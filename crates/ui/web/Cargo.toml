@@ -1,0 +1,28 @@
+[package]
+name = "uptrakit-web"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+db-sqlite = ["sea-orm/sqlx-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql"]
+
+[dependencies]
+axum = { workspace = true }
+http = { workspace = true }
+ipnet = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sea-orm = { workspace = true }
+uptrakit-internal-wire = { path = "../../shared/wire" }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tower = { workspace = true }
+http-body-util = "0.1"

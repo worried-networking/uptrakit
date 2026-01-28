@@ -1,0 +1,9 @@
+[package]
+name = "uptrakit-cli"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]

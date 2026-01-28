@@ -1,0 +1,108 @@
+asyncapi: 3.0.0
+info:
+  title: Uptrakit Agent-Controller Protocol
+  version: 0.0.1
+  description: |
+    WebSocket protocol for communication between Uptrakit agents and the controller.
+    Agents connect to the controller and exchange ping/pong messages to maintain
+    connectivity and measure round-trip time.
+
+servers:
+  controller:
+    host: "{host}:{port}"
+    pathname: /api/v1/ws/agent
+    protocol: wss
+    description: Controller WebSocket endpoint for agent connections
+
+channels:
+  agentConnection:
+    address: /api/v1/ws/agent
+    messages:
+      ping:
+        $ref: "#/components/messages/ping"
+      pong:
+        $ref: "#/components/messages/pong"
+
+operations:
+  sendPing:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/ping"
+    summary: Agent sends a ping to the controller
+    description: |
+      The agent sends a ping message containing its current timestamp.
+      The controller will respond with a pong message.
+
+  receivePong:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/pong"
+    summary: Agent receives a pong from the controller
+    description: |
+      The controller responds to a ping with a pong message containing
+      both the original agent timestamp and the controller's timestamp.
+      This allows the agent to calculate round-trip time.
+
+components:
+  messages:
+    ping:
+      name: ping
+      title: Ping Message
+      summary: Heartbeat message sent by the agent
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/pingPayload"
+
+    pong:
+      name: pong
+      title: Pong Message
+      summary: Heartbeat response sent by the controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/pongPayload"
+
+  schemas:
+    pingPayload:
+      type: object
+      required:
+        - type
+        - agent_ts
+      properties:
+        type:
+          type: string
+          const: ping
+          description: Message type discriminator
+        agent_ts:
+          type: integer
+          format: int64
+          description: Unix epoch timestamp in milliseconds when the agent sent the ping
+          examples:
+            - 1706400000000
+
+    pongPayload:
+      type: object
+      required:
+        - type
+        - agent_ts
+        - controller_ts
+      properties:
+        type:
+          type: string
+          const: pong
+          description: Message type discriminator
+        agent_ts:
+          type: integer
+          format: int64
+          description: Original timestamp from the agent's ping message
+          examples:
+            - 1706400000000
+        controller_ts:
+          type: integer
+          format: int64
+          description: Unix epoch timestamp in milliseconds when the controller processed the ping
+          examples:
+            - 1706400000050

@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo fmt --all -- --check
+      - run: cargo deny check
+      - run: cargo check --workspace --no-default-features --features db-sqlite
+      - run: cargo check --workspace --all-features
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-targets --no-default-features --features db-sqlite -- -D warnings
+      - run: cargo test --workspace --all-features

@@ -1,0 +1,39 @@
+[package]
+name = "uptrakit-controller"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = ["mqtt", "db-sqlite"]
+mqtt = ["dep:uptrakit-mqtt"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptrakit-web/db-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web/db-mysql"]
+
+[dependencies]
+uptrakit-mqtt = { path = "../../ui/mqtt", optional = true }
+uptrakit-web = { path = "../../ui/web" }
+tokio = { workspace = true }
+axum = { workspace = true }
+axum-server = { workspace = true }
+clap = { workspace = true }
+ipnet = { workspace = true }
+hostname = "0.4"
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+x509-parser = { workspace = true }
+time = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls"] }
+
+[dev-dependencies]
+tempfile = "3"

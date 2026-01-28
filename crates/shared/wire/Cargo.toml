@@ -1,0 +1,13 @@
+[package]
+name = "uptrakit-internal-wire"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+rust-version = "1.91"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }

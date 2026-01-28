@@ -1,0 +1,8 @@
+[package]
+name = "uptrakit-provider-github"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]

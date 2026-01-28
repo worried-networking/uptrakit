@@ -1,0 +1,22 @@
+[package]
+name = "uptrakit-agent"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+futures-util = { workspace = true }
+http = { workspace = true }
+rootcause = { workspace = true }
+rustls = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uptrakit-internal-wire = { path = "../../shared/wire" }

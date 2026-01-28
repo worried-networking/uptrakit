@@ -1,0 +1,13 @@
+[package]
+name = "uptrakit-mqtt"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rootcause = { workspace = true }
+rumqttc = "0.25.1"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

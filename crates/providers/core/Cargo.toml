@@ -1,0 +1,9 @@
+[package]
+name = "uptrakit-provider-core"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version = "1.91"
+
+[dependencies]
