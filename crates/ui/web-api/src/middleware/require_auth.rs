@@ -74,6 +74,7 @@ mod tests {
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::auth::session::SessionService;
     use crate::auth::token::generate_uuid;
+    use crate::settings::Settings;
     use axum::Router;
     use axum::body::Body;
     use axum::http::Request;
@@ -84,7 +85,6 @@ mod tests {
         ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Set,
     };
     use time::OffsetDateTime;
-    use tokio::sync::RwLock;
     use tower::ServiceExt;
     use uptrakit_shared_db::entity::user;
 
@@ -138,10 +138,10 @@ mod tests {
             ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
             trusted_proxies: vec![].into(),
             db,
-            registration: Arc::new(RwLock::new(RegistrationSettings {
+            settings: Settings::new(RegistrationSettings {
                 mode: RegistrationMode::Open,
                 token_hash: None,
-            })),
+            }),
         })
     }
 

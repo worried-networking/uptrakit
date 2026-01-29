@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::auth::registration::{self, RegistrationMode};
+use crate::auth::registration::RegistrationMode;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Extension, Json,
@@ -45,10 +45,8 @@ pub async fn get_registration_settings(
         return (StatusCode::FORBIDDEN, "Admin role required").into_response();
     }
 
-    let settings = state.registration.read().await;
-    let response = RegistrationSettingsResponse {
-        mode: settings.mode.clone(),
-    };
+    let reg = state.settings.registration().await;
+    let response = RegistrationSettingsResponse { mode: reg.mode };
 
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -85,17 +83,19 @@ pub async fn update_registration_settings(
             .into_response();
     }
 
-    if let Err(e) =
-        registration::update_settings(&state.db, &state.registration, req.mode, req.token).await
+    if let Err(e) = state
+        .settings
+        .registration_write()
+        .await
+        .update(&state.db, req.mode, req.token)
+        .await
     {
         tracing::error!("Failed to update registration settings: {:?}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    let settings = state.registration.read().await;
-    let response = RegistrationSettingsResponse {
-        mode: settings.mode.clone(),
-    };
+    let reg = state.settings.registration().await;
+    let response = RegistrationSettingsResponse { mode: reg.mode };
 
     (StatusCode::OK, Json(response)).into_response()
 }

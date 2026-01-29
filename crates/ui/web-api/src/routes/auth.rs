@@ -1,7 +1,5 @@
 use crate::AppState;
-use crate::auth::{
-    AuthError, password, registration, session::SessionService, token::generate_uuid,
-};
+use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
 use axum::{
     Json,
     extract::State,
@@ -92,13 +90,13 @@ pub async fn register(
     }
 
     // Validate registration is allowed
+    if let Err((status, msg)) = state
+        .settings
+        .registration()
+        .await
+        .validate(req.registration_token.as_deref())
     {
-        let settings = state.registration.read().await;
-        if let Err((status, msg)) =
-            registration::validate_registration(&settings, req.registration_token.as_deref())
-        {
-            return (status, msg).into_response();
-        }
+        return (status, msg).into_response();
     }
 
     // Hash password
@@ -151,7 +149,13 @@ pub async fn register(
             tracing::error!("Failed to assign admin role to first user: {:?}", e);
             // Continue anyway - user is created
         }
-        if let Err(e) = registration::complete_initial_setup(&state.db, &state.registration).await {
+        if let Err(e) = state
+            .settings
+            .registration_write()
+            .await
+            .complete_initial_setup(&state.db)
+            .await
+        {
             tracing::error!("Failed to complete initial registration setup: {:?}", e);
         }
     }

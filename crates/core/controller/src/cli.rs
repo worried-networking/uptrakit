@@ -49,6 +49,10 @@ pub struct Args {
     #[arg(long = "san")]
     pub sans: Vec<String>,
 
+    /// Path to the built frontend directory. Enables SPA serving.
+    #[arg(long)]
+    pub static_dir: Option<PathBuf>,
+
     #[cfg(feature = "mqtt")]
     #[command(flatten)]
     pub mqtt: MqttArgs,

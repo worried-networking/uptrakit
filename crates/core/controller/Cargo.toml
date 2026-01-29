@@ -9,14 +9,14 @@ version.workspace = true
 [features]
 default = ["mqtt", "db-sqlite"]
 mqtt = ["dep:uptrakit-mqtt"]
-swagger-ui = ["uptrakit-web/swagger-ui"]
-db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web/db-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptrakit-web/db-postgres"]
-db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web/db-mysql"]
+swagger-ui = ["uptrakit-web-api/swagger-ui"]
+db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web-api/db-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptrakit-web-api/db-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web-api/db-mysql"]
 
 [dependencies]
 uptrakit-mqtt = { path = "../../ui/mqtt", optional = true }
-uptrakit-web = { path = "../../ui/web" }
+uptrakit-web-api = { path = "../../ui/web-api" }
 tokio = { workspace = true }
 axum = { workspace = true }
 axum-server = { workspace = true }

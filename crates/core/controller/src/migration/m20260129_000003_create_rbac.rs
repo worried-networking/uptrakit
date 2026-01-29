@@ -105,17 +105,24 @@ impl MigrationTrait for Migration {
             .await?;
 
         // Seed default admin role and permissions
-        let db = manager.get_connection();
-
-        // Insert admin role
         let admin_role_id = Uuid::now_v7();
         let now = time::OffsetDateTime::now_utc();
 
-        db.execute_unprepared(&format!(
-            "INSERT INTO roles (id, name, description, created_at) VALUES ('{}', 'admin', 'Administrator with full system access', '{}')",
-            admin_role_id,
-            now.unix_timestamp()
-        )).await?;
+        // Insert admin role
+        manager
+            .exec_stmt(
+                Query::insert()
+                    .into_table(Roles::Table)
+                    .columns([Roles::Id, Roles::Name, Roles::Description, Roles::CreatedAt])
+                    .values_panic([
+                        admin_role_id.into(),
+                        "admin".into(),
+                        "Administrator with full system access".into(),
+                        now.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await?;
 
         // Insert default permissions
         let permissions = vec![
@@ -127,20 +134,37 @@ impl MigrationTrait for Migration {
 
         for (name, description) in permissions {
             let permission_id = Uuid::now_v7();
-            db.execute_unprepared(&format!(
-                "INSERT INTO permissions (id, name, description, created_at) VALUES ('{}', '{}', '{}', '{}')",
-                permission_id,
-                name,
-                description,
-                now.unix_timestamp()
-            )).await?;
+
+            manager
+                .exec_stmt(
+                    Query::insert()
+                        .into_table(Permissions::Table)
+                        .columns([
+                            Permissions::Id,
+                            Permissions::Name,
+                            Permissions::Description,
+                            Permissions::CreatedAt,
+                        ])
+                        .values_panic([
+                            permission_id.into(),
+                            name.into(),
+                            description.into(),
+                            now.into(),
+                        ])
+                        .to_owned(),
+                )
+                .await?;
 
             // Link permission to admin role
-            db.execute_unprepared(&format!(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES ('{}', '{}')",
-                admin_role_id, permission_id
-            ))
-            .await?;
+            manager
+                .exec_stmt(
+                    Query::insert()
+                        .into_table(RolePermissions::Table)
+                        .columns([RolePermissions::RoleId, RolePermissions::PermissionId])
+                        .values_panic([admin_role_id.into(), permission_id.into()])
+                        .to_owned(),
+                )
+                .await?;
         }
 
         Ok(())

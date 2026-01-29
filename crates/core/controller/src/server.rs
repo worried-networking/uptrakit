@@ -1,13 +1,15 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
 use rootcause::{Report, ReportConversion, markers, prelude::*};
 use rustls::ServerConfig;
 use thiserror::Error;
+use tower_http::services::{ServeDir, ServeFile};
 
-use uptrakit_web::AppState;
-use uptrakit_web::extract::Protocol;
+use uptrakit_web_api::AppState;
+use uptrakit_web_api::extract::Protocol;
 
 #[derive(Debug, Error)]
 pub enum ServerError {
@@ -33,11 +35,23 @@ pub struct ServerOptions {
     pub https_addr: SocketAddr,
     pub tls_config: ServerConfig,
     pub app_state: Arc<AppState>,
+    pub static_dir: Option<PathBuf>,
 }
 
 /// Run both HTTP and HTTPS servers.
 pub async fn run(cfg: ServerOptions) -> Result<()> {
-    let router = uptrakit_web::build_router(cfg.app_state);
+    let mut router = uptrakit_web_api::build_router(cfg.app_state);
+    if let Some(ref dir) = cfg.static_dir {
+        let index = dir.join("index.html");
+        let not_found = Router::new()
+            .route(
+                "/api/{*path}",
+                axum::routing::any(uptrakit_web_api::api_not_found),
+            )
+            .route("/api", axum::routing::any(uptrakit_web_api::api_not_found))
+            .fallback_service(ServeFile::new(index));
+        router = router.fallback_service(ServeDir::new(dir).not_found_service(not_found));
+    }
     let http_handle = tokio::spawn(run_http(cfg.http_addr, router.clone()));
     let https_handle = tokio::spawn(run_https(cfg.https_addr, router, cfg.tls_config));
 

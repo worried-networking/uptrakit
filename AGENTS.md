@@ -33,7 +33,7 @@ uptrakit/
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
 │       ├── mqtt/                       # uptrakit-mqtt                          (lib)  — MQTT / Home Assistant integration
-│       └── web/                        # uptrakit-web                           (lib)  — HTTP API + Web UI
+│       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── .github/
 │   ├── workflows/ci.yml                # CI: fmt check, clippy, tests (runs on macOS)
 │   └── dependabot.yml                  # Weekly Cargo dependency updates

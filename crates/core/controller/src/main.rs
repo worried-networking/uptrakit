@@ -4,13 +4,14 @@ mod migration;
 mod pki;
 mod server;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use uptrakit_web::AppState;
-use uptrakit_web::auth::registration;
+use uptrakit_web_api::AppState;
+use uptrakit_web_api::settings::Settings;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,17 +46,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("database initialized successfully");
 
-    // Initialize registration settings
-    let (reg_settings, reg_token) = registration::initialize(&db_conn)
+    // Initialize settings
+    let (settings, reg_token) = Settings::load(&db_conn)
         .await
-        .map_err(|e| format!("registration initialization failed: {e:?}"))?;
+        .map_err(|e| format!("settings initialization failed: {e:?}"))?;
     if let Some(token) = reg_token {
         tracing::info!("==========================================================");
         tracing::info!("  No users found. Use this one-time registration token:");
         tracing::info!("  {}", token);
         tracing::info!("==========================================================");
     }
-    let registration_state = std::sync::Arc::new(tokio::sync::RwLock::new(reg_settings));
+
+    // Resolve static directory for SPA serving
+    let static_dir = resolve_static_dir(args.static_dir)?;
 
     // Validate TLS args
     if args.tls_cert.is_some() != args.tls_key.is_some() {
@@ -85,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ca_pem: ca.cert_pem,
         trusted_proxies: args.trusted_proxies.into(),
         db: db_conn,
-        registration: registration_state,
+        settings,
     });
 
     // Start MQTT if configured
@@ -120,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             https_addr: args.https_addr,
             tls_config: rustls_config,
             app_state,
+            static_dir,
         }) => {
             result.map_err(|e| format!("{e:?}"))?;
         }
@@ -134,4 +138,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Resolve the static directory for SPA serving.
+///
+/// If `--static-dir` is given, validates that it contains `index.html`.
+/// Otherwise, auto-detects by probing `frontend/build` and `frontend`
+/// relative to the current working directory.
+fn resolve_static_dir(
+    explicit: Option<PathBuf>,
+) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+    if let Some(dir) = explicit {
+        let index = dir.join("index.html");
+        if !index.is_file() {
+            return Err(format!("--static-dir {}: missing index.html", dir.display()).into());
+        }
+        tracing::info!("serving static files from {}", dir.display());
+        return Ok(Some(dir));
+    }
+
+    for candidate in ["frontend/build", "frontend"] {
+        let dir = PathBuf::from(candidate);
+        if dir.join("index.html").is_file() {
+            tracing::info!("auto-detected static files in {}", dir.display());
+            return Ok(Some(dir));
+        }
+    }
+
+    Ok(None)
 }

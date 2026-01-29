@@ -2,22 +2,24 @@ pub mod auth;
 pub mod extract;
 pub mod middleware;
 pub mod routes;
+pub mod settings;
 
 use std::sync::Arc;
 
 use axum::Router;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware as axum_mw;
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
-use tokio::sync::RwLock;
 use utoipa::OpenApi;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use auth::registration::RegistrationSettings;
 use middleware::require_https;
+use settings::Settings;
 
 /// Shared application state available to all handlers.
 #[derive(Clone)]
@@ -28,8 +30,8 @@ pub struct AppState {
     pub trusted_proxies: Arc<[IpNet]>,
     /// Database connection pool.
     pub db: DatabaseConnection,
-    /// Cached registration settings (mode + optional token hash).
-    pub registration: Arc<RwLock<RegistrationSettings>>,
+    /// Application settings catalogue.
+    pub settings: Settings,
 }
 
 /// OpenAPI documentation
@@ -82,6 +84,41 @@ impl utoipa::Modify for SecurityAddon {
                 ),
             );
         }
+    }
+}
+
+/// Content-negotiated 404 handler for unmatched API paths.
+pub async fn api_not_found(headers: HeaderMap) -> Response {
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let wants_json = accept.contains("application/json")
+        || accept.contains("text/json");
+
+    if wants_json {
+        (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"error":"not found"}"#,
+        )
+            .into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Html(concat!(
+                "<!doctype html><html><head><title>404</title>",
+                "<style>body{font-family:system-ui,sans-serif;display:flex;",
+                "justify-content:center;align-items:center;height:100vh;margin:0;",
+                "color:#334155;background:#f8fafc}",
+                "h1{font-size:4rem;margin:0}p{color:#64748b}</style></head>",
+                "<body><div style=\"text-align:center\">",
+                "<h1>404</h1><p>Not Found</p>",
+                "</div></body></html>",
+            )),
+        )
+            .into_response()
     }
 }
 
@@ -142,11 +179,11 @@ mod tests {
     use http_body_util::BodyExt;
     use ipnet::IpNet;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
-    use tokio::sync::RwLock;
     use tower::ServiceExt;
 
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::extract::Protocol;
+    use crate::settings::Settings;
     use crate::{AppState, build_router};
 
     async fn test_db() -> DatabaseConnection {
@@ -163,10 +200,10 @@ mod tests {
             ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
             trusted_proxies: trusted_proxies.into(),
             db: test_db().await,
-            registration: Arc::new(RwLock::new(RegistrationSettings {
+            settings: Settings::new(RegistrationSettings {
                 mode: RegistrationMode::Open,
                 token_hash: None,
-            })),
+            }),
         })
     }
 

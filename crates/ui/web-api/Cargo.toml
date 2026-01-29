@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-web"
+name = "uptrakit-web-api"
 edition = "2024"
 license.workspace = true
 authors.workspace = true

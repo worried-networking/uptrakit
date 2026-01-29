@@ -15,22 +15,19 @@ pub enum AuthError {
     #[error("user is deactivated")]
     UserDeactivated,
 
-    #[error("email already exists: {0}")]
-    EmailExists(String),
-
-    #[error("password hashing error")]
+    #[error("password hashing error: {0}")]
     PasswordHash(#[from] argon2::password_hash::Error),
 
     #[error("token generation failed: {0}")]
     TokenGeneration(String),
 
-    #[error("database error")]
+    #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
 
-    #[error("UUID parsing error")]
+    #[error("UUID parsing error: {0}")]
     UuidParse(#[from] uuid::Error),
 
-    #[error("time error")]
+    #[error("time error: {0}")]
     TimeError(#[from] time::error::ComponentRange),
 
     #[error("internal error: {0}")]
