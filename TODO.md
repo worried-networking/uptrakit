@@ -47,7 +47,30 @@ Essential infrastructure needed before feature development.
 - [ ] Create repositories/DAOs for each entity
 - [ ] Add validation logic for data models
 
-### Authentication & Security
+### User Authentication & Authorization
+
+- [x] Password-based authentication with Argon2id hashing
+  - [x] User model (email, first/last name, password hash, active status)
+  - [x] Argon2id with OWASP-recommended parameters (19 MiB, 2 iterations)
+  - [x] Stateful session tokens (SHA-256 hashed, 7-day expiry, 30-min sliding window)
+  - [x] Bearer token authentication via Authorization header
+- [x] RBAC foundation
+  - [x] Roles and permissions tables with seeded admin role
+  - [x] User-role and role-permission junction tables
+  - [x] First registered user automatically gets admin role
+- [x] Auth API endpoints
+  - [x] POST /api/v1/auth/register
+  - [x] POST /api/v1/auth/login
+  - [x] POST /api/v1/auth/logout
+  - [x] GET /api/v1/auth/me
+- [x] Auth middleware (require_auth with user injection)
+- [x] OpenAPI documentation with Swagger UI (optional feature flag)
+- [ ] Full RBAC permission checking in middleware
+- [ ] OIDC integration (auth_method tracking already in place)
+- [ ] Rate limiting on login endpoint
+- [ ] Audit logging for security events
+
+### Agent Authentication & Security
 
 - [ ] Implement mTLS for agent-controller communication
   - [ ] Generate client certificates for agents during enrollment
@@ -216,9 +239,9 @@ Ways users interact with the system.
   - [ ] Trigger update endpoint
   - [ ] Get update history endpoint
   - [ ] Get system status endpoint
-- [ ] Add API authentication
+- [x] Add API authentication
 - [ ] Implement API rate limiting
-- [ ] Add API documentation (OpenAPI/Swagger)
+- [x] Add API documentation (OpenAPI/Swagger)
 - [ ] Add WebSocket endpoint for real-time updates
 
 ### Web UI

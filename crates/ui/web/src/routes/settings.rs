@@ -1,0 +1,115 @@
+use crate::AppState;
+use crate::auth::registration::{self, RegistrationMode};
+use crate::middleware::require_auth::AuthenticatedUser;
+use axum::{
+    Extension, Json,
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use uptrakit_shared_db::entity::{prelude::*, user_role};
+use utoipa::ToSchema;
+
+#[derive(Serialize, ToSchema)]
+pub struct RegistrationSettingsResponse {
+    pub mode: RegistrationMode,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateRegistrationSettingsRequest {
+    pub mode: RegistrationMode,
+    /// Required when mode is `invite`. The plaintext token will be hashed before storage.
+    pub token: Option<String>,
+}
+
+/// Get current registration settings
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/registration",
+    responses(
+        (status = 200, description = "Current registration settings", body = RegistrationSettingsResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized (admin role required)")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn get_registration_settings(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+) -> Response {
+    if !check_admin_role(&state.db, user.user_id).await {
+        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    }
+
+    let settings = state.registration.read().await;
+    let response = RegistrationSettingsResponse {
+        mode: settings.mode.clone(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Update registration settings
+#[utoipa::path(
+    put,
+    path = "/api/v1/settings/registration",
+    request_body = UpdateRegistrationSettingsRequest,
+    responses(
+        (status = 200, description = "Registration settings updated", body = RegistrationSettingsResponse),
+        (status = 400, description = "Invalid request (e.g., invite mode without token)"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized (admin role required)")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn update_registration_settings(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Json(req): Json<UpdateRegistrationSettingsRequest>,
+) -> Response {
+    if !check_admin_role(&state.db, user.user_id).await {
+        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    }
+
+    // Validate: invite mode requires a token
+    if req.mode == RegistrationMode::Invite && req.token.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Token is required when mode is invite",
+        )
+            .into_response();
+    }
+
+    if let Err(e) =
+        registration::update_settings(&state.db, &state.registration, req.mode, req.token).await
+    {
+        tracing::error!("Failed to update registration settings: {:?}", e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let settings = state.registration.read().await;
+    let response = RegistrationSettingsResponse {
+        mode: settings.mode.clone(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn check_admin_role(db: &DatabaseConnection, user_id: uuid::Uuid) -> bool {
+    UserRole::find()
+        .filter(user_role::Column::UserId.eq(user_id))
+        .find_also_related(Role)
+        .all(db)
+        .await
+        .map(|roles| {
+            roles
+                .iter()
+                .any(|(_, r)| r.as_ref().is_some_and(|r| r.name == "admin"))
+        })
+        .unwrap_or(false)
+}

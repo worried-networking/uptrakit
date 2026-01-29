@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod extract;
 pub mod middleware;
 pub mod routes;
@@ -9,7 +10,13 @@ use axum::middleware as axum_mw;
 use axum::routing::get;
 use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
+use tokio::sync::RwLock;
+use utoipa::OpenApi;
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
+use auth::registration::RegistrationSettings;
 use middleware::require_https;
 
 /// Shared application state available to all handlers.
@@ -21,19 +28,108 @@ pub struct AppState {
     pub trusted_proxies: Arc<[IpNet]>,
     /// Database connection pool.
     pub db: DatabaseConnection,
+    /// Cached registration settings (mode + optional token hash).
+    pub registration: Arc<RwLock<RegistrationSettings>>,
+}
+
+/// OpenAPI documentation
+#[derive(OpenApi)]
+#[openapi(
+    tags(
+        (name = "Authentication", description = "User authentication endpoints"),
+        (name = "Settings", description = "Application settings management")
+    ),
+    paths(
+        routes::auth::register,
+        routes::auth::login,
+        routes::auth::logout,
+        routes::auth::me,
+        routes::settings::get_registration_settings,
+        routes::settings::update_registration_settings
+    ),
+    components(
+        schemas(
+            routes::auth::RegisterRequest,
+            routes::auth::LoginRequest,
+            routes::auth::AuthResponse,
+            routes::auth::UserResponse,
+            routes::settings::RegistrationSettingsResponse,
+            routes::settings::UpdateRegistrationSettingsRequest,
+            auth::registration::RegistrationMode
+        )
+    ),
+    info(
+        title = "Uptrakit API",
+        version = "0.0.1",
+        description = "Uptrakit update tracking toolkit API"
+    ),
+    modifiers(&SecurityAddon)
+)]
+struct ApiDoc;
+
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearer_token",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("JWT")
+                        .build(),
+                ),
+            );
+        }
+    }
 }
 
 /// Build the application router.
 pub fn build_router(state: Arc<AppState>) -> Router {
-    Router::new()
+    // Create OpenAPI router with auth routes
+    let (auth_router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(routes::auth::register))
+        .routes(routes!(routes::auth::login))
+        .routes(routes!(routes::auth::logout))
+        .routes(routes!(routes::auth::me))
+        .split_for_parts();
+
+    // Settings routes require authentication
+    let settings_router = Router::new()
+        .route(
+            "/api/v1/settings/registration",
+            axum::routing::get(routes::settings::get_registration_settings)
+                .put(routes::settings::update_registration_settings),
+        )
+        .route_layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
+            middleware::require_auth::require_auth,
+        ));
+
+    let mut router = Router::new()
+        .merge(auth_router)
+        .merge(settings_router)
         .route("/api/v1/ws/agent", get(routes::agent_ws::agent_ws))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             require_https::require_https,
         ))
         .route("/healthz", get(routes::health::healthz))
-        .route("/api/v1/ca.crt", get(routes::ca::ca_cert))
-        .with_state(state)
+        .route("/api/v1/ca.crt", get(routes::ca::ca_cert));
+
+    #[cfg(feature = "swagger-ui")]
+    {
+        use utoipa_swagger_ui::SwaggerUi;
+        router = router.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api));
+    }
+
+    #[cfg(not(feature = "swagger-ui"))]
+    {
+        router = router.route("/api/openapi.json", get(|| async move { axum::Json(api) }));
+    }
+
+    router.with_state(state)
 }
 
 #[cfg(test)]
@@ -46,8 +142,10 @@ mod tests {
     use http_body_util::BodyExt;
     use ipnet::IpNet;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+    use tokio::sync::RwLock;
     use tower::ServiceExt;
 
+    use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::extract::Protocol;
     use crate::{AppState, build_router};
 
@@ -65,6 +163,10 @@ mod tests {
             ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
             trusted_proxies: trusted_proxies.into(),
             db: test_db().await,
+            registration: Arc::new(RwLock::new(RegistrationSettings {
+                mode: RegistrationMode::Open,
+                token_hash: None,
+            })),
         })
     }
 

@@ -7,6 +7,7 @@ repository.workspace = true
 
 [features]
 default = []
+swagger-ui = ["dep:utoipa-swagger-ui"]
 db-sqlite = ["sea-orm/sqlx-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql"]
@@ -15,12 +16,26 @@ db-mysql = ["sea-orm/sqlx-mysql"]
 axum = { workspace = true }
 http = { workspace = true }
 ipnet = { workspace = true }
+tokio = { workspace = true }
 tower = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sea-orm = { workspace = true }
+time = { workspace = true }
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
+argon2 = { workspace = true }
+rand = { workspace = true }
+base64 = "0.22"
+sha2 = "0.10"
+tower-cookies = "0.11"
+utoipa = { version = "5.4", features = ["axum_extras", "uuid"] }
+utoipa-axum = "0.2"
+utoipa-swagger-ui = { version = "9.0", features = ["axum"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

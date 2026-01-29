@@ -10,6 +10,7 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use uptrakit_web::AppState;
+use uptrakit_web::auth::registration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,6 +45,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("database initialized successfully");
 
+    // Initialize registration settings
+    let (reg_settings, reg_token) = registration::initialize(&db_conn)
+        .await
+        .map_err(|e| format!("registration initialization failed: {e:?}"))?;
+    if let Some(token) = reg_token {
+        tracing::info!("==========================================================");
+        tracing::info!("  No users found. Use this one-time registration token:");
+        tracing::info!("  {}", token);
+        tracing::info!("==========================================================");
+    }
+    let registration_state = std::sync::Arc::new(tokio::sync::RwLock::new(reg_settings));
+
     // Validate TLS args
     if args.tls_cert.is_some() != args.tls_key.is_some() {
         return Err("both --tls-cert and --tls-key must be provided together".into());
@@ -72,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ca_pem: ca.cert_pem,
         trusted_proxies: args.trusted_proxies.into(),
         db: db_conn,
+        registration: registration_state,
     });
 
     // Start MQTT if configured

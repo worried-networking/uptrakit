@@ -1,0 +1,12 @@
+[package]
+name = "uptrakit-shared-db"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+sea-orm = { workspace = true }
+time = { workspace = true }
+uuid = { workspace = true }
