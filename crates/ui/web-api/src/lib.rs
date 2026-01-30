@@ -1,3 +1,4 @@
+pub mod agent_connections;
 pub mod auth;
 pub mod cert_signer;
 pub mod extract;
@@ -20,6 +21,7 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use agent_connections::AgentConnectionRegistry;
 use middleware::require_https;
 use settings::Settings;
 
@@ -38,6 +40,8 @@ pub struct AppState {
     pub settings: Settings,
     /// Agent certificate signer for mTLS enrollment.
     pub cert_signer: Arc<dyn cert_signer::AgentCertSigner>,
+    /// Registry of connected agents for push notifications.
+    pub agent_connections: AgentConnectionRegistry,
 }
 
 /// OpenAPI documentation
@@ -55,15 +59,12 @@ pub struct AppState {
         routes::auth::me,
         routes::settings::get_registration_settings,
         routes::settings::update_registration_settings,
-        routes::agents::enroll,
-        routes::agents::enroll_status,
         routes::agents::list_agents,
         routes::agents::approve_agent,
         routes::agents::reject_agent,
         routes::agents::deactivate_agent,
         routes::agents::create_enrollment_token,
-        routes::agents::revoke_enrollment_token,
-        routes::agents::request_certificate
+        routes::agents::revoke_enrollment_token
     ),
     components(
         schemas(
@@ -75,13 +76,9 @@ pub struct AppState {
             routes::settings::UpdateRegistrationSettingsRequest,
             auth::registration::RegistrationMode,
             routes::agents::AgentStatus,
-            routes::agents::EnrollRequest,
-            routes::agents::EnrollResponse,
-            routes::agents::EnrollStatusResponse,
             routes::agents::AgentResponse,
             routes::agents::EnrollmentTokenResponse,
-            routes::agents::MessageResponse,
-            routes::agents::CertificateResponse
+            routes::agents::MessageResponse
         )
     ),
     info(
@@ -172,9 +169,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::auth::login))
         .routes(routes!(routes::auth::logout))
         .routes(routes!(routes::auth::me))
-        .routes(routes!(routes::agents::enroll))
-        .routes(routes!(routes::agents::enroll_status))
-        .routes(routes!(routes::agents::request_certificate))
         .merge(auth_routes)
         .split_for_parts();
 
@@ -253,6 +247,7 @@ mod tests {
                 7,
             ),
             cert_signer: Arc::new(NoopCertSigner),
+            agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
         })
     }
 

@@ -312,10 +312,10 @@ pub fn build_rustls_config_with_client_auth(
 ) -> Result<rustls::ServerConfig> {
     use std::sync::Arc;
 
+    use rustls::RootCertStore;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::server::WebPkiClientVerifier;
-    use rustls::RootCertStore;
 
     let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()

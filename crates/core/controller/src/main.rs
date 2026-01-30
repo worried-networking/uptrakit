@@ -133,6 +133,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         db: db_conn,
         settings,
         cert_signer,
+        agent_connections: uptrakit_web_api::agent_connections::AgentConnectionRegistry::new(),
     });
 
     // Start MQTT if configured

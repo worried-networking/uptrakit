@@ -3644,6 +3644,7 @@ dependencies = [
  "axum",
  "base64",
  "client-ip",
+ "futures-util",
  "http",
  "http-body-util",
  "ipnet",

@@ -1,21 +1,47 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Agent-Controller Protocol
-  version: 0.0.2
+  version: 0.0.3
   description: |
     WebSocket protocol for communication between Uptrakit agents and the controller.
-    Agents connect to the controller and exchange ping/pong messages to maintain
-    connectivity and measure round-trip time.
+
+    ## Agent Lifecycle
+
+    1. `HTTP GET /api/v1/ca.crt` — TOFU CA pinning (only HTTP endpoint used by agents)
+    2. `WSS /api/v1/ws/agent` (no auth) — agent sends `Enroll` message
+    3. Receives `Enrolled` response — agent persists `agent_id` + `enrollment_secret`
+       (connection promoted in-place — controller now tracks this session)
+    4. Waits for `Approved` push — no polling, no reconnect needed
+    5. Sends `RequestCertificate` — receives `Certificate` response
+    6. Disconnects enrollment WebSocket
+    7. `WSS /api/v1/ws/agent` (mTLS) — normal Ping/Pong keepalive operation
+
+    ## Reconnection (agent restarts before getting certificate)
+
+    1. `WSS /api/v1/ws/agent` + `Authorization: Bearer <enrollment_secret>`
+    2. Controller validates header during upgrade, identifies agent
+    3. If already approved → sends `Approved` immediately
+    4. If pending → waits for admin action, pushes when decided
+    5. Agent sends `RequestCertificate` → receives `Certificate`
+    6. Disconnect, reconnect with mTLS
+
+    ## Three Connection Types (determined at WS upgrade time)
+
+    | Auth present | Connection type | Behavior |
+    |---|---|---|
+    | None | Anonymous | Expects `Enroll` message |
+    | `Authorization: Bearer <secret>` | Enrolled (reconnecting) | Controller looks up agent by secret, resumes |
+    | mTLS client cert | Authenticated | Normal Ping/Pong operation |
 
     ## Authentication
 
-    The controller supports mutual TLS (mTLS) for agent authentication.
+    The controller supports mutual TLS (mTLS) for authenticated agent connections.
     After enrollment approval, agents request a short-lived client certificate
     signed by the internal CA. The certificate CN contains the agent UUID.
 
-    Both authenticated (mTLS) and anonymous WebSocket connections are accepted.
-    When an agent presents a valid client certificate, the controller extracts
-    the agent identity and associates it with the connection.
+    For reconnection during enrollment (before certificate issuance), agents
+    present the `enrollment_secret` via an `Authorization: Bearer` header
+    during the WebSocket upgrade handshake.
 
 servers:
   controller:
@@ -25,6 +51,7 @@ servers:
     description: Controller WebSocket endpoint for agent connections
     security:
       - $ref: "#/components/securitySchemes/mtls"
+      - $ref: "#/components/securitySchemes/bearerToken"
 
 channels:
   agentConnection:
@@ -34,6 +61,20 @@ channels:
         $ref: "#/components/messages/ping"
       pong:
         $ref: "#/components/messages/pong"
+      enroll:
+        $ref: "#/components/messages/enroll"
+      enrolled:
+        $ref: "#/components/messages/enrolled"
+      approved:
+        $ref: "#/components/messages/approved"
+      rejected:
+        $ref: "#/components/messages/rejected"
+      requestCertificate:
+        $ref: "#/components/messages/requestCertificate"
+      certificate:
+        $ref: "#/components/messages/certificate"
+      error:
+        $ref: "#/components/messages/error"
 
 operations:
   sendPing:
@@ -59,15 +100,107 @@ operations:
       both the original agent timestamp and the controller's timestamp.
       This allows the agent to calculate round-trip time.
 
+  sendEnroll:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/enroll"
+    summary: Agent sends an enrollment request
+    description: |
+      An anonymous agent sends its hostname, friendly name, and optional
+      enrollment token. The controller creates an agent record and responds
+      with an `Enrolled` message containing the agent_id and enrollment_secret.
+
+  receiveEnrolled:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/enrolled"
+    summary: Agent receives enrollment confirmation
+    description: |
+      After a successful `Enroll`, the controller responds with the assigned
+      agent_id, an enrollment_secret for reconnection, and the initial status
+      (pending or approved if a valid enrollment token was provided).
+
+  receiveApproved:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/approved"
+    summary: Agent receives approval notification
+    description: |
+      The controller pushes this message when an admin approves the agent,
+      or immediately upon connection if the agent is already approved.
+      No polling is required — the agent waits on the WebSocket for this push.
+
+  receiveRejected:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/rejected"
+    summary: Agent receives rejection notification
+    description: |
+      The controller pushes this message when an admin rejects the agent.
+      The agent should disconnect and exit upon receiving this message.
+
+  sendRequestCertificate:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/requestCertificate"
+    summary: Agent requests a client certificate
+    description: |
+      After receiving `Approved`, the agent sends this message to request
+      a signed client certificate for mTLS authentication. The controller
+      responds with a `Certificate` message.
+
+  receiveCertificate:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/certificate"
+    summary: Agent receives issued certificate
+    description: |
+      The controller responds to `RequestCertificate` with the signed
+      client certificate PEM, private key PEM, and certificate lifetime.
+      The agent should persist these and reconnect using mTLS.
+
+  receiveError:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/error"
+    summary: Agent receives an error from the controller
+    description: |
+      The controller sends an error message when a request cannot be
+      fulfilled (e.g., invalid enrollment token, certificate request
+      before approval).
+
 components:
   securitySchemes:
     mtls:
       type: X509
       description: |
-        Optional mutual TLS client certificate authentication.
+        Mutual TLS client certificate authentication.
         Agents present a client certificate signed by the internal CA
-        with CN set to the agent UUID. Both authenticated and anonymous
-        connections are accepted.
+        with CN set to the agent UUID. Used for authenticated connections
+        after certificate issuance.
+
+    bearerToken:
+      type: httpApiKey
+      name: Authorization
+      in: header
+      description: |
+        Bearer token authentication using the enrollment_secret.
+        Used for reconnection during enrollment (before certificate issuance).
+        Format: `Authorization: Bearer <enrollment_secret>`
 
   messages:
     ping:
@@ -85,6 +218,62 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/pongPayload"
+
+    enroll:
+      name: enroll
+      title: Enroll Message
+      summary: Agent enrollment request
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/enrollPayload"
+
+    enrolled:
+      name: enrolled
+      title: Enrolled Message
+      summary: Enrollment confirmation from controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/enrolledPayload"
+
+    approved:
+      name: approved
+      title: Approved Message
+      summary: Approval notification pushed by controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/approvedPayload"
+
+    rejected:
+      name: rejected
+      title: Rejected Message
+      summary: Rejection notification pushed by controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/rejectedPayload"
+
+    requestCertificate:
+      name: request_certificate
+      title: Request Certificate Message
+      summary: Agent requests a client certificate
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/requestCertificatePayload"
+
+    certificate:
+      name: certificate
+      title: Certificate Message
+      summary: Issued client certificate from controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/certificatePayload"
+
+    error:
+      name: error
+      title: Error Message
+      summary: Error response from controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/errorPayload"
 
   schemas:
     pingPayload:
@@ -127,3 +316,155 @@ components:
           description: Unix epoch timestamp in milliseconds when the controller processed the ping
           examples:
             - 1706400000050
+
+    enrollPayload:
+      type: object
+      required:
+        - type
+        - hostname
+        - friendly_name
+      properties:
+        type:
+          type: string
+          const: enroll
+          description: Message type discriminator
+        hostname:
+          type: string
+          description: System hostname of the agent
+          examples:
+            - node-1.example.com
+        friendly_name:
+          type: string
+          description: Human-readable name for the agent
+          examples:
+            - Production Node 1
+        enrollment_token:
+          type: string
+          description: Optional pre-shared enrollment token for auto-approval
+          examples:
+            - tok-abc123
+
+    enrolledPayload:
+      type: object
+      required:
+        - type
+        - agent_id
+        - enrollment_secret
+        - status
+      properties:
+        type:
+          type: string
+          const: enrolled
+          description: Message type discriminator
+        agent_id:
+          type: string
+          format: uuid
+          description: Assigned agent UUID
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        enrollment_secret:
+          type: string
+          description: Secret token for reconnection during enrollment
+          examples:
+            - secret-abc123
+        status:
+          type: string
+          enum:
+            - pending
+            - approved
+          description: Initial agent status (approved if valid enrollment token provided)
+          examples:
+            - pending
+
+    approvedPayload:
+      type: object
+      required:
+        - type
+        - agent_id
+      properties:
+        type:
+          type: string
+          const: approved
+          description: Message type discriminator
+        agent_id:
+          type: string
+          format: uuid
+          description: The approved agent's UUID
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+
+    rejectedPayload:
+      type: object
+      required:
+        - type
+        - agent_id
+      properties:
+        type:
+          type: string
+          const: rejected
+          description: Message type discriminator
+        agent_id:
+          type: string
+          format: uuid
+          description: The rejected agent's UUID
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+
+    requestCertificatePayload:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: request_certificate
+          description: Message type discriminator
+
+    certificatePayload:
+      type: object
+      required:
+        - type
+        - cert_pem
+        - key_pem
+        - lifetime_days
+      properties:
+        type:
+          type: string
+          const: certificate
+          description: Message type discriminator
+        cert_pem:
+          type: string
+          description: PEM-encoded client certificate signed by the internal CA
+        key_pem:
+          type: string
+          description: PEM-encoded private key for the client certificate
+        lifetime_days:
+          type: integer
+          format: int32
+          description: Certificate validity period in days
+          examples:
+            - 7
+
+    errorPayload:
+      type: object
+      required:
+        - type
+        - code
+        - message
+      properties:
+        type:
+          type: string
+          const: error
+          description: Message type discriminator
+        code:
+          type: string
+          description: Machine-readable error code
+          examples:
+            - invalid_token
+            - not_approved
+            - bad_request
+        message:
+          type: string
+          description: Human-readable error description
+          examples:
+            - The enrollment token is invalid

@@ -1,10 +1,7 @@
 mod cli;
 mod client;
-mod enrollment;
 mod error;
 mod state;
-
-use std::time::Duration;
 
 use clap::Parser;
 use rootcause::prelude::*;
@@ -52,12 +49,40 @@ async fn run(args: &Args) -> error::Result<()> {
     // Build TLS connector with the pinned CA
     let tls_connector = client::build_tls_connector(&ca_pem)?;
 
-    // Enrollment: load agent.json or enroll
-    let agent_state = if let Some(existing) = state::AgentState::load(&data_dir)? {
-        tracing::info!(agent_id = %existing.agent_id, "loaded existing agent state");
-        existing
+    // If we already have a certificate, skip straight to mTLS event loop
+    if let Some(existing_cert) = state::AgentCertState::load(&data_dir)? {
+        tracing::info!("loaded existing agent certificate from disk");
+        let mtls_connector = client::build_tls_connector_with_client_cert(
+            &ca_pem,
+            &existing_cert.cert_pem,
+            &existing_cert.key_pem,
+        )?;
+        client::run_authenticated_loop(&args.host, args.port, mtls_connector).await?;
+        return Ok(());
+    }
+
+    // Enrollment via WebSocket
+    let cert_payload = if let Some(existing) = state::AgentState::load(&data_dir)? {
+        // Reconnect with Bearer header
+        tracing::info!(agent_id = %existing.agent_id, "reconnecting with enrollment secret");
+        let auth_header = format!("Bearer {}", existing.enrollment_secret);
+        let mut ws =
+            client::connect_ws(&args.host, args.port, &tls_connector, Some(&auth_header)).await?;
+
+        // Wait for approval (controller pushes immediately if already approved)
+        client::wait_for_approval(&mut ws).await?;
+
+        // Request certificate
+        let cert = client::request_certificate_ws(&mut ws).await?;
+        tracing::info!(
+            lifetime_days = cert.lifetime_days,
+            "received client certificate"
+        );
+        cert
     } else {
-        tracing::info!("no agent state found, enrolling with controller");
+        // First-time enrollment
+        tracing::info!("no agent state found, enrolling via WebSocket");
+        let mut ws = client::connect_ws(&args.host, args.port, &tls_connector, None).await?;
 
         let system_hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
@@ -67,10 +92,8 @@ async fn run(args: &Args) -> error::Result<()> {
             .clone()
             .unwrap_or_else(|| system_hostname.clone());
 
-        let resp = enrollment::enroll(
-            &args.host,
-            args.port,
-            &tls_connector,
+        let enrolled = client::send_enroll(
+            &mut ws,
             &system_hostname,
             &friendly_name,
             args.enrollment_token.as_deref(),
@@ -78,89 +101,46 @@ async fn run(args: &Args) -> error::Result<()> {
         .await?;
 
         tracing::info!(
-            agent_id = %resp.agent_id,
-            status = %resp.status,
+            agent_id = %enrolled.agent_id,
+            status = %enrolled.status,
             "enrollment response received"
         );
 
-        let new_state = state::AgentState {
-            agent_id: resp.agent_id,
-            enrollment_secret: resp.enrollment_secret,
+        // Persist agent state
+        let agent_state = state::AgentState {
+            agent_id: enrolled.agent_id,
+            enrollment_secret: enrolled.enrollment_secret,
         };
-        new_state.save(&data_dir)?;
+        agent_state.save(&data_dir)?;
         tracing::info!("agent state persisted");
-        new_state
-    };
 
-    // Poll loop: check enrollment status until approved
-    loop {
-        let status_resp = enrollment::poll_status(
-            &args.host,
-            args.port,
-            &tls_connector,
-            &agent_state.enrollment_secret,
-        )
-        .await?;
+        // Wait for approval (may come immediately if auto-approved)
+        client::wait_for_approval(&mut ws).await?;
 
-        match status_resp.status.as_str() {
-            "approved" => {
-                tracing::info!(agent_id = %status_resp.agent_id, "enrollment approved");
-                break;
-            }
-            "rejected" => {
-                tracing::error!(agent_id = %status_resp.agent_id, "enrollment rejected");
-                return Err(report!(Error::EnrollmentRejected));
-            }
-            "pending" => {
-                tracing::info!(
-                    agent_id = %status_resp.agent_id,
-                    poll_interval_secs = args.enrollment_poll_interval,
-                    "enrollment pending, waiting..."
-                );
-                tokio::time::sleep(Duration::from_secs(args.enrollment_poll_interval)).await;
-            }
-            other => {
-                tracing::warn!(status = %other, "unknown enrollment status");
-                tokio::time::sleep(Duration::from_secs(args.enrollment_poll_interval)).await;
-            }
-        }
-    }
-
-    // Request client certificate for mTLS, or load existing
-    let cert_state = if let Some(existing) = state::AgentCertState::load(&data_dir)? {
-        tracing::info!("loaded existing agent certificate from disk");
-        existing
-    } else {
-        tracing::info!("requesting client certificate from controller");
-        let cert_resp = enrollment::request_certificate(
-            &args.host,
-            args.port,
-            &tls_connector,
-            &agent_state.enrollment_secret,
-        )
-        .await?;
+        // Request certificate
+        let cert = client::request_certificate_ws(&mut ws).await?;
         tracing::info!(
-            lifetime_days = cert_resp.lifetime_days,
+            lifetime_days = cert.lifetime_days,
             "received client certificate"
         );
-        let cert_state = state::AgentCertState {
-            cert_pem: cert_resp.cert_pem,
-            key_pem: cert_resp.key_pem,
-        };
-        cert_state.save(&data_dir)?;
-        tracing::info!("agent certificate saved to disk");
-        cert_state
+        cert
     };
 
-    // Build mTLS connector with client certificate
+    // Save certificate
+    let cert_state = state::AgentCertState {
+        cert_pem: cert_payload.cert_pem,
+        key_pem: cert_payload.key_pem,
+    };
+    cert_state.save(&data_dir)?;
+    tracing::info!("agent certificate saved to disk");
+
+    // Build mTLS connector and enter authenticated event loop
     let mtls_connector = client::build_tls_connector_with_client_cert(
         &ca_pem,
         &cert_state.cert_pem,
         &cert_state.key_pem,
     )?;
-
-    // Connect WebSocket with mTLS and run event loop
-    client::run_event_loop(&args.host, args.port, mtls_connector).await?;
+    client::run_authenticated_loop(&args.host, args.port, mtls_connector).await?;
 
     Ok(())
 }

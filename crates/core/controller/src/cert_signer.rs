@@ -51,8 +51,7 @@ fn generate_agent_cert(
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ClientAuth);
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after =
-        OffsetDateTime::now_utc() + time::Duration::days(i64::from(lifetime_days));
+    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(i64::from(lifetime_days));
 
     let cert = params
         .signed_by(&key_pair, issuer)
@@ -85,8 +84,7 @@ mod tests {
         assert_eq!(bundle.lifetime_days, 7);
 
         // Verify CN contains the agent UUID
-        let (_, pem_block) =
-            x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
+        let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
         let cert = pem_block.parse_x509().unwrap();
         let cn = cert
             .subject()
@@ -118,8 +116,7 @@ mod tests {
         let agent_id = Uuid::now_v7();
         let bundle = signer.sign_agent_cert(&agent_id, 30).unwrap();
 
-        let (_, pem_block) =
-            x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
+        let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
         let cert = pem_block.parse_x509().unwrap();
         let cn = cert
             .subject()

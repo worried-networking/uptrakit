@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::auth::{password, token};
-use crate::extract::ClientIp;
+use crate::cert_signer::AgentCertBundle;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
 use axum::{
@@ -11,9 +11,11 @@ use axum::{
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
 use uptrakit_shared_db::entity::{agent, prelude::*};
 use utoipa::ToSchema;
 
@@ -30,7 +32,7 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Approved => "approved",
@@ -38,7 +40,7 @@ impl AgentStatus {
         }
     }
 
-    fn from_str(s: &str) -> Option<Self> {
+    pub(crate) fn from_str(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),
             "approved" => Some(Self::Approved),
@@ -49,26 +51,6 @@ impl AgentStatus {
 }
 
 // --- Request/Response types ---
-
-#[derive(Deserialize, ToSchema)]
-pub struct EnrollRequest {
-    pub hostname: String,
-    pub friendly_name: String,
-    pub enrollment_token: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct EnrollResponse {
-    pub agent_id: String,
-    pub status: AgentStatus,
-    pub enrollment_secret: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct EnrollStatusResponse {
-    pub agent_id: String,
-    pub status: AgentStatus,
-}
 
 #[derive(Serialize, ToSchema)]
 pub struct AgentResponse {
@@ -97,85 +79,74 @@ pub struct MessageResponse {
     pub message: String,
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct CertificateResponse {
-    pub cert_pem: String,
-    pub key_pem: String,
-    pub lifetime_days: u16,
+// --- Shared enrollment helpers (used by both WS handler and admin endpoints) ---
+
+/// Result of a successful enrollment.
+pub(crate) struct EnrollResult {
+    pub agent: agent::Model,
+    pub enrollment_secret: String,
+    pub status: AgentStatus,
 }
 
-// --- Agent-facing endpoints (no user auth) ---
-
-/// Agent requests enrollment
-#[utoipa::path(
-    post,
-    path = "/api/v1/agents/enroll",
-    request_body = EnrollRequest,
-    responses(
-        (status = 201, description = "Enrollment request created", body = EnrollResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Invalid enrollment token")
-    ),
-    tag = "Agents"
-)]
-pub async fn enroll(
-    State(state): State<Arc<AppState>>,
-    client_ip: Option<Extension<ClientIp>>,
-    Json(req): Json<EnrollRequest>,
-) -> Response {
-    // Validate hostname non-empty
-    if req.hostname.trim().is_empty() {
-        return (StatusCode::BAD_REQUEST, "hostname must not be empty").into_response();
+/// Core enrollment logic: creates agent record, returns model + plaintext secret.
+pub(crate) async fn do_enroll(
+    db: &sea_orm::DatabaseConnection,
+    settings: &crate::settings::Settings,
+    hostname: &str,
+    friendly_name: &str,
+    enrollment_token: Option<&str>,
+    ip_address: Option<IpAddr>,
+) -> Result<EnrollResult, (StatusCode, &'static str)> {
+    if hostname.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "hostname must not be empty"));
     }
 
     // Determine status based on enrollment token
-    let status = if let Some(ref enrollment_token) = req.enrollment_token {
-        // Verify against stored Argon2 hash
-        let token_hash = match load_setting(&state.db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
+    let status = if let Some(enrollment_token) = enrollment_token {
+        let token_hash = match load_setting(db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
             Ok(Some(hash)) => hash,
             Ok(None) => {
-                return (StatusCode::FORBIDDEN, "No enrollment token configured").into_response();
+                return Err((StatusCode::FORBIDDEN, "No enrollment token configured"));
             }
             Err(e) => {
                 tracing::error!("Failed to load enrollment token hash: {:?}", e);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
             }
         };
 
         match password::verify_password(enrollment_token, &token_hash) {
             Ok(true) => AgentStatus::Approved,
             Ok(false) => {
-                return (StatusCode::FORBIDDEN, "Invalid enrollment token").into_response();
+                return Err((StatusCode::FORBIDDEN, "Invalid enrollment token"));
             }
             Err(e) => {
                 tracing::error!("Token verification error: {:?}", e);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
             }
         }
     } else {
         AgentStatus::Pending
     };
 
-    // Generate agent ID, enrollment secret
     let agent_id = token::generate_uuid();
     let enrollment_secret = match token::generate_secure_token() {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to generate enrollment secret: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
         }
     };
     let secret_hash = token::hash_token(&enrollment_secret);
 
-    // Capture IP
-    let ip_address = client_ip.map(|Extension(ClientIp(ip))| ip.to_string());
+    let ip_str = ip_address.map(|ip| ip.to_string());
+    let _ = settings; // settings available for future use
 
     let now = OffsetDateTime::now_utc();
     let model = agent::ActiveModel {
         id: Set(agent_id),
-        hostname: Set(req.hostname),
-        friendly_name: Set(req.friendly_name),
-        ip_address: Set(ip_address),
+        hostname: Set(hostname.to_string()),
+        friendly_name: Set(friendly_name.to_string()),
+        ip_address: Set(ip_str),
         status: Set(status.as_str().to_string()),
         enrollment_secret_hash: Set(secret_hash),
         last_seen_at: Set(Some(now)),
@@ -184,151 +155,73 @@ pub async fn enroll(
         deactivated_at: Set(None),
     };
 
-    if let Err(e) = model.insert(&state.db).await {
+    let inserted = model.insert(db).await.map_err(|e| {
         tracing::error!("Failed to insert agent: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+    })?;
 
-    let response = EnrollResponse {
-        agent_id: agent_id.to_string(),
-        status,
+    Ok(EnrollResult {
+        agent: inserted,
         enrollment_secret,
-    };
-
-    (StatusCode::CREATED, Json(response)).into_response()
-}
-
-/// Agent polls enrollment status
-#[utoipa::path(
-    get,
-    path = "/api/v1/agents/enroll/status",
-    responses(
-        (status = 200, description = "Current enrollment status", body = EnrollStatusResponse),
-        (status = 401, description = "Invalid enrollment secret")
-    ),
-    tag = "Agents",
-    security(("bearer_token" = []))
-)]
-pub async fn enroll_status(
-    State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
-) -> Response {
-    // Extract bearer token
-    let enrollment_secret = match extract_bearer_token(&req) {
-        Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, "Missing enrollment secret").into_response(),
-    };
-
-    let secret_hash = token::hash_token(&enrollment_secret);
-
-    // Look up agent by enrollment_secret_hash, excluding deactivated
-    let agent = match Agent::find()
-        .filter(agent::Column::EnrollmentSecretHash.eq(&secret_hash))
-        .filter(agent::Column::DeactivatedAt.is_null())
-        .one(&state.db)
-        .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::UNAUTHORIZED, "Invalid enrollment secret").into_response(),
-        Err(e) => {
-            tracing::error!("DB error looking up agent: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    // Update last_seen_at
-    let now = OffsetDateTime::now_utc();
-    let mut active: agent::ActiveModel = agent.clone().into();
-    active.last_seen_at = Set(Some(now));
-    active.updated_at = Set(now);
-    if let Err(e) = active.update(&state.db).await {
-        tracing::error!("Failed to update agent last_seen_at: {}", e);
-    }
-
-    let status = AgentStatus::from_str(&agent.status).unwrap_or(AgentStatus::Pending);
-    let response = EnrollStatusResponse {
-        agent_id: agent.id.to_string(),
         status,
-    };
-
-    (StatusCode::OK, Json(response)).into_response()
+    })
 }
 
-/// Agent requests a client certificate for mTLS
-#[utoipa::path(
-    post,
-    path = "/api/v1/agents/certificate",
-    responses(
-        (status = 200, description = "Certificate issued", body = CertificateResponse),
-        (status = 401, description = "Invalid enrollment secret"),
-        (status = 403, description = "Agent not approved or deactivated")
-    ),
-    tag = "Agents",
-    security(("bearer_token" = []))
-)]
-pub async fn request_certificate(
-    State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
-) -> Response {
-    // Extract bearer token (enrollment_secret)
-    let enrollment_secret = match extract_bearer_token(&req) {
-        Some(t) => t,
-        None => return (StatusCode::UNAUTHORIZED, "Missing enrollment secret").into_response(),
-    };
+/// Look up an agent by hashed enrollment_secret.
+pub(crate) async fn do_lookup_by_secret(
+    db: &sea_orm::DatabaseConnection,
+    enrollment_secret: &str,
+) -> Result<agent::Model, (StatusCode, &'static str)> {
+    let secret_hash = token::hash_token(enrollment_secret);
 
-    let secret_hash = token::hash_token(&enrollment_secret);
-
-    // Look up agent by enrollment_secret_hash, excluding deactivated
-    let agent = match Agent::find()
+    match Agent::find()
         .filter(agent::Column::EnrollmentSecretHash.eq(&secret_hash))
         .filter(agent::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(db)
         .await
     {
-        Ok(Some(a)) => a,
-        Ok(None) => return (StatusCode::UNAUTHORIZED, "Invalid enrollment secret").into_response(),
+        Ok(Some(a)) => Ok(a),
+        Ok(None) => Err((StatusCode::UNAUTHORIZED, "Invalid enrollment secret")),
         Err(e) => {
             tracing::error!("DB error looking up agent: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"))
         }
-    };
+    }
+}
 
-    // Must be approved
+/// Sign certificate for an approved agent, invalidate secret.
+pub(crate) async fn do_sign_certificate(
+    cert_signer: &dyn crate::cert_signer::AgentCertSigner,
+    settings: &crate::settings::Settings,
+    db: &sea_orm::DatabaseConnection,
+    agent: agent::Model,
+) -> Result<AgentCertBundle, (StatusCode, &'static str)> {
     if agent.status != AgentStatus::Approved.as_str() {
-        return (StatusCode::FORBIDDEN, "Agent is not approved").into_response();
+        return Err((StatusCode::FORBIDDEN, "Agent is not approved"));
     }
 
-    // Load lifetime from settings
-    let lifetime_days = state.settings.agent_cert_lifetime_days().await;
+    let lifetime_days = settings.agent_cert_lifetime_days().await;
 
-    // Sign agent certificate
-    let bundle = match state.cert_signer.sign_agent_cert(&agent.id, lifetime_days) {
-        Ok(b) => b,
-        Err(e) => {
+    let bundle = cert_signer
+        .sign_agent_cert(&agent.id, lifetime_days)
+        .map_err(|e| {
             tracing::error!("Failed to sign agent certificate: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+            (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        })?;
 
-    // Invalidate enrollment secret: replace hash with hash of a random UUID
+    // Invalidate enrollment secret
     let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
     let now = OffsetDateTime::now_utc();
     let mut active: agent::ActiveModel = agent.into();
     active.enrollment_secret_hash = Set(invalidated_hash);
     active.last_seen_at = Set(Some(now));
     active.updated_at = Set(now);
-    if let Err(e) = active.update(&state.db).await {
+    if let Err(e) = active.update(db).await {
         tracing::error!("Failed to invalidate enrollment secret: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
     }
 
-    let response = CertificateResponse {
-        cert_pem: bundle.cert_pem,
-        key_pem: bundle.key_pem,
-        lifetime_days: bundle.lifetime_days,
-    };
-
-    (StatusCode::OK, Json(response)).into_response()
+    Ok(bundle)
 }
 
 // --- Admin-facing endpoints (user auth + admin role) ---
@@ -439,6 +332,17 @@ pub async fn approve_agent(
         }
     };
 
+    // Push approval to connected agent via WebSocket
+    let _ = state
+        .agent_connections
+        .send(
+            &agent_id,
+            ControllerMessage::Approved(ApprovedPayload {
+                agent_id: agent_id.to_string(),
+            }),
+        )
+        .await;
+
     (StatusCode::OK, Json(agent_to_response(updated))).into_response()
 }
 
@@ -503,6 +407,17 @@ pub async fn reject_agent(
         }
     };
 
+    // Push rejection to connected agent via WebSocket
+    let _ = state
+        .agent_connections
+        .send(
+            &agent_id,
+            ControllerMessage::Rejected(RejectedPayload {
+                agent_id: agent_id.to_string(),
+            }),
+        )
+        .await;
+
     (StatusCode::OK, Json(agent_to_response(updated))).into_response()
 }
 
@@ -558,6 +473,11 @@ pub async fn deactivate_agent(
         tracing::error!("Failed to deactivate agent: {}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+
+    // Terminate any active WebSocket connection for this agent.
+    // Dropping the sender causes the handler's push_rx.recv() to
+    // return None, which breaks the select loop and closes the socket.
+    state.agent_connections.unregister(&agent_id).await;
 
     (
         StatusCode::OK,
@@ -651,15 +571,6 @@ pub async fn revoke_enrollment_token(
 }
 
 // --- Helper functions ---
-
-fn extract_bearer_token(req: &axum::extract::Request) -> Option<String> {
-    req.headers()
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.to_string())
-}
 
 fn format_rfc3339(dt: OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())

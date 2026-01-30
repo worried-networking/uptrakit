@@ -42,10 +42,7 @@ impl Settings {
             _ => DEFAULT_AGENT_CERT_LIFETIME_DAYS,
         };
 
-        Ok((
-            Self::new(registration, agent_cert_lifetime_days),
-            token,
-        ))
+        Ok((Self::new(registration, agent_cert_lifetime_days), token))
     }
 
     /// Read registration settings (acquires read lock, returns clone).

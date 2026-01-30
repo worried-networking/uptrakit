@@ -1,84 +1,499 @@
+use std::sync::Arc;
+
 use axum::Extension;
+use axum::extract::State;
 use axum::extract::WebSocketUpgrade;
 use axum::extract::ws::{Message, WebSocket};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
+use futures_util::{SinkExt, StreamExt};
+use sea_orm::EntityTrait;
+use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    AgentMessage, ControllerMessage, PingPayload, PongPayload, now_millis,
+    AgentMessage, ApprovedPayload, CertificatePayload, ControllerMessage, EnrolledPayload,
+    ErrorPayload, PingPayload, PongPayload, RejectedPayload, now_millis,
 };
 
-use crate::extract::AgentIdentity;
+use crate::AppState;
+use crate::extract::{AgentIdentity, ClientIp};
+use crate::routes::agents::{AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate};
 
-pub async fn agent_ws(
-    identity: Option<Extension<AgentIdentity>>,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    let agent_id = identity.map(|Extension(id)| id.agent_id);
-    if let Some(ref id) = agent_id {
-        tracing::info!(%id, "authenticated agent WS upgrade");
-    } else {
-        tracing::info!("anonymous WS upgrade");
-    }
-    ws.on_upgrade(move |socket| handle_agent_socket(socket, agent_id))
+/// Connection type determined at WebSocket upgrade time.
+enum ConnectionType {
+    /// mTLS client cert present → authenticated agent
+    Authenticated(uuid::Uuid),
+    /// Authorization: Bearer <secret> → reconnecting enrolled agent
+    Enrolled(uuid::Uuid),
+    /// No auth → expects Enroll message
+    Anonymous,
 }
 
-async fn handle_agent_socket(mut socket: WebSocket, agent_id: Option<uuid::Uuid>) {
-    if let Some(ref id) = agent_id {
-        tracing::debug!(%id, "agent connected");
+pub async fn agent_ws(
+    State(state): State<Arc<AppState>>,
+    identity: Option<Extension<AgentIdentity>>,
+    client_ip: Option<Extension<ClientIp>>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    // Determine connection type at upgrade time
+    let conn_type = if let Some(Extension(ref id)) = identity {
+        tracing::info!(agent_id = %id.agent_id, "authenticated agent WS upgrade (mTLS)");
+        ConnectionType::Authenticated(id.agent_id)
+    } else if let Some(secret) = extract_bearer(&headers) {
+        match do_lookup_by_secret(&state.db, &secret).await {
+            Ok(agent) => {
+                tracing::info!(agent_id = %agent.id, "enrolled agent WS upgrade (bearer)");
+                ConnectionType::Enrolled(agent.id)
+            }
+            Err((status, msg)) => {
+                tracing::warn!(status = %status, "bearer auth failed: {msg}");
+                return (status, msg).into_response();
+            }
+        }
     } else {
-        tracing::debug!("agent connected (anonymous)");
+        tracing::info!("anonymous WS upgrade");
+        ConnectionType::Anonymous
+    };
+
+    let ip = client_ip.map(|Extension(ClientIp(ip))| ip);
+
+    ws.on_upgrade(move |socket| handle_connection(socket, state, conn_type, ip))
+}
+
+fn extract_bearer(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
+        .map(|s| s.to_string())
+}
+
+async fn handle_connection(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    conn_type: ConnectionType,
+    client_ip: Option<std::net::IpAddr>,
+) {
+    match conn_type {
+        ConnectionType::Authenticated(agent_id) => {
+            handle_authenticated(socket, state, agent_id).await;
+        }
+        ConnectionType::Enrolled(agent_id) => {
+            handle_enrolled(socket, state, agent_id).await;
+        }
+        ConnectionType::Anonymous => {
+            handle_anonymous(socket, state, client_ip).await;
+        }
+    }
+}
+
+/// Authenticated path: mTLS agent, Ping/Pong keepalive loop.
+async fn handle_authenticated(socket: WebSocket, state: Arc<AppState>, agent_id: uuid::Uuid) {
+    tracing::debug!(%agent_id, "authenticated agent connected");
+    let mut push_rx = state.agent_connections.register(agent_id).await;
+    let (mut sink, mut stream) = socket.split();
+
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                let Some(msg) = msg else { break };
+                let msg = match msg {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "websocket receive error");
+                        break;
+                    }
+                };
+                match msg {
+                    Message::Text(text) => {
+                        match handle_authenticated_message(&text) {
+                            Ok(response) => {
+                                let json = match serde_json::to_string(&response) {
+                                    Ok(j) => j,
+                                    Err(e) => {
+                                        tracing::debug!(error = %e, "serialize error");
+                                        break;
+                                    }
+                                };
+                                if sink.send(Message::Text(json.into())).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!(error = %e, "error handling message");
+                                break;
+                            }
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+            push = push_rx.recv() => {
+                let Some(msg) = push else { break };
+                let json = match serde_json::to_string(&msg) {
+                    Ok(j) => j,
+                    Err(_) => break,
+                };
+                if sink.send(Message::Text(json.into())).await.is_err() {
+                    break;
+                }
+            }
+        }
     }
 
-    while let Some(msg) = socket.recv().await {
-        let msg = match msg {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::debug!(error = %e, "websocket receive error");
-                break;
+    state.agent_connections.unregister(&agent_id).await;
+    tracing::debug!(%agent_id, "authenticated agent disconnected");
+}
+
+fn handle_authenticated_message(
+    text: &str,
+) -> Result<ControllerMessage, Box<dyn std::error::Error + Send + Sync>> {
+    let agent_msg: AgentMessage = serde_json::from_str(text)?;
+    match agent_msg {
+        AgentMessage::Ping(PingPayload { agent_ts }) => {
+            let controller_ts = now_millis();
+            tracing::trace!(agent_ts, controller_ts, "ping/pong");
+            Ok(ControllerMessage::Pong(PongPayload {
+                agent_ts,
+                controller_ts,
+            }))
+        }
+        _ => Err("unexpected message for authenticated connection".into()),
+    }
+}
+
+/// Enrolled path: agent reconnecting with Bearer secret, waiting for approval.
+async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, agent_id: uuid::Uuid) {
+    tracing::debug!(%agent_id, "enrolled agent connected (bearer)");
+    let mut push_rx = state.agent_connections.register(agent_id).await;
+
+    // Check current status — if already approved/rejected, push immediately
+    let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => {
+            tracing::warn!(%agent_id, "agent not found in DB");
+            return;
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "DB lookup failed");
+            return;
+        }
+    };
+
+    let status = AgentStatus::from_str(&agent.status);
+
+    let (mut sink, mut stream) = socket.split();
+
+    // If already approved/rejected, push immediately
+    match status {
+        Some(AgentStatus::Approved) => {
+            let msg = ControllerMessage::Approved(ApprovedPayload {
+                agent_id: agent_id.to_string(),
+            });
+            let json = serde_json::to_string(&msg).unwrap();
+            if sink.send(Message::Text(json.into())).await.is_err() {
+                state.agent_connections.unregister(&agent_id).await;
+                return;
             }
+        }
+        Some(AgentStatus::Rejected) => {
+            let msg = ControllerMessage::Rejected(RejectedPayload {
+                agent_id: agent_id.to_string(),
+            });
+            let json = serde_json::to_string(&msg).unwrap();
+            let _ = sink.send(Message::Text(json.into())).await;
+            state.agent_connections.unregister(&agent_id).await;
+            return;
+        }
+        _ => {
+            // Pending — wait for push
+        }
+    }
+
+    // Enter enrolled loop
+    run_enrolled_loop(&mut sink, &mut stream, &mut push_rx, &state, agent_id).await;
+
+    state.agent_connections.unregister(&agent_id).await;
+    tracing::debug!(%agent_id, "enrolled agent disconnected");
+}
+
+/// Anonymous path: expects Enroll message, then promotes in-place.
+async fn handle_anonymous(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    client_ip: Option<std::net::IpAddr>,
+) {
+    tracing::debug!("anonymous agent connected");
+
+    let (mut sink, mut stream) = socket.split();
+
+    // Wait for first message — must be Enroll
+    let agent_id = loop {
+        let msg = match stream.next().await {
+            Some(Ok(m)) => m,
+            Some(Err(e)) => {
+                tracing::debug!(error = %e, "websocket receive error");
+                return;
+            }
+            None => return,
         };
 
         match msg {
             Message::Text(text) => {
-                if let Err(e) = handle_text_message(&mut socket, &text).await {
-                    tracing::debug!(error = %e, "error handling message");
+                let agent_msg: AgentMessage = match serde_json::from_str(&text) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let err = ControllerMessage::Error(ErrorPayload {
+                            code: "bad_request".to_string(),
+                            message: format!("invalid message: {e}"),
+                        });
+                        let _ = sink
+                            .send(Message::Text(serde_json::to_string(&err).unwrap().into()))
+                            .await;
+                        return;
+                    }
+                };
+
+                match agent_msg {
+                    AgentMessage::Enroll(payload) => {
+                        let result = do_enroll(
+                            &state.db,
+                            &state.settings,
+                            &payload.hostname,
+                            &payload.friendly_name,
+                            payload.enrollment_token.as_deref(),
+                            client_ip,
+                        )
+                        .await;
+
+                        match result {
+                            Ok(enroll_result) => {
+                                let agent_id = enroll_result.agent.id;
+                                let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
+                                    agent_id: agent_id.to_string(),
+                                    enrollment_secret: enroll_result.enrollment_secret,
+                                    status: enroll_result.status.as_str().to_string(),
+                                });
+                                let json = serde_json::to_string(&enrolled_msg).unwrap();
+                                if sink.send(Message::Text(json.into())).await.is_err() {
+                                    return;
+                                }
+
+                                tracing::info!(
+                                    %agent_id,
+                                    status = enroll_result.status.as_str(),
+                                    "agent enrolled via WS"
+                                );
+
+                                // If auto-approved (valid enrollment token), push Approved
+                                if enroll_result.status == AgentStatus::Approved {
+                                    let approved_msg =
+                                        ControllerMessage::Approved(ApprovedPayload {
+                                            agent_id: agent_id.to_string(),
+                                        });
+                                    let json = serde_json::to_string(&approved_msg).unwrap();
+                                    if sink.send(Message::Text(json.into())).await.is_err() {
+                                        return;
+                                    }
+                                }
+
+                                break agent_id;
+                            }
+                            Err((_status, msg)) => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "enrollment_failed".to_string(),
+                                    message: msg.to_string(),
+                                });
+                                let _ = sink
+                                    .send(Message::Text(
+                                        serde_json::to_string(&err).unwrap().into(),
+                                    ))
+                                    .await;
+                                return;
+                            }
+                        }
+                    }
+                    _ => {
+                        let err = ControllerMessage::Error(ErrorPayload {
+                            code: "bad_request".to_string(),
+                            message: "expected enroll message".to_string(),
+                        });
+                        let _ = sink
+                            .send(Message::Text(serde_json::to_string(&err).unwrap().into()))
+                            .await;
+                        return;
+                    }
+                }
+            }
+            Message::Close(_) => return,
+            _ => {}
+        }
+    };
+
+    // Connection promoted: register in connection registry
+    let mut push_rx = state.agent_connections.register(agent_id).await;
+
+    // Enter enrolled loop
+    run_enrolled_loop(&mut sink, &mut stream, &mut push_rx, &state, agent_id).await;
+
+    state.agent_connections.unregister(&agent_id).await;
+    tracing::debug!(%agent_id, "anonymous->enrolled agent disconnected");
+}
+
+/// Shared enrolled loop: handles Ping, RequestCertificate, and push messages.
+async fn run_enrolled_loop(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    push_rx: &mut mpsc::Receiver<ControllerMessage>,
+    state: &Arc<AppState>,
+    agent_id: uuid::Uuid,
+) {
+    let mut approved = false;
+
+    // Check current status to set initial approved flag
+    if let Ok(Some(agent)) = uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+        .one(&state.db)
+        .await
+        && agent.status == AgentStatus::Approved.as_str()
+    {
+        approved = true;
+    }
+
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                let Some(msg) = msg else { break };
+                let msg = match msg {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "websocket receive error");
+                        break;
+                    }
+                };
+
+                match msg {
+                    Message::Text(text) => {
+                        let agent_msg: AgentMessage = match serde_json::from_str(&text) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                tracing::debug!(error = %e, "deserialize error");
+                                break;
+                            }
+                        };
+
+                        match agent_msg {
+                            AgentMessage::Ping(PingPayload { agent_ts }) => {
+                                let controller_ts = now_millis();
+                                let response = ControllerMessage::Pong(PongPayload {
+                                    agent_ts,
+                                    controller_ts,
+                                });
+                                let json = serde_json::to_string(&response).unwrap();
+                                if sink.send(Message::Text(json.into())).await.is_err() {
+                                    break;
+                                }
+                                tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
+                            }
+                            AgentMessage::RequestCertificate(_) => {
+                                if !approved {
+                                    let err = ControllerMessage::Error(ErrorPayload {
+                                        code: "not_approved".to_string(),
+                                        message: "agent is not yet approved".to_string(),
+                                    });
+                                    let json = serde_json::to_string(&err).unwrap();
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                    continue;
+                                }
+
+                                // Re-fetch agent from DB
+                                let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+                                    .one(&state.db)
+                                    .await
+                                {
+                                    Ok(Some(a)) => a,
+                                    _ => {
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: "internal_error".to_string(),
+                                            message: "agent not found".to_string(),
+                                        });
+                                        let json = serde_json::to_string(&err).unwrap();
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        break;
+                                    }
+                                };
+
+                                match do_sign_certificate(
+                                    state.cert_signer.as_ref(),
+                                    &state.settings,
+                                    &state.db,
+                                    agent,
+                                ).await {
+                                    Ok(bundle) => {
+                                        let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                                            cert_pem: bundle.cert_pem,
+                                            key_pem: bundle.key_pem,
+                                            lifetime_days: bundle.lifetime_days,
+                                        });
+                                        let json = serde_json::to_string(&cert_msg).unwrap();
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        tracing::info!(%agent_id, "certificate issued via WS");
+                                        break; // close connection after certificate issuance
+                                    }
+                                    Err((_status, msg)) => {
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: "certificate_error".to_string(),
+                                            message: msg.to_string(),
+                                        });
+                                        let json = serde_json::to_string(&err).unwrap();
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        break;
+                                    }
+                                }
+                            }
+                            AgentMessage::Enroll(_) => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "bad_request".to_string(),
+                                    message: "already enrolled".to_string(),
+                                });
+                                let json = serde_json::to_string(&err).unwrap();
+                                let _ = sink.send(Message::Text(json.into())).await;
+                            }
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+            push = push_rx.recv() => {
+                let Some(msg) = push else { break };
+
+                // Track state transitions
+                match &msg {
+                    ControllerMessage::Approved(_) => {
+                        approved = true;
+                    }
+                    ControllerMessage::Rejected(_) => {
+                        // Forward rejection and close
+                        let json = serde_json::to_string(&msg).unwrap();
+                        let _ = sink.send(Message::Text(json.into())).await;
+                        break;
+                    }
+                    _ => {}
+                }
+
+                let json = match serde_json::to_string(&msg) {
+                    Ok(j) => j,
+                    Err(_) => break,
+                };
+                if sink.send(Message::Text(json.into())).await.is_err() {
                     break;
                 }
             }
-            Message::Close(_) => {
-                tracing::debug!("agent sent close frame");
-                break;
-            }
-            _ => {
-                // Ignore binary, ping, pong frames
-            }
         }
     }
-
-    if let Some(ref id) = agent_id {
-        tracing::debug!(%id, "agent disconnected");
-    } else {
-        tracing::debug!("agent disconnected (anonymous)");
-    }
-}
-
-async fn handle_text_message(
-    socket: &mut WebSocket,
-    text: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let agent_msg: AgentMessage = serde_json::from_str(text)?;
-
-    match agent_msg {
-        AgentMessage::Ping(PingPayload { agent_ts }) => {
-            let controller_ts = now_millis();
-            let response = ControllerMessage::Pong(PongPayload {
-                agent_ts,
-                controller_ts,
-            });
-            let response_json = serde_json::to_string(&response)?;
-            socket.send(Message::Text(response_json.into())).await?;
-            tracing::trace!(agent_ts, controller_ts, "ping/pong");
-        }
-    }
-
-    Ok(())
 }

@@ -43,9 +43,6 @@ pub enum Error {
 
     #[error("enrollment rejected by controller")]
     EnrollmentRejected,
-
-    #[error("HTTP request error: {0}")]
-    HttpRequest(String),
 }
 
 pub type Result<T> = std::result::Result<T, Report<Error>>;

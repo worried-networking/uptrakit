@@ -30,10 +30,6 @@ pub struct Args {
     /// Pre-shared enrollment token for auto-approval
     #[arg(long)]
     pub enrollment_token: Option<String>,
-
-    /// Seconds between enrollment status polls
-    #[arg(long, default_value = "30")]
-    pub enrollment_poll_interval: u64,
 }
 
 impl Args {

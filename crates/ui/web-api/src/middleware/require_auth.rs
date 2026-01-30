@@ -154,6 +154,7 @@ mod tests {
                 7,
             ),
             cert_signer: Arc::new(NoopCertSigner),
+            agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
         })
     }
 

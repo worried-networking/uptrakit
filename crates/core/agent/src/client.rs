@@ -1,12 +1,17 @@
 use std::sync::Arc;
 
+use futures_util::{SinkExt, StreamExt};
 use http::Uri;
 use rootcause::prelude::*;
 use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
-use uptrakit_internal_wire::{AgentMessage, ControllerMessage, PingPayload, now_millis};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use uptrakit_internal_wire::{
+    AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload,
+    PingPayload, RequestCertificatePayload, now_millis,
+};
 
 use crate::error::{Error, Result};
 
@@ -106,22 +111,24 @@ fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
     Ok(root_store)
 }
 
-pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) -> Result<()> {
-    use std::time::Duration;
+/// Type alias for the WebSocket stream produced by `connect_ws`.
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
 
-    use futures_util::{SinkExt, StreamExt};
-
-    const PING_INTERVAL: Duration = Duration::from_secs(300);
-
+/// Connect TCP → TLS → WebSocket upgrade, with optional Authorization header.
+pub async fn connect_ws(
+    host: &str,
+    port: u16,
+    tls_connector: &TlsConnector,
+    auth_header: Option<&str>,
+) -> Result<WsStream> {
     let ws_url = format!("wss://{host}:{port}/api/v1/ws/agent");
     tracing::info!(url = %ws_url, "connecting to controller");
 
-    // Establish TCP connection
     let tcp_stream = tokio::net::TcpStream::connect((host, port))
         .await
         .context_to::<Error>()?;
 
-    // Perform TLS handshake
     let server_name = ServerName::try_from(host.to_string()).context_to::<Error>()?;
 
     let tls_stream = tls_connector
@@ -129,14 +136,177 @@ pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) 
         .await
         .context_to::<Error>()?;
 
-    // Upgrade to WebSocket
     let uri: Uri = ws_url.parse().context_to::<Error>()?;
+    let mut request = uri
+        .to_string()
+        .into_client_request()
+        .context_to::<Error>()?;
 
-    let (mut ws_stream, _response) = tokio_tungstenite::client_async(uri.to_string(), tls_stream)
+    if let Some(header_value) = auth_header {
+        request.headers_mut().insert(
+            http::header::AUTHORIZATION,
+            http::HeaderValue::from_str(header_value).map_err(|e| {
+                report!(Error::Enrollment(format!(
+                    "invalid authorization header: {e}"
+                )))
+            })?,
+        );
+    }
+
+    let (ws_stream, _response) = tokio_tungstenite::client_async(request, tls_stream)
         .await
         .context_to::<Error>()?;
 
-    tracing::info!("connected to controller");
+    tracing::info!("WebSocket connected");
+    Ok(ws_stream)
+}
+
+/// Send Enroll message and read Enrolled response.
+pub async fn send_enroll(
+    ws: &mut WsStream,
+    hostname: &str,
+    friendly_name: &str,
+    enrollment_token: Option<&str>,
+) -> Result<EnrolledPayload> {
+    let msg = AgentMessage::Enroll(EnrollPayload {
+        hostname: hostname.to_string(),
+        friendly_name: friendly_name.to_string(),
+        enrollment_token: enrollment_token.map(|s| s.to_string()),
+    });
+    let json = serde_json::to_string(&msg).context_to::<Error>()?;
+    ws.send(Message::Text(json.into()))
+        .await
+        .context_to::<Error>()?;
+
+    tracing::info!("sent Enroll, waiting for Enrolled response");
+
+    loop {
+        let resp = ws
+            .next()
+            .await
+            .ok_or_else(|| report!(Error::ReceiveClosed))?
+            .context_to::<Error>()?;
+
+        match resp {
+            Message::Text(text) => {
+                let controller_msg: ControllerMessage =
+                    serde_json::from_str(&text).context_to::<Error>()?;
+
+                match controller_msg {
+                    ControllerMessage::Enrolled(payload) => return Ok(payload),
+                    ControllerMessage::Error(err) => {
+                        return Err(report!(Error::Enrollment(format!(
+                            "{}: {}",
+                            err.code, err.message
+                        ))));
+                    }
+                    _ => {
+                        return Err(report!(Error::UnexpectedMessage));
+                    }
+                }
+            }
+            Message::Close(_) => return Err(report!(Error::ReceiveClosed)),
+            _ => continue,
+        }
+    }
+}
+
+/// Wait for Approved/Rejected push from controller. Returns on Approved, errors on Rejected.
+pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
+    tracing::info!("waiting for approval...");
+
+    loop {
+        let msg = ws
+            .next()
+            .await
+            .ok_or_else(|| report!(Error::ReceiveClosed))?
+            .context_to::<Error>()?;
+
+        match msg {
+            Message::Text(text) => {
+                let controller_msg: ControllerMessage =
+                    serde_json::from_str(&text).context_to::<Error>()?;
+
+                match controller_msg {
+                    ControllerMessage::Approved(payload) => {
+                        tracing::info!(agent_id = %payload.agent_id, "enrollment approved");
+                        return Ok(());
+                    }
+                    ControllerMessage::Rejected(payload) => {
+                        tracing::error!(agent_id = %payload.agent_id, "enrollment rejected");
+                        return Err(report!(Error::EnrollmentRejected));
+                    }
+                    ControllerMessage::Pong(_) => {
+                        // Ignore pongs while waiting
+                        continue;
+                    }
+                    ControllerMessage::Error(err) => {
+                        return Err(report!(Error::Enrollment(format!(
+                            "{}: {}",
+                            err.code, err.message
+                        ))));
+                    }
+                    _ => continue,
+                }
+            }
+            Message::Close(_) => return Err(report!(Error::ReceiveClosed)),
+            _ => continue,
+        }
+    }
+}
+
+/// Send RequestCertificate and read Certificate response.
+pub async fn request_certificate_ws(ws: &mut WsStream) -> Result<CertificatePayload> {
+    let msg = AgentMessage::RequestCertificate(RequestCertificatePayload {});
+    let json = serde_json::to_string(&msg).context_to::<Error>()?;
+    ws.send(Message::Text(json.into()))
+        .await
+        .context_to::<Error>()?;
+
+    tracing::info!("sent RequestCertificate, waiting for Certificate response");
+
+    loop {
+        let resp = ws
+            .next()
+            .await
+            .ok_or_else(|| report!(Error::ReceiveClosed))?
+            .context_to::<Error>()?;
+
+        match resp {
+            Message::Text(text) => {
+                let controller_msg: ControllerMessage =
+                    serde_json::from_str(&text).context_to::<Error>()?;
+
+                match controller_msg {
+                    ControllerMessage::Certificate(payload) => return Ok(payload),
+                    ControllerMessage::Error(err) => {
+                        return Err(report!(Error::Enrollment(format!(
+                            "{}: {}",
+                            err.code, err.message
+                        ))));
+                    }
+                    _ => {
+                        return Err(report!(Error::UnexpectedMessage));
+                    }
+                }
+            }
+            Message::Close(_) => return Err(report!(Error::ReceiveClosed)),
+            _ => continue,
+        }
+    }
+}
+
+/// Authenticated Ping/Pong event loop (mTLS connection).
+pub async fn run_authenticated_loop(
+    host: &str,
+    port: u16,
+    tls_connector: TlsConnector,
+) -> Result<()> {
+    use std::time::Duration;
+
+    const PING_INTERVAL: Duration = Duration::from_secs(300);
+
+    let mut ws_stream = connect_ws(host, port, &tls_connector, None).await?;
 
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
@@ -159,9 +329,18 @@ pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) 
                     .context_to::<Error>()?;
             }
             msg = ws_stream.next() => {
-                let msg = msg
-                    .ok_or_else(|| report!(Error::ReceiveClosed))?
-                    .context_to::<Error>()?;
+                let msg = match msg {
+                    Some(Ok(m)) => m,
+                    Some(Err(e)) if is_peer_closed(&e) => {
+                        tracing::info!("connection closed by controller");
+                        break;
+                    }
+                    Some(Err(e)) => return Err(e).context_to::<Error>()?,
+                    None => {
+                        tracing::info!("connection closed by controller");
+                        break;
+                    }
+                };
 
                 match msg {
                     Message::Text(text) => {
@@ -178,6 +357,9 @@ pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) 
                                     rtt_ms = rtt,
                                     "received pong"
                                 );
+                            }
+                            _ => {
+                                tracing::debug!("ignoring non-pong message in authenticated loop");
                             }
                         }
                     }
@@ -201,8 +383,26 @@ pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) 
         }
     }
 
-    ws_stream.close(None).await.context_to::<Error>()?;
-    tracing::info!("websocket closed gracefully");
+    // Best-effort close — the peer may have already disconnected.
+    match ws_stream.close(None).await {
+        Ok(()) => tracing::info!("websocket closed gracefully"),
+        Err(e) if is_peer_closed(&e) => tracing::info!("websocket already closed by peer"),
+        Err(e) => return Err(e).context_to::<Error>()?,
+    }
 
     Ok(())
+}
+
+/// Returns `true` when the error indicates the peer dropped the TCP
+/// connection without sending a TLS `close_notify`.  This is normal
+/// when the controller terminates a connection (e.g. agent deactivated).
+fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
+    use tokio_tungstenite::tungstenite::Error as WsErr;
+    match err {
+        WsErr::Io(io) => io.kind() == std::io::ErrorKind::UnexpectedEof,
+        WsErr::Protocol(
+            tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+        ) => true,
+        _ => false,
+    }
 }
