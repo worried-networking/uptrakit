@@ -21,11 +21,19 @@ impl MigrationTrait for Migration {
                     .col(timestamp(Sessions::LastActivityAt))
                     .col(string_null(Sessions::UserAgent))
                     .col(string_null(Sessions::IpAddress))
+                    .col(ColumnDef::new(Sessions::OidcProviderId).uuid().null())
                     .foreign_key(
                         ForeignKey::create()
                             .from(Sessions::Table, Sessions::UserId)
                             .to(Users::Table, Users::Id)
                             .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_sessions_oidc_provider_id")
+                            .from(Sessions::Table, Sessions::OidcProviderId)
+                            .to(OidcProviders::Table, OidcProviders::Id)
+                            .on_delete(ForeignKeyAction::SetNull),
                     )
                     .to_owned(),
             )
@@ -86,10 +94,17 @@ enum Sessions {
     LastActivityAt,
     UserAgent,
     IpAddress,
+    OidcProviderId,
 }
 
 #[derive(DeriveIden)]
 enum Users {
+    Table,
+    Id,
+}
+
+#[derive(DeriveIden)]
+enum OidcProviders {
     Table,
     Id,
 }

@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { User, RegisterRequest, LoginRequest } from './types';
+import type { User, RegisterRequest, LoginRequest, OidcLinkRequest } from './types';
 import * as api from './api';
 
 export const user = writable<User | null>(null);
@@ -40,4 +40,25 @@ export async function handleLogout() {
 		localStorage.removeItem('token');
 		user.set(null);
 	}
+}
+
+export async function handleOidcLogin(providerId: string) {
+	const { authorize_url } = await api.getOidcAuthorizeUrl(providerId);
+	window.location.href = authorize_url;
+}
+
+export async function handleOidcCallback(token: string) {
+	localStorage.setItem('token', token);
+	const u = await api.me();
+	user.set(u);
+}
+
+export async function handleOidcLink(linkToken: string, password?: string) {
+	const data: OidcLinkRequest = { link_token: linkToken };
+	if (password) {
+		data.password = password;
+	}
+	const res = await api.oidcLink(data);
+	localStorage.setItem('token', res.token);
+	user.set(res.user);
 }

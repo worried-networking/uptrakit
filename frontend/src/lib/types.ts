@@ -38,3 +38,98 @@ export interface AgentResponse {
 export interface MessageResponse {
 	message: string;
 }
+
+export interface OidcProviderInfo {
+	id: string;
+	name: string;
+	slug: string;
+	logo_url?: string;
+}
+
+export interface AuthMethodsResponse {
+	password: boolean;
+	oidc_providers: OidcProviderInfo[];
+}
+
+export interface OidcLinkRequest {
+	link_token: string;
+	password?: string;
+}
+
+export interface RegistrationSettings {
+	mode: 'open' | 'invite' | 'closed';
+}
+
+export interface UpdateRegistrationSettings {
+	mode: 'open' | 'invite' | 'closed';
+	token?: string;
+}
+
+export interface AuthenticationSettings {
+	password_auth_enabled: boolean;
+}
+
+export interface UpdateAuthenticationSettings {
+	password_auth_enabled?: boolean;
+}
+
+export interface AgentCertificateSettings {
+	lifetime_days: number;
+	renewal_window_hours: number;
+}
+
+export interface UpdateAgentCertificateSettings {
+	lifetime_days?: number;
+	renewal_window_hours?: number;
+}
+
+export interface EnrollmentTokenStatus {
+	configured: boolean;
+}
+
+export interface EnrollmentTokenResponse {
+	token: string;
+}
+
+export interface OidcProviderResponse {
+	id: string;
+	name: string;
+	slug: string;
+	logo_url: string | null;
+	issuer_url: string;
+	client_id: string;
+	has_client_secret: boolean;
+	scopes: string;
+	auto_create_users: boolean;
+	role_claim_path: string | null;
+	role_mapping: Record<string, string>;
+	is_active: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface CreateOidcProviderRequest {
+	name: string;
+	slug: string;
+	issuer_url: string;
+	client_id: string;
+	client_secret: string;
+	logo_url?: string;
+	scopes?: string;
+	auto_create_users?: boolean;
+	role_claim_path?: string;
+	role_mapping?: Record<string, string>;
+}
+
+export interface UpdateOidcProviderRequest {
+	name?: string;
+	slug?: string;
+	logo_url?: string;
+	issuer_url?: string;
+	client_id?: string;
+	client_secret?: string;
+	scopes?: string;
+	auto_create_users?: boolean;
+	role_claim_path?: string;
+	role_mapping?: Record<string, string>;
+}

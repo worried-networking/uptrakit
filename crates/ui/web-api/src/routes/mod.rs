@@ -3,4 +3,8 @@ pub mod agents;
 pub mod auth;
 pub mod ca;
 pub mod health;
+pub mod oidc_auth;
+pub mod oidc_providers;
 pub mod settings;
+pub mod settings_agent_certs;
+pub mod settings_auth;

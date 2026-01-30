@@ -2,20 +2,14 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "sessions")]
+#[sea_orm(table_name = "user_oidc_links")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub user_id: Uuid,
-    #[sea_orm(unique)]
-    pub token_hash: String,
-    pub auth_method: String,
-    pub oidc_provider_id: Option<Uuid>,
-    pub created_at: OffsetDateTime,
-    pub expires_at: OffsetDateTime,
-    pub last_activity_at: OffsetDateTime,
-    pub user_agent: Option<String>,
-    pub ip_address: Option<String>,
+    pub provider_id: Uuid,
+    pub oidc_subject: String,
+    pub linked_at: OffsetDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -28,7 +22,7 @@ pub enum Relation {
     User,
     #[sea_orm(
         belongs_to = "super::oidc_provider::Entity",
-        from = "Column::OidcProviderId",
+        from = "Column::ProviderId",
         to = "super::oidc_provider::Column::Id"
     )]
     OidcProvider,

@@ -371,7 +371,7 @@ pub async fn run_authenticated_loop(
                 let ping = AgentMessage::Ping(PingPayload { agent_ts });
                 let ping_json = serde_json::to_string(&ping).context_to::<Error>()?;
 
-                tracing::info!(agent_ts, "sending ping");
+                tracing::trace!(agent_ts, "sending ping");
                 ws_stream
                     .send(Message::Text(ping_json.into()))
                     .await
@@ -412,7 +412,7 @@ pub async fn run_authenticated_loop(
                             ControllerMessage::Pong(pong) => {
                                 let now = now_millis();
                                 let rtt = now - pong.agent_ts;
-                                tracing::info!(
+                                tracing::trace!(
                                     agent_ts = pong.agent_ts,
                                     controller_ts = pong.controller_ts,
                                     rtt_ms = rtt,
@@ -434,7 +434,7 @@ pub async fn run_authenticated_loop(
                                 break;
                             }
                             ControllerMessage::AgentSettings(settings) => {
-                                tracing::info!(
+                                tracing::trace!(
                                     renewal_window_hours = settings.renewal_window_hours,
                                     "received agent settings"
                                 );

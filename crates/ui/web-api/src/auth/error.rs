@@ -30,6 +30,39 @@ pub enum AuthError {
     #[error("time error: {0}")]
     TimeError(#[from] time::error::ComponentRange),
 
+    #[error("OIDC provider not found or inactive")]
+    OidcProviderNotFound,
+
+    #[error("OIDC discovery failed: {0}")]
+    OidcDiscovery(String),
+
+    #[error("OIDC token exchange failed: {0}")]
+    OidcTokenExchange(String),
+
+    #[error("OIDC token validation failed: {0}")]
+    OidcTokenValidation(String),
+
+    #[error("OIDC state not found or expired")]
+    OidcStateNotFound,
+
+    #[error("OIDC account not found and auto-creation disabled")]
+    OidcNoAccount,
+
+    #[error("OIDC account linking required")]
+    OidcLinkRequired,
+
+    #[error("OIDC link verification failed")]
+    OidcLinkVerificationFailed,
+
+    #[error("password authentication is disabled")]
+    PasswordAuthDisabled,
+
+    #[error("cannot disable the auth method used by the current session")]
+    CannotDisableOwnAuthMethod,
+
+    #[error("at least one auth method must remain enabled")]
+    NoAuthMethodsRemaining,
+
     #[error("internal error: {0}")]
     Internal(String),
 }

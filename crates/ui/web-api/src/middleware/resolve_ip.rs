@@ -133,7 +133,11 @@ mod tests {
         use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
         struct NoopCertSigner;
         impl AgentCertSigner for NoopCertSigner {
-            fn sign_agent_cert(&self, _: &uuid::Uuid, _: time::Duration) -> Result<AgentCertBundle, String> {
+            fn sign_agent_cert(
+                &self,
+                _: &uuid::Uuid,
+                _: time::Duration,
+            ) -> Result<AgentCertBundle, String> {
                 unimplemented!()
             }
         }
@@ -152,6 +156,8 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
         })
     }
 

@@ -46,6 +46,7 @@ Essential infrastructure needed before feature development.
 - [ ] Implement version comparison logic (semver, custom formats)
 - [ ] Create repositories/DAOs for each entity
 - [ ] Add validation logic for data models
+- [ ] Store JSON encoded strings as settings values
 
 ### User Authentication & Authorization
 
@@ -69,6 +70,7 @@ Essential infrastructure needed before feature development.
 - [ ] OIDC integration (auth_method tracking already in place)
 - [ ] Rate limiting on login endpoint
 - [ ] Audit logging for security events
+- [ ] Use JWT token
 
 ### Agent Authentication & Security
 

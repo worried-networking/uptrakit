@@ -84,6 +84,11 @@ pub struct MessageResponse {
     pub message: String,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct EnrollmentTokenStatusResponse {
+    pub configured: bool,
+}
+
 // --- Shared enrollment helpers (used by both WS handler and admin endpoints) ---
 
 /// Result of a successful enrollment.
@@ -598,6 +603,38 @@ pub async fn revoke_enrollment_token(
         Json(MessageResponse {
             message: "Enrollment token revoked".to_string(),
         }),
+    )
+        .into_response()
+}
+
+/// Check if an enrollment token is configured
+#[utoipa::path(
+    get,
+    path = "/api/v1/agents/enrollment-token/status",
+    responses(
+        (status = 200, description = "Enrollment token status", body = EnrollmentTokenStatusResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Agents",
+    security(("bearer_token" = []))
+)]
+pub async fn enrollment_token_status(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+) -> Response {
+    if !check_admin_role(&state.db, user.user_id).await {
+        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    }
+
+    let configured = matches!(
+        load_setting(&state.db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await,
+        Ok(Some(_))
+    );
+
+    (
+        StatusCode::OK,
+        Json(EnrollmentTokenStatusResponse { configured }),
     )
         .into_response()
 }

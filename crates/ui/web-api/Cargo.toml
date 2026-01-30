@@ -38,6 +38,9 @@ sha2 = "0.10"
 tower-cookies = "0.11"
 utoipa = { version = "5.4", features = ["axum_extras", "uuid"] }
 utoipa-axum = "0.2"
+openidconnect = { workspace = true }
+url = { workspace = true }
+urlencoding = "2"
 utoipa-swagger-ui = { version = "9.0", features = ["axum"], optional = true }
 
 [dev-dependencies]

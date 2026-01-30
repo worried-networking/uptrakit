@@ -30,7 +30,7 @@
 {:else}
 	<AppShell slotSidebarLeft={showSidebar ? 'w-60 bg-surface-50-900-token border-r border-surface-300-600-token' : 'w-0'}>
 		{#snippet header()}
-			<AppBar>
+			<AppBar class="border-b border-surface-300-600-token shadow-sm py-1">
 				{#snippet lead()}
 					<a href="/" class="text-xl font-bold">Uptrakit</a>
 				{/snippet}

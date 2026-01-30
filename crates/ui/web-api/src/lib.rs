@@ -22,6 +22,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use agent_connections::AgentConnectionRegistry;
+use auth::oidc_state::{AccountLinkStore, OidcFlowStore};
 use middleware::require_https;
 use settings::Settings;
 
@@ -44,6 +45,10 @@ pub struct AppState {
     pub agent_connections: AgentConnectionRegistry,
     /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
     pub revocation_notify: Arc<tokio::sync::Notify>,
+    /// In-memory store for pending OIDC authorization flows.
+    pub oidc_flow_store: OidcFlowStore,
+    /// In-memory store for pending OIDC account links.
+    pub account_link_store: AccountLinkStore,
 }
 
 /// OpenAPI documentation
@@ -52,22 +57,39 @@ pub struct AppState {
     tags(
         (name = "Authentication", description = "User authentication endpoints"),
         (name = "Settings", description = "Application settings management"),
-        (name = "Agents", description = "Agent enrollment and management")
+        (name = "Agents", description = "Agent enrollment and management"),
+        (name = "OIDC Providers", description = "OIDC provider configuration")
     ),
     paths(
         routes::auth::register,
         routes::auth::login,
         routes::auth::logout,
         routes::auth::me,
+        routes::oidc_auth::auth_methods,
+        routes::oidc_auth::oidc_authorize,
+        routes::oidc_auth::oidc_callback,
+        routes::oidc_auth::oidc_link,
+        routes::oidc_providers::create_provider,
+        routes::oidc_providers::list_providers,
+        routes::oidc_providers::get_provider,
+        routes::oidc_providers::update_provider,
+        routes::oidc_providers::delete_provider,
+        routes::oidc_providers::activate_provider,
+        routes::oidc_providers::deactivate_provider,
         routes::settings::get_registration_settings,
         routes::settings::update_registration_settings,
+        routes::settings_auth::get_authentication_settings,
+        routes::settings_auth::update_authentication_settings,
         routes::agents::list_agents,
         routes::agents::approve_agent,
         routes::agents::reject_agent,
         routes::agents::deactivate_agent,
         routes::agents::create_enrollment_token,
         routes::agents::revoke_enrollment_token,
-        routes::agents::merge_agent
+        routes::agents::merge_agent,
+        routes::agents::enrollment_token_status,
+        routes::settings_agent_certs::get_agent_certificate_settings,
+        routes::settings_agent_certs::update_agent_certificate_settings
     ),
     components(
         schemas(
@@ -75,14 +97,26 @@ pub struct AppState {
             routes::auth::LoginRequest,
             routes::auth::AuthResponse,
             routes::auth::UserResponse,
+            routes::oidc_auth::AuthMethodsResponse,
+            routes::oidc_auth::OidcProviderInfo,
+            routes::oidc_auth::OidcAuthorizeResponse,
+            routes::oidc_auth::OidcLinkRequest,
+            routes::oidc_providers::CreateOidcProviderRequest,
+            routes::oidc_providers::UpdateOidcProviderRequest,
+            routes::oidc_providers::OidcProviderResponse,
             routes::settings::RegistrationSettingsResponse,
             routes::settings::UpdateRegistrationSettingsRequest,
+            routes::settings_auth::AuthenticationSettingsResponse,
+            routes::settings_auth::UpdateAuthenticationSettingsRequest,
             auth::registration::RegistrationMode,
             routes::agents::AgentStatus,
             routes::agents::AgentResponse,
             routes::agents::EnrollmentTokenResponse,
             routes::agents::MessageResponse,
-            routes::agents::MergeAgentRequest
+            routes::agents::MergeAgentRequest,
+            routes::agents::EnrollmentTokenStatusResponse,
+            routes::settings_agent_certs::AgentCertificateSettingsResponse,
+            routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest
         )
     ),
     info(
@@ -154,7 +188,23 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings::get_registration_settings,
             routes::settings::update_registration_settings
         ))
+        .routes(routes!(
+            routes::settings_auth::get_authentication_settings,
+            routes::settings_auth::update_authentication_settings
+        ))
+        .routes(routes!(
+            routes::settings_agent_certs::get_agent_certificate_settings,
+            routes::settings_agent_certs::update_agent_certificate_settings
+        ))
+        .routes(routes!(routes::oidc_providers::create_provider))
+        .routes(routes!(routes::oidc_providers::list_providers))
+        .routes(routes!(routes::oidc_providers::get_provider))
+        .routes(routes!(routes::oidc_providers::update_provider))
+        .routes(routes!(routes::oidc_providers::delete_provider))
+        .routes(routes!(routes::oidc_providers::activate_provider))
+        .routes(routes!(routes::oidc_providers::deactivate_provider))
         .routes(routes!(routes::agents::list_agents))
+        .routes(routes!(routes::agents::enrollment_token_status))
         .routes(routes!(
             routes::agents::create_enrollment_token,
             routes::agents::revoke_enrollment_token
@@ -174,6 +224,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::auth::login))
         .routes(routes!(routes::auth::logout))
         .routes(routes!(routes::auth::me))
+        .routes(routes!(routes::oidc_auth::auth_methods))
+        .routes(routes!(routes::oidc_auth::oidc_authorize))
+        .routes(routes!(routes::oidc_auth::oidc_callback))
+        .routes(routes!(routes::oidc_auth::oidc_link))
         .merge(auth_routes)
         .split_for_parts();
 
@@ -224,7 +278,11 @@ mod tests {
 
     struct NoopCertSigner;
     impl AgentCertSigner for NoopCertSigner {
-        fn sign_agent_cert(&self, _: &uuid::Uuid, _: time::Duration) -> Result<AgentCertBundle, String> {
+        fn sign_agent_cert(
+            &self,
+            _: &uuid::Uuid,
+            _: time::Duration,
+        ) -> Result<AgentCertBundle, String> {
             unimplemented!("not used in tests")
         }
     }
@@ -254,6 +312,8 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
         })
     }
 

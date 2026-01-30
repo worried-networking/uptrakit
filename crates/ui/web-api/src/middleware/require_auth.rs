@@ -10,15 +10,16 @@ use uptrakit_shared_db::entity::prelude::*;
 use crate::AppState;
 use crate::auth::session::SessionService;
 
-/// Extension type to carry the authenticated user ID through the request
+/// Extension type to carry the authenticated user ID and auth method through the request.
 #[derive(Clone, Debug)]
 pub struct AuthenticatedUser {
     pub user_id: uuid::Uuid,
+    pub auth_method: AuthMethod,
 }
 
 /// Middleware that requires authentication via Bearer token in Authorization header.
 /// Returns 401 Unauthorized if the token is missing, invalid, or expired.
-/// If authenticated, injects the user_id into request extensions.
+/// If authenticated, injects the user_id and auth method into request extensions.
 pub async fn require_auth(
     State(state): State<Arc<AppState>>,
     mut req: Request,
@@ -34,15 +35,15 @@ pub async fn require_auth(
 
     // Verify session
     let session_service = SessionService::new(state.db.clone());
-    let user_id = match session_service.verify_session(&token).await {
-        Ok(id) => id,
+    let verified = match session_service.verify_session(&token).await {
+        Ok(v) => v,
         Err(_) => {
             return (StatusCode::UNAUTHORIZED, "Invalid or expired session\n").into_response();
         }
     };
 
     // Check if user is active
-    let user = match User::find_by_id(user_id).one(&state.db).await {
+    let user = match User::find_by_id(verified.user_id).one(&state.db).await {
         Ok(Some(user)) => user,
         _ => {
             return (StatusCode::UNAUTHORIZED, "User not found\n").into_response();
@@ -53,8 +54,11 @@ pub async fn require_auth(
         return (StatusCode::FORBIDDEN, "User is deactivated\n").into_response();
     }
 
-    // Inject user_id into request extensions
-    req.extensions_mut().insert(AuthenticatedUser { user_id });
+    // Inject user_id and auth_method into request extensions
+    req.extensions_mut().insert(AuthenticatedUser {
+        user_id: verified.user_id,
+        auth_method: verified.auth_method,
+    });
 
     next.run(req).await
 }
@@ -119,6 +123,7 @@ mod tests {
                 user_id TEXT NOT NULL,
                 token_hash TEXT UNIQUE NOT NULL,
                 auth_method TEXT NOT NULL,
+                oidc_provider_id TEXT,
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
                 last_activity_at INTEGER NOT NULL,
@@ -137,7 +142,11 @@ mod tests {
         use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
         struct NoopCertSigner;
         impl AgentCertSigner for NoopCertSigner {
-            fn sign_agent_cert(&self, _: &uuid::Uuid, _: time::Duration) -> Result<AgentCertBundle, String> {
+            fn sign_agent_cert(
+                &self,
+                _: &uuid::Uuid,
+                _: time::Duration,
+            ) -> Result<AgentCertBundle, String> {
                 unimplemented!()
             }
         }
@@ -156,6 +165,8 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
         })
     }
 
@@ -189,7 +200,7 @@ mod tests {
         // Create session
         let session_service = SessionService::new(db.clone());
         let token = session_service
-            .create_session(user_id, "password".to_string(), None, None)
+            .create_session(user_id, AuthMethod::Password, None, None)
             .await
             .unwrap();
 
@@ -288,7 +299,7 @@ mod tests {
         // Create session
         let session_service = SessionService::new(db.clone());
         let token = session_service
-            .create_session(user_id, "password".to_string(), None, None)
+            .create_session(user_id, AuthMethod::Password, None, None)
             .await
             .unwrap();
 

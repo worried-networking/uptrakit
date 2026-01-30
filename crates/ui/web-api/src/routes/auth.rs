@@ -14,7 +14,8 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{prelude::*, role, user, user_role};
+use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_shared_db::entity::{role, user, user_role};
 use utoipa::ToSchema;
 
 #[derive(Deserialize, ToSchema)]
@@ -80,6 +81,11 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,
 ) -> Response {
+    // Check if password auth is enabled
+    if !state.settings.authentication().await.password_auth_enabled {
+        return (StatusCode::FORBIDDEN, "Password authentication is disabled").into_response();
+    }
+
     // Validate password length
     if req.password.len() < 8 {
         return (
@@ -172,7 +178,7 @@ pub async fn register(
     // Create session
     let session_service = SessionService::new(state.db.clone());
     let token = match session_service
-        .create_session(user_id, "password".to_string(), None, None)
+        .create_session(user_id, AuthMethod::Password, None, None)
         .await
     {
         Ok(token) => token,
@@ -209,6 +215,11 @@ pub async fn register(
     tag = "Authentication"
 )]
 pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequest>) -> Response {
+    // Check if password auth is enabled
+    if !state.settings.authentication().await.password_auth_enabled {
+        return (StatusCode::FORBIDDEN, "Password authentication is disabled").into_response();
+    }
+
     // Find user by email
     let user = match User::find()
         .filter(user::Column::Email.eq(&req.email))
@@ -258,7 +269,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     // Create session
     let session_service = SessionService::new(state.db.clone());
     let token = match session_service
-        .create_session(user.id, "password".to_string(), None, None)
+        .create_session(user.id, AuthMethod::Password, None, None)
         .await
     {
         Ok(token) => token,
@@ -333,15 +344,15 @@ pub async fn me(State(state): State<Arc<AppState>>, req: axum::extract::Request)
 
     // Verify session
     let session_service = SessionService::new(state.db.clone());
-    let user_id = match session_service.verify_session(&token).await {
-        Ok(id) => id,
+    let verified = match session_service.verify_session(&token).await {
+        Ok(v) => v,
         Err(_) => {
             return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
         }
     };
 
     // Get user info
-    let user = match User::find_by_id(user_id).one(&state.db).await {
+    let user = match User::find_by_id(verified.user_id).one(&state.db).await {
         Ok(Some(user)) => user,
         _ => {
             return (StatusCode::UNAUTHORIZED, "User not found").into_response();
@@ -409,7 +420,7 @@ async fn assign_admin_role(
     Ok(())
 }
 
-async fn get_user_roles(
+pub async fn get_user_roles(
     db: &DatabaseConnection,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<Vec<String>> {

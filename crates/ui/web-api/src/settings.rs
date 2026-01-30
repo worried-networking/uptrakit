@@ -4,6 +4,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::auth;
+use crate::auth::authentication::AuthenticationSettings;
 use crate::auth::registration::RegistrationSettings;
 use crate::settings_store::load_setting;
 
@@ -20,6 +21,7 @@ pub struct Settings {
 
 struct Inner {
     registration: RwLock<RegistrationSettings>,
+    authentication: RwLock<AuthenticationSettings>,
     agent_cert_lifetime_days: RwLock<u16>,
     renewal_window_hours: RwLock<u16>,
 }
@@ -43,6 +45,7 @@ impl Settings {
         Self {
             inner: Arc::new(Inner {
                 registration: RwLock::new(registration),
+                authentication: RwLock::new(AuthenticationSettings::default()),
                 agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
                 renewal_window_hours: RwLock::new(renewal_window_hours),
             }),
@@ -53,6 +56,7 @@ impl Settings {
     /// if no users exist. Returns `(Settings, Option<plaintext_token>)`.
     pub async fn load(db: &DatabaseConnection) -> auth::Result<(Self, Option<String>)> {
         let (registration, token) = RegistrationSettings::initialize(db).await?;
+        let authentication = AuthenticationSettings::load(db).await?;
 
         let agent_cert_lifetime_days = match load_setting(db, SETTING_KEY_AGENT_CERT_LIFETIME).await
         {
@@ -65,10 +69,16 @@ impl Settings {
             _ => DEFAULT_RENEWAL_WINDOW_HOURS,
         };
 
-        Ok((
-            Self::with_renewal_window(registration, agent_cert_lifetime_days, renewal_window_hours),
-            token,
-        ))
+        let settings = Self {
+            inner: Arc::new(Inner {
+                registration: RwLock::new(registration),
+                authentication: RwLock::new(authentication),
+                agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
+                renewal_window_hours: RwLock::new(renewal_window_hours),
+            }),
+        };
+
+        Ok((settings, token))
     }
 
     /// Read registration settings (acquires read lock, returns clone).
@@ -79,6 +89,16 @@ impl Settings {
     /// Acquire write access to registration settings.
     pub async fn registration_write(&self) -> RwLockWriteGuard<'_, RegistrationSettings> {
         self.inner.registration.write().await
+    }
+
+    /// Read authentication settings (acquires read lock, returns clone).
+    pub async fn authentication(&self) -> AuthenticationSettings {
+        self.inner.authentication.read().await.clone()
+    }
+
+    /// Acquire write access to authentication settings.
+    pub async fn authentication_write(&self) -> RwLockWriteGuard<'_, AuthenticationSettings> {
+        self.inner.authentication.write().await
     }
 
     /// Read the agent certificate lifetime in days.

@@ -6,10 +6,11 @@ use sea_orm_migration::prelude::*;
 mod m20260129_000001_initial;
 mod m20260129_000002_create_users;
 mod m20260129_000003_create_rbac;
-mod m20260129_000004_create_sessions;
-mod m20260129_000005_create_settings;
-mod m20260129_000006_create_agents;
-mod m20260130_000001_create_agent_certificates;
+mod m20260129_000004_create_oidc;
+mod m20260129_000005_create_sessions;
+mod m20260129_000006_create_settings;
+mod m20260129_000007_create_agents;
+mod m20260129_000008_create_agent_certificates;
 
 pub struct Migrator;
 
@@ -20,10 +21,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20260129_000001_initial::Migration),
             Box::new(m20260129_000002_create_users::Migration),
             Box::new(m20260129_000003_create_rbac::Migration),
-            Box::new(m20260129_000004_create_sessions::Migration),
-            Box::new(m20260129_000005_create_settings::Migration),
-            Box::new(m20260129_000006_create_agents::Migration),
-            Box::new(m20260130_000001_create_agent_certificates::Migration),
+            Box::new(m20260129_000004_create_oidc::Migration),
+            Box::new(m20260129_000005_create_sessions::Migration),
+            Box::new(m20260129_000006_create_settings::Migration),
+            Box::new(m20260129_000007_create_agents::Migration),
+            Box::new(m20260129_000008_create_agent_certificates::Migration),
         ]
     }
 }

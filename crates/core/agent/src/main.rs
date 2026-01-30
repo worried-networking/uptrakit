@@ -116,8 +116,8 @@ async fn run(args: &Args) -> error::Result<()> {
         key_pem: cert_payload.key_pem,
     };
     cert_state.save(&data_dir)?;
-    let not_after_ms =
-        cert_payload.not_after.unix_timestamp() * 1000 + i64::from(cert_payload.not_after.millisecond());
+    let not_after_ms = cert_payload.not_after.unix_timestamp() * 1000
+        + i64::from(cert_payload.not_after.millisecond());
     state::save_cert_not_after_ts(&data_dir, not_after_ms)?;
     tracing::info!("agent certificate saved to disk");
 

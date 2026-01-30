@@ -156,6 +156,9 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         ca.key_pem.clone(),
     ));
 
+    let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new();
+    let account_link_store = uptrakit_web_api::auth::oidc_state::AccountLinkStore::new();
+
     let app_state = Arc::new(AppState {
         ca_pem: ca.cert_pem,
         trusted_proxies: args.trusted_proxies.into(),
@@ -165,6 +168,18 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         cert_signer,
         agent_connections: uptrakit_web_api::agent_connections::AgentConnectionRegistry::new(),
         revocation_notify,
+        oidc_flow_store: oidc_flow_store.clone(),
+        account_link_store: account_link_store.clone(),
+    });
+
+    // Spawn periodic cleanup for OIDC state stores (every 5 minutes)
+    let oidc_cleanup_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            oidc_flow_store.cleanup_expired();
+            account_link_store.cleanup_expired();
+        }
     });
 
     // Start MQTT if configured
@@ -211,6 +226,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     }
 
     crl_handle.abort();
+    oidc_cleanup_handle.abort();
 
     #[cfg(feature = "mqtt")]
     if let Some(handle) = mqtt_handle {

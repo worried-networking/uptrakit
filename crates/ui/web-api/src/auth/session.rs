@@ -9,6 +9,12 @@ use uptrakit_shared_db::entity::{prelude::*, session};
 const SESSION_EXPIRY_DAYS: i64 = 7;
 const SESSION_SLIDING_WINDOW_MINUTES: i64 = 30;
 
+/// Verified session data returned by `verify_session`.
+pub struct VerifiedSession {
+    pub user_id: uuid::Uuid,
+    pub auth_method: AuthMethod,
+}
+
 pub struct SessionService {
     db: DatabaseConnection,
 }
@@ -18,13 +24,13 @@ impl SessionService {
         Self { db }
     }
 
-    /// Create a new session for a user
+    /// Create a new session for a user.
     ///
-    /// Returns the plaintext session token (only time it's available)
+    /// Returns the plaintext session token (only time it's available).
     pub async fn create_session(
         &self,
         user_id: uuid::Uuid,
-        auth_method: String,
+        auth_method: AuthMethod,
         user_agent: Option<String>,
         ip_address: Option<String>,
     ) -> Result<String> {
@@ -38,7 +44,8 @@ impl SessionService {
             id: Set(generate_uuid()),
             user_id: Set(user_id),
             token_hash: Set(token_hash),
-            auth_method: Set(auth_method),
+            auth_method: Set(auth_method.kind().to_string()),
+            oidc_provider_id: Set(auth_method.oidc_provider_id()),
             created_at: Set(now),
             expires_at: Set(expires_at),
             last_activity_at: Set(now),
@@ -51,10 +58,10 @@ impl SessionService {
         Ok(token)
     }
 
-    /// Verify a session token and return the user_id if valid
+    /// Verify a session token and return the verified session info.
     ///
-    /// Also updates last_activity_at if within sliding window
-    pub async fn verify_session(&self, token: &str) -> Result<uuid::Uuid> {
+    /// Also updates last_activity_at if within sliding window.
+    pub async fn verify_session(&self, token: &str) -> Result<VerifiedSession> {
         let token_hash = hash_token(token);
         let now = OffsetDateTime::now_utc();
 
@@ -71,8 +78,9 @@ impl SessionService {
             return Err(report!(AuthError::SessionExpired));
         }
 
-        // Save user_id before potentially moving session
         let user_id = session.user_id;
+        let auth_method = AuthMethod::from_session(&session.auth_method, session.oidc_provider_id)
+            .unwrap_or(AuthMethod::Password);
 
         // Update last_activity_at if within sliding window
         let time_since_activity = now - session.last_activity_at;
@@ -82,7 +90,10 @@ impl SessionService {
             session.update(&self.db).await.context_to()?;
         }
 
-        Ok(user_id)
+        Ok(VerifiedSession {
+            user_id,
+            auth_method,
+        })
     }
 
     /// Delete a session (logout)
@@ -160,6 +171,7 @@ mod tests {
                 user_id TEXT NOT NULL,
                 token_hash TEXT UNIQUE NOT NULL,
                 auth_method TEXT NOT NULL,
+                oidc_provider_id TEXT,
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
                 last_activity_at INTEGER NOT NULL,
@@ -200,7 +212,7 @@ mod tests {
         let token = service
             .create_session(
                 user.id,
-                "password".to_string(),
+                AuthMethod::Password,
                 Some("test-agent".to_string()),
                 Some("127.0.0.1".to_string()),
             )
@@ -220,12 +232,13 @@ mod tests {
         let user_id = user.id;
 
         let token = service
-            .create_session(user_id, "password".to_string(), None, None)
+            .create_session(user_id, AuthMethod::Password, None, None)
             .await
             .unwrap();
 
-        let verified_user_id = service.verify_session(&token).await.unwrap();
-        assert_eq!(verified_user_id, user_id);
+        let verified = service.verify_session(&token).await.unwrap();
+        assert_eq!(verified.user_id, user_id);
+        assert_eq!(verified.auth_method, AuthMethod::Password);
     }
 
     #[tokio::test]
@@ -245,7 +258,7 @@ mod tests {
         let user = User::find().one(&db).await.unwrap().unwrap();
 
         let token = service
-            .create_session(user.id, "password".to_string(), None, None)
+            .create_session(user.id, AuthMethod::Password, None, None)
             .await
             .unwrap();
 
@@ -278,6 +291,7 @@ mod tests {
             user_id: Set(user.id),
             token_hash: Set(token_hash),
             auth_method: Set("password".to_string()),
+            oidc_provider_id: Set(None),
             created_at: Set(now),
             expires_at: Set(expired_at),
             last_activity_at: Set(now),

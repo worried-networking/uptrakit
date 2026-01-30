@@ -32,7 +32,9 @@ http = "1"
 time = { version = "0.3", features = ["formatting"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-sea-orm = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls", "macros", "with-time", "with-uuid"] }
+sea-orm = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls", "macros", "with-time", "with-uuid", "with-json"] }
+openidconnect = "4"
+url = "2"
 uuid = { version = "1.20", features = ["v7"] }
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.9"
