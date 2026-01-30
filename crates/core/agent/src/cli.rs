@@ -30,6 +30,11 @@ pub struct Args {
     /// Pre-shared enrollment token for auto-approval
     #[arg(long)]
     pub enrollment_token: Option<String>,
+
+    /// Force fresh enrollment, discarding any existing state.
+    /// Use when the agent's certificate has been revoked.
+    #[arg(long)]
+    pub force_enroll: bool,
 }
 
 impl Args {

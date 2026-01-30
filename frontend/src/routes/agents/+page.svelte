@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { user } from '$lib/auth';
 	import { goto } from '$app/navigation';
-	import { getAgents, approveAgent, rejectAgent, deleteAgent } from '$lib/api';
+	import { getAgents, approveAgent, rejectAgent, deleteAgent, mergeAgent } from '$lib/api';
 	import type { AgentResponse } from '$lib/types';
 
 	let agents: AgentResponse[] = $state([]);
@@ -10,6 +10,8 @@
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
 	let confirmAction: { agentId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null =
 		$state(null);
+	let mergeSource: { id: string; name: string } | null = $state(null);
+	let mergeTargetId: string | null = $state(null);
 
 	$effect(() => {
 		if (!$user) {
@@ -55,6 +57,31 @@
 		confirmAction = null;
 	}
 
+	function openMergeDialog(agent: AgentResponse) {
+		closeMenu();
+		mergeSource = { id: agent.id, name: agent.friendly_name };
+		mergeTargetId = null;
+	}
+
+	function cancelMerge() {
+		mergeSource = null;
+		mergeTargetId = null;
+	}
+
+	async function executeMerge() {
+		if (!mergeSource || !mergeTargetId) return;
+		const sourceId = mergeSource.id;
+		try {
+			error = null;
+			await mergeAgent(mergeTargetId, sourceId);
+			agents = agents.filter((a) => a.id !== sourceId);
+			mergeSource = null;
+			mergeTargetId = null;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to merge agent';
+		}
+	}
+
 	async function executeConfirmed() {
 		if (!confirmAction) return;
 		const { agentId, action } = confirmAction;
@@ -64,7 +91,7 @@
 			error = null;
 			if (action === 'approve') {
 				const updated = await approveAgent(agentId);
-				agents = agents.filter((a) => a.id !== agentId);
+				agents = agents.map((a) => (a.id === agentId ? updated : a));
 			} else if (action === 'reject') {
 				await rejectAgent(agentId);
 				agents = agents.filter((a) => a.id !== agentId);
@@ -171,6 +198,14 @@
 						{#if agent.status === 'pending'}
 							<li>
 								<button
+									class="w-full text-left"
+									onclick={() => openMergeDialog(agent)}
+								>
+									Merge Into&hellip;
+								</button>
+							</li>
+							<li>
+								<button
 									class="w-full text-left text-success-500"
 									onclick={() => requestConfirm(agent.id, 'approve', agent.friendly_name)}
 								>
@@ -218,6 +253,41 @@
 					<button class="btn variant-ghost-surface" onclick={cancelConfirm}>Cancel</button>
 					<button class="btn {labels.btnClass}" onclick={executeConfirmed}>
 						{labels.title}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	{#if mergeSource}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			onkeydown={(e) => { if (e.key === 'Escape') cancelMerge(); }}
+		>
+			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+				<h3 class="h3">Merge Agent</h3>
+				<p>
+					Merge <strong>{mergeSource.name}</strong> into an existing agent.
+					The source agent's enrollment will be transferred to the target, preserving the target's history.
+				</p>
+				<label class="label">
+					<span>Select target agent</span>
+					<select class="select" bind:value={mergeTargetId}>
+						<option value={null}>-- Select an agent --</option>
+						{#each agents.filter((a) => a.status === 'approved' && a.id !== mergeSource?.id) as target (target.id)}
+							<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
+						{/each}
+					</select>
+				</label>
+				<div class="flex justify-end gap-2">
+					<button class="btn variant-ghost-surface" onclick={cancelMerge}>Cancel</button>
+					<button
+						class="btn variant-filled-primary"
+						disabled={!mergeTargetId}
+						onclick={executeMerge}
+					>
+						Merge
 					</button>
 				</div>
 			</div>

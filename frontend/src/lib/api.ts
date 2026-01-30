@@ -63,3 +63,10 @@ export function rejectAgent(id: string): Promise<AgentResponse> {
 export function deleteAgent(id: string): Promise<MessageResponse> {
 	return request(`/agents/${id}`, { method: 'DELETE' });
 }
+
+export function mergeAgent(targetId: string, sourceId: string): Promise<AgentResponse> {
+	return request(`/agents/${targetId}/merge`, {
+		method: 'POST',
+		body: JSON.stringify({ source_id: sourceId })
+	});
+}

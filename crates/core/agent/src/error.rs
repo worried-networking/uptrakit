@@ -45,6 +45,12 @@ pub enum Error {
     EnrollmentRejected,
 }
 
+impl Error {
+    pub fn is_receive_closed(&self) -> bool {
+        matches!(self, Error::ReceiveClosed)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Report<Error>>;
 
 impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for Error

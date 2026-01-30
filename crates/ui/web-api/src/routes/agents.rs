@@ -196,7 +196,7 @@ pub(crate) async fn do_lookup_by_secret(
 /// Sign certificate for an approved agent, invalidate secret.
 pub(crate) async fn do_sign_certificate(
     cert_signer: &dyn crate::cert_signer::AgentCertSigner,
-    settings: &crate::settings::Settings,
+    _settings: &crate::settings::Settings,
     db: &sea_orm::DatabaseConnection,
     agent: agent::Model,
 ) -> Result<AgentCertBundle, (StatusCode, &'static str)> {
@@ -204,7 +204,7 @@ pub(crate) async fn do_sign_certificate(
         return Err((StatusCode::FORBIDDEN, "Agent is not approved"));
     }
 
-    let lifetime_days = settings.agent_cert_lifetime_days().await;
+    let lifetime_days = 1; //settings.agent_cert_lifetime_days().await;
 
     let bundle = cert_signer
         .sign_agent_cert(&agent.id, lifetime_days)
@@ -680,6 +680,28 @@ async fn record_certificate(
     Ok(())
 }
 
+/// Revoke a certificate by serial number.
+pub(crate) async fn revoke_certificate(
+    db: &sea_orm::DatabaseConnection,
+    serial_number: &str,
+    reason: &str,
+) -> Result<(), sea_orm::DbErr> {
+    AgentCertificate::update_many()
+        .col_expr(
+            agent_certificate::Column::RevokedAt,
+            Expr::value(Some(OffsetDateTime::now_utc())),
+        )
+        .col_expr(
+            agent_certificate::Column::RevocationReason,
+            Expr::value(Some(reason.to_string())),
+        )
+        .filter(agent_certificate::Column::SerialNumber.eq(serial_number))
+        .filter(agent_certificate::Column::RevokedAt.is_null())
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
 fn parse_cert_metadata(
     pem: &str,
 ) -> Result<(String, OffsetDateTime, OffsetDateTime), Report<CertRecordError>> {
@@ -697,6 +719,167 @@ fn parse_cert_metadata(
         .context_to::<CertRecordError>()?;
 
     Ok((serial, not_before, not_after))
+}
+
+// --- Merge endpoint ---
+
+#[derive(Deserialize, ToSchema)]
+pub struct MergeAgentRequest {
+    pub source_id: String,
+}
+
+/// Merge a pending (source) agent into an existing approved (target) agent.
+#[utoipa::path(
+    post,
+    path = "/api/v1/agents/{target_id}/merge",
+    params(
+        ("target_id" = String, Path, description = "Target agent UUID (approved)")
+    ),
+    request_body = MergeAgentRequest,
+    responses(
+        (status = 200, description = "Agents merged", body = AgentResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Agent not found")
+    ),
+    tag = "Agents",
+    security(("bearer_token" = []))
+)]
+pub async fn merge_agent(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(target_id): Path<String>,
+    Json(body): Json<MergeAgentRequest>,
+) -> Response {
+    if !check_admin_role(&state.db, user.user_id).await {
+        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    }
+
+    let target_uuid = match uuid::Uuid::parse_str(&target_id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid target agent ID").into_response(),
+    };
+
+    let source_uuid = match uuid::Uuid::parse_str(&body.source_id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid source agent ID").into_response(),
+    };
+
+    if target_uuid == source_uuid {
+        return (StatusCode::BAD_REQUEST, "Cannot merge agent into itself").into_response();
+    }
+
+    // Find target agent (must be approved, not deactivated)
+    let target = match Agent::find_by_id(target_uuid)
+        .filter(agent::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Target agent not found").into_response(),
+        Err(e) => {
+            tracing::error!("DB error: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    if target.status != AgentStatus::Approved.as_str() {
+        return (StatusCode::BAD_REQUEST, "Target agent must be approved").into_response();
+    }
+
+    if state.agent_connections.is_connected(&target_uuid).await {
+        return (StatusCode::CONFLICT, "Target agent is currently connected").into_response();
+    }
+
+    // Find source agent (must be pending, not deactivated)
+    let source = match Agent::find_by_id(source_uuid)
+        .filter(agent::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Source agent not found").into_response(),
+        Err(e) => {
+            tracing::error!("DB error: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    if source.status != AgentStatus::Pending.as_str() {
+        return (StatusCode::BAD_REQUEST, "Source agent must be pending").into_response();
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    // Save the hash before deactivating the source
+    let source_secret_hash = source.enrollment_secret_hash.clone();
+    let source_hostname = source.hostname.clone();
+    let source_friendly_name = source.friendly_name.clone();
+    let source_ip_address = source.ip_address.clone();
+
+    // Deactivate source first — invalidate its hash to free the unique constraint
+    let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
+    let mut source_active: agent::ActiveModel = source.into();
+    source_active.enrollment_secret_hash = Set(invalidated_hash);
+    source_active.deactivated_at = Set(Some(now));
+    source_active.updated_at = Set(now);
+
+    if let Err(e) = source_active.update(&state.db).await {
+        tracing::error!("Failed to deactivate source agent: {}", e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // Revoke all non-revoked certificates for both agents.
+    // Source is being absorbed; target will get a fresh certificate via enrollment.
+    for (agent_uuid, label) in [
+        (source_uuid, "source"),
+        (target_uuid, "target"),
+    ] {
+        if let Err(e) = AgentCertificate::update_many()
+            .col_expr(
+                agent_certificate::Column::RevokedAt,
+                Expr::value(Some(now)),
+            )
+            .col_expr(
+                agent_certificate::Column::RevocationReason,
+                Expr::value(Some("agent_merged".to_string())),
+            )
+            .filter(agent_certificate::Column::AgentId.eq(agent_uuid))
+            .filter(agent_certificate::Column::RevokedAt.is_null())
+            .exec(&state.db)
+            .await
+        {
+            tracing::error!("Failed to revoke {label} agent certificates: {}", e);
+        }
+    }
+
+    // Now copy source's enrollment_secret_hash to target
+    let mut target_active: agent::ActiveModel = target.into();
+    target_active.enrollment_secret_hash = Set(source_secret_hash);
+    target_active.hostname = Set(source_hostname);
+    target_active.friendly_name = Set(source_friendly_name);
+    target_active.ip_address = Set(source_ip_address);
+    target_active.updated_at = Set(now);
+
+    let updated_target = match target_active.update(&state.db).await {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("Failed to update target agent: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Terminate source's WebSocket connection
+    state.agent_connections.unregister(&source_uuid).await;
+
+    tracing::info!(
+        target_id = %target_uuid,
+        source_id = %source_uuid,
+        "agents merged: source deactivated, target updated"
+    );
+
+    (StatusCode::OK, Json(agent_to_response(updated_target))).into_response()
 }
 
 async fn check_admin_role(db: &sea_orm::DatabaseConnection, user_id: uuid::Uuid) -> bool {

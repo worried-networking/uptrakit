@@ -64,7 +64,8 @@ pub struct AppState {
         routes::agents::reject_agent,
         routes::agents::deactivate_agent,
         routes::agents::create_enrollment_token,
-        routes::agents::revoke_enrollment_token
+        routes::agents::revoke_enrollment_token,
+        routes::agents::merge_agent
     ),
     components(
         schemas(
@@ -78,7 +79,8 @@ pub struct AppState {
             routes::agents::AgentStatus,
             routes::agents::AgentResponse,
             routes::agents::EnrollmentTokenResponse,
-            routes::agents::MessageResponse
+            routes::agents::MessageResponse,
+            routes::agents::MergeAgentRequest
         )
     ),
     info(
@@ -158,6 +160,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::agents::approve_agent))
         .routes(routes!(routes::agents::reject_agent))
         .routes(routes!(routes::agents::deactivate_agent))
+        .routes(routes!(routes::agents::merge_agent))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,

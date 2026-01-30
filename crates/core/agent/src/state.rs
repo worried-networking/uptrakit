@@ -9,6 +9,7 @@ const AGENT_STATE_FILE: &str = "agent.json";
 const CA_CERT_FILE: &str = "ca.pem";
 const AGENT_CERT_FILE: &str = "agent.crt";
 const AGENT_KEY_FILE: &str = "agent.key";
+const CERT_NOT_AFTER_FILE: &str = "cert_not_after_ts";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentState {
@@ -32,6 +33,14 @@ impl AgentState {
         let contents = serde_json::to_string_pretty(self).context_to::<Error>()?;
         std::fs::write(&path, contents).context_to::<Error>()?;
         set_secure_permissions(&path)?;
+        Ok(())
+    }
+
+    pub fn delete(data_dir: &Path) -> Result<()> {
+        let path = data_dir.join(AGENT_STATE_FILE);
+        if path.exists() {
+            std::fs::remove_file(path).context_to::<Error>()?;
+        }
         Ok(())
     }
 }
@@ -62,6 +71,18 @@ impl AgentCertState {
         set_secure_permissions(&key_path)?;
         Ok(())
     }
+
+    pub fn delete(data_dir: &Path) -> Result<()> {
+        let cert_path = data_dir.join(AGENT_CERT_FILE);
+        let key_path = data_dir.join(AGENT_KEY_FILE);
+        if cert_path.exists() {
+            std::fs::remove_file(cert_path).context_to::<Error>()?;
+        }
+        if key_path.exists() {
+            std::fs::remove_file(key_path).context_to::<Error>()?;
+        }
+        Ok(())
+    }
 }
 
 pub fn ca_cert_path(data_dir: &Path) -> PathBuf {
@@ -82,6 +103,33 @@ pub fn load_ca_cert(data_dir: &Path) -> Result<Option<Vec<u8>>> {
     }
     let contents = std::fs::read(&path).context_to::<Error>()?;
     Ok(Some(contents))
+}
+
+pub fn save_cert_not_after_ts(data_dir: &Path, ts: i64) -> Result<()> {
+    let path = data_dir.join(CERT_NOT_AFTER_FILE);
+    std::fs::write(&path, ts.to_string()).context_to::<Error>()?;
+    set_secure_permissions(&path)?;
+    Ok(())
+}
+
+pub fn load_cert_not_after_ts(data_dir: &Path) -> Result<Option<i64>> {
+    let path = data_dir.join(CERT_NOT_AFTER_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(&path).context_to::<Error>()?;
+    match contents.trim().parse::<i64>() {
+        Ok(ts) => Ok(Some(ts)),
+        Err(_) => Ok(None),
+    }
+}
+
+pub fn delete_cert_not_after_ts(data_dir: &Path) -> Result<()> {
+    let path = data_dir.join(CERT_NOT_AFTER_FILE);
+    if path.exists() {
+        std::fs::remove_file(path).context_to::<Error>()?;
+    }
+    Ok(())
 }
 
 fn set_secure_permissions(path: &Path) -> Result<()> {

@@ -17,6 +17,7 @@ pub enum AgentMessage {
     Ping(PingPayload),
     Enroll(EnrollPayload),
     RequestCertificate(RequestCertificatePayload),
+    RenewCertificate(RenewCertificatePayload),
 }
 
 /// Messages sent from the controller to the agent.
@@ -29,6 +30,7 @@ pub enum ControllerMessage {
     Rejected(RejectedPayload),
     Certificate(CertificatePayload),
     Error(ErrorPayload),
+    AgentSettings(AgentSettingsPayload),
 }
 
 /// Payload for ping messages.
@@ -59,6 +61,10 @@ pub struct EnrollPayload {
 /// Payload for requesting a client certificate after approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestCertificatePayload {}
+
+/// Payload for requesting certificate renewal (mTLS-authenticated agents).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewCertificatePayload {}
 
 /// Payload for enrollment confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +99,12 @@ pub struct CertificatePayload {
 pub struct ErrorPayload {
     pub code: String,
     pub message: String,
+}
+
+/// Payload for agent runtime settings pushed by the controller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSettingsPayload {
+    pub renewal_window_hours: u16,
 }
 
 #[cfg(test)]
@@ -231,6 +243,43 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn renew_certificate_serialization_roundtrip() {
+        let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {});
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"renew_certificate"}"#);
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn agent_settings_serialization_roundtrip() {
+        let msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
+            renewal_window_hours: 6,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"agent_settings","renewal_window_hours":6}"#
+        );
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn agent_settings_backward_compat_extra_fields() {
+        // Future-proof: extra fields in JSON should be ignored
+        let json =
+            r#"{"type":"agent_settings","renewal_window_hours":12,"some_future_field":"value"}"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg,
+            ControllerMessage::AgentSettings(AgentSettingsPayload {
+                renewal_window_hours: 12,
+            })
+        );
     }
 
     #[test]

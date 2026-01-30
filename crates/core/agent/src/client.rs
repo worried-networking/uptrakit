@@ -10,10 +10,20 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
     AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload,
-    PingPayload, RequestCertificatePayload, now_millis,
+    PingPayload, RenewCertificatePayload, RequestCertificatePayload, now_millis,
 };
 
 use crate::error::{Error, Result};
+
+/// Outcome of the authenticated event loop.
+pub enum LoopOutcome {
+    /// SIGINT/SIGTERM received — shut down cleanly.
+    Shutdown,
+    /// Certificate rotated — reload from disk and reconnect.
+    Reconnect,
+    /// Connection closed by controller — no special action.
+    Disconnected,
+}
 
 pub async fn fetch_ca_certificate(host: &str, http_port: u16) -> Result<Vec<u8>> {
     let url = format!("http://{host}:{http_port}/api/v1/ca.crt");
@@ -219,11 +229,15 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
     tracing::info!("waiting for approval...");
 
     loop {
-        let msg = ws
-            .next()
-            .await
-            .ok_or_else(|| report!(Error::ReceiveClosed))?
-            .context_to::<Error>()?;
+        let msg = match ws.next().await {
+            Some(Ok(m)) => m,
+            Some(Err(e)) if is_peer_closed(&e) => {
+                tracing::info!("connection closed by controller while waiting for approval");
+                return Err(report!(Error::ReceiveClosed));
+            }
+            Some(Err(e)) => return Err(e).context_to::<Error>()?,
+            None => return Err(report!(Error::ReceiveClosed)),
+        };
 
         match msg {
             Message::Text(text) => {
@@ -305,12 +319,30 @@ pub async fn request_certificate_ws(ws: &mut WsStream) -> Result<CertificatePayl
     }
 }
 
-/// Authenticated Ping/Pong event loop (mTLS connection).
+/// Far-future delay used when no renewal is scheduled (30 days).
+const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+/// Compute how long until the renewal window opens.
+fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> std::time::Duration {
+    match cert_not_after_ts {
+        Some(not_after) => {
+            let renew_at = not_after - i64::from(window_hours) * 3600 * 1000;
+            let delay_ms = (renew_at - now_millis()).max(0) as u64;
+            std::time::Duration::from_millis(delay_ms)
+        }
+        None => FAR_FUTURE,
+    }
+}
+
+/// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
 pub async fn run_authenticated_loop(
     host: &str,
     port: u16,
     tls_connector: TlsConnector,
-) -> Result<()> {
+    cert_not_after_ts: Option<i64>,
+    data_dir: &std::path::Path,
+) -> Result<LoopOutcome> {
+    use std::pin::Pin;
     use std::time::Duration;
 
     const PING_INTERVAL: Duration = Duration::from_secs(300);
@@ -323,6 +355,15 @@ pub async fn run_authenticated_loop(
     // First tick completes immediately, sending an initial ping on connect
     let mut ping_interval = tokio::time::interval(PING_INTERVAL);
     ping_interval.tick().await;
+
+    // Renewal timer — initially far-future, reset when AgentSettings arrives
+    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> =
+        Box::pin(tokio::time::sleep(FAR_FUTURE));
+
+    // Every `break` arm below assigns `outcome` before exiting; the
+    // initial value is a safety fallback only.
+    #[allow(unused_assignments)]
+    let mut outcome = LoopOutcome::Shutdown;
 
     loop {
         tokio::select! {
@@ -337,16 +378,28 @@ pub async fn run_authenticated_loop(
                     .await
                     .context_to::<Error>()?;
             }
+            _ = &mut renewal_sleep => {
+                tracing::info!("renewal window reached, requesting certificate renewal");
+                let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {});
+                let json = serde_json::to_string(&msg).context_to::<Error>()?;
+                ws_stream.send(Message::Text(json.into())).await.context_to::<Error>()?;
+                // Reset to far-future so it doesn't fire again
+                renewal_sleep.as_mut().reset(
+                    tokio::time::Instant::now() + FAR_FUTURE
+                );
+            }
             msg = ws_stream.next() => {
                 let msg = match msg {
                     Some(Ok(m)) => m,
                     Some(Err(e)) if is_peer_closed(&e) => {
                         tracing::info!("connection closed by controller");
+                        outcome = LoopOutcome::Disconnected;
                         break;
                     }
                     Some(Err(e)) => return Err(e).context_to::<Error>()?,
                     None => {
                         tracing::info!("connection closed by controller");
+                        outcome = LoopOutcome::Disconnected;
                         break;
                     }
                 };
@@ -367,26 +420,63 @@ pub async fn run_authenticated_loop(
                                     "received pong"
                                 );
                             }
+                            ControllerMessage::Certificate(payload) => {
+                                // Save new cert to disk
+                                let cert_state = crate::state::AgentCertState {
+                                    cert_pem: payload.cert_pem,
+                                    key_pem: payload.key_pem,
+                                };
+                                cert_state.save(data_dir)?;
+                                let not_after_ts = now_millis()
+                                    + i64::from(payload.lifetime_days) * 24 * 3600 * 1000;
+                                crate::state::save_cert_not_after_ts(data_dir, not_after_ts)?;
+                                tracing::info!("renewed certificate saved, reconnecting");
+                                outcome = LoopOutcome::Reconnect;
+                                break;
+                            }
+                            ControllerMessage::AgentSettings(settings) => {
+                                tracing::info!(
+                                    renewal_window_hours = settings.renewal_window_hours,
+                                    "received agent settings"
+                                );
+                                renewal_sleep.as_mut().reset(
+                                    tokio::time::Instant::now()
+                                        + compute_renewal_delay(
+                                            cert_not_after_ts,
+                                            settings.renewal_window_hours,
+                                        ),
+                                );
+                            }
                             _ => {
-                                tracing::debug!("ignoring non-pong message in authenticated loop");
+                                tracing::debug!("ignoring unexpected message in authenticated loop");
                             }
                         }
                     }
                     Message::Close(frame) => {
-                        log_close_frame(frame);
+                        let reason = frame.as_ref().map(|f| f.reason.as_ref()).unwrap_or("");
+                        if reason == "certificate rotated" {
+                            tracing::info!("connection closed: certificate rotated");
+                            outcome = LoopOutcome::Reconnect;
+                        } else if reason == "certificate revoked" {
+                            tracing::warn!("connection closed: certificate revoked");
+                            outcome = LoopOutcome::Disconnected;
+                        } else {
+                            log_close_frame(frame);
+                            outcome = LoopOutcome::Disconnected;
+                        }
                         break;
                     }
-                    _ => {
-                        return Err(report!(Error::UnexpectedMessage));
-                    }
+                    _ => {}
                 }
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received SIGINT, shutting down");
+                outcome = LoopOutcome::Shutdown;
                 break;
             }
             _ = shutdown.recv() => {
                 tracing::info!("received SIGTERM, shutting down");
+                outcome = LoopOutcome::Shutdown;
                 break;
             }
         }
@@ -399,7 +489,7 @@ pub async fn run_authenticated_loop(
         Err(e) => return Err(e).context_to::<Error>()?,
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
 fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {

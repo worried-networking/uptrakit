@@ -49,4 +49,17 @@ impl AgentConnectionRegistry {
             false
         }
     }
+
+    /// Check whether an agent is currently connected.
+    pub async fn is_connected(&self, agent_id: &Uuid) -> bool {
+        self.inner.read().await.contains_key(agent_id)
+    }
+
+    /// Broadcast a message to all connected agents.
+    pub async fn broadcast(&self, msg: ControllerMessage) {
+        let guard = self.inner.read().await;
+        for tx in guard.values() {
+            let _ = tx.send(msg.clone()).await;
+        }
+    }
 }

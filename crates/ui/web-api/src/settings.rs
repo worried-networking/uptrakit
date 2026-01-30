@@ -10,6 +10,9 @@ use crate::settings_store::load_setting;
 const SETTING_KEY_AGENT_CERT_LIFETIME: &str = "agent_certificate.lifetime_days";
 const DEFAULT_AGENT_CERT_LIFETIME_DAYS: u16 = 7;
 
+const SETTING_KEY_RENEWAL_WINDOW_HOURS: &str = "agent_certificate.renewal_window_hours";
+const DEFAULT_RENEWAL_WINDOW_HOURS: u16 = 6;
+
 #[derive(Clone)]
 pub struct Settings {
     inner: Arc<Inner>,
@@ -18,15 +21,30 @@ pub struct Settings {
 struct Inner {
     registration: RwLock<RegistrationSettings>,
     agent_cert_lifetime_days: RwLock<u16>,
+    renewal_window_hours: RwLock<u16>,
 }
 
 impl Settings {
     /// Construct from pre-loaded values (for tests).
     pub fn new(registration: RegistrationSettings, agent_cert_lifetime_days: u16) -> Self {
+        Self::with_renewal_window(
+            registration,
+            agent_cert_lifetime_days,
+            DEFAULT_RENEWAL_WINDOW_HOURS,
+        )
+    }
+
+    /// Construct with all values (for tests or when loading from DB).
+    pub fn with_renewal_window(
+        registration: RegistrationSettings,
+        agent_cert_lifetime_days: u16,
+        renewal_window_hours: u16,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 registration: RwLock::new(registration),
                 agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
+                renewal_window_hours: RwLock::new(renewal_window_hours),
             }),
         }
     }
@@ -42,7 +60,15 @@ impl Settings {
             _ => DEFAULT_AGENT_CERT_LIFETIME_DAYS,
         };
 
-        Ok((Self::new(registration, agent_cert_lifetime_days), token))
+        let renewal_window_hours = match load_setting(db, SETTING_KEY_RENEWAL_WINDOW_HOURS).await {
+            Ok(Some(v)) => v.parse::<u16>().unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS),
+            _ => DEFAULT_RENEWAL_WINDOW_HOURS,
+        };
+
+        Ok((
+            Self::with_renewal_window(registration, agent_cert_lifetime_days, renewal_window_hours),
+            token,
+        ))
     }
 
     /// Read registration settings (acquires read lock, returns clone).
@@ -63,5 +89,15 @@ impl Settings {
     /// Update the agent certificate lifetime in days.
     pub async fn set_agent_cert_lifetime_days(&self, days: u16) {
         *self.inner.agent_cert_lifetime_days.write().await = days;
+    }
+
+    /// Read the certificate renewal window in hours.
+    pub async fn renewal_window_hours(&self) -> u16 {
+        *self.inner.renewal_window_hours.read().await
+    }
+
+    /// Update the certificate renewal window in hours.
+    pub async fn set_renewal_window_hours(&self, hours: u16) {
+        *self.inner.renewal_window_hours.write().await = hours;
     }
 }

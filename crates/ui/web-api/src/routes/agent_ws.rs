@@ -10,13 +10,15 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    AgentMessage, ApprovedPayload, CertificatePayload, ControllerMessage, EnrolledPayload,
-    ErrorPayload, PingPayload, PongPayload, RejectedPayload, now_millis,
+    AgentMessage, AgentSettingsPayload, ApprovedPayload, CertificatePayload, ControllerMessage,
+    EnrolledPayload, ErrorPayload, PingPayload, PongPayload, RejectedPayload, now_millis,
 };
 
 use crate::AppState;
 use crate::extract::{AgentIdentity, ClientIp};
-use crate::routes::agents::{AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate};
+use crate::routes::agents::{
+    AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate, revoke_certificate,
+};
 
 /// Connection type determined at WebSocket upgrade time.
 enum ConnectionType {
@@ -174,11 +176,20 @@ async fn handle_authenticated(
     }
 
     // Record certificate usage
-    let mut active: uptrakit_shared_db::entity::agent_certificate::ActiveModel =
-        cert_record.into();
+    let mut active: uptrakit_shared_db::entity::agent_certificate::ActiveModel = cert_record.into();
     active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
     if let Err(e) = active.update(&state.db).await {
         tracing::error!(error = %e, "failed to update certificate last_seen_at");
+    }
+
+    // Send AgentSettings on connect
+    let renewal_window_hours = state.settings.renewal_window_hours().await;
+    let settings_msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
+        renewal_window_hours,
+    });
+    let json = serde_json::to_string(&settings_msg).unwrap();
+    if sink.send(Message::Text(json.into())).await.is_err() {
+        return;
     }
 
     let mut push_rx = state.agent_connections.register(agent_id).await;
@@ -196,21 +207,88 @@ async fn handle_authenticated(
                 };
                 match msg {
                     Message::Text(text) => {
-                        match handle_authenticated_message(&text) {
-                            Ok(response) => {
-                                let json = match serde_json::to_string(&response) {
-                                    Ok(j) => j,
-                                    Err(e) => {
-                                        tracing::debug!(error = %e, "serialize error");
-                                        break;
-                                    }
-                                };
+                        let agent_msg: AgentMessage = match serde_json::from_str(&text) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                tracing::debug!(error = %e, "deserialize error");
+                                break;
+                            }
+                        };
+
+                        match agent_msg {
+                            AgentMessage::Ping(PingPayload { agent_ts }) => {
+                                let controller_ts = now_millis();
+                                tracing::trace!(agent_ts, controller_ts, "ping/pong");
+                                let response = ControllerMessage::Pong(PongPayload {
+                                    agent_ts,
+                                    controller_ts,
+                                });
+                                let json = serde_json::to_string(&response).unwrap();
                                 if sink.send(Message::Text(json.into())).await.is_err() {
                                     break;
                                 }
                             }
-                            Err(e) => {
-                                tracing::debug!(error = %e, "error handling message");
+                            AgentMessage::RenewCertificate(_) => {
+                                // Re-fetch agent from DB, verify still approved
+                                let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+                                    .one(&state.db)
+                                    .await
+                                {
+                                    Ok(Some(a)) if a.status == AgentStatus::Approved.as_str() && a.deactivated_at.is_none() => a,
+                                    _ => {
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: "forbidden".to_string(),
+                                            message: "agent is not approved".to_string(),
+                                        });
+                                        let json = serde_json::to_string(&err).unwrap();
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        break;
+                                    }
+                                };
+
+                                // Sign new certificate
+                                match do_sign_certificate(
+                                    state.cert_signer.as_ref(),
+                                    &state.settings,
+                                    &state.db,
+                                    agent,
+                                ).await {
+                                    Ok(bundle) => {
+                                        let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                                            cert_pem: bundle.cert_pem,
+                                            key_pem: bundle.key_pem,
+                                            lifetime_days: bundle.lifetime_days,
+                                        });
+                                        let json = serde_json::to_string(&cert_msg).unwrap();
+                                        let _ = sink.send(Message::Text(json.into())).await;
+
+                                        // Revoke old cert
+                                        if let Err(e) = revoke_certificate(&state.db, &cert_serial, "certificate_renewed").await {
+                                            tracing::error!(error = %e, "failed to revoke old certificate");
+                                        }
+
+                                        tracing::info!(%agent_id, old_serial = %cert_serial, "certificate renewed, old cert revoked");
+                                        let _ = close_with_reason(&mut sink, "certificate rotated").await;
+                                        break;
+                                    }
+                                    Err((_status, msg)) => {
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: "certificate_error".to_string(),
+                                            message: msg.to_string(),
+                                        });
+                                        let json = serde_json::to_string(&err).unwrap();
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "bad_request".to_string(),
+                                    message: "unexpected message for authenticated connection".to_string(),
+                                });
+                                let json = serde_json::to_string(&err).unwrap();
+                                let _ = sink.send(Message::Text(json.into())).await;
                                 break;
                             }
                         }
@@ -234,23 +312,6 @@ async fn handle_authenticated(
 
     state.agent_connections.unregister(&agent_id).await;
     tracing::debug!(%agent_id, "authenticated agent disconnected");
-}
-
-fn handle_authenticated_message(
-    text: &str,
-) -> Result<ControllerMessage, Box<dyn std::error::Error + Send + Sync>> {
-    let agent_msg: AgentMessage = serde_json::from_str(text)?;
-    match agent_msg {
-        AgentMessage::Ping(PingPayload { agent_ts }) => {
-            let controller_ts = now_millis();
-            tracing::trace!(agent_ts, controller_ts, "ping/pong");
-            Ok(ControllerMessage::Pong(PongPayload {
-                agent_ts,
-                controller_ts,
-            }))
-        }
-        _ => Err("unexpected message for authenticated connection".into()),
-    }
 }
 
 /// Enrolled path: agent reconnecting with Bearer secret, waiting for approval.
@@ -548,6 +609,14 @@ async fn run_enrolled_loop(
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),
                                     message: "already enrolled".to_string(),
+                                });
+                                let json = serde_json::to_string(&err).unwrap();
+                                let _ = sink.send(Message::Text(json.into())).await;
+                            }
+                            AgentMessage::RenewCertificate(_) => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "bad_request".to_string(),
+                                    message: "not available during enrollment".to_string(),
                                 });
                                 let json = serde_json::to_string(&err).unwrap();
                                 let _ = sink.send(Message::Text(json.into())).await;
