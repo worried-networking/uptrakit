@@ -56,14 +56,12 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let data_dir = args
         .resolve_data_dir()
         .map_err(|s| report!(AppError::Config(s)))?;
-    std::fs::create_dir_all(&data_dir).context_transform(|e| {
-        AppError::Config(format!("failed to create data directory: {e}"))
-    })?;
+    std::fs::create_dir_all(&data_dir)
+        .context_transform(|e| AppError::Config(format!("failed to create data directory: {e}")))?;
     tracing::info!("data directory: {}", data_dir.display());
 
     // Initialize database
-    let db_config =
-        db::DbConfig::from_args(args.db_url, &data_dir).context(AppError::Database)?;
+    let db_config = db::DbConfig::from_args(args.db_url, &data_dir).context(AppError::Database)?;
     tracing::info!(
         "connecting to database: {}",
         db::sanitize_url(&db_config.url)
@@ -80,9 +78,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     tracing::info!("database initialized successfully");
 
     // Initialize settings
-    let (settings, reg_token) = Settings::load(&db_conn)
-        .await
-        .context(AppError::Settings)?;
+    let (settings, reg_token) = Settings::load(&db_conn).await.context(AppError::Settings)?;
     if let Some(token) = reg_token {
         tracing::info!("==========================================================");
         tracing::info!("  No users found. Use this one-time registration token:");
@@ -182,9 +178,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 /// If `--static-dir` is given, validates that it contains `index.html`.
 /// Otherwise, auto-detects by probing `frontend/build` and `frontend`
 /// relative to the current working directory.
-fn resolve_static_dir(
-    explicit: Option<PathBuf>,
-) -> Result<Option<PathBuf>, Report<AppError>> {
+fn resolve_static_dir(explicit: Option<PathBuf>) -> Result<Option<PathBuf>, Report<AppError>> {
     if let Some(dir) = explicit {
         let index = dir.join("index.html");
         if !index.is_file() {

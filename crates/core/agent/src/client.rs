@@ -77,7 +77,13 @@ pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
     Ok(TlsConnector::from(Arc::new(config)))
 }
 
-pub async fn connect_and_ping(host: &str, port: u16, tls_connector: TlsConnector) -> Result<()> {
+pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) -> Result<()> {
+    use std::time::Duration;
+
+    use futures_util::{SinkExt, StreamExt};
+
+    const PING_INTERVAL: Duration = Duration::from_secs(300);
+
     let ws_url = format!("wss://{host}:{port}/api/v1/ws/agent");
     tracing::info!(url = %ws_url, "connecting to controller");
 
@@ -103,54 +109,71 @@ pub async fn connect_and_ping(host: &str, port: u16, tls_connector: TlsConnector
 
     tracing::info!("connected to controller");
 
-    // Send ping
-    let agent_ts = now_millis();
-    let ping = AgentMessage::Ping(PingPayload { agent_ts });
-    let ping_json = serde_json::to_string(&ping).context_to::<Error>()?;
-
-    tracing::info!(agent_ts, "sending ping");
-
-    use futures_util::{SinkExt, StreamExt};
-    ws_stream
-        .send(Message::Text(ping_json.into()))
-        .await
+    let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
 
-    // Receive pong
-    let msg = ws_stream
-        .next()
-        .await
-        .ok_or_else(|| report!(Error::ReceiveClosed))?
-        .context_to::<Error>()?;
+    // First tick completes immediately, sending an initial ping on connect
+    let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+    ping_interval.tick().await;
 
-    match msg {
-        Message::Text(text) => {
-            let controller_msg: ControllerMessage =
-                serde_json::from_str(&text).context_to::<Error>()?;
+    loop {
+        tokio::select! {
+            _ = ping_interval.tick() => {
+                let agent_ts = now_millis();
+                let ping = AgentMessage::Ping(PingPayload { agent_ts });
+                let ping_json = serde_json::to_string(&ping).context_to::<Error>()?;
 
-            match controller_msg {
-                ControllerMessage::Pong(pong) => {
-                    let now = now_millis();
-                    let rtt = now - pong.agent_ts;
-                    tracing::info!(
-                        agent_ts = pong.agent_ts,
-                        controller_ts = pong.controller_ts,
-                        rtt_ms = rtt,
-                        "received pong"
-                    );
+                tracing::info!(agent_ts, "sending ping");
+                ws_stream
+                    .send(Message::Text(ping_json.into()))
+                    .await
+                    .context_to::<Error>()?;
+            }
+            msg = ws_stream.next() => {
+                let msg = msg
+                    .ok_or_else(|| report!(Error::ReceiveClosed))?
+                    .context_to::<Error>()?;
+
+                match msg {
+                    Message::Text(text) => {
+                        let controller_msg: ControllerMessage =
+                            serde_json::from_str(&text).context_to::<Error>()?;
+
+                        match controller_msg {
+                            ControllerMessage::Pong(pong) => {
+                                let now = now_millis();
+                                let rtt = now - pong.agent_ts;
+                                tracing::info!(
+                                    agent_ts = pong.agent_ts,
+                                    controller_ts = pong.controller_ts,
+                                    rtt_ms = rtt,
+                                    "received pong"
+                                );
+                            }
+                        }
+                    }
+                    Message::Close(_) => {
+                        tracing::info!("connection closed by controller");
+                        break;
+                    }
+                    _ => {
+                        return Err(report!(Error::UnexpectedMessage));
+                    }
                 }
             }
-        }
-        Message::Close(_) => {
-            tracing::info!("connection closed by controller");
-        }
-        _ => {
-            return Err(report!(Error::UnexpectedMessage));
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("received SIGINT, shutting down");
+                break;
+            }
+            _ = shutdown.recv() => {
+                tracing::info!("received SIGTERM, shutting down");
+                break;
+            }
         }
     }
 
-    // Close the connection gracefully
     ws_stream.close(None).await.context_to::<Error>()?;
+    tracing::info!("websocket closed gracefully");
 
     Ok(())
 }

@@ -20,6 +20,7 @@ If you’re planning a larger change, open an issue first so we can agree on the
 
 - Rust stable (preferably via `rustup`)
 - A recent `cargo`
+- Node.js (LTS) and npm (for the frontend)
 - Optional but recommended: `cargo-nextest`, `cargo-deny`
 
 Install `cargo-deny` for dependency checks:
@@ -28,31 +29,57 @@ Install `cargo-deny` for dependency checks:
 cargo install cargo-deny
 ```
 
-### Build
+### Backend (Rust)
+
+#### Build
 
 ```sh
 cargo build
 ```
 
-### Format
+#### Format
 
 ```sh
 cargo fmt --all
 ```
 
-### Lint
+#### Lint
 
 ```sh
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-### Dependency checks
+#### Dependency checks
 
 ```sh
 cargo deny check
 ```
 
 This checks for security advisories, license compliance, and dependency issues.
+
+### Frontend (SvelteKit)
+
+The frontend is a SvelteKit SPA in the `frontend/` directory, using Skeleton UI and Tailwind CSS. The controller serves the built frontend at runtime.
+
+#### Install dependencies
+
+```sh
+cd frontend && npm install
+```
+
+#### Type check
+
+```sh
+cd frontend && npm run check
+```
+
+#### Build
+
+```sh
+cd frontend && npm run build
+```
+
+The static build output goes to `frontend/build/`.
 
 ## Testing (required)
 
@@ -144,8 +171,10 @@ Guidelines:
   - `cargo fmt --all`
   - `cargo clippy --all-targets --all-features -- -D warnings`
   - `cargo deny check`
+  - `cd frontend && npm run check` (if frontend changes)
 - Run tests:
   - `cargo test --all-features` (or `cargo nextest run --all-features`)
+- Build the frontend: `cd frontend && npm run build`
 - Update docs if behaviour/config/output changes
 
 ### PR description should include

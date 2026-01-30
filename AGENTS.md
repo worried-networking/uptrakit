@@ -34,9 +34,17 @@ uptrakit/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
 │       ├── mqtt/                       # uptrakit-mqtt                          (lib)  — MQTT / Home Assistant integration
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
+├── frontend/                           # SvelteKit SPA (Skeleton UI + Tailwind CSS)
+│   ├── src/
+│   │   ├── lib/                        # Shared modules: api client, auth store, types
+│   │   └── routes/                     # SvelteKit file-based routes
+│   ├── package.json                    # npm scripts: build, check
+│   ├── svelte.config.js                # SvelteKit config (static adapter)
+│   ├── tailwind.config.ts              # Tailwind + Skeleton theme
+│   └── vite.config.ts                  # Vite config (dev proxy → controller)
 ├── .github/
-│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests (runs on macOS)
-│   └── dependabot.yml                  # Weekly Cargo dependency updates
+│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, frontend check + build
+│   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
 ├── CONTRIBUTING.md
 ├── README.md
 └── AGENTS.md                           # This file
@@ -46,10 +54,20 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 
 ## Quality gates (must pass before committing)
 
+### Backend (Rust)
+
 ```sh
 cargo fmt --all                                              # Format
 cargo clippy --all-targets --all-features -- -D warnings     # Lint (zero warnings)
 cargo test --all-features                                    # Tests
+```
+
+### Frontend (SvelteKit)
+
+```sh
+cd frontend && npm install                                   # Install dependencies
+cd frontend && npm run check                                 # Svelte/TypeScript type check
+cd frontend && npm run build                                 # Production build
 ```
 
 CI runs these same checks. A PR that fails any of them will not merge.

@@ -1,4 +1,11 @@
-import type { AuthResponse, LoginRequest, RegisterRequest, User } from './types';
+import type {
+	AgentResponse,
+	AuthResponse,
+	LoginRequest,
+	MessageResponse,
+	RegisterRequest,
+	User
+} from './types';
 
 const BASE = '/api/v1';
 
@@ -38,4 +45,21 @@ export function logout(): Promise<void> {
 
 export function me(): Promise<User> {
 	return request('/auth/me');
+}
+
+export function getAgents(status?: string): Promise<AgentResponse[]> {
+	const query = status ? `?status=${status}` : '';
+	return request(`/agents${query}`);
+}
+
+export function approveAgent(id: string): Promise<AgentResponse> {
+	return request(`/agents/${id}/approve`, { method: 'POST' });
+}
+
+export function rejectAgent(id: string): Promise<AgentResponse> {
+	return request(`/agents/${id}/reject`, { method: 'POST' });
+}
+
+export function deleteAgent(id: string): Promise<MessageResponse> {
+	return request(`/agents/${id}`, { method: 'DELETE' });
 }

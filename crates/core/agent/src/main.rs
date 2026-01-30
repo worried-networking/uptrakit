@@ -1,11 +1,17 @@
 mod cli;
 mod client;
+mod enrollment;
 mod error;
+mod state;
+
+use std::time::Duration;
 
 use clap::Parser;
+use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
 
 use cli::Args;
+use error::Error;
 
 #[tokio::main]
 async fn main() {
@@ -24,14 +30,104 @@ async fn main() {
 }
 
 async fn run(args: &Args) -> error::Result<()> {
-    // Fetch CA certificate from controller
-    let ca_pem = client::fetch_ca_certificate(&args.host, args.http_port).await?;
+    // Resolve data directory, create if needed
+    let data_dir = args
+        .resolve_data_dir()
+        .map_err(|s| report!(Error::Enrollment(s)))?;
+    std::fs::create_dir_all(&data_dir).context_to::<Error>()?;
+    tracing::info!("data directory: {}", data_dir.display());
 
-    // Build TLS connector with the fetched CA
+    // TOFU CA pinning: load from disk, or fetch from HTTP and persist
+    let ca_pem = if let Some(cached) = state::load_ca_cert(&data_dir)? {
+        tracing::info!("loaded CA certificate from disk");
+        cached
+    } else {
+        tracing::info!("fetching CA certificate from controller");
+        let pem = client::fetch_ca_certificate(&args.host, args.http_port).await?;
+        state::save_ca_cert(&data_dir, &pem)?;
+        tracing::info!("CA certificate saved to disk");
+        pem
+    };
+
+    // Build TLS connector with the pinned CA
     let tls_connector = client::build_tls_connector(&ca_pem)?;
 
-    // Connect and perform ping/pong
-    client::connect_and_ping(&args.host, args.port, tls_connector).await?;
+    // Enrollment: load agent.json or enroll
+    let agent_state = if let Some(existing) = state::AgentState::load(&data_dir)? {
+        tracing::info!(agent_id = %existing.agent_id, "loaded existing agent state");
+        existing
+    } else {
+        tracing::info!("no agent state found, enrolling with controller");
+
+        let system_hostname = hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        let friendly_name = args
+            .friendly_name
+            .clone()
+            .unwrap_or_else(|| system_hostname.clone());
+
+        let resp = enrollment::enroll(
+            &args.host,
+            args.port,
+            &tls_connector,
+            &system_hostname,
+            &friendly_name,
+            args.enrollment_token.as_deref(),
+        )
+        .await?;
+
+        tracing::info!(
+            agent_id = %resp.agent_id,
+            status = %resp.status,
+            "enrollment response received"
+        );
+
+        let new_state = state::AgentState {
+            agent_id: resp.agent_id,
+            enrollment_secret: resp.enrollment_secret,
+        };
+        new_state.save(&data_dir)?;
+        tracing::info!("agent state persisted");
+        new_state
+    };
+
+    // Poll loop: check enrollment status until approved
+    loop {
+        let status_resp = enrollment::poll_status(
+            &args.host,
+            args.port,
+            &tls_connector,
+            &agent_state.enrollment_secret,
+        )
+        .await?;
+
+        match status_resp.status.as_str() {
+            "approved" => {
+                tracing::info!(agent_id = %status_resp.agent_id, "enrollment approved");
+                break;
+            }
+            "rejected" => {
+                tracing::error!(agent_id = %status_resp.agent_id, "enrollment rejected");
+                return Err(report!(Error::EnrollmentRejected));
+            }
+            "pending" => {
+                tracing::info!(
+                    agent_id = %status_resp.agent_id,
+                    poll_interval_secs = args.enrollment_poll_interval,
+                    "enrollment pending, waiting..."
+                );
+                tokio::time::sleep(Duration::from_secs(args.enrollment_poll_interval)).await;
+            }
+            other => {
+                tracing::warn!(status = %other, "unknown enrollment status");
+                tokio::time::sleep(Duration::from_secs(args.enrollment_poll_interval)).await;
+            }
+        }
+    }
+
+    // Connect WebSocket and run event loop
+    client::run_event_loop(&args.host, args.port, tls_connector).await?;
 
     Ok(())
 }

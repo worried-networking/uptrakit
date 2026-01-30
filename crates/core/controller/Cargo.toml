@@ -22,7 +22,7 @@ axum = { workspace = true }
 axum-server = { workspace = true }
 clap = { workspace = true }
 ipnet = { workspace = true }
-hostname = "0.4"
+hostname = { workspace = true }
 rootcause = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

@@ -23,3 +23,18 @@ export interface LoginRequest {
 	email: string;
 	password: string;
 }
+
+export interface AgentResponse {
+	id: string;
+	hostname: string;
+	friendly_name: string;
+	ip_address: string | null;
+	status: 'pending' | 'approved' | 'rejected';
+	last_seen_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface MessageResponse {
+	message: string;
+}

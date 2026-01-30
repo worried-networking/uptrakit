@@ -37,6 +37,15 @@ pub enum Error {
 
     #[error("unexpected message type")]
     UnexpectedMessage,
+
+    #[error("enrollment failed: {0}")]
+    Enrollment(String),
+
+    #[error("enrollment rejected by controller")]
+    EnrollmentRejected,
+
+    #[error("HTTP request error: {0}")]
+    HttpRequest(String),
 }
 
 pub type Result<T> = std::result::Result<T, Report<Error>>;

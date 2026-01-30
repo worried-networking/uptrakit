@@ -72,7 +72,7 @@ async fn run_http(addr: SocketAddr, router: Router) -> Result<()> {
     let router = router.layer(axum::Extension(Protocol::Plain));
     tracing::info!("HTTP server listening on {addr}");
     axum_server::bind(addr)
-        .serve(router.into_make_service())
+        .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .context_to::<ServerError>()?;
     Ok(())
@@ -85,7 +85,7 @@ async fn run_https(addr: SocketAddr, router: Router, tls_config: ServerConfig) -
 
     tracing::info!("HTTPS server listening on {addr}");
     axum_server::bind_rustls(addr, rustls_config)
-        .serve(router.into_make_service())
+        .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .context_to::<ServerError>()?;
     Ok(())

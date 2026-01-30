@@ -1,7 +1,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use http::HeaderMap;
@@ -18,7 +18,10 @@ pub async fn resolve_ip(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let peer_ip = req.extensions().get::<SocketAddr>().map(|a| a.ip());
+    let peer_ip = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| canonicalize(c.0.ip()));
 
     let (client_ip, proxy_ip) = resolve_client_ip(
         peer_ip,
@@ -72,8 +75,17 @@ fn resolve_client_ip(
     }
 
     match extract_real_ip(headers, real_ip_header) {
-        Some(real_ip) => (Some(real_ip), Some(peer)),
+        Some(real_ip) => (Some(canonicalize(real_ip)), Some(peer)),
         None => (Some(peer), None),
+    }
+}
+
+/// Convert an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) to its IPv4
+/// equivalent. All other addresses pass through unchanged.
+fn canonicalize(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
+        other => other,
     }
 }
 
@@ -99,6 +111,7 @@ mod tests {
 
     use axum::Router;
     use axum::body::Body;
+    use axum::extract::ConnectInfo;
     use axum::middleware as axum_mw;
     use axum::routing::get;
     use http::Request;
@@ -170,7 +183,7 @@ mod tests {
         let router = app(state);
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 45)), 12345);
         let mut req = Request::builder().uri("/test").body(Body::empty()).unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
@@ -189,7 +202,7 @@ mod tests {
             .header("x-forwarded-for", "203.0.113.45, 10.0.0.1")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
@@ -210,7 +223,7 @@ mod tests {
             .header("forwarded", "for=203.0.113.45;by=10.0.0.1, for=10.0.0.1")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
@@ -230,7 +243,7 @@ mod tests {
             .header("x-real-ip", "203.0.113.45")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
@@ -245,7 +258,7 @@ mod tests {
         let router = app(state);
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 12345);
         let mut req = Request::builder().uri("/test").body(Body::empty()).unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
@@ -265,7 +278,7 @@ mod tests {
             .header("x-forwarded-for", "2001:db8::1")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
@@ -284,12 +297,28 @@ mod tests {
             .header("x-custom-ip", "198.51.100.7, 10.0.0.1")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = router.oneshot(req).await.unwrap();
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
             .unwrap();
         // Custom header: rightmost parseable IP from comma-separated list
         assert_eq!(body, "client=10.0.0.1 proxy=10.0.0.1");
+    }
+
+    #[tokio::test]
+    async fn ipv4_mapped_ipv6_is_normalised() {
+        let state = state_with(vec![], "X-Forwarded-For").await;
+        let router = app(state);
+        // ::ffff:203.0.113.45 is the IPv4-mapped form of 203.0.113.45
+        let v4_mapped = Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xcb00, 0x712d);
+        let addr = SocketAddr::new(IpAddr::V6(v4_mapped), 12345);
+        let mut req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        req.extensions_mut().insert(ConnectInfo(addr));
+        let resp = router.oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body, "client=203.0.113.45 proxy=-");
     }
 }

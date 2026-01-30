@@ -3,6 +3,7 @@ pub mod extract;
 pub mod middleware;
 pub mod routes;
 pub mod settings;
+pub mod settings_store;
 
 use std::sync::Arc;
 
@@ -41,7 +42,8 @@ pub struct AppState {
 #[openapi(
     tags(
         (name = "Authentication", description = "User authentication endpoints"),
-        (name = "Settings", description = "Application settings management")
+        (name = "Settings", description = "Application settings management"),
+        (name = "Agents", description = "Agent enrollment and management")
     ),
     paths(
         routes::auth::register,
@@ -49,7 +51,15 @@ pub struct AppState {
         routes::auth::logout,
         routes::auth::me,
         routes::settings::get_registration_settings,
-        routes::settings::update_registration_settings
+        routes::settings::update_registration_settings,
+        routes::agents::enroll,
+        routes::agents::enroll_status,
+        routes::agents::list_agents,
+        routes::agents::approve_agent,
+        routes::agents::reject_agent,
+        routes::agents::deactivate_agent,
+        routes::agents::create_enrollment_token,
+        routes::agents::revoke_enrollment_token
     ),
     components(
         schemas(
@@ -59,7 +69,14 @@ pub struct AppState {
             routes::auth::UserResponse,
             routes::settings::RegistrationSettingsResponse,
             routes::settings::UpdateRegistrationSettingsRequest,
-            auth::registration::RegistrationMode
+            auth::registration::RegistrationMode,
+            routes::agents::AgentStatus,
+            routes::agents::EnrollRequest,
+            routes::agents::EnrollResponse,
+            routes::agents::EnrollStatusResponse,
+            routes::agents::AgentResponse,
+            routes::agents::EnrollmentTokenResponse,
+            routes::agents::MessageResponse
         )
     ),
     info(
@@ -125,29 +142,37 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
 
 /// Build the application router.
 pub fn build_router(state: Arc<AppState>) -> Router {
-    // Create OpenAPI router with auth routes
-    let (auth_router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .routes(routes!(routes::auth::register))
-        .routes(routes!(routes::auth::login))
-        .routes(routes!(routes::auth::logout))
-        .routes(routes!(routes::auth::me))
-        .split_for_parts();
-
-    // Settings routes require authentication
-    let settings_router = Router::new()
-        .route(
-            "/api/v1/settings/registration",
-            axum::routing::get(routes::settings::get_registration_settings)
-                .put(routes::settings::update_registration_settings),
-        )
+    // Authenticated OpenAPI routes (require_auth middleware applied before merge)
+    let auth_routes = OpenApiRouter::new()
+        .routes(routes!(
+            routes::settings::get_registration_settings,
+            routes::settings::update_registration_settings
+        ))
+        .routes(routes!(routes::agents::list_agents))
+        .routes(routes!(
+            routes::agents::create_enrollment_token,
+            routes::agents::revoke_enrollment_token
+        ))
+        .routes(routes!(routes::agents::approve_agent))
+        .routes(routes!(routes::agents::reject_agent))
+        .routes(routes!(routes::agents::deactivate_agent))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,
         ));
 
-    let mut router = Router::new()
-        .merge(auth_router)
-        .merge(settings_router)
+    // All OpenAPI routes merged into a single router so the spec is complete
+    let (api_router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+        .routes(routes!(routes::auth::register))
+        .routes(routes!(routes::auth::login))
+        .routes(routes!(routes::auth::logout))
+        .routes(routes!(routes::auth::me))
+        .routes(routes!(routes::agents::enroll))
+        .routes(routes!(routes::agents::enroll_status))
+        .merge(auth_routes)
+        .split_for_parts();
+
+    let mut router = api_router
         .route("/api/v1/ws/agent", get(routes::agent_ws::agent_ws))
         .route_layer(axum_mw::from_fn(require_https::require_https))
         .route("/healthz", get(routes::health::healthz))
@@ -179,6 +204,7 @@ mod tests {
     use std::sync::Arc;
 
     use axum::body::Body;
+    use axum::extract::ConnectInfo;
     use http::Request;
     use http_body_util::BodyExt;
     use ipnet::IpNet;
@@ -233,7 +259,7 @@ mod tests {
             .uri("/api/v1/ws/agent")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), 403);
     }
@@ -270,7 +296,7 @@ mod tests {
             .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
             .body(Body::empty())
             .unwrap();
-        req.extensions_mut().insert(addr);
+        req.extensions_mut().insert(ConnectInfo(addr));
         let resp = app.oneshot(req).await.unwrap();
         assert_ne!(resp.status(), 403);
     }
@@ -309,5 +335,40 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), 404);
+    }
+
+    /// Verify that `into_make_service_with_connect_info` properly injects
+    /// `ConnectInfo<SocketAddr>` so the `resolve_ip` middleware can resolve
+    /// the client IP — this is the production code path via `axum-server`.
+    #[tokio::test]
+    async fn make_service_with_connect_info_resolves_client_ip() {
+        let router = build_router(test_state().await);
+        let mut make_svc = router.into_make_service_with_connect_info::<SocketAddr>();
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 45)), 12345);
+        // Simulate what axum-server does: call the make service with the peer
+        // SocketAddr to obtain a per-connection service.
+        let svc = <_ as tower::Service<SocketAddr>>::call(&mut make_svc, addr)
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .uri("/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = svc.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        // The resolve_ip middleware should have read ConnectInfo<SocketAddr>,
+        // created ClientIp, and copied it onto the response extensions.
+        let client_ip = resp.extensions().get::<crate::extract::ClientIp>();
+        assert!(
+            client_ip.is_some(),
+            "ClientIp should be present in response extensions"
+        );
+        assert_eq!(
+            client_ip.unwrap().0,
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 45))
+        );
     }
 }

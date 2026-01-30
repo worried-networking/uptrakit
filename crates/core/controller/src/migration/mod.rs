@@ -8,6 +8,7 @@ mod m20260129_000002_create_users;
 mod m20260129_000003_create_rbac;
 mod m20260129_000004_create_sessions;
 mod m20260129_000005_create_settings;
+mod m20260129_000006_create_agents;
 
 pub struct Migrator;
 
@@ -20,6 +21,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260129_000003_create_rbac::Migration),
             Box::new(m20260129_000004_create_sessions::Migration),
             Box::new(m20260129_000005_create_settings::Migration),
+            Box::new(m20260129_000006_create_agents::Migration),
         ]
     }
 }
