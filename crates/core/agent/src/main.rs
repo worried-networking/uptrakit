@@ -72,10 +72,24 @@ async fn run(args: &Args) -> error::Result<()> {
             tracing::warn!("certificate expired, falling back to fresh enrollment");
             state::AgentCertState::delete(&data_dir)?;
             state::delete_cert_not_after_ts(&data_dir)?;
+            state::AgentState::delete(&data_dir)?;
             // Fall through to enrollment below
         } else {
             tracing::info!("loaded existing agent certificate from disk");
-            return run_authenticated_with_reconnect(args, &data_dir, &ca_pem).await;
+            match run_authenticated_with_reconnect(args, &data_dir, &ca_pem).await {
+                Ok(()) => return Ok(()),
+                Err(mut e) => {
+                    if e.current_context_mut().is_cert_expired() {
+                        tracing::warn!("certificate expired, falling back to enrollment");
+                        state::AgentCertState::delete(&data_dir)?;
+                        state::delete_cert_not_after_ts(&data_dir)?;
+                        state::AgentState::delete(&data_dir)?;
+                        // Fall through to enrollment below
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         }
     }
 
@@ -102,8 +116,9 @@ async fn run(args: &Args) -> error::Result<()> {
         key_pem: cert_payload.key_pem,
     };
     cert_state.save(&data_dir)?;
-    let not_after_ts = now_millis() + i64::from(cert_payload.lifetime_days) * 24 * 3600 * 1000;
-    state::save_cert_not_after_ts(&data_dir, not_after_ts)?;
+    let not_after_ms =
+        cert_payload.not_after.unix_timestamp() * 1000 + i64::from(cert_payload.not_after.millisecond());
+    state::save_cert_not_after_ts(&data_dir, not_after_ms)?;
     tracing::info!("agent certificate saved to disk");
 
     // Enter mTLS loop with reconnect
@@ -129,7 +144,7 @@ async fn do_enrollment(
         // Request certificate
         let cert = client::request_certificate_ws(&mut ws).await?;
         tracing::info!(
-            lifetime_days = cert.lifetime_days,
+            not_after = %cert.not_after,
             "received client certificate"
         );
         Ok(cert)
@@ -174,7 +189,7 @@ async fn do_enrollment(
         // Request certificate
         let cert = client::request_certificate_ws(&mut ws).await?;
         tracing::info!(
-            lifetime_days = cert.lifetime_days,
+            not_after = %cert.not_after,
             "received client certificate"
         );
         Ok(cert)

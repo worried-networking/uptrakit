@@ -205,10 +205,10 @@ pub(crate) async fn do_sign_certificate(
         return Err((StatusCode::FORBIDDEN, "Agent is not approved"));
     }
 
-    let lifetime_days = 1; //settings.agent_cert_lifetime_days().await;
+    let lifetime = time::Duration::days(1); //settings.agent_cert_lifetime().await;
 
     let bundle = cert_signer
-        .sign_agent_cert(&agent.id, lifetime_days)
+        .sign_agent_cert(&agent.id, lifetime)
         .map_err(|e| {
             tracing::error!("Failed to sign agent certificate: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

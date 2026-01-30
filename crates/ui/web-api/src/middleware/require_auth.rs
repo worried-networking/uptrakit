@@ -137,7 +137,7 @@ mod tests {
         use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
         struct NoopCertSigner;
         impl AgentCertSigner for NoopCertSigner {
-            fn sign_agent_cert(&self, _: &uuid::Uuid, _: u16) -> Result<AgentCertBundle, String> {
+            fn sign_agent_cert(&self, _: &uuid::Uuid, _: time::Duration) -> Result<AgentCertBundle, String> {
                 unimplemented!()
             }
         }

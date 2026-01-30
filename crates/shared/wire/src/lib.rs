@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
+use time::UtcDateTime;
 
 /// Unix epoch timestamp in milliseconds.
 pub type Timestamp = i64;
 
 /// Returns the current time as Unix epoch milliseconds.
 pub fn now_millis() -> Timestamp {
-    let now = OffsetDateTime::now_utc();
+    let now = UtcDateTime::now();
     now.unix_timestamp() * 1000 + i64::from(now.millisecond())
 }
 
@@ -91,7 +91,28 @@ pub struct RejectedPayload {
 pub struct CertificatePayload {
     pub cert_pem: String,
     pub key_pem: String,
-    pub lifetime_days: u16,
+    /// Certificate "not valid after" timestamp.
+    #[serde(with = "utc_datetime_millis")]
+    pub not_after: UtcDateTime,
+}
+
+/// Serde helper: serialize/deserialize `UtcDateTime` as Unix epoch milliseconds.
+mod utc_datetime_millis {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use time::UtcDateTime;
+
+    pub fn serialize<S: Serializer>(dt: &UtcDateTime, serializer: S) -> Result<S::Ok, S::Error> {
+        let millis = dt.unix_timestamp_nanos() / 1_000_000;
+        serializer.serialize_i64(millis as i64)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<UtcDateTime, D::Error> {
+        let millis = i64::deserialize(deserializer)?;
+        let nanos = i128::from(millis) * 1_000_000;
+        UtcDateTime::from_unix_timestamp_nanos(nanos).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Payload for error responses.
@@ -238,7 +259,7 @@ mod tests {
                 .to_string(),
             key_pem: "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
                 .to_string(),
-            lifetime_days: 7,
+            not_after: UtcDateTime::from_unix_timestamp(1_706_400_000).unwrap(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();

@@ -426,7 +426,7 @@ components:
         - type
         - cert_pem
         - key_pem
-        - lifetime_days
+        - not_after
       properties:
         type:
           type: string
@@ -438,12 +438,12 @@ components:
         key_pem:
           type: string
           description: PEM-encoded private key for the client certificate
-        lifetime_days:
+        not_after:
           type: integer
-          format: int32
-          description: Certificate validity period in days
+          format: int64
+          description: Certificate "not valid after" as Unix epoch milliseconds
           examples:
-            - 7
+            - 1706400000000
 
     errorPayload:
       type: object

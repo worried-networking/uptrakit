@@ -426,9 +426,9 @@ pub async fn run_authenticated_loop(
                                     key_pem: payload.key_pem,
                                 };
                                 cert_state.save(data_dir)?;
-                                let not_after_ts = now_millis()
-                                    + i64::from(payload.lifetime_days) * 24 * 3600 * 1000;
-                                crate::state::save_cert_not_after_ts(data_dir, not_after_ts)?;
+                                let not_after_ms = payload.not_after.unix_timestamp() * 1000
+                                    + i64::from(payload.not_after.millisecond());
+                                crate::state::save_cert_not_after_ts(data_dir, not_after_ms)?;
                                 tracing::info!("renewed certificate saved, reconnecting");
                                 outcome = LoopOutcome::Reconnect;
                                 break;

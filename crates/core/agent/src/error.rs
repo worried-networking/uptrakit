@@ -49,6 +49,17 @@ impl Error {
     pub fn is_receive_closed(&self) -> bool {
         matches!(self, Error::ReceiveClosed)
     }
+
+    /// Returns `true` when the TLS handshake failed because the server
+    /// considers our client certificate expired.
+    pub fn is_cert_expired(&self) -> bool {
+        let msg = match self {
+            Error::WebSocket(e) => e.to_string(),
+            Error::Io(e) => e.to_string(),
+            _ => return false,
+        };
+        msg.contains("CertificateExpired")
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Report<Error>>;

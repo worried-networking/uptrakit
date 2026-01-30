@@ -257,7 +257,7 @@ async fn handle_authenticated(
                                         let cert_msg = ControllerMessage::Certificate(CertificatePayload {
                                             cert_pem: bundle.cert_pem,
                                             key_pem: bundle.key_pem,
-                                            lifetime_days: bundle.lifetime_days,
+                                            not_after: bundle.not_after,
                                         });
                                         let json = serde_json::to_string(&cert_msg).unwrap();
                                         let _ = sink.send(Message::Text(json.into())).await;
@@ -588,7 +588,7 @@ async fn run_enrolled_loop(
                                         let cert_msg = ControllerMessage::Certificate(CertificatePayload {
                                             cert_pem: bundle.cert_pem,
                                             key_pem: bundle.key_pem,
-                                            lifetime_days: bundle.lifetime_days,
+                                            not_after: bundle.not_after,
                                         });
                                         let json = serde_json::to_string(&cert_msg).unwrap();
                                         let _ = sink.send(Message::Text(json.into())).await;

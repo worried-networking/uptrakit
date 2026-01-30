@@ -1,5 +1,5 @@
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair};
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner};
 use uuid::Uuid;
 
@@ -21,23 +21,25 @@ impl AgentCertSigner for RcgenAgentCertSigner {
     fn sign_agent_cert(
         &self,
         agent_id: &Uuid,
-        lifetime_days: u16,
+        lifetime: time::Duration,
     ) -> Result<AgentCertBundle, String> {
         let key_pair =
             KeyPair::from_pem(&self.ca_key_pem).map_err(|e| format!("CA key parse: {e}"))?;
         let issuer = Issuer::from_ca_cert_pem(&self.ca_cert_pem, key_pair)
             .map_err(|e| format!("CA issuer: {e}"))?;
-        generate_agent_cert(&issuer, agent_id, lifetime_days)
+        generate_agent_cert(&issuer, agent_id, lifetime)
     }
 }
 
 fn generate_agent_cert(
     issuer: &Issuer<'_, KeyPair>,
     agent_id: &Uuid,
-    lifetime_days: u16,
+    lifetime: time::Duration,
 ) -> Result<AgentCertBundle, String> {
     let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
         .map_err(|e| format!("key generation: {e}"))?;
+
+    let not_after = OffsetDateTime::now_utc() + lifetime;
 
     let mut params = CertificateParams::default();
     params
@@ -51,7 +53,7 @@ fn generate_agent_cert(
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ClientAuth);
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after = OffsetDateTime::now_utc() + time::Duration::minutes(i64::from(3));
+    params.not_after = not_after;
 
     let cert = params
         .signed_by(&key_pair, issuer)
@@ -60,7 +62,7 @@ fn generate_agent_cert(
     Ok(AgentCertBundle {
         cert_pem: cert.pem(),
         key_pem: key_pair.serialize_pem(),
-        lifetime_days,
+        not_after: UtcDateTime::from(not_after),
     })
 }
 
@@ -77,11 +79,16 @@ mod tests {
         let signer = RcgenAgentCertSigner::new(ca.cert_pem, ca.key_pem);
 
         let agent_id = Uuid::now_v7();
-        let bundle = signer.sign_agent_cert(&agent_id, 7).unwrap();
+        let bundle = signer
+            .sign_agent_cert(&agent_id, time::Duration::days(7))
+            .unwrap();
 
         assert!(bundle.cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(bundle.key_pem.contains("BEGIN"));
-        assert_eq!(bundle.lifetime_days, 7);
+        // not_after should be ~7 days from now
+        let now = UtcDateTime::now();
+        assert!(bundle.not_after > now + time::Duration::days(6));
+        assert!(bundle.not_after < now + time::Duration::days(8));
 
         // Verify CN contains the agent UUID
         let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
@@ -114,7 +121,9 @@ mod tests {
         let signer = RcgenAgentCertSigner::new(ca.cert_pem, ca.key_pem);
 
         let agent_id = Uuid::now_v7();
-        let bundle = signer.sign_agent_cert(&agent_id, 30).unwrap();
+        let bundle = signer
+            .sign_agent_cert(&agent_id, time::Duration::days(30))
+            .unwrap();
 
         let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
         let cert = pem_block.parse_x509().unwrap();
