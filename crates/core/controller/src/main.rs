@@ -1,5 +1,6 @@
 mod cert_signer;
 mod cli;
+mod crl_manager;
 mod db;
 mod migration;
 mod mtls_acceptor;
@@ -112,13 +113,42 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Install the default crypto provider for rustls
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    // Build rustls config with optional client auth (mTLS)
-    let rustls_config = pki::build_rustls_config_with_client_auth(
+    // Create revocation notify channel
+    let revocation_notify = Arc::new(tokio::sync::Notify::const_new());
+
+    // Build initial CRL from DB before server starts
+    let initial_crl = crl_manager::build_initial_crl_der(&db_conn, &ca.cert_pem, &ca.key_pem)
+        .await
+        .context(AppError::Pki)?;
+
+    // Build initial server config WITH CRL
+    let initial_server_config = pki::build_rustls_config_with_client_auth_and_crl(
         &server_cert.cert_pem,
         &server_cert.key_pem,
         &ca.cert_pem,
+        initial_crl,
     )
     .context(AppError::Pki)?;
+
+    let rustls_config =
+        axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(initial_server_config));
+
+    // Create CRL manager with the real RustlsConfig handle for hot-reloads
+    let crl_manager = Arc::new(
+        crl_manager::CrlManager::new(crl_manager::CrlManagerConfig {
+            ca_cert_pem: ca.cert_pem.clone(),
+            ca_key_pem: ca.key_pem.clone(),
+            server_cert_pem: server_cert.cert_pem.clone(),
+            server_key_pem: server_cert.key_pem.clone(),
+            db: db_conn.clone(),
+            rustls_config: rustls_config.clone(),
+            revocation_notify: Arc::clone(&revocation_notify),
+        })
+        .context(AppError::Pki)?,
+    );
+
+    // Spawn CRL manager background task
+    let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run());
 
     // Create agent certificate signer
     let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
@@ -134,6 +164,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         settings,
         cert_signer,
         agent_connections: uptrakit_web_api::agent_connections::AgentConnectionRegistry::new(),
+        revocation_notify,
     });
 
     // Start MQTT if configured
@@ -168,7 +199,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         result = server::run(server::ServerOptions {
             http_addr: args.http_addr,
             https_addr: args.https_addr,
-            tls_config: rustls_config,
+            rustls_config,
             app_state,
             static_dir,
         }) => {
@@ -178,6 +209,8 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             tracing::info!("received shutdown signal");
         }
     }
+
+    crl_handle.abort();
 
     #[cfg(feature = "mqtt")]
     if let Some(handle) = mqtt_handle {

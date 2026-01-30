@@ -305,6 +305,10 @@ pub fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::Serv
 ///
 /// Clients presenting a certificate signed by the given CA will be verified;
 /// clients without a certificate are still allowed (anonymous).
+///
+/// Note: prefer `build_rustls_config_with_client_auth_and_crl` for production
+/// use so revoked certificates are rejected at the TLS handshake layer.
+#[allow(dead_code)]
 pub fn build_rustls_config_with_client_auth(
     cert_pem: &str,
     key_pem: &str,
@@ -335,6 +339,55 @@ pub fn build_rustls_config_with_client_auth(
 
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
         .allow_unauthenticated()
+        .build()
+        .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
+
+    let config = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(certs, key)
+        .context_to::<PkiError>()?;
+
+    Ok(config)
+}
+
+/// Build a `rustls::ServerConfig` with mTLS client authentication and a CRL.
+///
+/// Same as `build_rustls_config_with_client_auth()` but the verifier checks
+/// client certificates against the supplied CRL. No
+/// `allow_unknown_revocation_status()` — the CRL is authoritative.
+pub fn build_rustls_config_with_client_auth_and_crl(
+    cert_pem: &str,
+    key_pem: &str,
+    ca_cert_pem: &str,
+    crl_der: rustls::pki_types::CertificateRevocationListDer<'static>,
+) -> Result<rustls::ServerConfig> {
+    use std::sync::Arc;
+
+    use rustls::RootCertStore;
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use rustls::server::WebPkiClientVerifier;
+
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(ca_cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let mut root_store = RootCertStore::empty();
+    for ca_cert in ca_certs {
+        root_store.add(ca_cert).context_to::<PkiError>()?;
+    }
+
+    let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
+        .with_crls(vec![crl_der])
+        .allow_unauthenticated()
+        .only_check_end_entity_revocation()
         .build()
         .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
 

@@ -20,6 +20,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
+use uptrakit_shared_db::entity::prelude::RevocationReason;
 use uptrakit_shared_db::entity::{agent, agent_certificate, prelude::*};
 use utoipa::ToSchema;
 
@@ -493,7 +494,7 @@ pub async fn deactivate_agent(
         .col_expr(agent_certificate::Column::RevokedAt, Expr::value(Some(now)))
         .col_expr(
             agent_certificate::Column::RevocationReason,
-            Expr::value(Some("agent_deactivated".to_string())),
+            Expr::value(Some(RevocationReason::AgentDeactivated)),
         )
         .filter(agent_certificate::Column::AgentId.eq(agent_id))
         .filter(agent_certificate::Column::RevokedAt.is_null())
@@ -502,6 +503,8 @@ pub async fn deactivate_agent(
     {
         tracing::error!("Failed to revoke certificates: {}", e);
     }
+
+    state.revocation_notify.notify_one();
 
     // Terminate any active WebSocket connection for this agent.
     // Dropping the sender causes the handler's push_rx.recv() to
@@ -684,7 +687,7 @@ async fn record_certificate(
 pub(crate) async fn revoke_certificate(
     db: &sea_orm::DatabaseConnection,
     serial_number: &str,
-    reason: &str,
+    reason: RevocationReason,
 ) -> Result<(), sea_orm::DbErr> {
     AgentCertificate::update_many()
         .col_expr(
@@ -693,7 +696,7 @@ pub(crate) async fn revoke_certificate(
         )
         .col_expr(
             agent_certificate::Column::RevocationReason,
-            Expr::value(Some(reason.to_string())),
+            Expr::value(Some(reason)),
         )
         .filter(agent_certificate::Column::SerialNumber.eq(serial_number))
         .filter(agent_certificate::Column::RevokedAt.is_null())
@@ -832,18 +835,12 @@ pub async fn merge_agent(
 
     // Revoke all non-revoked certificates for both agents.
     // Source is being absorbed; target will get a fresh certificate via enrollment.
-    for (agent_uuid, label) in [
-        (source_uuid, "source"),
-        (target_uuid, "target"),
-    ] {
+    for (agent_uuid, label) in [(source_uuid, "source"), (target_uuid, "target")] {
         if let Err(e) = AgentCertificate::update_many()
-            .col_expr(
-                agent_certificate::Column::RevokedAt,
-                Expr::value(Some(now)),
-            )
+            .col_expr(agent_certificate::Column::RevokedAt, Expr::value(Some(now)))
             .col_expr(
                 agent_certificate::Column::RevocationReason,
-                Expr::value(Some("agent_merged".to_string())),
+                Expr::value(Some(RevocationReason::AgentMerged)),
             )
             .filter(agent_certificate::Column::AgentId.eq(agent_uuid))
             .filter(agent_certificate::Column::RevokedAt.is_null())
@@ -853,6 +850,8 @@ pub async fn merge_agent(
             tracing::error!("Failed to revoke {label} agent certificates: {}", e);
         }
     }
+
+    state.revocation_notify.notify_one();
 
     // Now copy source's enrollment_secret_hash to target
     let mut target_active: agent::ActiveModel = target.into();

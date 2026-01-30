@@ -357,8 +357,7 @@ pub async fn run_authenticated_loop(
     ping_interval.tick().await;
 
     // Renewal timer — initially far-future, reset when AgentSettings arrives
-    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> =
-        Box::pin(tokio::time::sleep(FAR_FUTURE));
+    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
 
     // Every `break` arm below assigns `outcome` before exiting; the
     // initial value is a safety fallback only.

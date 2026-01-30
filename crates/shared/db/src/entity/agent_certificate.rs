@@ -1,6 +1,17 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Text")]
+pub enum RevocationReason {
+    #[sea_orm(string_value = "certificate_renewed")]
+    CertificateRenewed,
+    #[sea_orm(string_value = "agent_deactivated")]
+    AgentDeactivated,
+    #[sea_orm(string_value = "agent_merged")]
+    AgentMerged,
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "agent_certificates")]
 pub struct Model {
@@ -10,7 +21,7 @@ pub struct Model {
     pub not_before: OffsetDateTime,
     pub not_after: OffsetDateTime,
     pub revoked_at: Option<OffsetDateTime>,
-    pub revocation_reason: Option<String>,
+    pub revocation_reason: Option<RevocationReason>,
     pub created_at: OffsetDateTime,
     pub last_seen_at: Option<OffsetDateTime>,
 }

@@ -51,7 +51,7 @@ fn generate_agent_cert(
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ClientAuth);
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(i64::from(lifetime_days));
+    params.not_after = OffsetDateTime::now_utc() + time::Duration::minutes(i64::from(3));
 
     let cert = params
         .signed_by(&key_pair, issuer)

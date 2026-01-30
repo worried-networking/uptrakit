@@ -151,6 +151,7 @@ mod tests {
             ),
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
+            revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
         })
     }
 

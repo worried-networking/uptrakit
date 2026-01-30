@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use axum::Router;
 use rootcause::{Report, ReportConversion, markers, prelude::*};
-use rustls::ServerConfig;
 use thiserror::Error;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -34,7 +33,7 @@ where
 pub struct ServerOptions {
     pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
-    pub tls_config: ServerConfig,
+    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub app_state: Arc<AppState>,
     pub static_dir: Option<PathBuf>,
 }
@@ -54,7 +53,7 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
         router = router.fallback_service(ServeDir::new(dir).not_found_service(not_found));
     }
     let http_handle = tokio::spawn(run_http(cfg.http_addr, router.clone()));
-    let https_handle = tokio::spawn(run_https(cfg.https_addr, router, cfg.tls_config));
+    let https_handle = tokio::spawn(run_https(cfg.https_addr, router, cfg.rustls_config));
 
     // Wait for either server to finish (which normally means an error).
     tokio::select! {
@@ -79,10 +78,12 @@ async fn run_http(addr: SocketAddr, router: Router) -> Result<()> {
     Ok(())
 }
 
-async fn run_https(addr: SocketAddr, router: Router, tls_config: ServerConfig) -> Result<()> {
+async fn run_https(
+    addr: SocketAddr,
+    router: Router,
+    rustls_config: axum_server::tls_rustls::RustlsConfig,
+) -> Result<()> {
     let router = router.layer(axum::Extension(Protocol::Tls));
-    let tls_config = Arc::new(tls_config);
-    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(tls_config);
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config);
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
 

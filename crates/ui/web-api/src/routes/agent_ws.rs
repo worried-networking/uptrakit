@@ -263,10 +263,11 @@ async fn handle_authenticated(
                                         let _ = sink.send(Message::Text(json.into())).await;
 
                                         // Revoke old cert
-                                        if let Err(e) = revoke_certificate(&state.db, &cert_serial, "certificate_renewed").await {
+                                        if let Err(e) = revoke_certificate(&state.db, &cert_serial, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
+                                        state.revocation_notify.notify_one();
                                         tracing::info!(%agent_id, old_serial = %cert_serial, "certificate renewed, old cert revoked");
                                         let _ = close_with_reason(&mut sink, "certificate rotated").await;
                                         break;

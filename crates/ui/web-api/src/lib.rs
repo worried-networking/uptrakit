@@ -42,6 +42,8 @@ pub struct AppState {
     pub cert_signer: Arc<dyn cert_signer::AgentCertSigner>,
     /// Registry of connected agents for push notifications.
     pub agent_connections: AgentConnectionRegistry,
+    /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
+    pub revocation_notify: Arc<tokio::sync::Notify>,
 }
 
 /// OpenAPI documentation
@@ -251,6 +253,7 @@ mod tests {
             ),
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
+            revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
         })
     }
 

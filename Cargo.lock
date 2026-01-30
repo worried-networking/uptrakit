@@ -3586,6 +3586,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-mqtt",
+ "uptrakit-shared-db",
  "uptrakit-web-api",
  "uuid",
  "x509-parser",
