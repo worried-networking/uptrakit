@@ -5,6 +5,13 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Uptrakit</title>
 		%sveltekit.head%
+		<script>
+			(function() {
+				var m = localStorage.getItem('theme-mode') || 'system';
+				var d = m === 'dark' || (m === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+				if (d) document.documentElement.classList.add('dark');
+			})();
+		</script>
 	</head>
 	<body data-theme="skeleton" class="h-full">
 		<div style="display: contents">%sveltekit.body%</div>
