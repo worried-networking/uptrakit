@@ -130,15 +130,26 @@ mod tests {
     }
 
     async fn state_with(proxies: Vec<IpNet>, header: &str) -> Arc<AppState> {
+        use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
+        struct NoopCertSigner;
+        impl AgentCertSigner for NoopCertSigner {
+            fn sign_agent_cert(&self, _: &uuid::Uuid, _: u16) -> Result<AgentCertBundle, String> {
+                unimplemented!()
+            }
+        }
         Arc::new(AppState {
             ca_pem: "test".into(),
             trusted_proxies: proxies.into(),
             real_ip_header: header.into(),
             db: test_db().await,
-            settings: Settings::new(RegistrationSettings {
-                mode: RegistrationMode::Open,
-                token_hash: None,
-            }),
+            settings: Settings::new(
+                RegistrationSettings {
+                    mode: RegistrationMode::Open,
+                    token_hash: None,
+                },
+                7,
+            ),
+            cert_signer: Arc::new(NoopCertSigner),
         })
     }
 

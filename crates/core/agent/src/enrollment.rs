@@ -27,6 +27,13 @@ pub struct EnrollStatusResponse {
     pub status: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CertificateResponse {
+    pub cert_pem: String,
+    pub key_pem: String,
+    pub lifetime_days: u16,
+}
+
 pub async fn enroll(
     host: &str,
     port: u16,
@@ -93,6 +100,42 @@ pub async fn poll_status(
         Err(report!(Error::Enrollment(
             "invalid enrollment secret (401)".to_string()
         )))
+    } else {
+        Err(report!(Error::Enrollment(format!(
+            "unexpected status {status_code}: {body}"
+        ))))
+    }
+}
+
+pub async fn request_certificate(
+    host: &str,
+    port: u16,
+    tls: &TlsConnector,
+    enrollment_secret: &str,
+) -> Result<CertificateResponse> {
+    let response = https_request(
+        host,
+        port,
+        tls,
+        "POST",
+        "/api/v1/agents/certificate",
+        None,
+        Some(enrollment_secret),
+    )
+    .await?;
+    let (status_code, body) = parse_http_response(&response)?;
+
+    if status_code == 200 {
+        let resp: CertificateResponse = serde_json::from_str(&body).context_to::<Error>()?;
+        Ok(resp)
+    } else if status_code == 401 {
+        Err(report!(Error::Enrollment(
+            "invalid enrollment secret (401)".to_string()
+        )))
+    } else if status_code == 403 {
+        Err(report!(Error::Enrollment(format!(
+            "agent not approved (403): {body}"
+        ))))
     } else {
         Err(report!(Error::Enrollment(format!(
             "unexpected status {status_code}: {body}"

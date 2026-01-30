@@ -57,6 +57,39 @@ pub async fn fetch_ca_certificate(host: &str, http_port: u16) -> Result<Vec<u8>>
 }
 
 pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
+    let root_store = build_root_store(ca_pem)?;
+
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
+pub fn build_tls_connector_with_client_cert(
+    ca_pem: &[u8],
+    cert_pem: &str,
+    key_pem: &str,
+) -> Result<TlsConnector> {
+    use rustls::pki_types::PrivateKeyDer;
+
+    let root_store = build_root_store(ca_pem)?;
+
+    let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_to::<Error>()?;
+
+    let client_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<Error>()?;
+
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_client_auth_cert(client_certs, client_key)
+        .context_to::<Error>()?;
+
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
+fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
     let certs = CertificateDer::pem_slice_iter(ca_pem)
         .collect::<std::result::Result<Vec<_>, _>>()
         .context_to::<Error>()?;
@@ -70,11 +103,7 @@ pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
         root_store.add(cert).context_to::<Error>()?;
     }
 
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    Ok(TlsConnector::from(Arc::new(config)))
+    Ok(root_store)
 }
 
 pub async fn run_event_loop(host: &str, port: u16, tls_connector: TlsConnector) -> Result<()> {

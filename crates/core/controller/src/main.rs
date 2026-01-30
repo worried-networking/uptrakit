@@ -1,6 +1,8 @@
+mod cert_signer;
 mod cli;
 mod db;
 mod migration;
+mod mtls_acceptor;
 mod pki;
 mod server;
 
@@ -110,9 +112,19 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Install the default crypto provider for rustls
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    // Build rustls config
-    let rustls_config = pki::build_rustls_config(&server_cert.cert_pem, &server_cert.key_pem)
-        .context(AppError::Pki)?;
+    // Build rustls config with optional client auth (mTLS)
+    let rustls_config = pki::build_rustls_config_with_client_auth(
+        &server_cert.cert_pem,
+        &server_cert.key_pem,
+        &ca.cert_pem,
+    )
+    .context(AppError::Pki)?;
+
+    // Create agent certificate signer
+    let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
+        ca.cert_pem.clone(),
+        ca.key_pem.clone(),
+    ));
 
     let app_state = Arc::new(AppState {
         ca_pem: ca.cert_pem,
@@ -120,6 +132,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         real_ip_header: args.real_ip_header,
         db: db_conn,
         settings,
+        cert_signer,
     });
 
     // Start MQTT if configured

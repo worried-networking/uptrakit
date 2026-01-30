@@ -126,8 +126,41 @@ async fn run(args: &Args) -> error::Result<()> {
         }
     }
 
-    // Connect WebSocket and run event loop
-    client::run_event_loop(&args.host, args.port, tls_connector).await?;
+    // Request client certificate for mTLS, or load existing
+    let cert_state = if let Some(existing) = state::AgentCertState::load(&data_dir)? {
+        tracing::info!("loaded existing agent certificate from disk");
+        existing
+    } else {
+        tracing::info!("requesting client certificate from controller");
+        let cert_resp = enrollment::request_certificate(
+            &args.host,
+            args.port,
+            &tls_connector,
+            &agent_state.enrollment_secret,
+        )
+        .await?;
+        tracing::info!(
+            lifetime_days = cert_resp.lifetime_days,
+            "received client certificate"
+        );
+        let cert_state = state::AgentCertState {
+            cert_pem: cert_resp.cert_pem,
+            key_pem: cert_resp.key_pem,
+        };
+        cert_state.save(&data_dir)?;
+        tracing::info!("agent certificate saved to disk");
+        cert_state
+    };
+
+    // Build mTLS connector with client certificate
+    let mtls_connector = client::build_tls_connector_with_client_cert(
+        &ca_pem,
+        &cert_state.cert_pem,
+        &cert_state.key_pem,
+    )?;
+
+    // Connect WebSocket with mTLS and run event loop
+    client::run_event_loop(&args.host, args.port, mtls_connector).await?;
 
     Ok(())
 }

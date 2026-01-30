@@ -1,11 +1,21 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Agent-Controller Protocol
-  version: 0.0.1
+  version: 0.0.2
   description: |
     WebSocket protocol for communication between Uptrakit agents and the controller.
     Agents connect to the controller and exchange ping/pong messages to maintain
     connectivity and measure round-trip time.
+
+    ## Authentication
+
+    The controller supports mutual TLS (mTLS) for agent authentication.
+    After enrollment approval, agents request a short-lived client certificate
+    signed by the internal CA. The certificate CN contains the agent UUID.
+
+    Both authenticated (mTLS) and anonymous WebSocket connections are accepted.
+    When an agent presents a valid client certificate, the controller extracts
+    the agent identity and associates it with the connection.
 
 servers:
   controller:
@@ -13,6 +23,8 @@ servers:
     pathname: /api/v1/ws/agent
     protocol: wss
     description: Controller WebSocket endpoint for agent connections
+    security:
+      - $ref: "#/components/securitySchemes/mtls"
 
 channels:
   agentConnection:
@@ -48,6 +60,15 @@ operations:
       This allows the agent to calculate round-trip time.
 
 components:
+  securitySchemes:
+    mtls:
+      type: X509
+      description: |
+        Optional mutual TLS client certificate authentication.
+        Agents present a client certificate signed by the internal CA
+        with CN set to the agent UUID. Both authenticated and anonymous
+        connections are accepted.
+
   messages:
     ping:
       name: ping

@@ -1,3 +1,4 @@
+use axum::Extension;
 use axum::extract::WebSocketUpgrade;
 use axum::extract::ws::{Message, WebSocket};
 use axum::response::IntoResponse;
@@ -5,12 +6,27 @@ use uptrakit_internal_wire::{
     AgentMessage, ControllerMessage, PingPayload, PongPayload, now_millis,
 };
 
-pub async fn agent_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_agent_socket)
+use crate::extract::AgentIdentity;
+
+pub async fn agent_ws(
+    identity: Option<Extension<AgentIdentity>>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let agent_id = identity.map(|Extension(id)| id.agent_id);
+    if let Some(ref id) = agent_id {
+        tracing::info!(%id, "authenticated agent WS upgrade");
+    } else {
+        tracing::info!("anonymous WS upgrade");
+    }
+    ws.on_upgrade(move |socket| handle_agent_socket(socket, agent_id))
 }
 
-async fn handle_agent_socket(mut socket: WebSocket) {
-    tracing::debug!("agent connected");
+async fn handle_agent_socket(mut socket: WebSocket, agent_id: Option<uuid::Uuid>) {
+    if let Some(ref id) = agent_id {
+        tracing::debug!(%id, "agent connected");
+    } else {
+        tracing::debug!("agent connected (anonymous)");
+    }
 
     while let Some(msg) = socket.recv().await {
         let msg = match msg {
@@ -38,7 +54,11 @@ async fn handle_agent_socket(mut socket: WebSocket) {
         }
     }
 
-    tracing::debug!("agent disconnected");
+    if let Some(ref id) = agent_id {
+        tracing::debug!(%id, "agent disconnected");
+    } else {
+        tracing::debug!("agent disconnected (anonymous)");
+    }
 }
 
 async fn handle_text_message(

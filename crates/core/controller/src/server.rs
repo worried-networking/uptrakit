@@ -8,6 +8,7 @@ use rustls::ServerConfig;
 use thiserror::Error;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::mtls_acceptor::MtlsAcceptor;
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::extract::Protocol;
 
@@ -82,9 +83,12 @@ async fn run_https(addr: SocketAddr, router: Router, tls_config: ServerConfig) -
     let router = router.layer(axum::Extension(Protocol::Tls));
     let tls_config = Arc::new(tls_config);
     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(tls_config);
+    let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config);
+    let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
 
     tracing::info!("HTTPS server listening on {addr}");
-    axum_server::bind_rustls(addr, rustls_config)
+    axum_server::bind(addr)
+        .acceptor(mtls_acceptor)
         .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .context_to::<ServerError>()?;

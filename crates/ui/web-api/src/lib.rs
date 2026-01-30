@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod cert_signer;
 pub mod extract;
 pub mod middleware;
 pub mod routes;
@@ -35,6 +36,8 @@ pub struct AppState {
     pub db: DatabaseConnection,
     /// Application settings catalogue.
     pub settings: Settings,
+    /// Agent certificate signer for mTLS enrollment.
+    pub cert_signer: Arc<dyn cert_signer::AgentCertSigner>,
 }
 
 /// OpenAPI documentation
@@ -59,7 +62,8 @@ pub struct AppState {
         routes::agents::reject_agent,
         routes::agents::deactivate_agent,
         routes::agents::create_enrollment_token,
-        routes::agents::revoke_enrollment_token
+        routes::agents::revoke_enrollment_token,
+        routes::agents::request_certificate
     ),
     components(
         schemas(
@@ -76,7 +80,8 @@ pub struct AppState {
             routes::agents::EnrollStatusResponse,
             routes::agents::AgentResponse,
             routes::agents::EnrollmentTokenResponse,
-            routes::agents::MessageResponse
+            routes::agents::MessageResponse,
+            routes::agents::CertificateResponse
         )
     ),
     info(
@@ -169,6 +174,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::auth::me))
         .routes(routes!(routes::agents::enroll))
         .routes(routes!(routes::agents::enroll_status))
+        .routes(routes!(routes::agents::request_certificate))
         .merge(auth_routes)
         .split_for_parts();
 
@@ -212,9 +218,17 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
+    use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
     use crate::extract::Protocol;
     use crate::settings::Settings;
     use crate::{AppState, build_router};
+
+    struct NoopCertSigner;
+    impl AgentCertSigner for NoopCertSigner {
+        fn sign_agent_cert(&self, _: &uuid::Uuid, _: u16) -> Result<AgentCertBundle, String> {
+            unimplemented!("not used in tests")
+        }
+    }
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -231,10 +245,14 @@ mod tests {
             trusted_proxies: trusted_proxies.into(),
             real_ip_header: "X-Forwarded-For".into(),
             db: test_db().await,
-            settings: Settings::new(RegistrationSettings {
-                mode: RegistrationMode::Open,
-                token_hash: None,
-            }),
+            settings: Settings::new(
+                RegistrationSettings {
+                    mode: RegistrationMode::Open,
+                    token_hash: None,
+                },
+                7,
+            ),
+            cert_signer: Arc::new(NoopCertSigner),
         })
     }
 

@@ -20,3 +20,11 @@ pub struct ClientIp(pub IpAddr);
 /// Set by the `resolve_ip` middleware.
 #[derive(Debug, Clone, Copy)]
 pub struct ProxyIp(pub IpAddr);
+
+/// The verified agent identity from a client TLS certificate.
+/// Injected by the mTLS acceptor when the peer presents a valid cert
+/// signed by the internal CA, with a parseable UUID as CN.
+#[derive(Debug, Clone)]
+pub struct AgentIdentity {
+    pub agent_id: uuid::Uuid,
+}

@@ -21,6 +21,9 @@ pub enum PkiError {
     #[error("PEM parsing error")]
     PemParse,
 
+    #[error("client verifier builder error: {0}")]
+    VerifierBuilder(String),
+
     #[error("hostname resolution failed: {0}")]
     Hostname(String),
 }
@@ -277,7 +280,8 @@ pub fn is_cert_expired(pem: &str) -> bool {
     !cert.validity().is_valid()
 }
 
-/// Build a `rustls::ServerConfig` from PEM-encoded cert and key.
+/// Build a `rustls::ServerConfig` from PEM-encoded cert and key (no client auth).
+#[cfg(test)]
 pub fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::ServerConfig> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -291,6 +295,51 @@ pub fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::Serv
 
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .context_to::<PkiError>()?;
+
+    Ok(config)
+}
+
+/// Build a `rustls::ServerConfig` with optional mTLS client authentication.
+///
+/// Clients presenting a certificate signed by the given CA will be verified;
+/// clients without a certificate are still allowed (anonymous).
+pub fn build_rustls_config_with_client_auth(
+    cert_pem: &str,
+    key_pem: &str,
+    ca_cert_pem: &str,
+) -> Result<rustls::ServerConfig> {
+    use std::sync::Arc;
+
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use rustls::server::WebPkiClientVerifier;
+    use rustls::RootCertStore;
+
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(ca_cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_transform(|_| PkiError::PemParse)?;
+
+    let mut root_store = RootCertStore::empty();
+    for ca_cert in ca_certs {
+        root_store.add(ca_cert).context_to::<PkiError>()?;
+    }
+
+    let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
+        .allow_unauthenticated()
+        .build()
+        .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
+
+    let config = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(verifier)
         .with_single_cert(certs, key)
         .context_to::<PkiError>()?;
 

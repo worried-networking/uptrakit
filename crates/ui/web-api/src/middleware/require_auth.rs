@@ -134,15 +134,26 @@ mod tests {
     }
 
     async fn test_state(db: DatabaseConnection) -> Arc<AppState> {
+        use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
+        struct NoopCertSigner;
+        impl AgentCertSigner for NoopCertSigner {
+            fn sign_agent_cert(&self, _: &uuid::Uuid, _: u16) -> Result<AgentCertBundle, String> {
+                unimplemented!()
+            }
+        }
         Arc::new(AppState {
             ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
             trusted_proxies: vec![].into(),
             real_ip_header: "X-Forwarded-For".into(),
             db,
-            settings: Settings::new(RegistrationSettings {
-                mode: RegistrationMode::Open,
-                token_hash: None,
-            }),
+            settings: Settings::new(
+                RegistrationSettings {
+                    mode: RegistrationMode::Open,
+                    token_hash: None,
+                },
+                7,
+            ),
+            cert_signer: Arc::new(NoopCertSigner),
         })
     }
 

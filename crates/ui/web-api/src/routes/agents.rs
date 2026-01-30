@@ -97,6 +97,13 @@ pub struct MessageResponse {
     pub message: String,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct CertificateResponse {
+    pub cert_pem: String,
+    pub key_pem: String,
+    pub lifetime_days: u16,
+}
+
 // --- Agent-facing endpoints (no user auth) ---
 
 /// Agent requests enrollment
@@ -242,6 +249,83 @@ pub async fn enroll_status(
     let response = EnrollStatusResponse {
         agent_id: agent.id.to_string(),
         status,
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Agent requests a client certificate for mTLS
+#[utoipa::path(
+    post,
+    path = "/api/v1/agents/certificate",
+    responses(
+        (status = 200, description = "Certificate issued", body = CertificateResponse),
+        (status = 401, description = "Invalid enrollment secret"),
+        (status = 403, description = "Agent not approved or deactivated")
+    ),
+    tag = "Agents",
+    security(("bearer_token" = []))
+)]
+pub async fn request_certificate(
+    State(state): State<Arc<AppState>>,
+    req: axum::extract::Request,
+) -> Response {
+    // Extract bearer token (enrollment_secret)
+    let enrollment_secret = match extract_bearer_token(&req) {
+        Some(t) => t,
+        None => return (StatusCode::UNAUTHORIZED, "Missing enrollment secret").into_response(),
+    };
+
+    let secret_hash = token::hash_token(&enrollment_secret);
+
+    // Look up agent by enrollment_secret_hash, excluding deactivated
+    let agent = match Agent::find()
+        .filter(agent::Column::EnrollmentSecretHash.eq(&secret_hash))
+        .filter(agent::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(a)) => a,
+        Ok(None) => return (StatusCode::UNAUTHORIZED, "Invalid enrollment secret").into_response(),
+        Err(e) => {
+            tracing::error!("DB error looking up agent: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Must be approved
+    if agent.status != AgentStatus::Approved.as_str() {
+        return (StatusCode::FORBIDDEN, "Agent is not approved").into_response();
+    }
+
+    // Load lifetime from settings
+    let lifetime_days = state.settings.agent_cert_lifetime_days().await;
+
+    // Sign agent certificate
+    let bundle = match state.cert_signer.sign_agent_cert(&agent.id, lifetime_days) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("Failed to sign agent certificate: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Invalidate enrollment secret: replace hash with hash of a random UUID
+    let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
+    let now = OffsetDateTime::now_utc();
+    let mut active: agent::ActiveModel = agent.into();
+    active.enrollment_secret_hash = Set(invalidated_hash);
+    active.last_seen_at = Set(Some(now));
+    active.updated_at = Set(now);
+    if let Err(e) = active.update(&state.db).await {
+        tracing::error!("Failed to invalidate enrollment secret: {}", e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    let response = CertificateResponse {
+        cert_pem: bundle.cert_pem,
+        key_pem: bundle.key_pem,
+        lifetime_days: bundle.lifetime_days,
     };
 
     (StatusCode::OK, Json(response)).into_response()
