@@ -32,6 +32,7 @@ uptrakit-internal-wire = { path = "../../shared/wire" }
 argon2 = { workspace = true }
 rand = { workspace = true }
 client-ip = { version = "0.2", features = ["forwarded-header"] }
+x509-parser = { workspace = true }
 base64 = "0.22"
 sha2 = "0.10"
 tower-cookies = "0.11"

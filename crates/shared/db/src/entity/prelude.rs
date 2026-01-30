@@ -1,4 +1,5 @@
 pub use super::agent::{Entity as Agent, Model as AgentModel};
+pub use super::agent_certificate::{Entity as AgentCertificate, Model as AgentCertificateModel};
 pub use super::permission::{Entity as Permission, Model as PermissionModel};
 pub use super::role::{Entity as Role, Model as RoleModel};
 pub use super::role_permission::{Entity as RolePermission, Model as RolePermissionModel};

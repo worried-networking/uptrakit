@@ -64,10 +64,10 @@
 			error = null;
 			if (action === 'approve') {
 				const updated = await approveAgent(agentId);
-				agents = agents.map((a) => (a.id === agentId ? updated : a));
+				agents = agents.filter((a) => a.id !== agentId);
 			} else if (action === 'reject') {
-				const updated = await rejectAgent(agentId);
-				agents = agents.map((a) => (a.id === agentId ? updated : a));
+				await rejectAgent(agentId);
+				agents = agents.filter((a) => a.id !== agentId);
 			} else if (action === 'delete') {
 				await deleteAgent(agentId);
 				agents = agents.filter((a) => a.id !== agentId);
@@ -185,15 +185,16 @@
 									Reject
 								</button>
 							</li>
+						{:else}
+							<li>
+								<button
+									class="w-full text-left text-error-500"
+									onclick={() => requestConfirm(agent.id, 'delete', agent.friendly_name)}
+								>
+									Delete
+								</button>
+							</li>
 						{/if}
-						<li>
-							<button
-								class="w-full text-left text-error-500"
-								onclick={() => requestConfirm(agent.id, 'delete', agent.friendly_name)}
-							>
-								Delete
-							</button>
-						</li>
 					</ul>
 				</nav>
 			</div>

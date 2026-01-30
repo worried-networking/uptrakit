@@ -205,7 +205,10 @@ pub async fn send_enroll(
                     }
                 }
             }
-            Message::Close(_) => return Err(report!(Error::ReceiveClosed)),
+            Message::Close(frame) => {
+                log_close_frame(frame);
+                return Err(report!(Error::ReceiveClosed));
+            }
             _ => continue,
         }
     }
@@ -249,7 +252,10 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
                     _ => continue,
                 }
             }
-            Message::Close(_) => return Err(report!(Error::ReceiveClosed)),
+            Message::Close(frame) => {
+                log_close_frame(frame);
+                return Err(report!(Error::ReceiveClosed));
+            }
             _ => continue,
         }
     }
@@ -290,7 +296,10 @@ pub async fn request_certificate_ws(ws: &mut WsStream) -> Result<CertificatePayl
                     }
                 }
             }
-            Message::Close(_) => return Err(report!(Error::ReceiveClosed)),
+            Message::Close(frame) => {
+                log_close_frame(frame);
+                return Err(report!(Error::ReceiveClosed));
+            }
             _ => continue,
         }
     }
@@ -363,8 +372,8 @@ pub async fn run_authenticated_loop(
                             }
                         }
                     }
-                    Message::Close(_) => {
-                        tracing::info!("connection closed by controller");
+                    Message::Close(frame) => {
+                        log_close_frame(frame);
                         break;
                     }
                     _ => {
@@ -393,15 +402,31 @@ pub async fn run_authenticated_loop(
     Ok(())
 }
 
+fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {
+    match frame {
+        Some(frame) => {
+            tracing::warn!(
+                code = %frame.code,
+                reason = %frame.reason,
+                "connection closed by controller: {}", frame.reason
+            );
+        }
+        None => {
+            tracing::info!("connection closed by controller");
+        }
+    }
+}
+
 /// Returns `true` when the error indicates the peer dropped the TCP
 /// connection without sending a TLS `close_notify`.  This is normal
 /// when the controller terminates a connection (e.g. agent deactivated).
 fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
     use tokio_tungstenite::tungstenite::Error as WsErr;
+    use tokio_tungstenite::tungstenite::error::ProtocolError;
     match err {
         WsErr::Io(io) => io.kind() == std::io::ErrorKind::UnexpectedEof,
         WsErr::Protocol(
-            tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+            ProtocolError::ResetWithoutClosingHandshake | ProtocolError::SendAfterClosing,
         ) => true,
         _ => false,
     }

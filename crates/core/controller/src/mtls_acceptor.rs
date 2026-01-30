@@ -46,6 +46,7 @@ pub struct MtlsAcceptFuture<I, S>
 where
     I: AsyncRead + AsyncWrite + Unpin,
 {
+    #[allow(clippy::type_complexity)]
     inner: Pin<Box<dyn Future<Output = io::Result<(TlsStream<I>, S)>> + Send>>,
 }
 
@@ -111,5 +112,9 @@ where
     let (_, cert) = x509_parser::parse_x509_certificate(leaf.as_ref()).ok()?;
     let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
     let agent_id = uuid::Uuid::parse_str(cn).ok()?;
-    Some(AgentIdentity { agent_id })
+    let cert_serial = cert.raw_serial_as_string();
+    Some(AgentIdentity {
+        agent_id,
+        cert_serial,
+    })
 }

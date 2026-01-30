@@ -3,11 +3,11 @@ use std::sync::Arc;
 use axum::Extension;
 use axum::extract::State;
 use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     AgentMessage, ApprovedPayload, CertificatePayload, ControllerMessage, EnrolledPayload,
@@ -21,7 +21,10 @@ use crate::routes::agents::{AgentStatus, do_enroll, do_lookup_by_secret, do_sign
 /// Connection type determined at WebSocket upgrade time.
 enum ConnectionType {
     /// mTLS client cert present → authenticated agent
-    Authenticated(uuid::Uuid),
+    Authenticated {
+        agent_id: uuid::Uuid,
+        cert_serial: String,
+    },
     /// Authorization: Bearer <secret> → reconnecting enrolled agent
     Enrolled(uuid::Uuid),
     /// No auth → expects Enroll message
@@ -38,7 +41,10 @@ pub async fn agent_ws(
     // Determine connection type at upgrade time
     let conn_type = if let Some(Extension(ref id)) = identity {
         tracing::info!(agent_id = %id.agent_id, "authenticated agent WS upgrade (mTLS)");
-        ConnectionType::Authenticated(id.agent_id)
+        ConnectionType::Authenticated {
+            agent_id: id.agent_id,
+            cert_serial: id.cert_serial.clone(),
+        }
     } else if let Some(secret) = extract_bearer(&headers) {
         match do_lookup_by_secret(&state.db, &secret).await {
             Ok(agent) => {
@@ -76,8 +82,11 @@ async fn handle_connection(
     client_ip: Option<std::net::IpAddr>,
 ) {
     match conn_type {
-        ConnectionType::Authenticated(agent_id) => {
-            handle_authenticated(socket, state, agent_id).await;
+        ConnectionType::Authenticated {
+            agent_id,
+            cert_serial,
+        } => {
+            handle_authenticated(socket, state, agent_id, cert_serial).await;
         }
         ConnectionType::Enrolled(agent_id) => {
             handle_enrolled(socket, state, agent_id).await;
@@ -89,10 +98,90 @@ async fn handle_connection(
 }
 
 /// Authenticated path: mTLS agent, Ping/Pong keepalive loop.
-async fn handle_authenticated(socket: WebSocket, state: Arc<AppState>, agent_id: uuid::Uuid) {
+async fn handle_authenticated(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    agent_id: uuid::Uuid,
+    cert_serial: String,
+) {
     tracing::debug!(%agent_id, "authenticated agent connected");
-    let mut push_rx = state.agent_connections.register(agent_id).await;
+
     let (mut sink, mut stream) = socket.split();
+
+    // 1. Certificate validation check
+    let cert_record = match uptrakit_shared_db::entity::prelude::AgentCertificate::find_by_id(
+        cert_serial.clone(),
+    )
+    .one(&state.db)
+    .await
+    {
+        Ok(Some(record)) => {
+            if record.revoked_at.is_some() {
+                tracing::warn!(
+                    %agent_id,
+                    serial_number = %cert_serial,
+                    "rejected connection: certificate is revoked"
+                );
+                let _ = close_with_reason(&mut sink, "certificate revoked").await;
+                return;
+            }
+            record
+        }
+        Ok(None) => {
+            tracing::warn!(
+                %agent_id,
+                serial_number = %cert_serial,
+                "rejected connection: certificate not recognized"
+            );
+            let _ = close_with_reason(&mut sink, "certificate not recognized").await;
+            return;
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "certificate validation check failed");
+            let _ = close_with_reason(&mut sink, "internal error").await;
+            return;
+        }
+    };
+
+    // 2. Agent status check
+    match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(agent)) => {
+            if agent.deactivated_at.is_some() {
+                tracing::warn!(%agent_id, "deactivated agent connected with valid certificate");
+                let _ = close_with_reason(&mut sink, "agent deactivated").await;
+                return;
+            }
+
+            if agent.status != AgentStatus::Approved.as_str() {
+                tracing::warn!(%agent_id, "rejected connection: agent not approved");
+                let _ = close_with_reason(&mut sink, "agent not approved").await;
+                return;
+            }
+        }
+        Ok(None) => {
+            tracing::warn!(%agent_id, "rejected connection: agent not found");
+            let _ = close_with_reason(&mut sink, "agent not found").await;
+            return;
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "agent status check failed");
+            let _ = close_with_reason(&mut sink, "internal error").await;
+            return;
+        }
+    }
+
+    // Record certificate usage
+    let mut active: uptrakit_shared_db::entity::agent_certificate::ActiveModel =
+        cert_record.into();
+    active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
+    if let Err(e) = active.update(&state.db).await {
+        tracing::error!(error = %e, "failed to update certificate last_seen_at");
+    }
+
+    let mut push_rx = state.agent_connections.register(agent_id).await;
 
     loop {
         tokio::select! {
@@ -496,4 +585,15 @@ async fn run_enrolled_loop(
             }
         }
     }
+}
+
+async fn close_with_reason(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    reason: &str,
+) -> Result<(), axum::Error> {
+    sink.send(Message::Close(Some(CloseFrame {
+        code: axum::extract::ws::close_code::POLICY,
+        reason: reason.into(),
+    })))
+    .await
 }

@@ -9,14 +9,18 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use rootcause::{Report, ReportConversion, markers, prelude::*};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, sea_query::Expr,
+};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::sync::Arc;
+use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
-use uptrakit_shared_db::entity::{agent, prelude::*};
+use uptrakit_shared_db::entity::{agent, agent_certificate, prelude::*};
 use utoipa::ToSchema;
 
 const SETTING_KEY_ENROLLMENT_TOKEN_HASH: &str = "agent_enrollment.token_hash";
@@ -208,6 +212,12 @@ pub(crate) async fn do_sign_certificate(
             tracing::error!("Failed to sign agent certificate: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         })?;
+
+    // Record certificate in DB for revocation tracking
+    if let Err(e) = record_certificate(db, agent.id, &bundle.cert_pem).await {
+        tracing::error!("Failed to record agent certificate: {:?}", e);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
+    }
 
     // Invalidate enrollment secret
     let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
@@ -418,6 +428,9 @@ pub async fn reject_agent(
         )
         .await;
 
+    // Terminate any active WebSocket connection for this agent
+    state.agent_connections.unregister(&agent_id).await;
+
     (StatusCode::OK, Json(agent_to_response(updated))).into_response()
 }
 
@@ -472,6 +485,22 @@ pub async fn deactivate_agent(
     if let Err(e) = active.update(&state.db).await {
         tracing::error!("Failed to deactivate agent: {}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // Revoke all non-revoked certificates for this agent
+    let now = OffsetDateTime::now_utc();
+    if let Err(e) = AgentCertificate::update_many()
+        .col_expr(agent_certificate::Column::RevokedAt, Expr::value(Some(now)))
+        .col_expr(
+            agent_certificate::Column::RevocationReason,
+            Expr::value(Some("agent_deactivated".to_string())),
+        )
+        .filter(agent_certificate::Column::AgentId.eq(agent_id))
+        .filter(agent_certificate::Column::RevokedAt.is_null())
+        .exec(&state.db)
+        .await
+    {
+        tracing::error!("Failed to revoke certificates: {}", e);
     }
 
     // Terminate any active WebSocket connection for this agent.
@@ -587,6 +616,87 @@ fn agent_to_response(agent: agent::Model) -> AgentResponse {
         created_at: format_rfc3339(agent.created_at),
         updated_at: format_rfc3339(agent.updated_at),
     }
+}
+
+// --- Certificate recording error type ---
+
+#[derive(Debug, Error)]
+enum CertRecordError {
+    #[error("failed to parse PEM data")]
+    PemParse,
+
+    #[error("failed to parse X.509 certificate")]
+    X509Parse,
+
+    #[error("invalid certificate timestamp: {0}")]
+    Timestamp(#[from] time::error::ComponentRange),
+
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+}
+
+impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for CertRecordError
+where
+    CertRecordError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<sea_orm::DbErr, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(CertRecordError::Database)
+    }
+}
+
+impl<T> ReportConversion<time::error::ComponentRange, markers::Mutable, T> for CertRecordError
+where
+    CertRecordError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<time::error::ComponentRange, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(CertRecordError::Timestamp)
+    }
+}
+
+async fn record_certificate(
+    db: &sea_orm::DatabaseConnection,
+    agent_id: uuid::Uuid,
+    cert_pem: &str,
+) -> Result<(), Report<CertRecordError>> {
+    let (serial, not_before, not_after) = parse_cert_metadata(cert_pem)?;
+
+    let record = agent_certificate::ActiveModel {
+        serial_number: Set(serial),
+        agent_id: Set(agent_id),
+        not_before: Set(not_before),
+        not_after: Set(not_after),
+        revoked_at: Set(None),
+        revocation_reason: Set(None),
+        created_at: Set(OffsetDateTime::now_utc()),
+        last_seen_at: Set(None),
+    };
+
+    record.insert(db).await.context_to::<CertRecordError>()?;
+
+    Ok(())
+}
+
+fn parse_cert_metadata(
+    pem: &str,
+) -> Result<(String, OffsetDateTime, OffsetDateTime), Report<CertRecordError>> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
+        .map_err(|_| report!(CertRecordError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(CertRecordError::X509Parse))?;
+
+    let serial = cert.raw_serial_as_string();
+    let validity = cert.validity();
+    let not_before = OffsetDateTime::from_unix_timestamp(validity.not_before.timestamp())
+        .context_to::<CertRecordError>()?;
+    let not_after = OffsetDateTime::from_unix_timestamp(validity.not_after.timestamp())
+        .context_to::<CertRecordError>()?;
+
+    Ok((serial, not_before, not_after))
 }
 
 async fn check_admin_role(db: &sea_orm::DatabaseConnection, user_id: uuid::Uuid) -> bool {

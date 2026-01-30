@@ -27,4 +27,5 @@ pub struct ProxyIp(pub IpAddr);
 #[derive(Debug, Clone)]
 pub struct AgentIdentity {
     pub agent_id: uuid::Uuid,
+    pub cert_serial: String,
 }

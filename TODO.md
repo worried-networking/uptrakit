@@ -72,15 +72,15 @@ Essential infrastructure needed before feature development.
 
 ### Agent Authentication & Security
 
-- [ ] Implement mTLS for agent-controller communication
-  - [ ] Generate client certificates for agents during enrollment
-  - [ ] Add certificate-based authentication middleware
-  - [ ] Extract agent identity from client certificates
-  - [ ] Implement certificate validation on controller
-- [ ] CA certificate persistence on agents
-  - [ ] Secure storage location for CA certificate
-  - [ ] CA certificate pinning to prevent MITM attacks
-  - [ ] Verification of controller certificate against pinned CA
+- [x] Implement mTLS for agent-controller communication
+  - [x] Generate client certificates for agents during enrollment
+  - [x] Add certificate-based authentication middleware
+  - [x] Extract agent identity from client certificates
+  - [x] Implement certificate validation on controller
+- [x] CA certificate persistence on agents
+  - [x] Secure storage location for CA certificate
+  - [x] CA certificate pinning to prevent MITM attacks
+  - [x] Verification of controller certificate against pinned CA
   - [ ] Fallback handling for CA certificate issues
 - [ ] CA rotation support
   - [ ] Design dual-CA validation mechanism
@@ -91,34 +91,34 @@ Essential infrastructure needed before feature development.
 - [ ] Certificate lifecycle management
   - [ ] Certificate expiration monitoring
   - [ ] Automated certificate renewal for agents
-  - [ ] Certificate revocation mechanism (CRL or OCSP)
-  - [ ] Revoked certificate checking on each connection
+  - [x] Certificate revocation mechanism (CRL or OCSP)
+  - [x] Revoked certificate checking on each connection
 
 ### Wire Protocol
 
 - [ ] Design message types beyond ping/pong
-  - [ ] Agent registration message
+  - [x] Agent registration message
   - [ ] Software inventory report message
   - [ ] Version check request/response
   - [ ] Update command message
   - [ ] Status update message
-  - [ ] Error reporting message
-- [ ] Implement message serialization/deserialization
-- [ ] Add message routing in controller
-- [ ] Implement message handling in agent
+  - [x] Error reporting message
+- [x] Implement message serialization/deserialization
+- [x] Add message routing in controller
+- [x] Implement message handling in agent
 - [ ] Add protocol versioning for future compatibility
 
 ### Agent Registration & Discovery
 
-- [ ] Design agent enrollment flow
-  - [ ] Initial registration request from agent
-  - [ ] Controller approval mechanism (auto or manual)
-  - [ ] Client certificate issuance
-  - [ ] Agent ID assignment
-- [ ] Implement agent registration endpoint
+- [x] Design agent enrollment flow
+  - [x] Initial registration request from agent
+  - [x] Controller approval mechanism (auto or manual)
+  - [x] Client certificate issuance
+  - [x] Agent ID assignment
+- [x] Implement agent registration endpoint
 - [ ] Create agent inventory tracking
-- [ ] Add agent heartbeat mechanism
-- [ ] Implement agent status monitoring (online/offline)
+- [x] Add agent heartbeat mechanism
+- [x] Implement agent status monitoring (online/offline)
 - [ ] Add agent metadata collection (OS, architecture, capabilities)
 
 ### Provider Trait System
@@ -242,22 +242,22 @@ Ways users interact with the system.
 - [x] Add API authentication
 - [ ] Implement API rate limiting
 - [x] Add API documentation (OpenAPI/Swagger)
-- [ ] Add WebSocket endpoint for real-time updates
+- [x] Add WebSocket endpoint for real-time updates
 
 ### Web UI
 
-- [ ] Create basic web UI framework
-  - [ ] Choose framework (Svelte, React, Vue)
-  - [ ] Set up build system
-  - [ ] Implement API client
+- [x] Create basic web UI framework
+  - [x] Choose framework (Svelte, React, Vue)
+  - [x] Set up build system
+  - [x] Implement API client
 - [ ] Build dashboard view
   - [ ] System overview statistics
   - [ ] Recent update activity
   - [ ] Alert/notification display
-- [ ] Implement host list view
+- [x] Implement host list view
   - [ ] Sortable/filterable table
   - [ ] Host detail drill-down
-  - [ ] Host status indicators
+  - [x] Host status indicators
 - [ ] Create software list view
   - [ ] Grouped by host or provider
   - [ ] Current vs. available version display
@@ -424,14 +424,14 @@ Comprehensive security hardening.
 
 ### mTLS Implementation Details
 
-- [ ] Automated client certificate issuance
+- [x] Automated client certificate issuance
   - [ ] Certificate signing request (CSR) handling
-  - [ ] Automated CA signing
-  - [ ] Certificate delivery to agents
-- [ ] Certificate revocation mechanism
+  - [x] Automated CA signing
+  - [x] Certificate delivery to agents
+- [x] Certificate revocation mechanism
   - [ ] CRL generation and distribution
   - [ ] OCSP responder implementation
-  - [ ] Revocation checking on agent connections
+  - [x] Revocation checking on agent connections
 - [ ] Certificate expiration handling
   - [ ] Expiration monitoring dashboard
   - [ ] Automated renewal workflow
@@ -454,18 +454,18 @@ Comprehensive security hardening.
 
 ### Agent Authentication
 
-- [ ] Certificate-based agent identity
-  - [ ] Identity extraction from certificates
-  - [ ] Identity-to-agent mapping
-  - [ ] Identity persistence
+- [x] Certificate-based agent identity
+  - [x] Identity extraction from certificates
+  - [x] Identity-to-agent mapping
+  - [x] Identity persistence
 - [ ] Agent authorization policies
   - [ ] Role-based access control
   - [ ] Per-agent permissions
   - [ ] Policy enforcement points
-- [ ] Secure agent enrollment flow
-  - [ ] Enrollment token generation
-  - [ ] Token expiration and validation
-  - [ ] Enrollment approval workflow
+- [x] Secure agent enrollment flow
+  - [x] Enrollment token generation
+  - [x] Token expiration and validation
+  - [x] Enrollment approval workflow
 
 ### Audit Logging
 
