@@ -28,6 +28,8 @@ pub struct AppState {
     pub ca_pem: String,
     /// IP networks whose `X-Forwarded-*` headers are trusted.
     pub trusted_proxies: Arc<[IpNet]>,
+    /// Header to extract the real client IP from when behind a trusted proxy.
+    pub real_ip_header: String,
     /// Database connection pool.
     pub db: DatabaseConnection,
     /// Application settings catalogue.
@@ -94,8 +96,7 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let wants_json = accept.contains("application/json")
-        || accept.contains("text/json");
+    let wants_json = accept.contains("application/json") || accept.contains("text/json");
 
     if wants_json {
         (
@@ -148,10 +149,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .merge(auth_router)
         .merge(settings_router)
         .route("/api/v1/ws/agent", get(routes::agent_ws::agent_ws))
-        .route_layer(axum_mw::from_fn_with_state(
-            Arc::clone(&state),
-            require_https::require_https,
-        ))
+        .route_layer(axum_mw::from_fn(require_https::require_https))
         .route("/healthz", get(routes::health::healthz))
         .route("/api/v1/ca.crt", get(routes::ca::ca_cert));
 
@@ -166,7 +164,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         router = router.route("/api/openapi.json", get(|| async move { axum::Json(api) }));
     }
 
-    router.with_state(state)
+    router
+        .layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
+            middleware::resolve_ip::resolve_ip,
+        ))
+        .layer(axum_mw::from_fn(middleware::request_log::request_log))
+        .with_state(state)
 }
 
 #[cfg(test)]
@@ -199,6 +203,7 @@ mod tests {
         Arc::new(AppState {
             ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
             trusted_proxies: trusted_proxies.into(),
+            real_ip_header: "X-Forwarded-For".into(),
             db: test_db().await,
             settings: Settings::new(RegistrationSettings {
                 mode: RegistrationMode::Open,
@@ -257,6 +262,7 @@ mod tests {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 12345);
         let mut req = Request::builder()
             .uri("/api/v1/ws/agent")
+            .header("x-forwarded-for", "203.0.113.45")
             .header("x-forwarded-proto", "https")
             .header("connection", "upgrade")
             .header("upgrade", "websocket")

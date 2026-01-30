@@ -137,6 +137,7 @@ mod tests {
         Arc::new(AppState {
             ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
             trusted_proxies: vec![].into(),
+            real_ip_header: "X-Forwarded-For".into(),
             db,
             settings: Settings::new(RegistrationSettings {
                 mode: RegistrationMode::Open,

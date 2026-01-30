@@ -8,13 +8,33 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
+use rootcause::{Report, prelude::*};
+use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::settings::Settings;
 
+#[derive(Debug, Error)]
+enum AppError {
+    #[error("{0}")]
+    Config(String),
+
+    #[error("database initialization failed")]
+    Database,
+
+    #[error("settings initialization failed")]
+    Settings,
+
+    #[error("PKI initialization failed")]
+    Pki,
+
+    #[error("server error")]
+    Server,
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -23,33 +43,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = cli::Args::parse();
 
+    if let Err(report) = run(args).await {
+        eprintln!("Error: {report:?}");
+        std::process::ExitCode::FAILURE
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
+}
+
+async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Resolve data directory
-    let data_dir = args.resolve_data_dir()?;
-    std::fs::create_dir_all(&data_dir)?;
+    let data_dir = args
+        .resolve_data_dir()
+        .map_err(|s| report!(AppError::Config(s)))?;
+    std::fs::create_dir_all(&data_dir).context_transform(|e| {
+        AppError::Config(format!("failed to create data directory: {e}"))
+    })?;
     tracing::info!("data directory: {}", data_dir.display());
 
     // Initialize database
-    let db_config = db::DbConfig::from_args(args.db_url, &data_dir)
-        .map_err(|e| format!("database configuration failed: {e:?}"))?;
+    let db_config =
+        db::DbConfig::from_args(args.db_url, &data_dir).context(AppError::Database)?;
     tracing::info!(
         "connecting to database: {}",
         db::sanitize_url(&db_config.url)
     );
     let db_conn = db::connect(&db_config.url)
         .await
-        .map_err(|e| format!("database connection failed: {e:?}"))?;
+        .context(AppError::Database)?;
 
     tracing::info!("running database migrations");
     migration::run_migrations(&db_conn)
         .await
-        .map_err(|e| format!("database migration failed: {e:?}"))?;
+        .context(AppError::Database)?;
 
     tracing::info!("database initialized successfully");
 
     // Initialize settings
     let (settings, reg_token) = Settings::load(&db_conn)
         .await
-        .map_err(|e| format!("settings initialization failed: {e:?}"))?;
+        .context(AppError::Settings)?;
     if let Some(token) = reg_token {
         tracing::info!("==========================================================");
         tracing::info!("  No users found. Use this one-time registration token:");
@@ -62,19 +95,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Validate TLS args
     if args.tls_cert.is_some() != args.tls_key.is_some() {
-        return Err("both --tls-cert and --tls-key must be provided together".into());
+        return Err(report!(AppError::Config(
+            "both --tls-cert and --tls-key must be provided together".into()
+        )));
     }
 
     // Initialize PKI
-    let pki_path = pki::pki_dir(&data_dir).map_err(|e| format!("{e:?}"))?;
-    let ca = pki::load_or_generate_ca(&pki_path).map_err(|e| format!("{e:?}"))?;
+    let pki_path = pki::pki_dir(&data_dir).context(AppError::Pki)?;
+    let ca = pki::load_or_generate_ca(&pki_path).context(AppError::Pki)?;
 
     // Resolve server certificate
     let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
-        pki::load_external_cert(cert_path, key_path).map_err(|e| format!("{e:?}"))?
+        pki::load_external_cert(cert_path, key_path).context(AppError::Pki)?
     } else {
-        pki::load_or_generate_server_cert(&pki_path, &ca, &args.sans)
-            .map_err(|e| format!("{e:?}"))?
+        pki::load_or_generate_server_cert(&pki_path, &ca, &args.sans).context(AppError::Pki)?
     };
 
     // Install the default crypto provider for rustls
@@ -82,11 +116,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build rustls config
     let rustls_config = pki::build_rustls_config(&server_cert.cert_pem, &server_cert.key_pem)
-        .map_err(|e| format!("{e:?}"))?;
+        .context(AppError::Pki)?;
 
     let app_state = Arc::new(AppState {
         ca_pem: ca.cert_pem,
         trusted_proxies: args.trusted_proxies.into(),
+        real_ip_header: args.real_ip_header,
         db: db_conn,
         settings,
     });
@@ -95,7 +130,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "mqtt")]
     let mqtt_handle = if let Some(host) = args.mqtt.mqtt_host {
         if args.mqtt.mqtt_password.is_some() && args.mqtt.mqtt_username.is_none() {
-            return Err("--mqtt-password requires --mqtt-username".into());
+            return Err(report!(AppError::Config(
+                "--mqtt-password requires --mqtt-username".into()
+            )));
         }
         let config = uptrakit_mqtt::MqttConfig {
             host,
@@ -125,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             app_state,
             static_dir,
         }) => {
-            result.map_err(|e| format!("{e:?}"))?;
+            result.context(AppError::Server)?;
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("received shutdown signal");
@@ -147,11 +184,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// relative to the current working directory.
 fn resolve_static_dir(
     explicit: Option<PathBuf>,
-) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+) -> Result<Option<PathBuf>, Report<AppError>> {
     if let Some(dir) = explicit {
         let index = dir.join("index.html");
         if !index.is_file() {
-            return Err(format!("--static-dir {}: missing index.html", dir.display()).into());
+            return Err(report!(AppError::Config(format!(
+                "--static-dir {}: missing index.html",
+                dir.display()
+            ))));
         }
         tracing::info!("serving static files from {}", dir.display());
         return Ok(Some(dir));

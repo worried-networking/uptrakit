@@ -45,6 +45,12 @@ pub struct Args {
     #[arg(long = "trusted-proxy", value_parser = parse_proxy)]
     pub trusted_proxies: Vec<IpNet>,
 
+    /// Header to extract the real client IP from when behind a trusted proxy.
+    /// Supported: X-Forwarded-For (default), Forwarded (RFC 7239), X-Real-Ip,
+    /// or any custom header name (parsed as comma-separated IPs).
+    #[arg(long, default_value = "X-Forwarded-For")]
+    pub real_ip_header: String,
+
     /// Additional SAN for the generated server certificate (IP or DNS name, repeatable).
     #[arg(long = "san")]
     pub sans: Vec<String>,

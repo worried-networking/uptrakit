@@ -393,7 +393,7 @@ async fn assign_admin_role(
         .one(db)
         .await
         .context_to()?
-        .ok_or_else(|| AuthError::Internal("admin role not found".to_string()))?;
+        .ok_or_else(|| report!(AuthError::Internal("admin role not found".to_string())))?;
 
     let now = OffsetDateTime::now_utc();
 

@@ -89,7 +89,8 @@ These are non-negotiable design constraints. Do not violate them.
 
 ## Error handling
 
-Use the [`rootcause`](https://github.com/rootcause-rs/rootcause) crate for error propagation and handling. Use [`thiserror`](https://github.com/dtolnay/thiserror) for constructing and designing errors.
+Use the [`rootcause`](https://github.com/rootcause-rs/rootcause) crate for error propagation and handling. Use [`thiserror`](https://github.com/dtolnay/thiserror) for constructing and designing errors. Ensure that everything
+related to errors complies with the rootcause-specified best-practices (see <https://github.com/rootcause-rs/rootcause/blob/main/examples/thiserror_interop.rs>).
 
 - Add context at boundaries (host, provider, software item, operation).
 - Prefer structured context over generic string errors.

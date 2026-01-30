@@ -64,11 +64,11 @@ impl SessionService {
             .one(&self.db)
             .await
             .context_to()?
-            .ok_or(AuthError::SessionExpired)?;
+            .ok_or_else(|| report!(AuthError::SessionExpired))?;
 
         // Check if expired
         if now >= session.expires_at {
-            return Err(AuthError::SessionExpired.into());
+            return Err(report!(AuthError::SessionExpired));
         }
 
         // Save user_id before potentially moving session

@@ -323,6 +323,8 @@ mod tests {
 
     #[test]
     fn server_cert_signed_by_ca() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         let ca = generate_ca().unwrap();
         let bundle = generate_server_cert(&ca, &[]).unwrap();
         assert!(bundle.cert_pem.contains("BEGIN CERTIFICATE"));
