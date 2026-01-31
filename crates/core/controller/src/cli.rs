@@ -22,12 +22,16 @@ pub struct Args {
     pub db_url: Option<String>,
 
     /// HTTP listen address (dual-stack by default).
-    #[arg(long, default_value = "[::]:8080")]
-    pub http_addr: SocketAddr,
+    /// Stored in DB as `network.http_addr`. CLI value used only on first run
+    /// or with `--force-settings-override`.
+    #[arg(long)]
+    pub http_addr: Option<SocketAddr>,
 
     /// HTTPS listen address (dual-stack by default).
-    #[arg(long, default_value = "[::]:8443")]
-    pub https_addr: SocketAddr,
+    /// Stored in DB as `network.https_addr`. CLI value used only on first run
+    /// or with `--force-settings-override`.
+    #[arg(long)]
+    pub https_addr: Option<SocketAddr>,
 
     /// Override: path to PEM-encoded server certificate.
     /// If not provided, a certificate is auto-generated using the internal CA.
@@ -42,14 +46,18 @@ pub struct Args {
     /// Trusted reverse proxy IP or CIDR (repeatable).
     /// Bare IPs are treated as /32 (IPv4) or /128 (IPv6).
     /// Both IPv4 and IPv6 are supported.
+    /// Stored in DB as `network.trusted_proxies`. CLI value used only on first
+    /// run or with `--force-settings-override`.
     #[arg(long = "trusted-proxy", value_parser = parse_proxy)]
     pub trusted_proxies: Vec<IpNet>,
 
     /// Header to extract the real client IP from when behind a trusted proxy.
-    /// Supported: X-Forwarded-For (default), Forwarded (RFC 7239), X-Real-Ip,
+    /// Supported: X-Forwarded-For, Forwarded (RFC 7239), X-Real-Ip,
     /// or any custom header name (parsed as comma-separated IPs).
-    #[arg(long, default_value = "X-Forwarded-For")]
-    pub real_ip_header: String,
+    /// Stored in DB as `network.real_ip_header`. CLI value used only on first
+    /// run or with `--force-settings-override`.
+    #[arg(long)]
+    pub real_ip_header: Option<String>,
 
     /// Override: path to PEM-encoded CA certificate.
     /// If not provided, a CA is auto-generated and managed internally.
@@ -63,12 +71,20 @@ pub struct Args {
     pub ca_key: Option<PathBuf>,
 
     /// Additional SAN for the generated server certificate (IP or DNS name, repeatable).
+    /// Stored in DB as `network.extra_sans`. CLI value used only on first run
+    /// or with `--force-settings-override`.
     #[arg(long = "san")]
     pub sans: Vec<String>,
 
     /// Path to the built frontend directory. Enables SPA serving.
     #[arg(long)]
     pub static_dir: Option<PathBuf>,
+
+    /// When set, CLI values for DB-managed settings (network, MQTT) overwrite
+    /// any existing values in the database. Without this flag, DB values take
+    /// priority and a warning is logged when CLI values differ.
+    #[arg(long)]
+    pub force_settings_override: bool,
 
     #[cfg(feature = "mqtt")]
     #[command(flatten)]
@@ -84,12 +100,16 @@ pub struct MqttArgs {
     pub mqtt_host: Option<String>,
 
     /// MQTT broker port.
-    #[arg(long, default_value_t = 1883)]
-    pub mqtt_port: u16,
+    /// Stored in DB as `mqtt.port`. CLI value used only on first run
+    /// or with `--force-settings-override`.
+    #[arg(long)]
+    pub mqtt_port: Option<u16>,
 
     /// MQTT client ID.
-    #[arg(long, default_value = "uptrakit-controller")]
-    pub mqtt_client_id: String,
+    /// Stored in DB as `mqtt.client_id`. CLI value used only on first run
+    /// or with `--force-settings-override`.
+    #[arg(long)]
+    pub mqtt_client_id: Option<String>,
 
     /// MQTT username.
     #[arg(long)]
@@ -100,8 +120,10 @@ pub struct MqttArgs {
     pub mqtt_password: Option<String>,
 
     /// MQTT topic prefix.
-    #[arg(long, default_value = "uptrakit")]
-    pub mqtt_topic_prefix: String,
+    /// Stored in DB as `mqtt.topic_prefix`. CLI value used only on first run
+    /// or with `--force-settings-override`.
+    #[arg(long)]
+    pub mqtt_topic_prefix: Option<String>,
 }
 
 /// Parse a trusted proxy argument. Accepts:
@@ -143,7 +165,6 @@ fn home_dir() -> Option<PathBuf> {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    #[cfg(feature = "mqtt")]
     use clap::Parser;
     use ipnet::IpNet;
 
@@ -187,17 +208,60 @@ mod tests {
         assert!(parse_proxy("").is_err());
     }
 
+    #[test]
+    fn defaults_have_no_addresses() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(args.http_addr.is_none());
+        assert!(args.https_addr.is_none());
+        assert!(args.real_ip_header.is_none());
+        assert!(args.trusted_proxies.is_empty());
+        assert!(args.sans.is_empty());
+        assert!(!args.force_settings_override);
+    }
+
+    #[test]
+    fn explicit_addresses_parsed() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--http-addr",
+            "0.0.0.0:9080",
+            "--https-addr",
+            "0.0.0.0:9443",
+            "--real-ip-header",
+            "X-Real-Ip",
+        ])
+        .expect("should parse explicit addresses");
+        assert_eq!(
+            args.http_addr.unwrap(),
+            "0.0.0.0:9080".parse::<std::net::SocketAddr>().unwrap()
+        );
+        assert_eq!(
+            args.https_addr.unwrap(),
+            "0.0.0.0:9443".parse::<std::net::SocketAddr>().unwrap()
+        );
+        assert_eq!(args.real_ip_header.as_deref(), Some("X-Real-Ip"));
+    }
+
+    #[test]
+    fn force_settings_override_flag() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller", "--force-settings-override"])
+                .expect("should parse force flag");
+        assert!(args.force_settings_override);
+    }
+
     #[cfg(feature = "mqtt")]
     #[test]
     fn mqtt_args_not_set_by_default() {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
         assert!(args.mqtt.mqtt_host.is_none());
-        assert_eq!(args.mqtt.mqtt_port, 1883);
-        assert_eq!(args.mqtt.mqtt_client_id, "uptrakit-controller");
+        assert!(args.mqtt.mqtt_port.is_none());
+        assert!(args.mqtt.mqtt_client_id.is_none());
         assert!(args.mqtt.mqtt_username.is_none());
         assert!(args.mqtt.mqtt_password.is_none());
-        assert_eq!(args.mqtt.mqtt_topic_prefix, "uptrakit");
+        assert!(args.mqtt.mqtt_topic_prefix.is_none());
     }
 
     #[cfg(feature = "mqtt")]
@@ -221,11 +285,14 @@ mod tests {
         .expect("should parse custom values");
 
         assert_eq!(args.mqtt.mqtt_host.as_deref(), Some("broker.local"));
-        assert_eq!(args.mqtt.mqtt_port, 8883);
-        assert_eq!(args.mqtt.mqtt_client_id, "my-controller");
+        assert_eq!(args.mqtt.mqtt_port, Some(8883));
+        assert_eq!(args.mqtt.mqtt_client_id.as_deref(), Some("my-controller"));
         assert_eq!(args.mqtt.mqtt_username.as_deref(), Some("user"));
         assert_eq!(args.mqtt.mqtt_password.as_deref(), Some("pass"));
-        assert_eq!(args.mqtt.mqtt_topic_prefix, "home/uptrakit");
+        assert_eq!(
+            args.mqtt.mqtt_topic_prefix.as_deref(),
+            Some("home/uptrakit")
+        );
     }
 
     #[test]
