@@ -70,15 +70,15 @@ pub struct AppState {
     pub agent_connections: AgentConnectionRegistry,
     /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
     pub revocation_notify: Arc<tokio::sync::Notify>,
-    /// In-memory store for pending OIDC authorization flows.
+    /// Database-backed store for pending OIDC authorization flows.
     pub oidc_flow_store: OidcFlowStore,
-    /// In-memory store for pending OIDC account links.
+    /// Database-backed store for pending OIDC account links.
     pub account_link_store: AccountLinkStore,
     /// JWT signing/validation manager for access tokens.
     pub jwt: Arc<JwtManager>,
-    /// In-memory store for pending OIDC token exchanges.
+    /// Database-backed store for pending OIDC token exchanges.
     pub oidc_token_exchange_store: OidcTokenExchangeStore,
-    /// In-memory store for pending device authorization flows.
+    /// Database-backed store for pending device authorization flows.
     pub device_flow_store: DeviceFlowStore,
     /// Path to the PKI directory (for server cert renewal).
     pub pki_path: std::path::PathBuf,
@@ -411,11 +411,12 @@ mod tests {
             axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
         };
 
+        let db = test_db().await;
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             trusted_proxies: trusted_proxies.into(),
             real_ip_header: "X-Forwarded-For".into(),
-            db: test_db().await,
             settings: Settings::new(
                 RegistrationSettings {
                     mode: RegistrationMode::Open,
@@ -426,16 +427,19 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
-            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
             jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
                 b"test-secret-lib",
             )),
-            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
-            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                db.clone(),
+            ),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             extra_sans: Arc::new([]),
+            db,
         })
     }
 

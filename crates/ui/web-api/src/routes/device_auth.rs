@@ -67,7 +67,7 @@ pub async fn device_auth_start(
     headers: HeaderMap,
     Json(req): Json<DeviceAuthStartRequest>,
 ) -> Response {
-    let (device_code, user_code) = match state.device_flow_store.create(req.client_name) {
+    let (device_code, user_code) = match state.device_flow_store.create(req.client_name).await {
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Failed to create device flow: {e}");
@@ -118,7 +118,11 @@ pub async fn device_auth_poll(
     Json(req): Json<DeviceAuthPollRequest>,
 ) -> Response {
     // Check rate limiting
-    match state.device_flow_store.is_rate_limited(&req.device_code) {
+    match state
+        .device_flow_store
+        .is_rate_limited(&req.device_code)
+        .await
+    {
         Ok(true) => {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -144,12 +148,12 @@ pub async fn device_auth_poll(
     }
 
     // Record poll timestamp
-    if let Err(e) = state.device_flow_store.record_poll(&req.device_code) {
+    if let Err(e) = state.device_flow_store.record_poll(&req.device_code).await {
         tracing::error!("Failed to record poll: {e}");
     }
 
     // Check status
-    let status = match state.device_flow_store.get_status(&req.device_code) {
+    let status = match state.device_flow_store.get_status(&req.device_code).await {
         Ok(s) => s,
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
@@ -184,19 +188,20 @@ pub async fn device_auth_poll(
             .into_response(),
         DeviceFlowStatus::Authorized { .. } => {
             // Consume the flow (one-time use)
-            let (user_id, client_name) = match state.device_flow_store.consume(&req.device_code) {
-                Ok(result) => result,
-                Err(e) => match e.current_context() {
-                    DeviceFlowError::NotFound => {
-                        return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
-                            .into_response();
-                    }
-                    _ => {
-                        tracing::error!("Device flow consume failed: {e}");
-                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                    }
-                },
-            };
+            let (user_id, client_name) =
+                match state.device_flow_store.consume(&req.device_code).await {
+                    Ok(result) => result,
+                    Err(e) => match e.current_context() {
+                        DeviceFlowError::NotFound => {
+                            return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
+                                .into_response();
+                        }
+                        _ => {
+                            tracing::error!("Device flow consume failed: {e}");
+                            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                        }
+                    },
+                };
 
             let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
 
@@ -245,6 +250,7 @@ pub async fn device_auth_approve(
     match state
         .device_flow_store
         .approve(&normalized, auth_user.user_id)
+        .await
     {
         Ok(()) => (
             StatusCode::OK,

@@ -178,11 +178,12 @@ mod tests {
             axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
         };
 
+        let db = test_db().await;
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             trusted_proxies: proxies.into(),
             real_ip_header: header.into(),
-            db: test_db().await,
+            db: db.clone(),
             settings: Settings::new(
                 RegistrationSettings {
                     mode: RegistrationMode::Open,
@@ -193,13 +194,15 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
-            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
             jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
                 b"test-secret-resolve-ip",
             )),
-            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
-            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                db.clone(),
+            ),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             extra_sans: Arc::new([]),
