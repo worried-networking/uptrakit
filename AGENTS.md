@@ -150,7 +150,7 @@ These are non-negotiable design constraints. Do not violate them.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
 12. **Do not add any `allow()`** without excpicit approval from the user.
-13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, `unwrap_or_else` for mutex poisoning, serialization helpers).
+13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
 ## Device authorization flow (CLI login)
 
@@ -285,6 +285,69 @@ let user = users::Entity::find_by_id(id)
 ```rust
 return Err(report!(MyError::NotFound("item not found".to_string())));
 ```
+
+### Pattern 5: Adding parent context with `.context()`
+
+Used when wrapping a low-level error with a higher-level description. Creates a parent node in the error tree:
+
+```rust
+db::connect(&db_config.url)
+    .await
+    .context(AppError::Database)?;
+```
+
+### Pattern 6: `context_transform()` with closures
+
+For non-`#[from]` error conversions where you need to compute the target variant:
+
+```rust
+hostname::get()
+    .context_transform(|e| PkiError::Hostname(e.to_string()))?;
+```
+
+Unlike `.context()` which creates a parent node, `.context_transform()` replaces the context type in place (single-node structure).
+
+### Pattern 7: `map_err` with `report!()` for one-off conversions
+
+When there's no `ReportConversion` impl and adding one isn't justified:
+
+```rust
+serde_json::from_str(json_str)
+    .map_err(|e| report!(CliError::Other(format!("Invalid JSON: {e}"))))?;
+```
+
+### Pattern 8: Error inspection with `.current_context()`
+
+Pattern-match on typed `Report` errors for semantic handling (e.g., retry logic):
+
+```rust
+if let Err(e) = operation().await {
+    match e.current_context() {
+        MyError::Transient => retry(),
+        MyError::Fatal(msg) => return Err(e),
+    }
+}
+```
+
+### Anti-patterns
+
+These are error handling patterns that MUST NOT be used:
+
+- **`Result<T, String>`** — always define a typed error enum with `Report<E>`.
+- **`Result<T, (StatusCode, &str)>`** — use typed errors; map to HTTP status at the handler level.
+- **Reusing unrelated error variants** (e.g. `PkiError::Hostname` for a database error) — add a new variant.
+- **`format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to preserve the original error.
+- **Bare error enums without `Report`** — every boundary error type should use `pub type Result<T> = std::result::Result<T, Report<MyError>>`.
+
+### Mutex and RwLock locks
+
+The release profile uses `panic = "abort"`, so lock poisoning **cannot occur in production**. `.unwrap()` is allowed on `Mutex::lock()`, `RwLock::read()`, and `RwLock::write()`:
+
+```rust
+let guard = store.lock().unwrap();
+```
+
+Do NOT use `.map_err()` to convert `PoisonError` into an application error — this adds unnecessary complexity since poisoning is impossible with `panic = "abort"`.
 
 ### Rules summary
 

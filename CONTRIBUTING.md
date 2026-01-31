@@ -165,7 +165,7 @@ Guidelines:
 - Prefer structured context over stringly-typed "something failed".
 - **Never use `unwrap()`, `expect()`, or `panic!()` in production code.** These are only acceptable inside `#[cfg(test)]` modules. Preferred alternatives:
   - **Fallible parsing / serialization**: use `match` with a sensible fallback or propagate the error.
-  - **`Mutex::lock()`**: use `.unwrap_or_else(|poisoned| poisoned.into_inner())` to recover from mutex poisoning when the guarded data is ephemeral.
+  - **`Mutex::lock()` / `RwLock::read()` / `RwLock::write()`**: use `.unwrap()` — safe because `panic = "abort"` in the release profile makes lock poisoning impossible. Do **not** use `.map_err()` to convert `PoisonError` into an application error.
   - **Repeated serialization** (e.g. WebSocket handlers): extract a helper function that returns `Option<String>` and logs on failure, then use `let Some(json) = helper(&msg) else { break/return; };` at each call site.
   - **`From` trait impls** (which cannot return `Result`): use `match` with a safe default value.
 
