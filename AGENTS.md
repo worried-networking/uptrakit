@@ -226,6 +226,52 @@ The first registered user gets the `admin` role. Subsequent users (password or O
 3. Add the check in the relevant route handler(s).
 4. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
 
+## DB-managed settings
+
+Most CLI arguments are reconciled with DB-persisted values at startup. The reconciliation module (`crates/core/controller/src/reconcile.rs`) implements a generic 5-case priority logic. Settings are stored in the `setting` DB entity as JSON values.
+
+### Settings reference
+
+| CLI flag | DB key | Default | Runtime-changeable |
+| --- | --- | --- | --- |
+| `--trusted-proxy` | `network.trusted_proxies` | `[]` | Yes |
+| `--real-ip-header` | `network.real_ip_header` | `X-Forwarded-For` | Yes |
+| `--san` | `network.extra_sans` | `[]` | Yes |
+| `--http-addr` | `network.http_addr` | `[::]:8080` | No (restart) |
+| `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
+| `--mqtt-host` | `mqtt.host` | `null` | No (restart) |
+| `--mqtt-port` | `mqtt.port` | `1883` | No (restart) |
+| `--mqtt-client-id` | `mqtt.client_id` | `uptrakit-controller` | No (restart) |
+| `--mqtt-username` | `mqtt.username` | `null` | No (restart) |
+| `--mqtt-password` | `mqtt.password` | `null` | No (restart) |
+| `--mqtt-topic-prefix` | `mqtt.topic_prefix` | `uptrakit` | No (restart) |
+
+**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
+
+### Reconciliation logic
+
+For each DB-managed setting at startup:
+1. DB has value + CLI provided + differs + `--force-settings-override` → use CLI, update DB
+2. DB has value + CLI provided + differs + no force → use DB, log warning
+3. DB has value + (CLI absent or same) → use DB
+4. No DB value + CLI provided → use CLI, save to DB
+5. No DB value + CLI absent → use hardcoded default, save to DB
+
+### In-memory settings
+
+The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettings` and `MqttSettings` behind `RwLock`s. Runtime-changeable fields (proxies, header, SANs) are updated in-memory immediately when changed via the API. Restart-required fields (addresses, MQTT) are saved to DB only.
+
+### Settings API endpoints
+
+| Endpoint | Permission | Purpose |
+| --- | --- | --- |
+| `GET /api/v1/settings/network` | ViewSettings | Read network settings |
+| `PUT /api/v1/settings/network` | ManageSettings | Update network settings |
+| `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT settings |
+| `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT settings |
+
+MQTT password is never exposed in API responses; a `has_password: bool` field indicates whether one is set.
+
 ## Error handling
 
 Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagation and [`thiserror`](https://github.com/dtolnay/thiserror) for error enum definition. Every module boundary must define its own error type following the patterns below.
