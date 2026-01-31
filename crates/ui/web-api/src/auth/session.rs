@@ -5,11 +5,10 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use time::{Duration, OffsetDateTime};
 use uptrakit_shared_db::entity::{prelude::*, session};
 
-/// Session configuration constants
-const SESSION_EXPIRY_DAYS: i64 = 7;
-const SESSION_SLIDING_WINDOW_MINUTES: i64 = 30;
+/// Refresh token configuration constants
+const REFRESH_TOKEN_EXPIRY_DAYS: i64 = 7;
 
-/// Verified session data returned by `verify_session`.
+/// Verified refresh token data returned by `verify_refresh_token`.
 pub struct VerifiedSession {
     pub user_id: uuid::Uuid,
     pub auth_method: AuthMethod,
@@ -24,10 +23,10 @@ impl SessionService {
         Self { db }
     }
 
-    /// Create a new session for a user.
+    /// Create a new refresh token for a user.
     ///
-    /// Returns the plaintext session token (only time it's available).
-    pub async fn create_session(
+    /// Returns the plaintext refresh token (only time it's available).
+    pub async fn create_refresh_token(
         &self,
         user_id: uuid::Uuid,
         auth_method: AuthMethod,
@@ -38,17 +37,18 @@ impl SessionService {
         let token_hash = hash_token(&token);
 
         let now = OffsetDateTime::now_utc();
-        let expires_at = now + Duration::days(SESSION_EXPIRY_DAYS);
+        let expires_at = now + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS);
 
         let session = session::ActiveModel {
             id: Set(generate_uuid()),
             user_id: Set(user_id),
-            token_hash: Set(token_hash),
+            refresh_token_hash: Set(token_hash),
             auth_method: Set(auth_method.kind().to_string()),
             oidc_provider_id: Set(auth_method.oidc_provider_id()),
+            token_type: Set("refresh_token".to_string()),
             created_at: Set(now),
             expires_at: Set(expires_at),
-            last_activity_at: Set(now),
+            revoked_at: Set(None),
             user_agent: Set(user_agent),
             ip_address: Set(ip_address),
         };
@@ -58,37 +58,32 @@ impl SessionService {
         Ok(token)
     }
 
-    /// Verify a session token and return the verified session info.
-    ///
-    /// Also updates last_activity_at if within sliding window.
-    pub async fn verify_session(&self, token: &str) -> Result<VerifiedSession> {
+    /// Verify a refresh token and return the verified session info.
+    pub async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession> {
         let token_hash = hash_token(token);
         let now = OffsetDateTime::now_utc();
 
-        // Query session by token_hash
+        // Query session by refresh_token_hash
         let session = Session::find()
-            .filter(session::Column::TokenHash.eq(token_hash.clone()))
+            .filter(session::Column::RefreshTokenHash.eq(token_hash))
             .one(&self.db)
             .await
             .context_to()?
-            .ok_or_else(|| report!(AuthError::SessionExpired))?;
+            .ok_or_else(|| report!(AuthError::InvalidRefreshToken))?;
+
+        // Check if revoked
+        if session.revoked_at.is_some() {
+            return Err(report!(AuthError::RefreshTokenRevoked));
+        }
 
         // Check if expired
         if now >= session.expires_at {
-            return Err(report!(AuthError::SessionExpired));
+            return Err(report!(AuthError::RefreshTokenExpired));
         }
 
         let user_id = session.user_id;
         let auth_method = AuthMethod::from_session(&session.auth_method, session.oidc_provider_id)
             .unwrap_or(AuthMethod::Password);
-
-        // Update last_activity_at if within sliding window
-        let time_since_activity = now - session.last_activity_at;
-        if time_since_activity >= Duration::minutes(SESSION_SLIDING_WINDOW_MINUTES) {
-            let mut session: session::ActiveModel = session.into();
-            session.last_activity_at = Set(now);
-            session.update(&self.db).await.context_to()?;
-        }
 
         Ok(VerifiedSession {
             user_id,
@@ -96,15 +91,22 @@ impl SessionService {
         })
     }
 
-    /// Delete a session (logout)
-    pub async fn delete_session(&self, token: &str) -> Result<()> {
+    /// Revoke a refresh token (logout). Sets revoked_at instead of deleting.
+    pub async fn revoke_refresh_token(&self, token: &str) -> Result<()> {
         let token_hash = hash_token(token);
+        let now = OffsetDateTime::now_utc();
 
-        Session::delete_many()
-            .filter(session::Column::TokenHash.eq(token_hash))
-            .exec(&self.db)
+        let session = Session::find()
+            .filter(session::Column::RefreshTokenHash.eq(token_hash))
+            .one(&self.db)
             .await
             .context_to()?;
+
+        if let Some(session) = session {
+            let mut session: session::ActiveModel = session.into();
+            session.revoked_at = Set(Some(now));
+            session.update(&self.db).await.context_to()?;
+        }
 
         Ok(())
     }
@@ -169,12 +171,13 @@ mod tests {
             "CREATE TABLE sessions (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
-                token_hash TEXT UNIQUE NOT NULL,
+                refresh_token_hash TEXT UNIQUE NOT NULL,
                 auth_method TEXT NOT NULL,
                 oidc_provider_id TEXT,
+                token_type TEXT NOT NULL DEFAULT 'refresh_token',
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
-                last_activity_at INTEGER NOT NULL,
+                revoked_at INTEGER,
                 user_agent TEXT,
                 ip_address TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id)
@@ -202,7 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_session() {
+    async fn test_create_refresh_token() {
         let db = setup_test_db().await;
         let service = SessionService::new(db.clone());
 
@@ -210,7 +213,7 @@ mod tests {
         let user = User::find().one(&db).await.unwrap().unwrap();
 
         let token = service
-            .create_session(
+            .create_refresh_token(
                 user.id,
                 AuthMethod::Password,
                 Some("test-agent".to_string()),
@@ -224,7 +227,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_session_valid() {
+    async fn test_verify_refresh_token_valid() {
         let db = setup_test_db().await;
         let service = SessionService::new(db.clone());
 
@@ -232,44 +235,44 @@ mod tests {
         let user_id = user.id;
 
         let token = service
-            .create_session(user_id, AuthMethod::Password, None, None)
+            .create_refresh_token(user_id, AuthMethod::Password, None, None)
             .await
             .unwrap();
 
-        let verified = service.verify_session(&token).await.unwrap();
+        let verified = service.verify_refresh_token(&token).await.unwrap();
         assert_eq!(verified.user_id, user_id);
         assert_eq!(verified.auth_method, AuthMethod::Password);
     }
 
     #[tokio::test]
-    async fn test_verify_session_invalid_token() {
+    async fn test_verify_refresh_token_invalid() {
         let db = setup_test_db().await;
         let service = SessionService::new(db);
 
-        let result = service.verify_session("invalid-token").await;
+        let result = service.verify_refresh_token("invalid-token").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_delete_session() {
+    async fn test_revoke_refresh_token() {
         let db = setup_test_db().await;
         let service = SessionService::new(db.clone());
 
         let user = User::find().one(&db).await.unwrap().unwrap();
 
         let token = service
-            .create_session(user.id, AuthMethod::Password, None, None)
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
             .await
             .unwrap();
 
         // Verify it exists
-        assert!(service.verify_session(&token).await.is_ok());
+        assert!(service.verify_refresh_token(&token).await.is_ok());
 
-        // Delete it
-        service.delete_session(&token).await.unwrap();
+        // Revoke it
+        service.revoke_refresh_token(&token).await.unwrap();
 
-        // Verify it's gone
-        let result = service.verify_session(&token).await;
+        // Verify it's revoked
+        let result = service.verify_refresh_token(&token).await;
         assert!(result.is_err());
     }
 
@@ -289,12 +292,13 @@ mod tests {
         let expired_session = session::ActiveModel {
             id: Set(generate_uuid()),
             user_id: Set(user.id),
-            token_hash: Set(token_hash),
+            refresh_token_hash: Set(token_hash),
             auth_method: Set("password".to_string()),
             oidc_provider_id: Set(None),
+            token_type: Set("refresh_token".to_string()),
             created_at: Set(now),
             expires_at: Set(expired_at),
-            last_activity_at: Set(now),
+            revoked_at: Set(None),
             user_agent: Set(None),
             ip_address: Set(None),
         };

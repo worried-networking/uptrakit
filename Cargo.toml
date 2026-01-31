@@ -39,6 +39,7 @@ uuid = { version = "1.20", features = ["v7"] }
 argon2 = { version = "0.5", features = ["std"] }
 rand = "0.9"
 hostname = "0.4"
+jsonwebtoken = "9"
 
 [profile.release]
 opt-level = 3

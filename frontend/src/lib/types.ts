@@ -7,8 +7,17 @@ export interface User {
 }
 
 export interface AuthResponse {
-	token: string;
+	access_token: string;
+	refresh_token: string;
+	expires_in: number;
+	token_type: string;
 	user: User;
+}
+
+export interface RefreshResponse {
+	access_token: string;
+	expires_in: number;
+	token_type: string;
 }
 
 export interface RegisterRequest {

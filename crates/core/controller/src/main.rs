@@ -156,8 +156,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         ca.key_pem.clone(),
     ));
 
+    // Initialize JWT signing key
+    let jwt_manager = uptrakit_web_api::auth::jwt::JwtManager::load_or_generate(&data_dir)
+        .map_err(|e| report!(AppError::Config(format!("JWT initialization failed: {e}"))))?;
+    tracing::info!("JWT signing key initialized");
+
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new();
     let account_link_store = uptrakit_web_api::auth::oidc_state::AccountLinkStore::new();
+    let oidc_token_exchange_store =
+        uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new();
 
     let app_state = Arc::new(AppState {
         ca_pem: ca.cert_pem,
@@ -170,6 +177,8 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         revocation_notify,
         oidc_flow_store: oidc_flow_store.clone(),
         account_link_store: account_link_store.clone(),
+        jwt: Arc::new(jwt_manager),
+        oidc_token_exchange_store: oidc_token_exchange_store.clone(),
     });
 
     // Spawn periodic cleanup for OIDC state stores (every 5 minutes)
@@ -179,6 +188,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             interval.tick().await;
             oidc_flow_store.cleanup_expired();
             account_link_store.cleanup_expired();
+            oidc_token_exchange_store.cleanup_expired();
         }
     });
 

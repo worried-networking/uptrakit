@@ -25,10 +25,10 @@
 	$effect(() => {
 		const params = $page.url.searchParams;
 
-		// Handle OIDC token callback
-		const oidcToken = params.get('oidc_token');
-		if (oidcToken) {
-			handleOidcCallback(oidcToken)
+		// Handle OIDC exchange code callback
+		const oidcCode = params.get('oidc_code');
+		if (oidcCode) {
+			handleOidcCallback(oidcCode)
 				.then(() => goto('/'))
 				.catch((err) => {
 					error = err instanceof Error ? err.message : 'OIDC login failed';

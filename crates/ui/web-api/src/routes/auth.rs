@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
+use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
     extract::State,
@@ -50,13 +51,33 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Deserialize, ToSchema)]
+pub struct LogoutRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Serialize, ToSchema, Clone)]
 pub struct AuthResponse {
-    pub token: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: i64,
+    pub token_type: String,
     pub user: UserResponse,
 }
 
 #[derive(Serialize, ToSchema)]
+pub struct RefreshResponse {
+    pub access_token: String,
+    pub expires_in: i64,
+    pub token_type: String,
+}
+
+#[derive(Serialize, ToSchema, Clone)]
 pub struct UserResponse {
     pub id: String,
     pub email: String,
@@ -175,21 +196,36 @@ pub async fn register(
         }
     };
 
-    // Create session
+    // Create refresh token
     let session_service = SessionService::new(state.db.clone());
-    let token = match session_service
-        .create_session(user_id, AuthMethod::Password, None, None)
+    let refresh_token = match session_service
+        .create_refresh_token(user_id, AuthMethod::Password, None, None)
         .await
     {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to create session: {:?}", e);
+            tracing::error!("Failed to create refresh token: {:?}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Create JWT access token
+    let access_token = match state
+        .jwt
+        .create_access_token(user_id, &roles, "password", None)
+    {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
     let response = AuthResponse {
-        token,
+        access_token,
+        refresh_token,
+        expires_in: state.jwt.expires_in(),
+        token_type: "Bearer".to_string(),
         user: UserResponse {
             id: user_id.to_string(),
             email: req.email,
@@ -266,21 +302,36 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         }
     };
 
-    // Create session
+    // Create refresh token
     let session_service = SessionService::new(state.db.clone());
-    let token = match session_service
-        .create_session(user.id, AuthMethod::Password, None, None)
+    let refresh_token = match session_service
+        .create_refresh_token(user.id, AuthMethod::Password, None, None)
         .await
     {
         Ok(token) => token,
         Err(e) => {
-            tracing::error!("Failed to create session: {:?}", e);
+            tracing::error!("Failed to create refresh token: {:?}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Create JWT access token
+    let access_token = match state
+        .jwt
+        .create_access_token(user.id, &roles, "password", None)
+    {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {:?}", e);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
 
     let response = AuthResponse {
-        token,
+        access_token,
+        refresh_token,
+        expires_in: state.jwt.expires_in(),
+        token_type: "Bearer".to_string(),
         user: UserResponse {
             id: user.id.to_string(),
             email: user.email,
@@ -293,30 +344,27 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Logout and invalidate session
+/// Logout and revoke refresh token
 #[utoipa::path(
     post,
     path = "/api/v1/auth/logout",
+    request_body = LogoutRequest,
     responses(
         (status = 204, description = "Logout successful"),
-        (status = 401, description = "Not authenticated")
     ),
-    tag = "Authentication",
-    security(("bearer_token" = []))
+    tag = "Authentication"
 )]
-pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
-    // Get bearer token from Authorization header
-    let token = match extract_bearer_token(&req) {
-        Some(token) => token,
-        None => {
-            return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
-        }
-    };
-
-    // Delete session
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<LogoutRequest>,
+) -> Response {
+    // Revoke refresh token
     let session_service = SessionService::new(state.db.clone());
-    if let Err(e) = session_service.delete_session(&token).await {
-        tracing::error!("Failed to delete session: {:?}", e);
+    if let Err(e) = session_service
+        .revoke_refresh_token(&req.refresh_token)
+        .await
+    {
+        tracing::error!("Failed to revoke refresh token: {:?}", e);
     }
 
     StatusCode::NO_CONTENT.into_response()
@@ -333,26 +381,12 @@ pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Requ
     tag = "Authentication",
     security(("bearer_token" = []))
 )]
-pub async fn me(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
-    // Get bearer token from Authorization header
-    let token = match extract_bearer_token(&req) {
-        Some(token) => token,
-        None => {
-            return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
-        }
-    };
-
-    // Verify session
-    let session_service = SessionService::new(state.db.clone());
-    let verified = match session_service.verify_session(&token).await {
-        Ok(v) => v,
-        Err(_) => {
-            return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
-        }
-    };
-
-    // Get user info
-    let user = match User::find_by_id(verified.user_id).one(&state.db).await {
+pub async fn me(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+) -> Response {
+    // Get user info from DB (fresh data)
+    let user = match User::find_by_id(auth_user.user_id).one(&state.db).await {
         Ok(Some(user)) => user,
         _ => {
             return (StatusCode::UNAUTHORIZED, "User not found").into_response();
@@ -363,7 +397,7 @@ pub async fn me(State(state): State<Arc<AppState>>, req: axum::extract::Request)
         return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
     }
 
-    // Get user roles
+    // Get fresh user roles from DB
     let roles = match get_user_roles(&state.db, user.id).await {
         Ok(roles) => roles,
         Err(e) => {
@@ -383,16 +417,80 @@ pub async fn me(State(state): State<Arc<AppState>>, req: axum::extract::Request)
     (StatusCode::OK, Json(response)).into_response()
 }
 
-// Helper functions
+/// Refresh an access token using a refresh token
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/refresh",
+    request_body = RefreshRequest,
+    responses(
+        (status = 200, description = "Token refreshed", body = RefreshResponse),
+        (status = 401, description = "Invalid or expired refresh token")
+    ),
+    tag = "Authentication"
+)]
+pub async fn refresh(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RefreshRequest>,
+) -> Response {
+    // Verify refresh token in DB
+    let session_service = SessionService::new(state.db.clone());
+    let verified = match session_service
+        .verify_refresh_token(&req.refresh_token)
+        .await
+    {
+        Ok(v) => v,
+        Err(_) => {
+            return (StatusCode::UNAUTHORIZED, "Invalid or expired refresh token").into_response();
+        }
+    };
 
-fn extract_bearer_token(req: &axum::extract::Request) -> Option<String> {
-    req.headers()
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.to_string())
+    // Check user is active
+    let user = match User::find_by_id(verified.user_id).one(&state.db).await {
+        Ok(Some(user)) => user,
+        _ => {
+            return (StatusCode::UNAUTHORIZED, "User not found").into_response();
+        }
+    };
+
+    if !user.is_active {
+        return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
+    }
+
+    // Get fresh roles from DB
+    let roles = match get_user_roles(&state.db, user.id).await {
+        Ok(roles) => roles,
+        Err(e) => {
+            tracing::error!("Failed to get user roles: {:?}", e);
+            vec![]
+        }
+    };
+
+    // Issue new JWT access token
+    let auth_method = verified.auth_method.kind();
+    let oidc_provider_id = verified.auth_method.oidc_provider_id();
+
+    let access_token =
+        match state
+            .jwt
+            .create_access_token(user.id, &roles, auth_method, oidc_provider_id)
+        {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!("Failed to create access token: {:?}", e);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+    let response = RefreshResponse {
+        access_token,
+        expires_in: state.jwt.expires_in(),
+        token_type: "Bearer".to_string(),
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
+
+// Helper functions
 
 async fn assign_admin_role(
     db: &DatabaseConnection,

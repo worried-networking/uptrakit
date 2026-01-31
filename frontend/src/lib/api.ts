@@ -11,6 +11,7 @@ import type {
 	MessageResponse,
 	OidcLinkRequest,
 	OidcProviderResponse,
+	RefreshResponse,
 	RegisterRequest,
 	RegistrationSettings,
 	UpdateAgentCertificateSettings,
@@ -23,8 +24,29 @@ import type {
 const BASE = '/api/v1';
 
 function authHeaders(): Record<string, string> {
-	const token = localStorage.getItem('token');
+	const token = localStorage.getItem('access_token');
 	return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+let refreshPromise: Promise<RefreshResponse> | null = null;
+
+async function refreshAccessToken(): Promise<RefreshResponse> {
+	const refreshToken = localStorage.getItem('refresh_token');
+	if (!refreshToken) {
+		throw new Error('No refresh token');
+	}
+
+	const res = await fetch(`${BASE}/auth/refresh`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ refresh_token: refreshToken })
+	});
+
+	if (!res.ok) {
+		throw new Error('Refresh failed');
+	}
+
+	return res.json();
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -36,6 +58,43 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 		},
 		...options
 	});
+
+	if (res.status === 401 && localStorage.getItem('refresh_token')) {
+		// Attempt token refresh, deduplicating concurrent attempts
+		try {
+			if (!refreshPromise) {
+				refreshPromise = refreshAccessToken();
+			}
+			const refreshed = await refreshPromise;
+			localStorage.setItem('access_token', refreshed.access_token);
+
+			// Retry original request with new token
+			const retryRes = await fetch(`${BASE}${path}`, {
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${refreshed.access_token}`,
+					...(options.headers as Record<string, string> | undefined)
+				},
+				...options
+			});
+
+			if (!retryRes.ok) {
+				const text = await retryRes.text();
+				throw new Error(text || retryRes.statusText);
+			}
+			if (retryRes.status === 204) return undefined as T;
+			return retryRes.json();
+		} catch {
+			// Refresh failed — clear tokens and redirect to login
+			localStorage.removeItem('access_token');
+			localStorage.removeItem('refresh_token');
+			window.location.href = '/login';
+			throw new Error('Session expired');
+		} finally {
+			refreshPromise = null;
+		}
+	}
+
 	if (!res.ok) {
 		const text = await res.text();
 		throw new Error(text || res.statusText);
@@ -53,7 +112,11 @@ export function login(data: LoginRequest): Promise<AuthResponse> {
 }
 
 export function logout(): Promise<void> {
-	return request('/auth/logout', { method: 'POST' });
+	const refreshToken = localStorage.getItem('refresh_token');
+	return request('/auth/logout', {
+		method: 'POST',
+		body: JSON.stringify({ refresh_token: refreshToken || '' })
+	});
 }
 
 export function me(): Promise<User> {
@@ -70,6 +133,20 @@ export function getOidcAuthorizeUrl(providerId: string): Promise<{ authorize_url
 
 export function oidcLink(data: OidcLinkRequest): Promise<AuthResponse> {
 	return request('/auth/oidc/link', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function oidcExchange(code: string): Promise<AuthResponse> {
+	// Direct fetch without auth headers — this is a public endpoint
+	const res = await fetch(`${BASE}/auth/oidc/exchange`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ code })
+	});
+	if (!res.ok) {
+		const text = await res.text();
+		throw new Error(text || res.statusText);
+	}
+	return res.json();
 }
 
 export function getAgents(status?: string): Promise<AgentResponse[]> {

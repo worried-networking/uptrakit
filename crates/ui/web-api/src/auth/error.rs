@@ -63,6 +63,21 @@ pub enum AuthError {
     #[error("at least one auth method must remain enabled")]
     NoAuthMethodsRemaining,
 
+    #[error("JWT encoding failed: {0}")]
+    JwtEncode(String),
+
+    #[error("JWT validation failed: {0}")]
+    JwtDecode(String),
+
+    #[error("invalid refresh token")]
+    InvalidRefreshToken,
+
+    #[error("refresh token expired")]
+    RefreshTokenExpired,
+
+    #[error("refresh token revoked")]
+    RefreshTokenRevoked,
+
     #[error("internal error: {0}")]
     Internal(String),
 }

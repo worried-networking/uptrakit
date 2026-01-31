@@ -22,7 +22,8 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use agent_connections::AgentConnectionRegistry;
-use auth::oidc_state::{AccountLinkStore, OidcFlowStore};
+use auth::jwt::JwtManager;
+use auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
 use middleware::require_https;
 use settings::Settings;
 
@@ -49,6 +50,10 @@ pub struct AppState {
     pub oidc_flow_store: OidcFlowStore,
     /// In-memory store for pending OIDC account links.
     pub account_link_store: AccountLinkStore,
+    /// JWT signing/validation manager for access tokens.
+    pub jwt: Arc<JwtManager>,
+    /// In-memory store for pending OIDC token exchanges.
+    pub oidc_token_exchange_store: OidcTokenExchangeStore,
 }
 
 /// OpenAPI documentation
@@ -65,10 +70,12 @@ pub struct AppState {
         routes::auth::login,
         routes::auth::logout,
         routes::auth::me,
+        routes::auth::refresh,
         routes::oidc_auth::auth_methods,
         routes::oidc_auth::oidc_authorize,
         routes::oidc_auth::oidc_callback,
         routes::oidc_auth::oidc_link,
+        routes::oidc_auth::oidc_exchange,
         routes::oidc_providers::create_provider,
         routes::oidc_providers::list_providers,
         routes::oidc_providers::get_provider,
@@ -95,12 +102,16 @@ pub struct AppState {
         schemas(
             routes::auth::RegisterRequest,
             routes::auth::LoginRequest,
+            routes::auth::LogoutRequest,
+            routes::auth::RefreshRequest,
             routes::auth::AuthResponse,
+            routes::auth::RefreshResponse,
             routes::auth::UserResponse,
             routes::oidc_auth::AuthMethodsResponse,
             routes::oidc_auth::OidcProviderInfo,
             routes::oidc_auth::OidcAuthorizeResponse,
             routes::oidc_auth::OidcLinkRequest,
+            routes::oidc_auth::OidcExchangeRequest,
             routes::oidc_providers::CreateOidcProviderRequest,
             routes::oidc_providers::UpdateOidcProviderRequest,
             routes::oidc_providers::OidcProviderResponse,
@@ -184,6 +195,7 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
     let auth_routes = OpenApiRouter::new()
+        .routes(routes!(routes::auth::me))
         .routes(routes!(
             routes::settings::get_registration_settings,
             routes::settings::update_registration_settings
@@ -223,11 +235,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::auth::register))
         .routes(routes!(routes::auth::login))
         .routes(routes!(routes::auth::logout))
-        .routes(routes!(routes::auth::me))
+        .routes(routes!(routes::auth::refresh))
         .routes(routes!(routes::oidc_auth::auth_methods))
         .routes(routes!(routes::oidc_auth::oidc_authorize))
         .routes(routes!(routes::oidc_auth::oidc_callback))
         .routes(routes!(routes::oidc_auth::oidc_link))
+        .routes(routes!(routes::oidc_auth::oidc_exchange))
         .merge(auth_routes)
         .split_for_parts();
 
@@ -314,6 +327,10 @@ mod tests {
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
+            jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                b"test-secret-lib",
+            )),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
         })
     }
 
