@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
 use rand::Rng;
 use rootcause::{Report, prelude::*};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::entity::{pending_device_flow, prelude::PendingDeviceFlow};
 use uuid::Uuid;
 
 use super::token::generate_secure_token;
@@ -31,6 +30,9 @@ pub enum DeviceFlowError {
 
     #[error("token generation failed: {0}")]
     TokenGeneration(String),
+
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
 }
 
 pub type Result<T> = std::result::Result<T, Report<DeviceFlowError>>;
@@ -42,85 +44,76 @@ pub enum DeviceFlowStatus {
     Expired,
 }
 
-struct PendingDeviceFlow {
-    user_code: String,
-    status: DeviceFlowStatus,
-    created_at: OffsetDateTime,
-    last_polled_at: Option<OffsetDateTime>,
-    client_name: Option<String>,
-}
-
-/// In-memory store for pending device authorization flows.
+/// Database-backed store for pending device authorization flows.
 #[derive(Clone)]
 pub struct DeviceFlowStore {
-    by_device_code: Arc<Mutex<HashMap<String, PendingDeviceFlow>>>,
-    by_user_code: Arc<Mutex<HashMap<String, String>>>,
-}
-
-impl Default for DeviceFlowStore {
-    fn default() -> Self {
-        Self::new()
-    }
+    db: DatabaseConnection,
 }
 
 impl DeviceFlowStore {
-    pub fn new() -> Self {
-        Self {
-            by_device_code: Arc::new(Mutex::new(HashMap::new())),
-            by_user_code: Arc::new(Mutex::new(HashMap::new())),
-        }
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self { db }
     }
 
     /// Create a new device flow session. Returns `(device_code, user_code)`.
-    pub fn create(&self, client_name: Option<String>) -> Result<(String, String)> {
+    pub async fn create(&self, client_name: Option<String>) -> Result<(String, String)> {
         let device_code = generate_secure_token()
             .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
         let user_code = generate_user_code();
         let raw_user_code = user_code.replace('-', "");
 
-        let flow = PendingDeviceFlow {
-            user_code: raw_user_code.clone(),
-            status: DeviceFlowStatus::Pending,
-            created_at: OffsetDateTime::now_utc(),
-            last_polled_at: None,
-            client_name,
+        let now = OffsetDateTime::now_utc();
+        let expires_at = now + time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
+
+        let model = pending_device_flow::ActiveModel {
+            device_code: Set(device_code.clone()),
+            user_code: Set(raw_user_code),
+            status: Set("pending".to_string()),
+            user_id: Set(None),
+            client_name: Set(client_name),
+            created_at: Set(now),
+            last_polled_at: Set(None),
+            expires_at: Set(expires_at),
         };
 
-        {
-            let mut by_dc = self.by_device_code.lock().unwrap();
-            by_dc.insert(device_code.clone(), flow);
-        }
-
-        {
-            let mut by_uc = self.by_user_code.lock().unwrap();
-            by_uc.insert(raw_user_code, device_code.clone());
-        }
+        model
+            .insert(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
 
         Ok((device_code, user_code))
     }
 
     /// Get the current status of a device flow by device code.
-    pub fn get_status(&self, device_code: &str) -> Result<DeviceFlowStatus> {
-        let by_dc = self.by_device_code.lock().unwrap();
-
-        let flow = by_dc
-            .get(device_code)
+    pub async fn get_status(&self, device_code: &str) -> Result<DeviceFlowStatus> {
+        let flow = PendingDeviceFlow::find_by_id(device_code)
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
-        let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
-        if flow.created_at < cutoff {
+        let now = OffsetDateTime::now_utc();
+        if flow.expires_at <= now {
             return Ok(DeviceFlowStatus::Expired);
         }
 
-        Ok(flow.status.clone())
+        match flow.status.as_str() {
+            "authorized" => {
+                let user_id = flow
+                    .user_id
+                    .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
+                Ok(DeviceFlowStatus::Authorized { user_id })
+            }
+            _ => Ok(DeviceFlowStatus::Pending),
+        }
     }
 
     /// Check if polling is too fast (rate limiting).
-    pub fn is_rate_limited(&self, device_code: &str) -> Result<bool> {
-        let by_dc = self.by_device_code.lock().unwrap();
-
-        let flow = by_dc
-            .get(device_code)
+    pub async fn is_rate_limited(&self, device_code: &str) -> Result<bool> {
+        let flow = PendingDeviceFlow::find_by_id(device_code)
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         if let Some(last_polled) = flow.last_polled_at {
@@ -134,95 +127,140 @@ impl DeviceFlowStore {
     }
 
     /// Record a poll timestamp for rate limiting.
-    pub fn record_poll(&self, device_code: &str) -> Result<()> {
-        let mut by_dc = self.by_device_code.lock().unwrap();
-
-        let flow = by_dc
-            .get_mut(device_code)
+    pub async fn record_poll(&self, device_code: &str) -> Result<()> {
+        let flow = PendingDeviceFlow::find_by_id(device_code)
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
-        flow.last_polled_at = Some(OffsetDateTime::now_utc());
+
+        let mut active: pending_device_flow::ActiveModel = flow.into();
+        active.last_polled_at = Set(Some(OffsetDateTime::now_utc()));
+        active
+            .update(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
 
         Ok(())
     }
 
     /// Look up the client name for a device code.
-    pub fn get_client_name(&self, device_code: &str) -> Result<Option<String>> {
-        let by_dc = self.by_device_code.lock().unwrap();
-
-        let flow = by_dc
-            .get(device_code)
+    pub async fn get_client_name(&self, device_code: &str) -> Result<Option<String>> {
+        let flow = PendingDeviceFlow::find_by_id(device_code)
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
-        Ok(flow.client_name.clone())
+
+        Ok(flow.client_name)
     }
 
     /// Approve a device flow by user code, setting the authorized user.
-    pub fn approve(&self, user_code: &str, user_id: Uuid) -> Result<()> {
+    pub async fn approve(&self, user_code: &str, user_id: Uuid) -> Result<()> {
         let normalized = user_code.replace('-', "").to_uppercase();
+        let now = OffsetDateTime::now_utc();
 
-        let device_code = {
-            let by_uc = self.by_user_code.lock().unwrap();
-            by_uc
-                .get(&normalized)
-                .cloned()
-                .ok_or_else(|| report!(DeviceFlowError::NotFound))?
-        };
-
-        let mut by_dc = self.by_device_code.lock().unwrap();
-
-        let flow = by_dc
-            .get_mut(&device_code)
+        // Find the flow by user code
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::UserCode.eq(&normalized))
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
-        let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
-        if flow.created_at < cutoff {
+        // Check expiry
+        if flow.expires_at <= now {
             return Err(report!(DeviceFlowError::NotFound));
         }
 
-        if matches!(flow.status, DeviceFlowStatus::Authorized { .. }) {
+        // Check already authorized
+        if flow.status == "authorized" {
             return Err(report!(DeviceFlowError::AlreadyAuthorized));
         }
 
-        flow.status = DeviceFlowStatus::Authorized { user_id };
+        // Atomic update: only update if still pending and not expired (HA-safe)
+        let result = PendingDeviceFlow::update_many()
+            .col_expr(
+                pending_device_flow::Column::Status,
+                sea_orm::sea_query::Expr::value("authorized"),
+            )
+            .col_expr(
+                pending_device_flow::Column::UserId,
+                sea_orm::sea_query::Expr::value(user_id),
+            )
+            .filter(pending_device_flow::Column::DeviceCode.eq(&flow.device_code))
+            .filter(pending_device_flow::Column::Status.eq("pending"))
+            .filter(pending_device_flow::Column::ExpiresAt.gt(now))
+            .exec(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
+
+        if result.rows_affected == 0 {
+            // Another instance may have approved it, or it expired
+            return Err(report!(DeviceFlowError::AlreadyAuthorized));
+        }
 
         Ok(())
     }
 
-    /// Consume a device flow (one-time use). Removes the flow from both maps.
-    pub fn consume(&self, device_code: &str) -> Result<(Uuid, Option<String>)> {
-        let mut by_dc = self.by_device_code.lock().unwrap();
-
-        let flow = by_dc
-            .remove(device_code)
+    /// Consume a device flow (one-time use). Removes the flow from the database.
+    pub async fn consume(&self, device_code: &str) -> Result<(Uuid, Option<String>)> {
+        // Read the flow first
+        let flow = PendingDeviceFlow::find_by_id(device_code)
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
-        // Also remove from user_code map
-        let mut by_uc = self.by_user_code.lock().unwrap();
-        by_uc.remove(&flow.user_code);
-
-        match flow.status {
-            DeviceFlowStatus::Authorized { user_id } => Ok((user_id, flow.client_name)),
-            _ => Err(report!(DeviceFlowError::NotFound)),
+        if flow.status != "authorized" {
+            return Err(report!(DeviceFlowError::NotFound));
         }
+
+        let user_id = flow
+            .user_id
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
+        let client_name = flow.client_name.clone();
+
+        // Atomic delete: only delete if still authorized (HA-safe double-consume prevention)
+        let result = PendingDeviceFlow::delete_many()
+            .filter(pending_device_flow::Column::DeviceCode.eq(device_code))
+            .filter(pending_device_flow::Column::Status.eq("authorized"))
+            .exec(&self.db)
+            .await
+            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
+
+        if result.rows_affected == 0 {
+            return Err(report!(DeviceFlowError::NotFound));
+        }
+
+        Ok((user_id, client_name))
     }
 
     /// Remove expired device flows.
-    pub fn cleanup_expired(&self) {
-        let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
+    pub async fn cleanup_expired(&self) {
+        let now = OffsetDateTime::now_utc();
+        let result = PendingDeviceFlow::delete_many()
+            .filter(pending_device_flow::Column::ExpiresAt.lt(now))
+            .exec(&self.db)
+            .await;
 
-        let mut by_dc = self.by_device_code.lock().unwrap();
-        let expired_user_codes: Vec<String> = by_dc
-            .iter()
-            .filter(|(_, flow)| flow.created_at < cutoff)
-            .map(|(_, flow)| flow.user_code.clone())
-            .collect();
-
-        by_dc.retain(|_, flow| flow.created_at >= cutoff);
-        drop(by_dc);
-
-        let mut by_uc = self.by_user_code.lock().unwrap();
-        for uc in &expired_user_codes {
-            by_uc.remove(uc);
+        if let Err(e) = result {
+            tracing::warn!("failed to clean up expired device flows: {e}");
         }
+    }
+
+    /// Test helper: backdate a flow's expiry to make it expired.
+    #[cfg(test)]
+    async fn expire_flow(&self, device_code: &str) {
+        use sea_orm::ActiveValue::Unchanged;
+        let expired_at =
+            OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS + 1);
+        let model = pending_device_flow::ActiveModel {
+            device_code: Unchanged(device_code.to_string()),
+            expires_at: Set(expired_at),
+            ..Default::default()
+        };
+        model.update(&self.db).await.expect("expire_flow update");
     }
 }
 
@@ -245,11 +283,25 @@ fn generate_user_code() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema};
 
-    #[test]
-    fn test_create_flow() {
-        let store = DeviceFlowStore::new();
-        let (device_code, user_code) = store.create(Some("test-client".into())).unwrap();
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+
+        // Create table from entity
+        let schema = Schema::new(db.get_database_backend());
+        let stmt = schema.create_table_from_entity(PendingDeviceFlow);
+        db.execute(&stmt).await.expect("create table");
+
+        db
+    }
+
+    #[tokio::test]
+    async fn test_create_flow() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, user_code) = store.create(Some("test-client".into())).await.unwrap();
 
         assert!(!device_code.is_empty());
         assert_eq!(user_code.len(), 9); // XXXX-XXXX
@@ -264,147 +316,142 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_status_pending() {
-        let store = DeviceFlowStore::new();
-        let (device_code, _) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_status_pending() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, _) = store.create(None).await.unwrap();
 
-        let status = store.get_status(&device_code).unwrap();
+        let status = store.get_status(&device_code).await.unwrap();
         assert_eq!(status, DeviceFlowStatus::Pending);
     }
 
-    #[test]
-    fn test_approve_and_status() {
-        let store = DeviceFlowStore::new();
-        let (device_code, user_code) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_approve_and_status() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, user_code) = store.create(None).await.unwrap();
         let user_id = Uuid::now_v7();
 
-        store.approve(&user_code, user_id).unwrap();
+        store.approve(&user_code, user_id).await.unwrap();
 
-        let status = store.get_status(&device_code).unwrap();
+        let status = store.get_status(&device_code).await.unwrap();
         assert_eq!(status, DeviceFlowStatus::Authorized { user_id });
     }
 
-    #[test]
-    fn test_approve_normalizes_code() {
-        let store = DeviceFlowStore::new();
-        let (_device_code, user_code) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_approve_normalizes_code() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (_device_code, user_code) = store.create(None).await.unwrap();
         let user_id = Uuid::now_v7();
 
         // Approve with lowercase and hyphen
         let lower = user_code.to_lowercase();
-        store.approve(&lower, user_id).unwrap();
+        store.approve(&lower, user_id).await.unwrap();
     }
 
-    #[test]
-    fn test_approve_already_authorized() {
-        let store = DeviceFlowStore::new();
-        let (_device_code, user_code) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_approve_already_authorized() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (_device_code, user_code) = store.create(None).await.unwrap();
         let user_id = Uuid::now_v7();
 
-        store.approve(&user_code, user_id).unwrap();
+        store.approve(&user_code, user_id).await.unwrap();
 
-        let err = store.approve(&user_code, user_id).unwrap_err();
+        let err = store.approve(&user_code, user_id).await.unwrap_err();
         assert!(matches!(
             err.current_context(),
             DeviceFlowError::AlreadyAuthorized
         ));
     }
 
-    #[test]
-    fn test_consume_one_time_use() {
-        let store = DeviceFlowStore::new();
-        let (device_code, user_code) = store.create(Some("cli-host-2026".into())).unwrap();
+    #[tokio::test]
+    async fn test_consume_one_time_use() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, user_code) = store.create(Some("cli-host-2026".into())).await.unwrap();
         let user_id = Uuid::now_v7();
 
-        store.approve(&user_code, user_id).unwrap();
+        store.approve(&user_code, user_id).await.unwrap();
 
-        let (uid, client_name) = store.consume(&device_code).unwrap();
+        let (uid, client_name) = store.consume(&device_code).await.unwrap();
         assert_eq!(uid, user_id);
         assert_eq!(client_name.as_deref(), Some("cli-host-2026"));
 
         // Second consume should fail
-        let err = store.consume(&device_code).unwrap_err();
+        let err = store.consume(&device_code).await.unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
     }
 
-    #[test]
-    fn test_consume_pending_fails() {
-        let store = DeviceFlowStore::new();
-        let (device_code, _) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_consume_pending_fails() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, _) = store.create(None).await.unwrap();
 
-        let err = store.consume(&device_code).unwrap_err();
+        let err = store.consume(&device_code).await.unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
     }
 
-    #[test]
-    fn test_not_found() {
-        let store = DeviceFlowStore::new();
+    #[tokio::test]
+    async fn test_not_found() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
 
-        let err = store.get_status("nonexistent").unwrap_err();
+        let err = store.get_status("nonexistent").await.unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
 
-        let err = store.approve("NOPE-CODE", Uuid::now_v7()).unwrap_err();
+        let err = store
+            .approve("NOPE-CODE", Uuid::now_v7())
+            .await
+            .unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
     }
 
-    #[test]
-    fn test_rate_limiting() {
-        let store = DeviceFlowStore::new();
-        let (device_code, _) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_rate_limiting() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, _) = store.create(None).await.unwrap();
 
         // First poll: not rate limited
-        assert!(!store.is_rate_limited(&device_code).unwrap());
+        assert!(!store.is_rate_limited(&device_code).await.unwrap());
 
         // Record poll
-        store.record_poll(&device_code).unwrap();
+        store.record_poll(&device_code).await.unwrap();
 
         // Immediately poll again: should be rate limited
-        assert!(store.is_rate_limited(&device_code).unwrap());
+        assert!(store.is_rate_limited(&device_code).await.unwrap());
     }
 
-    #[test]
-    fn test_cleanup_expired() {
-        let store = DeviceFlowStore::new();
+    #[tokio::test]
+    async fn test_cleanup_expired() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
 
-        // Create a flow and manually backdate it
-        let (device_code, user_code) = store.create(None).unwrap();
-        let raw_user_code = user_code.replace('-', "");
+        // Create a flow and backdate it
+        let (device_code, _user_code) = store.create(None).await.unwrap();
+        store.expire_flow(&device_code).await;
 
-        {
-            let mut by_dc = store.by_device_code.lock().unwrap();
-            if let Some(flow) = by_dc.get_mut(&device_code) {
-                flow.created_at = OffsetDateTime::now_utc()
-                    - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS + 1);
-            }
-        }
-
-        store.cleanup_expired();
+        store.cleanup_expired().await;
 
         // Flow should be gone
-        let err = store.get_status(&device_code).unwrap_err();
+        let err = store.get_status(&device_code).await.unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
-
-        // User code should also be gone
-        let by_uc = store.by_user_code.lock().unwrap();
-        assert!(!by_uc.contains_key(&raw_user_code));
     }
 
-    #[test]
-    fn test_expired_flow_returns_expired_status() {
-        let store = DeviceFlowStore::new();
-        let (device_code, _) = store.create(None).unwrap();
+    #[tokio::test]
+    async fn test_expired_flow_returns_expired_status() {
+        let db = test_db().await;
+        let store = DeviceFlowStore::new(db);
+        let (device_code, _) = store.create(None).await.unwrap();
 
         // Backdate the flow
-        {
-            let mut by_dc = store.by_device_code.lock().unwrap();
-            if let Some(flow) = by_dc.get_mut(&device_code) {
-                flow.created_at = OffsetDateTime::now_utc()
-                    - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS + 1);
-            }
-        }
+        store.expire_flow(&device_code).await;
 
-        let status = store.get_status(&device_code).unwrap();
+        let status = store.get_status(&device_code).await.unwrap();
         assert_eq!(status, DeviceFlowStatus::Expired);
     }
 

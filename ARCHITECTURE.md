@@ -139,9 +139,11 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 13 entities in `crates/shared/db/src/entity/`:
+The data model comprises 17 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `api_token`, `auth_method`, `oidc_provider`, `permission`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `api_token`, `auth_method`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
+
+The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
 
 ### Migrations
 

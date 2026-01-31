@@ -199,11 +199,13 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         .context(AppError::Config("JWT initialization failed".into()))?;
     tracing::info!("JWT signing key initialized");
 
-    let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new();
-    let account_link_store = uptrakit_web_api::auth::oidc_state::AccountLinkStore::new();
+    let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
+    let account_link_store =
+        uptrakit_web_api::auth::oidc_state::AccountLinkStore::new(db_conn.clone());
     let oidc_token_exchange_store =
-        uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new();
-    let device_flow_store = uptrakit_web_api::auth::device_flow::DeviceFlowStore::new();
+        uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new(db_conn.clone());
+    let device_flow_store =
+        uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
 
     let agent_connections = uptrakit_web_api::agent_connections::AgentConnectionRegistry::new();
 
@@ -226,15 +228,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         extra_sans: args.sans.into(),
     });
 
-    // Spawn periodic cleanup for OIDC state stores (every 5 minutes)
+    // Spawn periodic cleanup for auth state stores (every 5 minutes)
     let oidc_cleanup_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
         loop {
             interval.tick().await;
-            oidc_flow_store.cleanup_expired();
-            account_link_store.cleanup_expired();
-            oidc_token_exchange_store.cleanup_expired();
-            device_flow_store.cleanup_expired();
+            oidc_flow_store.cleanup_expired().await;
+            account_link_store.cleanup_expired().await;
+            oidc_token_exchange_store.cleanup_expired().await;
+            device_flow_store.cleanup_expired().await;
         }
     });
 

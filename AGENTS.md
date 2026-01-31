@@ -179,7 +179,7 @@ The CLI uses an RFC 8628-style device authorization flow instead of password-bas
 - **Rate limiting**: 429 returned if polling faster than the 5-second interval.
 - **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.
 - **10-minute expiry**: flows auto-expire; cleanup runs every 5 minutes alongside OIDC state cleanup.
-- **In-memory store**: follows the same `Arc<Mutex<HashMap>>` pattern as `OidcFlowStore`. Only the resulting API token is persisted to the database.
+- **Database-backed store**: all pending device flow state is persisted to the `pending_device_flows` table (shared with OIDC flow, account link, and token exchange stores). Survives controller restarts and supports HA multi-instance deployments. Only the resulting API token is persisted to the `api_tokens` table.
 
 ## Permissions model
 

@@ -743,7 +743,7 @@ Items to consider for future versions but not currently prioritized:
 
 - [ ] Multi-tenant support
 - [ ] Agent clustering
-- [ ] High availability for controller
+- [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready)
 - [ ] Update preview/dry-run mode
 - [ ] Cost tracking for cloud-based updates
 - [ ] Compliance reporting (update audit trails)
