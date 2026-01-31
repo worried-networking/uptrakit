@@ -15,6 +15,9 @@ use uptrakit_web_api::extract::Protocol;
 pub enum ServerError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("server task failed: {0}")]
+    TaskPanic(String),
 }
 
 pub type Result<T> = std::result::Result<T, Report<ServerError>>;
@@ -58,10 +61,10 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
     // Wait for either server to finish (which normally means an error).
     tokio::select! {
         res = http_handle => {
-            res.expect("HTTP server task panicked")?;
+            res.map_err(|e| report!(ServerError::TaskPanic(format!("HTTP server: {e}"))))??;
         }
         res = https_handle => {
-            res.expect("HTTPS server task panicked")?;
+            res.map_err(|e| report!(ServerError::TaskPanic(format!("HTTPS server: {e}"))))??;
         }
     }
 
