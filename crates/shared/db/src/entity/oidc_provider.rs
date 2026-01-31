@@ -32,9 +32,14 @@ impl sea_orm::sea_query::ValueType for RoleMapping {
 
 impl From<RoleMapping> for sea_orm::Value {
     fn from(val: RoleMapping) -> Self {
-        sea_orm::Value::Json(Some(Box::new(
-            serde_json::to_value(val).expect("RoleMapping serialization"),
-        )))
+        let json = match serde_json::to_value(&val) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(error = %e, "RoleMapping serialization failed, using empty object");
+                serde_json::Value::Object(Default::default())
+            }
+        };
+        sea_orm::Value::Json(Some(Box::new(json)))
     }
 }
 

@@ -11,4 +11,5 @@ sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
+tracing = { workspace = true }
 uuid = { workspace = true }
