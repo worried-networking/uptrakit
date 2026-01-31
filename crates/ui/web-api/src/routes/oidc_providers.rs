@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
@@ -117,9 +118,13 @@ impl From<oidc_provider::Model> for OidcProviderResponse {
 )]
 pub async fn create_provider(
     State(state): State<Arc<AppState>>,
-    axum::Extension(_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateOidcProviderRequest>,
 ) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     if req.name.is_empty()
         || req.slug.is_empty()
         || req.issuer_url.is_empty()
@@ -180,8 +185,12 @@ pub async fn create_provider(
 )]
 pub async fn list_providers(
     State(state): State<Arc<AppState>>,
-    axum::Extension(_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     match OidcProvider::find()
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .order_by_asc(oidc_provider::Column::Name)
@@ -217,8 +226,12 @@ pub async fn list_providers(
 pub async fn get_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    axum::Extension(_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
@@ -248,9 +261,13 @@ pub async fn get_provider(
 pub async fn update_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    axum::Extension(_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
@@ -338,6 +355,10 @@ pub async fn delete_provider(
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
@@ -393,8 +414,12 @@ pub async fn delete_provider(
 pub async fn activate_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    axum::Extension(_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
@@ -464,6 +489,10 @@ pub async fn deactivate_provider(
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),

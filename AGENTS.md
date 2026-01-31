@@ -149,6 +149,41 @@ These are non-negotiable design constraints. Do not violate them.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
 
+## Permissions model
+
+Authorization uses a typed `Permission` enum (`crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
+
+| Permission | Serialized name | Purpose |
+| --- | --- | --- |
+| `ViewSettings` | `view_settings` | Read settings, OIDC providers, auth config |
+| `ManageSettings` | `manage_settings` | Modify settings, OIDC providers, auth config |
+| `ViewAgents` | `view_agents` | List agents |
+| `ManageAgents` | `manage_agents` | Approve, reject, delete, merge agents; manage enrollment tokens |
+
+### Roles
+
+| Role | Permissions |
+| --- | --- |
+| `admin` | All four |
+| `user` | `view_agents` only |
+
+The first registered user gets the `admin` role. Subsequent users (password or OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
+
+### How it works
+
+1. `get_user_permissions()` (`routes/auth.rs`) resolves a user's permissions: user → user_roles → role_permissions → permissions table.
+2. The resolved `Vec<Permission>` is embedded in the JWT access token (`permissions` claim) and returned in `UserResponse.permissions`.
+3. The `require_auth` middleware injects `AuthenticatedUser` with the `permissions` field decoded from the JWT.
+4. Route handlers call `user.has_permission(Permission::...)` — no DB round-trip needed.
+5. The frontend receives permissions as `string[]` (e.g. `["view_settings", "manage_agents"]`) and uses the `Permission` TypeScript enum for checks.
+
+### Adding a new permission
+
+1. Add a variant to the `Permission` enum in `permissions.rs` (with `as_str` / `parse` arms).
+2. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate roles.
+3. Add the check in the relevant route handler(s).
+4. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
+
 ## Error handling
 
 Use the [`rootcause`](https://github.com/rootcause-rs/rootcause) crate for error propagation and handling. Use [`thiserror`](https://github.com/dtolnay/thiserror) for constructing and designing errors. Ensure that everything

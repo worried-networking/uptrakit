@@ -190,10 +190,14 @@ Guidelines:
   - **Controller**: orchestration, scheduling, remote provider logic, MQTT integration, API/UI
   - **Agent**: local inspection + update execution, outbound-only WS connection
   - **Providers**: small, composable units with clear responsibilities
+- Authorization uses a typed `Permission` enum, not raw role-name strings:
+  - Route handlers check `user.has_permission(Permission::...)` — never compare role names directly.
+  - JWT tokens carry resolved permissions, not roles. The frontend only sees permissions.
+  - When adding a new protected route, pick the most specific existing permission or propose a new one. See the "Permissions model" section in [AGENTS.md](AGENTS.md) for the full list and instructions on adding a new permission.
 - Security-sensitive code should be boring:
   - No shell injection footguns.
   - Validate inputs on any command execution path.
-  - Any “custom script” feature must be explicit, documented, and treated as untrusted input.
+  - Any "custom script" feature must be explicit, documented, and treated as untrusted input.
 - Logging:
   - Log high-level operational summaries.
   - Do not store full command output internally; rely on journald/stdout as designed.

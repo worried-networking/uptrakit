@@ -4,6 +4,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+use super::permissions::Permission;
 use super::token::generate_uuid;
 use super::{AuthError, Result};
 
@@ -15,7 +16,7 @@ const KEY_LENGTH: usize = 64;
 pub struct AccessTokenClaims {
     pub sub: String,
     pub jti: String,
-    pub roles: Vec<String>,
+    pub permissions: Vec<Permission>,
     pub auth_method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oidc_provider_id: Option<String>,
@@ -72,7 +73,7 @@ impl JwtManager {
     pub fn create_access_token(
         &self,
         user_id: uuid::Uuid,
-        roles: &[String],
+        permissions: &[Permission],
         auth_method: &str,
         oidc_provider_id: Option<uuid::Uuid>,
     ) -> Result<String> {
@@ -81,7 +82,7 @@ impl JwtManager {
         let claims = AccessTokenClaims {
             sub: user_id.to_string(),
             jti: generate_uuid().to_string(),
-            roles: roles.to_vec(),
+            permissions: permissions.to_vec(),
             auth_method: auth_method.to_string(),
             oidc_provider_id: oidc_provider_id.map(|id| id.to_string()),
             iat: now,
@@ -122,15 +123,18 @@ mod tests {
     fn test_create_and_decode_access_token() {
         let manager = test_manager();
         let user_id = uuid::Uuid::now_v7();
-        let roles = vec!["admin".to_string()];
+        let permissions = vec![Permission::ViewSettings, Permission::ManageAgents];
 
         let token = manager
-            .create_access_token(user_id, &roles, "password", None)
+            .create_access_token(user_id, &permissions, "password", None)
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();
         assert_eq!(claims.sub, user_id.to_string());
-        assert_eq!(claims.roles, vec!["admin"]);
+        assert_eq!(
+            claims.permissions,
+            vec![Permission::ViewSettings, Permission::ManageAgents]
+        );
         assert_eq!(claims.auth_method, "password");
         assert!(claims.oidc_provider_id.is_none());
     }
@@ -140,10 +144,10 @@ mod tests {
         let manager = test_manager();
         let user_id = uuid::Uuid::now_v7();
         let provider_id = uuid::Uuid::now_v7();
-        let roles = vec!["admin".to_string()];
+        let permissions = vec![Permission::ViewAgents];
 
         let token = manager
-            .create_access_token(user_id, &roles, "oidc", Some(provider_id))
+            .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
             .unwrap();
 
         let claims = manager.decode_access_token(&token).unwrap();

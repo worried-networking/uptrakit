@@ -584,14 +584,14 @@ pub async fn oidc_link(
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let roles = super::auth::get_user_roles(&state.db, pending.user_id)
+    let permissions = super::auth::get_user_permissions(&state.db, pending.user_id)
         .await
         .unwrap_or_default();
 
     // Create JWT access token
     let access_token = match state.jwt.create_access_token(
         pending.user_id,
-        &roles,
+        &permissions,
         "oidc",
         Some(pending.provider_id),
     ) {
@@ -612,7 +612,7 @@ pub async fn oidc_link(
             email: user.email,
             first_name: user.first_name,
             last_name: user.last_name,
-            roles,
+            permissions,
         },
     };
 
@@ -661,7 +661,7 @@ async fn create_oidc_tokens_and_redirect(
         }
     };
 
-    let roles = super::auth::get_user_roles(&state.db, user_id)
+    let permissions = super::auth::get_user_permissions(&state.db, user_id)
         .await
         .unwrap_or_default();
 
@@ -669,7 +669,7 @@ async fn create_oidc_tokens_and_redirect(
     let access_token =
         match state
             .jwt
-            .create_access_token(user_id, &roles, "oidc", Some(provider_id))
+            .create_access_token(user_id, &permissions, "oidc", Some(provider_id))
         {
             Ok(t) => t,
             Err(e) => {
@@ -691,7 +691,7 @@ async fn create_oidc_tokens_and_redirect(
                 email: user.email,
                 first_name: user.first_name,
                 last_name: user.last_name,
-                roles,
+                permissions,
             },
             created_at: OffsetDateTime::now_utc(),
         },

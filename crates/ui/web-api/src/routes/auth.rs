@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{role, user, user_role};
+use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
 use utoipa::ToSchema;
 
 #[derive(Deserialize, ToSchema)]
@@ -83,7 +84,7 @@ pub struct UserResponse {
     pub email: String,
     pub first_name: String,
     pub last_name: String,
-    pub roles: Vec<String>,
+    pub permissions: Vec<Permission>,
 }
 
 /// Register a new user
@@ -185,13 +186,18 @@ pub async fn register(
         {
             tracing::error!("Failed to complete initial registration setup: {:?}", e);
         }
+    } else {
+        // Non-first users get the 'user' role
+        if let Err(e) = assign_user_role(&state.db, user_id).await {
+            tracing::error!("Failed to assign user role: {:?}", e);
+        }
     }
 
-    // Get user roles
-    let roles = match get_user_roles(&state.db, user_id).await {
-        Ok(roles) => roles,
+    // Get user permissions
+    let permissions = match get_user_permissions(&state.db, user_id).await {
+        Ok(p) => p,
         Err(e) => {
-            tracing::error!("Failed to get user roles: {:?}", e);
+            tracing::error!("Failed to get user permissions: {:?}", e);
             vec![]
         }
     };
@@ -212,7 +218,7 @@ pub async fn register(
     // Create JWT access token
     let access_token = match state
         .jwt
-        .create_access_token(user_id, &roles, "password", None)
+        .create_access_token(user_id, &permissions, "password", None)
     {
         Ok(token) => token,
         Err(e) => {
@@ -231,7 +237,7 @@ pub async fn register(
             email: req.email,
             first_name: req.first_name,
             last_name: req.last_name,
-            roles,
+            permissions,
         },
     };
 
@@ -293,11 +299,11 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         return (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response();
     }
 
-    // Get user roles
-    let roles = match get_user_roles(&state.db, user.id).await {
-        Ok(roles) => roles,
+    // Get user permissions
+    let permissions = match get_user_permissions(&state.db, user.id).await {
+        Ok(p) => p,
         Err(e) => {
-            tracing::error!("Failed to get user roles: {:?}", e);
+            tracing::error!("Failed to get user permissions: {:?}", e);
             vec![]
         }
     };
@@ -318,7 +324,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     // Create JWT access token
     let access_token = match state
         .jwt
-        .create_access_token(user.id, &roles, "password", None)
+        .create_access_token(user.id, &permissions, "password", None)
     {
         Ok(token) => token,
         Err(e) => {
@@ -337,7 +343,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
             email: user.email,
             first_name: user.first_name,
             last_name: user.last_name,
-            roles,
+            permissions,
         },
     };
 
@@ -397,11 +403,11 @@ pub async fn me(
         return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
     }
 
-    // Get fresh user roles from DB
-    let roles = match get_user_roles(&state.db, user.id).await {
-        Ok(roles) => roles,
+    // Get fresh user permissions from DB
+    let permissions = match get_user_permissions(&state.db, user.id).await {
+        Ok(p) => p,
         Err(e) => {
-            tracing::error!("Failed to get user roles: {:?}", e);
+            tracing::error!("Failed to get user permissions: {:?}", e);
             vec![]
         }
     };
@@ -411,7 +417,7 @@ pub async fn me(
         email: user.email,
         first_name: user.first_name,
         last_name: user.last_name,
-        roles,
+        permissions,
     };
 
     (StatusCode::OK, Json(response)).into_response()
@@ -456,11 +462,11 @@ pub async fn refresh(
         return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
     }
 
-    // Get fresh roles from DB
-    let roles = match get_user_roles(&state.db, user.id).await {
-        Ok(roles) => roles,
+    // Get fresh permissions from DB
+    let permissions = match get_user_permissions(&state.db, user.id).await {
+        Ok(p) => p,
         Err(e) => {
-            tracing::error!("Failed to get user roles: {:?}", e);
+            tracing::error!("Failed to get user permissions: {:?}", e);
             vec![]
         }
     };
@@ -472,7 +478,7 @@ pub async fn refresh(
     let access_token =
         match state
             .jwt
-            .create_access_token(user.id, &roles, auth_method, oidc_provider_id)
+            .create_access_token(user.id, &permissions, auth_method, oidc_provider_id)
         {
             Ok(token) => token,
             Err(e) => {
@@ -496,7 +502,6 @@ async fn assign_admin_role(
     db: &DatabaseConnection,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
-    // Get admin role
     let admin_role = Role::find()
         .filter(role::Column::Name.eq("admin"))
         .one(db)
@@ -506,7 +511,6 @@ async fn assign_admin_role(
 
     let now = OffsetDateTime::now_utc();
 
-    // Assign role to user
     let user_role_model = user_role::ActiveModel {
         user_id: Set(user_id),
         role_id: Set(admin_role.id),
@@ -518,21 +522,75 @@ async fn assign_admin_role(
     Ok(())
 }
 
-pub async fn get_user_roles(
+pub async fn assign_user_role(
     db: &DatabaseConnection,
     user_id: uuid::Uuid,
-) -> crate::auth::Result<Vec<String>> {
+) -> crate::auth::Result<()> {
+    let user_role_entity = Role::find()
+        .filter(role::Column::Name.eq("user"))
+        .one(db)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(AuthError::Internal("user role not found".to_string())))?;
+
+    let now = OffsetDateTime::now_utc();
+
+    let user_role_model = user_role::ActiveModel {
+        user_id: Set(user_id),
+        role_id: Set(user_role_entity.id),
+        assigned_at: Set(now),
+    };
+
+    user_role_model.insert(db).await.context_to()?;
+
+    Ok(())
+}
+
+/// Resolve the deduplicated set of permissions for a user via user_roles -> role_permissions -> permissions.
+pub async fn get_user_permissions(
+    db: &DatabaseConnection,
+    user_id: uuid::Uuid,
+) -> crate::auth::Result<Vec<Permission>> {
+    // Get user's role IDs
     let user_roles = UserRole::find()
         .filter(user_role::Column::UserId.eq(user_id))
-        .find_also_related(Role)
         .all(db)
         .await
         .context_to()?;
 
-    let roles = user_roles
+    let role_ids: Vec<uuid::Uuid> = user_roles.iter().map(|ur| ur.role_id).collect();
+
+    if role_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get permission IDs for those roles
+    let role_perms = RolePermission::find()
+        .filter(role_permission::Column::RoleId.is_in(role_ids))
+        .all(db)
+        .await
+        .context_to()?;
+
+    let perm_ids: Vec<uuid::Uuid> = role_perms.iter().map(|rp| rp.permission_id).collect();
+
+    if perm_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Get permission names
+    let perm_models = uptrakit_shared_db::entity::prelude::Permission::find()
+        .filter(permission::Column::Id.is_in(perm_ids))
+        .all(db)
+        .await
+        .context_to()?;
+
+    // Deduplicate and convert to enum
+    let mut seen = std::collections::HashSet::new();
+    let permissions: Vec<Permission> = perm_models
         .into_iter()
-        .filter_map(|(_, role)| role.map(|r| r.name))
+        .filter_map(|p| Permission::parse(&p.name))
+        .filter(|p| seen.insert(p.clone()))
         .collect();
 
-    Ok(roles)
+    Ok(permissions)
 }

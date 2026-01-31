@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::settings_store::upsert_setting;
 use axum::{
@@ -7,10 +8,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use uptrakit_shared_db::entity::{prelude::*, user_role};
 use utoipa::ToSchema;
 
 #[derive(Serialize, ToSchema)]
@@ -25,14 +24,14 @@ pub struct UpdateAgentCertificateSettingsRequest {
     pub renewal_window_hours: Option<u16>,
 }
 
-/// Get agent certificate settings (admin-only)
+/// Get agent certificate settings
 #[utoipa::path(
     get,
     path = "/api/v1/settings/agent-certificates",
     responses(
         (status = 200, description = "Agent certificate settings", body = AgentCertificateSettingsResponse),
         (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized (admin role required)")
+        (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
@@ -41,8 +40,8 @@ pub async fn get_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let response = AgentCertificateSettingsResponse {
@@ -52,7 +51,7 @@ pub async fn get_agent_certificate_settings(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Update agent certificate settings (admin-only)
+/// Update agent certificate settings
 #[utoipa::path(
     put,
     path = "/api/v1/settings/agent-certificates",
@@ -61,7 +60,7 @@ pub async fn get_agent_certificate_settings(
         (status = 200, description = "Settings updated", body = AgentCertificateSettingsResponse),
         (status = 400, description = "Invalid values"),
         (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized (admin role required)")
+        (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
@@ -71,8 +70,8 @@ pub async fn update_agent_certificate_settings(
     Extension(user): Extension<AuthenticatedUser>,
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     if let Some(days) = req.lifetime_days {
@@ -122,18 +121,4 @@ pub async fn update_agent_certificate_settings(
         renewal_window_hours: state.settings.renewal_window_hours().await,
     };
     (StatusCode::OK, Json(response)).into_response()
-}
-
-async fn check_admin_role(db: &DatabaseConnection, user_id: uuid::Uuid) -> bool {
-    UserRole::find()
-        .filter(user_role::Column::UserId.eq(user_id))
-        .find_also_related(Role)
-        .all(db)
-        .await
-        .map(|roles| {
-            roles
-                .iter()
-                .any(|(_, r)| r.as_ref().is_some_and(|r| r.name == "admin"))
-        })
-        .unwrap_or(false)
 }

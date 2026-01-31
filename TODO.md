@@ -59,6 +59,11 @@ Essential infrastructure needed before feature development.
   - [x] Roles and permissions tables with seeded admin role
   - [x] User-role and role-permission junction tables
   - [x] First registered user automatically gets admin role
+  - [x] Permission enum (`ViewSettings`, `ManageSettings`, `ViewAgents`, `ManageAgents`)
+  - [x] `admin` role (all permissions) and `user` role (`view_agents` only)
+  - [x] JWT and API responses expose resolved permissions instead of raw role names
+  - [x] Permission-based authorization checks on all protected routes
+  - [x] Non-first users automatically assigned `user` role
 - [x] Auth API endpoints
   - [x] POST /api/v1/auth/register
   - [x] POST /api/v1/auth/login
@@ -66,11 +71,11 @@ Essential infrastructure needed before feature development.
   - [x] GET /api/v1/auth/me
 - [x] Auth middleware (require_auth with user injection)
 - [x] OpenAPI documentation with Swagger UI (optional feature flag)
-- [ ] Full RBAC permission checking in middleware
-- [ ] OIDC integration (auth_method tracking already in place)
+- [x] Full RBAC permission checking in middleware
+- [x] OIDC integration
 - [ ] Rate limiting on login endpoint
 - [ ] Audit logging for security events
-- [ ] Use JWT token
+- [x] Use JWT token
 
 ### Agent Authentication & Security
 
