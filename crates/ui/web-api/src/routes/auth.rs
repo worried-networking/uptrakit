@@ -142,7 +142,7 @@ pub async fn register(
         .one(&state.db)
         .await;
 
-    if existing.is_ok() && existing.unwrap().is_some() {
+    if let Ok(Some(_)) = existing {
         return (StatusCode::CONFLICT, "Email already exists").into_response();
     }
 
