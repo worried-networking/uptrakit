@@ -360,12 +360,7 @@ pub async fn run_authenticated_loop(
     // Renewal timer — initially far-future, reset when AgentSettings arrives
     let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
 
-    // Every `break` arm below assigns `outcome` before exiting; the
-    // initial value is a safety fallback only.
-    #[allow(unused_assignments)]
-    let mut outcome = LoopOutcome::Shutdown;
-
-    loop {
+    let outcome = loop {
         tokio::select! {
             _ = ping_interval.tick() => {
                 let agent_ts = now_millis();
@@ -393,14 +388,12 @@ pub async fn run_authenticated_loop(
                     Some(Ok(m)) => m,
                     Some(Err(e)) if is_peer_closed(&e) => {
                         tracing::info!("connection closed by controller");
-                        outcome = LoopOutcome::Disconnected;
-                        break;
+                        break LoopOutcome::Disconnected;
                     }
                     Some(Err(e)) => return Err(e).context_to::<Error>()?,
                     None => {
                         tracing::info!("connection closed by controller");
-                        outcome = LoopOutcome::Disconnected;
-                        break;
+                        break LoopOutcome::Disconnected;
                     }
                 };
 
@@ -436,8 +429,7 @@ pub async fn run_authenticated_loop(
                                     + i64::from(payload.not_after.millisecond());
                                 crate::state::save_cert_not_after_ts(data_dir, not_after_ms)?;
                                 tracing::info!("renewed certificate saved, reconnecting");
-                                outcome = LoopOutcome::Reconnect;
-                                break;
+                                break LoopOutcome::Reconnect;
                             }
                             ControllerMessage::AgentSettings(settings) => {
                                 tracing::trace!(
@@ -488,31 +480,28 @@ pub async fn run_authenticated_loop(
                         let reason = frame.as_ref().map(|f| f.reason.as_ref()).unwrap_or("");
                         if reason == "certificate rotated" {
                             tracing::info!("connection closed: certificate rotated");
-                            outcome = LoopOutcome::Reconnect;
+                            break LoopOutcome::Reconnect;
                         } else if reason == "certificate revoked" {
                             tracing::warn!("connection closed: certificate revoked");
-                            outcome = LoopOutcome::Disconnected;
+                            break LoopOutcome::Disconnected;
                         } else {
                             log_close_frame(frame);
-                            outcome = LoopOutcome::Disconnected;
+                            break LoopOutcome::Disconnected;
                         }
-                        break;
                     }
                     _ => {}
                 }
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received SIGINT, shutting down");
-                outcome = LoopOutcome::Shutdown;
-                break;
+                break LoopOutcome::Shutdown;
             }
             _ = shutdown.recv() => {
                 tracing::info!("received SIGTERM, shutting down");
-                outcome = LoopOutcome::Shutdown;
-                break;
+                break LoopOutcome::Shutdown;
             }
         }
-    }
+    };
 
     // Best-effort close — the peer may have already disconnected.
     match ws_stream.close(None).await {
