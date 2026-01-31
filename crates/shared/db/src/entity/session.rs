@@ -8,12 +8,13 @@ pub struct Model {
     pub id: Uuid,
     pub user_id: Uuid,
     #[sea_orm(unique)]
-    pub token_hash: String,
+    pub refresh_token_hash: String,
     pub auth_method: String,
     pub oidc_provider_id: Option<Uuid>,
+    pub token_type: String,
     pub created_at: OffsetDateTime,
     pub expires_at: OffsetDateTime,
-    pub last_activity_at: OffsetDateTime,
+    pub revoked_at: Option<OffsetDateTime>,
     pub user_agent: Option<String>,
     pub ip_address: Option<String>,
 }

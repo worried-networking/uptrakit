@@ -4,22 +4,23 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
-use sea_orm::EntityTrait;
 use uptrakit_shared_db::entity::prelude::*;
 
 use crate::AppState;
-use crate::auth::session::SessionService;
 
-/// Extension type to carry the authenticated user ID and auth method through the request.
+/// Extension type to carry the authenticated user ID, auth method, and roles through the request.
 #[derive(Clone, Debug)]
 pub struct AuthenticatedUser {
     pub user_id: uuid::Uuid,
     pub auth_method: AuthMethod,
+    pub roles: Vec<String>,
 }
 
-/// Middleware that requires authentication via Bearer token in Authorization header.
+/// Middleware that requires authentication via JWT Bearer token in Authorization header.
 /// Returns 401 Unauthorized if the token is missing, invalid, or expired.
-/// If authenticated, injects the user_id and auth method into request extensions.
+/// If authenticated, injects the user_id, auth method, and roles into request extensions.
+///
+/// No DB call is made — user deactivation/role changes take effect at refresh (~15 min max delay).
 pub async fn require_auth(
     State(state): State<Arc<AppState>>,
     mut req: Request,
@@ -33,31 +34,41 @@ pub async fn require_auth(
         }
     };
 
-    // Verify session
-    let session_service = SessionService::new(state.db.clone());
-    let verified = match session_service.verify_session(&token).await {
-        Ok(v) => v,
+    // Decode JWT access token (stateless validation)
+    let claims = match state.jwt.decode_access_token(&token) {
+        Ok(c) => c,
         Err(_) => {
-            return (StatusCode::UNAUTHORIZED, "Invalid or expired session\n").into_response();
+            return (StatusCode::UNAUTHORIZED, "Invalid or expired token\n").into_response();
         }
     };
 
-    // Check if user is active
-    let user = match User::find_by_id(verified.user_id).one(&state.db).await {
-        Ok(Some(user)) => user,
-        _ => {
-            return (StatusCode::UNAUTHORIZED, "User not found\n").into_response();
+    // Parse user_id from claims.sub
+    let user_id = match uuid::Uuid::parse_str(&claims.sub) {
+        Ok(id) => id,
+        Err(_) => {
+            return (StatusCode::UNAUTHORIZED, "Invalid token subject\n").into_response();
         }
     };
 
-    if !user.is_active {
-        return (StatusCode::FORBIDDEN, "User is deactivated\n").into_response();
-    }
+    // Reconstruct auth_method from claims
+    let auth_method = if claims.auth_method == "oidc" {
+        let provider_id = claims
+            .oidc_provider_id
+            .as_deref()
+            .and_then(|id| uuid::Uuid::parse_str(id).ok());
+        match provider_id {
+            Some(pid) => AuthMethod::Oidc { provider_id: pid },
+            None => AuthMethod::Password,
+        }
+    } else {
+        AuthMethod::Password
+    };
 
-    // Inject user_id and auth_method into request extensions
+    // Inject user_id, auth_method, and roles into request extensions
     req.extensions_mut().insert(AuthenticatedUser {
-        user_id: verified.user_id,
-        auth_method: verified.auth_method,
+        user_id,
+        auth_method,
+        roles: claims.roles,
     });
 
     next.run(req).await
@@ -75,8 +86,8 @@ fn extract_bearer_token(req: &Request) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::jwt::JwtManager;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
-    use crate::auth::session::SessionService;
     use crate::auth::token::generate_uuid;
     use crate::settings::Settings;
     use axum::Router;
@@ -85,57 +96,12 @@ mod tests {
     use axum::middleware;
     use axum::routing::get;
     use http_body_util::BodyExt;
-    use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Set,
-    };
-    use time::OffsetDateTime;
+    use sea_orm::{ConnectOptions, Database, DatabaseConnection};
     use tower::ServiceExt;
-    use uptrakit_shared_db::entity::user;
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         Database::connect(opt).await.expect("test db")
-    }
-
-    async fn setup_test_db() -> DatabaseConnection {
-        let db = test_db().await;
-
-        // Create tables
-        db.execute_unprepared(
-            "CREATE TABLE users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE NOT NULL,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                password_hash TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                deactivated_at INTEGER,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            )",
-        )
-        .await
-        .unwrap();
-
-        db.execute_unprepared(
-            "CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                token_hash TEXT UNIQUE NOT NULL,
-                auth_method TEXT NOT NULL,
-                oidc_provider_id TEXT,
-                created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,
-                last_activity_at INTEGER NOT NULL,
-                user_agent TEXT,
-                ip_address TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )",
-        )
-        .await
-        .unwrap();
-
-        db
     }
 
     async fn test_state(db: DatabaseConnection) -> Arc<AppState> {
@@ -167,6 +133,8 @@ mod tests {
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
+            jwt: Arc::new(JwtManager::from_secret(b"test-secret-for-middleware-tests")),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
         })
     }
 
@@ -177,31 +145,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_require_auth_with_valid_session() {
-        let db = setup_test_db().await;
-        let state = test_state(db.clone()).await;
+    async fn test_require_auth_with_valid_jwt() {
+        let db = test_db().await;
+        let state = test_state(db).await;
 
-        // Create test user
         let user_id = generate_uuid();
-        let now = OffsetDateTime::now_utc();
-        let test_user = user::ActiveModel {
-            id: Set(user_id),
-            email: Set("test@example.com".to_string()),
-            first_name: Set("Test".to_string()),
-            last_name: Set("User".to_string()),
-            password_hash: Set(None),
-            is_active: Set(true),
-            deactivated_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        test_user.insert(&db).await.unwrap();
+        let roles = vec!["admin".to_string()];
 
-        // Create session
-        let session_service = SessionService::new(db.clone());
-        let token = session_service
-            .create_session(user_id, AuthMethod::Password, None, None)
-            .await
+        // Create a JWT access token
+        let jwt_token = state
+            .jwt
+            .create_access_token(user_id, &roles, "password", None)
             .unwrap();
 
         // Build app with auth middleware
@@ -213,10 +167,10 @@ mod tests {
             ))
             .with_state(state);
 
-        // Make request with valid bearer token
+        // Make request with valid JWT bearer token
         let req = Request::builder()
             .uri("/protected")
-            .header("authorization", format!("Bearer {}", token))
+            .header("authorization", format!("Bearer {}", jwt_token))
             .body(Body::empty())
             .unwrap();
 
@@ -230,7 +184,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_require_auth_without_token() {
-        let db = setup_test_db().await;
+        let db = test_db().await;
         let state = test_state(db).await;
 
         let app = Router::new()
@@ -253,7 +207,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_require_auth_with_invalid_token() {
-        let db = setup_test_db().await;
+        let db = test_db().await;
         let state = test_state(db).await;
 
         let app = Router::new()
@@ -276,34 +230,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_require_auth_with_deactivated_user() {
-        let db = setup_test_db().await;
-        let state = test_state(db.clone()).await;
+    async fn test_require_auth_with_wrong_secret() {
+        let db = test_db().await;
+        let state = test_state(db).await;
 
-        // Create deactivated test user
+        // Create token with a different secret
+        let other_jwt = JwtManager::from_secret(b"different-secret");
         let user_id = generate_uuid();
-        let now = OffsetDateTime::now_utc();
-        let test_user = user::ActiveModel {
-            id: Set(user_id),
-            email: Set("test@example.com".to_string()),
-            first_name: Set("Test".to_string()),
-            last_name: Set("User".to_string()),
-            password_hash: Set(None),
-            is_active: Set(false),
-            deactivated_at: Set(Some(now)),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-        test_user.insert(&db).await.unwrap();
-
-        // Create session
-        let session_service = SessionService::new(db.clone());
-        let token = session_service
-            .create_session(user_id, AuthMethod::Password, None, None)
-            .await
+        let token = other_jwt
+            .create_access_token(user_id, &[], "password", None)
             .unwrap();
 
-        // Build app with auth middleware
         let app = Router::new()
             .route("/protected", get(protected_handler))
             .layer(middleware::from_fn_with_state(
@@ -312,7 +249,6 @@ mod tests {
             ))
             .with_state(state);
 
-        // Make request with valid bearer token but deactivated user
         let req = Request::builder()
             .uri("/protected")
             .header("authorization", format!("Bearer {}", token))
@@ -320,6 +256,6 @@ mod tests {
             .unwrap();
 
         let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), 403);
+        assert_eq!(resp.status(), 401);
     }
 }

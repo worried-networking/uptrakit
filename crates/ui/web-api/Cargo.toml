@@ -41,6 +41,7 @@ utoipa-axum = "0.2"
 openidconnect = { workspace = true }
 url = { workspace = true }
 urlencoding = "2"
+jsonwebtoken = { workspace = true }
 utoipa-swagger-ui = { version = "9.0", features = ["axum"], optional = true }
 
 [dev-dependencies]

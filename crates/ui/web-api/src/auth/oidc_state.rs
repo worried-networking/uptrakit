@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use openidconnect::{Nonce, PkceCodeVerifier};
 use time::OffsetDateTime;
 
+use crate::routes::auth::UserResponse;
+
 const TTL_SECONDS: i64 = 600; // 10 minutes
+const EXCHANGE_TTL_SECONDS: i64 = 60; // 60 seconds
 
 /// Pending OIDC authorization flow (stored between authorize and callback).
 pub struct PendingOidcFlow {
@@ -98,5 +101,49 @@ impl AccountLinkStore {
             .lock()
             .unwrap()
             .retain(|_, link| link.created_at > cutoff);
+    }
+}
+
+/// Pending OIDC token exchange (stored between callback redirect and exchange API call).
+pub struct PendingOidcTokenExchange {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub user: UserResponse,
+    pub created_at: OffsetDateTime,
+}
+
+/// In-memory store for pending OIDC token exchanges keyed by exchange code.
+#[derive(Clone)]
+pub struct OidcTokenExchangeStore {
+    inner: Arc<Mutex<HashMap<String, PendingOidcTokenExchange>>>,
+}
+
+impl Default for OidcTokenExchangeStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OidcTokenExchangeStore {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn insert(&self, code: String, exchange: PendingOidcTokenExchange) {
+        self.inner.lock().unwrap().insert(code, exchange);
+    }
+
+    pub fn take(&self, code: &str) -> Option<PendingOidcTokenExchange> {
+        self.inner.lock().unwrap().remove(code)
+    }
+
+    pub fn cleanup_expired(&self) {
+        let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(EXCHANGE_TTL_SECONDS);
+        self.inner
+            .lock()
+            .unwrap()
+            .retain(|_, ex| ex.created_at > cutoff);
     }
 }

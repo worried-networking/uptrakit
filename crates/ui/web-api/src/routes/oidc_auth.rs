@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::auth::authentication::{
     OidcUserResolution, extract_mapped_roles, resolve_oidc_user, sync_oidc_roles,
 };
-use crate::auth::oidc_state::{PendingAccountLink, PendingOidcFlow};
+use crate::auth::oidc_state::{PendingAccountLink, PendingOidcFlow, PendingOidcTokenExchange};
 use crate::auth::password;
 use crate::auth::session::SessionService;
 use crate::auth::token::{generate_secure_token, generate_uuid};
@@ -58,6 +58,11 @@ pub struct OidcCallbackParams {
 pub struct OidcLinkRequest {
     pub link_token: String,
     pub password: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct OidcExchangeRequest {
+    pub code: String,
 }
 
 /// Get available auth methods (public)
@@ -319,11 +324,11 @@ pub async fn oidc_callback(
         OidcUserResolution::LinkedUser(user_id) => {
             // Sync roles and create session
             let _ = sync_oidc_roles(&state.db, user_id, &provider, &additional_claims).await;
-            create_oidc_session_and_redirect(&state, user_id, flow.provider_id).await
+            create_oidc_tokens_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
             let _ = sync_oidc_roles(&state.db, user_id, &provider, &additional_claims).await;
-            create_oidc_session_and_redirect(&state, user_id, flow.provider_id).await
+            create_oidc_tokens_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::AutoLink { user_id } => {
             // Auto-link and create session
@@ -339,7 +344,7 @@ pub async fn oidc_callback(
                 return Redirect::to("/login?error=oidc_link_failed").into_response();
             }
             let _ = sync_oidc_roles(&state.db, user_id, &provider, &additional_claims).await;
-            create_oidc_session_and_redirect(&state, user_id, flow.provider_id).await
+            create_oidc_tokens_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
             // Store pending link and redirect to frontend
@@ -392,6 +397,39 @@ pub async fn oidc_callback(
     }
 }
 
+/// Exchange an OIDC exchange code for tokens
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/oidc/exchange",
+    request_body = OidcExchangeRequest,
+    responses(
+        (status = 200, description = "Exchange successful", body = AuthResponse),
+        (status = 400, description = "Invalid or expired exchange code")
+    ),
+    tag = "Authentication"
+)]
+pub async fn oidc_exchange(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OidcExchangeRequest>,
+) -> Response {
+    let pending = match state.oidc_token_exchange_store.take(&req.code) {
+        Some(p) => p,
+        None => {
+            return (StatusCode::BAD_REQUEST, "Invalid or expired exchange code").into_response();
+        }
+    };
+
+    let response = AuthResponse {
+        access_token: pending.access_token,
+        refresh_token: pending.refresh_token,
+        expires_in: state.jwt.expires_in(),
+        token_type: "Bearer".to_string(),
+        user: pending.user,
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
 /// Link a pending OIDC account (public)
 #[utoipa::path(
     post,
@@ -440,7 +478,7 @@ pub async fn oidc_link(
         };
         matches!(password::verify_password(pwd, hash), Ok(true))
     } else {
-        // Bearer token verification (OIDC-to-OIDC linking)
+        // Bearer token verification (OIDC-to-OIDC linking) — now JWT-based
         let bearer = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
@@ -449,9 +487,10 @@ pub async fn oidc_link(
             .map(|s| s.to_string());
 
         if let Some(token) = bearer {
-            let session_service = SessionService::new(state.db.clone());
-            match session_service.verify_session(&token).await {
-                Ok(verified) => verified.user_id == pending.user_id,
+            match state.jwt.decode_access_token(&token) {
+                Ok(claims) => uuid::Uuid::parse_str(&claims.sub)
+                    .map(|uid| uid == pending.user_id)
+                    .unwrap_or(false),
                 Err(_) => false,
             }
         } else {
@@ -519,10 +558,10 @@ pub async fn oidc_link(
         }
     }
 
-    // Create session
+    // Create refresh token
     let session_service = SessionService::new(state.db.clone());
-    let token = match session_service
-        .create_session(
+    let refresh_token = match session_service
+        .create_refresh_token(
             pending.user_id,
             AuthMethod::Oidc {
                 provider_id: pending.provider_id,
@@ -534,7 +573,7 @@ pub async fn oidc_link(
     {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to create session: {e:?}");
+            tracing::error!("Failed to create refresh token: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -549,8 +588,25 @@ pub async fn oidc_link(
         .await
         .unwrap_or_default();
 
+    // Create JWT access token
+    let access_token = match state.jwt.create_access_token(
+        pending.user_id,
+        &roles,
+        "oidc",
+        Some(pending.provider_id),
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Failed to create access token: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
     let response = AuthResponse {
-        token,
+        access_token,
+        refresh_token,
+        expires_in: state.jwt.expires_in(),
+        token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
             id: user.id.to_string(),
             email: user.email,
@@ -578,24 +634,70 @@ async fn find_active_provider(
         .flatten()
 }
 
-/// Build an OIDC client from provider configuration and inline all logic
-/// that uses it to avoid complex generic return types.
-async fn create_oidc_session_and_redirect(
+/// Create tokens and redirect using a short-lived exchange code.
+async fn create_oidc_tokens_and_redirect(
     state: &AppState,
     user_id: uuid::Uuid,
     provider_id: uuid::Uuid,
 ) -> Response {
+    // Create refresh token
     let session_service = SessionService::new(state.db.clone());
-    match session_service
-        .create_session(user_id, AuthMethod::Oidc { provider_id }, None, None)
+    let refresh_token = match session_service
+        .create_refresh_token(user_id, AuthMethod::Oidc { provider_id }, None, None)
         .await
     {
-        Ok(token) => Redirect::to(&format!("/login?oidc_token={token}")).into_response(),
+        Ok(t) => t,
         Err(e) => {
-            tracing::error!("Failed to create OIDC session: {e:?}");
-            Redirect::to("/login?error=oidc_session_failed").into_response()
+            tracing::error!("Failed to create OIDC refresh token: {e:?}");
+            return Redirect::to("/login?error=oidc_session_failed").into_response();
         }
-    }
+    };
+
+    // Get user info + roles for the response
+    let user = match User::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) => u,
+        _ => {
+            return Redirect::to("/login?error=oidc_internal_error").into_response();
+        }
+    };
+
+    let roles = super::auth::get_user_roles(&state.db, user_id)
+        .await
+        .unwrap_or_default();
+
+    // Create JWT access token
+    let access_token =
+        match state
+            .jwt
+            .create_access_token(user_id, &roles, "oidc", Some(provider_id))
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Failed to create OIDC access token: {e:?}");
+                return Redirect::to("/login?error=oidc_session_failed").into_response();
+            }
+        };
+
+    // Generate exchange code and store tokens
+    let exchange_code = generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+
+    state.oidc_token_exchange_store.insert(
+        exchange_code.clone(),
+        PendingOidcTokenExchange {
+            access_token,
+            refresh_token,
+            user: super::auth::UserResponse {
+                id: user.id.to_string(),
+                email: user.email,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                roles,
+            },
+            created_at: OffsetDateTime::now_utc(),
+        },
+    );
+
+    Redirect::to(&format!("/login?oidc_code={exchange_code}")).into_response()
 }
 
 #[allow(clippy::too_many_arguments)]

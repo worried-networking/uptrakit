@@ -158,6 +158,10 @@ mod tests {
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
+            jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                b"test-secret-resolve-ip",
+            )),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
         })
     }
 

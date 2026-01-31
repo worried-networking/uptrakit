@@ -1,5 +1,6 @@
 pub mod authentication;
 pub mod error;
+pub mod jwt;
 pub mod oidc_state;
 pub mod password;
 pub mod registration;
