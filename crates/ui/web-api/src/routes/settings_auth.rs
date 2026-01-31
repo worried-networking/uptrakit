@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
@@ -23,20 +24,26 @@ pub struct UpdateAuthenticationSettingsRequest {
     pub password_auth_enabled: Option<bool>,
 }
 
-/// Get authentication settings (admin-only)
+/// Get authentication settings
 #[utoipa::path(
     get,
     path = "/api/v1/settings/authentication",
     responses(
         (status = 200, description = "Authentication settings", body = AuthenticationSettingsResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
 )]
 pub async fn get_authentication_settings(
     State(state): State<Arc<AppState>>,
-    axum::Extension(_user): axum::Extension<AuthenticatedUser>,
+    axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let auth_settings = state.settings.authentication().await;
     let response = AuthenticationSettingsResponse {
         password_auth_enabled: auth_settings.password_auth_enabled,
@@ -44,7 +51,7 @@ pub async fn get_authentication_settings(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Update authentication settings (admin-only)
+/// Update authentication settings
 #[utoipa::path(
     put,
     path = "/api/v1/settings/authentication",
@@ -61,6 +68,10 @@ pub async fn update_authentication_settings(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     if let Some(password_enabled) = req.password_auth_enabled {
         if !password_enabled {
             // Safety: cannot disable password auth if current session uses password

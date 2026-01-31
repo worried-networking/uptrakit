@@ -5,6 +5,7 @@
 	import { page } from '$app/stores';
 	import { user, loading, initialize, handleLogout } from '$lib/auth';
 	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
+	import { Permission } from '$lib/types';
 	import '../app.postcss';
 
 	let { children }: { children: Snippet } = $props();
@@ -23,11 +24,17 @@
 
 	const publicRoutes = new Set(['/login', '/register']);
 
-	const navItems = [
+	const allNavItems = [
 		{ href: '/', label: 'Home' },
 		{ href: '/agents', label: 'Agents' },
-		{ href: '/settings', label: 'Settings' }
+		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings }
 	];
+
+	const navItems = $derived(
+		allNavItems.filter(
+			(item) => !item.permission || $user?.permissions.includes(item.permission)
+		)
+	);
 
 	let showSidebar = $derived($user && !publicRoutes.has($page.url.pathname));
 </script>

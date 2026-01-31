@@ -7,13 +7,20 @@ use http::StatusCode;
 use uptrakit_shared_db::entity::prelude::*;
 
 use crate::AppState;
+use crate::auth::permissions::Permission;
 
-/// Extension type to carry the authenticated user ID, auth method, and roles through the request.
+/// Extension type to carry the authenticated user ID, auth method, and permissions through the request.
 #[derive(Clone, Debug)]
 pub struct AuthenticatedUser {
     pub user_id: uuid::Uuid,
     pub auth_method: AuthMethod,
-    pub roles: Vec<String>,
+    pub permissions: Vec<Permission>,
+}
+
+impl AuthenticatedUser {
+    pub fn has_permission(&self, perm: Permission) -> bool {
+        self.permissions.contains(&perm)
+    }
 }
 
 /// Middleware that requires authentication via JWT Bearer token in Authorization header.
@@ -64,11 +71,11 @@ pub async fn require_auth(
         AuthMethod::Password
     };
 
-    // Inject user_id, auth_method, and roles into request extensions
+    // Inject user_id, auth_method, and permissions into request extensions
     req.extensions_mut().insert(AuthenticatedUser {
         user_id,
         auth_method,
-        roles: claims.roles,
+        permissions: claims.permissions,
     });
 
     next.run(req).await
@@ -87,6 +94,7 @@ fn extract_bearer_token(req: &Request) -> Option<String> {
 mod tests {
     use super::*;
     use crate::auth::jwt::JwtManager;
+    use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::auth::token::generate_uuid;
     use crate::settings::Settings;
@@ -150,12 +158,12 @@ mod tests {
         let state = test_state(db).await;
 
         let user_id = generate_uuid();
-        let roles = vec!["admin".to_string()];
+        let permissions = vec![Permission::ViewAgents];
 
         // Create a JWT access token
         let jwt_token = state
             .jwt
-            .create_access_token(user_id, &roles, "password", None)
+            .create_access_token(user_id, &permissions, "password", None)
             .unwrap();
 
         // Build app with auth middleware

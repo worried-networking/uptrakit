@@ -18,14 +18,15 @@
 		activateOidcProvider,
 		deactivateOidcProvider
 	} from '$lib/api';
-	import type {
-		RegistrationSettings,
-		AuthenticationSettings,
-		AgentCertificateSettings,
-		EnrollmentTokenStatus,
-		OidcProviderResponse,
-		CreateOidcProviderRequest,
-		UpdateOidcProviderRequest
+	import {
+		Permission,
+		type RegistrationSettings,
+		type AuthenticationSettings,
+		type AgentCertificateSettings,
+		type EnrollmentTokenStatus,
+		type OidcProviderResponse,
+		type CreateOidcProviderRequest,
+		type UpdateOidcProviderRequest
 	} from '$lib/types';
 
 	// --- Global feedback ---
@@ -84,18 +85,18 @@
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
-	const isAdmin = $derived($user?.roles.includes('admin') ?? false);
+	const canManageSettings = $derived($user?.permissions.includes(Permission.ManageSettings) ?? false);
 
 	$effect(() => {
 		if (!$user) {
 			goto('/login');
-		} else if (!isAdmin) {
+		} else if (!canManageSettings) {
 			goto('/');
 		}
 	});
 
 	$effect(() => {
-		if (isAdmin) {
+		if (canManageSettings) {
 			loadAllSettings();
 		}
 	});
@@ -355,7 +356,7 @@
 	}
 </script>
 
-{#if $user && isAdmin}
+{#if $user && canManageSettings}
 	<h1 class="h1 mb-6">Settings</h1>
 
 	{#if successMessage}

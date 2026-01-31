@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
 use crate::cert_signer::AgentCertBundle;
 use crate::middleware::require_auth::AuthenticatedUser;
@@ -265,8 +266,8 @@ pub async fn list_agents(
     Extension(user): Extension<AuthenticatedUser>,
     Query(query): Query<ListAgentsQuery>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ViewAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let mut q = Agent::find().filter(agent::Column::DeactivatedAt.is_null());
@@ -312,8 +313,8 @@ pub async fn approve_agent(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let agent_id = match uuid::Uuid::parse_str(&id) {
@@ -386,8 +387,8 @@ pub async fn reject_agent(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let agent_id = match uuid::Uuid::parse_str(&id) {
@@ -464,8 +465,8 @@ pub async fn deactivate_agent(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let agent_id = match uuid::Uuid::parse_str(&id) {
@@ -544,8 +545,8 @@ pub async fn create_enrollment_token(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let plaintext = match token::generate_secure_token() {
@@ -598,8 +599,8 @@ pub async fn revoke_enrollment_token(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     if let Err(e) = delete_setting(&state.db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
@@ -632,8 +633,8 @@ pub async fn enrollment_token_status(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let configured = matches!(
@@ -801,8 +802,8 @@ pub async fn merge_agent(
     Path(target_id): Path<String>,
     Json(body): Json<MergeAgentRequest>,
 ) -> Response {
-    if !check_admin_role(&state.db, user.user_id).await {
-        return (StatusCode::FORBIDDEN, "Admin role required").into_response();
+    if !user.has_permission(Permission::ManageAgents) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
     let target_uuid = match uuid::Uuid::parse_str(&target_id) {
@@ -925,20 +926,4 @@ pub async fn merge_agent(
     );
 
     (StatusCode::OK, Json(agent_to_response(updated_target))).into_response()
-}
-
-async fn check_admin_role(db: &sea_orm::DatabaseConnection, user_id: uuid::Uuid) -> bool {
-    use uptrakit_shared_db::entity::{prelude::*, user_role};
-
-    UserRole::find()
-        .filter(user_role::Column::UserId.eq(user_id))
-        .find_also_related(Role)
-        .all(db)
-        .await
-        .map(|roles| {
-            roles
-                .iter()
-                .any(|(_, r)| r.as_ref().is_some_and(|r| r.name == "admin"))
-        })
-        .unwrap_or(false)
 }

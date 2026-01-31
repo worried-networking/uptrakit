@@ -1,9 +1,16 @@
+export enum Permission {
+	ViewSettings = 'view_settings',
+	ManageSettings = 'manage_settings',
+	ViewAgents = 'view_agents',
+	ManageAgents = 'manage_agents'
+}
+
 export interface User {
 	id: string;
 	email: string;
 	first_name: string;
 	last_name: string;
-	roles: string[];
+	permissions: string[];
 }
 
 export interface AuthResponse {

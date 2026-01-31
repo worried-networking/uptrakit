@@ -176,6 +176,20 @@ pub async fn resolve_oidc_user(
     };
     link.insert(db).await.context_to()?;
 
+    // Assign default 'user' role (role mapping may override this later via sync_oidc_roles)
+    if let Ok(Some(user_role_entity)) = Role::find()
+        .filter(role::Column::Name.eq("user"))
+        .one(db)
+        .await
+    {
+        let user_role_model = user_role::ActiveModel {
+            user_id: Set(user_id),
+            role_id: Set(user_role_entity.id),
+            assigned_at: Set(now),
+        };
+        let _ = user_role_model.insert(db).await;
+    }
+
     Ok(OidcUserResolution::NewUser(user_id))
 }
 

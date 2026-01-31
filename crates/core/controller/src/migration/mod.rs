@@ -12,6 +12,7 @@ mod m20260129_000006_create_settings;
 mod m20260129_000007_create_agents;
 mod m20260129_000008_create_agent_certificates;
 mod m20260130_000009_jwt_refresh_tokens;
+mod m20260131_000010_update_rbac_permissions;
 
 pub struct Migrator;
 
@@ -28,6 +29,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260129_000007_create_agents::Migration),
             Box::new(m20260129_000008_create_agent_certificates::Migration),
             Box::new(m20260130_000009_jwt_refresh_tokens::Migration),
+            Box::new(m20260131_000010_update_rbac_permissions::Migration),
         ]
     }
 }
