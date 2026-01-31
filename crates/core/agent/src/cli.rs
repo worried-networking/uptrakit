@@ -14,7 +14,7 @@ pub struct Args {
     /// Trust the controller's TLS certificate on first connection (TOFU).
     /// Only effective when no CA certificate is cached locally.
     #[arg(long, conflicts_with = "ca_cert")]
-    pub trust_first_use: bool,
+    pub tofu: bool,
 
     /// Path to a PEM-encoded CA certificate file.
     #[arg(long)]
@@ -84,7 +84,7 @@ mod tests {
         let args =
             Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
                 .expect("should parse defaults");
-        assert!(!args.trust_first_use);
+        assert!(!args.tofu);
         assert!(args.ca_cert.is_none());
         assert!(args.friendly_name.is_none());
         assert!(args.enrollment_token.is_none());
@@ -97,13 +97,13 @@ mod tests {
             "uptrakit-agent",
             "--url",
             "https://host:8443",
-            "--trust-first-use",
+            "--tofu",
             "--ca-cert",
             "/some/path.pem",
         ]);
         assert!(
             result.is_err(),
-            "--trust-first-use and --ca-cert should conflict"
+            "--tofu and --ca-cert should conflict"
         );
     }
 

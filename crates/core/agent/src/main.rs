@@ -60,11 +60,11 @@ async fn run(args: &Args) -> error::Result<()> {
         state::delete_cert_not_after_ts(&data_dir)?;
     }
 
-    // CA bootstrap: cached → --ca-cert file → --trust-first-use TOFU → system trust
+    // CA bootstrap: cached → --ca-cert file → --tofu TOFU → system trust
     let ca_pem: Option<Vec<u8>> = if let Some(cached) = state::load_ca_cert(&data_dir)? {
         tracing::info!("loaded CA certificate from disk");
-        if args.trust_first_use {
-            tracing::warn!("--trust-first-use ignored: CA already cached");
+        if args.tofu {
+            tracing::warn!("--tofu ignored: CA already cached");
         }
         Some(cached)
     } else if let Some(ref ca_path) = args.ca_cert {
@@ -74,7 +74,7 @@ async fn run(args: &Args) -> error::Result<()> {
         state::save_ca_cert(&data_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
-    } else if args.trust_first_use {
+    } else if args.tofu {
         tracing::info!("TOFU: fetching CA (accepting any server certificate)");
         let pem = client::fetch_ca_certificate(base_url, client::TlsMode::TrustFirstUse).await?;
         state::save_ca_cert(&data_dir, &pem)?;
