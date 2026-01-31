@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rand::Rng;
+use rootcause::{Report, prelude::*};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -28,12 +29,11 @@ pub enum DeviceFlowError {
     #[error("device flow polling too fast")]
     RateLimited,
 
-    #[error("internal error: {0}")]
-    Internal(String),
-
     #[error("token generation failed: {0}")]
     TokenGeneration(String),
 }
+
+pub type Result<T> = std::result::Result<T, Report<DeviceFlowError>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceFlowStatus {
@@ -72,9 +72,9 @@ impl DeviceFlowStore {
     }
 
     /// Create a new device flow session. Returns `(device_code, user_code)`.
-    pub fn create(&self, client_name: Option<String>) -> Result<(String, String), DeviceFlowError> {
-        let device_code =
-            generate_secure_token().map_err(|e| DeviceFlowError::TokenGeneration(e.to_string()))?;
+    pub fn create(&self, client_name: Option<String>) -> Result<(String, String)> {
+        let device_code = generate_secure_token()
+            .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
         let user_code = generate_user_code();
         let raw_user_code = user_code.replace('-', "");
 
@@ -87,18 +87,12 @@ impl DeviceFlowStore {
         };
 
         {
-            let mut by_dc = self
-                .by_device_code
-                .lock()
-                .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+            let mut by_dc = self.by_device_code.lock().unwrap();
             by_dc.insert(device_code.clone(), flow);
         }
 
         {
-            let mut by_uc = self
-                .by_user_code
-                .lock()
-                .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+            let mut by_uc = self.by_user_code.lock().unwrap();
             by_uc.insert(raw_user_code, device_code.clone());
         }
 
@@ -106,13 +100,12 @@ impl DeviceFlowStore {
     }
 
     /// Get the current status of a device flow by device code.
-    pub fn get_status(&self, device_code: &str) -> Result<DeviceFlowStatus, DeviceFlowError> {
-        let by_dc = self
-            .by_device_code
-            .lock()
-            .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+    pub fn get_status(&self, device_code: &str) -> Result<DeviceFlowStatus> {
+        let by_dc = self.by_device_code.lock().unwrap();
 
-        let flow = by_dc.get(device_code).ok_or(DeviceFlowError::NotFound)?;
+        let flow = by_dc
+            .get(device_code)
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
         if flow.created_at < cutoff {
@@ -123,13 +116,12 @@ impl DeviceFlowStore {
     }
 
     /// Check if polling is too fast (rate limiting).
-    pub fn is_rate_limited(&self, device_code: &str) -> Result<bool, DeviceFlowError> {
-        let by_dc = self
-            .by_device_code
-            .lock()
-            .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+    pub fn is_rate_limited(&self, device_code: &str) -> Result<bool> {
+        let by_dc = self.by_device_code.lock().unwrap();
 
-        let flow = by_dc.get(device_code).ok_or(DeviceFlowError::NotFound)?;
+        let flow = by_dc
+            .get(device_code)
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         if let Some(last_polled) = flow.last_polled_at {
             let min_interval = time::Duration::seconds(MIN_POLL_INTERVAL_SECONDS);
@@ -142,62 +134,52 @@ impl DeviceFlowStore {
     }
 
     /// Record a poll timestamp for rate limiting.
-    pub fn record_poll(&self, device_code: &str) -> Result<(), DeviceFlowError> {
-        let mut by_dc = self
-            .by_device_code
-            .lock()
-            .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+    pub fn record_poll(&self, device_code: &str) -> Result<()> {
+        let mut by_dc = self.by_device_code.lock().unwrap();
 
         let flow = by_dc
             .get_mut(device_code)
-            .ok_or(DeviceFlowError::NotFound)?;
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
         flow.last_polled_at = Some(OffsetDateTime::now_utc());
 
         Ok(())
     }
 
     /// Look up the client name for a device code.
-    pub fn get_client_name(&self, device_code: &str) -> Result<Option<String>, DeviceFlowError> {
-        let by_dc = self
-            .by_device_code
-            .lock()
-            .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+    pub fn get_client_name(&self, device_code: &str) -> Result<Option<String>> {
+        let by_dc = self.by_device_code.lock().unwrap();
 
-        let flow = by_dc.get(device_code).ok_or(DeviceFlowError::NotFound)?;
+        let flow = by_dc
+            .get(device_code)
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
         Ok(flow.client_name.clone())
     }
 
     /// Approve a device flow by user code, setting the authorized user.
-    pub fn approve(&self, user_code: &str, user_id: Uuid) -> Result<(), DeviceFlowError> {
+    pub fn approve(&self, user_code: &str, user_id: Uuid) -> Result<()> {
         let normalized = user_code.replace('-', "").to_uppercase();
 
         let device_code = {
-            let by_uc = self
-                .by_user_code
-                .lock()
-                .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+            let by_uc = self.by_user_code.lock().unwrap();
             by_uc
                 .get(&normalized)
                 .cloned()
-                .ok_or(DeviceFlowError::NotFound)?
+                .ok_or_else(|| report!(DeviceFlowError::NotFound))?
         };
 
-        let mut by_dc = self
-            .by_device_code
-            .lock()
-            .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+        let mut by_dc = self.by_device_code.lock().unwrap();
 
         let flow = by_dc
             .get_mut(&device_code)
-            .ok_or(DeviceFlowError::NotFound)?;
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
         if flow.created_at < cutoff {
-            return Err(DeviceFlowError::NotFound);
+            return Err(report!(DeviceFlowError::NotFound));
         }
 
         if matches!(flow.status, DeviceFlowStatus::Authorized { .. }) {
-            return Err(DeviceFlowError::AlreadyAuthorized);
+            return Err(report!(DeviceFlowError::AlreadyAuthorized));
         }
 
         flow.status = DeviceFlowStatus::Authorized { user_id };
@@ -206,22 +188,20 @@ impl DeviceFlowStore {
     }
 
     /// Consume a device flow (one-time use). Removes the flow from both maps.
-    pub fn consume(&self, device_code: &str) -> Result<(Uuid, Option<String>), DeviceFlowError> {
-        let mut by_dc = self
-            .by_device_code
-            .lock()
-            .map_err(|e| DeviceFlowError::Internal(e.to_string()))?;
+    pub fn consume(&self, device_code: &str) -> Result<(Uuid, Option<String>)> {
+        let mut by_dc = self.by_device_code.lock().unwrap();
 
-        let flow = by_dc.remove(device_code).ok_or(DeviceFlowError::NotFound)?;
+        let flow = by_dc
+            .remove(device_code)
+            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         // Also remove from user_code map
-        if let Ok(mut by_uc) = self.by_user_code.lock() {
-            by_uc.remove(&flow.user_code);
-        }
+        let mut by_uc = self.by_user_code.lock().unwrap();
+        by_uc.remove(&flow.user_code);
 
         match flow.status {
             DeviceFlowStatus::Authorized { user_id } => Ok((user_id, flow.client_name)),
-            _ => Err(DeviceFlowError::NotFound),
+            _ => Err(report!(DeviceFlowError::NotFound)),
         }
     }
 
@@ -229,24 +209,19 @@ impl DeviceFlowStore {
     pub fn cleanup_expired(&self) {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
 
-        // Collect expired user codes first
-        let expired_user_codes: Vec<String>;
-        if let Ok(mut by_dc) = self.by_device_code.lock() {
-            expired_user_codes = by_dc
-                .iter()
-                .filter(|(_, flow)| flow.created_at < cutoff)
-                .map(|(_, flow)| flow.user_code.clone())
-                .collect();
+        let mut by_dc = self.by_device_code.lock().unwrap();
+        let expired_user_codes: Vec<String> = by_dc
+            .iter()
+            .filter(|(_, flow)| flow.created_at < cutoff)
+            .map(|(_, flow)| flow.user_code.clone())
+            .collect();
 
-            by_dc.retain(|_, flow| flow.created_at >= cutoff);
-        } else {
-            return;
-        }
+        by_dc.retain(|_, flow| flow.created_at >= cutoff);
+        drop(by_dc);
 
-        if let Ok(mut by_uc) = self.by_user_code.lock() {
-            for uc in &expired_user_codes {
-                by_uc.remove(uc);
-            }
+        let mut by_uc = self.by_user_code.lock().unwrap();
+        for uc in &expired_user_codes {
+            by_uc.remove(uc);
         }
     }
 }
@@ -330,7 +305,10 @@ mod tests {
         store.approve(&user_code, user_id).unwrap();
 
         let err = store.approve(&user_code, user_id).unwrap_err();
-        assert!(matches!(err, DeviceFlowError::AlreadyAuthorized));
+        assert!(matches!(
+            err.current_context(),
+            DeviceFlowError::AlreadyAuthorized
+        ));
     }
 
     #[test]
@@ -347,7 +325,10 @@ mod tests {
 
         // Second consume should fail
         let err = store.consume(&device_code).unwrap_err();
-        assert!(matches!(err, DeviceFlowError::NotFound));
+        assert!(matches!(
+            err.current_context(),
+            DeviceFlowError::NotFound
+        ));
     }
 
     #[test]
@@ -356,7 +337,10 @@ mod tests {
         let (device_code, _) = store.create(None).unwrap();
 
         let err = store.consume(&device_code).unwrap_err();
-        assert!(matches!(err, DeviceFlowError::NotFound));
+        assert!(matches!(
+            err.current_context(),
+            DeviceFlowError::NotFound
+        ));
     }
 
     #[test]
@@ -364,10 +348,16 @@ mod tests {
         let store = DeviceFlowStore::new();
 
         let err = store.get_status("nonexistent").unwrap_err();
-        assert!(matches!(err, DeviceFlowError::NotFound));
+        assert!(matches!(
+            err.current_context(),
+            DeviceFlowError::NotFound
+        ));
 
         let err = store.approve("NOPE-CODE", Uuid::now_v7()).unwrap_err();
-        assert!(matches!(err, DeviceFlowError::NotFound));
+        assert!(matches!(
+            err.current_context(),
+            DeviceFlowError::NotFound
+        ));
     }
 
     #[test]

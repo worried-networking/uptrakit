@@ -131,13 +131,16 @@ pub async fn device_auth_poll(
                 .into_response();
         }
         Ok(false) => {}
-        Err(DeviceFlowError::NotFound) => {
-            return (StatusCode::NOT_FOUND, "Device flow not found or expired\n").into_response();
-        }
-        Err(e) => {
-            tracing::error!("Device flow rate limit check failed: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => match e.current_context() {
+            DeviceFlowError::NotFound => {
+                return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
+                    .into_response();
+            }
+            _ => {
+                tracing::error!("Device flow rate limit check failed: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        },
     }
 
     // Record poll timestamp
@@ -148,13 +151,16 @@ pub async fn device_auth_poll(
     // Check status
     let status = match state.device_flow_store.get_status(&req.device_code) {
         Ok(s) => s,
-        Err(DeviceFlowError::NotFound) => {
-            return (StatusCode::NOT_FOUND, "Device flow not found or expired\n").into_response();
-        }
-        Err(e) => {
-            tracing::error!("Device flow status check failed: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => match e.current_context() {
+            DeviceFlowError::NotFound => {
+                return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
+                    .into_response();
+            }
+            _ => {
+                tracing::error!("Device flow status check failed: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        },
     };
 
     match status {
@@ -180,14 +186,16 @@ pub async fn device_auth_poll(
             // Consume the flow (one-time use)
             let (user_id, client_name) = match state.device_flow_store.consume(&req.device_code) {
                 Ok(result) => result,
-                Err(DeviceFlowError::NotFound) => {
-                    return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
-                        .into_response();
-                }
-                Err(e) => {
-                    tracing::error!("Device flow consume failed: {e}");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                }
+                Err(e) => match e.current_context() {
+                    DeviceFlowError::NotFound => {
+                        return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
+                            .into_response();
+                    }
+                    _ => {
+                        tracing::error!("Device flow consume failed: {e}");
+                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    }
+                },
             };
 
             let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
@@ -245,15 +253,17 @@ pub async fn device_auth_approve(
             }),
         )
             .into_response(),
-        Err(DeviceFlowError::NotFound) => {
-            (StatusCode::NOT_FOUND, "Device flow not found or expired\n").into_response()
-        }
-        Err(DeviceFlowError::AlreadyAuthorized) => {
-            (StatusCode::CONFLICT, "Device flow already authorized\n").into_response()
-        }
-        Err(e) => {
-            tracing::error!("Device flow approve failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
+        Err(e) => match e.current_context() {
+            DeviceFlowError::NotFound => {
+                (StatusCode::NOT_FOUND, "Device flow not found or expired\n").into_response()
+            }
+            DeviceFlowError::AlreadyAuthorized => {
+                (StatusCode::CONFLICT, "Device flow already authorized\n").into_response()
+            }
+            _ => {
+                tracing::error!("Device flow approve failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        },
     }
 }
