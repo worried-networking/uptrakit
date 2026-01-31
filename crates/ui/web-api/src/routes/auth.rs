@@ -147,7 +147,13 @@ pub async fn register(
     }
 
     // Check if this is the first user
-    let user_count = User::find().count(&state.db).await.unwrap_or(0);
+    let user_count = match User::find().count(&state.db).await {
+        Ok(count) => count,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to count users");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
     let is_first_user = user_count == 0;
 
     // Create user
