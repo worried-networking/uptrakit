@@ -75,6 +75,8 @@ ignore = [
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained but transitively used by rumqttc 0.25.1. Waiting for rumqttc update to migrate to rustls-pki-types." },
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, pulled transitively by utoipa-axum. No safe upgrade available; utoipa-axum hasn't migrated to pastey yet." },
+    { id = "RUSTSEC-2023-0071", reason = "rsa Marvin Attack — pulled transitively by openidconnect for OIDC JWT verification. No patched rsa crate exists. openidconnect uses rsa only for ID token signature verification (public-key operation), which is not susceptible to the Marvin timing attack." },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -114,6 +116,15 @@ allow = [
     # redistribution with attribution. Required by Unicode standard implementations.
     # Used by: unicode-ident (proc-macro dependency, ubiquitous in Rust ecosystem)
     "Unicode-3.0",
+    # Zlib: OSI-approved, FSF Free/Libre permissive license similar to MIT/BSD.
+    # Allows unrestricted use, modification, and redistribution with only
+    # attribution and no misrepresentation requirements.
+    # Used by: foldhash (hash function used by hashbrown, transitive via sqlx-core)
+    "Zlib",
+    # CDLA-Permissive-2.0: Community Data License Agreement — permissive data license.
+    # Allows unrestricted use, modification, and redistribution of data with attribution.
+    # Used by: webpki-roots (Mozilla CA certificate bundle data)
+    "CDLA-Permissive-2.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -243,6 +254,38 @@ skip = [
     { crate = "windows_x86_64_gnu@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
     { crate = "windows_x86_64_gnullvm@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
     { crate = "windows_x86_64_msvc@0.52.6", reason = "pulled by windows-targets@0.52.6 via ring" },
+
+    # base64: 0.21.7 via openidconnect, 0.22.1 via axum/reqwest/sqlx
+    { crate = "base64@0.21.7", reason = "pulled by openidconnect; newer 0.22.x used by axum, reqwest, sqlx" },
+
+    # darling: 0.20.x via sea-query-derive, 0.21.x via serde_with (openidconnect)
+    { crate = "darling@0.20.11", reason = "pulled by sea-query-derive; newer 0.21.x used by serde_with" },
+    { crate = "darling_core@0.20.11", reason = "pulled by darling 0.20; newer 0.21.x used by darling 0.21" },
+    { crate = "darling_macro@0.20.11", reason = "pulled by darling 0.20; newer 0.21.x used by darling 0.21" },
+
+    # hashbrown: 0.15.x via sqlx-core, 0.16.x via indexmap/rootcause
+    { crate = "hashbrown@0.15.5", reason = "pulled by sqlx-core; newer 0.16.x used by indexmap, rootcause" },
+
+    # heck: 0.4.x via sea-orm macros, 0.5.x via clap/sea-orm-macros
+    { crate = "heck@0.4.1", reason = "pulled by sea-orm derive macros; newer 0.5.x used by clap, sea-orm-macros" },
+
+    # itertools: 0.10.x via openidconnect, 0.14.x via sea-orm
+    { crate = "itertools@0.10.5", reason = "pulled by openidconnect; newer 0.14.x used by sea-orm" },
+
+    # ordered-float: 2.x via serde-value (openidconnect), 4.x via sea-query
+    { crate = "ordered-float@2.10.1", reason = "pulled by serde-value (openidconnect); newer 4.x used by sea-query" },
+
+    # rand: 0.8.x via openidconnect/rsa, 0.9.x via tungstenite/uptrakit
+    { crate = "rand@0.8.5", reason = "pulled by openidconnect/rsa; newer 0.9.x used by tungstenite, uptrakit" },
+    { crate = "rand_chacha@0.3.1", reason = "pulled by rand 0.8; newer 0.9.x used by rand 0.9" },
+    { crate = "rand_core@0.6.4", reason = "pulled by crypto crates (openidconnect); newer 0.9.x used by rand 0.9" },
+
+    # thiserror: 1.x via openidconnect/oauth2, 2.x via most ecosystem
+    { crate = "thiserror@1.0.69", reason = "pulled by openidconnect, oauth2; newer 2.x used by most ecosystem" },
+    { crate = "thiserror-impl@1.0.69", reason = "pulled by thiserror 1.x; newer 2.x used by thiserror 2.x" },
+
+    # webpki-roots: 0.26.x via sqlx-core, 1.x via reqwest/hyper-rustls
+    { crate = "webpki-roots@0.26.11", reason = "pulled by sqlx-core; newer 1.x used by reqwest, hyper-rustls" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
