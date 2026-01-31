@@ -262,6 +262,7 @@ The `RawSettingsExt` trait (defined in `settings_store.rs`) provides a `get_sett
 `reconcile_setting()` (`crates/core/controller/src/reconcile.rs`) accepts a `SettingKey` and a `&RawSettings` map, looking up the key via `key.as_str()` — no per-key DB reads. It still needs the `DatabaseConnection` for upserts.
 
 For each DB-managed setting at startup:
+
 1. DB has value + CLI provided + differs + `--force-settings-override` → use CLI, update DB
 2. DB has value + CLI provided + differs + no force → use DB, log warning
 3. DB has value + (CLI absent or same) → use DB

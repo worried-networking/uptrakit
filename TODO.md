@@ -212,6 +212,7 @@ Main functionality that delivers the core value proposition.
 - [ ] Implement update logging
 - [ ] Handle update failures and retries
 - [ ] Add update timeout handling
+- [ ] Support updating agent and controller
 
 ### Scheduling System
 
@@ -238,6 +239,17 @@ Main functionality that delivers the core value proposition.
 - [ ] Implement priority queue for updates
 - [ ] Handle concurrent version checks efficiently
 - [ ] Add resource-based throttling
+
+### User convenience
+
+- [ ] Reverse proxy support and documentation
+  - [ ] mTLS authentication handled by reverse proxy
+  - [ ] Certificates revokation is checked on the reverse proxy
+- [ ] SIGHUP support for graceful reloading
+  - [ ] All possible settings are reloaded
+  - [ ] Agents should not be disconnected during reload (but there should be a "please reconnect" message)
+- [ ] Add support for a graceful restart (probably via `so_reuseport`)
+- [ ] Certificate renewal on the controller through API must enable that certificate for new connections
 
 ---
 
@@ -306,6 +318,10 @@ Ways users interact with the system.
   - [ ] `uptrakit-cli update` - trigger update
   - [ ] `uptrakit-cli history` - view update history
   - [ ] `uptrakit-cli status` - system status
+  - [ ] `uptrakit-cli agent` - various commands proxied to the agent. Plus
+    `uptrakit-cli agent install` to install the agent locally
+  - [ ] `uptrakit-cli controller` - various commands proxied to the controller. Plus
+    `uptrakit-cli agent install` to install the agent locally
 - [ ] Implement CLI commands
 - [ ] Add output formatting (table, JSON, YAML)
 - [ ] Implement filtering and query options
@@ -328,10 +344,6 @@ Ways users interact with the system.
 - [ ] Add configurable MQTT topics
 - [ ] Implement MQTT connection resilience
 - [ ] Add MQTT authentication support
-
-### Notifications
-
-- [ ] Add a universal notifications engine
 
 ---
 
@@ -662,7 +674,6 @@ Making the system usable and maintainable.
 - [x] Write CONTRIBUTING.md
 - [x] Document development setup
 - [x] Create architecture documentation
-- [ ] Add code style guide
 - [ ] Document testing strategy
 - [ ] Create PR template and guidelines
 
