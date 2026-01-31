@@ -293,6 +293,12 @@ Ways users interact with the system.
 
 ### CLI Tool
 
+- [x] Device authorization login flow (RFC 8628-style)
+  - [x] CLI requests device code from controller
+  - [x] Opens browser for user approval
+  - [x] Polls for authorization completion
+  - [x] Stores API token locally on success
+- [x] Auth status and API token management (`auth status`, `auth token create/list/revoke`)
 - [ ] Design CLI command structure
   - [ ] `uptrakit-cli hosts` - list hosts
   - [ ] `uptrakit-cli software` - list software

@@ -109,6 +109,7 @@ For cryptographic algorithm details, see [SECURITY.md](SECURITY.md) section "Cry
 
 - **Password**: Argon2id with OWASP-recommended parameters.
 - **OIDC**: External identity providers with auto-create or account linking.
+- **Device authorization**: RFC 8628-style flow for CLI login. The CLI requests a device code, the user approves in the browser, and the CLI receives an API token. Works with any auth method (password or OIDC).
 - **Sessions**: SHA-256 hashed tokens, 7-day expiry, 30-min sliding window.
 - **JWT**: Access and refresh tokens carrying resolved permissions.
 - **API tokens**: Long-lived, revocable bearer tokens for programmatic access.

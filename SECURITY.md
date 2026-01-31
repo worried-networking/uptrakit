@@ -65,6 +65,7 @@ For the full operational flow (rotation steps, bundle distribution, `CaSnapshot`
 | Password (Argon2id) | User login | Local accounts with hashed passwords |
 | OIDC | User login | External identity providers; auto-create or link accounts |
 | JWT access tokens | API requests | Short-lived; carry resolved permissions (not roles) |
+| Device authorization | CLI login | Short-lived user code + browser approval; results in API token |
 | API tokens | Programmatic access | Long-lived bearer tokens; revocable |
 | mTLS client certificates | Agent connections | Issued during enrollment; validated on every WebSocket connection |
 | Enrollment tokens | Agent registration | One-time tokens with expiry for initial agent enrollment |

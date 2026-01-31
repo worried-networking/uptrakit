@@ -151,6 +151,35 @@ These are non-negotiable design constraints. Do not violate them.
 12. **Do not add any `allow()`** without excpicit approval from the user.
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions.
 
+## Device authorization flow (CLI login)
+
+The CLI uses an RFC 8628-style device authorization flow instead of password-based login. This allows the CLI to authenticate even when password auth is disabled (OIDC-only environments).
+
+### Flow
+
+1. CLI calls `POST /api/v1/auth/device` with an optional `client_name`. Returns `device_code`, `user_code`, `verification_url`, `expires_in` (600s), and `interval` (5s).
+2. CLI opens `verification_url` in the user's browser and displays the `user_code`.
+3. User logs in via the browser (password or OIDC) and approves the device code at `/device?code=XXXX-XXXX`.
+4. CLI polls `POST /api/v1/auth/device/poll` with the `device_code` every `interval` seconds.
+5. On approval, the poll response contains an API token. The CLI stores it locally.
+
+### Endpoints
+
+| Endpoint | Auth | Purpose |
+| --- | --- | --- |
+| `POST /api/v1/auth/device` | Public | Start device flow, get device code + user code |
+| `POST /api/v1/auth/device/poll` | Public | Poll for authorization status |
+| `POST /api/v1/auth/device/approve` | Bearer (JWT or API token) | Approve a device code (browser-side) |
+
+### Security
+
+- **Device code**: 32-byte crypto random (base64url), unguessable.
+- **User code**: 8 uppercase consonants from a 20-char alphabet (avoids vowels to prevent offensive words), ~34.5 bits entropy, formatted `XXXX-XXXX`.
+- **Rate limiting**: 429 returned if polling faster than the 5-second interval.
+- **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.
+- **10-minute expiry**: flows auto-expire; cleanup runs every 5 minutes alongside OIDC state cleanup.
+- **In-memory store**: follows the same `Arc<Mutex<HashMap>>` pattern as `OidcFlowStore`. Only the resulting API token is persisted to the database.
+
 ## Permissions model
 
 Authorization uses a typed `Permission` enum (`crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
