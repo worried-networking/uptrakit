@@ -162,8 +162,7 @@ mod tests {
 
         let rustls_cfg = {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let key_pair =
-                rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
             let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
                 .unwrap()
                 .self_signed(&key_pair)
@@ -172,8 +171,7 @@ mod tests {
                 .with_no_client_auth()
                 .with_single_cert(
                     vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
-                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
-                        .unwrap(),
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap(),
                 )
                 .unwrap();
             axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))

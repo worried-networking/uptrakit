@@ -223,10 +223,7 @@ fn load_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
 /// Load a CA from user-provided (external) paths.
 pub fn load_external_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
     let bundle = load_ca(cert_path, key_path)?;
-    tracing::info!(
-        "using external CA certificate from {}",
-        cert_path.display()
-    );
+    tracing::info!("using external CA certificate from {}", cert_path.display());
     Ok(bundle)
 }
 

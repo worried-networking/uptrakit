@@ -302,8 +302,7 @@ mod tests {
     #[test]
     fn agent_settings_backward_compat_extra_fields() {
         // Future-proof: extra fields in JSON should be ignored
-        let json =
-            r#"{"type":"agent_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","some_future_field":"value"}"#;
+        let json = r#"{"type":"agent_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","some_future_field":"value"}"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert_eq!(
             msg,

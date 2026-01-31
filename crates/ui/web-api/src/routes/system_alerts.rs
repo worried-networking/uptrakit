@@ -32,9 +32,7 @@ pub struct SystemAlertsResponse {
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_system_alerts(
-    State(state): State<Arc<AppState>>,
-) -> Json<SystemAlertsResponse> {
+pub async fn get_system_alerts(State(state): State<Arc<AppState>>) -> Json<SystemAlertsResponse> {
     let snapshot = state.ca_snapshot.borrow().clone();
     let mut alerts = Vec::new();
 

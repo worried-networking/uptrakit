@@ -110,9 +110,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let pki_path = pki::pki_dir(&data_dir).context(AppError::Pki)?;
 
     // Load CA state
-    let ca_state = if let (Some(ca_cert_path), Some(ca_key_path)) =
-        (&args.ca_cert, &args.ca_key)
-    {
+    let ca_state = if let (Some(ca_cert_path), Some(ca_key_path)) = (&args.ca_cert, &args.ca_key) {
         // External CA — not managed
         let ca = pki::load_external_ca(ca_cert_path, ca_key_path).context(AppError::Pki)?;
         pki::CaState {
@@ -139,9 +137,8 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
         pki::load_external_cert(cert_path, key_path).context(AppError::Pki)?
     } else {
-        let mut cert =
-            pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &args.sans)
-                .context(AppError::Pki)?;
+        let mut cert = pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &args.sans)
+            .context(AppError::Pki)?;
 
         // Auto-renew if within renewal window
         if pki::should_renew_server_cert(&cert.cert_pem) {
@@ -160,10 +157,9 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let revocation_notify = Arc::new(tokio::sync::Notify::const_new());
 
     // Build initial CRLs from DB before server starts
-    let initial_crls =
-        crl_manager::build_initial_crls_der(&db_conn, &ca_snapshot)
-            .await
-            .context(AppError::Pki)?;
+    let initial_crls = crl_manager::build_initial_crls_der(&db_conn, &ca_snapshot)
+        .await
+        .context(AppError::Pki)?;
 
     // Build initial server config with CRLs
     let initial_server_config = pki::build_rustls_config_with_client_auth_and_crls(
@@ -247,8 +243,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let conns_for_task = agent_connections.clone();
 
         Some(tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
             // Skip the first immediate tick
             interval.tick().await;
 
@@ -311,8 +306,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let app_state_for_task = Arc::clone(&app_state);
 
         Some(tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
             // Skip the first immediate tick
             interval.tick().await;
 
@@ -365,10 +359,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
                     Ok(new_cert) => {
                         // Update CRL manager's server cert
                         crl_mgr_for_task
-                            .update_server_cert(
-                                new_cert.cert_pem.clone(),
-                                new_cert.key_pem.clone(),
-                            )
+                            .update_server_cert(new_cert.cert_pem.clone(), new_cert.key_pem.clone())
                             .await;
 
                         // Reload TLS config

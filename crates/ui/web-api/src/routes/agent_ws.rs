@@ -114,7 +114,10 @@ async fn handle_authenticated(
     // the composite PK is (ca_fingerprint, serial_number) and we don't know
     // the CA fingerprint at this point.
     let cert_record = match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
-        .filter(uptrakit_shared_db::entity::agent_certificate::Column::SerialNumber.eq(cert_serial.clone()))
+        .filter(
+            uptrakit_shared_db::entity::agent_certificate::Column::SerialNumber
+                .eq(cert_serial.clone()),
+        )
         .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
         .one(&state.db)
         .await

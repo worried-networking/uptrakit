@@ -5,10 +5,10 @@ use http::Uri;
 use rootcause::prelude::*;
 use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
+use sha2::{Digest, Sha256};
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
     AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload,
     PingPayload, RenewCertificatePayload, RequestCertificatePayload, now_millis,

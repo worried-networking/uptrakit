@@ -2,6 +2,7 @@ pub use super::agent::{Entity as Agent, Model as AgentModel};
 pub use super::agent_certificate::{
     Entity as AgentCertificate, Model as AgentCertificateModel, RevocationReason,
 };
+pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::auth_method::AuthMethod;
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::permission::{Entity as Permission, Model as PermissionModel};

@@ -4,9 +4,12 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
+use sea_orm::EntityTrait;
 use uptrakit_shared_db::entity::prelude::*;
 
 use crate::AppState;
+use crate::auth::api_token::ApiTokenService;
+use crate::routes::auth::get_user_roles;
 
 /// Extension type to carry the authenticated user ID, auth method, and roles through the request.
 #[derive(Clone, Debug)]
@@ -16,11 +19,13 @@ pub struct AuthenticatedUser {
     pub roles: Vec<String>,
 }
 
-/// Middleware that requires authentication via JWT Bearer token in Authorization header.
+/// Middleware that requires authentication via Bearer token in Authorization header.
+///
+/// If the token starts with `upk_`, it is treated as an API token (DB lookup).
+/// Otherwise, it is decoded as a JWT access token (stateless validation).
+///
 /// Returns 401 Unauthorized if the token is missing, invalid, or expired.
 /// If authenticated, injects the user_id, auth method, and roles into request extensions.
-///
-/// No DB call is made — user deactivation/role changes take effect at refresh (~15 min max delay).
 pub async fn require_auth(
     State(state): State<Arc<AppState>>,
     mut req: Request,
@@ -34,23 +39,73 @@ pub async fn require_auth(
         }
     };
 
-    // Decode JWT access token (stateless validation)
-    let claims = match state.jwt.decode_access_token(&token) {
-        Ok(c) => c,
-        Err(_) => {
-            return (StatusCode::UNAUTHORIZED, "Invalid or expired token\n").into_response();
+    let auth_user = if token.starts_with("upk_") {
+        // API token path: DB lookup
+        match authenticate_api_token(&state, &token).await {
+            Ok(user) => user,
+            Err(resp) => return resp,
+        }
+    } else {
+        // JWT path: stateless validation
+        match authenticate_jwt(&state, &token) {
+            Ok(user) => user,
+            Err(resp) => return resp,
         }
     };
 
-    // Parse user_id from claims.sub
-    let user_id = match uuid::Uuid::parse_str(&claims.sub) {
-        Ok(id) => id,
-        Err(_) => {
-            return (StatusCode::UNAUTHORIZED, "Invalid token subject\n").into_response();
-        }
-    };
+    // Inject user into request extensions
+    req.extensions_mut().insert(auth_user);
 
-    // Reconstruct auth_method from claims
+    next.run(req).await
+}
+
+/// Authenticate using a `upk_`-prefixed API token (requires DB lookup).
+#[allow(clippy::result_large_err)]
+async fn authenticate_api_token(
+    state: &AppState,
+    token: &str,
+) -> std::result::Result<AuthenticatedUser, Response> {
+    let service = ApiTokenService::new(state.db.clone());
+
+    let (user_id, _token_id) = service.verify_token(token).await.map_err(|_| {
+        (StatusCode::UNAUTHORIZED, "Invalid or revoked API token\n").into_response()
+    })?;
+
+    // Check user is active
+    let user = User::find_by_id(user_id)
+        .one(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found\n").into_response())?;
+
+    if !user.is_active {
+        return Err((StatusCode::FORBIDDEN, "User is deactivated\n").into_response());
+    }
+
+    // Fetch roles from DB
+    let roles = get_user_roles(&state.db, user_id).await.unwrap_or_default();
+
+    Ok(AuthenticatedUser {
+        user_id,
+        auth_method: AuthMethod::ApiToken,
+        roles,
+    })
+}
+
+/// Authenticate using a JWT access token (stateless, no DB call).
+#[allow(clippy::result_large_err)]
+fn authenticate_jwt(
+    state: &AppState,
+    token: &str,
+) -> std::result::Result<AuthenticatedUser, Response> {
+    let claims = state
+        .jwt
+        .decode_access_token(token)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token\n").into_response())?;
+
+    let user_id = uuid::Uuid::parse_str(&claims.sub)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token subject\n").into_response())?;
+
     let auth_method = if claims.auth_method == "oidc" {
         let provider_id = claims
             .oidc_provider_id
@@ -64,14 +119,11 @@ pub async fn require_auth(
         AuthMethod::Password
     };
 
-    // Inject user_id, auth_method, and roles into request extensions
-    req.extensions_mut().insert(AuthenticatedUser {
+    Ok(AuthenticatedUser {
         user_id,
         auth_method,
         roles: claims.roles,
-    });
-
-    next.run(req).await
+    })
 }
 
 fn extract_bearer_token(req: &Request) -> Option<String> {
@@ -137,8 +189,7 @@ mod tests {
 
         let rustls_cfg = {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let key_pair =
-                rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
             let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
                 .unwrap()
                 .self_signed(&key_pair)
@@ -147,8 +198,7 @@ mod tests {
                 .with_no_client_auth()
                 .with_single_cert(
                     vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
-                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
-                        .unwrap(),
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap(),
                 )
                 .unwrap();
             axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
@@ -293,6 +343,30 @@ mod tests {
         let req = Request::builder()
             .uri("/protected")
             .header("authorization", format!("Bearer {}", token))
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_require_auth_with_invalid_api_token() {
+        let db = test_db().await;
+        let state = test_state(db).await;
+
+        let app = Router::new()
+            .route("/protected", get(protected_handler))
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&state),
+                require_auth,
+            ))
+            .with_state(state);
+
+        // Make request with invalid API token (upk_ prefix but not in DB)
+        let req = Request::builder()
+            .uri("/protected")
+            .header("authorization", "Bearer upk_invalid_token_not_in_db")
             .body(Body::empty())
             .unwrap();
 

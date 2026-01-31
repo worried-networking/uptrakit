@@ -92,7 +92,8 @@ pub struct AppState {
         (name = "Authentication", description = "User authentication endpoints"),
         (name = "Settings", description = "Application settings management"),
         (name = "Agents", description = "Agent enrollment and management"),
-        (name = "OIDC Providers", description = "OIDC provider configuration")
+        (name = "OIDC Providers", description = "OIDC provider configuration"),
+        (name = "API Tokens", description = "Personal access token management")
     ),
     paths(
         routes::auth::register,
@@ -127,7 +128,10 @@ pub struct AppState {
         routes::settings_agent_certs::get_agent_certificate_settings,
         routes::settings_agent_certs::update_agent_certificate_settings,
         routes::system_alerts::get_system_alerts,
-        routes::server_cert::renew_server_certificate
+        routes::server_cert::renew_server_certificate,
+        routes::api_tokens::create_api_token,
+        routes::api_tokens::list_api_tokens,
+        routes::api_tokens::revoke_api_token
     ),
     components(
         schemas(
@@ -161,7 +165,11 @@ pub struct AppState {
             routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest,
             routes::system_alerts::SystemAlert,
             routes::system_alerts::SystemAlertsResponse,
-            routes::server_cert::RenewServerCertResponse
+            routes::server_cert::RenewServerCertResponse,
+            routes::api_tokens::CreateApiTokenRequest,
+            routes::api_tokens::CreateApiTokenResponse,
+            routes::api_tokens::ApiTokenResponse,
+            routes::api_tokens::ApiTokenListResponse
         )
     ),
     info(
@@ -230,6 +238,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
     let auth_routes = OpenApiRouter::new()
         .routes(routes!(routes::auth::me))
+        .routes(routes!(
+            routes::api_tokens::create_api_token,
+            routes::api_tokens::list_api_tokens
+        ))
+        .routes(routes!(routes::api_tokens::revoke_api_token))
         .routes(routes!(
             routes::settings::get_registration_settings,
             routes::settings::update_registration_settings
@@ -368,8 +381,7 @@ mod tests {
         // Create a dummy RustlsConfig — tests don't actually do TLS handshakes.
         let rustls_cfg = {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let key_pair =
-                rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
             let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
                 .unwrap()
                 .self_signed(&key_pair)
@@ -378,8 +390,7 @@ mod tests {
                 .with_no_client_auth()
                 .with_single_cert(
                     vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
-                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
-                        .unwrap(),
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap(),
                 )
                 .unwrap();
             axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))

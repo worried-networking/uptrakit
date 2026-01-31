@@ -1,5 +1,6 @@
 pub mod agent_ws;
 pub mod agents;
+pub mod api_tokens;
 pub mod auth;
 pub mod ca;
 pub mod health;

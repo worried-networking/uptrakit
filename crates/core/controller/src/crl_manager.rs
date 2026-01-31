@@ -45,13 +45,11 @@ pub async fn build_initial_crls_der(
     db: &DatabaseConnection,
     snapshot: &CaSnapshot,
 ) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
-    let active_key =
-        KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
+    let active_key = KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
     let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
         .context_to::<pki::PkiError>()?;
 
-    let active_revoked =
-        query_revoked_certs_for_ca(db, &snapshot.active_fingerprint).await?;
+    let active_revoked = query_revoked_certs_for_ca(db, &snapshot.active_fingerprint).await?;
     let active_crl = sign_crl(&active_issuer, active_revoked, 0)?;
     let mut crls = vec![active_crl];
 
@@ -84,8 +82,8 @@ impl CrlManager {
             &snapshot.previous_fingerprint,
         ) {
             let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
-            let prev_issuer = Issuer::from_ca_cert_pem(prev_cert_pem, prev_key)
-                .context_to::<pki::PkiError>()?;
+            let prev_issuer =
+                Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
             Some((prev_issuer, prev_fp.clone()))
         } else {
             None
@@ -120,8 +118,8 @@ impl CrlManager {
             &snapshot.previous_fingerprint,
         ) {
             let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
-            let prev_issuer = Issuer::from_ca_cert_pem(prev_cert_pem, prev_key)
-                .context_to::<pki::PkiError>()?;
+            let prev_issuer =
+                Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
             Some((prev_issuer, prev_fp.clone()))
         } else {
             None
@@ -143,9 +141,7 @@ impl CrlManager {
     }
 
     /// Build DER-encoded CRLs from revoked certificates in the database.
-    async fn build_crls_der(
-        &self,
-    ) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
+    async fn build_crls_der(&self) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
         let issuers = self.issuers.read().await;
         let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
 
@@ -155,8 +151,7 @@ impl CrlManager {
         let mut crls = vec![active_crl];
 
         if let Some((ref prev_issuer, ref prev_fp)) = issuers.prev {
-            let prev_revoked =
-                query_revoked_certs_for_ca(&self.config.db, prev_fp).await?;
+            let prev_revoked = query_revoked_certs_for_ca(&self.config.db, prev_fp).await?;
             let prev_crl = sign_crl(prev_issuer, prev_revoked, crl_number)?;
             crls.push(prev_crl);
         }

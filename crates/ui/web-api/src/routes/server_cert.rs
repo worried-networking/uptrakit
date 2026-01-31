@@ -30,13 +30,12 @@ pub async fn renew_server_certificate(
     let snapshot = state.ca_snapshot.borrow().clone();
 
     // Build CA issuer from the active snapshot
-    let ca_key = rcgen::KeyPair::from_pem(&snapshot.active_key_pem)
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to parse CA key");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    let ca_issuer = rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key)
-        .map_err(|e| {
+    let ca_key = rcgen::KeyPair::from_pem(&snapshot.active_key_pem).map_err(|e| {
+        tracing::error!(error = %e, "failed to parse CA key");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let ca_issuer =
+        rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key).map_err(|e| {
             tracing::error!(error = %e, "failed to create CA issuer");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
@@ -53,11 +52,10 @@ pub async fn renew_server_certificate(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let mut params =
-        rcgen::CertificateParams::new(sans.dns_names.clone()).map_err(|e| {
-            tracing::error!(error = %e, "failed to create cert params");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let mut params = rcgen::CertificateParams::new(sans.dns_names.clone()).map_err(|e| {
+        tracing::error!(error = %e, "failed to create cert params");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     for ip in &sans.ip_addrs {
         params
             .subject_alt_names
@@ -72,12 +70,10 @@ pub async fn renew_server_certificate(
     params.not_before = time::OffsetDateTime::now_utc();
     params.not_after = time::OffsetDateTime::now_utc() + time::Duration::days(90);
 
-    let cert = params
-        .signed_by(&key_pair, &ca_issuer)
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to sign server cert");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let cert = params.signed_by(&key_pair, &ca_issuer).map_err(|e| {
+        tracing::error!(error = %e, "failed to sign server cert");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
@@ -133,7 +129,9 @@ fn build_server_tls_config(
 
     let mut root_store = RootCertStore::empty();
     for ca_cert in ca_certs {
-        root_store.add(ca_cert).map_err(|e| format!("root store: {e}"))?;
+        root_store
+            .add(ca_cert)
+            .map_err(|e| format!("root store: {e}"))?;
     }
 
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
