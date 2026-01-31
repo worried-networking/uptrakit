@@ -221,7 +221,7 @@ pub(crate) async fn do_sign_certificate(
     let bundle = cert_signer
         .sign_agent_cert(&agent.id, lifetime)
         .map_err(|e| {
-            tracing::error!("Failed to sign agent certificate: {}", e);
+            tracing::error!("Failed to sign agent certificate: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         })?;
 

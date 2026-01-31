@@ -1,3 +1,21 @@
+use rootcause::Report;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum CertSignerError {
+    #[error("CA key parse error: {0}")]
+    CaKeyParse(String),
+
+    #[error("CA issuer creation error: {0}")]
+    CaIssuer(String),
+
+    #[error("key generation error: {0}")]
+    KeyGeneration(String),
+
+    #[error("certificate signing error: {0}")]
+    Signing(String),
+}
+
 pub struct AgentCertBundle {
     pub cert_pem: String,
     pub key_pem: String,
@@ -10,7 +28,7 @@ pub trait AgentCertSigner: Send + Sync + 'static {
         &self,
         agent_id: &uuid::Uuid,
         lifetime: time::Duration,
-    ) -> Result<AgentCertBundle, String>;
+    ) -> std::result::Result<AgentCertBundle, Report<CertSignerError>>;
 
     /// Return the SHA-256 hex fingerprint of the active CA cert.
     fn active_ca_fingerprint(&self) -> String;

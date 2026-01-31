@@ -1,7 +1,8 @@
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair};
+use rootcause::{Report, prelude::*};
 use time::{OffsetDateTime, UtcDateTime};
 use tokio::sync::watch;
-use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner};
+use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
 use uuid::Uuid;
 
 use crate::pki::CaSnapshot;
@@ -21,12 +22,12 @@ impl AgentCertSigner for RcgenAgentCertSigner {
         &self,
         agent_id: &Uuid,
         lifetime: time::Duration,
-    ) -> Result<AgentCertBundle, String> {
+    ) -> std::result::Result<AgentCertBundle, Report<CertSignerError>> {
         let snapshot = self.ca_rx.borrow();
         let key_pair = KeyPair::from_pem(&snapshot.active_key_pem)
-            .map_err(|e| format!("CA key parse: {e}"))?;
+            .map_err(|e| report!(CertSignerError::CaKeyParse(e.to_string())))?;
         let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
-            .map_err(|e| format!("CA issuer: {e}"))?;
+            .map_err(|e| report!(CertSignerError::CaIssuer(e.to_string())))?;
         generate_agent_cert(&issuer, agent_id, lifetime)
     }
 
@@ -39,9 +40,9 @@ fn generate_agent_cert(
     issuer: &Issuer<'_, KeyPair>,
     agent_id: &Uuid,
     lifetime: time::Duration,
-) -> Result<AgentCertBundle, String> {
+) -> std::result::Result<AgentCertBundle, Report<CertSignerError>> {
     let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-        .map_err(|e| format!("key generation: {e}"))?;
+        .map_err(|e| report!(CertSignerError::KeyGeneration(e.to_string())))?;
 
     let not_after = OffsetDateTime::now_utc() + lifetime;
 
@@ -61,7 +62,7 @@ fn generate_agent_cert(
 
     let cert = params
         .signed_by(&key_pair, issuer)
-        .map_err(|e| format!("cert signing: {e}"))?;
+        .map_err(|e| report!(CertSignerError::Signing(e.to_string())))?;
 
     Ok(AgentCertBundle {
         cert_pem: cert.pem(),
