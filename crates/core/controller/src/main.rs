@@ -99,6 +99,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         )));
     }
 
+    // --san only makes sense with managed (auto-generated) certificates
+    if !args.sans.is_empty() && args.tls_cert.is_some() {
+        return Err(report!(AppError::Config(
+            "--san cannot be used with --tls-cert/--tls-key; \
+             SANs are only configurable for controller-managed certificates"
+                .into()
+        )));
+    }
+
     // Validate CA args
     if args.ca_cert.is_some() != args.ca_key.is_some() {
         return Err(report!(AppError::Config(
@@ -139,6 +148,29 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     } else {
         let mut cert = pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &args.sans)
             .context(AppError::Pki)?;
+
+        // Check if the existing cert needs SAN regeneration
+        if pki::server_cert_needs_san_update(&cert.cert_pem, &args.sans).context(AppError::Pki)? {
+            if pki::cert_signed_by_ca(&cert.cert_pem, &ca_state.active.cert_pem)
+                .context(AppError::Pki)?
+            {
+                tracing::info!(
+                    "server certificate SANs do not match requested --san values, regenerating"
+                );
+                cert = pki::renew_server_cert(&pki_path, &ca_state.active, &args.sans)
+                    .context(AppError::Pki)?;
+            } else {
+                return Err(report!(AppError::Config(
+                    "The server certificate does not include the requested SANs and was signed by \
+                     a different CA than the currently active one.\n\n\
+                     To fix this:\n  \
+                     1. Restart the controller without the --san flag(s) that are not yet in the certificate\n  \
+                     2. Regenerate the server certificate via POST /api/v1/settings/renew-server-certificate or the UI\n  \
+                     3. Restart the controller with the desired --san flag(s)"
+                        .into()
+                )));
+            }
+        }
 
         // Auto-renew if within renewal window
         if pki::should_renew_server_cert(&cert.cert_pem) {

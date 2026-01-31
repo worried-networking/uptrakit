@@ -100,6 +100,7 @@ The controller operates an internal Certificate Authority for mutual TLS authent
 - **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`).
 - **Runtime state**: CA material is shared via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct.
 - **External CA**: Supported via `--ca-cert` / `--ca-key` flags, which disable managed rotation.
+- **SAN sanity checks**: At startup, `--san` values are validated against the existing managed cert's SANs. Mismatched SANs trigger silent regeneration (same CA) or an error with fix instructions (different CA). `--san` is incompatible with `--tls-cert`/`--tls-key`.
 
 For cryptographic algorithm details, see [SECURITY.md](SECURITY.md) section "Cryptographic Details". For the full operational flow (rotation steps, bundle distribution, agent update path), see [AGENTS.md](AGENTS.md) section "PKI & CA rotation".
 

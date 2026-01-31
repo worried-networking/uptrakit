@@ -130,6 +130,16 @@ Pass `--ca-cert` and `--ca-key` to disable managed CA and rotation. The controll
 
 When the server HTTPS certificate (also CA-signed) approaches expiry, a background task generates a new one and hot-reloads the TLS listener. Admins can also trigger renewal manually via `POST /api/v1/settings/renew-server-certificate`.
 
+### Server cert SAN sanity checks
+
+At startup, the controller validates that `--san` values match the existing managed server certificate's SANs:
+
+1. **`--san` is incompatible with `--tls-cert`/`--tls-key`**: the controller rejects this combination because SANs are only configurable for controller-managed certificates.
+2. **SAN mismatch + same CA**: if `--san` values are not present in the existing cert's SANs and the cert was signed by the currently active CA, the cert is silently regenerated.
+3. **SAN mismatch + different CA**: if the cert needing SAN regeneration was signed by a different CA (e.g. after CA rotation), the controller fails with a multi-step fix message guiding the admin through manual certificate renewal.
+
+Shared PKI utility functions (`SanCollection`, `collect_sans`, `cert_signed_by_ca`) live in `crates/ui/web-api/src/pki_utils.rs` and are used by both the web API handlers and the controller startup logic.
+
 ### CaSnapshot sharing
 
 Runtime CA state is shared across async tasks via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct. The cert signer, CRL manager, API handlers, and background tasks all read from this channel.

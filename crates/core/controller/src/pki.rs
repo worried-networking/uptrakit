@@ -8,6 +8,7 @@ use rootcause::{Report, ReportConversion, markers, prelude::*};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_web_api::pki_utils::{self, SanCollection};
 
 #[derive(Debug, Error)]
 pub enum PkiError {
@@ -79,6 +80,20 @@ where
         report: Report<sea_orm::DbErr, markers::Mutable, T>,
     ) -> Report<Self, markers::Mutable, T> {
         report.context_transform(|e| PkiError::Database(e.to_string()))
+    }
+}
+
+impl<T> ReportConversion<pki_utils::PkiUtilError, markers::Mutable, T> for PkiError
+where
+    PkiError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<pki_utils::PkiUtilError, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(|e| match e {
+            pki_utils::PkiUtilError::Hostname(s) => PkiError::Hostname(s),
+            pki_utils::PkiUtilError::PemParse => PkiError::PemParse,
+        })
     }
 }
 
@@ -289,7 +304,7 @@ fn generate_server_cert(ca: &CaBundle, extra_sans: &[String]) -> Result<ServerCe
     let key_pair =
         KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context_to::<PkiError>()?;
 
-    let sans = collect_sans(extra_sans)?;
+    let sans = pki_utils::collect_sans(extra_sans).context_to::<PkiError>()?;
 
     let mut params = CertificateParams::new(sans.dns_names.clone()).context_to::<PkiError>()?;
     for ip in &sans.ip_addrs {
@@ -313,61 +328,6 @@ fn generate_server_cert(ca: &CaBundle, extra_sans: &[String]) -> Result<ServerCe
     Ok(ServerCertBundle {
         cert_pem: cert.pem(),
         key_pem: key_pair.serialize_pem(),
-    })
-}
-
-struct SanCollection {
-    dns_names: Vec<String>,
-    ip_addrs: Vec<IpAddr>,
-}
-
-fn collect_sans(extra: &[String]) -> Result<SanCollection> {
-    let mut dns_names = Vec::new();
-    let mut ip_addrs = Vec::new();
-
-    // Add system hostname
-    let hostname = hostname::get()
-        .context_transform(|e| PkiError::Hostname(e.to_string()))?
-        .to_string_lossy()
-        .to_string();
-
-    if !hostname.is_empty() {
-        dns_names.push(hostname.clone());
-    }
-
-    // Try to get FQDN — on many systems the hostname already is the FQDN.
-    // We add both the short name and FQDN if they differ.
-    if let Some(dot_pos) = hostname.find('.') {
-        let short = &hostname[..dot_pos];
-        if !short.is_empty() && short != hostname {
-            // hostname is FQDN, also add short name
-            dns_names.push(short.to_string());
-        }
-    }
-
-    // Always include localhost
-    if !dns_names.iter().any(|n| n == "localhost") {
-        dns_names.push("localhost".to_string());
-    }
-
-    // Add extra SANs from CLI
-    for san in extra {
-        if let Ok(ip) = san.parse::<IpAddr>() {
-            if !ip_addrs.contains(&ip) {
-                ip_addrs.push(ip);
-            }
-        } else if !dns_names.iter().any(|n| n == san) {
-            dns_names.push(san.clone());
-        }
-    }
-
-    // Deduplicate dns_names
-    dns_names.sort();
-    dns_names.dedup();
-
-    Ok(SanCollection {
-        dns_names,
-        ip_addrs,
     })
 }
 
@@ -490,6 +450,98 @@ pub fn renew_server_cert(
     Ok(bundle)
 }
 
+// --- SAN sanity checks ---
+
+/// Extract Subject Alternative Names from a PEM-encoded certificate.
+///
+/// Returns a `SanCollection` with the DNS names and IP addresses found in
+/// the certificate's SAN extension.
+pub fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
+    use x509_parser::extensions::GeneralName;
+
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+        .map_err(|_| report!(PkiError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(PkiError::PemParse))?;
+
+    let mut dns_names = Vec::new();
+    let mut ip_addrs = Vec::new();
+
+    if let Ok(Some(san_ext)) = cert.tbs_certificate.subject_alternative_name() {
+        for name in &san_ext.value.general_names {
+            match name {
+                GeneralName::DNSName(dns) => {
+                    dns_names.push((*dns).to_string());
+                }
+                GeneralName::IPAddress(ip_bytes) => {
+                    match ip_bytes.len() {
+                        4 => {
+                            let octets: [u8; 4] = (*ip_bytes).try_into().unwrap_or([0; 4]);
+                            ip_addrs.push(IpAddr::V4(std::net::Ipv4Addr::from(octets)));
+                        }
+                        16 => {
+                            let octets: [u8; 16] = (*ip_bytes).try_into().unwrap_or([0; 16]);
+                            ip_addrs.push(IpAddr::V6(std::net::Ipv6Addr::from(octets)));
+                        }
+                        _ => {} // skip malformed IP entries
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    dns_names.sort();
+    dns_names.dedup();
+    ip_addrs.sort();
+    ip_addrs.dedup();
+
+    Ok(SanCollection {
+        dns_names,
+        ip_addrs,
+    })
+}
+
+/// Check whether the server certificate needs to be regenerated because its
+/// SANs do not include all the requested `extra_sans`.
+///
+/// Returns `false` if `extra_sans` is empty (no user-requested SANs to check).
+/// Otherwise computes the expected SAN set via `collect_sans(extra_sans)` and
+/// compares against the certificate's actual SANs.
+pub fn server_cert_needs_san_update(cert_pem: &str, extra_sans: &[String]) -> Result<bool> {
+    if extra_sans.is_empty() {
+        return Ok(false);
+    }
+
+    let expected = pki_utils::collect_sans(extra_sans).context_to::<PkiError>()?;
+    let actual = extract_sans_from_cert(cert_pem)?;
+
+    let mut expected_dns = expected.dns_names;
+    expected_dns.sort();
+    let mut actual_dns = actual.dns_names;
+    actual_dns.sort();
+
+    let mut expected_ips = expected.ip_addrs;
+    expected_ips.sort();
+    let mut actual_ips = actual.ip_addrs;
+    actual_ips.sort();
+
+    // Check that every expected SAN is present in actual
+    let dns_match = expected_dns.iter().all(|name| actual_dns.contains(name));
+    let ip_match = expected_ips.iter().all(|ip| actual_ips.contains(ip));
+
+    Ok(!dns_match || !ip_match)
+}
+
+/// Check if a certificate was signed by the given CA.
+///
+/// Thin wrapper around `pki_utils::cert_signed_by_ca` that converts errors
+/// to `PkiError`.
+pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
+    pki_utils::cert_signed_by_ca(cert_pem, ca_pem).context_to::<PkiError>()
+}
+
 // --- TLS config builders ---
 
 /// Build a `rustls::ServerConfig` from PEM-encoded cert and key (no client auth).
@@ -598,7 +650,7 @@ mod tests {
 
     #[test]
     fn server_cert_includes_localhost() {
-        let sans = collect_sans(&[]).unwrap();
+        let sans = pki_utils::collect_sans(&[]).unwrap();
         assert!(sans.dns_names.contains(&"localhost".to_string()));
     }
 
@@ -609,7 +661,7 @@ mod tests {
             "192.168.1.1".to_string(),
             "::1".to_string(),
         ];
-        let sans = collect_sans(&extras).unwrap();
+        let sans = pki_utils::collect_sans(&extras).unwrap();
         assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
         assert!(
             sans.ip_addrs
@@ -622,7 +674,7 @@ mod tests {
     fn hostname_deduplication() {
         let hostname = hostname::get().unwrap().to_string_lossy().to_string();
         let extras = vec![hostname.clone()];
-        let sans = collect_sans(&extras).unwrap();
+        let sans = pki_utils::collect_sans(&extras).unwrap();
         let count = sans.dns_names.iter().filter(|n| **n == hostname).count();
         assert_eq!(count, 1);
     }
@@ -653,7 +705,7 @@ mod tests {
     #[test]
     fn san_ipv6_address() {
         let extras = vec!["fd00::1".to_string()];
-        let sans = collect_sans(&extras).unwrap();
+        let sans = pki_utils::collect_sans(&extras).unwrap();
         assert!(
             sans.ip_addrs
                 .contains(&IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)))
@@ -747,5 +799,99 @@ mod tests {
         let prev = state.previous.as_ref().unwrap();
         let prev_fp = ca_fingerprint(&prev.cert_pem).unwrap();
         assert_eq!(initial_fp, prev_fp);
+    }
+
+    #[test]
+    fn extract_sans_dns_only() {
+        let ca = generate_ca().unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        let sans = extract_sans_from_cert(&server.cert_pem).unwrap();
+        assert!(sans.dns_names.contains(&"localhost".to_string()));
+        assert!(sans.ip_addrs.is_empty());
+    }
+
+    #[test]
+    fn extract_sans_dns_and_ip() {
+        let ca = generate_ca().unwrap();
+        let extras = vec!["192.168.1.1".to_string(), "myhost.example.com".to_string()];
+        let server = generate_server_cert(&ca, &extras).unwrap();
+        let sans = extract_sans_from_cert(&server.cert_pem).unwrap();
+        assert!(sans.dns_names.contains(&"localhost".to_string()));
+        assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
+        assert!(
+            sans.ip_addrs
+                .contains(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
+        );
+    }
+
+    #[test]
+    fn server_cert_needs_san_update_empty_extra() {
+        let ca = generate_ca().unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        // Empty extra_sans always returns false
+        assert!(!server_cert_needs_san_update(&server.cert_pem, &[]).unwrap());
+    }
+
+    #[test]
+    fn server_cert_needs_san_update_matching() {
+        let ca = generate_ca().unwrap();
+        let extras = vec!["myhost.example.com".to_string()];
+        let server = generate_server_cert(&ca, &extras).unwrap();
+        // Cert already includes the requested SAN
+        assert!(!server_cert_needs_san_update(&server.cert_pem, &extras).unwrap());
+    }
+
+    #[test]
+    fn server_cert_needs_san_update_mismatched() {
+        let ca = generate_ca().unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        let extras = vec!["new-host.example.com".to_string()];
+        // Cert does not include the requested SAN
+        assert!(server_cert_needs_san_update(&server.cert_pem, &extras).unwrap());
+    }
+
+    #[test]
+    fn server_cert_needs_san_update_ip_missing() {
+        let ca = generate_ca().unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        let extras = vec!["10.0.0.1".to_string()];
+        // Cert does not include the requested IP SAN
+        assert!(server_cert_needs_san_update(&server.cert_pem, &extras).unwrap());
+    }
+
+    #[test]
+    fn cert_signed_by_ca_same() {
+        let ca = generate_ca().unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        assert!(cert_signed_by_ca(&server.cert_pem, &ca.cert_pem).unwrap());
+    }
+
+    #[test]
+    fn cert_signed_by_ca_different() {
+        // Use CAs with different DNs so issuer check can distinguish them
+        let key1 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params1 = CertificateParams::default();
+        params1
+            .distinguished_name
+            .push(DnType::CommonName, "Test CA 1");
+        params1.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let _ca1_cert = params1.self_signed(&key1).unwrap();
+        let issuer1 = Issuer::new(params1, key1);
+
+        let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let server_params = CertificateParams::new(vec!["localhost".into()]).unwrap();
+        let server_cert = server_params.signed_by(&server_key, &issuer1).unwrap();
+        let server_pem = server_cert.pem();
+
+        let key2 = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params2 = CertificateParams::default();
+        params2
+            .distinguished_name
+            .push(DnType::CommonName, "Test CA 2");
+        params2.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca2_cert = params2.self_signed(&key2).unwrap();
+        let ca2_pem = ca2_cert.pem();
+
+        assert!(!cert_signed_by_ca(&server_pem, &ca2_pem).unwrap());
     }
 }

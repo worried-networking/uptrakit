@@ -56,6 +56,8 @@ Uptrakit operates an internal PKI for mTLS agent authentication. The controller 
 
 CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued.
 
+At startup, the controller validates that `--san` CLI values are present in the managed server certificate's SANs. Mismatches trigger automatic regeneration when the cert was signed by the active CA, or a guided error when the cert was signed by a previous CA (preventing accidental re-signing under a rotated CA).
+
 For the full operational flow (rotation steps, bundle distribution, `CaSnapshot` sharing), see [AGENTS.md](AGENTS.md) section "PKI & CA rotation".
 
 ## Authentication Methods
