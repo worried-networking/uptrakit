@@ -9,12 +9,14 @@ version.workspace = true
 [dependencies]
 clap = { workspace = true }
 futures-util = { workspace = true }
+hex = { workspace = true }
 hostname = { workspace = true }
 http = { workspace = true }
 rootcause = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }

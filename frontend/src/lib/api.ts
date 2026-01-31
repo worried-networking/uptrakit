@@ -13,6 +13,8 @@ import type {
 	OidcProviderResponse,
 	RegisterRequest,
 	RegistrationSettings,
+	RenewServerCertResponse,
+	SystemAlertsResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
 	UpdateOidcProviderRequest,
@@ -170,4 +172,16 @@ export function activateOidcProvider(id: string): Promise<OidcProviderResponse> 
 
 export function deactivateOidcProvider(id: string): Promise<OidcProviderResponse> {
 	return request(`/settings/oidc-providers/${id}/deactivate`, { method: 'POST' });
+}
+
+// --- System Alerts ---
+
+export function getSystemAlerts(): Promise<SystemAlertsResponse> {
+	return request('/system/alerts');
+}
+
+// --- Server Certificate ---
+
+export function renewServerCertificate(): Promise<RenewServerCertResponse> {
+	return request('/settings/renew-server-certificate', { method: 'POST' });
 }

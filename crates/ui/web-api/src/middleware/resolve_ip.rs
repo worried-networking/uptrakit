@@ -140,9 +140,47 @@ mod tests {
             ) -> Result<AgentCertBundle, String> {
                 unimplemented!()
             }
+            fn active_ca_fingerprint(&self) -> String {
+                "0".repeat(64)
+            }
         }
+
+        let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
+        let snapshot_data = crate::ca_snapshot::CaSnapshotData {
+            active_cert_pem: ca_pem.to_string(),
+            active_key_pem: String::new(),
+            active_fingerprint: "0".repeat(64),
+            previous_cert_pem: None,
+            previous_key_pem: None,
+            previous_fingerprint: None,
+            bundle_pem: ca_pem.to_string(),
+            bundle_hash: "0".repeat(64),
+            managed: true,
+            active_not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+        };
+        let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+
+        let rustls_cfg = {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let key_pair =
+                rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .unwrap()
+                .self_signed(&key_pair)
+                .unwrap();
+            let server_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
+                        .unwrap(),
+                )
+                .unwrap();
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+        };
+
         Arc::new(AppState {
-            ca_pem: "test".into(),
+            ca_snapshot: ca_rx,
             trusted_proxies: proxies.into(),
             real_ip_header: header.into(),
             db: test_db().await,
@@ -158,6 +196,9 @@ mod tests {
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
+            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_config: rustls_cfg,
+            extra_sans: Arc::new([]),
         })
     }
 

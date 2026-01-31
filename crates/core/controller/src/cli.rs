@@ -51,6 +51,17 @@ pub struct Args {
     #[arg(long, default_value = "X-Forwarded-For")]
     pub real_ip_header: String,
 
+    /// Override: path to PEM-encoded CA certificate.
+    /// If not provided, a CA is auto-generated and managed internally.
+    /// Must be provided together with --ca-key.
+    #[arg(long)]
+    pub ca_cert: Option<PathBuf>,
+
+    /// Override: path to PEM-encoded CA private key.
+    /// Must be provided together with --ca-cert.
+    #[arg(long)]
+    pub ca_key: Option<PathBuf>,
+
     /// Additional SAN for the generated server certificate (IP or DNS name, repeatable).
     #[arg(long = "san")]
     pub sans: Vec<String>,

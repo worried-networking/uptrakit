@@ -62,4 +62,13 @@ impl AgentConnectionRegistry {
             let _ = tx.send(msg.clone()).await;
         }
     }
+
+    /// Broadcast a CA bundle update to all connected agents.
+    pub async fn broadcast_ca_bundle_updated(
+        &self,
+        payload: uptrakit_internal_wire::CaBundleUpdatedPayload,
+    ) {
+        let msg = ControllerMessage::CaBundleUpdated(payload);
+        self.broadcast(msg).await;
+    }
 }

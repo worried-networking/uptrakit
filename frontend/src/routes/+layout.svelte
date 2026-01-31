@@ -1,24 +1,50 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import type { SystemAlert } from '$lib/types';
 	import { onMount } from 'svelte';
 	import { AppShell, AppBar } from '@skeletonlabs/skeleton';
 	import { page } from '$app/stores';
 	import { user, loading, initialize, handleLogout } from '$lib/auth';
 	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
+	import { getSystemAlerts } from '$lib/api';
 	import '../app.postcss';
 
 	let { children }: { children: Snippet } = $props();
 
 	const themeCycle: ThemeMode[] = ['light', 'dark', 'system'];
 
+	let systemAlerts: SystemAlert[] = $state([]);
+	let dismissedAlerts: Set<string> = $state(new Set());
+
 	function cycleTheme() {
 		const i = themeCycle.indexOf($themeMode);
 		setThemeMode(themeCycle[(i + 1) % themeCycle.length]);
 	}
 
+	function dismissAlert(id: string) {
+		dismissedAlerts = new Set([...dismissedAlerts, id]);
+	}
+
+	let visibleAlerts = $derived(systemAlerts.filter((a) => !dismissedAlerts.has(a.id)));
+
+	async function fetchAlerts() {
+		try {
+			const res = await getSystemAlerts();
+			systemAlerts = res.alerts;
+		} catch {
+			// Silently ignore — alerts are non-critical
+		}
+	}
+
 	onMount(() => {
 		initialize();
 		initTheme();
+	});
+
+	$effect(() => {
+		if ($user?.roles.includes('admin')) {
+			fetchAlerts();
+		}
 	});
 
 	const publicRoutes = new Set(['/login', '/register']);
@@ -96,6 +122,25 @@
 				</nav>
 			{/if}
 		{/snippet}
+
+		{#if visibleAlerts.length > 0}
+			<div class="px-4 pt-2 space-y-2">
+				{#each visibleAlerts as alert (alert.id)}
+					<aside class="alert {alert.severity === 'warning' ? 'variant-filled-warning' : 'variant-filled-surface'}">
+						<div class="alert-message">
+							<h3 class="h4">{alert.title}</h3>
+							<p>{alert.message}</p>
+						</div>
+						<div class="alert-actions">
+							{#if alert.action === 'renew_server_certificate'}
+								<a href="/settings" class="btn btn-sm variant-filled">Go to Settings</a>
+							{/if}
+							<button class="btn btn-sm variant-soft" onclick={() => dismissAlert(alert.id)}>Dismiss</button>
+						</div>
+					</aside>
+				{/each}
+			</div>
+		{/if}
 
 		<div class="container mx-auto max-w-2xl p-4">
 			{@render children()}

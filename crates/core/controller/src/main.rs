@@ -99,15 +99,58 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         )));
     }
 
+    // Validate CA args
+    if args.ca_cert.is_some() != args.ca_key.is_some() {
+        return Err(report!(AppError::Config(
+            "both --ca-cert and --ca-key must be provided together".into()
+        )));
+    }
+
     // Initialize PKI
     let pki_path = pki::pki_dir(&data_dir).context(AppError::Pki)?;
-    let ca = pki::load_or_generate_ca(&pki_path).context(AppError::Pki)?;
+
+    // Load CA state
+    let ca_state = if let (Some(ca_cert_path), Some(ca_key_path)) =
+        (&args.ca_cert, &args.ca_key)
+    {
+        // External CA — not managed
+        let ca = pki::load_external_ca(ca_cert_path, ca_key_path).context(AppError::Pki)?;
+        pki::CaState {
+            active: ca,
+            previous: None,
+            managed: false,
+        }
+    } else {
+        let mut state = pki::load_ca_state(&pki_path).context(AppError::Pki)?;
+
+        // Auto-rotate if managed and within rotation window
+        if state.managed && pki::should_rotate_ca(&state.active.cert_pem) {
+            tracing::info!("CA certificate is within rotation window, rotating now");
+            state = pki::rotate_ca(&pki_path).context(AppError::Pki)?;
+        }
+
+        state
+    };
+
+    let ca_snapshot = ca_state.to_snapshot().context(AppError::Pki)?;
+    let (ca_tx, ca_rx) = tokio::sync::watch::channel(ca_snapshot.clone());
 
     // Resolve server certificate
     let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
         pki::load_external_cert(cert_path, key_path).context(AppError::Pki)?
     } else {
-        pki::load_or_generate_server_cert(&pki_path, &ca, &args.sans).context(AppError::Pki)?
+        let mut cert =
+            pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &args.sans)
+                .context(AppError::Pki)?;
+
+        // Auto-renew if within renewal window
+        if pki::should_renew_server_cert(&cert.cert_pem) {
+            tracing::info!("server certificate is within renewal window, renewing now");
+            cert = pki::renew_server_cert(&pki_path, &ca_state.active, &args.sans)
+                .context(AppError::Pki)?;
+        }
+
+        cert
     };
 
     // Install the default crypto provider for rustls
@@ -116,60 +159,64 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Create revocation notify channel
     let revocation_notify = Arc::new(tokio::sync::Notify::const_new());
 
-    // Build initial CRL from DB before server starts
-    let initial_crl = crl_manager::build_initial_crl_der(&db_conn, &ca.cert_pem, &ca.key_pem)
-        .await
-        .context(AppError::Pki)?;
+    // Build initial CRLs from DB before server starts
+    let initial_crls =
+        crl_manager::build_initial_crls_der(&db_conn, &ca_snapshot)
+            .await
+            .context(AppError::Pki)?;
 
-    // Build initial server config WITH CRL
-    let initial_server_config = pki::build_rustls_config_with_client_auth_and_crl(
+    // Build initial server config with CRLs
+    let initial_server_config = pki::build_rustls_config_with_client_auth_and_crls(
         &server_cert.cert_pem,
         &server_cert.key_pem,
-        &ca.cert_pem,
-        initial_crl,
+        &ca_snapshot.bundle_pem,
+        initial_crls,
     )
     .context(AppError::Pki)?;
 
     let rustls_config =
         axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(initial_server_config));
 
-    // Create CRL manager with the real RustlsConfig handle for hot-reloads
+    // Create CRL manager
     let crl_manager = Arc::new(
-        crl_manager::CrlManager::new(crl_manager::CrlManagerConfig {
-            ca_cert_pem: ca.cert_pem.clone(),
-            ca_key_pem: ca.key_pem.clone(),
-            server_cert_pem: server_cert.cert_pem.clone(),
-            server_key_pem: server_cert.key_pem.clone(),
-            db: db_conn.clone(),
-            rustls_config: rustls_config.clone(),
-            revocation_notify: Arc::clone(&revocation_notify),
-        })
+        crl_manager::CrlManager::new(
+            crl_manager::CrlManagerConfig {
+                server_cert_pem: server_cert.cert_pem.clone(),
+                server_key_pem: server_cert.key_pem.clone(),
+                db: db_conn.clone(),
+                rustls_config: rustls_config.clone(),
+                revocation_notify: Arc::clone(&revocation_notify),
+            },
+            &ca_snapshot,
+        )
         .context(AppError::Pki)?,
     );
 
     // Spawn CRL manager background task
     let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run());
 
-    // Create agent certificate signer
-    let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
-        ca.cert_pem.clone(),
-        ca.key_pem.clone(),
-    ));
+    // Create agent certificate signer (reads from watch receiver)
+    let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(ca_rx.clone()));
 
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new();
     let account_link_store = uptrakit_web_api::auth::oidc_state::AccountLinkStore::new();
 
+    let agent_connections = uptrakit_web_api::agent_connections::AgentConnectionRegistry::new();
+
     let app_state = Arc::new(AppState {
-        ca_pem: ca.cert_pem,
+        ca_snapshot: ca_rx,
         trusted_proxies: args.trusted_proxies.into(),
         real_ip_header: args.real_ip_header,
         db: db_conn,
         settings,
         cert_signer,
-        agent_connections: uptrakit_web_api::agent_connections::AgentConnectionRegistry::new(),
+        agent_connections: agent_connections.clone(),
         revocation_notify,
         oidc_flow_store: oidc_flow_store.clone(),
         account_link_store: account_link_store.clone(),
+        pki_path: pki_path.clone(),
+        rustls_config: rustls_config.clone(),
+        extra_sans: args.sans.into(),
     });
 
     // Spawn periodic cleanup for OIDC state stores (every 5 minutes)
@@ -181,6 +228,155 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             account_link_store.cleanup_expired();
         }
     });
+
+    // Spawn CA rotation background task (managed CAs only, every 24h)
+    let ca_rotation_handle = if ca_state.managed {
+        let pki_for_task = pki_path.clone();
+        let ca_tx_for_task = ca_tx;
+        let crl_mgr_for_task = Arc::clone(&crl_manager);
+        let conns_for_task = agent_connections.clone();
+
+        Some(tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            // Skip the first immediate tick
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+                tracing::debug!("checking CA rotation status");
+
+                let snapshot = ca_tx_for_task.borrow().clone();
+                if !pki::should_rotate_ca(&snapshot.active_cert_pem) {
+                    continue;
+                }
+
+                tracing::info!("CA certificate is within rotation window, rotating");
+                match pki::rotate_ca(&pki_for_task) {
+                    Ok(new_state) => {
+                        match new_state.to_snapshot() {
+                            Ok(new_snapshot) => {
+                                // Update CRL manager with new CA material
+                                if let Err(e) = crl_mgr_for_task.update_ca(&new_snapshot).await {
+                                    tracing::error!(error = ?e, "failed to update CRL manager after CA rotation");
+                                    continue;
+                                }
+
+                                // Broadcast CA bundle update to all connected agents
+                                let payload = uptrakit_internal_wire::CaBundleUpdatedPayload {
+                                    ca_bundle_pem: new_snapshot.bundle_pem.clone(),
+                                };
+                                conns_for_task.broadcast_ca_bundle_updated(payload).await;
+
+                                // Publish new snapshot via watch channel
+                                let _ = ca_tx_for_task.send(new_snapshot);
+
+                                // Trigger CRL rebuild
+                                if let Err(e) = crl_mgr_for_task.reload_tls_config().await {
+                                    tracing::error!(error = ?e, "failed to reload TLS after CA rotation");
+                                }
+
+                                tracing::info!("CA rotation completed successfully");
+                            }
+                            Err(e) => {
+                                tracing::error!(error = ?e, "failed to build snapshot after CA rotation");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = ?e, "CA rotation failed");
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Spawn server cert renewal background task (every 24h)
+    let server_cert_renewal_handle = if args.tls_cert.is_none() {
+        // Only auto-renew when using internally-generated server certs
+        let pki_for_task = pki_path;
+        let crl_mgr_for_task = Arc::clone(&crl_manager);
+        let app_state_for_task = Arc::clone(&app_state);
+
+        Some(tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            // Skip the first immediate tick
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+                tracing::debug!("checking server certificate renewal status");
+
+                // Read current server cert from disk
+                let cert_path = pki_for_task.join("server.crt");
+                let Ok(cert_pem) = std::fs::read_to_string(&cert_path) else {
+                    continue;
+                };
+
+                if !pki::should_renew_server_cert(&cert_pem) {
+                    continue;
+                }
+
+                tracing::info!("server certificate is within renewal window, renewing");
+
+                // Get current active CA from watch channel
+                let snapshot = app_state_for_task.ca_snapshot.borrow().clone();
+
+                // Build a temporary CaBundle for renewal
+                let ca_key = match rcgen::KeyPair::from_pem(&snapshot.active_key_pem) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to parse CA key for server cert renewal");
+                        continue;
+                    }
+                };
+                let ca_issuer = match rcgen::Issuer::from_ca_cert_pem(
+                    &snapshot.active_cert_pem,
+                    ca_key,
+                ) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to create CA issuer for server cert renewal");
+                        continue;
+                    }
+                };
+
+                let ca_bundle = pki::CaBundle {
+                    cert_pem: snapshot.active_cert_pem.clone(),
+                    key_pem: snapshot.active_key_pem.clone(),
+                    issuer: ca_issuer,
+                };
+
+                let extra_sans: Vec<String> = app_state_for_task.extra_sans.to_vec();
+                match pki::renew_server_cert(&pki_for_task, &ca_bundle, &extra_sans) {
+                    Ok(new_cert) => {
+                        // Update CRL manager's server cert
+                        crl_mgr_for_task
+                            .update_server_cert(
+                                new_cert.cert_pem.clone(),
+                                new_cert.key_pem.clone(),
+                            )
+                            .await;
+
+                        // Reload TLS config
+                        if let Err(e) = crl_mgr_for_task.reload_tls_config().await {
+                            tracing::error!(error = ?e, "failed to reload TLS after server cert renewal");
+                        }
+
+                        tracing::info!("server certificate auto-renewed successfully");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = ?e, "server certificate renewal failed");
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
 
     // Start MQTT if configured
     #[cfg(feature = "mqtt")]
@@ -227,6 +423,12 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     crl_handle.abort();
     oidc_cleanup_handle.abort();
+    if let Some(h) = ca_rotation_handle {
+        h.abort();
+    }
+    if let Some(h) = server_cert_renewal_handle {
+        h.abort();
+    }
 
     #[cfg(feature = "mqtt")]
     if let Some(handle) = mqtt_handle {

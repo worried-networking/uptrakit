@@ -84,16 +84,20 @@ Essential infrastructure needed before feature development.
   - [x] CA certificate pinning to prevent MITM attacks
   - [x] Verification of controller certificate against pinned CA
   - [ ] Fallback handling for CA certificate issues
-- [ ] CA rotation support
-  - [ ] Design dual-CA validation mechanism
-  - [ ] Implement CA certificate update endpoint
-  - [ ] Create agent CA update workflow
-  - [ ] Add rotation state tracking in database
-  - [ ] Implement automatic transition after rotation period
-- [ ] Certificate lifecycle management
-  - [ ] Certificate expiration monitoring
-  - [ ] Automated certificate renewal for agents
-  - [x] Certificate revocation mechanism (CRL or OCSP)
+- [x] CA rotation support
+  - [x] Dual-CA validation (active + previous CA in trust bundle)
+  - [x] CA bundle update endpoint (`GET /api/v1/ca.crt` returns full bundle)
+  - [x] Agent CA update workflow (via `CaBundleUpdated` wire message + hash-based staleness check)
+  - [x] Rotation state tracking in database (`ca_fingerprint` column on `agent_certificates`)
+  - [x] Automatic rotation when managed CA enters 6-month expiry window
+  - [x] Background rotation task (24h check interval)
+  - [x] Partitioned CRL generation (each CA signs its own CRL)
+- [x] Certificate lifecycle management
+  - [x] Certificate expiration monitoring (system alerts API + admin UI banners)
+  - [x] Automated certificate renewal for agents
+  - [x] Server certificate auto-renewal (90-day lifetime, 30-day renewal window)
+  - [x] Manual server cert renewal endpoint (`POST /api/v1/settings/renew-server-certificate`)
+  - [x] Certificate revocation mechanism (CRL)
   - [x] Revoked certificate checking on each connection
 
 ### Wire Protocol
@@ -431,13 +435,13 @@ Comprehensive security hardening.
   - [x] Automated CA signing
   - [x] Certificate delivery to agents
 - [x] Certificate revocation mechanism
-  - [ ] CRL generation and distribution
+  - [x] CRL generation and distribution (per-CA partitioned CRLs)
   - [ ] OCSP responder implementation
   - [x] Revocation checking on agent connections
-- [ ] Certificate expiration handling
-  - [ ] Expiration monitoring dashboard
-  - [ ] Automated renewal workflow
-  - [ ] Pre-expiration notifications
+- [x] Certificate expiration handling
+  - [x] Expiration monitoring (system alerts API for admin UI)
+  - [x] Automated renewal workflow (agent certs + server cert auto-renewal)
+  - [x] Pre-expiration notifications (admin alert banners)
 
 ### CA Management
 
@@ -445,14 +449,14 @@ Comprehensive security hardening.
   - [ ] Automated CA backup
   - [ ] Secure backup storage
   - [ ] Recovery procedures documentation
-- [ ] CA rotation automation
-  - [ ] Rotation scheduling system
-  - [ ] Automated rotation execution
+- [x] CA rotation automation
+  - [x] Rotation scheduling system (background task, 24h interval)
+  - [x] Automated rotation execution (6-month window before expiry)
   - [ ] Rollback capability for failed rotations
-- [ ] Multi-CA validation support
-  - [ ] Trust store management
-  - [ ] CA priority handling
-  - [ ] Gradual CA migration
+- [x] Multi-CA validation support
+  - [x] Trust store management (active + previous CA bundle)
+  - [x] CA priority handling (active CA signs new certs; both CAs trusted)
+  - [x] Gradual CA migration (agents auto-fetch updated bundle)
 
 ### Agent Authentication
 

@@ -1,9 +1,11 @@
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rootcause::{Report, ReportConversion, markers, prelude::*};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
 
@@ -76,11 +78,73 @@ pub struct ServerCertBundle {
     pub key_pem: String,
 }
 
+/// Active + optional previous CA state.
+pub struct CaState {
+    pub active: CaBundle,
+    pub previous: Option<CaBundle>,
+    pub managed: bool,
+}
+
+/// Type alias for the canonical CA snapshot type from the web-api crate.
+pub type CaSnapshot = uptrakit_web_api::ca_snapshot::CaSnapshotData;
+
+impl CaState {
+    /// Build a PEM bundle of all trusted CA certs (active + optional previous).
+    pub fn ca_bundle_pem(&self) -> String {
+        let mut bundle = self.active.cert_pem.clone();
+        if let Some(prev) = &self.previous {
+            if !bundle.ends_with('\n') {
+                bundle.push('\n');
+            }
+            bundle.push_str(&prev.cert_pem);
+        }
+        bundle
+    }
+
+    /// Build a shareable snapshot.
+    pub fn to_snapshot(&self) -> Result<CaSnapshot> {
+        let active_fingerprint = ca_fingerprint(&self.active.cert_pem)?;
+        let previous_fingerprint = match &self.previous {
+            Some(prev) => Some(ca_fingerprint(&prev.cert_pem)?),
+            None => None,
+        };
+        let bundle_pem = self.ca_bundle_pem();
+        let bundle_hash = sha256_hex(bundle_pem.as_bytes());
+        let active_not_after = cert_not_after(&self.active.cert_pem)?;
+
+        Ok(CaSnapshot {
+            active_cert_pem: self.active.cert_pem.clone(),
+            active_key_pem: self.active.key_pem.clone(),
+            active_fingerprint,
+            previous_cert_pem: self.previous.as_ref().map(|p| p.cert_pem.clone()),
+            previous_key_pem: self.previous.as_ref().map(|p| p.key_pem.clone()),
+            previous_fingerprint,
+            bundle_pem,
+            bundle_hash,
+            managed: self.managed,
+            active_not_after,
+        })
+    }
+}
+
 /// Ensure the PKI directory exists and return its path.
 pub fn pki_dir(data_dir: &Path) -> Result<PathBuf> {
     let dir = data_dir.join("pki");
     fs::create_dir_all(&dir).context_to::<PkiError>()?;
     Ok(dir)
+}
+
+/// Load the full CA state from the PKI directory (active + optional previous).
+pub fn load_ca_state(pki: &Path) -> Result<CaState> {
+    let active = load_or_generate_ca(pki)?;
+    let previous = load_previous_ca(pki)?;
+    let managed = is_ca_managed(pki);
+
+    Ok(CaState {
+        active,
+        previous,
+        managed,
+    })
 }
 
 /// Load or generate the internal CA.
@@ -94,8 +158,23 @@ pub fn load_or_generate_ca(pki: &Path) -> Result<CaBundle> {
         let bundle = generate_ca()?;
         fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
         fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;
+        mark_ca_managed(pki)?;
         tracing::info!("generated new internal CA at {}", pki.display());
         Ok(bundle)
+    }
+}
+
+/// Load the previous (rotated-out) CA if present.
+fn load_previous_ca(pki: &Path) -> Result<Option<CaBundle>> {
+    let cert_path = pki.join("ca-previous.crt");
+    let key_path = pki.join("ca-previous.key");
+
+    if cert_path.exists() && key_path.exists() {
+        let bundle = load_ca(&cert_path, &key_path)?;
+        tracing::info!("loaded previous CA from {}", cert_path.display());
+        Ok(Some(bundle))
+    } else {
+        Ok(None)
     }
 }
 
@@ -112,7 +191,7 @@ fn generate_ca() -> Result<CaBundle> {
         .push(DnType::OrganizationName, "Uptrakit");
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(3650);
+    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(1825);
 
     let cert = params.self_signed(&key_pair).context_to::<PkiError>()?;
     let cert_pem = cert.pem();
@@ -139,6 +218,16 @@ fn load_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
         key_pem,
         issuer,
     })
+}
+
+/// Load a CA from user-provided (external) paths.
+pub fn load_external_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
+    let bundle = load_ca(cert_path, key_path)?;
+    tracing::info!(
+        "using external CA certificate from {}",
+        cert_path.display()
+    );
+    Ok(bundle)
 }
 
 /// Load a server certificate from user-provided paths.
@@ -201,7 +290,7 @@ fn generate_server_cert(ca: &CaBundle, extra_sans: &[String]) -> Result<ServerCe
         .distinguished_name
         .push(DnType::OrganizationName, "Uptrakit");
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(365);
+    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(90);
 
     let cert = params
         .signed_by(&key_pair, &ca.issuer)
@@ -268,6 +357,37 @@ fn collect_sans(extra: &[String]) -> Result<SanCollection> {
     })
 }
 
+// --- CA fingerprint ---
+
+/// Compute SHA-256 hex fingerprint of a PEM-encoded certificate.
+pub fn ca_fingerprint(cert_pem: &str) -> Result<String> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+        .map_err(|_| report!(PkiError::PemParse))?;
+    Ok(sha256_hex(&pem_block.contents))
+}
+
+/// SHA-256 hex digest of arbitrary bytes.
+pub fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+}
+
+// --- Managed CA marker ---
+
+/// Mark the CA as auto-generated (managed).
+pub fn mark_ca_managed(pki: &Path) -> Result<()> {
+    fs::write(pki.join("ca-managed"), "").context_to::<PkiError>()?;
+    Ok(())
+}
+
+/// Check if the CA was auto-generated (managed).
+pub fn is_ca_managed(pki: &Path) -> bool {
+    pki.join("ca-managed").exists()
+}
+
+// --- Cert introspection ---
+
 /// Check if a PEM-encoded certificate is expired.
 /// Returns `true` if the certificate is expired or unparseable.
 pub fn is_cert_expired(pem: &str) -> bool {
@@ -279,6 +399,84 @@ pub fn is_cert_expired(pem: &str) -> bool {
     };
     !cert.validity().is_valid()
 }
+
+/// Extract the `not_after` timestamp from a PEM-encoded certificate.
+pub fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
+        .map_err(|_| report!(PkiError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(PkiError::PemParse))?;
+    OffsetDateTime::from_unix_timestamp(cert.validity().not_after.timestamp())
+        .map_err(|e| report!(PkiError::Hostname(format!("timestamp error: {e}"))))
+}
+
+// --- Rotation helpers ---
+
+/// Returns `true` if the CA certificate expires within 183 days (6 months).
+pub fn should_rotate_ca(cert_pem: &str) -> bool {
+    let Ok(not_after) = cert_not_after(cert_pem) else {
+        return true;
+    };
+    let threshold = OffsetDateTime::now_utc() + time::Duration::days(183);
+    not_after <= threshold
+}
+
+/// Rotate the CA: move current → previous, generate new active CA.
+pub fn rotate_ca(pki: &Path) -> Result<CaState> {
+    let active_cert = pki.join("ca.crt");
+    let active_key = pki.join("ca.key");
+    let prev_cert = pki.join("ca-previous.crt");
+    let prev_key = pki.join("ca-previous.key");
+
+    // Move current active → previous
+    fs::copy(&active_cert, &prev_cert).context_to::<PkiError>()?;
+    fs::copy(&active_key, &prev_key).context_to::<PkiError>()?;
+
+    // Generate new CA
+    let new_ca = generate_ca()?;
+    fs::write(&active_cert, &new_ca.cert_pem).context_to::<PkiError>()?;
+    fs::write(&active_key, &new_ca.key_pem).context_to::<PkiError>()?;
+
+    // Load previous for issuer
+    let previous = load_ca(&prev_cert, &prev_key)?;
+
+    tracing::info!("CA rotated: new CA generated, previous CA preserved");
+
+    Ok(CaState {
+        active: new_ca,
+        previous: Some(previous),
+        managed: true,
+    })
+}
+
+// --- Server cert renewal ---
+
+/// Returns `true` if the server certificate expires within 30 days.
+pub fn should_renew_server_cert(cert_pem: &str) -> bool {
+    let Ok(not_after) = cert_not_after(cert_pem) else {
+        return true;
+    };
+    let threshold = OffsetDateTime::now_utc() + time::Duration::days(30);
+    not_after <= threshold
+}
+
+/// Generate a new server cert signed by the given CA and save to the PKI directory.
+pub fn renew_server_cert(
+    pki: &Path,
+    ca: &CaBundle,
+    extra_sans: &[String],
+) -> Result<ServerCertBundle> {
+    let bundle = generate_server_cert(ca, extra_sans)?;
+    let cert_path = pki.join("server.crt");
+    let key_path = pki.join("server.key");
+    fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
+    fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;
+    tracing::info!("server certificate renewed at {}", pki.display());
+    Ok(bundle)
+}
+
+// --- TLS config builders ---
 
 /// Build a `rustls::ServerConfig` from PEM-encoded cert and key (no client auth).
 #[cfg(test)]
@@ -301,21 +499,16 @@ pub fn build_rustls_config(cert_pem: &str, key_pem: &str) -> Result<rustls::Serv
     Ok(config)
 }
 
-/// Build a `rustls::ServerConfig` with optional mTLS client authentication.
+/// Build a `rustls::ServerConfig` with mTLS client authentication and multiple CRLs.
 ///
-/// Clients presenting a certificate signed by the given CA will be verified;
-/// clients without a certificate are still allowed (anonymous).
-///
-/// Note: prefer `build_rustls_config_with_client_auth_and_crl` for production
-/// use so revoked certificates are rejected at the TLS handshake layer.
-#[allow(dead_code)]
-pub fn build_rustls_config_with_client_auth(
+/// Each CA in the bundle gets its own CRL. The verifier checks client certificates
+/// against all supplied CRLs.
+pub fn build_rustls_config_with_client_auth_and_crls(
     cert_pem: &str,
     key_pem: &str,
-    ca_cert_pem: &str,
+    ca_bundle_pem: &str,
+    crls: Vec<rustls::pki_types::CertificateRevocationListDer<'static>>,
 ) -> Result<rustls::ServerConfig> {
-    use std::sync::Arc;
-
     use rustls::RootCertStore;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -328,7 +521,7 @@ pub fn build_rustls_config_with_client_auth(
     let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
         .context_transform(|_| PkiError::PemParse)?;
 
-    let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(ca_cert_pem.as_bytes())
+    let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(ca_bundle_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()
         .context_transform(|_| PkiError::PemParse)?;
 
@@ -338,54 +531,7 @@ pub fn build_rustls_config_with_client_auth(
     }
 
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
-        .allow_unauthenticated()
-        .build()
-        .map_err(|e| report!(PkiError::VerifierBuilder(e.to_string())))?;
-
-    let config = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(verifier)
-        .with_single_cert(certs, key)
-        .context_to::<PkiError>()?;
-
-    Ok(config)
-}
-
-/// Build a `rustls::ServerConfig` with mTLS client authentication and a CRL.
-///
-/// Same as `build_rustls_config_with_client_auth()` but the verifier checks
-/// client certificates against the supplied CRL. No
-/// `allow_unknown_revocation_status()` — the CRL is authoritative.
-pub fn build_rustls_config_with_client_auth_and_crl(
-    cert_pem: &str,
-    key_pem: &str,
-    ca_cert_pem: &str,
-    crl_der: rustls::pki_types::CertificateRevocationListDer<'static>,
-) -> Result<rustls::ServerConfig> {
-    use std::sync::Arc;
-
-    use rustls::RootCertStore;
-    use rustls::pki_types::pem::PemObject;
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use rustls::server::WebPkiClientVerifier;
-
-    let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_transform(|_| PkiError::PemParse)?;
-
-    let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
-        .context_transform(|_| PkiError::PemParse)?;
-
-    let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(ca_cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_transform(|_| PkiError::PemParse)?;
-
-    let mut root_store = RootCertStore::empty();
-    for ca_cert in ca_certs {
-        root_store.add(ca_cert).context_to::<PkiError>()?;
-    }
-
-    let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
-        .with_crls(vec![crl_der])
+        .with_crls(crls)
         .allow_unauthenticated()
         .only_check_end_entity_revocation()
         .build()
@@ -498,5 +644,94 @@ mod tests {
             sans.ip_addrs
                 .contains(&IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)))
         );
+    }
+
+    #[test]
+    fn ca_fingerprint_deterministic() {
+        let ca = generate_ca().unwrap();
+        let fp1 = ca_fingerprint(&ca.cert_pem).unwrap();
+        let fp2 = ca_fingerprint(&ca.cert_pem).unwrap();
+        assert_eq!(fp1, fp2);
+        assert_eq!(fp1.len(), 64); // SHA-256 hex is 64 chars
+    }
+
+    #[test]
+    fn ca_fingerprint_differs_between_cas() {
+        let ca1 = generate_ca().unwrap();
+        let ca2 = generate_ca().unwrap();
+        let fp1 = ca_fingerprint(&ca1.cert_pem).unwrap();
+        let fp2 = ca_fingerprint(&ca2.cert_pem).unwrap();
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn should_rotate_ca_not_yet() {
+        let ca = generate_ca().unwrap();
+        // Fresh CA with 5 year validity should not need rotation
+        assert!(!should_rotate_ca(&ca.cert_pem));
+    }
+
+    #[test]
+    fn should_renew_server_cert_not_yet() {
+        let ca = generate_ca().unwrap();
+        let server = generate_server_cert(&ca, &[]).unwrap();
+        // Fresh server cert with 90 day validity should not need renewal
+        assert!(!should_renew_server_cert(&server.cert_pem));
+    }
+
+    #[test]
+    fn ca_state_bundle_pem() {
+        let ca1 = generate_ca().unwrap();
+        let ca2 = generate_ca().unwrap();
+        let state = CaState {
+            active: ca1,
+            previous: Some(ca2),
+            managed: true,
+        };
+        let bundle = state.ca_bundle_pem();
+        // Bundle should contain two certificates
+        assert_eq!(bundle.matches("BEGIN CERTIFICATE").count(), 2);
+    }
+
+    #[test]
+    fn ca_snapshot_roundtrip() {
+        let ca = generate_ca().unwrap();
+        let state = CaState {
+            active: ca,
+            previous: None,
+            managed: true,
+        };
+        let snapshot = state.to_snapshot().unwrap();
+        assert!(!snapshot.active_fingerprint.is_empty());
+        assert!(snapshot.previous_fingerprint.is_none());
+        assert!(!snapshot.bundle_hash.is_empty());
+    }
+
+    #[test]
+    fn managed_marker_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let pki = dir.path();
+        assert!(!is_ca_managed(pki));
+        mark_ca_managed(pki).unwrap();
+        assert!(is_ca_managed(pki));
+    }
+
+    #[test]
+    fn ca_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let pki = dir.path();
+
+        // Generate initial CA
+        let initial = load_or_generate_ca(pki).unwrap();
+        let initial_fp = ca_fingerprint(&initial.cert_pem).unwrap();
+
+        // Rotate
+        let state = rotate_ca(pki).unwrap();
+        let new_fp = ca_fingerprint(&state.active.cert_pem).unwrap();
+        assert_ne!(initial_fp, new_fp);
+
+        let prev = state.previous.as_ref().unwrap();
+        let prev_fp = ca_fingerprint(&prev.cert_pem).unwrap();
+        assert_eq!(initial_fp, prev_fp);
     }
 }

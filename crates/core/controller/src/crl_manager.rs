@@ -7,20 +7,26 @@ use rcgen::{
 use rustls::pki_types::CertificateRevocationListDer;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, RwLock};
 use uptrakit_shared_db::entity::{agent_certificate, prelude::*};
 
-use crate::pki;
+use crate::pki::{self, CaSnapshot};
 
 /// Configuration for the CRL manager.
 pub struct CrlManagerConfig {
-    pub ca_cert_pem: String,
-    pub ca_key_pem: String,
     pub server_cert_pem: String,
     pub server_key_pem: String,
     pub db: DatabaseConnection,
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub revocation_notify: Arc<Notify>,
+}
+
+/// Mutable CA material that can be updated at runtime when the CA rotates.
+struct CaIssuers {
+    active: Issuer<'static, KeyPair>,
+    active_fingerprint: String,
+    active_bundle_pem: String,
+    prev: Option<(Issuer<'static, KeyPair>, String)>,
 }
 
 /// CRL lifecycle manager.
@@ -30,51 +36,145 @@ pub struct CrlManagerConfig {
 pub struct CrlManager {
     config: CrlManagerConfig,
     crl_number: AtomicU64,
-    ca_issuer: Issuer<'static, KeyPair>,
+    issuers: RwLock<CaIssuers>,
+    server_cert: RwLock<(String, String)>,
 }
 
-/// Build a DER-encoded CRL from the database (standalone, for initial startup).
-pub async fn build_initial_crl_der(
+/// Build DER-encoded CRLs from the database (standalone, for initial startup).
+pub async fn build_initial_crls_der(
     db: &DatabaseConnection,
-    ca_cert_pem: &str,
-    ca_key_pem: &str,
-) -> pki::Result<CertificateRevocationListDer<'static>> {
-    let ca_key = KeyPair::from_pem(ca_key_pem).context_to::<pki::PkiError>()?;
-    let ca_issuer = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key).context_to::<pki::PkiError>()?;
+    snapshot: &CaSnapshot,
+) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
+    let active_key =
+        KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
+    let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
+        .context_to::<pki::PkiError>()?;
 
-    let revoked = query_revoked_certs(db).await?;
-    sign_crl(&ca_issuer, revoked, 0)
+    let active_revoked =
+        query_revoked_certs_for_ca(db, &snapshot.active_fingerprint).await?;
+    let active_crl = sign_crl(&active_issuer, active_revoked, 0)?;
+    let mut crls = vec![active_crl];
+
+    if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
+        &snapshot.previous_cert_pem,
+        &snapshot.previous_key_pem,
+        &snapshot.previous_fingerprint,
+    ) {
+        let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
+        let prev_issuer =
+            Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
+        let prev_revoked = query_revoked_certs_for_ca(db, prev_fp).await?;
+        let prev_crl = sign_crl(&prev_issuer, prev_revoked, 0)?;
+        crls.push(prev_crl);
+    }
+
+    Ok(crls)
 }
 
 impl CrlManager {
-    pub fn new(config: CrlManagerConfig) -> pki::Result<Self> {
-        let ca_key = KeyPair::from_pem(&config.ca_key_pem).context_to::<pki::PkiError>()?;
-        let ca_issuer =
-            Issuer::from_ca_cert_pem(&config.ca_cert_pem, ca_key).context_to::<pki::PkiError>()?;
+    pub fn new(config: CrlManagerConfig, snapshot: &CaSnapshot) -> pki::Result<Self> {
+        let active_key =
+            KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
+        let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
+            .context_to::<pki::PkiError>()?;
+
+        let prev = if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
+            &snapshot.previous_cert_pem,
+            &snapshot.previous_key_pem,
+            &snapshot.previous_fingerprint,
+        ) {
+            let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
+            let prev_issuer = Issuer::from_ca_cert_pem(prev_cert_pem, prev_key)
+                .context_to::<pki::PkiError>()?;
+            Some((prev_issuer, prev_fp.clone()))
+        } else {
+            None
+        };
+
+        let server_cert_pem = config.server_cert_pem.clone();
+        let server_key_pem = config.server_key_pem.clone();
 
         Ok(Self {
             config,
             crl_number: AtomicU64::new(1),
-            ca_issuer,
+            issuers: RwLock::new(CaIssuers {
+                active: active_issuer,
+                active_fingerprint: snapshot.active_fingerprint.clone(),
+                active_bundle_pem: snapshot.bundle_pem.clone(),
+                prev,
+            }),
+            server_cert: RwLock::new((server_cert_pem, server_key_pem)),
         })
     }
 
-    /// Build a DER-encoded CRL from revoked certificates in the database.
-    async fn build_crl_der(&self) -> pki::Result<CertificateRevocationListDer<'static>> {
-        let revoked = query_revoked_certs(&self.config.db).await?;
-        let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
-        sign_crl(&self.ca_issuer, revoked, crl_number)
+    /// Update CA issuers after a rotation event.
+    pub async fn update_ca(&self, snapshot: &CaSnapshot) -> pki::Result<()> {
+        let active_key =
+            KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
+        let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
+            .context_to::<pki::PkiError>()?;
+
+        let prev = if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
+            &snapshot.previous_cert_pem,
+            &snapshot.previous_key_pem,
+            &snapshot.previous_fingerprint,
+        ) {
+            let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
+            let prev_issuer = Issuer::from_ca_cert_pem(prev_cert_pem, prev_key)
+                .context_to::<pki::PkiError>()?;
+            Some((prev_issuer, prev_fp.clone()))
+        } else {
+            None
+        };
+
+        let mut issuers = self.issuers.write().await;
+        issuers.active = active_issuer;
+        issuers.active_fingerprint = snapshot.active_fingerprint.clone();
+        issuers.active_bundle_pem = snapshot.bundle_pem.clone();
+        issuers.prev = prev;
+
+        Ok(())
     }
 
-    /// Rebuild the CRL and hot-reload the TLS configuration.
-    pub async fn reload_tls_config(&self) -> pki::Result<()> {
-        let crl_der = self.build_crl_der().await?;
+    /// Update server cert material (after renewal).
+    pub async fn update_server_cert(&self, cert_pem: String, key_pem: String) {
+        let mut cert = self.server_cert.write().await;
+        *cert = (cert_pem, key_pem);
+    }
 
-        let server_config = pki::build_rustls_config_with_client_auth_and_crl(
-            &self.config.server_cert_pem,
-            &self.config.server_key_pem,
-            &self.config.ca_cert_pem,
-            crl_der,
+    /// Build DER-encoded CRLs from revoked certificates in the database.
+    async fn build_crls_der(
+        &self,
+    ) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
+        let issuers = self.issuers.read().await;
+        let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
+
+        let active_revoked =
+            query_revoked_certs_for_ca(&self.config.db, &issuers.active_fingerprint).await?;
+        let active_crl = sign_crl(&issuers.active, active_revoked, crl_number)?;
+        let mut crls = vec![active_crl];
+
+        if let Some((ref prev_issuer, ref prev_fp)) = issuers.prev {
+            let prev_revoked =
+                query_revoked_certs_for_ca(&self.config.db, prev_fp).await?;
+            let prev_crl = sign_crl(prev_issuer, prev_revoked, crl_number)?;
+            crls.push(prev_crl);
+        }
+
+        Ok(crls)
+    }
+
+    /// Rebuild the CRLs and hot-reload the TLS configuration.
+    pub async fn reload_tls_config(&self) -> pki::Result<()> {
+        let crls = self.build_crls_der().await?;
+        let issuers = self.issuers.read().await;
+        let server_cert = self.server_cert.read().await;
+
+        let server_config = pki::build_rustls_config_with_client_auth_and_crls(
+            &server_cert.0,
+            &server_cert.1,
+            &issuers.active_bundle_pem,
+            crls,
         )?;
 
         self.config
@@ -109,12 +209,16 @@ impl CrlManager {
     }
 }
 
-/// Query revoked certificates from the database.
-async fn query_revoked_certs(db: &DatabaseConnection) -> pki::Result<Vec<RevokedCertParams>> {
+/// Query revoked certificates for a specific CA (by fingerprint).
+async fn query_revoked_certs_for_ca(
+    db: &DatabaseConnection,
+    ca_fingerprint: &str,
+) -> pki::Result<Vec<RevokedCertParams>> {
     let now = OffsetDateTime::now_utc();
     let grace = time::Duration::hours(24);
 
     let revoked_certs = AgentCertificate::find()
+        .filter(agent_certificate::Column::CaFingerprint.eq(ca_fingerprint))
         .filter(agent_certificate::Column::RevokedAt.is_not_null())
         .filter(agent_certificate::Column::NotAfter.gt(now - grace))
         .all(db)

@@ -121,6 +121,22 @@ export interface CreateOidcProviderRequest {
 	role_mapping?: Record<string, string>;
 }
 
+export interface SystemAlert {
+	id: string;
+	severity: string;
+	title: string;
+	message: string;
+	action?: string;
+}
+
+export interface SystemAlertsResponse {
+	alerts: SystemAlert[];
+}
+
+export interface RenewServerCertResponse {
+	message: string;
+}
+
 export interface UpdateOidcProviderRequest {
 	name?: string;
 	slug?: string;

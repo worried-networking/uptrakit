@@ -1,19 +1,18 @@
 use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair};
 use time::{OffsetDateTime, UtcDateTime};
+use tokio::sync::watch;
 use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner};
 use uuid::Uuid;
 
+use crate::pki::CaSnapshot;
+
 pub struct RcgenAgentCertSigner {
-    ca_cert_pem: String,
-    ca_key_pem: String,
+    ca_rx: watch::Receiver<CaSnapshot>,
 }
 
 impl RcgenAgentCertSigner {
-    pub fn new(ca_cert_pem: String, ca_key_pem: String) -> Self {
-        Self {
-            ca_cert_pem,
-            ca_key_pem,
-        }
+    pub fn new(ca_rx: watch::Receiver<CaSnapshot>) -> Self {
+        Self { ca_rx }
     }
 }
 
@@ -23,11 +22,16 @@ impl AgentCertSigner for RcgenAgentCertSigner {
         agent_id: &Uuid,
         lifetime: time::Duration,
     ) -> Result<AgentCertBundle, String> {
-        let key_pair =
-            KeyPair::from_pem(&self.ca_key_pem).map_err(|e| format!("CA key parse: {e}"))?;
-        let issuer = Issuer::from_ca_cert_pem(&self.ca_cert_pem, key_pair)
+        let snapshot = self.ca_rx.borrow();
+        let key_pair = KeyPair::from_pem(&snapshot.active_key_pem)
+            .map_err(|e| format!("CA key parse: {e}"))?;
+        let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
             .map_err(|e| format!("CA issuer: {e}"))?;
         generate_agent_cert(&issuer, agent_id, lifetime)
+    }
+
+    fn active_ca_fingerprint(&self) -> String {
+        self.ca_rx.borrow().active_fingerprint.clone()
     }
 }
 
@@ -71,12 +75,23 @@ mod tests {
     use super::*;
     use crate::pki;
 
+    fn make_test_signer() -> (RcgenAgentCertSigner, watch::Sender<CaSnapshot>) {
+        let ca = pki::load_or_generate_ca(tempfile::tempdir().unwrap().path()).unwrap();
+        let state = pki::CaState {
+            active: ca,
+            previous: None,
+            managed: true,
+        };
+        let snapshot = state.to_snapshot().unwrap();
+        let (tx, rx) = watch::channel(snapshot);
+        (RcgenAgentCertSigner::new(rx), tx)
+    }
+
     #[test]
     fn agent_cert_signed_by_ca() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let ca = pki::load_or_generate_ca(tempfile::tempdir().unwrap().path()).unwrap();
-        let signer = RcgenAgentCertSigner::new(ca.cert_pem, ca.key_pem);
+        let (signer, _tx) = make_test_signer();
 
         let agent_id = Uuid::now_v7();
         let bundle = signer
@@ -117,8 +132,7 @@ mod tests {
     fn cn_parses_as_uuid() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        let ca = pki::load_or_generate_ca(tempfile::tempdir().unwrap().path()).unwrap();
-        let signer = RcgenAgentCertSigner::new(ca.cert_pem, ca.key_pem);
+        let (signer, _tx) = make_test_signer();
 
         let agent_id = Uuid::now_v7();
         let bundle = signer
@@ -136,5 +150,12 @@ mod tests {
             .unwrap();
         let parsed = Uuid::parse_str(cn).unwrap();
         assert_eq!(parsed, agent_id);
+    }
+
+    #[test]
+    fn active_ca_fingerprint_returns_value() {
+        let (signer, _tx) = make_test_signer();
+        let fp = signer.active_ca_fingerprint();
+        assert_eq!(fp.len(), 64);
     }
 }
