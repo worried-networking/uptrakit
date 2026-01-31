@@ -84,8 +84,9 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     tracing::info!("database initialized successfully");
 
-    // Initialize settings (loads existing values from DB)
-    let (settings, reg_token) = Settings::load(&db_conn).await.context(AppError::Settings)?;
+    // Initialize settings (bulk-loads all values from DB in a single query)
+    let (settings, raw_settings, reg_token) =
+        Settings::load(&db_conn).await.context(AppError::Settings)?;
     if let Some(token) = reg_token {
         tracing::info!("==========================================================");
         tracing::info!("  No users found. Use this one-time registration token:");
@@ -100,6 +101,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let trusted_proxies = reconcile_setting_vec::<IpNet>(
         &db_conn,
         uptrakit_web_api::settings::SETTING_KEY_TRUSTED_PROXIES,
+        &raw_settings,
         if args.trusted_proxies.is_empty() {
             None
         } else {
@@ -107,13 +109,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         },
         vec![],
         force,
-        |v| serde_json::json!(v.iter().map(|n| n.to_string()).collect::<Vec<_>>()),
-        |v| {
-            v.as_array().map(|arr| {
-                arr.iter()
-                    .filter_map(|s| s.as_str()?.parse::<IpNet>().ok())
-                    .collect()
-            })
+        reconcile::JsonConvert {
+            to_json: |v| serde_json::json!(v.iter().map(|n| n.to_string()).collect::<Vec<_>>()),
+            from_json: |v| {
+                v.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| s.as_str()?.parse::<IpNet>().ok())
+                        .collect()
+                })
+            },
         },
     )
     .await
@@ -123,11 +127,14 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let real_ip_header = reconcile::reconcile_setting(
         &db_conn,
         uptrakit_web_api::settings::SETTING_KEY_REAL_IP_HEADER,
+        &raw_settings,
         args.real_ip_header,
         uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
         force,
-        |v| serde_json::json!(v),
-        |v| v.as_str().map(String::from),
+        reconcile::JsonConvert {
+            to_json: |v| serde_json::json!(v),
+            from_json: |v| v.as_str().map(String::from),
+        },
     )
     .await
     .context(AppError::Settings)?;
@@ -136,6 +143,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let extra_sans = reconcile_setting_vec::<String>(
         &db_conn,
         uptrakit_web_api::settings::SETTING_KEY_EXTRA_SANS,
+        &raw_settings,
         if args.sans.is_empty() {
             None
         } else {
@@ -143,13 +151,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         },
         vec![],
         force,
-        |v| serde_json::json!(v),
-        |v| {
-            v.as_array().map(|arr| {
-                arr.iter()
-                    .filter_map(|s| s.as_str().map(String::from))
-                    .collect()
-            })
+        reconcile::JsonConvert {
+            to_json: |v| serde_json::json!(v),
+            from_json: |v| {
+                v.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|s| s.as_str().map(String::from))
+                        .collect()
+                })
+            },
         },
     )
     .await
@@ -159,10 +169,11 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let http_addr = reconcile_socket_addr(
         &db_conn,
         uptrakit_web_api::settings::SETTING_KEY_HTTP_ADDR,
+        &raw_settings,
         args.http_addr,
         uptrakit_web_api::settings::DEFAULT_HTTP_ADDR
             .parse()
-            .unwrap(),
+            .expect("valid default HTTP addr"),
         force,
     )
     .await?;
@@ -171,10 +182,11 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let https_addr = reconcile_socket_addr(
         &db_conn,
         uptrakit_web_api::settings::SETTING_KEY_HTTPS_ADDR,
+        &raw_settings,
         args.https_addr,
         uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
             .parse()
-            .unwrap(),
+            .expect("valid default HTTPS addr"),
         force,
     )
     .await?;
@@ -186,22 +198,25 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let mqtt_host = reconcile::reconcile_setting(
             &db_conn,
             uptrakit_web_api::settings::SETTING_KEY_MQTT_HOST,
+            &raw_settings,
             args.mqtt.mqtt_host.clone(),
             String::new(), // empty = disabled
             force,
-            |v| {
-                if v.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::json!(v)
-                }
-            },
-            |v| {
-                if v.is_null() {
-                    Some(String::new())
-                } else {
-                    v.as_str().map(String::from)
-                }
+            reconcile::JsonConvert {
+                to_json: |v| {
+                    if v.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(v)
+                    }
+                },
+                from_json: |v| {
+                    if v.is_null() {
+                        Some(String::new())
+                    } else {
+                        v.as_str().map(String::from)
+                    }
+                },
             },
         )
         .await
@@ -215,6 +230,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let mqtt_port = reconcile_u16(
             &db_conn,
             uptrakit_web_api::settings::SETTING_KEY_MQTT_PORT,
+            &raw_settings,
             args.mqtt.mqtt_port,
             uptrakit_web_api::settings::DEFAULT_MQTT_PORT,
             force,
@@ -224,11 +240,14 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let mqtt_client_id = reconcile::reconcile_setting(
             &db_conn,
             uptrakit_web_api::settings::SETTING_KEY_MQTT_CLIENT_ID,
+            &raw_settings,
             args.mqtt.mqtt_client_id.clone(),
             uptrakit_web_api::settings::DEFAULT_MQTT_CLIENT_ID.to_string(),
             force,
-            |v| serde_json::json!(v),
-            |v| v.as_str().map(String::from),
+            reconcile::JsonConvert {
+                to_json: |v| serde_json::json!(v),
+                from_json: |v| v.as_str().map(String::from),
+            },
         )
         .await
         .context(AppError::Settings)?;
@@ -236,22 +255,25 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let mqtt_username = reconcile::reconcile_setting(
             &db_conn,
             uptrakit_web_api::settings::SETTING_KEY_MQTT_USERNAME,
+            &raw_settings,
             args.mqtt.mqtt_username.clone(),
             String::new(),
             force,
-            |v| {
-                if v.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::json!(v)
-                }
-            },
-            |v| {
-                if v.is_null() {
-                    Some(String::new())
-                } else {
-                    v.as_str().map(String::from)
-                }
+            reconcile::JsonConvert {
+                to_json: |v| {
+                    if v.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(v)
+                    }
+                },
+                from_json: |v| {
+                    if v.is_null() {
+                        Some(String::new())
+                    } else {
+                        v.as_str().map(String::from)
+                    }
+                },
             },
         )
         .await
@@ -265,22 +287,25 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let mqtt_password = reconcile::reconcile_setting(
             &db_conn,
             uptrakit_web_api::settings::SETTING_KEY_MQTT_PASSWORD,
+            &raw_settings,
             args.mqtt.mqtt_password.clone(),
             String::new(),
             force,
-            |v| {
-                if v.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::json!(v)
-                }
-            },
-            |v| {
-                if v.is_null() {
-                    Some(String::new())
-                } else {
-                    v.as_str().map(String::from)
-                }
+            reconcile::JsonConvert {
+                to_json: |v| {
+                    if v.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(v)
+                    }
+                },
+                from_json: |v| {
+                    if v.is_null() {
+                        Some(String::new())
+                    } else {
+                        v.as_str().map(String::from)
+                    }
+                },
             },
         )
         .await
@@ -294,11 +319,14 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let mqtt_topic_prefix = reconcile::reconcile_setting(
             &db_conn,
             uptrakit_web_api::settings::SETTING_KEY_MQTT_TOPIC_PREFIX,
+            &raw_settings,
             args.mqtt.mqtt_topic_prefix.clone(),
             uptrakit_web_api::settings::DEFAULT_MQTT_TOPIC_PREFIX.to_string(),
             force,
-            |v| serde_json::json!(v),
-            |v| v.as_str().map(String::from),
+            reconcile::JsonConvert {
+                to_json: |v| serde_json::json!(v),
+                from_json: |v| v.as_str().map(String::from),
+            },
         )
         .await
         .context(AppError::Settings)?;
@@ -722,27 +750,28 @@ impl<T: fmt::Display> fmt::Display for DisplayVec<'_, T> {
 async fn reconcile_setting_vec<T>(
     db: &sea_orm::DatabaseConnection,
     key: &str,
+    raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<Vec<T>>,
     default_value: Vec<T>,
     force: bool,
-    to_json: fn(&Vec<T>) -> serde_json::Value,
-    from_json: fn(&serde_json::Value) -> Option<Vec<T>>,
+    convert: reconcile::JsonConvert<Vec<T>>,
 ) -> Result<Vec<T>, Report<AppError>>
 where
     T: PartialEq + Clone + fmt::Display + 'static,
 {
-    let db_value = uptrakit_web_api::settings_store::load_setting(db, key)
-        .await
-        .context(AppError::Settings)?
-        .and_then(|v| from_json(&v));
+    let db_value = raw.get(key).and_then(convert.from_json);
 
     match (db_value, cli_value) {
         (Some(db_val), Some(cli_val)) if db_val != cli_val => {
             if force {
                 tracing::info!(key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
-                uptrakit_web_api::settings_store::upsert_setting(db, key, to_json(&cli_val))
-                    .await
-                    .context(AppError::Settings)?;
+                uptrakit_web_api::settings_store::upsert_setting(
+                    db,
+                    key,
+                    (convert.to_json)(&cli_val),
+                )
+                .await
+                .context(AppError::Settings)?;
                 Ok(cli_val)
             } else {
                 tracing::warn!(
@@ -760,16 +789,20 @@ where
         }
         (None, Some(cli_val)) => {
             tracing::info!(key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
-            uptrakit_web_api::settings_store::upsert_setting(db, key, to_json(&cli_val))
+            uptrakit_web_api::settings_store::upsert_setting(db, key, (convert.to_json)(&cli_val))
                 .await
                 .context(AppError::Settings)?;
             Ok(cli_val)
         }
         (None, None) => {
             tracing::info!(key, value = %DisplayVec(&default_value), "seeding DB setting from default");
-            uptrakit_web_api::settings_store::upsert_setting(db, key, to_json(&default_value))
-                .await
-                .context(AppError::Settings)?;
+            uptrakit_web_api::settings_store::upsert_setting(
+                db,
+                key,
+                (convert.to_json)(&default_value),
+            )
+            .await
+            .context(AppError::Settings)?;
             Ok(default_value)
         }
     }
@@ -779,6 +812,7 @@ where
 async fn reconcile_socket_addr(
     db: &sea_orm::DatabaseConnection,
     key: &str,
+    raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<SocketAddr>,
     default_value: SocketAddr,
     force: bool,
@@ -786,11 +820,14 @@ async fn reconcile_socket_addr(
     reconcile::reconcile_setting(
         db,
         key,
+        raw,
         cli_value,
         default_value,
         force,
-        |v| serde_json::json!(v.to_string()),
-        |v| v.as_str().and_then(|s| s.parse().ok()),
+        reconcile::JsonConvert {
+            to_json: |v| serde_json::json!(v.to_string()),
+            from_json: |v| v.as_str().and_then(|s| s.parse().ok()),
+        },
     )
     .await
     .context(AppError::Settings)
@@ -801,6 +838,7 @@ async fn reconcile_socket_addr(
 async fn reconcile_u16(
     db: &sea_orm::DatabaseConnection,
     key: &str,
+    raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<u16>,
     default_value: u16,
     force: bool,
@@ -808,11 +846,14 @@ async fn reconcile_u16(
     reconcile::reconcile_setting(
         db,
         key,
+        raw,
         cli_value,
         default_value,
         force,
-        |v| serde_json::json!(v),
-        |v| v.as_u64().and_then(|n| u16::try_from(n).ok()),
+        reconcile::JsonConvert {
+            to_json: |v| serde_json::json!(v),
+            from_json: |v| v.as_u64().and_then(|n| u16::try_from(n).ok()),
+        },
     )
     .await
     .context(AppError::Settings)

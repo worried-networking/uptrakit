@@ -3,14 +3,24 @@ use std::fmt;
 use rootcause::Report;
 use sea_orm::DatabaseConnection;
 
-use uptrakit_web_api::settings_store::{load_setting, upsert_setting};
+use uptrakit_web_api::settings_store::{RawSettings, upsert_setting};
 
 /// Error type used for reconciliation failures.
 #[derive(Debug, thiserror::Error)]
 #[error("settings reconciliation failed")]
 pub struct ReconcileError;
 
+/// JSON conversion pair used by [`reconcile_setting`].
+pub struct JsonConvert<T> {
+    pub to_json: fn(&T) -> serde_json::Value,
+    pub from_json: fn(&serde_json::Value) -> Option<T>,
+}
+
 /// Reconcile a single DB-managed setting with an optional CLI value.
+///
+/// `raw` is the pre-fetched settings map from the bulk `load_all_settings()`
+/// call. The function looks up `key` in the map instead of issuing a DB query.
+/// The DB connection is still needed for upserts (cases 1, 4, 5).
 ///
 /// The five cases:
 /// 1. DB has value + CLI provided + differs + `force` → use CLI, update DB
@@ -21,22 +31,16 @@ pub struct ReconcileError;
 pub async fn reconcile_setting<T>(
     db: &DatabaseConnection,
     key: &str,
+    raw: &RawSettings,
     cli_value: Option<T>,
     default_value: T,
     force: bool,
-    to_json: fn(&T) -> serde_json::Value,
-    from_json: fn(&serde_json::Value) -> Option<T>,
+    convert: JsonConvert<T>,
 ) -> Result<T, Report<ReconcileError>>
 where
     T: PartialEq + Clone + fmt::Display,
 {
-    let db_value = load_setting(db, key)
-        .await
-        .map_err(|e| {
-            tracing::error!(key, error = ?e, "failed to load setting from DB");
-            rootcause::report!(ReconcileError)
-        })?
-        .and_then(|v| from_json(&v));
+    let db_value = raw.get(key).and_then(convert.from_json);
 
     match (db_value, cli_value) {
         // Case 1 & 2: DB has a value and CLI differs
@@ -44,7 +48,7 @@ where
             if force {
                 // Case 1: force override — use CLI, update DB
                 tracing::info!(key, cli = %cli_val, db = %db_val, "force-overriding DB setting with CLI value");
-                upsert_setting(db, key, to_json(&cli_val))
+                upsert_setting(db, key, (convert.to_json)(&cli_val))
                     .await
                     .map_err(|e| {
                         tracing::error!(key, error = ?e, "failed to upsert setting");
@@ -70,7 +74,7 @@ where
         // Case 4: No DB value, CLI provided
         (None, Some(cli_val)) => {
             tracing::info!(key, value = %cli_val, "seeding DB setting from CLI");
-            upsert_setting(db, key, to_json(&cli_val))
+            upsert_setting(db, key, (convert.to_json)(&cli_val))
                 .await
                 .map_err(|e| {
                     tracing::error!(key, error = ?e, "failed to upsert setting");
@@ -81,7 +85,7 @@ where
         // Case 5: No DB value, no CLI
         (None, None) => {
             tracing::info!(key, value = %default_value, "seeding DB setting from default");
-            upsert_setting(db, key, to_json(&default_value))
+            upsert_setting(db, key, (convert.to_json)(&default_value))
                 .await
                 .map_err(|e| {
                     tracing::error!(key, error = ?e, "failed to upsert setting");
@@ -94,10 +98,13 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 
     use super::*;
     use crate::migration;
+    use uptrakit_web_api::settings_store::{load_setting, upsert_setting};
 
     async fn setup_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -106,25 +113,25 @@ mod tests {
         conn
     }
 
-    fn string_to_json(v: &String) -> serde_json::Value {
-        serde_json::json!(v)
-    }
-
-    fn string_from_json(v: &serde_json::Value) -> Option<String> {
-        v.as_str().map(String::from)
+    fn string_convert() -> JsonConvert<String> {
+        JsonConvert {
+            to_json: |v| serde_json::json!(v),
+            from_json: |v| v.as_str().map(String::from),
+        }
     }
 
     #[tokio::test]
     async fn no_db_no_cli_uses_default() {
         let db = setup_db().await;
+        let raw = HashMap::new();
         let result = reconcile_setting(
             &db,
             "test.no_db_no_cli",
+            &raw,
             None,
             "default_val".to_string(),
             false,
-            string_to_json,
-            string_from_json,
+            string_convert(),
         )
         .await
         .unwrap();
@@ -138,14 +145,15 @@ mod tests {
     #[tokio::test]
     async fn no_db_cli_provided_uses_cli() {
         let db = setup_db().await;
+        let raw = HashMap::new();
         let result = reconcile_setting(
             &db,
             "test.no_db_cli",
+            &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
             false,
-            string_to_json,
-            string_from_json,
+            string_convert(),
         )
         .await
         .unwrap();
@@ -162,14 +170,15 @@ mod tests {
             .await
             .unwrap();
 
+        let raw = HashMap::from([("test.db_exists".to_string(), serde_json::json!("db_val"))]);
         let result = reconcile_setting(
             &db,
             "test.db_exists",
+            &raw,
             None,
             "default_val".to_string(),
             false,
-            string_to_json,
-            string_from_json,
+            string_convert(),
         )
         .await
         .unwrap();
@@ -183,14 +192,15 @@ mod tests {
             .await
             .unwrap();
 
+        let raw = HashMap::from([("test.no_force".to_string(), serde_json::json!("db_val"))]);
         let result = reconcile_setting(
             &db,
             "test.no_force",
+            &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
             false,
-            string_to_json,
-            string_from_json,
+            string_convert(),
         )
         .await
         .unwrap();
@@ -204,14 +214,15 @@ mod tests {
             .await
             .unwrap();
 
+        let raw = HashMap::from([("test.force".to_string(), serde_json::json!("db_val"))]);
         let result = reconcile_setting(
             &db,
             "test.force",
+            &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
             true,
-            string_to_json,
-            string_from_json,
+            string_convert(),
         )
         .await
         .unwrap();
