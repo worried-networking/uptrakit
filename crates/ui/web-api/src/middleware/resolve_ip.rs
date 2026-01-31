@@ -137,7 +137,8 @@ mod tests {
                 &self,
                 _: &uuid::Uuid,
                 _: time::Duration,
-            ) -> std::result::Result<AgentCertBundle, rootcause::Report<CertSignerError>> {
+            ) -> std::result::Result<AgentCertBundle, rootcause::Report<CertSignerError>>
+            {
                 unimplemented!()
             }
             fn active_ca_fingerprint(&self) -> String {
