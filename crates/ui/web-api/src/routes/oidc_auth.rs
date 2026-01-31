@@ -8,12 +8,12 @@ use crate::auth::token::{generate_secure_token, generate_uuid};
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
 };
 use openidconnect::{
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
-    PkceCodeChallenge, Scope, TokenResponse,
+    PkceCodeChallenge, RedirectUrl, Scope, TokenResponse,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
     reqwest,
 };
@@ -115,7 +115,21 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
 pub async fn oidc_authorize(
     State(state): State<Arc<AppState>>,
     Path(provider_id): Path<String>,
+    headers: HeaderMap,
 ) -> Response {
+    let base_url = match base_url_from_headers(&headers) {
+        Some(url) => url,
+        None => return (StatusCode::BAD_REQUEST, "Missing Host header").into_response(),
+    };
+
+    let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
+        Ok(url) => url,
+        Err(e) => {
+            tracing::error!("Invalid OIDC redirect URL: {e}");
+            return (StatusCode::BAD_REQUEST, "Invalid redirect URL").into_response();
+        }
+    };
+
     let provider_uuid = match uuid::Uuid::parse_str(&provider_id) {
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid provider ID").into_response(),
@@ -148,6 +162,7 @@ pub async fn oidc_authorize(
         ClientId::new(provider.client_id.clone()),
         Some(ClientSecret::new(provider.client_secret.clone())),
     );
+    let client = client.set_redirect_uri(redirect_url);
 
     // Generate PKCE challenge
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -209,6 +224,7 @@ pub async fn oidc_authorize(
 pub async fn oidc_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<OidcCallbackParams>,
+    headers: HeaderMap,
 ) -> Response {
     // Handle error from provider
     if params.error.is_some() {
@@ -236,6 +252,18 @@ pub async fn oidc_callback(
         None => return Redirect::to("/login?error=oidc_provider_gone").into_response(),
     };
 
+    let base_url = match base_url_from_headers(&headers) {
+        Some(url) => url,
+        None => return Redirect::to("/login?error=oidc_missing_host").into_response(),
+    };
+    let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
+        Ok(url) => url,
+        Err(e) => {
+            tracing::error!("Invalid OIDC redirect URL during callback: {e}");
+            return Redirect::to("/login?error=oidc_invalid_redirect").into_response();
+        }
+    };
+
     // Build OIDC client
     let issuer_url = match IssuerUrl::new(provider.issuer_url.clone()) {
         Ok(u) => u,
@@ -258,6 +286,7 @@ pub async fn oidc_callback(
         ClientId::new(provider.client_id.clone()),
         Some(ClientSecret::new(provider.client_secret.clone())),
     );
+    let client = client.set_redirect_uri(redirect_url.clone());
 
     // Exchange code for tokens
     let token_request = match client.exchange_code(AuthorizationCode::new(code)) {
@@ -268,6 +297,7 @@ pub async fn oidc_callback(
         }
     };
     let token_response = match token_request
+        .set_redirect_uri(std::borrow::Cow::Owned(redirect_url))
         .set_pkce_verifier(flow.pkce_verifier)
         .request_async(&http_client)
         .await
@@ -762,4 +792,52 @@ async fn store_pending_link(
     let link_token = params.token.clone();
     state.account_link_store.insert(params).await?;
     Ok(link_token)
+}
+
+fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
+    let origin = headers
+        .get("origin")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim_end_matches('/').to_string());
+
+    if origin.as_deref().is_some_and(|s| !s.is_empty()) {
+        return origin;
+    }
+
+    headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .map(|h| format!("https://{}", h.trim_end_matches('/')))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base_url_from_headers;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn base_url_prefers_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", HeaderValue::from_static("https://example.test/"));
+        headers.insert("host", HeaderValue::from_static("ignored.test"));
+
+        let base = base_url_from_headers(&headers).unwrap();
+        assert_eq!(base, "https://example.test");
+    }
+
+    #[test]
+    fn base_url_uses_host_when_origin_missing() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("example.test:8443"));
+
+        let base = base_url_from_headers(&headers).unwrap();
+        assert_eq!(base, "https://example.test:8443");
+    }
+
+    #[test]
+    fn base_url_none_when_headers_missing() {
+        let headers = HeaderMap::new();
+        let base = base_url_from_headers(&headers);
+        assert!(base.is_none());
+    }
 }
