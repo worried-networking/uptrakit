@@ -12,6 +12,9 @@ use uptrakit_web_api::extract::AgentIdentity;
 use axum_server::accept::Accept;
 use axum_server::tls_rustls::RustlsAcceptor;
 
+/// Pinned, boxed future returned by the inner TLS acceptor.
+type BoxedAcceptFuture<I, S> = Pin<Box<dyn Future<Output = io::Result<(TlsStream<I>, S)>> + Send>>;
+
 /// Custom acceptor wrapping `RustlsAcceptor`.
 /// After TLS handshake, extracts peer cert CN as `AgentIdentity`.
 #[derive(Clone)]
@@ -46,8 +49,7 @@ pub struct MtlsAcceptFuture<I, S>
 where
     I: AsyncRead + AsyncWrite + Unpin,
 {
-    #[allow(clippy::type_complexity)]
-    inner: Pin<Box<dyn Future<Output = io::Result<(TlsStream<I>, S)>> + Send>>,
+    inner: BoxedAcceptFuture<I, S>,
 }
 
 impl<I, S> Future for MtlsAcceptFuture<I, S>
