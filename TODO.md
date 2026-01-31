@@ -9,6 +9,11 @@ This roadmap tracks the development of Uptrakit, a self-hosted software update m
 **Key Documentation**:
 
 - [README.md](README.md) - Project overview and architecture
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System design and technology decisions
+- [SECURITY.md](SECURITY.md) - Security policy and cryptographic details
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup and contribution guidelines
+- [AGENTS.md](AGENTS.md) - AI agent guide with codebase layout and patterns
+- [docs/README.md](docs/README.md) - Documentation catalogue
 
 **How to Use This Roadmap**:
 
@@ -620,18 +625,18 @@ Making the system usable and maintainable.
   - [ ] Rotation execution steps
   - [ ] Post-rotation verification
   - [ ] Rollback procedures
-- [ ] Create certificate management guide
-  - [ ] Certificate lifecycle overview
-  - [ ] Revocation procedures
+- [x] Create certificate management guide
+  - [x] Certificate lifecycle overview
+  - [x] Revocation procedures
   - [ ] Backup and recovery
 - [ ] Document agent authentication
   - [ ] Enrollment workflow
   - [ ] Identity management
   - [ ] Authorization policies
-- [ ] Write security best practices guide
-  - [ ] Secure deployment recommendations
-  - [ ] Network security
-  - [ ] Secret management
+- [x] Write security best practices guide
+  - [x] Secure deployment recommendations
+  - [x] Network security
+  - [x] Secret management
   - [ ] Audit logging configuration
 
 ### Deployment Documentation
@@ -648,9 +653,9 @@ Making the system usable and maintainable.
 
 ### Contributor Documentation
 
-- [ ] Write CONTRIBUTING.md
-- [ ] Document development setup
-- [ ] Create architecture documentation
+- [x] Write CONTRIBUTING.md
+- [x] Document development setup
+- [x] Create architecture documentation
 - [ ] Add code style guide
 - [ ] Document testing strategy
 - [ ] Create PR template and guidelines

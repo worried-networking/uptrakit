@@ -12,7 +12,7 @@ Key components:
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version detection and update execution via sudo allowlists.
 - **Providers**: pluggable modules that define how to detect installed versions, resolve latest versions, and perform updates.
 
-For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md). For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [docs/README.md](docs/README.md).
 
 ## Codebase layout
 
@@ -188,12 +188,82 @@ The first registered user gets the `admin` role. Subsequent users (password or O
 
 ## Error handling
 
-Use the [`rootcause`](https://github.com/rootcause-rs/rootcause) crate for error propagation and handling. Use [`thiserror`](https://github.com/dtolnay/thiserror) for constructing and designing errors. Ensure that everything
-related to errors complies with the rootcause-specified best-practices (see <https://github.com/rootcause-rs/rootcause/blob/main/examples/thiserror_interop.rs>).
+Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagation and [`thiserror`](https://github.com/dtolnay/thiserror) for error enum definition. Every module boundary must define its own error type following the patterns below.
 
-- Add context at boundaries (host, provider, software item, operation).
-- Prefer structured context over generic string errors.
-- Never log or expose secrets in error messages.
+### Pattern 1: Define an error enum with a `Result<T>` alias
+
+Each boundary (crate, module, or logical subsystem) defines its own error enum and a `Result` alias using `Report`:
+
+```rust
+use rootcause::{Report, ReportConversion, markers};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum MyError {
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+
+    #[error("not found: {0}")]
+    NotFound(String),
+
+    #[error("internal error: {0}")]
+    Internal(String),
+}
+
+pub type Result<T> = std::result::Result<T, Report<MyError>>;
+```
+
+Real example: [`crates/ui/web-api/src/auth/error.rs`](crates/ui/web-api/src/auth/error.rs) (`AuthError`), [`crates/core/controller/src/db/error.rs`](crates/core/controller/src/db/error.rs) (`DbError`).
+
+### Pattern 2: Implement `ReportConversion` for cross-boundary error conversion
+
+When your module calls code that returns a different error type, implement `ReportConversion` so that `.context_to()` can convert automatically:
+
+```rust
+impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for MyError
+where
+    MyError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<sea_orm::DbErr, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(MyError::Database)
+    }
+}
+```
+
+For errors that don't map directly via `#[from]`, use a closure:
+
+```rust
+report.context_transform(|_| MyError::Internal("unexpected failure".to_string()))
+```
+
+### Pattern 3: Use `context_to()` in function bodies
+
+Call `.context_to()?` on any `Result` whose error type has a `ReportConversion` impl for your boundary:
+
+```rust
+let user = users::Entity::find_by_id(id)
+    .one(db)
+    .await
+    .context_to()?           // converts sea_orm::DbErr → MyError::Database
+    .ok_or_else(|| report!(MyError::NotFound(format!("user {id}"))))?;
+```
+
+### Pattern 4: Use `report!()` to create reports directly
+
+```rust
+return Err(report!(MyError::NotFound("item not found".to_string())));
+```
+
+### Rules summary
+
+1. **Every boundary has its own error enum.** Do not reuse error types across crate boundaries.
+2. **Derive `Debug` and `Error`** (via thiserror) on all error enums.
+3. **Use structured context** -- prefer typed variants (`NotFound(String)`) over generic string errors.
+4. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.
+5. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
+6. **Implement `ReportConversion`** for every foreign error type your boundary may encounter.
 
 ## Testing expectations
 

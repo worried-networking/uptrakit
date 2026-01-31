@@ -10,7 +10,9 @@ Thanks for taking the time to contribute. Uptrakit is a security-adjacent system
 - Performance improvements (with evidence)
 - CI / tooling improvements
 
-If you’re planning a larger change, open an issue first so we can agree on the shape before you write 2,000 lines of Rust.
+If you're planning a larger change, open an issue first so we can agree on the shape before you write 2,000 lines of Rust.
+
+For system design and architecture context, see [ARCHITECTURE.md](ARCHITECTURE.md). For the full documentation catalogue, see [docs/README.md](docs/README.md).
 
 ---
 
@@ -232,13 +234,9 @@ The controller manages an internal CA for mTLS. Relevant rules:
 
 ## Security reports
 
-There is no `SECURITY.md` yet.
+For vulnerability reporting, security design details, and cryptographic information, see [SECURITY.md](SECURITY.md).
 
-If you discover a vulnerability (auth, command execution, WS security, privilege boundaries):
-
-- Avoid posting exploit details publicly.
-- If the repository has GitHub “Report a vulnerability” enabled, use it.
-- Otherwise, open a minimal issue requesting a private disclosure channel and keep technical details out of the public thread.
+If you discover a security issue, please use GitHub's "Report a vulnerability" feature or follow the process described in the security policy. Do not post exploit details in public issues.
 
 ## Licence
 

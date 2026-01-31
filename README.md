@@ -36,6 +36,17 @@ Contribution guidelines and project conventions:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
+## Documentation
+
+| Document | Description |
+| --- | --- |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, component diagram, technology stack, key decisions |
+| [SECURITY.md](SECURITY.md) | Security policy, vulnerability reporting, cryptographic details |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, testing, commit conventions, PR guidelines |
+| [AGENTS.md](AGENTS.md) | AI agent guide: codebase layout, quality gates, error patterns |
+| [docs/](docs/README.md) | Documentation catalogue and planned guides |
+| [TODO.md](TODO.md) | Project roadmap and progress tracker |
+
 ## License
 
 Licensed under either of
