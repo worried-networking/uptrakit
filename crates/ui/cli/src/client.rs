@@ -1,4 +1,5 @@
 use crate::error::{CliError, Result};
+use rootcause::prelude::*;
 
 pub struct ApiClient {
     http: reqwest::Client,
@@ -10,7 +11,8 @@ impl ApiClient {
     pub fn new(base_url: &str, token: Option<&str>) -> Result<Self> {
         let http = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
-            .build()?;
+            .build()
+            .context_to()?;
 
         Ok(Self {
             http,
@@ -36,7 +38,7 @@ impl ApiClient {
         let method = method.to_uppercase();
         let req_method = method
             .parse::<reqwest::Method>()
-            .map_err(|e| CliError::Other(format!("Invalid HTTP method: {e}")))?;
+            .map_err(|e| report!(CliError::Other(format!("Invalid HTTP method: {e}"))))?;
 
         let mut req = self.http.request(req_method, &url);
 
@@ -48,9 +50,9 @@ impl ApiClient {
             req = req.json(&body);
         }
 
-        let resp = req.send().await?;
+        let resp = req.send().await.context_to()?;
         let status = resp.status().as_u16();
-        let text = resp.text().await?;
+        let text = resp.text().await.context_to()?;
 
         let value = if text.is_empty() {
             serde_json::Value::Null
