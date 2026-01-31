@@ -147,6 +147,7 @@ These are non-negotiable design constraints. Do not violate them.
 8. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host never run concurrently.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
+11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
 
 ## Error handling
 
