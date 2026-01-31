@@ -251,6 +251,15 @@ export function deactivateOidcProvider(id: string): Promise<OidcProviderResponse
 	return request(`/settings/oidc-providers/${id}/deactivate`, { method: 'POST' });
 }
 
+// --- Device Authorization ---
+
+export function approveDeviceAuth(userCode: string): Promise<{ message: string }> {
+	return request('/auth/device/approve', {
+		method: 'POST',
+		body: JSON.stringify({ user_code: userCode })
+	});
+}
+
 // --- System Alerts ---
 
 export function getSystemAlerts(): Promise<SystemAlertsResponse> {

@@ -48,7 +48,7 @@
 		}
 	});
 
-	const publicRoutes = new Set(['/login', '/register']);
+	const publicRoutes = new Set(['/login', '/register', '/device']);
 
 	const allNavItems = [
 		{ href: '/', label: 'Home' },
