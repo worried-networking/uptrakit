@@ -106,7 +106,9 @@ For cryptographic algorithm details, see [SECURITY.md](SECURITY.md) section "Cry
 
 ## DB-Managed Settings
 
-Most runtime settings are stored in the database (`setting` entity) as JSON values. At startup, the controller reconciles CLI arguments with DB-persisted values using a 5-case priority logic:
+Most runtime settings are stored in the database (`setting` entity) as JSON values. At startup, `Settings::load()` issues a single `SELECT * FROM settings` query and distributes the resulting `RawSettings` map to all sub-loaders and to reconciliation — no per-key DB reads. Any unrecognised keys in the DB trigger a warning log.
+
+The controller then reconciles CLI arguments with the pre-loaded values using a 5-case priority logic:
 
 1. **DB has value + CLI provided + differs + `--force-settings-override`**: CLI wins, DB updated.
 2. **DB has value + CLI provided + differs + no force**: DB wins, warning logged.

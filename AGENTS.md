@@ -248,7 +248,17 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
 
+### Bulk loading and known-keys registry
+
+At startup, `Settings::load()` issues a single `SELECT * FROM settings` via `load_all_settings()` and distributes the resulting `RawSettings` (`HashMap<String, serde_json::Value>`) to all sub-loaders. This replaces the previous pattern of one query per key.
+
+After the bulk load, `warn_unrecognised_keys()` logs a warning for any DB key not in `ALL_KNOWN_KEYS` (defined in `settings.rs`). This catches stale or misspelled entries left after upgrades.
+
+`Settings::load()` returns `(Self, RawSettings, Option<String>)` so the controller passes the same map to reconciliation without re-reading.
+
 ### Reconciliation logic
+
+`reconcile_setting()` (`crates/core/controller/src/reconcile.rs`) accepts a `&RawSettings` map and looks up the key itself — no per-key DB reads. It still needs the `DatabaseConnection` for upserts.
 
 For each DB-managed setting at startup:
 1. DB has value + CLI provided + differs + `--force-settings-override` → use CLI, update DB
