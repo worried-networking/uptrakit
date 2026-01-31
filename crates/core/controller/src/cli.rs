@@ -10,7 +10,7 @@ use ipnet::IpNet;
 pub struct Args {
     /// Data directory (CA keys, certs, future DB).
     /// Supports `~` for home directory expansion.
-    #[arg(long, default_value = "~/.uptrakit")]
+    #[arg(long, default_value = "~/.uptrakit-controller")]
     pub data_dir: String,
 
     /// Database URL. If not provided, defaults to SQLite in data directory.
