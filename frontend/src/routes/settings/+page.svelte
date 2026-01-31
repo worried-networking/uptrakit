@@ -18,7 +18,11 @@
 		activateOidcProvider,
 		deactivateOidcProvider,
 		getSystemAlerts,
-		renewServerCertificate
+		renewServerCertificate,
+		getNetworkSettings,
+		updateNetworkSettings,
+		getMqttSettings,
+		updateMqttSettings
 	} from '$lib/api';
 	import {
 		Permission,
@@ -29,7 +33,9 @@
 		type OidcProviderResponse,
 		type CreateOidcProviderRequest,
 		type UpdateOidcProviderRequest,
-		type SystemAlert
+		type SystemAlert,
+		type NetworkSettings,
+		type MqttSettingsResponse
 	} from '$lib/types';
 
 	// --- Global feedback ---
@@ -49,6 +55,22 @@
 	let generatedToken: string | null = $state(null);
 
 	let oidcProviders: OidcProviderResponse[] = $state([]);
+
+	// --- Network Settings ---
+	let trustedProxiesText: string = $state('');
+	let realIpHeader: string = $state('X-Forwarded-For');
+	let extraSansText: string = $state('');
+	let httpAddr: string = $state('[::]:8080');
+	let httpsAddr: string = $state('[::]:8443');
+
+	// --- MQTT Settings ---
+	let mqttHost: string = $state('');
+	let mqttPort: number = $state(1883);
+	let mqttClientId: string = $state('uptrakit-controller');
+	let mqttUsername: string = $state('');
+	let mqttPassword: string = $state('');
+	let mqttHasPassword: boolean = $state(false);
+	let mqttTopicPrefix: string = $state('uptrakit');
 
 	// --- TLS Certificate ---
 	let tlsAlerts: SystemAlert[] = $state([]);
@@ -131,7 +153,9 @@
 			getAgentCertificateSettings(),
 			getEnrollmentTokenStatus(),
 			getOidcProviders(),
-			getSystemAlerts()
+			getSystemAlerts(),
+			getNetworkSettings(),
+			getMqttSettings()
 		]);
 
 		if (results[0].status === 'fulfilled') {
@@ -155,8 +179,85 @@
 				(a) => a.id === 'server_cert_old_ca' || a.id === 'server_cert_expiring'
 			);
 		}
+		if (results[6].status === 'fulfilled') {
+			const net = results[6].value;
+			trustedProxiesText = net.trusted_proxies.join('\n');
+			realIpHeader = net.real_ip_header;
+			extraSansText = net.extra_sans.join('\n');
+			httpAddr = net.http_addr;
+			httpsAddr = net.https_addr;
+		}
+		if (results[7].status === 'fulfilled') {
+			const mqtt = results[7].value;
+			mqttHost = mqtt.host ?? '';
+			mqttPort = mqtt.port;
+			mqttClientId = mqtt.client_id;
+			mqttUsername = mqtt.username ?? '';
+			mqttHasPassword = mqtt.has_password;
+			mqttTopicPrefix = mqtt.topic_prefix;
+			mqttPassword = '';
+		}
 
 		loading = false;
+	}
+
+	// --- Network Settings ---
+	async function saveNetworkSettings() {
+		clearError();
+		try {
+			const proxies = trustedProxiesText
+				.split('\n')
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0);
+			const sans = extraSansText
+				.split('\n')
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0);
+			const res = await updateNetworkSettings({
+				trusted_proxies: proxies,
+				real_ip_header: realIpHeader,
+				extra_sans: sans,
+				http_addr: httpAddr,
+				https_addr: httpsAddr
+			});
+			trustedProxiesText = res.trusted_proxies.join('\n');
+			realIpHeader = res.real_ip_header;
+			extraSansText = res.extra_sans.join('\n');
+			httpAddr = res.http_addr;
+			httpsAddr = res.https_addr;
+			showSuccess('Network settings saved.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save network settings');
+		}
+	}
+
+	// --- MQTT Settings ---
+	async function saveMqttSettings() {
+		clearError();
+		try {
+			const data: Record<string, unknown> = {
+				host: mqttHost || null,
+				port: mqttPort,
+				client_id: mqttClientId,
+				username: mqttUsername || null,
+				topic_prefix: mqttTopicPrefix
+			};
+			// Only send password if user typed something
+			if (mqttPassword) {
+				data.password = mqttPassword;
+			}
+			const res = await updateMqttSettings(data);
+			mqttHost = res.host ?? '';
+			mqttPort = res.port;
+			mqttClientId = res.client_id;
+			mqttUsername = res.username ?? '';
+			mqttHasPassword = res.has_password;
+			mqttTopicPrefix = res.topic_prefix;
+			mqttPassword = '';
+			showSuccess('MQTT settings saved.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to save MQTT settings');
+		}
 	}
 
 	// --- Registration ---
@@ -453,7 +554,118 @@
 			</button>
 		</div>
 
-		<!-- Section 3: OIDC Providers -->
+		<!-- Section 3: Network Settings -->
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">Network Settings</h2>
+			<p class="text-surface-600-300-token mb-4">
+				Configure reverse proxy trust, client IP detection, and listen addresses.
+				Changes to listen addresses require a restart to take effect.
+			</p>
+
+			<label class="label mb-4">
+				<span>Trusted Proxies (one IP/CIDR per line)</span>
+				<textarea
+					class="textarea"
+					rows="3"
+					placeholder="e.g. 10.0.0.0/8&#10;192.168.1.1"
+					bind:value={trustedProxiesText}
+				></textarea>
+			</label>
+
+			<label class="label mb-4">
+				<span>Real IP Header</span>
+				<select class="select" bind:value={realIpHeader}>
+					<option value="X-Forwarded-For">X-Forwarded-For</option>
+					<option value="Forwarded">Forwarded (RFC 7239)</option>
+					<option value="X-Real-Ip">X-Real-Ip</option>
+					<option value="CF-Connecting-IP">CF-Connecting-IP</option>
+					<option value="True-Client-IP">True-Client-IP</option>
+				</select>
+			</label>
+
+			<label class="label mb-4">
+				<span>Extra SANs (one IP or DNS name per line)</span>
+				<textarea
+					class="textarea"
+					rows="3"
+					placeholder="e.g. controller.local&#10;192.168.1.100"
+					bind:value={extraSansText}
+				></textarea>
+			</label>
+
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+				<label class="label">
+					<span>HTTP Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<input class="input" type="text" bind:value={httpAddr} />
+				</label>
+				<label class="label">
+					<span>HTTPS Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<input class="input" type="text" bind:value={httpsAddr} />
+				</label>
+			</div>
+
+			<button class="btn variant-filled-primary" onclick={saveNetworkSettings}>
+				Save
+			</button>
+		</div>
+
+		<!-- Section 4: MQTT Settings -->
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">MQTT Settings</h2>
+			<p class="text-surface-600-300-token mb-4">
+				Configure MQTT broker connection for Home Assistant integration.
+				All MQTT changes require a restart to take effect.
+				Leave the host empty to disable MQTT.
+			</p>
+
+			<label class="label mb-4">
+				<span>Broker Host <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+				<input class="input" type="text" placeholder="e.g. mqtt.local (empty to disable)" bind:value={mqttHost} />
+			</label>
+
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+				<label class="label">
+					<span>Port <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<input class="input" type="number" min="1" max="65535" bind:value={mqttPort} />
+				</label>
+				<label class="label">
+					<span>Client ID <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<input class="input" type="text" bind:value={mqttClientId} />
+				</label>
+			</div>
+
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+				<label class="label">
+					<span>Username</span>
+					<input class="input" type="text" placeholder="(optional)" bind:value={mqttUsername} />
+				</label>
+				<label class="label">
+					<span>
+						Password
+						{#if mqttHasPassword}
+							<span class="badge variant-filled-success text-xs ml-2">Password set</span>
+						{/if}
+					</span>
+					<input
+						class="input"
+						type="password"
+						placeholder="Leave blank to keep current"
+						bind:value={mqttPassword}
+					/>
+				</label>
+			</div>
+
+			<label class="label mb-4">
+				<span>Topic Prefix <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+				<input class="input" type="text" bind:value={mqttTopicPrefix} />
+			</label>
+
+			<button class="btn variant-filled-primary" onclick={saveMqttSettings}>
+				Save
+			</button>
+		</div>
+
+		<!-- Section 5: OIDC Providers -->
 		<div class="card mb-6 p-6">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="h3">OIDC Providers</h2>

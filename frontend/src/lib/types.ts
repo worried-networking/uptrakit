@@ -153,6 +153,40 @@ export interface RenewServerCertResponse {
 	message: string;
 }
 
+export interface NetworkSettings {
+	trusted_proxies: string[];
+	real_ip_header: string;
+	extra_sans: string[];
+	http_addr: string;
+	https_addr: string;
+}
+
+export interface UpdateNetworkSettings {
+	trusted_proxies?: string[];
+	real_ip_header?: string;
+	extra_sans?: string[];
+	http_addr?: string;
+	https_addr?: string;
+}
+
+export interface MqttSettingsResponse {
+	host: string | null;
+	port: number;
+	client_id: string;
+	username: string | null;
+	has_password: boolean;
+	topic_prefix: string;
+}
+
+export interface UpdateMqttSettings {
+	host?: string | null;
+	port?: number;
+	client_id?: string;
+	username?: string | null;
+	password?: string;
+	topic_prefix?: string;
+}
+
 export interface UpdateOidcProviderRequest {
 	name?: string;
 	slug?: string;
