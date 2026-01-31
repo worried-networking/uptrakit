@@ -5,12 +5,16 @@ mod db;
 mod migration;
 mod mtls_acceptor;
 mod pki;
+mod reconcile;
 mod server;
 
+use std::fmt;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
+use ipnet::IpNet;
 use rootcause::{Report, prelude::*};
 use thiserror::Error;
 use tracing_subscriber::EnvFilter;
@@ -80,13 +84,235 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     tracing::info!("database initialized successfully");
 
-    // Initialize settings
+    // Initialize settings (loads existing values from DB)
     let (settings, reg_token) = Settings::load(&db_conn).await.context(AppError::Settings)?;
     if let Some(token) = reg_token {
         tracing::info!("==========================================================");
         tracing::info!("  No users found. Use this one-time registration token:");
         tracing::info!("  {}", token);
         tracing::info!("==========================================================");
+    }
+
+    // --- Reconcile DB-managed settings with CLI values ---
+    let force = args.force_settings_override;
+
+    // Network settings
+    let trusted_proxies = reconcile_setting_vec::<IpNet>(
+        &db_conn,
+        uptrakit_web_api::settings::SETTING_KEY_TRUSTED_PROXIES,
+        if args.trusted_proxies.is_empty() {
+            None
+        } else {
+            Some(args.trusted_proxies)
+        },
+        vec![],
+        force,
+        |v| serde_json::json!(v.iter().map(|n| n.to_string()).collect::<Vec<_>>()),
+        |v| {
+            v.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|s| s.as_str()?.parse::<IpNet>().ok())
+                    .collect()
+            })
+        },
+    )
+    .await
+    .context(AppError::Settings)?;
+    settings.set_trusted_proxies(trusted_proxies).await;
+
+    let real_ip_header = reconcile::reconcile_setting(
+        &db_conn,
+        uptrakit_web_api::settings::SETTING_KEY_REAL_IP_HEADER,
+        args.real_ip_header,
+        uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
+        force,
+        |v| serde_json::json!(v),
+        |v| v.as_str().map(String::from),
+    )
+    .await
+    .context(AppError::Settings)?;
+    settings.set_real_ip_header(real_ip_header).await;
+
+    let extra_sans = reconcile_setting_vec::<String>(
+        &db_conn,
+        uptrakit_web_api::settings::SETTING_KEY_EXTRA_SANS,
+        if args.sans.is_empty() {
+            None
+        } else {
+            Some(args.sans)
+        },
+        vec![],
+        force,
+        |v| serde_json::json!(v),
+        |v| {
+            v.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|s| s.as_str().map(String::from))
+                    .collect()
+            })
+        },
+    )
+    .await
+    .context(AppError::Settings)?;
+    settings.set_extra_sans(extra_sans.clone()).await;
+
+    let http_addr = reconcile_socket_addr(
+        &db_conn,
+        uptrakit_web_api::settings::SETTING_KEY_HTTP_ADDR,
+        args.http_addr,
+        uptrakit_web_api::settings::DEFAULT_HTTP_ADDR
+            .parse()
+            .unwrap(),
+        force,
+    )
+    .await?;
+    settings.set_http_addr(http_addr).await;
+
+    let https_addr = reconcile_socket_addr(
+        &db_conn,
+        uptrakit_web_api::settings::SETTING_KEY_HTTPS_ADDR,
+        args.https_addr,
+        uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
+            .parse()
+            .unwrap(),
+        force,
+    )
+    .await?;
+    settings.set_https_addr(https_addr).await;
+
+    // MQTT settings
+    #[cfg(feature = "mqtt")]
+    {
+        let mqtt_host = reconcile::reconcile_setting(
+            &db_conn,
+            uptrakit_web_api::settings::SETTING_KEY_MQTT_HOST,
+            args.mqtt.mqtt_host.clone(),
+            String::new(), // empty = disabled
+            force,
+            |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        )
+        .await
+        .context(AppError::Settings)?;
+        let mqtt_host_opt = if mqtt_host.is_empty() {
+            None
+        } else {
+            Some(mqtt_host)
+        };
+
+        let mqtt_port = reconcile_u16(
+            &db_conn,
+            uptrakit_web_api::settings::SETTING_KEY_MQTT_PORT,
+            args.mqtt.mqtt_port,
+            uptrakit_web_api::settings::DEFAULT_MQTT_PORT,
+            force,
+        )
+        .await?;
+
+        let mqtt_client_id = reconcile::reconcile_setting(
+            &db_conn,
+            uptrakit_web_api::settings::SETTING_KEY_MQTT_CLIENT_ID,
+            args.mqtt.mqtt_client_id.clone(),
+            uptrakit_web_api::settings::DEFAULT_MQTT_CLIENT_ID.to_string(),
+            force,
+            |v| serde_json::json!(v),
+            |v| v.as_str().map(String::from),
+        )
+        .await
+        .context(AppError::Settings)?;
+
+        let mqtt_username = reconcile::reconcile_setting(
+            &db_conn,
+            uptrakit_web_api::settings::SETTING_KEY_MQTT_USERNAME,
+            args.mqtt.mqtt_username.clone(),
+            String::new(),
+            force,
+            |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        )
+        .await
+        .context(AppError::Settings)?;
+        let mqtt_username_opt = if mqtt_username.is_empty() {
+            None
+        } else {
+            Some(mqtt_username)
+        };
+
+        let mqtt_password = reconcile::reconcile_setting(
+            &db_conn,
+            uptrakit_web_api::settings::SETTING_KEY_MQTT_PASSWORD,
+            args.mqtt.mqtt_password.clone(),
+            String::new(),
+            force,
+            |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        )
+        .await
+        .context(AppError::Settings)?;
+        let mqtt_password_opt = if mqtt_password.is_empty() {
+            None
+        } else {
+            Some(mqtt_password)
+        };
+
+        let mqtt_topic_prefix = reconcile::reconcile_setting(
+            &db_conn,
+            uptrakit_web_api::settings::SETTING_KEY_MQTT_TOPIC_PREFIX,
+            args.mqtt.mqtt_topic_prefix.clone(),
+            uptrakit_web_api::settings::DEFAULT_MQTT_TOPIC_PREFIX.to_string(),
+            force,
+            |v| serde_json::json!(v),
+            |v| v.as_str().map(String::from),
+        )
+        .await
+        .context(AppError::Settings)?;
+
+        settings
+            .set_mqtt(uptrakit_web_api::settings::MqttSettings {
+                host: mqtt_host_opt.clone(),
+                port: mqtt_port,
+                client_id: mqtt_client_id,
+                username: mqtt_username_opt.clone(),
+                password: mqtt_password_opt.clone(),
+                topic_prefix: mqtt_topic_prefix,
+            })
+            .await;
     }
 
     // Resolve static directory for SPA serving
@@ -100,7 +326,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     }
 
     // --san only makes sense with managed (auto-generated) certificates
-    if !args.sans.is_empty() && args.tls_cert.is_some() {
+    if !extra_sans.is_empty() && args.tls_cert.is_some() {
         return Err(report!(AppError::Config(
             "--san cannot be used with --tls-cert/--tls-key; \
              SANs are only configurable for controller-managed certificates"
@@ -142,22 +368,22 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let ca_snapshot = ca_state.to_snapshot().context(AppError::Pki)?;
     let (ca_tx, ca_rx) = tokio::sync::watch::channel(ca_snapshot.clone());
 
-    // Resolve server certificate
+    // Resolve server certificate (using reconciled extra_sans)
     let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
         pki::load_external_cert(cert_path, key_path).context(AppError::Pki)?
     } else {
-        let mut cert = pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &args.sans)
+        let mut cert = pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &extra_sans)
             .context(AppError::Pki)?;
 
         // Check if the existing cert needs SAN regeneration
-        if pki::server_cert_needs_san_update(&cert.cert_pem, &args.sans).context(AppError::Pki)? {
+        if pki::server_cert_needs_san_update(&cert.cert_pem, &extra_sans).context(AppError::Pki)? {
             if pki::cert_signed_by_ca(&cert.cert_pem, &ca_state.active.cert_pem)
                 .context(AppError::Pki)?
             {
                 tracing::info!(
-                    "server certificate SANs do not match requested --san values, regenerating"
+                    "server certificate SANs do not match configured values, regenerating"
                 );
-                cert = pki::renew_server_cert(&pki_path, &ca_state.active, &args.sans)
+                cert = pki::renew_server_cert(&pki_path, &ca_state.active, &extra_sans)
                     .context(AppError::Pki)?;
             } else {
                 return Err(report!(AppError::Config(
@@ -175,7 +401,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         // Auto-renew if within renewal window
         if pki::should_renew_server_cert(&cert.cert_pem) {
             tracing::info!("server certificate is within renewal window, renewing now");
-            cert = pki::renew_server_cert(&pki_path, &ca_state.active, &args.sans)
+            cert = pki::renew_server_cert(&pki_path, &ca_state.active, &extra_sans)
                 .context(AppError::Pki)?;
         }
 
@@ -243,8 +469,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
-        trusted_proxies: args.trusted_proxies.into(),
-        real_ip_header: args.real_ip_header,
         db: db_conn,
         settings,
         cert_signer,
@@ -257,7 +481,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         device_flow_store: device_flow_store.clone(),
         pki_path: pki_path.clone(),
         rustls_config: rustls_config.clone(),
-        extra_sans: args.sans.into(),
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
@@ -391,7 +614,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
                     issuer: ca_issuer,
                 };
 
-                let extra_sans: Vec<String> = app_state_for_task.extra_sans.to_vec();
+                let extra_sans = app_state_for_task.settings.extra_sans().await;
                 match pki::renew_server_cert(&pki_for_task, &ca_bundle, &extra_sans) {
                     Ok(new_cert) => {
                         // Update CRL manager's server cert
@@ -416,38 +639,41 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         None
     };
 
-    // Start MQTT if configured
+    // Start MQTT if configured (read from reconciled settings)
     #[cfg(feature = "mqtt")]
-    let mqtt_handle = if let Some(host) = args.mqtt.mqtt_host {
-        if args.mqtt.mqtt_password.is_some() && args.mqtt.mqtt_username.is_none() {
-            return Err(report!(AppError::Config(
-                "--mqtt-password requires --mqtt-username".into()
-            )));
-        }
-        let config = uptrakit_mqtt::MqttConfig {
-            host,
-            port: args.mqtt.mqtt_port,
-            client_id: args.mqtt.mqtt_client_id,
-            username: args.mqtt.mqtt_username,
-            password: args.mqtt.mqtt_password,
-            topic_prefix: args.mqtt.mqtt_topic_prefix,
-        };
-        tracing::info!("starting MQTT client: {config:?}");
-        match uptrakit_mqtt::start(config).await {
-            Ok(handle) => Some(handle),
-            Err(e) => {
-                tracing::warn!("MQTT startup failed: {e}");
-                None
+    let mqtt_handle = {
+        let mqtt_settings = app_state.settings.mqtt().await;
+        if let Some(host) = mqtt_settings.host {
+            if mqtt_settings.password.is_some() && mqtt_settings.username.is_none() {
+                return Err(report!(AppError::Config(
+                    "MQTT password requires a username".into()
+                )));
             }
+            let config = uptrakit_mqtt::MqttConfig {
+                host,
+                port: mqtt_settings.port,
+                client_id: mqtt_settings.client_id,
+                username: mqtt_settings.username,
+                password: mqtt_settings.password,
+                topic_prefix: mqtt_settings.topic_prefix,
+            };
+            tracing::info!("starting MQTT client: {config:?}");
+            match uptrakit_mqtt::start(config).await {
+                Ok(handle) => Some(handle),
+                Err(e) => {
+                    tracing::warn!("MQTT startup failed: {e}");
+                    None
+                }
+            }
+        } else {
+            None
         }
-    } else {
-        None
     };
 
     tokio::select! {
         result = server::run(server::ServerOptions {
-            http_addr: args.http_addr,
-            https_addr: args.https_addr,
+            http_addr,
+            https_addr,
             rustls_config,
             app_state,
             static_dir,
@@ -474,6 +700,122 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     }
 
     Ok(())
+}
+
+// --- Reconciliation helpers ---
+
+/// Wrapper for `&[T]` that implements Display for logging in reconciliation.
+struct DisplayVec<'a, T: fmt::Display>(&'a [T]);
+
+impl<T: fmt::Display> fmt::Display for DisplayVec<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.is_empty() {
+            write!(f, "[]")
+        } else {
+            let items: Vec<String> = self.0.iter().map(|i| i.to_string()).collect();
+            write!(f, "[{}]", items.join(", "))
+        }
+    }
+}
+
+/// Reconcile a `Vec<T>` setting. Empty CLI vec is treated as "not provided".
+async fn reconcile_setting_vec<T>(
+    db: &sea_orm::DatabaseConnection,
+    key: &str,
+    cli_value: Option<Vec<T>>,
+    default_value: Vec<T>,
+    force: bool,
+    to_json: fn(&Vec<T>) -> serde_json::Value,
+    from_json: fn(&serde_json::Value) -> Option<Vec<T>>,
+) -> Result<Vec<T>, Report<AppError>>
+where
+    T: PartialEq + Clone + fmt::Display + 'static,
+{
+    let db_value = uptrakit_web_api::settings_store::load_setting(db, key)
+        .await
+        .context(AppError::Settings)?
+        .and_then(|v| from_json(&v));
+
+    match (db_value, cli_value) {
+        (Some(db_val), Some(cli_val)) if db_val != cli_val => {
+            if force {
+                tracing::info!(key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
+                uptrakit_web_api::settings_store::upsert_setting(db, key, to_json(&cli_val))
+                    .await
+                    .context(AppError::Settings)?;
+                Ok(cli_val)
+            } else {
+                tracing::warn!(
+                    key,
+                    cli = %DisplayVec(&cli_val),
+                    db = %DisplayVec(&db_val),
+                    "CLI value differs from DB; using DB value (pass --force-settings-override to overwrite)"
+                );
+                Ok(db_val)
+            }
+        }
+        (Some(db_val), _) => {
+            tracing::debug!(key, value = %DisplayVec(&db_val), "using DB value");
+            Ok(db_val)
+        }
+        (None, Some(cli_val)) => {
+            tracing::info!(key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
+            uptrakit_web_api::settings_store::upsert_setting(db, key, to_json(&cli_val))
+                .await
+                .context(AppError::Settings)?;
+            Ok(cli_val)
+        }
+        (None, None) => {
+            tracing::info!(key, value = %DisplayVec(&default_value), "seeding DB setting from default");
+            uptrakit_web_api::settings_store::upsert_setting(db, key, to_json(&default_value))
+                .await
+                .context(AppError::Settings)?;
+            Ok(default_value)
+        }
+    }
+}
+
+/// Reconcile a `SocketAddr` setting.
+async fn reconcile_socket_addr(
+    db: &sea_orm::DatabaseConnection,
+    key: &str,
+    cli_value: Option<SocketAddr>,
+    default_value: SocketAddr,
+    force: bool,
+) -> Result<SocketAddr, Report<AppError>> {
+    reconcile::reconcile_setting(
+        db,
+        key,
+        cli_value,
+        default_value,
+        force,
+        |v| serde_json::json!(v.to_string()),
+        |v| v.as_str().and_then(|s| s.parse().ok()),
+    )
+    .await
+    .context(AppError::Settings)
+}
+
+/// Reconcile a `u16` setting.
+#[cfg(feature = "mqtt")]
+async fn reconcile_u16(
+    db: &sea_orm::DatabaseConnection,
+    key: &str,
+    cli_value: Option<u16>,
+    default_value: u16,
+    force: bool,
+) -> Result<u16, Report<AppError>> {
+    reconcile::reconcile_setting(
+        db,
+        key,
+        cli_value,
+        default_value,
+        force,
+        |v| serde_json::json!(v),
+        |v| v.as_u64().and_then(|n| u16::try_from(n).ok()),
+    )
+    .await
+    .context(AppError::Settings)
 }
 
 /// Resolve the static directory for SPA serving.
