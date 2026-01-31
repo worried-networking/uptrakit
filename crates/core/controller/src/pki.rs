@@ -28,6 +28,12 @@ pub enum PkiError {
 
     #[error("hostname resolution failed: {0}")]
     Hostname(String),
+
+    #[error("timestamp error: {0}")]
+    Timestamp(String),
+
+    #[error("database error: {0}")]
+    Database(String),
 }
 
 pub type Result<T> = std::result::Result<T, Report<PkiError>>;
@@ -62,6 +68,17 @@ where
         report: Report<rustls::Error, markers::Mutable, T>,
     ) -> Report<Self, markers::Mutable, T> {
         report.context_transform(PkiError::Rustls)
+    }
+}
+
+impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for PkiError
+where
+    PkiError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<sea_orm::DbErr, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(|e| PkiError::Database(e.to_string()))
     }
 }
 
@@ -405,7 +422,7 @@ pub fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
         .parse_x509()
         .map_err(|_| report!(PkiError::PemParse))?;
     OffsetDateTime::from_unix_timestamp(cert.validity().not_after.timestamp())
-        .map_err(|e| report!(PkiError::Hostname(format!("timestamp error: {e}"))))
+        .map_err(|e| report!(PkiError::Timestamp(e.to_string())))
 }
 
 // --- Rotation helpers ---

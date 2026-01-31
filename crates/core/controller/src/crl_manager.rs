@@ -218,9 +218,7 @@ async fn query_revoked_certs_for_ca(
         .filter(agent_certificate::Column::NotAfter.gt(now - grace))
         .all(db)
         .await
-        .map_err(|e| {
-            rootcause::report!(pki::PkiError::Hostname(format!("DB query failed: {e}")))
-        })?;
+        .context_to::<pki::PkiError>()?;
 
     let mut revoked = Vec::with_capacity(revoked_certs.len());
     for cert in &revoked_certs {
