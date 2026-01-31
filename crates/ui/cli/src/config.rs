@@ -1,4 +1,5 @@
 use crate::error::{CliError, Result};
+use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -16,7 +17,7 @@ pub struct Credentials {
 
 fn config_dir() -> Result<PathBuf> {
     let home = std::env::var("HOME")
-        .map_err(|_| CliError::Other("HOME environment variable not set".into()))?;
+        .map_err(|_| report!(CliError::Other("HOME environment variable not set".into())))?;
     Ok(PathBuf::from(home).join(".config").join("uptrakit"))
 }
 
@@ -25,16 +26,16 @@ pub fn load_config() -> Result<Config> {
     if !path.exists() {
         return Ok(Config::default());
     }
-    let data = std::fs::read_to_string(&path)?;
-    Ok(serde_json::from_str(&data)?)
+    let data = std::fs::read_to_string(&path).context_to()?;
+    serde_json::from_str(&data).context_to()
 }
 
 pub fn save_config(config: &Config) -> Result<()> {
     let dir = config_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(&dir).context_to()?;
     let path = dir.join("config.json");
-    let data = serde_json::to_string_pretty(config)?;
-    std::fs::write(&path, data)?;
+    let data = serde_json::to_string_pretty(config).context_to()?;
+    std::fs::write(&path, data).context_to()?;
     Ok(())
 }
 
@@ -43,22 +44,22 @@ pub fn load_credentials() -> Result<Credentials> {
     if !path.exists() {
         return Ok(Credentials::default());
     }
-    let data = std::fs::read_to_string(&path)?;
-    Ok(serde_json::from_str(&data)?)
+    let data = std::fs::read_to_string(&path).context_to()?;
+    serde_json::from_str(&data).context_to()
 }
 
 pub fn save_credentials(creds: &Credentials) -> Result<()> {
     let dir = config_dir()?;
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(&dir).context_to()?;
     let path = dir.join("credentials.json");
-    let data = serde_json::to_string_pretty(creds)?;
-    std::fs::write(&path, &data)?;
+    let data = serde_json::to_string_pretty(creds).context_to()?;
+    std::fs::write(&path, &data).context_to()?;
 
     // Set restrictive permissions on Unix
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).context_to()?;
     }
 
     Ok(())

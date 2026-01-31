@@ -3,6 +3,7 @@ use crate::config::{
     Config, Credentials, load_config, load_credentials, save_config, save_credentials,
 };
 use crate::error::{CliError, Result};
+use rootcause::prelude::*;
 
 /// Interactive login flow using device authorization.
 ///
@@ -24,7 +25,7 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
     };
 
     if server.is_empty() {
-        return Err(CliError::Other("Server URL is required".into()));
+        return Err(report!(CliError::Other("Server URL is required".into())));
     }
 
     // Build client name for the token
@@ -47,24 +48,24 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
             .as_str()
             .unwrap_or("Failed to start device authorization")
             .to_string();
-        return Err(CliError::Api {
+        return Err(report!(CliError::Api {
             status,
             message: msg,
-        });
+        }));
     }
 
     let device_code = body["device_code"]
         .as_str()
-        .ok_or_else(|| CliError::Other("No device_code in response".into()))?
+        .ok_or_else(|| report!(CliError::Other("No device_code in response".into())))?
         .to_string();
 
     let user_code = body["user_code"]
         .as_str()
-        .ok_or_else(|| CliError::Other("No user_code in response".into()))?;
+        .ok_or_else(|| report!(CliError::Other("No user_code in response".into())))?;
 
     let verification_url = body["verification_url"]
         .as_str()
-        .ok_or_else(|| CliError::Other("No verification_url in response".into()))?;
+        .ok_or_else(|| report!(CliError::Other("No verification_url in response".into())))?;
 
     let interval = body["interval"].as_u64().unwrap_or(5);
     let expires_in = body["expires_in"].as_u64().unwrap_or(600);
@@ -95,7 +96,9 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 
         if start.elapsed() > timeout {
-            return Err(CliError::Other("Device authorization timed out".into()));
+            return Err(report!(CliError::Other(
+                "Device authorization timed out".into()
+            )));
         }
 
         let poll_body = serde_json::json!({ "device_code": device_code });
@@ -110,9 +113,9 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
         }
 
         if poll_status == 404 {
-            return Err(CliError::Other(
+            return Err(report!(CliError::Other(
                 "Device authorization session not found or expired".into(),
-            ));
+            )));
         }
 
         if poll_status != 200 {
@@ -120,10 +123,10 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
                 .as_str()
                 .unwrap_or("Unexpected error during polling")
                 .to_string();
-            return Err(CliError::Api {
+            return Err(report!(CliError::Api {
                 status: poll_status,
                 message: msg,
-            });
+            }));
         }
 
         let flow_status = poll_resp["status"].as_str().unwrap_or("unknown");
@@ -131,12 +134,14 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
         match flow_status {
             "pending" => continue,
             "expired" => {
-                return Err(CliError::Other("Device authorization expired".into()));
+                return Err(report!(CliError::Other(
+                    "Device authorization expired".into()
+                )));
             }
             "authorized" => {
                 let api_token = poll_resp["token"]
                     .as_str()
-                    .ok_or_else(|| CliError::Other("No token in response".into()))?;
+                    .ok_or_else(|| report!(CliError::Other("No token in response".into())))?;
                 let token_name = poll_resp["token_name"].as_str().unwrap_or(&client_name);
 
                 // Store config and credentials
@@ -154,9 +159,9 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
                 return Ok(());
             }
             other => {
-                return Err(CliError::Other(format!(
+                return Err(report!(CliError::Other(format!(
                     "Unexpected device flow status: {other}"
-                )));
+                ))));
             }
         }
     }
@@ -174,10 +179,10 @@ pub async fn status(server_override: Option<&str>, token_override: Option<&str>)
             .as_str()
             .unwrap_or("Failed to get user info")
             .to_string();
-        return Err(CliError::Api {
+        return Err(report!(CliError::Api {
             status,
             message: msg,
-        });
+        }));
     }
 
     println!("Server:     {}", server);
@@ -215,10 +220,10 @@ pub async fn token_create(
             .as_str()
             .unwrap_or("Failed to create token")
             .to_string();
-        return Err(CliError::Api {
+        return Err(report!(CliError::Api {
             status,
             message: msg,
-        });
+        }));
     }
 
     println!("Token created:");
@@ -241,10 +246,10 @@ pub async fn token_list(server_override: Option<&str>, token_override: Option<&s
 
     if status != 200 {
         let msg = body.as_str().unwrap_or("Failed to list tokens").to_string();
-        return Err(CliError::Api {
+        return Err(report!(CliError::Api {
             status,
             message: msg,
-        });
+        }));
     }
 
     let tokens = body["tokens"].as_array();
@@ -291,10 +296,10 @@ pub async fn token_revoke(
             .as_str()
             .unwrap_or("Failed to revoke token")
             .to_string();
-        return Err(CliError::Api {
+        return Err(report!(CliError::Api {
             status,
             message: msg,
-        });
+        }));
     }
 
     println!("Token {} revoked.", id);
@@ -313,12 +318,12 @@ fn resolve_auth(
     let server = server_override
         .map(|s| s.to_string())
         .or(config.server)
-        .ok_or(CliError::NotLoggedIn)?;
+        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
 
     let token = token_override
         .map(|t| t.to_string())
         .or(creds.token)
-        .ok_or(CliError::NotLoggedIn)?;
+        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
 
     Ok((server, token))
 }
@@ -326,7 +331,7 @@ fn resolve_auth(
 fn prompt(msg: &str) -> Result<String> {
     eprint!("{}", msg);
     let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    std::io::stdin().read_line(&mut input).context_to()?;
     Ok(input.trim().to_string())
 }
 

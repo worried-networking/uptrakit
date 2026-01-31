@@ -1,6 +1,7 @@
 use crate::client::ApiClient;
 use crate::config::{load_config, load_credentials};
 use crate::error::{CliError, Result};
+use rootcause::prelude::*;
 
 /// Execute a raw API call and pretty-print the response.
 pub async fn execute(
@@ -16,19 +17,19 @@ pub async fn execute(
     let server = server_override
         .map(|s| s.to_string())
         .or(config.server)
-        .ok_or(CliError::NotLoggedIn)?;
+        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
 
     let token = token_override
         .map(|t| t.to_string())
         .or(creds.token)
-        .ok_or(CliError::NotLoggedIn)?;
+        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
 
     let client = ApiClient::with_token(&server, &token)?;
 
     let body = match data {
         Some(json_str) => Some(
             serde_json::from_str(json_str)
-                .map_err(|e| CliError::Other(format!("Invalid JSON data: {e}")))?,
+                .map_err(|e| report!(CliError::Other(format!("Invalid JSON data: {e}"))))?,
         ),
         None => None,
     };
