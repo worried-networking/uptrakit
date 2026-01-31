@@ -148,6 +148,8 @@ These are non-negotiable design constraints. Do not violate them.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
+12. **Do not add any `allow()`** without excpicit approval from the user.
+13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions.
 
 ## Permissions model
 
