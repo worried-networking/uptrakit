@@ -50,13 +50,13 @@ pub async fn require_auth(
         // API token path: DB lookup
         match authenticate_api_token(&state, &token).await {
             Ok(user) => user,
-            Err(resp) => return resp,
+            Err(e) => return e.into_response(),
         }
     } else {
         // JWT path: stateless validation
         match authenticate_jwt(&state, &token) {
             Ok(user) => user,
-            Err(resp) => return resp,
+            Err(e) => return e.into_response(),
         }
     };
 
@@ -66,27 +66,45 @@ pub async fn require_auth(
     next.run(req).await
 }
 
+/// Lightweight error type for authentication failures, replacing `Result<_, Response>`
+/// to avoid the `clippy::result_large_err` lint.
+enum AuthFailure {
+    Unauthorized(&'static str),
+    Forbidden(&'static str),
+    InternalError,
+}
+
+impl IntoResponse for AuthFailure {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg).into_response(),
+            Self::InternalError => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+    }
+}
+
 /// Authenticate using a `upk_`-prefixed API token (requires DB lookup).
-#[allow(clippy::result_large_err)]
 async fn authenticate_api_token(
     state: &AppState,
     token: &str,
-) -> std::result::Result<AuthenticatedUser, Response> {
+) -> std::result::Result<AuthenticatedUser, AuthFailure> {
     let service = ApiTokenService::new(state.db.clone());
 
-    let (user_id, _token_id) = service.verify_token(token).await.map_err(|_| {
-        (StatusCode::UNAUTHORIZED, "Invalid or revoked API token\n").into_response()
-    })?;
+    let (user_id, _token_id) = service
+        .verify_token(token)
+        .await
+        .map_err(|_| AuthFailure::Unauthorized("Invalid or revoked API token\n"))?;
 
     // Check user is active
     let user = User::find_by_id(user_id)
         .one(&state.db)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "User not found\n").into_response())?;
+        .map_err(|_| AuthFailure::InternalError)?
+        .ok_or(AuthFailure::Unauthorized("User not found\n"))?;
 
     if !user.is_active {
-        return Err((StatusCode::FORBIDDEN, "User is deactivated\n").into_response());
+        return Err(AuthFailure::Forbidden("User is deactivated\n"));
     }
 
     // Fetch permissions from DB
@@ -102,18 +120,17 @@ async fn authenticate_api_token(
 }
 
 /// Authenticate using a JWT access token (stateless, no DB call).
-#[allow(clippy::result_large_err)]
 fn authenticate_jwt(
     state: &AppState,
     token: &str,
-) -> std::result::Result<AuthenticatedUser, Response> {
+) -> std::result::Result<AuthenticatedUser, AuthFailure> {
     let claims = state
         .jwt
         .decode_access_token(token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid or expired token\n").into_response())?;
+        .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token\n"))?;
 
     let user_id = uuid::Uuid::parse_str(&claims.sub)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid token subject\n").into_response())?;
+        .map_err(|_| AuthFailure::Unauthorized("Invalid token subject\n"))?;
 
     let auth_method = if claims.auth_method == "oidc" {
         let provider_id = claims
