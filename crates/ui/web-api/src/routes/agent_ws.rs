@@ -64,7 +64,10 @@ pub async fn agent_ws(
                 tracing::info!(agent_id = %agent.id, "enrolled agent WS upgrade (bearer)");
                 ConnectionType::Enrolled(agent.id)
             }
-            Err((status, msg)) => {
+            Err(e) => {
+                let ctx = e.current_context();
+                let status = ctx.status_code();
+                let msg = ctx.to_string();
                 tracing::warn!(status = %status, "bearer auth failed: {msg}");
                 return (status, msg).into_response();
             }
@@ -297,10 +300,10 @@ async fn handle_authenticated(
                                         let _ = close_with_reason(&mut sink, "certificate rotated").await;
                                         break;
                                     }
-                                    Err((_status, msg)) => {
+                                    Err(e) => {
                                         let err = ControllerMessage::Error(ErrorPayload {
                                             code: "certificate_error".to_string(),
-                                            message: msg.to_string(),
+                                            message: e.current_context().to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
@@ -490,10 +493,10 @@ async fn handle_anonymous(
 
                                 break agent_id;
                             }
-                            Err((_status, msg)) => {
+                            Err(e) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "enrollment_failed".to_string(),
-                                    message: msg.to_string(),
+                                    message: e.current_context().to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
@@ -631,10 +634,10 @@ async fn run_enrolled_loop(
                                         tracing::info!(%agent_id, "certificate issued via WS");
                                         break; // close connection after certificate issuance
                                     }
-                                    Err((_status, msg)) => {
+                                    Err(e) => {
                                         let err = ControllerMessage::Error(ErrorPayload {
                                             code: "certificate_error".to_string(),
-                                            message: msg.to_string(),
+                                            message: e.current_context().to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
                                             let _ = sink.send(Message::Text(json.into())).await;

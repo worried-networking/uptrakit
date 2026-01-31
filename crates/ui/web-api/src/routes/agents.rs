@@ -90,6 +90,53 @@ pub struct EnrollmentTokenStatusResponse {
     pub configured: bool,
 }
 
+// --- Agent route error type ---
+
+#[derive(Debug, Error)]
+pub(crate) enum AgentRouteError {
+    #[error("{0}")]
+    BadRequest(String),
+
+    #[error("{0}")]
+    Forbidden(String),
+
+    #[error("{0}")]
+    NotFound(String),
+
+    #[error("internal error: {0}")]
+    Internal(String),
+
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+
+    #[error("certificate signing error")]
+    CertSigning,
+}
+
+impl AgentRouteError {
+    pub(crate) fn status_code(&self) -> StatusCode {
+        match self {
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::Internal(_) | Self::Database(_) | Self::CertSigning => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        }
+    }
+}
+
+impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for AgentRouteError
+where
+    AgentRouteError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<sea_orm::DbErr, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(AgentRouteError::Database)
+    }
+}
+
 // --- Shared enrollment helpers (used by both WS handler and admin endpoints) ---
 
 /// Result of a successful enrollment.
@@ -107,9 +154,11 @@ pub(crate) async fn do_enroll(
     friendly_name: &str,
     enrollment_token: Option<&str>,
     ip_address: Option<IpAddr>,
-) -> Result<EnrollResult, (StatusCode, &'static str)> {
+) -> Result<EnrollResult, Report<AgentRouteError>> {
     if hostname.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "hostname must not be empty"));
+        return Err(report!(AgentRouteError::BadRequest(
+            "hostname must not be empty".into()
+        )));
     }
 
     // Determine status based on enrollment token
@@ -117,25 +166,37 @@ pub(crate) async fn do_enroll(
         let token_hash = match load_setting(db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
             Ok(Some(v)) => match v.as_str() {
                 Some(hash) => hash.to_string(),
-                None => return Err((StatusCode::FORBIDDEN, "No enrollment token configured")),
+                None => {
+                    return Err(report!(AgentRouteError::Forbidden(
+                        "No enrollment token configured".into()
+                    )));
+                }
             },
             Ok(None) => {
-                return Err((StatusCode::FORBIDDEN, "No enrollment token configured"));
+                return Err(report!(AgentRouteError::Forbidden(
+                    "No enrollment token configured".into()
+                )));
             }
             Err(e) => {
                 tracing::error!("Failed to load enrollment token hash: {:?}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
+                return Err(report!(AgentRouteError::Internal(
+                    "Internal server error".into()
+                )));
             }
         };
 
         match password::verify_password(enrollment_token, &token_hash) {
             Ok(true) => AgentStatus::Approved,
             Ok(false) => {
-                return Err((StatusCode::FORBIDDEN, "Invalid enrollment token"));
+                return Err(report!(AgentRouteError::Forbidden(
+                    "Invalid enrollment token".into()
+                )));
             }
             Err(e) => {
                 tracing::error!("Token verification error: {:?}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
+                return Err(report!(AgentRouteError::Internal(
+                    "Internal server error".into()
+                )));
             }
         }
     } else {
@@ -147,7 +208,9 @@ pub(crate) async fn do_enroll(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to generate enrollment secret: {:?}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
+            return Err(report!(AgentRouteError::Internal(
+                "Internal server error".into()
+            )));
         }
     };
     let secret_hash = token::hash_token(&enrollment_secret);
@@ -169,10 +232,7 @@ pub(crate) async fn do_enroll(
         deactivated_at: Set(None),
     };
 
-    let inserted = model.insert(db).await.map_err(|e| {
-        tracing::error!("Failed to insert agent: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-    })?;
+    let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
 
     Ok(EnrollResult {
         agent: inserted,
@@ -185,22 +245,21 @@ pub(crate) async fn do_enroll(
 pub(crate) async fn do_lookup_by_secret(
     db: &sea_orm::DatabaseConnection,
     enrollment_secret: &str,
-) -> Result<agent::Model, (StatusCode, &'static str)> {
+) -> Result<agent::Model, Report<AgentRouteError>> {
     let secret_hash = token::hash_token(enrollment_secret);
 
-    match Agent::find()
+    let agent = Agent::find()
         .filter(agent::Column::EnrollmentSecretHash.eq(&secret_hash))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(db)
         .await
-    {
-        Ok(Some(a)) => Ok(a),
-        Ok(None) => Err((StatusCode::UNAUTHORIZED, "Invalid enrollment secret")),
-        Err(e) => {
-            tracing::error!("DB error looking up agent: {}", e);
-            Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"))
-        }
-    }
+        .context_to::<AgentRouteError>()?;
+
+    agent.ok_or_else(|| {
+        report!(AgentRouteError::NotFound(
+            "Invalid enrollment secret".into()
+        ))
+    })
 }
 
 /// Sign certificate for an approved agent, invalidate secret.
@@ -209,9 +268,11 @@ pub(crate) async fn do_sign_certificate(
     _settings: &crate::settings::Settings,
     db: &sea_orm::DatabaseConnection,
     agent: agent::Model,
-) -> Result<AgentCertBundle, (StatusCode, &'static str)> {
+) -> Result<AgentCertBundle, Report<AgentRouteError>> {
     if agent.status != AgentStatus::Approved.as_str() {
-        return Err((StatusCode::FORBIDDEN, "Agent is not approved"));
+        return Err(report!(AgentRouteError::Forbidden(
+            "Agent is not approved".into()
+        )));
     }
 
     let lifetime = time::Duration::days(1); //settings.agent_cert_lifetime().await;
@@ -222,13 +283,15 @@ pub(crate) async fn do_sign_certificate(
         .sign_agent_cert(&agent.id, lifetime)
         .map_err(|e| {
             tracing::error!("Failed to sign agent certificate: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            report!(AgentRouteError::CertSigning)
         })?;
 
     // Record certificate in DB for revocation tracking
     if let Err(e) = record_certificate(db, agent.id, &bundle.cert_pem, &ca_fp).await {
         tracing::error!("Failed to record agent certificate: {:?}", e);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
+        return Err(report!(AgentRouteError::Internal(
+            "Internal server error".into()
+        )));
     }
 
     // Invalidate enrollment secret
@@ -238,10 +301,7 @@ pub(crate) async fn do_sign_certificate(
     active.enrollment_secret_hash = Set(invalidated_hash);
     active.last_seen_at = Set(Some(now));
     active.updated_at = Set(now);
-    if let Err(e) = active.update(db).await {
-        tracing::error!("Failed to invalidate enrollment secret: {}", e);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
-    }
+    active.update(db).await.context_to::<AgentRouteError>()?;
 
     Ok(bundle)
 }
