@@ -63,7 +63,8 @@ pub struct AppState {
         (name = "Authentication", description = "User authentication endpoints"),
         (name = "Settings", description = "Application settings management"),
         (name = "Agents", description = "Agent enrollment and management"),
-        (name = "OIDC Providers", description = "OIDC provider configuration")
+        (name = "OIDC Providers", description = "OIDC provider configuration"),
+        (name = "API Tokens", description = "Personal access token management")
     ),
     paths(
         routes::auth::register,
@@ -96,7 +97,10 @@ pub struct AppState {
         routes::agents::merge_agent,
         routes::agents::enrollment_token_status,
         routes::settings_agent_certs::get_agent_certificate_settings,
-        routes::settings_agent_certs::update_agent_certificate_settings
+        routes::settings_agent_certs::update_agent_certificate_settings,
+        routes::api_tokens::create_api_token,
+        routes::api_tokens::list_api_tokens,
+        routes::api_tokens::revoke_api_token
     ),
     components(
         schemas(
@@ -127,7 +131,11 @@ pub struct AppState {
             routes::agents::MergeAgentRequest,
             routes::agents::EnrollmentTokenStatusResponse,
             routes::settings_agent_certs::AgentCertificateSettingsResponse,
-            routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest
+            routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest,
+            routes::api_tokens::CreateApiTokenRequest,
+            routes::api_tokens::CreateApiTokenResponse,
+            routes::api_tokens::ApiTokenResponse,
+            routes::api_tokens::ApiTokenListResponse
         )
     ),
     info(
@@ -196,6 +204,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
     let auth_routes = OpenApiRouter::new()
         .routes(routes!(routes::auth::me))
+        .routes(routes!(
+            routes::api_tokens::create_api_token,
+            routes::api_tokens::list_api_tokens
+        ))
+        .routes(routes!(routes::api_tokens::revoke_api_token))
         .routes(routes!(
             routes::settings::get_registration_settings,
             routes::settings::update_registration_settings

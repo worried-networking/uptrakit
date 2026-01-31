@@ -7,3 +7,11 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+rpassword = "5"
+hostname = { workspace = true }

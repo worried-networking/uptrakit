@@ -4,6 +4,7 @@
 pub enum AuthMethod {
     Password,
     Oidc { provider_id: uuid::Uuid },
+    ApiToken,
 }
 
 impl AuthMethod {
@@ -12,6 +13,7 @@ impl AuthMethod {
         match kind {
             "password" => Some(Self::Password),
             "oidc" => oidc_provider_id.map(|id| Self::Oidc { provider_id: id }),
+            "api_token" => Some(Self::ApiToken),
             _ => None,
         }
     }
@@ -21,10 +23,11 @@ impl AuthMethod {
         match self {
             Self::Password => "password",
             Self::Oidc { .. } => "oidc",
+            Self::ApiToken => "api_token",
         }
     }
 
-    /// The provider ID for the `oidc_provider_id` DB column. `None` for password.
+    /// The provider ID for the `oidc_provider_id` DB column. `None` for password and api_token.
     pub fn oidc_provider_id(&self) -> Option<uuid::Uuid> {
         match self {
             Self::Oidc { provider_id } => Some(*provider_id),

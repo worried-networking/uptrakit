@@ -78,6 +78,12 @@ pub enum AuthError {
     #[error("refresh token revoked")]
     RefreshTokenRevoked,
 
+    #[error("API token not found")]
+    ApiTokenNotFound,
+
+    #[error("API token has been revoked")]
+    ApiTokenRevoked,
+
     #[error("internal error: {0}")]
     Internal(String),
 }
