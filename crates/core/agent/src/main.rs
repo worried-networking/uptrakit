@@ -17,11 +17,11 @@ use error::Error;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive("uptrakit_agent=info".parse().unwrap()),
-        )
-        .init();
+    let filter = match "uptrakit_agent=info".parse() {
+        Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
+        Err(_) => EnvFilter::from_default_env(),
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let args = Args::parse();
 
