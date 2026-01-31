@@ -3,6 +3,7 @@ pub mod agents;
 pub mod api_tokens;
 pub mod auth;
 pub mod ca;
+pub mod device_auth;
 pub mod health;
 pub mod oidc_auth;
 pub mod oidc_providers;

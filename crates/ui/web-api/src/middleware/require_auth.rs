@@ -233,6 +233,7 @@ mod tests {
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(),
             jwt: Arc::new(JwtManager::from_secret(b"test-secret-for-middleware-tests")),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             extra_sans: Arc::new([]),

@@ -22,6 +22,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use agent_connections::AgentConnectionRegistry;
+use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
 use auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
 use middleware::require_https;
@@ -77,6 +78,8 @@ pub struct AppState {
     pub jwt: Arc<JwtManager>,
     /// In-memory store for pending OIDC token exchanges.
     pub oidc_token_exchange_store: OidcTokenExchangeStore,
+    /// In-memory store for pending device authorization flows.
+    pub device_flow_store: DeviceFlowStore,
     /// Path to the PKI directory (for server cert renewal).
     pub pki_path: std::path::PathBuf,
     /// RustlsConfig handle for hot-reloading TLS.
@@ -131,7 +134,10 @@ pub struct AppState {
         routes::server_cert::renew_server_certificate,
         routes::api_tokens::create_api_token,
         routes::api_tokens::list_api_tokens,
-        routes::api_tokens::revoke_api_token
+        routes::api_tokens::revoke_api_token,
+        routes::device_auth::device_auth_start,
+        routes::device_auth::device_auth_poll,
+        routes::device_auth::device_auth_approve
     ),
     components(
         schemas(
@@ -169,7 +175,13 @@ pub struct AppState {
             routes::api_tokens::CreateApiTokenRequest,
             routes::api_tokens::CreateApiTokenResponse,
             routes::api_tokens::ApiTokenResponse,
-            routes::api_tokens::ApiTokenListResponse
+            routes::api_tokens::ApiTokenListResponse,
+            routes::device_auth::DeviceAuthStartRequest,
+            routes::device_auth::DeviceAuthStartResponse,
+            routes::device_auth::DeviceAuthPollRequest,
+            routes::device_auth::DeviceAuthPollResponse,
+            routes::device_auth::DeviceAuthApproveRequest,
+            routes::device_auth::DeviceAuthApproveResponse
         )
     ),
     info(
@@ -274,6 +286,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::agents::merge_agent))
         .routes(routes!(routes::system_alerts::get_system_alerts))
         .routes(routes!(routes::server_cert::renew_server_certificate))
+        .routes(routes!(routes::device_auth::device_auth_approve))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,
@@ -290,6 +303,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::oidc_auth::oidc_callback))
         .routes(routes!(routes::oidc_auth::oidc_link))
         .routes(routes!(routes::oidc_auth::oidc_exchange))
+        .routes(routes!(routes::device_auth::device_auth_start))
+        .routes(routes!(routes::device_auth::device_auth_poll))
         .merge(auth_routes)
         .split_for_parts();
 
@@ -417,6 +432,7 @@ mod tests {
                 b"test-secret-lib",
             )),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             extra_sans: Arc::new([]),

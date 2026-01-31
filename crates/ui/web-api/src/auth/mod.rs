@@ -1,5 +1,6 @@
 pub mod api_token;
 pub mod authentication;
+pub mod device_flow;
 pub mod error;
 pub mod jwt;
 pub mod oidc_state;

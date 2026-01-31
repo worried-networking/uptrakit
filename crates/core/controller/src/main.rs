@@ -203,6 +203,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let account_link_store = uptrakit_web_api::auth::oidc_state::AccountLinkStore::new();
     let oidc_token_exchange_store =
         uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new();
+    let device_flow_store = uptrakit_web_api::auth::device_flow::DeviceFlowStore::new();
 
     let agent_connections = uptrakit_web_api::agent_connections::AgentConnectionRegistry::new();
 
@@ -219,6 +220,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         account_link_store: account_link_store.clone(),
         jwt: Arc::new(jwt_manager),
         oidc_token_exchange_store: oidc_token_exchange_store.clone(),
+        device_flow_store: device_flow_store.clone(),
         pki_path: pki_path.clone(),
         rustls_config: rustls_config.clone(),
         extra_sans: args.sans.into(),
@@ -232,6 +234,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             oidc_flow_store.cleanup_expired();
             account_link_store.cleanup_expired();
             oidc_token_exchange_store.cleanup_expired();
+            device_flow_store.cleanup_expired();
         }
     });
 

@@ -84,6 +84,15 @@ pub enum AuthError {
     #[error("API token has been revoked")]
     ApiTokenRevoked,
 
+    #[error("device flow not found or expired")]
+    DeviceFlowNotFound,
+
+    #[error("device flow already authorized")]
+    DeviceFlowAlreadyAuthorized,
+
+    #[error("device flow polling too fast")]
+    DeviceFlowRateLimited,
+
     #[error("internal error: {0}")]
     Internal(String),
 }

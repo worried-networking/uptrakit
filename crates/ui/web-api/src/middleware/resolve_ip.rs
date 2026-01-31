@@ -198,6 +198,7 @@ mod tests {
                 b"test-secret-resolve-ip",
             )),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             extra_sans: Arc::new([]),
