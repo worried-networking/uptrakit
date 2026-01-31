@@ -60,12 +60,18 @@ impl Settings {
 
         let agent_cert_lifetime_days = match load_setting(db, SETTING_KEY_AGENT_CERT_LIFETIME).await
         {
-            Ok(Some(v)) => v.parse::<u16>().unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS),
+            Ok(Some(v)) => match v.as_u64().and_then(|n| u16::try_from(n).ok()) {
+                Some(days) => days,
+                None => DEFAULT_AGENT_CERT_LIFETIME_DAYS,
+            },
             _ => DEFAULT_AGENT_CERT_LIFETIME_DAYS,
         };
 
         let renewal_window_hours = match load_setting(db, SETTING_KEY_RENEWAL_WINDOW_HOURS).await {
-            Ok(Some(v)) => v.parse::<u16>().unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS),
+            Ok(Some(v)) => match v.as_u64().and_then(|n| u16::try_from(n).ok()) {
+                Some(hours) => hours,
+                None => DEFAULT_RENEWAL_WINDOW_HOURS,
+            },
             _ => DEFAULT_RENEWAL_WINDOW_HOURS,
         };
 

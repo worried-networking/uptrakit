@@ -27,7 +27,7 @@ impl Default for AuthenticationSettings {
 impl AuthenticationSettings {
     pub async fn load(db: &DatabaseConnection) -> Result<Self> {
         let password_auth_enabled = match load_setting(db, SETTING_KEY_PASSWORD_AUTH).await? {
-            Some(v) => v.parse::<bool>().unwrap_or(true),
+            Some(v) => v.as_bool().unwrap_or(true),
             None => true,
         };
         Ok(Self {
@@ -39,7 +39,7 @@ impl AuthenticationSettings {
         upsert_setting(
             db,
             SETTING_KEY_PASSWORD_AUTH,
-            &self.password_auth_enabled.to_string(),
+            serde_json::Value::Bool(self.password_auth_enabled),
         )
         .await
     }

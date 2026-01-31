@@ -62,9 +62,19 @@ impl RegistrationSettings {
             let hash = password::hash_password(&plaintext)?;
 
             // Upsert mode = invite
-            upsert_setting(db, SETTING_KEY_MODE, RegistrationMode::Invite.as_str()).await?;
+            upsert_setting(
+                db,
+                SETTING_KEY_MODE,
+                serde_json::Value::String(RegistrationMode::Invite.as_str().to_string()),
+            )
+            .await?;
             // Upsert token hash
-            upsert_setting(db, SETTING_KEY_TOKEN_HASH, &hash).await?;
+            upsert_setting(
+                db,
+                SETTING_KEY_TOKEN_HASH,
+                serde_json::Value::String(hash.clone()),
+            )
+            .await?;
 
             let settings = RegistrationSettings {
                 mode: RegistrationMode::Invite,
@@ -75,10 +85,12 @@ impl RegistrationSettings {
             // Load existing settings from DB
             let mode = load_setting(db, SETTING_KEY_MODE)
                 .await?
-                .and_then(|v| RegistrationMode::from_str(&v))
+                .and_then(|v| v.as_str().and_then(RegistrationMode::from_str))
                 .unwrap_or(RegistrationMode::Closed);
 
-            let token_hash = load_setting(db, SETTING_KEY_TOKEN_HASH).await?;
+            let token_hash = load_setting(db, SETTING_KEY_TOKEN_HASH)
+                .await?
+                .and_then(|v| v.as_str().map(String::from));
 
             let settings = RegistrationSettings { mode, token_hash };
             Ok((settings, None))
@@ -129,7 +141,12 @@ impl RegistrationSettings {
     /// Updates both DB and in-memory state.
     pub async fn complete_initial_setup(&mut self, db: &DatabaseConnection) -> Result<()> {
         // Update DB
-        upsert_setting(db, SETTING_KEY_MODE, RegistrationMode::Closed.as_str()).await?;
+        upsert_setting(
+            db,
+            SETTING_KEY_MODE,
+            serde_json::Value::String(RegistrationMode::Closed.as_str().to_string()),
+        )
+        .await?;
         delete_setting(db, SETTING_KEY_TOKEN_HASH).await?;
 
         // Update in-memory state
@@ -148,18 +165,30 @@ impl RegistrationSettings {
         token: Option<String>,
     ) -> Result<()> {
         // Update mode in DB
-        upsert_setting(db, SETTING_KEY_MODE, mode.as_str()).await?;
+        upsert_setting(
+            db,
+            SETTING_KEY_MODE,
+            serde_json::Value::String(mode.as_str().to_string()),
+        )
+        .await?;
 
         // Handle token
         let token_hash = if mode == RegistrationMode::Invite {
             if let Some(ref plaintext) = token {
                 let hash = password::hash_password(plaintext)?;
-                upsert_setting(db, SETTING_KEY_TOKEN_HASH, &hash).await?;
+                upsert_setting(
+                    db,
+                    SETTING_KEY_TOKEN_HASH,
+                    serde_json::Value::String(hash.clone()),
+                )
+                .await?;
                 Some(hash)
             } else {
                 // Keep existing hash if no new token provided (shouldn't happen per API contract,
                 // but handled defensively)
-                load_setting(db, SETTING_KEY_TOKEN_HASH).await?
+                load_setting(db, SETTING_KEY_TOKEN_HASH)
+                    .await?
+                    .and_then(|v| v.as_str().map(String::from))
             }
         } else {
             // Open or Closed: clear any stored token

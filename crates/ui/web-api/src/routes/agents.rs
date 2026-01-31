@@ -114,7 +114,10 @@ pub(crate) async fn do_enroll(
     // Determine status based on enrollment token
     let status = if let Some(enrollment_token) = enrollment_token {
         let token_hash = match load_setting(db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
-            Ok(Some(hash)) => hash,
+            Ok(Some(v)) => match v.as_str() {
+                Some(hash) => hash.to_string(),
+                None => return Err((StatusCode::FORBIDDEN, "No enrollment token configured")),
+            },
             Ok(None) => {
                 return Err((StatusCode::FORBIDDEN, "No enrollment token configured"));
             }
@@ -561,7 +564,13 @@ pub async fn create_enrollment_token(
         }
     };
 
-    if let Err(e) = upsert_setting(&state.db, SETTING_KEY_ENROLLMENT_TOKEN_HASH, &hash).await {
+    if let Err(e) = upsert_setting(
+        &state.db,
+        SETTING_KEY_ENROLLMENT_TOKEN_HASH,
+        serde_json::Value::String(hash),
+    )
+    .await
+    {
         tracing::error!("Failed to store enrollment token hash: {:?}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }

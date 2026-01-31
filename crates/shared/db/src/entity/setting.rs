@@ -6,7 +6,8 @@ use time::OffsetDateTime;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub key: String,
-    pub value: String,
+    #[sea_orm(column_type = "Json")]
+    pub value: serde_json::Value,
     pub updated_at: OffsetDateTime,
 }
 

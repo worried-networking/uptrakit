@@ -86,7 +86,7 @@ pub async fn update_agent_certificate_settings(
         if let Err(e) = upsert_setting(
             &state.db,
             "agent_certificate.lifetime_days",
-            &days.to_string(),
+            serde_json::json!(days),
         )
         .await
         {
@@ -107,7 +107,7 @@ pub async fn update_agent_certificate_settings(
         if let Err(e) = upsert_setting(
             &state.db,
             "agent_certificate.renewal_window_hours",
-            &hours.to_string(),
+            serde_json::json!(hours),
         )
         .await
         {

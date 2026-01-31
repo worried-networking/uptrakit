@@ -4,7 +4,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{prelude::*, setting};
 
-pub async fn upsert_setting(db: &DatabaseConnection, key: &str, value: &str) -> Result<()> {
+pub async fn upsert_setting(
+    db: &DatabaseConnection,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<()> {
     let now = OffsetDateTime::now_utc();
     let existing = Setting::find_by_id(key.to_string())
         .one(db)
@@ -13,13 +17,13 @@ pub async fn upsert_setting(db: &DatabaseConnection, key: &str, value: &str) -> 
 
     if let Some(existing) = existing {
         let mut model: setting::ActiveModel = existing.into();
-        model.value = Set(value.to_string());
+        model.value = Set(value);
         model.updated_at = Set(now);
         model.update(db).await.context_to()?;
     } else {
         let model = setting::ActiveModel {
             key: Set(key.to_string()),
-            value: Set(value.to_string()),
+            value: Set(value),
             updated_at: Set(now),
         };
         model.insert(db).await.context_to()?;
@@ -28,7 +32,7 @@ pub async fn upsert_setting(db: &DatabaseConnection, key: &str, value: &str) -> 
     Ok(())
 }
 
-pub async fn load_setting(db: &DatabaseConnection, key: &str) -> Result<Option<String>> {
+pub async fn load_setting(db: &DatabaseConnection, key: &str) -> Result<Option<serde_json::Value>> {
     let setting = Setting::find_by_id(key.to_string())
         .one(db)
         .await

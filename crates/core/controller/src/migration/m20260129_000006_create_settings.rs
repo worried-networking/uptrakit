@@ -18,7 +18,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(string(Settings::Value))
+                    .col(ColumnDef::new(Settings::Value).json().not_null())
                     .col(timestamp(Settings::UpdatedAt))
                     .to_owned(),
             )
