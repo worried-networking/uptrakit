@@ -196,7 +196,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     // Initialize JWT signing key
     let jwt_manager = uptrakit_web_api::auth::jwt::JwtManager::load_or_generate(&data_dir)
-        .map_err(|e| report!(AppError::Config(format!("JWT initialization failed: {e}"))))?;
+        .context(AppError::Config("JWT initialization failed".into()))?;
     tracing::info!("JWT signing key initialized");
 
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new();

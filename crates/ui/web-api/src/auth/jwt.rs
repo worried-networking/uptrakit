@@ -2,6 +2,7 @@ use std::path::Path;
 
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation};
 use rand::Rng;
+use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::permissions::Permission;
@@ -34,24 +35,35 @@ impl JwtManager {
     ///
     /// Creates `{data_dir}/jwt_signing.key` with 64 random bytes if it doesn't exist.
     /// Sets file permissions to 0o600.
-    pub fn load_or_generate(data_dir: &Path) -> std::result::Result<Self, String> {
+    pub fn load_or_generate(data_dir: &Path) -> Result<Self> {
         let key_path = data_dir.join(KEY_FILE_NAME);
 
         let secret = if key_path.exists() {
-            std::fs::read(&key_path).map_err(|e| format!("failed to read JWT signing key: {e}"))?
+            std::fs::read(&key_path).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to read JWT signing key: {e}"
+                )))
+            })?
         } else {
             let mut rng = rand::rng();
             let mut bytes = vec![0u8; KEY_LENGTH];
             rng.fill(&mut bytes[..]);
 
-            std::fs::write(&key_path, &bytes)
-                .map_err(|e| format!("failed to write JWT signing key: {e}"))?;
+            std::fs::write(&key_path, &bytes).map_err(|e| {
+                report!(AuthError::Internal(format!(
+                    "failed to write JWT signing key: {e}"
+                )))
+            })?;
 
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(|e| format!("failed to set JWT key permissions: {e}"))?;
+                    .map_err(|e| {
+                        report!(AuthError::Internal(format!(
+                            "failed to set JWT key permissions: {e}"
+                        )))
+                    })?;
             }
 
             tracing::info!("generated new JWT signing key at {}", key_path.display());
