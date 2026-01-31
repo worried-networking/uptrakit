@@ -5,30 +5,14 @@ use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
 use tokio::sync::{RwLock, RwLockWriteGuard};
 
+use crate::SettingKey;
 use crate::auth;
 use crate::auth::authentication::AuthenticationSettings;
 use crate::auth::registration::RegistrationSettings;
-use crate::settings_store::RawSettings;
+use crate::settings_store::{RawSettings, RawSettingsExt};
 
-const SETTING_KEY_AGENT_CERT_LIFETIME: &str = "agent_certificate.lifetime_days";
 const DEFAULT_AGENT_CERT_LIFETIME_DAYS: u16 = 7;
-
-const SETTING_KEY_RENEWAL_WINDOW_HOURS: &str = "agent_certificate.renewal_window_hours";
 const DEFAULT_RENEWAL_WINDOW_HOURS: u16 = 6;
-
-// Network setting DB keys
-pub const SETTING_KEY_TRUSTED_PROXIES: &str = "network.trusted_proxies";
-pub const SETTING_KEY_REAL_IP_HEADER: &str = "network.real_ip_header";
-pub const SETTING_KEY_EXTRA_SANS: &str = "network.extra_sans";
-pub const SETTING_KEY_HTTPS_ADDR: &str = "network.https_addr";
-
-// MQTT setting DB keys
-pub const SETTING_KEY_MQTT_HOST: &str = "mqtt.host";
-pub const SETTING_KEY_MQTT_PORT: &str = "mqtt.port";
-pub const SETTING_KEY_MQTT_CLIENT_ID: &str = "mqtt.client_id";
-pub const SETTING_KEY_MQTT_USERNAME: &str = "mqtt.username";
-pub const SETTING_KEY_MQTT_PASSWORD: &str = "mqtt.password";
-pub const SETTING_KEY_MQTT_TOPIC_PREFIX: &str = "mqtt.topic_prefix";
 
 /// Default listen addresses used when neither CLI nor DB provides a value.
 pub const DEFAULT_HTTPS_ADDR: &str = "[::]:8443";
@@ -37,36 +21,9 @@ pub const DEFAULT_MQTT_PORT: u16 = 1883;
 pub const DEFAULT_MQTT_CLIENT_ID: &str = "uptrakit-controller";
 pub const DEFAULT_MQTT_TOPIC_PREFIX: &str = "uptrakit";
 
-/// Every recognised setting key. Used to warn about stale or misspelled entries
-/// left in the DB after upgrades.
-pub const ALL_KNOWN_KEYS: &[&str] = &[
-    // Registration
-    crate::auth::registration::SETTING_KEY_MODE,
-    crate::auth::registration::SETTING_KEY_TOKEN_HASH,
-    // Authentication
-    crate::auth::authentication::SETTING_KEY_PASSWORD_AUTH,
-    // Agent certificates
-    SETTING_KEY_AGENT_CERT_LIFETIME,
-    SETTING_KEY_RENEWAL_WINDOW_HOURS,
-    // Network
-    SETTING_KEY_TRUSTED_PROXIES,
-    SETTING_KEY_REAL_IP_HEADER,
-    SETTING_KEY_EXTRA_SANS,
-    SETTING_KEY_HTTPS_ADDR,
-    // MQTT
-    SETTING_KEY_MQTT_HOST,
-    SETTING_KEY_MQTT_PORT,
-    SETTING_KEY_MQTT_CLIENT_ID,
-    SETTING_KEY_MQTT_USERNAME,
-    SETTING_KEY_MQTT_PASSWORD,
-    SETTING_KEY_MQTT_TOPIC_PREFIX,
-    // Agent enrollment
-    crate::routes::agents::SETTING_KEY_ENROLLMENT_TOKEN_HASH,
-];
-
 fn warn_unrecognised_keys(raw: &RawSettings) {
     for key in raw.keys() {
-        if !ALL_KNOWN_KEYS.contains(&key.as_str()) {
+        if SettingKey::from_db_key(key).is_none() {
             tracing::warn!(
                 key,
                 "unrecognised setting key in database — may be stale or misspelled"
@@ -169,12 +126,12 @@ impl Settings {
         let authentication = AuthenticationSettings::from_raw(&raw);
 
         let agent_cert_lifetime_days = raw
-            .get(SETTING_KEY_AGENT_CERT_LIFETIME)
+            .get_setting(SettingKey::AgentCertLifetimeDays)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
 
         let renewal_window_hours = raw
-            .get(SETTING_KEY_RENEWAL_WINDOW_HOURS)
+            .get_setting(SettingKey::AgentCertRenewalWindowHours)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
 
@@ -197,7 +154,7 @@ impl Settings {
 
     fn load_network_settings(raw: &RawSettings) -> NetworkSettings {
         let trusted_proxies = raw
-            .get(SETTING_KEY_TRUSTED_PROXIES)
+            .get_setting(SettingKey::TrustedProxies)
             .and_then(|v| {
                 v.as_array().map(|arr| {
                     arr.iter()
@@ -208,13 +165,13 @@ impl Settings {
             .unwrap_or_default();
 
         let real_ip_header = raw
-            .get(SETTING_KEY_REAL_IP_HEADER)
+            .get_setting(SettingKey::RealIpHeader)
             .and_then(|v| v.as_str())
             .unwrap_or(DEFAULT_REAL_IP_HEADER)
             .to_string();
 
         let extra_sans = raw
-            .get(SETTING_KEY_EXTRA_SANS)
+            .get_setting(SettingKey::ExtraSans)
             .and_then(|v| {
                 v.as_array().map(|arr| {
                     arr.iter()
@@ -225,7 +182,7 @@ impl Settings {
             .unwrap_or_default();
 
         let https_addr = raw
-            .get(SETTING_KEY_HTTPS_ADDR)
+            .get_setting(SettingKey::HttpsAddr)
             .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
             .unwrap_or_else(|| {
                 DEFAULT_HTTPS_ADDR
@@ -243,30 +200,30 @@ impl Settings {
 
     fn load_mqtt_settings(raw: &RawSettings) -> MqttSettings {
         let host = raw
-            .get(SETTING_KEY_MQTT_HOST)
+            .get_setting(SettingKey::MqttHost)
             .and_then(|v| v.as_str().map(String::from));
 
         let port = raw
-            .get(SETTING_KEY_MQTT_PORT)
+            .get_setting(SettingKey::MqttPort)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_PORT);
 
         let client_id = raw
-            .get(SETTING_KEY_MQTT_CLIENT_ID)
+            .get_setting(SettingKey::MqttClientId)
             .and_then(|v| v.as_str())
             .unwrap_or(DEFAULT_MQTT_CLIENT_ID)
             .to_string();
 
         let username = raw
-            .get(SETTING_KEY_MQTT_USERNAME)
+            .get_setting(SettingKey::MqttUsername)
             .and_then(|v| v.as_str().map(String::from));
 
         let password = raw
-            .get(SETTING_KEY_MQTT_PASSWORD)
+            .get_setting(SettingKey::MqttPassword)
             .and_then(|v| v.as_str().map(String::from));
 
         let topic_prefix = raw
-            .get(SETTING_KEY_MQTT_TOPIC_PREFIX)
+            .get_setting(SettingKey::MqttTopicPrefix)
             .and_then(|v| v.as_str())
             .unwrap_or(DEFAULT_MQTT_TOPIC_PREFIX)
             .to_string();

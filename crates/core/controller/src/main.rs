@@ -20,6 +20,7 @@ use thiserror::Error;
 use tracing_subscriber::EnvFilter;
 
 use uptrakit_web_api::AppState;
+use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::settings::Settings;
 
 #[derive(Debug, Error)]
@@ -100,7 +101,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Network settings
     let trusted_proxies = reconcile_setting_vec::<IpNet>(
         &db_conn,
-        uptrakit_web_api::settings::SETTING_KEY_TRUSTED_PROXIES,
+        SettingKey::TrustedProxies,
         &raw_settings,
         if args.trusted_proxies.is_empty() {
             None
@@ -126,7 +127,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let real_ip_header = reconcile::reconcile_setting(
         &db_conn,
-        uptrakit_web_api::settings::SETTING_KEY_REAL_IP_HEADER,
+        SettingKey::RealIpHeader,
         &raw_settings,
         args.real_ip_header,
         uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
@@ -142,7 +143,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let extra_sans = reconcile_setting_vec::<String>(
         &db_conn,
-        uptrakit_web_api::settings::SETTING_KEY_EXTRA_SANS,
+        SettingKey::ExtraSans,
         &raw_settings,
         if args.sans.is_empty() {
             None
@@ -168,7 +169,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let https_addr = reconcile_socket_addr(
         &db_conn,
-        uptrakit_web_api::settings::SETTING_KEY_HTTPS_ADDR,
+        SettingKey::HttpsAddr,
         &raw_settings,
         args.https_addr,
         uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
@@ -184,7 +185,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     {
         let mqtt_host = reconcile::reconcile_setting(
             &db_conn,
-            uptrakit_web_api::settings::SETTING_KEY_MQTT_HOST,
+            SettingKey::MqttHost,
             &raw_settings,
             args.mqtt.mqtt_host.clone(),
             String::new(), // empty = disabled
@@ -216,7 +217,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_port = reconcile_u16(
             &db_conn,
-            uptrakit_web_api::settings::SETTING_KEY_MQTT_PORT,
+            SettingKey::MqttPort,
             &raw_settings,
             args.mqtt.mqtt_port,
             uptrakit_web_api::settings::DEFAULT_MQTT_PORT,
@@ -226,7 +227,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_client_id = reconcile::reconcile_setting(
             &db_conn,
-            uptrakit_web_api::settings::SETTING_KEY_MQTT_CLIENT_ID,
+            SettingKey::MqttClientId,
             &raw_settings,
             args.mqtt.mqtt_client_id.clone(),
             uptrakit_web_api::settings::DEFAULT_MQTT_CLIENT_ID.to_string(),
@@ -241,7 +242,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_username = reconcile::reconcile_setting(
             &db_conn,
-            uptrakit_web_api::settings::SETTING_KEY_MQTT_USERNAME,
+            SettingKey::MqttUsername,
             &raw_settings,
             args.mqtt.mqtt_username.clone(),
             String::new(),
@@ -273,7 +274,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_password = reconcile::reconcile_setting(
             &db_conn,
-            uptrakit_web_api::settings::SETTING_KEY_MQTT_PASSWORD,
+            SettingKey::MqttPassword,
             &raw_settings,
             args.mqtt.mqtt_password.clone(),
             String::new(),
@@ -305,7 +306,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_topic_prefix = reconcile::reconcile_setting(
             &db_conn,
-            uptrakit_web_api::settings::SETTING_KEY_MQTT_TOPIC_PREFIX,
+            SettingKey::MqttTopicPrefix,
             &raw_settings,
             args.mqtt.mqtt_topic_prefix.clone(),
             uptrakit_web_api::settings::DEFAULT_MQTT_TOPIC_PREFIX.to_string(),
@@ -739,7 +740,7 @@ impl<T: fmt::Display> fmt::Display for DisplayVec<'_, T> {
 /// Reconcile a `Vec<T>` setting. Empty CLI vec is treated as "not provided".
 async fn reconcile_setting_vec<T>(
     db: &sea_orm::DatabaseConnection,
-    key: &str,
+    key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<Vec<T>>,
     default_value: Vec<T>,
@@ -749,12 +750,13 @@ async fn reconcile_setting_vec<T>(
 where
     T: PartialEq + Clone + fmt::Display + 'static,
 {
-    let db_value = raw.get(key).and_then(convert.from_json);
+    let db_key = key.as_str();
+    let db_value = raw.get(db_key).and_then(convert.from_json);
 
     match (db_value, cli_value) {
         (Some(db_val), Some(cli_val)) if db_val != cli_val => {
             if force {
-                tracing::info!(key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
+                tracing::info!(key = db_key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
                 uptrakit_web_api::settings_store::upsert_setting(
                     db,
                     key,
@@ -765,7 +767,7 @@ where
                 Ok(cli_val)
             } else {
                 tracing::warn!(
-                    key,
+                    key = db_key,
                     cli = %DisplayVec(&cli_val),
                     db = %DisplayVec(&db_val),
                     "CLI value differs from DB; using DB value (pass --force-settings-override to overwrite)"
@@ -774,18 +776,18 @@ where
             }
         }
         (Some(db_val), _) => {
-            tracing::debug!(key, value = %DisplayVec(&db_val), "using DB value");
+            tracing::debug!(key = db_key, value = %DisplayVec(&db_val), "using DB value");
             Ok(db_val)
         }
         (None, Some(cli_val)) => {
-            tracing::info!(key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
+            tracing::info!(key = db_key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
             uptrakit_web_api::settings_store::upsert_setting(db, key, (convert.to_json)(&cli_val))
                 .await
                 .context(AppError::Settings)?;
             Ok(cli_val)
         }
         (None, None) => {
-            tracing::info!(key, value = %DisplayVec(&default_value), "seeding DB setting from default");
+            tracing::info!(key = db_key, value = %DisplayVec(&default_value), "seeding DB setting from default");
             uptrakit_web_api::settings_store::upsert_setting(
                 db,
                 key,
@@ -801,7 +803,7 @@ where
 /// Reconcile a `SocketAddr` setting.
 async fn reconcile_socket_addr(
     db: &sea_orm::DatabaseConnection,
-    key: &str,
+    key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<SocketAddr>,
     default_value: SocketAddr,
@@ -827,7 +829,7 @@ async fn reconcile_socket_addr(
 #[cfg(feature = "mqtt")]
 async fn reconcile_u16(
     db: &sea_orm::DatabaseConnection,
-    key: &str,
+    key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<u16>,
     default_value: u16,

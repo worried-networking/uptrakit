@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
 use crate::cert_signer::AgentCertBundle;
@@ -24,8 +25,6 @@ use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload
 use uptrakit_shared_db::entity::prelude::RevocationReason;
 use uptrakit_shared_db::entity::{agent, agent_certificate, prelude::*};
 use utoipa::ToSchema;
-
-pub const SETTING_KEY_ENROLLMENT_TOKEN_HASH: &str = "agent_enrollment.token_hash";
 
 // --- Agent status enum ---
 
@@ -163,7 +162,7 @@ pub(crate) async fn do_enroll(
 
     // Determine status based on enrollment token
     let status = if let Some(enrollment_token) = enrollment_token {
-        let token_hash = match load_setting(db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
+        let token_hash = match load_setting(db, SettingKey::EnrollmentTokenHash).await {
             Ok(Some(v)) => match v.as_str() {
                 Some(hash) => hash.to_string(),
                 None => {
@@ -629,7 +628,7 @@ pub async fn create_enrollment_token(
 
     if let Err(e) = upsert_setting(
         &state.db,
-        SETTING_KEY_ENROLLMENT_TOKEN_HASH,
+        SettingKey::EnrollmentTokenHash,
         serde_json::Value::String(hash),
     )
     .await
@@ -665,7 +664,7 @@ pub async fn revoke_enrollment_token(
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    if let Err(e) = delete_setting(&state.db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await {
+    if let Err(e) = delete_setting(&state.db, SettingKey::EnrollmentTokenHash).await {
         tracing::error!("Failed to delete enrollment token: {:?}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
@@ -700,7 +699,7 @@ pub async fn enrollment_token_status(
     }
 
     let configured = matches!(
-        load_setting(&state.db, SETTING_KEY_ENROLLMENT_TOKEN_HASH).await,
+        load_setting(&state.db, SettingKey::EnrollmentTokenHash).await,
         Ok(Some(_))
     );
 

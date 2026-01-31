@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::settings_store::upsert_setting;
@@ -106,13 +107,7 @@ pub async fn update_network_settings(
             }
         }
         let json_val = serde_json::json!(parsed.iter().map(|n| n.to_string()).collect::<Vec<_>>());
-        if let Err(e) = upsert_setting(
-            &state.db,
-            crate::settings::SETTING_KEY_TRUSTED_PROXIES,
-            json_val,
-        )
-        .await
-        {
+        if let Err(e) = upsert_setting(&state.db, SettingKey::TrustedProxies, json_val).await {
             tracing::error!("Failed to save trusted_proxies: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
@@ -123,7 +118,7 @@ pub async fn update_network_settings(
     if let Some(ref header) = req.real_ip_header {
         if let Err(e) = upsert_setting(
             &state.db,
-            crate::settings::SETTING_KEY_REAL_IP_HEADER,
+            SettingKey::RealIpHeader,
             serde_json::json!(header),
         )
         .await
@@ -136,12 +131,8 @@ pub async fn update_network_settings(
 
     // Validate and apply extra_sans (runtime-changeable)
     if let Some(ref sans) = req.extra_sans {
-        if let Err(e) = upsert_setting(
-            &state.db,
-            crate::settings::SETTING_KEY_EXTRA_SANS,
-            serde_json::json!(sans),
-        )
-        .await
+        if let Err(e) =
+            upsert_setting(&state.db, SettingKey::ExtraSans, serde_json::json!(sans)).await
         {
             tracing::error!("Failed to save extra_sans: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -163,7 +154,7 @@ pub async fn update_network_settings(
         };
         if let Err(e) = upsert_setting(
             &state.db,
-            crate::settings::SETTING_KEY_HTTPS_ADDR,
+            SettingKey::HttpsAddr,
             serde_json::json!(addr.to_string()),
         )
         .await

@@ -3,6 +3,7 @@ use std::fmt;
 use rootcause::Report;
 use sea_orm::DatabaseConnection;
 
+use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::settings_store::{RawSettings, upsert_setting};
 
 /// Error type used for reconciliation failures.
@@ -30,7 +31,7 @@ pub struct JsonConvert<T> {
 /// 5. No DB value + CLI absent → use default, save to DB
 pub async fn reconcile_setting<T>(
     db: &DatabaseConnection,
-    key: &str,
+    key: SettingKey,
     raw: &RawSettings,
     cli_value: Option<T>,
     default_value: T,
@@ -40,25 +41,26 @@ pub async fn reconcile_setting<T>(
 where
     T: PartialEq + Clone + fmt::Display,
 {
-    let db_value = raw.get(key).and_then(convert.from_json);
+    let db_key = key.as_str();
+    let db_value = raw.get(db_key).and_then(convert.from_json);
 
     match (db_value, cli_value) {
         // Case 1 & 2: DB has a value and CLI differs
         (Some(db_val), Some(cli_val)) if db_val != cli_val => {
             if force {
                 // Case 1: force override — use CLI, update DB
-                tracing::info!(key, cli = %cli_val, db = %db_val, "force-overriding DB setting with CLI value");
+                tracing::info!(key = db_key, cli = %cli_val, db = %db_val, "force-overriding DB setting with CLI value");
                 upsert_setting(db, key, (convert.to_json)(&cli_val))
                     .await
                     .map_err(|e| {
-                        tracing::error!(key, error = ?e, "failed to upsert setting");
+                        tracing::error!(key = db_key, error = ?e, "failed to upsert setting");
                         rootcause::report!(ReconcileError)
                     })?;
                 Ok(cli_val)
             } else {
                 // Case 2: no force — use DB, warn
                 tracing::warn!(
-                    key,
+                    key = db_key,
                     cli = %cli_val,
                     db = %db_val,
                     "CLI value differs from DB; using DB value (pass --force-settings-override to overwrite)"
@@ -68,27 +70,27 @@ where
         }
         // Case 3: DB has value, CLI either absent or same
         (Some(db_val), _) => {
-            tracing::debug!(key, value = %db_val, "using DB value");
+            tracing::debug!(key = db_key, value = %db_val, "using DB value");
             Ok(db_val)
         }
         // Case 4: No DB value, CLI provided
         (None, Some(cli_val)) => {
-            tracing::info!(key, value = %cli_val, "seeding DB setting from CLI");
+            tracing::info!(key = db_key, value = %cli_val, "seeding DB setting from CLI");
             upsert_setting(db, key, (convert.to_json)(&cli_val))
                 .await
                 .map_err(|e| {
-                    tracing::error!(key, error = ?e, "failed to upsert setting");
+                    tracing::error!(key = db_key, error = ?e, "failed to upsert setting");
                     rootcause::report!(ReconcileError)
                 })?;
             Ok(cli_val)
         }
         // Case 5: No DB value, no CLI
         (None, None) => {
-            tracing::info!(key, value = %default_value, "seeding DB setting from default");
+            tracing::info!(key = db_key, value = %default_value, "seeding DB setting from default");
             upsert_setting(db, key, (convert.to_json)(&default_value))
                 .await
                 .map_err(|e| {
-                    tracing::error!(key, error = ?e, "failed to upsert setting");
+                    tracing::error!(key = db_key, error = ?e, "failed to upsert setting");
                     rootcause::report!(ReconcileError)
                 })?;
             Ok(default_value)
@@ -104,6 +106,7 @@ mod tests {
 
     use super::*;
     use crate::migration;
+    use uptrakit_web_api::SettingKey;
     use uptrakit_web_api::settings_store::{load_setting, upsert_setting};
 
     async fn setup_db() -> DatabaseConnection {
@@ -126,7 +129,7 @@ mod tests {
         let raw = HashMap::new();
         let result = reconcile_setting(
             &db,
-            "test.no_db_no_cli",
+            SettingKey::TrustedProxies,
             &raw,
             None,
             "default_val".to_string(),
@@ -138,7 +141,7 @@ mod tests {
         assert_eq!(result, "default_val");
 
         // Verify it was saved to DB
-        let saved = load_setting(&db, "test.no_db_no_cli").await.unwrap();
+        let saved = load_setting(&db, SettingKey::TrustedProxies).await.unwrap();
         assert_eq!(saved.unwrap().as_str(), Some("default_val"));
     }
 
@@ -148,7 +151,7 @@ mod tests {
         let raw = HashMap::new();
         let result = reconcile_setting(
             &db,
-            "test.no_db_cli",
+            SettingKey::RealIpHeader,
             &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
@@ -159,21 +162,24 @@ mod tests {
         .unwrap();
         assert_eq!(result, "cli_val");
 
-        let saved = load_setting(&db, "test.no_db_cli").await.unwrap();
+        let saved = load_setting(&db, SettingKey::RealIpHeader).await.unwrap();
         assert_eq!(saved.unwrap().as_str(), Some("cli_val"));
     }
 
     #[tokio::test]
     async fn db_exists_no_cli_uses_db() {
         let db = setup_db().await;
-        upsert_setting(&db, "test.db_exists", serde_json::json!("db_val"))
+        upsert_setting(&db, SettingKey::MqttHost, serde_json::json!("db_val"))
             .await
             .unwrap();
 
-        let raw = HashMap::from([("test.db_exists".to_string(), serde_json::json!("db_val"))]);
+        let raw = HashMap::from([(
+            SettingKey::MqttHost.as_str().to_string(),
+            serde_json::json!("db_val"),
+        )]);
         let result = reconcile_setting(
             &db,
-            "test.db_exists",
+            SettingKey::MqttHost,
             &raw,
             None,
             "default_val".to_string(),
@@ -188,14 +194,17 @@ mod tests {
     #[tokio::test]
     async fn db_exists_cli_differs_no_force_uses_db() {
         let db = setup_db().await;
-        upsert_setting(&db, "test.no_force", serde_json::json!("db_val"))
+        upsert_setting(&db, SettingKey::MqttClientId, serde_json::json!("db_val"))
             .await
             .unwrap();
 
-        let raw = HashMap::from([("test.no_force".to_string(), serde_json::json!("db_val"))]);
+        let raw = HashMap::from([(
+            SettingKey::MqttClientId.as_str().to_string(),
+            serde_json::json!("db_val"),
+        )]);
         let result = reconcile_setting(
             &db,
-            "test.no_force",
+            SettingKey::MqttClientId,
             &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
@@ -210,14 +219,21 @@ mod tests {
     #[tokio::test]
     async fn db_exists_cli_differs_force_uses_cli() {
         let db = setup_db().await;
-        upsert_setting(&db, "test.force", serde_json::json!("db_val"))
-            .await
-            .unwrap();
+        upsert_setting(
+            &db,
+            SettingKey::MqttTopicPrefix,
+            serde_json::json!("db_val"),
+        )
+        .await
+        .unwrap();
 
-        let raw = HashMap::from([("test.force".to_string(), serde_json::json!("db_val"))]);
+        let raw = HashMap::from([(
+            SettingKey::MqttTopicPrefix.as_str().to_string(),
+            serde_json::json!("db_val"),
+        )]);
         let result = reconcile_setting(
             &db,
-            "test.force",
+            SettingKey::MqttTopicPrefix,
             &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
@@ -229,7 +245,9 @@ mod tests {
         assert_eq!(result, "cli_val");
 
         // Verify DB was updated
-        let saved = load_setting(&db, "test.force").await.unwrap();
+        let saved = load_setting(&db, SettingKey::MqttTopicPrefix)
+            .await
+            .unwrap();
         assert_eq!(saved.unwrap().as_str(), Some("cli_val"));
     }
 }

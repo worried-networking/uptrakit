@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::settings_store::upsert_setting;
@@ -84,7 +85,7 @@ pub async fn update_agent_certificate_settings(
         }
         if let Err(e) = upsert_setting(
             &state.db,
-            "agent_certificate.lifetime_days",
+            SettingKey::AgentCertLifetimeDays,
             serde_json::json!(days),
         )
         .await
@@ -105,7 +106,7 @@ pub async fn update_agent_certificate_settings(
         }
         if let Err(e) = upsert_setting(
             &state.db,
-            "agent_certificate.renewal_window_hours",
+            SettingKey::AgentCertRenewalWindowHours,
             serde_json::json!(hours),
         )
         .await

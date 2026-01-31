@@ -5,8 +5,11 @@ pub mod extract;
 pub mod middleware;
 pub mod pki_utils;
 pub mod routes;
+pub mod setting_key;
 pub mod settings;
 pub mod settings_store;
+
+pub use setting_key::SettingKey;
 
 use std::sync::Arc;
 

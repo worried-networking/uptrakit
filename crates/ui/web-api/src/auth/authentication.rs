@@ -1,13 +1,12 @@
+use crate::SettingKey;
 use crate::auth::Result;
-use crate::settings_store::{RawSettings, upsert_setting};
+use crate::settings_store::{RawSettings, RawSettingsExt, upsert_setting};
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
 };
-
-pub const SETTING_KEY_PASSWORD_AUTH: &str = "auth.password_enabled";
 
 /// Global authentication settings (password auth toggle).
 /// OIDC config lives in the `oidc_providers` table.
@@ -28,7 +27,7 @@ impl AuthenticationSettings {
     /// Build from pre-fetched settings map. No DB access required.
     pub fn from_raw(raw: &RawSettings) -> Self {
         let password_auth_enabled = raw
-            .get(SETTING_KEY_PASSWORD_AUTH)
+            .get_setting(SettingKey::PasswordAuthEnabled)
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
         Self {
@@ -39,7 +38,7 @@ impl AuthenticationSettings {
     pub async fn save(&self, db: &DatabaseConnection) -> Result<()> {
         upsert_setting(
             db,
-            SETTING_KEY_PASSWORD_AUTH,
+            SettingKey::PasswordAuthEnabled,
             serde_json::Value::Bool(self.password_auth_enabled),
         )
         .await

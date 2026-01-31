@@ -1,13 +1,13 @@
 use super::{Result, password, token::generate_secure_token};
-use crate::settings_store::{RawSettings, delete_setting, load_setting, upsert_setting};
+use crate::SettingKey;
+use crate::settings_store::{
+    RawSettings, RawSettingsExt, delete_setting, load_setting, upsert_setting,
+};
 use rootcause::prelude::*;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use serde::{Deserialize, Serialize};
 use uptrakit_shared_db::entity::prelude::*;
 use utoipa::ToSchema;
-
-pub const SETTING_KEY_MODE: &str = "registration.mode";
-pub const SETTING_KEY_TOKEN_HASH: &str = "registration.token_hash";
 
 /// Registration mode controlling how new users can sign up.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -68,14 +68,14 @@ impl RegistrationSettings {
             // Upsert mode = invite
             upsert_setting(
                 db,
-                SETTING_KEY_MODE,
+                SettingKey::RegistrationMode,
                 serde_json::Value::String(RegistrationMode::Invite.as_str().to_string()),
             )
             .await?;
             // Upsert token hash
             upsert_setting(
                 db,
-                SETTING_KEY_TOKEN_HASH,
+                SettingKey::RegistrationTokenHash,
                 serde_json::Value::String(hash.clone()),
             )
             .await?;
@@ -88,12 +88,12 @@ impl RegistrationSettings {
         } else {
             // Read from pre-fetched map
             let mode = raw
-                .get(SETTING_KEY_MODE)
+                .get_setting(SettingKey::RegistrationMode)
                 .and_then(|v| v.as_str().and_then(RegistrationMode::from_str))
                 .unwrap_or(RegistrationMode::Closed);
 
             let token_hash = raw
-                .get(SETTING_KEY_TOKEN_HASH)
+                .get_setting(SettingKey::RegistrationTokenHash)
                 .and_then(|v| v.as_str().map(String::from));
 
             let settings = RegistrationSettings { mode, token_hash };
@@ -147,11 +147,11 @@ impl RegistrationSettings {
         // Update DB
         upsert_setting(
             db,
-            SETTING_KEY_MODE,
+            SettingKey::RegistrationMode,
             serde_json::Value::String(RegistrationMode::Closed.as_str().to_string()),
         )
         .await?;
-        delete_setting(db, SETTING_KEY_TOKEN_HASH).await?;
+        delete_setting(db, SettingKey::RegistrationTokenHash).await?;
 
         // Update in-memory state
         self.mode = RegistrationMode::Closed;
@@ -171,7 +171,7 @@ impl RegistrationSettings {
         // Update mode in DB
         upsert_setting(
             db,
-            SETTING_KEY_MODE,
+            SettingKey::RegistrationMode,
             serde_json::Value::String(mode.as_str().to_string()),
         )
         .await?;
@@ -182,7 +182,7 @@ impl RegistrationSettings {
                 let hash = password::hash_password(plaintext)?;
                 upsert_setting(
                     db,
-                    SETTING_KEY_TOKEN_HASH,
+                    SettingKey::RegistrationTokenHash,
                     serde_json::Value::String(hash.clone()),
                 )
                 .await?;
@@ -190,13 +190,13 @@ impl RegistrationSettings {
             } else {
                 // Keep existing hash if no new token provided (shouldn't happen per API contract,
                 // but handled defensively)
-                load_setting(db, SETTING_KEY_TOKEN_HASH)
+                load_setting(db, SettingKey::RegistrationTokenHash)
                     .await?
                     .and_then(|v| v.as_str().map(String::from))
             }
         } else {
             // Open or Closed: clear any stored token
-            delete_setting(db, SETTING_KEY_TOKEN_HASH).await?;
+            delete_setting(db, SettingKey::RegistrationTokenHash).await?;
             None
         };
 

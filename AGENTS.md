@@ -251,13 +251,15 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 
 At startup, `Settings::load()` issues a single `SELECT * FROM settings` via `load_all_settings()` and distributes the resulting `RawSettings` (`HashMap<String, serde_json::Value>`) to all sub-loaders. This replaces the previous pattern of one query per key.
 
-After the bulk load, `warn_unrecognised_keys()` logs a warning for any DB key not in `ALL_KNOWN_KEYS` (defined in `settings.rs`). This catches stale or misspelled entries left after upgrades.
+After the bulk load, `warn_unrecognised_keys()` logs a warning for any DB key not recognised by `SettingKey::from_db_key()`. The `SettingKey` enum (defined in `crates/ui/web-api/src/setting_key.rs`) is the single source of truth for all known setting keys. `SettingKey::ALL` provides an array of every variant.
 
 `Settings::load()` returns `(Self, RawSettings, Option<String>)` so the controller passes the same map to reconciliation without re-reading.
 
+The `RawSettingsExt` trait (defined in `settings_store.rs`) provides a `get_setting(SettingKey) -> Option<&Value>` method for typed lookups on `RawSettings`, replacing raw `raw.get("string.key")` calls throughout the codebase.
+
 ### Reconciliation logic
 
-`reconcile_setting()` (`crates/core/controller/src/reconcile.rs`) accepts a `&RawSettings` map and looks up the key itself — no per-key DB reads. It still needs the `DatabaseConnection` for upserts.
+`reconcile_setting()` (`crates/core/controller/src/reconcile.rs`) accepts a `SettingKey` and a `&RawSettings` map, looking up the key via `key.as_str()` — no per-key DB reads. It still needs the `DatabaseConnection` for upserts.
 
 For each DB-managed setting at startup:
 1. DB has value + CLI provided + differs + `--force-settings-override` → use CLI, update DB
