@@ -20,6 +20,17 @@ use crate::routes::agents::{
     AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate, revoke_certificate,
 };
 
+/// Serialize a [`ControllerMessage`] to JSON, logging on failure.
+fn serialize_msg(msg: &ControllerMessage) -> Option<String> {
+    match serde_json::to_string(msg) {
+        Ok(json) => Some(json),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to serialize controller message");
+            None
+        }
+    }
+}
+
 /// Connection type determined at WebSocket upgrade time.
 enum ConnectionType {
     /// mTLS client cert present → authenticated agent
@@ -197,7 +208,9 @@ async fn handle_authenticated(
         renewal_window_hours,
         ca_bundle_hash,
     });
-    let json = serde_json::to_string(&settings_msg).unwrap();
+    let Some(json) = serialize_msg(&settings_msg) else {
+        return;
+    };
     if sink.send(Message::Text(json.into())).await.is_err() {
         return;
     }
@@ -233,7 +246,7 @@ async fn handle_authenticated(
                                     agent_ts,
                                     controller_ts,
                                 });
-                                let json = serde_json::to_string(&response).unwrap();
+                                let Some(json) = serialize_msg(&response) else { break };
                                 if sink.send(Message::Text(json.into())).await.is_err() {
                                     break;
                                 }
@@ -250,8 +263,9 @@ async fn handle_authenticated(
                                             code: "forbidden".to_string(),
                                             message: "agent is not approved".to_string(),
                                         });
-                                        let json = serde_json::to_string(&err).unwrap();
-                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        if let Some(json) = serialize_msg(&err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
                                         break;
                                     }
                                 };
@@ -269,8 +283,9 @@ async fn handle_authenticated(
                                             key_pem: bundle.key_pem,
                                             not_after: bundle.not_after,
                                         });
-                                        let json = serde_json::to_string(&cert_msg).unwrap();
-                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        if let Some(json) = serialize_msg(&cert_msg) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
 
                                         // Revoke old cert
                                         if let Err(e) = revoke_certificate(&state.db, &cert_serial, &cert_ca_fingerprint, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
@@ -287,8 +302,9 @@ async fn handle_authenticated(
                                             code: "certificate_error".to_string(),
                                             message: msg.to_string(),
                                         });
-                                        let json = serde_json::to_string(&err).unwrap();
-                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        if let Some(json) = serialize_msg(&err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
                                         break;
                                     }
                                 }
@@ -298,8 +314,9 @@ async fn handle_authenticated(
                                     code: "bad_request".to_string(),
                                     message: "unexpected message for authenticated connection".to_string(),
                                 });
-                                let json = serde_json::to_string(&err).unwrap();
-                                let _ = sink.send(Message::Text(json.into())).await;
+                                if let Some(json) = serialize_msg(&err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
                                 break;
                             }
                         }
@@ -356,7 +373,10 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, agent_id: uuid
             let msg = ControllerMessage::Approved(ApprovedPayload {
                 agent_id: agent_id.to_string(),
             });
-            let json = serde_json::to_string(&msg).unwrap();
+            let Some(json) = serialize_msg(&msg) else {
+                state.agent_connections.unregister(&agent_id).await;
+                return;
+            };
             if sink.send(Message::Text(json.into())).await.is_err() {
                 state.agent_connections.unregister(&agent_id).await;
                 return;
@@ -366,8 +386,9 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, agent_id: uuid
             let msg = ControllerMessage::Rejected(RejectedPayload {
                 agent_id: agent_id.to_string(),
             });
-            let json = serde_json::to_string(&msg).unwrap();
-            let _ = sink.send(Message::Text(json.into())).await;
+            if let Some(json) = serialize_msg(&msg) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
             state.agent_connections.unregister(&agent_id).await;
             return;
         }
@@ -413,9 +434,9 @@ async fn handle_anonymous(
                             code: "bad_request".to_string(),
                             message: format!("invalid message: {e}"),
                         });
-                        let _ = sink
-                            .send(Message::Text(serde_json::to_string(&err).unwrap().into()))
-                            .await;
+                        if let Some(json) = serialize_msg(&err) {
+                            let _ = sink.send(Message::Text(json.into())).await;
+                        }
                         return;
                     }
                 };
@@ -440,7 +461,9 @@ async fn handle_anonymous(
                                     enrollment_secret: enroll_result.enrollment_secret,
                                     status: enroll_result.status.as_str().to_string(),
                                 });
-                                let json = serde_json::to_string(&enrolled_msg).unwrap();
+                                let Some(json) = serialize_msg(&enrolled_msg) else {
+                                    return;
+                                };
                                 if sink.send(Message::Text(json.into())).await.is_err() {
                                     return;
                                 }
@@ -457,7 +480,9 @@ async fn handle_anonymous(
                                         ControllerMessage::Approved(ApprovedPayload {
                                             agent_id: agent_id.to_string(),
                                         });
-                                    let json = serde_json::to_string(&approved_msg).unwrap();
+                                    let Some(json) = serialize_msg(&approved_msg) else {
+                                        return;
+                                    };
                                     if sink.send(Message::Text(json.into())).await.is_err() {
                                         return;
                                     }
@@ -470,11 +495,9 @@ async fn handle_anonymous(
                                     code: "enrollment_failed".to_string(),
                                     message: msg.to_string(),
                                 });
-                                let _ = sink
-                                    .send(Message::Text(
-                                        serde_json::to_string(&err).unwrap().into(),
-                                    ))
-                                    .await;
+                                if let Some(json) = serialize_msg(&err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
                                 return;
                             }
                         }
@@ -484,9 +507,9 @@ async fn handle_anonymous(
                             code: "bad_request".to_string(),
                             message: "expected enroll message".to_string(),
                         });
-                        let _ = sink
-                            .send(Message::Text(serde_json::to_string(&err).unwrap().into()))
-                            .await;
+                        if let Some(json) = serialize_msg(&err) {
+                            let _ = sink.send(Message::Text(json.into())).await;
+                        }
                         return;
                     }
                 }
@@ -554,7 +577,7 @@ async fn run_enrolled_loop(
                                     agent_ts,
                                     controller_ts,
                                 });
-                                let json = serde_json::to_string(&response).unwrap();
+                                let Some(json) = serialize_msg(&response) else { break };
                                 if sink.send(Message::Text(json.into())).await.is_err() {
                                     break;
                                 }
@@ -566,8 +589,9 @@ async fn run_enrolled_loop(
                                         code: "not_approved".to_string(),
                                         message: "agent is not yet approved".to_string(),
                                     });
-                                    let json = serde_json::to_string(&err).unwrap();
-                                    let _ = sink.send(Message::Text(json.into())).await;
+                                    if let Some(json) = serialize_msg(&err) {
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                    }
                                     continue;
                                 }
 
@@ -582,8 +606,9 @@ async fn run_enrolled_loop(
                                             code: "internal_error".to_string(),
                                             message: "agent not found".to_string(),
                                         });
-                                        let json = serde_json::to_string(&err).unwrap();
-                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        if let Some(json) = serialize_msg(&err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
                                         break;
                                     }
                                 };
@@ -600,8 +625,9 @@ async fn run_enrolled_loop(
                                             key_pem: bundle.key_pem,
                                             not_after: bundle.not_after,
                                         });
-                                        let json = serde_json::to_string(&cert_msg).unwrap();
-                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        if let Some(json) = serialize_msg(&cert_msg) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
                                         tracing::info!(%agent_id, "certificate issued via WS");
                                         break; // close connection after certificate issuance
                                     }
@@ -610,8 +636,9 @@ async fn run_enrolled_loop(
                                             code: "certificate_error".to_string(),
                                             message: msg.to_string(),
                                         });
-                                        let json = serde_json::to_string(&err).unwrap();
-                                        let _ = sink.send(Message::Text(json.into())).await;
+                                        if let Some(json) = serialize_msg(&err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
                                         break;
                                     }
                                 }
@@ -621,16 +648,18 @@ async fn run_enrolled_loop(
                                     code: "bad_request".to_string(),
                                     message: "already enrolled".to_string(),
                                 });
-                                let json = serde_json::to_string(&err).unwrap();
-                                let _ = sink.send(Message::Text(json.into())).await;
+                                if let Some(json) = serialize_msg(&err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
                             }
                             AgentMessage::RenewCertificate(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),
                                     message: "not available during enrollment".to_string(),
                                 });
-                                let json = serde_json::to_string(&err).unwrap();
-                                let _ = sink.send(Message::Text(json.into())).await;
+                                if let Some(json) = serialize_msg(&err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
                             }
                         }
                     }
@@ -648,8 +677,9 @@ async fn run_enrolled_loop(
                     }
                     ControllerMessage::Rejected(_) => {
                         // Forward rejection and close
-                        let json = serde_json::to_string(&msg).unwrap();
-                        let _ = sink.send(Message::Text(json.into())).await;
+                        if let Some(json) = serialize_msg(&msg) {
+                            let _ = sink.send(Message::Text(json.into())).await;
+                        }
                         break;
                     }
                     _ => {}
