@@ -325,10 +325,7 @@ mod tests {
 
         // Second consume should fail
         let err = store.consume(&device_code).unwrap_err();
-        assert!(matches!(
-            err.current_context(),
-            DeviceFlowError::NotFound
-        ));
+        assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
     }
 
     #[test]
@@ -337,10 +334,7 @@ mod tests {
         let (device_code, _) = store.create(None).unwrap();
 
         let err = store.consume(&device_code).unwrap_err();
-        assert!(matches!(
-            err.current_context(),
-            DeviceFlowError::NotFound
-        ));
+        assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
     }
 
     #[test]
@@ -348,16 +342,10 @@ mod tests {
         let store = DeviceFlowStore::new();
 
         let err = store.get_status("nonexistent").unwrap_err();
-        assert!(matches!(
-            err.current_context(),
-            DeviceFlowError::NotFound
-        ));
+        assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
 
         let err = store.approve("NOPE-CODE", Uuid::now_v7()).unwrap_err();
-        assert!(matches!(
-            err.current_context(),
-            DeviceFlowError::NotFound
-        ));
+        assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
     }
 
     #[test]
