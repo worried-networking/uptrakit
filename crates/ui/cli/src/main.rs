@@ -43,7 +43,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AuthCommands {
-    /// Login with email and password
+    /// Login to the server via browser authorization
     Login,
     /// Show current authentication status
     Status,

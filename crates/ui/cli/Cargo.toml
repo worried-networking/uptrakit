@@ -13,5 +13,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 thiserror = { workspace = true }
-rpassword = "5"
+open = "5"
 hostname = { workspace = true }

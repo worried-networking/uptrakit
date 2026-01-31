@@ -4,12 +4,12 @@ use crate::config::{
 };
 use crate::error::{CliError, Result};
 
-/// Interactive login flow.
+/// Interactive login flow using device authorization.
 ///
 /// 1. Prompt for server URL (if not stored/provided)
-/// 2. Prompt for email and password
-/// 3. POST /api/v1/auth/login -> get JWT
-/// 4. Use JWT to POST /api/v1/auth/api-tokens -> get API token
+/// 2. POST /api/v1/auth/device -> get device_code, user_code, verification_url
+/// 3. Open verification URL in user's browser
+/// 4. Poll /api/v1/auth/device/poll until authorized/expired
 /// 5. Store server URL + API token locally
 pub async fn login(server_override: Option<&str>) -> Result<()> {
     // Determine server URL
@@ -27,52 +27,25 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
         return Err(CliError::Other("Server URL is required".into()));
     }
 
-    // Prompt for credentials
-    let email = prompt("Email: ")?;
-    eprint!("Password: ");
-    let password = rpassword::read_password()
-        .map_err(|e| CliError::Other(format!("Failed to read password: {e}")))?;
-
-    // Login via password
-    let client = ApiClient::new(&server, None)?;
-    let login_body = serde_json::json!({
-        "email": email,
-        "password": password,
-    });
-
-    let (status, body) = client
-        .request("POST", "/api/v1/auth/login", Some(login_body))
-        .await?;
-
-    if status != 200 {
-        let msg = body.as_str().unwrap_or("Login failed").to_string();
-        return Err(CliError::Api {
-            status,
-            message: msg,
-        });
-    }
-
-    let access_token = body["access_token"]
-        .as_str()
-        .ok_or_else(|| CliError::Other("No access_token in response".into()))?;
-
-    // Create API token using the JWT
-    let jwt_client = ApiClient::with_token(&server, access_token)?;
+    // Build client name for the token
     let host = hostname::get()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
     let date = chrono_date();
-    let token_name = format!("cli-{host}-{date}");
+    let client_name = format!("cli-{host}-{date}");
 
-    let create_body = serde_json::json!({ "name": token_name });
-    let (status, body) = jwt_client
-        .request("POST", "/api/v1/auth/api-tokens", Some(create_body))
+    // Start device authorization flow
+    let client = ApiClient::new(&server, None)?;
+    let start_body = serde_json::json!({ "client_name": client_name });
+
+    let (status, body) = client
+        .request("POST", "/api/v1/auth/device", Some(start_body))
         .await?;
 
-    if status != 201 {
+    if status != 200 {
         let msg = body
             .as_str()
-            .unwrap_or("Failed to create API token")
+            .unwrap_or("Failed to start device authorization")
             .to_string();
         return Err(CliError::Api {
             status,
@@ -80,22 +53,113 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
         });
     }
 
-    let api_token = body["token"]
+    let device_code = body["device_code"]
         .as_str()
-        .ok_or_else(|| CliError::Other("No token in response".into()))?;
+        .ok_or_else(|| CliError::Other("No device_code in response".into()))?
+        .to_string();
 
-    // Store config and credentials
-    save_config(&Config {
-        server: Some(server.clone()),
-    })?;
-    save_credentials(&Credentials {
-        token: Some(api_token.to_string()),
-    })?;
+    let user_code = body["user_code"]
+        .as_str()
+        .ok_or_else(|| CliError::Other("No user_code in response".into()))?;
 
-    println!("Logged in to {} successfully.", server);
-    println!("API token stored locally (name: {}).", token_name);
+    let verification_url = body["verification_url"]
+        .as_str()
+        .ok_or_else(|| CliError::Other("No verification_url in response".into()))?;
 
-    Ok(())
+    let interval = body["interval"].as_u64().unwrap_or(5);
+    let expires_in = body["expires_in"].as_u64().unwrap_or(600);
+
+    // Display the code and URL
+    eprintln!();
+    eprintln!("  Open this URL in your browser:");
+    eprintln!("  {}", verification_url);
+    eprintln!();
+    eprintln!("  And enter this code: {}", user_code);
+    eprintln!();
+
+    // Try to open the URL in the user's browser
+    if let Err(e) = open::that(verification_url) {
+        eprintln!("  (Could not open browser automatically: {})", e);
+        eprintln!("  Please open the URL above manually.");
+        eprintln!();
+    }
+
+    eprintln!("  Waiting for authorization...");
+
+    // Poll for completion
+    let poll_client = ApiClient::new(&server, None)?;
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(expires_in);
+
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+
+        if start.elapsed() > timeout {
+            return Err(CliError::Other("Device authorization timed out".into()));
+        }
+
+        let poll_body = serde_json::json!({ "device_code": device_code });
+        let (poll_status, poll_resp) = poll_client
+            .request("POST", "/api/v1/auth/device/poll", Some(poll_body))
+            .await?;
+
+        if poll_status == 429 {
+            // Rate limited, wait extra interval
+            tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+            continue;
+        }
+
+        if poll_status == 404 {
+            return Err(CliError::Other(
+                "Device authorization session not found or expired".into(),
+            ));
+        }
+
+        if poll_status != 200 {
+            let msg = poll_resp
+                .as_str()
+                .unwrap_or("Unexpected error during polling")
+                .to_string();
+            return Err(CliError::Api {
+                status: poll_status,
+                message: msg,
+            });
+        }
+
+        let flow_status = poll_resp["status"].as_str().unwrap_or("unknown");
+
+        match flow_status {
+            "pending" => continue,
+            "expired" => {
+                return Err(CliError::Other("Device authorization expired".into()));
+            }
+            "authorized" => {
+                let api_token = poll_resp["token"]
+                    .as_str()
+                    .ok_or_else(|| CliError::Other("No token in response".into()))?;
+                let token_name = poll_resp["token_name"].as_str().unwrap_or(&client_name);
+
+                // Store config and credentials
+                save_config(&Config {
+                    server: Some(server.clone()),
+                })?;
+                save_credentials(&Credentials {
+                    token: Some(api_token.to_string()),
+                })?;
+
+                eprintln!();
+                println!("Logged in to {} successfully.", server);
+                println!("API token stored locally (name: {}).", token_name);
+
+                return Ok(());
+            }
+            other => {
+                return Err(CliError::Other(format!(
+                    "Unexpected device flow status: {other}"
+                )));
+            }
+        }
+    }
 }
 
 /// Show current authentication status.
