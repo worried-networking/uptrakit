@@ -478,6 +478,20 @@ Each tracked software item becomes a Home Assistant `update` entity via MQTT aut
 - Prefer well-maintained crates with clear track records.
 - Crates affecting command execution, untrusted input parsing, crypto, or networking receive extra scrutiny.
 
+### Workspace vs crate-local placement
+
+A dependency belongs in `[workspace.dependencies]` (root `Cargo.toml`) only when **two or more crates** use it. Single-consumer dependencies go directly in the crate's own `Cargo.toml`.
+
+**Adding a new dependency:**
+
+1. Check how many crates will use it.
+2. If only one crate needs it, add it to that crate's `[dependencies]` with an explicit version.
+3. If two or more crates need it, add it to `[workspace.dependencies]` and reference it with `{ workspace = true }` in each consumer.
+
+**Promotion (crate-local to workspace):** when a second crate starts using an existing crate-local dependency, move the version spec to `[workspace.dependencies]` and replace both crate entries with `{ workspace = true }`.
+
+**Demotion (workspace to crate-local):** when a dependency's last second consumer is removed, move the version spec back into the sole remaining consumer's `Cargo.toml` and delete the `[workspace.dependencies]` entry.
+
 ## Release profile
 
 The workspace uses an optimised release profile:

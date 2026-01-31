@@ -236,6 +236,7 @@ The controller manages an internal CA for mTLS. Relevant rules:
 - Avoid heavy dependencies without a strong reason.
 - Prefer well-maintained crates with a clear track record.
 - Anything affecting command execution, parsing untrusted input, crypto, or networking gets extra scrutiny.
+- **Workspace placement rule:** a dependency belongs in `[workspace.dependencies]` only when two or more crates use it; single-consumer deps go in the crate's own `Cargo.toml`. See the "Dependencies policy" section in [AGENTS.md](AGENTS.md) for the full workflow.
 
 ## Security reports
 

@@ -35,7 +35,7 @@ rcgen = { workspace = true }
 x509-parser = { workspace = true }
 time = { workspace = true }
 tower = { workspace = true }
-tower-http = { workspace = true }
+tower-http = { version = "0.6", features = ["trace", "fs"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls"] }
 argon2 = { workspace = true }

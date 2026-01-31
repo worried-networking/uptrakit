@@ -34,14 +34,14 @@ rand = { workspace = true }
 client-ip = { version = "0.2", features = ["forwarded-header"] }
 x509-parser = { workspace = true }
 base64 = "0.22"
-sha2 = "0.10"
+sha2 = { workspace = true }
 tower-cookies = "0.11"
 utoipa = { version = "5.4", features = ["axum_extras", "uuid"] }
 utoipa-axum = "0.2"
-openidconnect = { workspace = true }
+openidconnect = "4"
 url = { workspace = true }
 urlencoding = "2"
-jsonwebtoken = { workspace = true }
+jsonwebtoken = "9"
 axum-server = { workspace = true }
 hostname = { workspace = true }
 rcgen = { workspace = true }
