@@ -63,7 +63,7 @@ pub async fn get_system_alerts(State(state): State<Arc<AppState>>) -> Json<Syste
             // Check if server cert's issuer matches the active CA
             if let (Ok(server_not_after), Ok(active_fp)) = (
                 cert_not_after_from_pem(&server_cert_pem),
-                cert_issuer_check(&server_cert_pem, &snapshot.active_cert_pem),
+                crate::pki_utils::cert_signed_by_ca(&server_cert_pem, &snapshot.active_cert_pem),
             ) {
                 if !active_fp {
                     alerts.push(SystemAlert {
@@ -105,16 +105,4 @@ fn cert_not_after_from_pem(pem: &str) -> Result<time::OffsetDateTime, ()> {
     let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).map_err(|_| ())?;
     let cert = pem_block.parse_x509().map_err(|_| ())?;
     time::OffsetDateTime::from_unix_timestamp(cert.validity().not_after.timestamp()).map_err(|_| ())
-}
-
-/// Check if the given cert was signed by (has the same issuer as) the given CA.
-/// Returns true if the cert's issuer DN matches the CA's subject DN.
-fn cert_issuer_check(cert_pem: &str, ca_pem: &str) -> Result<bool, ()> {
-    let (_, cert_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes()).map_err(|_| ())?;
-    let cert = cert_block.parse_x509().map_err(|_| ())?;
-
-    let (_, ca_block) = x509_parser::pem::parse_x509_pem(ca_pem.as_bytes()).map_err(|_| ())?;
-    let ca = ca_block.parse_x509().map_err(|_| ())?;
-
-    Ok(cert.issuer() == ca.subject())
 }

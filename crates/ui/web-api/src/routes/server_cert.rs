@@ -7,6 +7,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::AppState;
+use crate::pki_utils::{self, SanCollection};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RenewServerCertResponse {
@@ -42,7 +43,7 @@ pub async fn renew_server_certificate(
 
     // Generate new server cert
     let extra_sans: Vec<String> = state.extra_sans.to_vec();
-    let sans = collect_sans(&extra_sans).map_err(|e| {
+    let sans: SanCollection = pki_utils::collect_sans(&extra_sans).map_err(|e| {
         tracing::error!(error = %e, "failed to collect SANs");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -143,52 +144,4 @@ fn build_server_tls_config(
         .with_client_cert_verifier(verifier)
         .with_single_cert(certs, key)
         .map_err(|e| format!("server config: {e}"))
-}
-
-struct SanCollection {
-    dns_names: Vec<String>,
-    ip_addrs: Vec<std::net::IpAddr>,
-}
-
-fn collect_sans(extra: &[String]) -> Result<SanCollection, String> {
-    let mut dns_names = Vec::new();
-    let mut ip_addrs = Vec::new();
-
-    let hostname = hostname::get()
-        .map_err(|e| format!("hostname: {e}"))?
-        .to_string_lossy()
-        .to_string();
-
-    if !hostname.is_empty() {
-        dns_names.push(hostname.clone());
-    }
-
-    if let Some(dot_pos) = hostname.find('.') {
-        let short = &hostname[..dot_pos];
-        if !short.is_empty() && short != hostname {
-            dns_names.push(short.to_string());
-        }
-    }
-
-    if !dns_names.iter().any(|n| n == "localhost") {
-        dns_names.push("localhost".to_string());
-    }
-
-    for san in extra {
-        if let Ok(ip) = san.parse::<std::net::IpAddr>() {
-            if !ip_addrs.contains(&ip) {
-                ip_addrs.push(ip);
-            }
-        } else if !dns_names.iter().any(|n| n == san) {
-            dns_names.push(san.clone());
-        }
-    }
-
-    dns_names.sort();
-    dns_names.dedup();
-
-    Ok(SanCollection {
-        dns_names,
-        ip_addrs,
-    })
 }

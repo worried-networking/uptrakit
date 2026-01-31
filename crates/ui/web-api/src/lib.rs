@@ -3,6 +3,7 @@ pub mod auth;
 pub mod cert_signer;
 pub mod extract;
 pub mod middleware;
+pub mod pki_utils;
 pub mod routes;
 pub mod settings;
 pub mod settings_store;
