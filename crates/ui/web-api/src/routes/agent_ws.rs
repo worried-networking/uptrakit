@@ -7,7 +7,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     AgentMessage, AgentSettingsPayload, ApprovedPayload, CertificatePayload, ControllerMessage,
@@ -110,12 +110,14 @@ async fn handle_authenticated(
 
     let (mut sink, mut stream) = socket.split();
 
-    // 1. Certificate validation check
-    let cert_record = match uptrakit_shared_db::entity::prelude::AgentCertificate::find_by_id(
-        cert_serial.clone(),
-    )
-    .one(&state.db)
-    .await
+    // 1. Certificate validation check — query by (agent_id, serial) since
+    // the composite PK is (ca_fingerprint, serial_number) and we don't know
+    // the CA fingerprint at this point.
+    let cert_record = match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
+        .filter(uptrakit_shared_db::entity::agent_certificate::Column::SerialNumber.eq(cert_serial.clone()))
+        .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
+        .one(&state.db)
+        .await
     {
         Ok(Some(record)) => {
             if record.revoked_at.is_some() {
@@ -175,6 +177,9 @@ async fn handle_authenticated(
         }
     }
 
+    // Save CA fingerprint before moving cert_record
+    let cert_ca_fingerprint = cert_record.ca_fingerprint.clone();
+
     // Record certificate usage
     let mut active: uptrakit_shared_db::entity::agent_certificate::ActiveModel = cert_record.into();
     active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
@@ -184,8 +189,10 @@ async fn handle_authenticated(
 
     // Send AgentSettings on connect
     let renewal_window_hours = state.settings.renewal_window_hours().await;
+    let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
     let settings_msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
         renewal_window_hours,
+        ca_bundle_hash,
     });
     let json = serde_json::to_string(&settings_msg).unwrap();
     if sink.send(Message::Text(json.into())).await.is_err() {
@@ -263,7 +270,7 @@ async fn handle_authenticated(
                                         let _ = sink.send(Message::Text(json.into())).await;
 
                                         // Revoke old cert
-                                        if let Err(e) = revoke_certificate(&state.db, &cert_serial, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
+                                        if let Err(e) = revoke_certificate(&state.db, &cert_serial, &cert_ca_fingerprint, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 

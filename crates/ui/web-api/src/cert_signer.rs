@@ -11,4 +11,7 @@ pub trait AgentCertSigner: Send + Sync + 'static {
         agent_id: &uuid::Uuid,
         lifetime: time::Duration,
     ) -> Result<AgentCertBundle, String>;
+
+    /// Return the SHA-256 hex fingerprint of the active CA cert.
+    fn active_ca_fingerprint(&self) -> String;
 }

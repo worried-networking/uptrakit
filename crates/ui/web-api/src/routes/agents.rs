@@ -215,6 +215,8 @@ pub(crate) async fn do_sign_certificate(
 
     let lifetime = time::Duration::days(1); //settings.agent_cert_lifetime().await;
 
+    let ca_fp = cert_signer.active_ca_fingerprint();
+
     let bundle = cert_signer
         .sign_agent_cert(&agent.id, lifetime)
         .map_err(|e| {
@@ -223,7 +225,7 @@ pub(crate) async fn do_sign_certificate(
         })?;
 
     // Record certificate in DB for revocation tracking
-    if let Err(e) = record_certificate(db, agent.id, &bundle.cert_pem).await {
+    if let Err(e) = record_certificate(db, agent.id, &bundle.cert_pem, &ca_fp).await {
         tracing::error!("Failed to record agent certificate: {:?}", e);
         return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
     }
@@ -710,10 +712,12 @@ async fn record_certificate(
     db: &sea_orm::DatabaseConnection,
     agent_id: uuid::Uuid,
     cert_pem: &str,
+    ca_fingerprint: &str,
 ) -> Result<(), Report<CertRecordError>> {
     let (serial, not_before, not_after) = parse_cert_metadata(cert_pem)?;
 
     let record = agent_certificate::ActiveModel {
+        ca_fingerprint: Set(ca_fingerprint.to_string()),
         serial_number: Set(serial),
         agent_id: Set(agent_id),
         not_before: Set(not_before),
@@ -729,10 +733,11 @@ async fn record_certificate(
     Ok(())
 }
 
-/// Revoke a certificate by serial number.
+/// Revoke a certificate by serial number and CA fingerprint.
 pub(crate) async fn revoke_certificate(
     db: &sea_orm::DatabaseConnection,
     serial_number: &str,
+    ca_fingerprint: &str,
     reason: RevocationReason,
 ) -> Result<(), sea_orm::DbErr> {
     AgentCertificate::update_many()
@@ -744,6 +749,7 @@ pub(crate) async fn revoke_certificate(
             agent_certificate::Column::RevocationReason,
             Expr::value(Some(reason)),
         )
+        .filter(agent_certificate::Column::CaFingerprint.eq(ca_fingerprint))
         .filter(agent_certificate::Column::SerialNumber.eq(serial_number))
         .filter(agent_certificate::Column::RevokedAt.is_null())
         .exec(db)

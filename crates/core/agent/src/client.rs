@@ -8,6 +8,7 @@ use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
     AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload,
     PingPayload, RenewCertificatePayload, RequestCertificatePayload, now_millis,
@@ -405,8 +406,13 @@ pub async fn run_authenticated_loop(
 
                 match msg {
                     Message::Text(text) => {
-                        let controller_msg: ControllerMessage =
-                            serde_json::from_str(&text).context_to::<Error>()?;
+                        let controller_msg: ControllerMessage = match serde_json::from_str(&text) {
+                            Ok(msg) => msg,
+                            Err(e) => {
+                                tracing::debug!("ignoring unrecognized controller message: {e}");
+                                continue;
+                            }
+                        };
 
                         match controller_msg {
                             ControllerMessage::Pong(pong) => {
@@ -445,9 +451,36 @@ pub async fn run_authenticated_loop(
                                             settings.renewal_window_hours,
                                         ),
                                 );
+
+                                // Check if CA bundle is stale
+                                if !settings.ca_bundle_hash.is_empty() {
+                                    let local_hash = compute_local_ca_hash(data_dir);
+                                    if local_hash != settings.ca_bundle_hash {
+                                        tracing::info!("CA bundle hash mismatch, fetching updated bundle");
+                                        match fetch_ca_certificate(host, port).await {
+                                            Ok(pem) => {
+                                                if let Err(e) = crate::state::save_ca_cert(data_dir, &pem) {
+                                                    tracing::warn!("failed to save updated CA: {e}");
+                                                } else {
+                                                    tracing::info!("updated CA bundle saved to disk");
+                                                }
+                                            }
+                                            Err(e) => tracing::warn!("failed to fetch updated CA: {e}"),
+                                        }
+                                    }
+                                }
+                            }
+                            ControllerMessage::CaBundleUpdated(payload) => {
+                                tracing::info!("received CA bundle update from controller");
+                                if let Err(e) = crate::state::save_ca_cert(data_dir, payload.ca_bundle_pem.as_bytes()) {
+                                    tracing::warn!("failed to save updated CA bundle: {e}");
+                                } else {
+                                    tracing::info!("updated CA bundle saved to disk");
+                                }
                             }
                             _ => {
-                                tracing::debug!("ignoring unexpected message in authenticated loop");
+                                tracing::debug!("ignoring unrecognized message in authenticated loop");
+                                continue;
                             }
                         }
                     }
@@ -489,6 +522,18 @@ pub async fn run_authenticated_loop(
     }
 
     Ok(outcome)
+}
+
+/// Compute SHA-256 hex hash of the local CA certificate file.
+fn compute_local_ca_hash(data_dir: &std::path::Path) -> String {
+    match crate::state::load_ca_cert(data_dir) {
+        Ok(Some(bytes)) => {
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            hex::encode(hasher.finalize())
+        }
+        _ => String::new(),
+    }
 }
 
 fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {

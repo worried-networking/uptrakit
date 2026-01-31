@@ -16,7 +16,9 @@
 		updateOidcProvider,
 		deleteOidcProvider,
 		activateOidcProvider,
-		deactivateOidcProvider
+		deactivateOidcProvider,
+		getSystemAlerts,
+		renewServerCertificate
 	} from '$lib/api';
 	import type {
 		RegistrationSettings,
@@ -25,7 +27,8 @@
 		EnrollmentTokenStatus,
 		OidcProviderResponse,
 		CreateOidcProviderRequest,
-		UpdateOidcProviderRequest
+		UpdateOidcProviderRequest,
+		SystemAlert
 	} from '$lib/types';
 
 	// --- Global feedback ---
@@ -45,6 +48,10 @@
 	let generatedToken: string | null = $state(null);
 
 	let oidcProviders: OidcProviderResponse[] = $state([]);
+
+	// --- TLS Certificate ---
+	let tlsAlerts: SystemAlert[] = $state([]);
+	let renewingCert: boolean = $state(false);
 
 	// --- OIDC modal state ---
 	let showOidcModal: boolean = $state(false);
@@ -122,7 +129,8 @@
 			getAuthenticationSettings(),
 			getAgentCertificateSettings(),
 			getEnrollmentTokenStatus(),
-			getOidcProviders()
+			getOidcProviders(),
+			getSystemAlerts()
 		]);
 
 		if (results[0].status === 'fulfilled') {
@@ -140,6 +148,11 @@
 		}
 		if (results[4].status === 'fulfilled') {
 			oidcProviders = results[4].value;
+		}
+		if (results[5].status === 'fulfilled') {
+			tlsAlerts = results[5].value.alerts.filter(
+				(a) => a.id === 'server_cert_old_ca' || a.id === 'server_cert_expiring'
+			);
 		}
 
 		loading = false;
@@ -216,6 +229,21 @@
 			showSuccess('Enrollment token revoked.');
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to revoke enrollment token');
+		}
+	}
+
+	// --- Server Certificate ---
+	async function handleRenewServerCert() {
+		clearError();
+		renewingCert = true;
+		try {
+			await renewServerCertificate();
+			tlsAlerts = tlsAlerts.filter((a) => a.id !== 'server_cert_old_ca' && a.id !== 'server_cert_expiring');
+			showSuccess('Server certificate renewed successfully.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to renew server certificate');
+		} finally {
+			renewingCert = false;
 		}
 	}
 
@@ -529,7 +557,34 @@
 			</button>
 		</div>
 
-		<!-- Section 5: Enrollment Token -->
+		<!-- Section 5: Controller TLS Certificate -->
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">Controller TLS Certificate</h2>
+			<p class="text-surface-600-300-token mb-4">
+				The controller's HTTPS certificate is automatically renewed before expiration.
+				You can manually renew it here to re-issue under the current active CA.
+			</p>
+
+			{#if tlsAlerts.length > 0}
+				{#each tlsAlerts as alert (alert.id)}
+					<aside class="alert {alert.severity === 'warning' ? 'variant-filled-warning' : 'variant-filled-surface'} mb-4">
+						<div class="alert-message">
+							<p>{alert.message}</p>
+						</div>
+					</aside>
+				{/each}
+			{/if}
+
+			<button
+				class="btn variant-filled-primary"
+				onclick={handleRenewServerCert}
+				disabled={renewingCert}
+			>
+				{renewingCert ? 'Renewing...' : 'Renew Server Certificate'}
+			</button>
+		</div>
+
+		<!-- Section 6: Enrollment Token -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Enrollment Token</h2>
 			<div class="flex items-center gap-3 mb-4">

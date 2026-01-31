@@ -5,6 +5,8 @@ pub mod ca;
 pub mod health;
 pub mod oidc_auth;
 pub mod oidc_providers;
+pub mod server_cert;
 pub mod settings;
 pub mod settings_agent_certs;
 pub mod settings_auth;
+pub mod system_alerts;

@@ -7,8 +7,9 @@ use http::header;
 use crate::AppState;
 
 pub async fn ca_cert(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let bundle_pem = state.ca_snapshot.borrow().bundle_pem.clone();
     (
         [(header::CONTENT_TYPE, "application/x-pem-file")],
-        state.ca_pem.clone(),
+        bundle_pem,
     )
 }

@@ -16,6 +16,8 @@ pub enum RevocationReason {
 #[sea_orm(table_name = "agent_certificates")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    pub ca_fingerprint: String,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub serial_number: String,
     pub agent_id: Uuid,
     pub not_before: OffsetDateTime,

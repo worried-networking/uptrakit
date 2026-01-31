@@ -29,6 +29,7 @@ uptrakit/
 │   │   └── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   ├── shared/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — agent<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
@@ -97,6 +98,40 @@ Examples:
 - `feat(agent): add helper-scripts autodiscovery`
 - `fix(controller): handle websocket reconnect backoff`
 - `refactor(provider-github): simplify release tag normalisation`
+
+## PKI & CA rotation
+
+The controller manages a self-signed internal CA for mTLS agent authentication.
+
+### Key lifetimes
+
+| Asset | Default lifetime | Renewal/rotation window |
+| --- | --- | --- |
+| CA certificate | 5 years | 6 months before expiry |
+| Server HTTPS cert | 90 days | 30 days before expiry |
+| Agent client cert | 365 days | Configured via `renewal_window_hours` setting |
+
+### CA rotation flow
+
+1. Background task checks every 24 hours whether the active CA enters the 6-month rotation window.
+2. On rotation: current CA files move to `ca-previous.{crt,key}`, a new CA is generated as `ca.{crt,key}`.
+3. Both CAs form a trust bundle (`bundle_pem`). The controller trusts client certs signed by either CA.
+4. CRLs are partitioned: each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint` column in `agent_certificates`).
+5. Connected agents receive a `CaBundleUpdated` WebSocket message with the new bundle PEM.
+6. Agents that were offline detect staleness via `ca_bundle_hash` in `AgentSettings` and fetch the updated bundle over HTTP.
+7. New agent certs are always signed by the active CA.
+
+### External CA
+
+Pass `--ca-cert` and `--ca-key` to disable managed CA and rotation. The controller uses the provided CA as-is.
+
+### Server cert auto-renewal
+
+When the server HTTPS certificate (also CA-signed) approaches expiry, a background task generates a new one and hot-reloads the TLS listener. Admins can also trigger renewal manually via `POST /api/v1/settings/renew-server-certificate`.
+
+### CaSnapshot sharing
+
+Runtime CA state is shared across async tasks via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct. The cert signer, CRL manager, API handlers, and background tasks all read from this channel.
 
 ## Architecture rules and invariants
 

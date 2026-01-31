@@ -13,10 +13,19 @@ impl MigrationTrait for Migration {
                     .table(AgentCertificates::Table)
                     .if_not_exists()
                     .col(
+                        ColumnDef::new(AgentCertificates::CaFingerprint)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
                         ColumnDef::new(AgentCertificates::SerialNumber)
                             .string()
-                            .not_null()
-                            .primary_key(),
+                            .not_null(),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col(AgentCertificates::CaFingerprint)
+                            .col(AgentCertificates::SerialNumber),
                     )
                     .col(ColumnDef::new(AgentCertificates::AgentId).uuid().not_null())
                     .col(timestamp(AgentCertificates::NotBefore))
@@ -59,6 +68,7 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum AgentCertificates {
     Table,
+    CaFingerprint,
     AgentId,
     SerialNumber,
     NotBefore,

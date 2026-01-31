@@ -15,6 +15,7 @@ db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptr
 db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web-api/db-mysql"]
 
 [dependencies]
+uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-mqtt = { path = "../../ui/mqtt", optional = true }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-web-api = { path = "../../ui/web-api" }
@@ -40,6 +41,8 @@ sea-orm-migration = { version = "2.0.0-rc.30", default-features = false, feature
 argon2 = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

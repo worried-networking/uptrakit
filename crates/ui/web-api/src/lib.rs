@@ -27,11 +27,34 @@ use auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
 use middleware::require_https;
 use settings::Settings;
 
+/// Cloneable snapshot of CA state. Re-exported for use by consumers.
+pub use ca_snapshot::CaSnapshotReceiver;
+
+pub mod ca_snapshot {
+    /// Type alias for the watch receiver carrying CA snapshot data.
+    pub type CaSnapshotReceiver = tokio::sync::watch::Receiver<CaSnapshotData>;
+
+    /// Cloneable snapshot of CA state shared across the application.
+    #[derive(Clone, Debug)]
+    pub struct CaSnapshotData {
+        pub active_cert_pem: String,
+        pub active_key_pem: String,
+        pub active_fingerprint: String,
+        pub previous_cert_pem: Option<String>,
+        pub previous_key_pem: Option<String>,
+        pub previous_fingerprint: Option<String>,
+        pub bundle_pem: String,
+        pub bundle_hash: String,
+        pub managed: bool,
+        pub active_not_after: time::OffsetDateTime,
+    }
+}
+
 /// Shared application state available to all handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// PEM-encoded CA certificate served at `/api/v1/ca.crt`.
-    pub ca_pem: String,
+    /// Watch receiver for the current CA snapshot (bundle PEM, fingerprints, etc.).
+    pub ca_snapshot: CaSnapshotReceiver,
     /// IP networks whose `X-Forwarded-*` headers are trusted.
     pub trusted_proxies: Arc<[IpNet]>,
     /// Header to extract the real client IP from when behind a trusted proxy.
@@ -54,6 +77,12 @@ pub struct AppState {
     pub jwt: Arc<JwtManager>,
     /// In-memory store for pending OIDC token exchanges.
     pub oidc_token_exchange_store: OidcTokenExchangeStore,
+    /// Path to the PKI directory (for server cert renewal).
+    pub pki_path: std::path::PathBuf,
+    /// RustlsConfig handle for hot-reloading TLS.
+    pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// Extra SANs configured via CLI for server cert generation.
+    pub extra_sans: Arc<[String]>,
 }
 
 /// OpenAPI documentation
@@ -96,7 +125,9 @@ pub struct AppState {
         routes::agents::merge_agent,
         routes::agents::enrollment_token_status,
         routes::settings_agent_certs::get_agent_certificate_settings,
-        routes::settings_agent_certs::update_agent_certificate_settings
+        routes::settings_agent_certs::update_agent_certificate_settings,
+        routes::system_alerts::get_system_alerts,
+        routes::server_cert::renew_server_certificate
     ),
     components(
         schemas(
@@ -127,7 +158,10 @@ pub struct AppState {
             routes::agents::MergeAgentRequest,
             routes::agents::EnrollmentTokenStatusResponse,
             routes::settings_agent_certs::AgentCertificateSettingsResponse,
-            routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest
+            routes::settings_agent_certs::UpdateAgentCertificateSettingsRequest,
+            routes::system_alerts::SystemAlert,
+            routes::system_alerts::SystemAlertsResponse,
+            routes::server_cert::RenewServerCertResponse
         )
     ),
     info(
@@ -225,6 +259,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::agents::reject_agent))
         .routes(routes!(routes::agents::deactivate_agent))
         .routes(routes!(routes::agents::merge_agent))
+        .routes(routes!(routes::system_alerts::get_system_alerts))
+        .routes(routes!(routes::server_cert::renew_server_certificate))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,
@@ -298,6 +334,10 @@ mod tests {
         ) -> Result<AgentCertBundle, String> {
             unimplemented!("not used in tests")
         }
+
+        fn active_ca_fingerprint(&self) -> String {
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string()
+        }
     }
 
     async fn test_db() -> DatabaseConnection {
@@ -310,8 +350,43 @@ mod tests {
     }
 
     async fn test_state_with_proxies(trusted_proxies: Vec<IpNet>) -> Arc<AppState> {
+        let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
+        let snapshot_data = crate::ca_snapshot::CaSnapshotData {
+            active_cert_pem: ca_pem.to_string(),
+            active_key_pem: String::new(),
+            active_fingerprint: "0".repeat(64),
+            previous_cert_pem: None,
+            previous_key_pem: None,
+            previous_fingerprint: None,
+            bundle_pem: ca_pem.to_string(),
+            bundle_hash: "0".repeat(64),
+            managed: true,
+            active_not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+        };
+        let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+
+        // Create a dummy RustlsConfig — tests don't actually do TLS handshakes.
+        let rustls_cfg = {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let key_pair =
+                rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .unwrap()
+                .self_signed(&key_pair)
+                .unwrap();
+            let server_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der())
+                        .unwrap(),
+                )
+                .unwrap();
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+        };
+
         Arc::new(AppState {
-            ca_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".into(),
+            ca_snapshot: ca_rx,
             trusted_proxies: trusted_proxies.into(),
             real_ip_header: "X-Forwarded-For".into(),
             db: test_db().await,
@@ -331,6 +406,9 @@ mod tests {
                 b"test-secret-lib",
             )),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(),
+            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_config: rustls_cfg,
+            extra_sans: Arc::new([]),
         })
     }
 

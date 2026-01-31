@@ -31,6 +31,7 @@ pub enum ControllerMessage {
     Certificate(CertificatePayload),
     Error(ErrorPayload),
     AgentSettings(AgentSettingsPayload),
+    CaBundleUpdated(CaBundleUpdatedPayload),
 }
 
 /// Payload for ping messages.
@@ -126,6 +127,14 @@ pub struct ErrorPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSettingsPayload {
     pub renewal_window_hours: u16,
+    #[serde(default)]
+    pub ca_bundle_hash: String,
+}
+
+/// Payload for CA bundle update notification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaBundleUpdatedPayload {
+    pub ca_bundle_pem: String,
 }
 
 #[cfg(test)]
@@ -279,11 +288,12 @@ mod tests {
     fn agent_settings_serialization_roundtrip() {
         let msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
             renewal_window_hours: 6,
+            ca_bundle_hash: "abc123".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"agent_settings","renewal_window_hours":6}"#
+            r#"{"type":"agent_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123"}"#
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -293,14 +303,40 @@ mod tests {
     fn agent_settings_backward_compat_extra_fields() {
         // Future-proof: extra fields in JSON should be ignored
         let json =
-            r#"{"type":"agent_settings","renewal_window_hours":12,"some_future_field":"value"}"#;
+            r#"{"type":"agent_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","some_future_field":"value"}"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert_eq!(
             msg,
             ControllerMessage::AgentSettings(AgentSettingsPayload {
                 renewal_window_hours: 12,
+                ca_bundle_hash: "def456".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn agent_settings_backward_compat_missing_ca_hash() {
+        // Agents running older protocol without ca_bundle_hash should still parse
+        let json = r#"{"type":"agent_settings","renewal_window_hours":6}"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg,
+            ControllerMessage::AgentSettings(AgentSettingsPayload {
+                renewal_window_hours: 6,
+                ca_bundle_hash: String::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn ca_bundle_updated_serialization_roundtrip() {
+        let msg = ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
+            ca_bundle_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
+                .to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
     }
 
     #[test]
