@@ -348,7 +348,7 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
-    use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
+    use crate::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
     use crate::extract::Protocol;
     use crate::settings::Settings;
     use crate::{AppState, build_router};
@@ -359,7 +359,7 @@ mod tests {
             &self,
             _: &uuid::Uuid,
             _: time::Duration,
-        ) -> Result<AgentCertBundle, String> {
+        ) -> std::result::Result<AgentCertBundle, rootcause::Report<CertSignerError>> {
             unimplemented!("not used in tests")
         }
 

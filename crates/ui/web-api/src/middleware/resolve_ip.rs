@@ -130,14 +130,14 @@ mod tests {
     }
 
     async fn state_with(proxies: Vec<IpNet>, header: &str) -> Arc<AppState> {
-        use crate::cert_signer::{AgentCertBundle, AgentCertSigner};
+        use crate::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
         struct NoopCertSigner;
         impl AgentCertSigner for NoopCertSigner {
             fn sign_agent_cert(
                 &self,
                 _: &uuid::Uuid,
                 _: time::Duration,
-            ) -> Result<AgentCertBundle, String> {
+            ) -> std::result::Result<AgentCertBundle, rootcause::Report<CertSignerError>> {
                 unimplemented!()
             }
             fn active_ca_fingerprint(&self) -> String {

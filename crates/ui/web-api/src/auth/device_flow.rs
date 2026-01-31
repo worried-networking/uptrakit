@@ -383,7 +383,7 @@ mod tests {
 
         // Flow should be gone
         let err = store.get_status(&device_code).unwrap_err();
-        assert!(matches!(err, DeviceFlowError::NotFound));
+        assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
 
         // User code should also be gone
         let by_uc = store.by_user_code.lock().unwrap();
