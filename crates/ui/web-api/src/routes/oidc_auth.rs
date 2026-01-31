@@ -253,9 +253,14 @@ pub async fn oidc_callback(
     );
 
     // Exchange code for tokens
-    let token_response = match client
-        .exchange_code(AuthorizationCode::new(code))
-        .unwrap()
+    let token_request = match client.exchange_code(AuthorizationCode::new(code)) {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!("OIDC token endpoint not configured: {e}");
+            return Redirect::to("/login?error=oidc_token_exchange_failed").into_response();
+        }
+    };
+    let token_response = match token_request
         .set_pkce_verifier(flow.pkce_verifier)
         .request_async(&http_client)
         .await
