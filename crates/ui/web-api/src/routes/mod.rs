@@ -11,4 +11,6 @@ pub mod server_cert;
 pub mod settings;
 pub mod settings_agent_certs;
 pub mod settings_auth;
+pub mod settings_mqtt;
+pub mod settings_network;
 pub mod system_alerts;

@@ -23,11 +23,12 @@ pub async fn resolve_ip(
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| canonicalize(c.0.ip()));
 
+    let network = state.settings.network().await;
     let (client_ip, proxy_ip) = resolve_client_ip(
         peer_ip,
         req.headers(),
-        &state.trusted_proxies,
-        &state.real_ip_header,
+        &network.trusted_proxies,
+        &network.real_ip_header,
     );
 
     if let Some(ip) = client_ip {
@@ -179,18 +180,20 @@ mod tests {
         };
 
         let db = test_db().await;
+        let settings = Settings::new(
+            RegistrationSettings {
+                mode: RegistrationMode::Open,
+                token_hash: None,
+            },
+            7,
+        );
+        settings.set_trusted_proxies(proxies).await;
+        settings.set_real_ip_header(header.to_string()).await;
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
-            trusted_proxies: proxies.into(),
-            real_ip_header: header.into(),
             db: db.clone(),
-            settings: Settings::new(
-                RegistrationSettings {
-                    mode: RegistrationMode::Open,
-                    token_hash: None,
-                },
-                7,
-            ),
+            settings,
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
@@ -205,7 +208,6 @@ mod tests {
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
-            extra_sans: Arc::new([]),
         })
     }
 

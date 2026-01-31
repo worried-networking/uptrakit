@@ -234,8 +234,6 @@ mod tests {
 
         Arc::new(AppState {
             ca_snapshot: ca_rx,
-            trusted_proxies: vec![].into(),
-            real_ip_header: "X-Forwarded-For".into(),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
@@ -256,7 +254,6 @@ mod tests {
             jwt: Arc::new(JwtManager::from_secret(b"test-secret-for-middleware-tests")),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
-            extra_sans: Arc::new([]),
         })
     }
 

@@ -17,7 +17,7 @@ axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 clap = { version = "4", features = ["derive"] }
 rootcause = "0.11"
 thiserror = "2"
-ipnet = "2"
+ipnet = { version = "2", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "aws-lc-rs"] }

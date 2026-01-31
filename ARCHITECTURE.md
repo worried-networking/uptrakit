@@ -104,6 +104,34 @@ The controller operates an internal Certificate Authority for mutual TLS authent
 
 For cryptographic algorithm details, see [SECURITY.md](SECURITY.md) section "Cryptographic Details". For the full operational flow (rotation steps, bundle distribution, agent update path), see [AGENTS.md](AGENTS.md) section "PKI & CA rotation".
 
+## DB-Managed Settings
+
+Most runtime settings are stored in the database (`setting` entity) as JSON values. At startup, `Settings::load()` issues a single `SELECT * FROM settings` query and distributes the resulting `RawSettings` map to all sub-loaders and to reconciliation — no per-key DB reads. Any unrecognised keys in the DB trigger a warning log.
+
+The controller then reconciles CLI arguments with the pre-loaded values using a 5-case priority logic:
+
+1. **DB has value + CLI provided + differs + `--force-settings-override`**: CLI wins, DB updated.
+2. **DB has value + CLI provided + differs + no force**: DB wins, warning logged.
+3. **DB has value + (CLI absent or same)**: DB value used.
+4. **No DB value + CLI provided**: CLI value saved to DB.
+5. **No DB value + CLI absent**: Hardcoded default saved to DB.
+
+This ensures that settings persist across restarts without requiring CLI flags after initial configuration, while still allowing one-time overrides.
+
+### Settings categories
+
+| Category | DB key prefix | Runtime-changeable | API endpoint |
+| --- | --- | --- | --- |
+| Network | `network.*` | Proxies, header, SANs: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
+| MQTT | `mqtt.*` | No (all require restart) | `GET/PUT /api/v1/settings/mqtt` |
+| Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
+| Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
+| Agent certificates | `agent_certificates.*` | Yes | `GET/PUT /api/v1/settings/agent-certificates` |
+
+**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
+
+The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for each settings group, allowing runtime-changeable settings to take effect immediately without restart. See [AGENTS.md](AGENTS.md) section "DB-managed settings" for the full key reference.
+
 ## Authentication & Authorization
 
 ### User authentication

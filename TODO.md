@@ -51,7 +51,7 @@ Essential infrastructure needed before feature development.
 - [ ] Implement version comparison logic (semver, custom formats)
 - [ ] Create repositories/DAOs for each entity
 - [ ] Add validation logic for data models
-- [ ] Store JSON encoded strings as settings values
+- [x] Store JSON encoded strings as settings values
 
 ### User Authentication & Authorization
 

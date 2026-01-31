@@ -9,6 +9,8 @@ import type {
 	EnrollmentTokenStatus,
 	LoginRequest,
 	MessageResponse,
+	MqttSettingsResponse,
+	NetworkSettings,
 	OidcLinkRequest,
 	OidcProviderResponse,
 	RefreshResponse,
@@ -18,6 +20,8 @@ import type {
 	SystemAlertsResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
+	UpdateMqttSettings,
+	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdateRegistrationSettings,
 	User
@@ -217,6 +221,26 @@ export function createEnrollmentToken(): Promise<EnrollmentTokenResponse> {
 
 export function revokeEnrollmentToken(): Promise<MessageResponse> {
 	return request('/agents/enrollment-token', { method: 'DELETE' });
+}
+
+// --- Network Settings APIs ---
+
+export function getNetworkSettings(): Promise<NetworkSettings> {
+	return request('/settings/network');
+}
+
+export function updateNetworkSettings(data: UpdateNetworkSettings): Promise<NetworkSettings> {
+	return request('/settings/network', { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// --- MQTT Settings APIs ---
+
+export function getMqttSettings(): Promise<MqttSettingsResponse> {
+	return request('/settings/mqtt');
+}
+
+export function updateMqttSettings(data: UpdateMqttSettings): Promise<MqttSettingsResponse> {
+	return request('/settings/mqtt', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- OIDC Provider APIs ---

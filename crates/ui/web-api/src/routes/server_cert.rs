@@ -42,7 +42,7 @@ pub async fn renew_server_certificate(
         })?;
 
     // Generate new server cert
-    let extra_sans: Vec<String> = state.extra_sans.to_vec();
+    let extra_sans: Vec<String> = state.settings.extra_sans().await;
     let sans: SanCollection = pki_utils::collect_sans(&extra_sans).map_err(|e| {
         tracing::error!(error = %e, "failed to collect SANs");
         StatusCode::INTERNAL_SERVER_ERROR
