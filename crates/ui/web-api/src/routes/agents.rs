@@ -733,7 +733,7 @@ fn agent_to_response(agent: agent::Model) -> AgentResponse {
 // --- Certificate recording error type ---
 
 #[derive(Debug, Error)]
-enum CertRecordError {
+pub(crate) enum CertRecordError {
     #[error("failed to parse PEM data")]
     PemParse,
 
@@ -800,7 +800,7 @@ pub(crate) async fn revoke_certificate(
     serial_number: &str,
     ca_fingerprint: &str,
     reason: RevocationReason,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<(), Report<CertRecordError>> {
     AgentCertificate::update_many()
         .col_expr(
             agent_certificate::Column::RevokedAt,
@@ -814,7 +814,8 @@ pub(crate) async fn revoke_certificate(
         .filter(agent_certificate::Column::SerialNumber.eq(serial_number))
         .filter(agent_certificate::Column::RevokedAt.is_null())
         .exec(db)
-        .await?;
+        .await
+        .context_to::<CertRecordError>()?;
     Ok(())
 }
 
