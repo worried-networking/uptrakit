@@ -1,13 +1,13 @@
 use super::{Result, password, token::generate_secure_token};
-use crate::settings_store::{delete_setting, load_setting, upsert_setting};
+use crate::settings_store::{RawSettings, delete_setting, load_setting, upsert_setting};
 use rootcause::prelude::*;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use serde::{Deserialize, Serialize};
 use uptrakit_shared_db::entity::prelude::*;
 use utoipa::ToSchema;
 
-const SETTING_KEY_MODE: &str = "registration.mode";
-const SETTING_KEY_TOKEN_HASH: &str = "registration.token_hash";
+pub const SETTING_KEY_MODE: &str = "registration.mode";
+pub const SETTING_KEY_TOKEN_HASH: &str = "registration.token_hash";
 
 /// Registration mode controlling how new users can sign up.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -52,8 +52,12 @@ impl RegistrationSettings {
     ///
     /// - If no users exist: generate a new invite token, store/overwrite it, return
     ///   settings + plaintext token for logging.
-    /// - If users exist: load existing settings from DB (defaulting to Closed if absent).
-    pub async fn initialize(db: &DatabaseConnection) -> Result<(Self, Option<String>)> {
+    /// - If users exist: load existing settings from the pre-fetched map
+    ///   (defaulting to Closed if absent).
+    pub async fn initialize(
+        db: &DatabaseConnection,
+        raw: &RawSettings,
+    ) -> Result<(Self, Option<String>)> {
         let user_count = User::find().count(db).await.context_to()?;
 
         if user_count == 0 {
@@ -82,14 +86,14 @@ impl RegistrationSettings {
             };
             Ok((settings, Some(plaintext)))
         } else {
-            // Load existing settings from DB
-            let mode = load_setting(db, SETTING_KEY_MODE)
-                .await?
+            // Read from pre-fetched map
+            let mode = raw
+                .get(SETTING_KEY_MODE)
                 .and_then(|v| v.as_str().and_then(RegistrationMode::from_str))
                 .unwrap_or(RegistrationMode::Closed);
 
-            let token_hash = load_setting(db, SETTING_KEY_TOKEN_HASH)
-                .await?
+            let token_hash = raw
+                .get(SETTING_KEY_TOKEN_HASH)
                 .and_then(|v| v.as_str().map(String::from));
 
             let settings = RegistrationSettings { mode, token_hash };

@@ -25,7 +25,7 @@ use uptrakit_shared_db::entity::prelude::RevocationReason;
 use uptrakit_shared_db::entity::{agent, agent_certificate, prelude::*};
 use utoipa::ToSchema;
 
-const SETTING_KEY_ENROLLMENT_TOKEN_HASH: &str = "agent_enrollment.token_hash";
+pub const SETTING_KEY_ENROLLMENT_TOKEN_HASH: &str = "agent_enrollment.token_hash";
 
 // --- Agent status enum ---
 

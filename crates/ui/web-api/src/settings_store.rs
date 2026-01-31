@@ -1,8 +1,19 @@
+use std::collections::HashMap;
+
 use crate::auth::Result;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{prelude::*, setting};
+
+/// All settings from the DB, keyed by setting name.
+pub type RawSettings = HashMap<String, serde_json::Value>;
+
+/// Load every row from the `settings` table in a single query.
+pub async fn load_all_settings(db: &DatabaseConnection) -> Result<RawSettings> {
+    let rows = Setting::find().all(db).await.context_to()?;
+    Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
+}
 
 pub async fn upsert_setting(
     db: &DatabaseConnection,

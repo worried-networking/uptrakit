@@ -8,7 +8,7 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 use crate::auth;
 use crate::auth::authentication::AuthenticationSettings;
 use crate::auth::registration::RegistrationSettings;
-use crate::settings_store::load_setting;
+use crate::settings_store::RawSettings;
 
 const SETTING_KEY_AGENT_CERT_LIFETIME: &str = "agent_certificate.lifetime_days";
 const DEFAULT_AGENT_CERT_LIFETIME_DAYS: u16 = 7;
@@ -38,6 +38,45 @@ pub const DEFAULT_REAL_IP_HEADER: &str = "X-Forwarded-For";
 pub const DEFAULT_MQTT_PORT: u16 = 1883;
 pub const DEFAULT_MQTT_CLIENT_ID: &str = "uptrakit-controller";
 pub const DEFAULT_MQTT_TOPIC_PREFIX: &str = "uptrakit";
+
+/// Every recognised setting key. Used to warn about stale or misspelled entries
+/// left in the DB after upgrades.
+pub const ALL_KNOWN_KEYS: &[&str] = &[
+    // Registration
+    crate::auth::registration::SETTING_KEY_MODE,
+    crate::auth::registration::SETTING_KEY_TOKEN_HASH,
+    // Authentication
+    crate::auth::authentication::SETTING_KEY_PASSWORD_AUTH,
+    // Agent certificates
+    SETTING_KEY_AGENT_CERT_LIFETIME,
+    SETTING_KEY_RENEWAL_WINDOW_HOURS,
+    // Network
+    SETTING_KEY_TRUSTED_PROXIES,
+    SETTING_KEY_REAL_IP_HEADER,
+    SETTING_KEY_EXTRA_SANS,
+    SETTING_KEY_HTTP_ADDR,
+    SETTING_KEY_HTTPS_ADDR,
+    // MQTT
+    SETTING_KEY_MQTT_HOST,
+    SETTING_KEY_MQTT_PORT,
+    SETTING_KEY_MQTT_CLIENT_ID,
+    SETTING_KEY_MQTT_USERNAME,
+    SETTING_KEY_MQTT_PASSWORD,
+    SETTING_KEY_MQTT_TOPIC_PREFIX,
+    // Agent enrollment
+    crate::routes::agents::SETTING_KEY_ENROLLMENT_TOKEN_HASH,
+];
+
+fn warn_unrecognised_keys(raw: &RawSettings) {
+    for key in raw.keys() {
+        if !ALL_KNOWN_KEYS.contains(&key.as_str()) {
+            tracing::warn!(
+                key,
+                "unrecognised setting key in database — may be stale or misspelled"
+            );
+        }
+    }
+}
 
 /// Network-related settings persisted in the DB and changeable at runtime
 /// (except for listen addresses which require a restart).
@@ -120,34 +159,32 @@ impl Settings {
         }
     }
 
-    /// Load all settings from DB. Generates initial registration token
-    /// if no users exist. Returns `(Settings, Option<plaintext_token>)`.
-    pub async fn load(db: &DatabaseConnection) -> auth::Result<(Self, Option<String>)> {
-        let (registration, token) = RegistrationSettings::initialize(db).await?;
-        let authentication = AuthenticationSettings::load(db).await?;
+    /// Load all settings from DB in a single bulk query. Generates initial
+    /// registration token if no users exist.
+    ///
+    /// Returns `(Settings, RawSettings, Option<plaintext_token>)` — the caller
+    /// can pass the raw map to reconciliation without re-reading from DB.
+    pub async fn load(
+        db: &DatabaseConnection,
+    ) -> auth::Result<(Self, RawSettings, Option<String>)> {
+        let raw = crate::settings_store::load_all_settings(db).await?;
+        warn_unrecognised_keys(&raw);
 
-        let agent_cert_lifetime_days = match load_setting(db, SETTING_KEY_AGENT_CERT_LIFETIME).await
-        {
-            Ok(Some(v)) => match v.as_u64().and_then(|n| u16::try_from(n).ok()) {
-                Some(days) => days,
-                None => DEFAULT_AGENT_CERT_LIFETIME_DAYS,
-            },
-            _ => DEFAULT_AGENT_CERT_LIFETIME_DAYS,
-        };
+        let (registration, token) = RegistrationSettings::initialize(db, &raw).await?;
+        let authentication = AuthenticationSettings::from_raw(&raw);
 
-        let renewal_window_hours = match load_setting(db, SETTING_KEY_RENEWAL_WINDOW_HOURS).await {
-            Ok(Some(v)) => match v.as_u64().and_then(|n| u16::try_from(n).ok()) {
-                Some(hours) => hours,
-                None => DEFAULT_RENEWAL_WINDOW_HOURS,
-            },
-            _ => DEFAULT_RENEWAL_WINDOW_HOURS,
-        };
+        let agent_cert_lifetime_days = raw
+            .get(SETTING_KEY_AGENT_CERT_LIFETIME)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
 
-        // Load network settings from DB
-        let network = Self::load_network_settings(db).await;
+        let renewal_window_hours = raw
+            .get(SETTING_KEY_RENEWAL_WINDOW_HOURS)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
 
-        // Load MQTT settings from DB
-        let mqtt = Self::load_mqtt_settings(db).await;
+        let network = Self::load_network_settings(&raw);
+        let mqtt = Self::load_mqtt_settings(&raw);
 
         let settings = Self {
             inner: Arc::new(Inner {
@@ -160,54 +197,51 @@ impl Settings {
             }),
         };
 
-        Ok((settings, token))
+        Ok((settings, raw, token))
     }
 
-    async fn load_network_settings(db: &DatabaseConnection) -> NetworkSettings {
-        let trusted_proxies = match load_setting(db, SETTING_KEY_TRUSTED_PROXIES).await {
-            Ok(Some(v)) => v
-                .as_array()
-                .map(|arr| {
+    fn load_network_settings(raw: &RawSettings) -> NetworkSettings {
+        let trusted_proxies = raw
+            .get(SETTING_KEY_TRUSTED_PROXIES)
+            .and_then(|v| {
+                v.as_array().map(|arr| {
                     arr.iter()
                         .filter_map(|s| s.as_str()?.parse::<IpNet>().ok())
                         .collect()
                 })
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
+            })
+            .unwrap_or_default();
 
-        let real_ip_header = match load_setting(db, SETTING_KEY_REAL_IP_HEADER).await {
-            Ok(Some(v)) => v.as_str().unwrap_or(DEFAULT_REAL_IP_HEADER).to_string(),
-            _ => DEFAULT_REAL_IP_HEADER.to_string(),
-        };
+        let real_ip_header = raw
+            .get(SETTING_KEY_REAL_IP_HEADER)
+            .and_then(|v| v.as_str())
+            .unwrap_or(DEFAULT_REAL_IP_HEADER)
+            .to_string();
 
-        let extra_sans = match load_setting(db, SETTING_KEY_EXTRA_SANS).await {
-            Ok(Some(v)) => v
-                .as_array()
-                .map(|arr| {
+        let extra_sans = raw
+            .get(SETTING_KEY_EXTRA_SANS)
+            .and_then(|v| {
+                v.as_array().map(|arr| {
                     arr.iter()
                         .filter_map(|s| s.as_str().map(String::from))
                         .collect()
                 })
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
+            })
+            .unwrap_or_default();
 
-        let http_addr = match load_setting(db, SETTING_KEY_HTTP_ADDR).await {
-            Ok(Some(v)) => v
-                .as_str()
-                .and_then(|s| s.parse::<SocketAddr>().ok())
-                .unwrap_or_else(|| DEFAULT_HTTP_ADDR.parse().unwrap()),
-            _ => DEFAULT_HTTP_ADDR.parse().unwrap(),
-        };
+        let http_addr = raw
+            .get(SETTING_KEY_HTTP_ADDR)
+            .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
+            .unwrap_or_else(|| DEFAULT_HTTP_ADDR.parse().expect("valid default HTTP addr"));
 
-        let https_addr = match load_setting(db, SETTING_KEY_HTTPS_ADDR).await {
-            Ok(Some(v)) => v
-                .as_str()
-                .and_then(|s| s.parse::<SocketAddr>().ok())
-                .unwrap_or_else(|| DEFAULT_HTTPS_ADDR.parse().unwrap()),
-            _ => DEFAULT_HTTPS_ADDR.parse().unwrap(),
-        };
+        let https_addr = raw
+            .get(SETTING_KEY_HTTPS_ADDR)
+            .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
+            .unwrap_or_else(|| {
+                DEFAULT_HTTPS_ADDR
+                    .parse()
+                    .expect("valid default HTTPS addr")
+            });
 
         NetworkSettings {
             trusted_proxies,
@@ -218,39 +252,35 @@ impl Settings {
         }
     }
 
-    async fn load_mqtt_settings(db: &DatabaseConnection) -> MqttSettings {
-        let host = match load_setting(db, SETTING_KEY_MQTT_HOST).await {
-            Ok(Some(v)) => v.as_str().map(String::from),
-            _ => None,
-        };
+    fn load_mqtt_settings(raw: &RawSettings) -> MqttSettings {
+        let host = raw
+            .get(SETTING_KEY_MQTT_HOST)
+            .and_then(|v| v.as_str().map(String::from));
 
-        let port = match load_setting(db, SETTING_KEY_MQTT_PORT).await {
-            Ok(Some(v)) => v
-                .as_u64()
-                .and_then(|n| u16::try_from(n).ok())
-                .unwrap_or(DEFAULT_MQTT_PORT),
-            _ => DEFAULT_MQTT_PORT,
-        };
+        let port = raw
+            .get(SETTING_KEY_MQTT_PORT)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_MQTT_PORT);
 
-        let client_id = match load_setting(db, SETTING_KEY_MQTT_CLIENT_ID).await {
-            Ok(Some(v)) => v.as_str().unwrap_or(DEFAULT_MQTT_CLIENT_ID).to_string(),
-            _ => DEFAULT_MQTT_CLIENT_ID.to_string(),
-        };
+        let client_id = raw
+            .get(SETTING_KEY_MQTT_CLIENT_ID)
+            .and_then(|v| v.as_str())
+            .unwrap_or(DEFAULT_MQTT_CLIENT_ID)
+            .to_string();
 
-        let username = match load_setting(db, SETTING_KEY_MQTT_USERNAME).await {
-            Ok(Some(v)) => v.as_str().map(String::from),
-            _ => None,
-        };
+        let username = raw
+            .get(SETTING_KEY_MQTT_USERNAME)
+            .and_then(|v| v.as_str().map(String::from));
 
-        let password = match load_setting(db, SETTING_KEY_MQTT_PASSWORD).await {
-            Ok(Some(v)) => v.as_str().map(String::from),
-            _ => None,
-        };
+        let password = raw
+            .get(SETTING_KEY_MQTT_PASSWORD)
+            .and_then(|v| v.as_str().map(String::from));
 
-        let topic_prefix = match load_setting(db, SETTING_KEY_MQTT_TOPIC_PREFIX).await {
-            Ok(Some(v)) => v.as_str().unwrap_or(DEFAULT_MQTT_TOPIC_PREFIX).to_string(),
-            _ => DEFAULT_MQTT_TOPIC_PREFIX.to_string(),
-        };
+        let topic_prefix = raw
+            .get(SETTING_KEY_MQTT_TOPIC_PREFIX)
+            .and_then(|v| v.as_str())
+            .unwrap_or(DEFAULT_MQTT_TOPIC_PREFIX)
+            .to_string();
 
         MqttSettings {
             host,
