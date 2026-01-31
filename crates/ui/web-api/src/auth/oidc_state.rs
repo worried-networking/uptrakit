@@ -37,18 +37,33 @@ impl OidcFlowStore {
     }
 
     pub fn insert(&self, state: String, flow: PendingOidcFlow) {
-        self.inner.lock().unwrap().insert(state, flow);
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
+            .insert(state, flow);
     }
 
     pub fn take(&self, state: &str) -> Option<PendingOidcFlow> {
-        self.inner.lock().unwrap().remove(state)
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
+            .remove(state)
     }
 
     pub fn cleanup_expired(&self) {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(TTL_SECONDS);
         self.inner
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
             .retain(|_, flow| flow.created_at > cutoff);
     }
 }
@@ -88,18 +103,33 @@ impl AccountLinkStore {
     }
 
     pub fn insert(&self, token: String, link: PendingAccountLink) {
-        self.inner.lock().unwrap().insert(token, link);
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
+            .insert(token, link);
     }
 
     pub fn take(&self, token: &str) -> Option<PendingAccountLink> {
-        self.inner.lock().unwrap().remove(token)
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
+            .remove(token)
     }
 
     pub fn cleanup_expired(&self) {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(TTL_SECONDS);
         self.inner
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
             .retain(|_, link| link.created_at > cutoff);
     }
 }
@@ -132,18 +162,33 @@ impl OidcTokenExchangeStore {
     }
 
     pub fn insert(&self, code: String, exchange: PendingOidcTokenExchange) {
-        self.inner.lock().unwrap().insert(code, exchange);
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
+            .insert(code, exchange);
     }
 
     pub fn take(&self, code: &str) -> Option<PendingOidcTokenExchange> {
-        self.inner.lock().unwrap().remove(code)
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
+            .remove(code)
     }
 
     pub fn cleanup_expired(&self) {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(EXCHANGE_TTL_SECONDS);
         self.inner
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("mutex poisoned, recovering inner data");
+                poisoned.into_inner()
+            })
             .retain(|_, ex| ex.created_at > cutoff);
     }
 }
