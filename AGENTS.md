@@ -64,6 +64,7 @@ cargo check --workspace --all-features                               # Lint
 cargo clippy --workspace --all-targets --no-default-features --features db-sqlite -- -D warnings # Lint with Clippy over minimal features-set
 cargo clippy --workspace --all-targets --all-features -- -D warnings # Lint with Clippy
 cargo test --all-features                                            # Tests
+cargo deny check                                                     # Validate new dependencies
 ```
 
 ### Frontend (SvelteKit)
