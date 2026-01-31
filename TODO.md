@@ -309,6 +309,10 @@ Ways users interact with the system.
 - [ ] Implement MQTT connection resilience
 - [ ] Add MQTT authentication support
 
+### Notifications
+
+- [ ] Add a universal notifications engine
+
 ---
 
 ## Phase 4: Provider Ecosystem (Priority 3-4)

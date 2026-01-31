@@ -57,9 +57,12 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 ### Backend (Rust)
 
 ```sh
-cargo fmt --all                                              # Format
-cargo clippy --all-targets --all-features -- -D warnings     # Lint (zero warnings)
-cargo test --all-features                                    # Tests
+cargo fmt --all                                                      # Format
+cargo check --workspace --no-default-features --features db-sqlite   # Lint with minimal features-set
+cargo check --workspace --all-features                               # Lint
+cargo clippy --workspace --all-targets --no-default-features --features db-sqlite -- -D warnings # Lint with Clippy over minimal features-set
+cargo clippy --workspace --all-targets --all-features -- -D warnings # Lint with Clippy
+cargo test --all-features                                            # Tests
 ```
 
 ### Frontend (SvelteKit)
@@ -86,6 +89,9 @@ Scopes typically match crate or component names: `agent`, `controller`, `provide
 
 Breaking changes: add `!` after type/scope, e.g. `feat(api)!: change ws handshake payload`.
 
+Multi-scope commits should omit scope in the first line of the commit message, but provide all the details in the body.
+Make small, granular commits, focused on a single thing.
+
 Examples:
 
 - `feat(agent): add helper-scripts autodiscovery`
@@ -104,6 +110,8 @@ These are non-negotiable design constraints. Do not violate them.
 6. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials.
 7. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally — only high-level summaries are retained for display.
 8. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host never run concurrently.
+9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
+10. **Cover new logic with tests.** Cover success and failure paths.
 
 ## Error handling
 
