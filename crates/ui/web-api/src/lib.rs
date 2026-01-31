@@ -15,7 +15,6 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware as axum_mw;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
-use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
 use utoipa::OpenApi;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -57,13 +56,9 @@ pub mod ca_snapshot {
 pub struct AppState {
     /// Watch receiver for the current CA snapshot (bundle PEM, fingerprints, etc.).
     pub ca_snapshot: CaSnapshotReceiver,
-    /// IP networks whose `X-Forwarded-*` headers are trusted.
-    pub trusted_proxies: Arc<[IpNet]>,
-    /// Header to extract the real client IP from when behind a trusted proxy.
-    pub real_ip_header: String,
     /// Database connection pool.
     pub db: DatabaseConnection,
-    /// Application settings catalogue.
+    /// Application settings catalogue (includes network/MQTT settings).
     pub settings: Settings,
     /// Agent certificate signer for mTLS enrollment.
     pub cert_signer: Arc<dyn cert_signer::AgentCertSigner>,
@@ -85,8 +80,6 @@ pub struct AppState {
     pub pki_path: std::path::PathBuf,
     /// RustlsConfig handle for hot-reloading TLS.
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
-    /// Extra SANs configured via CLI for server cert generation.
-    pub extra_sans: Arc<[String]>,
 }
 
 /// OpenAPI documentation
@@ -138,7 +131,11 @@ pub struct AppState {
         routes::api_tokens::revoke_api_token,
         routes::device_auth::device_auth_start,
         routes::device_auth::device_auth_poll,
-        routes::device_auth::device_auth_approve
+        routes::device_auth::device_auth_approve,
+        routes::settings_network::get_network_settings,
+        routes::settings_network::update_network_settings,
+        routes::settings_mqtt::get_mqtt_settings,
+        routes::settings_mqtt::update_mqtt_settings
     ),
     components(
         schemas(
@@ -182,7 +179,11 @@ pub struct AppState {
             routes::device_auth::DeviceAuthPollRequest,
             routes::device_auth::DeviceAuthPollResponse,
             routes::device_auth::DeviceAuthApproveRequest,
-            routes::device_auth::DeviceAuthApproveResponse
+            routes::device_auth::DeviceAuthApproveResponse,
+            routes::settings_network::NetworkSettingsResponse,
+            routes::settings_network::UpdateNetworkSettingsRequest,
+            routes::settings_mqtt::MqttSettingsResponse,
+            routes::settings_mqtt::UpdateMqttSettingsRequest
         )
     ),
     info(
@@ -287,6 +288,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::agents::merge_agent))
         .routes(routes!(routes::system_alerts::get_system_alerts))
         .routes(routes!(routes::server_cert::renew_server_certificate))
+        .routes(routes!(
+            routes::settings_network::get_network_settings,
+            routes::settings_network::update_network_settings
+        ))
+        .routes(routes!(
+            routes::settings_mqtt::get_mqtt_settings,
+            routes::settings_mqtt::update_mqtt_settings
+        ))
         .routes(routes!(routes::device_auth::device_auth_approve))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
@@ -414,17 +423,20 @@ mod tests {
 
         let db = test_db().await;
 
+        let settings = Settings::new(
+            RegistrationSettings {
+                mode: RegistrationMode::Open,
+                token_hash: None,
+            },
+            7,
+        );
+        if !trusted_proxies.is_empty() {
+            settings.set_trusted_proxies(trusted_proxies).await;
+        }
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
-            trusted_proxies: trusted_proxies.into(),
-            real_ip_header: "X-Forwarded-For".into(),
-            settings: Settings::new(
-                RegistrationSettings {
-                    mode: RegistrationMode::Open,
-                    token_hash: None,
-                },
-                7,
-            ),
+            settings,
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
@@ -439,7 +451,6 @@ mod tests {
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
-            extra_sans: Arc::new([]),
             db,
         })
     }
