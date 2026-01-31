@@ -36,6 +36,15 @@ async fn main() {
 }
 
 async fn run(args: &Args) -> error::Result<()> {
+    // Parse URL early
+    let (host, port) = args
+        .parsed_url()
+        .map_err(|s| report!(Error::Enrollment(s)))?;
+    let base_url = args.url.trim_end_matches('/');
+
+    // Install the default crypto provider for rustls
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     // Resolve data directory, create if needed
     let data_dir = args
         .resolve_data_dir()
@@ -51,16 +60,29 @@ async fn run(args: &Args) -> error::Result<()> {
         state::delete_cert_not_after_ts(&data_dir)?;
     }
 
-    // TOFU CA pinning: load from disk, or fetch from HTTP and persist
-    let ca_pem = if let Some(cached) = state::load_ca_cert(&data_dir)? {
+    // CA bootstrap: cached → --ca-cert file → --trust-first-use TOFU → system trust
+    let ca_pem: Option<Vec<u8>> = if let Some(cached) = state::load_ca_cert(&data_dir)? {
         tracing::info!("loaded CA certificate from disk");
-        cached
-    } else {
-        tracing::info!("fetching CA certificate from controller");
-        let pem = client::fetch_ca_certificate(&args.host, args.http_port).await?;
+        if args.trust_first_use {
+            tracing::warn!("--trust-first-use ignored: CA already cached");
+        }
+        Some(cached)
+    } else if let Some(ref ca_path) = args.ca_cert {
+        tracing::info!("loading CA certificate from {}", ca_path.display());
+        let pem = std::fs::read(ca_path)
+            .map_err(|e| report!(Error::CaCertFile(format!("{}: {e}", ca_path.display()))))?;
         state::save_ca_cert(&data_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
-        pem
+        Some(pem)
+    } else if args.trust_first_use {
+        tracing::info!("TOFU: fetching CA (accepting any server certificate)");
+        let pem = client::fetch_ca_certificate(base_url, client::TlsMode::TrustFirstUse).await?;
+        state::save_ca_cert(&data_dir, &pem)?;
+        tracing::info!("CA certificate saved to disk");
+        Some(pem)
+    } else {
+        tracing::info!("using system root certificates");
+        None
     };
 
     // Check for existing certificate
@@ -76,7 +98,15 @@ async fn run(args: &Args) -> error::Result<()> {
             // Fall through to enrollment below
         } else {
             tracing::info!("loaded existing agent certificate from disk");
-            match run_authenticated_with_reconnect(args, &data_dir, &ca_pem).await {
+            match run_authenticated_with_reconnect(
+                &host,
+                port,
+                base_url,
+                &data_dir,
+                ca_pem.as_deref(),
+            )
+            .await
+            {
                 Ok(()) => return Ok(()),
                 Err(mut e) => {
                     if e.current_context_mut().is_cert_expired() {
@@ -95,9 +125,12 @@ async fn run(args: &Args) -> error::Result<()> {
 
     // Enrollment (existing agent.json OR fresh enrollment)
     // Retry on disconnect — e.g. a merge transfers our identity while we wait.
-    let tls_connector = client::build_tls_connector(&ca_pem)?;
+    let tls_connector = match ca_pem.as_deref() {
+        Some(pem) => client::build_tls_connector(pem)?,
+        None => client::build_system_trust_tls_connector()?,
+    };
     let cert_payload = loop {
-        match do_enrollment(args, &data_dir, &tls_connector).await {
+        match do_enrollment(args, &host, port, &data_dir, &tls_connector).await {
             Ok(cert) => break cert,
             Err(mut e) => {
                 if e.current_context_mut().is_receive_closed() {
@@ -122,12 +155,14 @@ async fn run(args: &Args) -> error::Result<()> {
     tracing::info!("agent certificate saved to disk");
 
     // Enter mTLS loop with reconnect
-    run_authenticated_with_reconnect(args, &data_dir, &ca_pem).await
+    run_authenticated_with_reconnect(&host, port, base_url, &data_dir, ca_pem.as_deref()).await
 }
 
 /// Consolidates the existing enrollment logic (bearer reconnect + fresh enroll).
 async fn do_enrollment(
     args: &Args,
+    host: &str,
+    port: u16,
     data_dir: &Path,
     tls_connector: &tokio_rustls::TlsConnector,
 ) -> error::Result<CertificatePayload> {
@@ -135,8 +170,7 @@ async fn do_enrollment(
         // Reconnect with Bearer header (existing agent.json)
         tracing::info!(agent_id = %existing.agent_id, "reconnecting with enrollment secret");
         let auth_header = format!("Bearer {}", existing.enrollment_secret);
-        let mut ws =
-            client::connect_ws(&args.host, args.port, tls_connector, Some(&auth_header)).await?;
+        let mut ws = client::connect_ws(host, port, tls_connector, Some(&auth_header)).await?;
 
         // Wait for approval (controller pushes immediately if already approved)
         client::wait_for_approval(&mut ws).await?;
@@ -151,7 +185,7 @@ async fn do_enrollment(
     } else {
         // Fresh enrollment
         tracing::info!("no agent state found, enrolling via WebSocket");
-        let mut ws = client::connect_ws(&args.host, args.port, tls_connector, None).await?;
+        let mut ws = client::connect_ws(host, port, tls_connector, None).await?;
 
         let system_hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
@@ -198,24 +232,34 @@ async fn do_enrollment(
 
 /// Enter the mTLS authenticated loop with automatic reconnection on cert rotation.
 async fn run_authenticated_with_reconnect(
-    args: &Args,
+    host: &str,
+    port: u16,
+    base_url: &str,
     data_dir: &Path,
-    ca_pem: &[u8],
+    ca_pem: Option<&[u8]>,
 ) -> error::Result<()> {
     loop {
         let cert_state =
             state::AgentCertState::load(data_dir)?.ok_or_else(|| report!(Error::NoCertificates))?;
         let cert_not_after_ts = state::load_cert_not_after_ts(data_dir)?;
 
-        let mtls_connector = client::build_tls_connector_with_client_cert(
-            ca_pem,
-            &cert_state.cert_pem,
-            &cert_state.key_pem,
-        )?;
+        let mtls_connector = match ca_pem {
+            Some(pem) => client::build_tls_connector_with_client_cert(
+                pem,
+                &cert_state.cert_pem,
+                &cert_state.key_pem,
+            )?,
+            None => client::build_system_trust_tls_connector_with_client_cert(
+                &cert_state.cert_pem,
+                &cert_state.key_pem,
+            )?,
+        };
 
         match client::run_authenticated_loop(
-            &args.host,
-            args.port,
+            host,
+            port,
+            base_url,
+            ca_pem,
             mtls_connector,
             cert_not_after_ts,
             data_dir,

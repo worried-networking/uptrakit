@@ -19,6 +19,7 @@ pub struct CrlManagerConfig {
     pub db: DatabaseConnection,
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub revocation_notify: Arc<Notify>,
+    pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
 }
 
 /// Mutable CA material that can be updated at runtime when the CA rotates.
@@ -40,18 +41,19 @@ pub struct CrlManager {
     server_cert: RwLock<(String, String)>,
 }
 
-/// Build DER-encoded CRLs from the database (standalone, for initial startup).
-pub async fn build_initial_crls_der(
+/// Build DER-encoded CRLs and combined PEM from the database (standalone, for initial startup).
+pub async fn build_initial_crls(
     db: &DatabaseConnection,
     snapshot: &CaSnapshot,
-) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
+) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
     let active_key = KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
     let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
         .context_to::<pki::PkiError>()?;
 
     let active_revoked = query_revoked_certs_for_ca(db, &snapshot.active_fingerprint).await?;
-    let active_crl = sign_crl(&active_issuer, active_revoked, 0)?;
+    let (active_crl, active_pem) = sign_crl(&active_issuer, active_revoked, 0)?;
     let mut crls = vec![active_crl];
+    let mut combined_pem = active_pem;
 
     if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
         &snapshot.previous_cert_pem,
@@ -62,11 +64,12 @@ pub async fn build_initial_crls_der(
         let prev_issuer =
             Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
         let prev_revoked = query_revoked_certs_for_ca(db, prev_fp).await?;
-        let prev_crl = sign_crl(&prev_issuer, prev_revoked, 0)?;
+        let (prev_crl, prev_pem) = sign_crl(&prev_issuer, prev_revoked, 0)?;
         crls.push(prev_crl);
+        combined_pem.push_str(&prev_pem);
     }
 
-    Ok(crls)
+    Ok((crls, combined_pem))
 }
 
 impl CrlManager {
@@ -140,28 +143,32 @@ impl CrlManager {
         *cert = (cert_pem, key_pem);
     }
 
-    /// Build DER-encoded CRLs from revoked certificates in the database.
-    async fn build_crls_der(&self) -> pki::Result<Vec<CertificateRevocationListDer<'static>>> {
+    /// Build DER-encoded CRLs and combined PEM from revoked certificates in the database.
+    async fn build_crls(
+        &self,
+    ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
         let issuers = self.issuers.read().await;
         let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
 
         let active_revoked =
             query_revoked_certs_for_ca(&self.config.db, &issuers.active_fingerprint).await?;
-        let active_crl = sign_crl(&issuers.active, active_revoked, crl_number)?;
+        let (active_crl, active_pem) = sign_crl(&issuers.active, active_revoked, crl_number)?;
         let mut crls = vec![active_crl];
+        let mut combined_pem = active_pem;
 
         if let Some((ref prev_issuer, ref prev_fp)) = issuers.prev {
             let prev_revoked = query_revoked_certs_for_ca(&self.config.db, prev_fp).await?;
-            let prev_crl = sign_crl(prev_issuer, prev_revoked, crl_number)?;
+            let (prev_crl, prev_pem) = sign_crl(prev_issuer, prev_revoked, crl_number)?;
             crls.push(prev_crl);
+            combined_pem.push_str(&prev_pem);
         }
 
-        Ok(crls)
+        Ok((crls, combined_pem))
     }
 
     /// Rebuild the CRLs and hot-reload the TLS configuration.
     pub async fn reload_tls_config(&self) -> pki::Result<()> {
-        let crls = self.build_crls_der().await?;
+        let (crls, crl_pem) = self.build_crls().await?;
         let issuers = self.issuers.read().await;
         let server_cert = self.server_cert.read().await;
 
@@ -175,6 +182,9 @@ impl CrlManager {
         self.config
             .rustls_config
             .reload_from_config(Arc::new(server_config));
+
+        // Update the CRL PEM cache for the HTTP endpoint
+        *self.config.crl_pem_cache.write().await = crl_pem;
 
         tracing::info!("TLS configuration reloaded with updated CRL");
         Ok(())
@@ -244,12 +254,12 @@ async fn query_revoked_certs_for_ca(
     Ok(revoked)
 }
 
-/// Sign a CRL with the given issuer and return the DER bytes.
+/// Sign a CRL with the given issuer and return both DER bytes and PEM string.
 fn sign_crl(
     ca_issuer: &Issuer<'_, KeyPair>,
     revoked_certs: Vec<RevokedCertParams>,
     crl_number: u64,
-) -> pki::Result<CertificateRevocationListDer<'static>> {
+) -> pki::Result<(CertificateRevocationListDer<'static>, String)> {
     let now = OffsetDateTime::now_utc();
     let params = CertificateRevocationListParams {
         this_update: now,
@@ -261,8 +271,10 @@ fn sign_crl(
     };
 
     let crl = params.signed_by(ca_issuer).context_to::<pki::PkiError>()?;
+    let pem = crl.pem().context_to::<pki::PkiError>()?;
+    let der = CertificateRevocationListDer::from(crl.der().to_vec());
 
-    Ok(CertificateRevocationListDer::from(crl.der().to_vec()))
+    Ok((der, pem))
 }
 
 /// Parse a colon-hex serial string (e.g. `"00:ab:cd"`) into raw bytes.

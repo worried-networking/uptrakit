@@ -20,7 +20,6 @@ const DEFAULT_RENEWAL_WINDOW_HOURS: u16 = 6;
 pub const SETTING_KEY_TRUSTED_PROXIES: &str = "network.trusted_proxies";
 pub const SETTING_KEY_REAL_IP_HEADER: &str = "network.real_ip_header";
 pub const SETTING_KEY_EXTRA_SANS: &str = "network.extra_sans";
-pub const SETTING_KEY_HTTP_ADDR: &str = "network.http_addr";
 pub const SETTING_KEY_HTTPS_ADDR: &str = "network.https_addr";
 
 // MQTT setting DB keys
@@ -32,7 +31,6 @@ pub const SETTING_KEY_MQTT_PASSWORD: &str = "mqtt.password";
 pub const SETTING_KEY_MQTT_TOPIC_PREFIX: &str = "mqtt.topic_prefix";
 
 /// Default listen addresses used when neither CLI nor DB provides a value.
-pub const DEFAULT_HTTP_ADDR: &str = "[::]:8080";
 pub const DEFAULT_HTTPS_ADDR: &str = "[::]:8443";
 pub const DEFAULT_REAL_IP_HEADER: &str = "X-Forwarded-For";
 pub const DEFAULT_MQTT_PORT: u16 = 1883;
@@ -54,7 +52,6 @@ pub const ALL_KNOWN_KEYS: &[&str] = &[
     SETTING_KEY_TRUSTED_PROXIES,
     SETTING_KEY_REAL_IP_HEADER,
     SETTING_KEY_EXTRA_SANS,
-    SETTING_KEY_HTTP_ADDR,
     SETTING_KEY_HTTPS_ADDR,
     // MQTT
     SETTING_KEY_MQTT_HOST,
@@ -85,7 +82,6 @@ pub struct NetworkSettings {
     pub trusted_proxies: Vec<IpNet>,
     pub real_ip_header: String,
     pub extra_sans: Vec<String>,
-    pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
 }
 
@@ -95,7 +91,6 @@ impl Default for NetworkSettings {
             trusted_proxies: Vec::new(),
             real_ip_header: DEFAULT_REAL_IP_HEADER.to_string(),
             extra_sans: Vec::new(),
-            http_addr: DEFAULT_HTTP_ADDR.parse().unwrap(),
             https_addr: DEFAULT_HTTPS_ADDR.parse().unwrap(),
         }
     }
@@ -229,11 +224,6 @@ impl Settings {
             })
             .unwrap_or_default();
 
-        let http_addr = raw
-            .get(SETTING_KEY_HTTP_ADDR)
-            .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
-            .unwrap_or_else(|| DEFAULT_HTTP_ADDR.parse().expect("valid default HTTP addr"));
-
         let https_addr = raw
             .get(SETTING_KEY_HTTPS_ADDR)
             .and_then(|v| v.as_str()?.parse::<SocketAddr>().ok())
@@ -247,7 +237,6 @@ impl Settings {
             trusted_proxies,
             real_ip_header,
             extra_sans,
-            http_addr,
             https_addr,
         }
     }
@@ -360,11 +349,6 @@ impl Settings {
         self.inner.network.read().await.extra_sans.clone()
     }
 
-    /// Read the HTTP listen address.
-    pub async fn http_addr(&self) -> SocketAddr {
-        self.inner.network.read().await.http_addr
-    }
-
     /// Read the HTTPS listen address.
     pub async fn https_addr(&self) -> SocketAddr {
         self.inner.network.read().await.https_addr
@@ -388,11 +372,6 @@ impl Settings {
     /// Update only extra SANs.
     pub async fn set_extra_sans(&self, sans: Vec<String>) {
         self.inner.network.write().await.extra_sans = sans;
-    }
-
-    /// Update only HTTP listen address.
-    pub async fn set_http_addr(&self, addr: SocketAddr) {
-        self.inner.network.write().await.http_addr = addr;
     }
 
     /// Update only HTTPS listen address.

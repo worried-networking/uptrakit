@@ -157,7 +157,6 @@ export interface NetworkSettings {
 	trusted_proxies: string[];
 	real_ip_header: string;
 	extra_sans: string[];
-	http_addr: string;
 	https_addr: string;
 }
 
@@ -165,7 +164,6 @@ export interface UpdateNetworkSettings {
 	trusted_proxies?: string[];
 	real_ip_header?: string;
 	extra_sans?: string[];
-	http_addr?: string;
 	https_addr?: string;
 }
 

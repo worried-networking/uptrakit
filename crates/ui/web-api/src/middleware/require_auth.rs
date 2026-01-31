@@ -254,6 +254,7 @@ mod tests {
             jwt: Arc::new(JwtManager::from_secret(b"test-secret-for-middleware-tests")),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
+            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
         })
     }
 

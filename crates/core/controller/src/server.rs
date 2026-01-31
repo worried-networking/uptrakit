@@ -9,15 +9,11 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::mtls_acceptor::MtlsAcceptor;
 use uptrakit_web_api::AppState;
-use uptrakit_web_api::extract::Protocol;
 
 #[derive(Debug, Error)]
 pub enum ServerError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-
-    #[error("server task failed: {0}")]
-    TaskPanic(String),
 }
 
 pub type Result<T> = std::result::Result<T, Report<ServerError>>;
@@ -34,14 +30,13 @@ where
 }
 
 pub struct ServerOptions {
-    pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub app_state: Arc<AppState>,
     pub static_dir: Option<PathBuf>,
 }
 
-/// Run both HTTP and HTTPS servers.
+/// Run the HTTPS server.
 pub async fn run(cfg: ServerOptions) -> Result<()> {
     let mut router = uptrakit_web_api::build_router(cfg.app_state);
     if let Some(ref dir) = cfg.static_dir {
@@ -55,46 +50,16 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
             .fallback_service(ServeFile::new(index));
         router = router.fallback_service(ServeDir::new(dir).not_found_service(not_found));
     }
-    let http_handle = tokio::spawn(run_http(cfg.http_addr, router.clone()));
-    let https_handle = tokio::spawn(run_https(cfg.https_addr, router, cfg.rustls_config));
 
-    // Wait for either server to finish (which normally means an error).
-    tokio::select! {
-        res = http_handle => {
-            res.map_err(|e| report!(ServerError::TaskPanic(format!("HTTP server: {e}"))))??;
-        }
-        res = https_handle => {
-            res.map_err(|e| report!(ServerError::TaskPanic(format!("HTTPS server: {e}"))))??;
-        }
-    }
-
-    Ok(())
-}
-
-async fn run_http(addr: SocketAddr, router: Router) -> Result<()> {
-    let router = router.layer(axum::Extension(Protocol::Plain));
-    tracing::info!("HTTP server listening on {addr}");
-    axum_server::bind(addr)
-        .serve(router.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .context_to::<ServerError>()?;
-    Ok(())
-}
-
-async fn run_https(
-    addr: SocketAddr,
-    router: Router,
-    rustls_config: axum_server::tls_rustls::RustlsConfig,
-) -> Result<()> {
-    let router = router.layer(axum::Extension(Protocol::Tls));
-    let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(rustls_config);
+    let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);
     let mtls_acceptor = MtlsAcceptor::new(rustls_acceptor);
 
-    tracing::info!("HTTPS server listening on {addr}");
-    axum_server::bind(addr)
+    tracing::info!("HTTPS server listening on {}", cfg.https_addr);
+    axum_server::bind(cfg.https_addr)
         .acceptor(mtls_acceptor)
         .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .context_to::<ServerError>()?;
+
     Ok(())
 }

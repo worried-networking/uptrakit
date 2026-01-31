@@ -19,7 +19,6 @@ pub struct NetworkSettingsResponse {
     pub trusted_proxies: Vec<String>,
     pub real_ip_header: String,
     pub extra_sans: Vec<String>,
-    pub http_addr: String,
     pub https_addr: String,
 }
 
@@ -28,7 +27,6 @@ pub struct UpdateNetworkSettingsRequest {
     pub trusted_proxies: Option<Vec<String>>,
     pub real_ip_header: Option<String>,
     pub extra_sans: Option<Vec<String>>,
-    pub http_addr: Option<String>,
     pub https_addr: Option<String>,
 }
 
@@ -61,7 +59,6 @@ pub async fn get_network_settings(
             .collect(),
         real_ip_header: network.real_ip_header,
         extra_sans: network.extra_sans,
-        http_addr: network.http_addr.to_string(),
         https_addr: network.https_addr.to_string(),
     };
     (StatusCode::OK, Json(response)).into_response()
@@ -152,31 +149,6 @@ pub async fn update_network_settings(
         state.settings.set_extra_sans(sans.clone()).await;
     }
 
-    // Validate and apply http_addr (requires restart — save to DB only)
-    if let Some(ref addr_str) = req.http_addr {
-        let addr: SocketAddr = match addr_str.parse() {
-            Ok(a) => a,
-            Err(_) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    format!("invalid HTTP address: {addr_str}"),
-                )
-                    .into_response();
-            }
-        };
-        if let Err(e) = upsert_setting(
-            &state.db,
-            crate::settings::SETTING_KEY_HTTP_ADDR,
-            serde_json::json!(addr.to_string()),
-        )
-        .await
-        {
-            tracing::error!("Failed to save http_addr: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-        state.settings.set_http_addr(addr).await;
-    }
-
     // Validate and apply https_addr (requires restart — save to DB only)
     if let Some(ref addr_str) = req.https_addr {
         let addr: SocketAddr = match addr_str.parse() {
@@ -211,7 +183,6 @@ pub async fn update_network_settings(
             .collect(),
         real_ip_header: network.real_ip_header,
         extra_sans: network.extra_sans,
-        http_addr: network.http_addr.to_string(),
         https_addr: network.https_addr.to_string(),
     };
     (StatusCode::OK, Json(response)).into_response()

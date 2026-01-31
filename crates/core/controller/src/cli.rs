@@ -21,12 +21,6 @@ pub struct Args {
     #[arg(long)]
     pub db_url: Option<String>,
 
-    /// HTTP listen address (dual-stack by default).
-    /// Stored in DB as `network.http_addr`. CLI value used only on first run
-    /// or with `--force-settings-override`.
-    #[arg(long)]
-    pub http_addr: Option<SocketAddr>,
-
     /// HTTPS listen address (dual-stack by default).
     /// Stored in DB as `network.https_addr`. CLI value used only on first run
     /// or with `--force-settings-override`.
@@ -212,7 +206,6 @@ mod tests {
     fn defaults_have_no_addresses() {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
-        assert!(args.http_addr.is_none());
         assert!(args.https_addr.is_none());
         assert!(args.real_ip_header.is_none());
         assert!(args.trusted_proxies.is_empty());
@@ -224,18 +217,12 @@ mod tests {
     fn explicit_addresses_parsed() {
         let args = super::Args::try_parse_from([
             "uptrakit-controller",
-            "--http-addr",
-            "0.0.0.0:9080",
             "--https-addr",
             "0.0.0.0:9443",
             "--real-ip-header",
             "X-Real-Ip",
         ])
         .expect("should parse explicit addresses");
-        assert_eq!(
-            args.http_addr.unwrap(),
-            "0.0.0.0:9080".parse::<std::net::SocketAddr>().unwrap()
-        );
         assert_eq!(
             args.https_addr.unwrap(),
             "0.0.0.0:9443".parse::<std::net::SocketAddr>().unwrap()

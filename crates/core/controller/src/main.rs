@@ -166,19 +166,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     .context(AppError::Settings)?;
     settings.set_extra_sans(extra_sans.clone()).await;
 
-    let http_addr = reconcile_socket_addr(
-        &db_conn,
-        uptrakit_web_api::settings::SETTING_KEY_HTTP_ADDR,
-        &raw_settings,
-        args.http_addr,
-        uptrakit_web_api::settings::DEFAULT_HTTP_ADDR
-            .parse()
-            .expect("valid default HTTP addr"),
-        force,
-    )
-    .await?;
-    settings.set_http_addr(http_addr).await;
-
     let https_addr = reconcile_socket_addr(
         &db_conn,
         uptrakit_web_api::settings::SETTING_KEY_HTTPS_ADDR,
@@ -443,9 +430,11 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let revocation_notify = Arc::new(tokio::sync::Notify::const_new());
 
     // Build initial CRLs from DB before server starts
-    let initial_crls = crl_manager::build_initial_crls_der(&db_conn, &ca_snapshot)
+    let crl_pem_cache = Arc::new(tokio::sync::RwLock::new(String::new()));
+    let (initial_crls, initial_crl_pem) = crl_manager::build_initial_crls(&db_conn, &ca_snapshot)
         .await
         .context(AppError::Pki)?;
+    *crl_pem_cache.write().await = initial_crl_pem;
 
     // Build initial server config with CRLs
     let initial_server_config = pki::build_rustls_config_with_client_auth_and_crls(
@@ -468,6 +457,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
                 db: db_conn.clone(),
                 rustls_config: rustls_config.clone(),
                 revocation_notify: Arc::clone(&revocation_notify),
+                crl_pem_cache: Arc::clone(&crl_pem_cache),
             },
             &ca_snapshot,
         )
@@ -509,6 +499,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         device_flow_store: device_flow_store.clone(),
         pki_path: pki_path.clone(),
         rustls_config: rustls_config.clone(),
+        crl_pem_cache,
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
@@ -700,7 +691,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     tokio::select! {
         result = server::run(server::ServerOptions {
-            http_addr,
             https_addr,
             rustls_config,
             app_state,

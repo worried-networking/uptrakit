@@ -119,7 +119,7 @@ The controller manages a self-signed internal CA for mTLS agent authentication.
 3. Both CAs form a trust bundle (`bundle_pem`). The controller trusts client certs signed by either CA.
 4. CRLs are partitioned: each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint` column in `agent_certificates`).
 5. Connected agents receive a `CaBundleUpdated` WebSocket message with the new bundle PEM.
-6. Agents that were offline detect staleness via `ca_bundle_hash` in `AgentSettings` and fetch the updated bundle over HTTP.
+6. Agents that were offline detect staleness via `ca_bundle_hash` in `AgentSettings` and fetch the updated bundle over HTTPS.
 7. New agent certs are always signed by the active CA.
 
 ### External CA
@@ -237,7 +237,6 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--trusted-proxy` | `network.trusted_proxies` | `[]` | Yes |
 | `--real-ip-header` | `network.real_ip_header` | `X-Forwarded-For` | Yes |
 | `--san` | `network.extra_sans` | `[]` | Yes |
-| `--http-addr` | `network.http_addr` | `[::]:8080` | No (restart) |
 | `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
 | `--mqtt-host` | `mqtt.host` | `null` | No (restart) |
 | `--mqtt-port` | `mqtt.port` | `1883` | No (restart) |

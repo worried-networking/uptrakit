@@ -97,7 +97,7 @@ For the full message schema with payloads, see the [AsyncAPI specification](crat
 The controller operates an internal Certificate Authority for mutual TLS authentication with agents.
 
 - **CA rotation**: Automatic when the managed CA enters a 6-month expiry window. Produces a dual-CA trust bundle for seamless transition.
-- **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`).
+- **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`). Combined PEM CRLs are served at `GET /api/v1/ca.crl`.
 - **Runtime state**: CA material is shared via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct.
 - **External CA**: Supported via `--ca-cert` / `--ca-key` flags, which disable managed rotation.
 - **SAN sanity checks**: At startup, `--san` values are validated against the existing managed cert's SANs. Mismatched SANs trigger silent regeneration (same CA) or an error with fix instructions (different CA). `--san` is incompatible with `--tls-cert`/`--tls-key`.
@@ -230,3 +230,5 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **SvelteKit static adapter** | No server-side rendering needed -- the controller serves the pre-built SPA. Keeps deployment simple (single binary + static files). |
 | **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
+| **HTTPS-only controller** | The controller listens only on HTTPS (no plain HTTP listener). All agent and browser connections use TLS. |
+| **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--trust-first-use` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. |

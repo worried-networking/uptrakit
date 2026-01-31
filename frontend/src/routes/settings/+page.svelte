@@ -60,7 +60,6 @@
 	let trustedProxiesText: string = $state('');
 	let realIpHeader: string = $state('X-Forwarded-For');
 	let extraSansText: string = $state('');
-	let httpAddr: string = $state('[::]:8080');
 	let httpsAddr: string = $state('[::]:8443');
 
 	// --- MQTT Settings ---
@@ -184,7 +183,6 @@
 			trustedProxiesText = net.trusted_proxies.join('\n');
 			realIpHeader = net.real_ip_header;
 			extraSansText = net.extra_sans.join('\n');
-			httpAddr = net.http_addr;
 			httpsAddr = net.https_addr;
 		}
 		if (results[7].status === 'fulfilled') {
@@ -217,13 +215,11 @@
 				trusted_proxies: proxies,
 				real_ip_header: realIpHeader,
 				extra_sans: sans,
-				http_addr: httpAddr,
 				https_addr: httpsAddr
 			});
 			trustedProxiesText = res.trusted_proxies.join('\n');
 			realIpHeader = res.real_ip_header;
 			extraSansText = res.extra_sans.join('\n');
-			httpAddr = res.http_addr;
 			httpsAddr = res.https_addr;
 			showSuccess('Network settings saved.');
 		} catch (e) {
@@ -593,16 +589,10 @@
 				></textarea>
 			</label>
 
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
-				<label class="label">
-					<span>HTTP Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
-					<input class="input" type="text" bind:value={httpAddr} />
-				</label>
-				<label class="label">
-					<span>HTTPS Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
-					<input class="input" type="text" bind:value={httpsAddr} />
-				</label>
-			</div>
+			<label class="label mb-4">
+				<span>HTTPS Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+				<input class="input" type="text" bind:value={httpsAddr} />
+			</label>
 
 			<button class="btn variant-filled-primary" onclick={saveNetworkSettings}>
 				Save

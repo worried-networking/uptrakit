@@ -25,7 +25,6 @@ use agent_connections::AgentConnectionRegistry;
 use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
 use auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
-use middleware::require_https;
 use settings::Settings;
 
 /// Cloneable snapshot of CA state. Re-exported for use by consumers.
@@ -80,6 +79,8 @@ pub struct AppState {
     pub pki_path: std::path::PathBuf,
     /// RustlsConfig handle for hot-reloading TLS.
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
+    /// Cached PEM-encoded CRL bundle, updated by the CRL manager.
+    pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
 }
 
 /// OpenAPI documentation
@@ -320,9 +321,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let mut router = api_router
         .route("/api/v1/ws/agent", get(routes::agent_ws::agent_ws))
-        .route_layer(axum_mw::from_fn(require_https::require_https))
         .route("/healthz", get(routes::health::healthz))
-        .route("/api/v1/ca.crt", get(routes::ca::ca_cert));
+        .route("/api/v1/ca.crt", get(routes::ca::ca_cert))
+        .route("/api/v1/ca.crl", get(routes::ca::ca_crl));
 
     #[cfg(feature = "swagger-ui")]
     {
@@ -350,7 +351,6 @@ mod tests {
     use std::sync::Arc;
 
     use axum::body::Body;
-    use axum::extract::ConnectInfo;
     use http::Request;
     use http_body_util::BodyExt;
     use ipnet::IpNet;
@@ -359,7 +359,6 @@ mod tests {
 
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
-    use crate::extract::Protocol;
     use crate::settings::Settings;
     use crate::{AppState, build_router};
 
@@ -451,6 +450,7 @@ mod tests {
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
+            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
             db,
         })
     }
@@ -466,56 +466,6 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..], b"ok");
-    }
-
-    #[tokio::test]
-    async fn agent_ws_without_https_returns_403() {
-        let app = build_router(test_state().await);
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 12345);
-        let mut req = Request::builder()
-            .uri("/api/v1/ws/agent")
-            .body(Body::empty())
-            .unwrap();
-        req.extensions_mut().insert(ConnectInfo(addr));
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), 403);
-    }
-
-    #[tokio::test]
-    async fn agent_ws_with_tls_protocol_not_403() {
-        let app = build_router(test_state().await);
-        let mut req = Request::builder()
-            .uri("/api/v1/ws/agent")
-            .header("connection", "upgrade")
-            .header("upgrade", "websocket")
-            .header("sec-websocket-version", "13")
-            .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-            .body(Body::empty())
-            .unwrap();
-        req.extensions_mut().insert(Protocol::Tls);
-        let resp = app.oneshot(req).await.unwrap();
-        // Should be 101 Switching Protocols (or at least not 403)
-        assert_ne!(resp.status(), 403);
-    }
-
-    #[tokio::test]
-    async fn agent_ws_via_trusted_proxy_not_403() {
-        let proxy_net: IpNet = "192.168.1.0/24".parse().unwrap();
-        let app = build_router(test_state_with_proxies(vec![proxy_net]).await);
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 12345);
-        let mut req = Request::builder()
-            .uri("/api/v1/ws/agent")
-            .header("x-forwarded-for", "203.0.113.45")
-            .header("x-forwarded-proto", "https")
-            .header("connection", "upgrade")
-            .header("upgrade", "websocket")
-            .header("sec-websocket-version", "13")
-            .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-            .body(Body::empty())
-            .unwrap();
-        req.extensions_mut().insert(ConnectInfo(addr));
-        let resp = app.oneshot(req).await.unwrap();
-        assert_ne!(resp.status(), 403);
     }
 
     #[tokio::test]

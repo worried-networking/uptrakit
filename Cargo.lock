@@ -4173,6 +4173,7 @@ dependencies = [
  "hex",
  "hostname",
  "http",
+ "reqwest",
  "rootcause",
  "rustls",
  "serde",
@@ -4185,6 +4186,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-internal-wire",
+ "url",
+ "webpki-roots 1.0.5",
 ]
 
 [[package]]

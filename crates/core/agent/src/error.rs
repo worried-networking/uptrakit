@@ -26,8 +26,11 @@ pub enum Error {
     HttpUri(#[from] http::uri::InvalidUri),
 
     // Context-specific variants (keep these - they add semantic meaning)
-    #[error("invalid HTTP response: {0}")]
-    FetchCaHttp(String),
+    #[error("failed to fetch CA certificate: {0}")]
+    FetchCa(String),
+
+    #[error("failed to read CA certificate file: {0}")]
+    CaCertFile(String),
 
     #[error("no certificates found in CA response")]
     NoCertificates,

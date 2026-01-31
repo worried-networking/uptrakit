@@ -26,52 +26,57 @@ pub enum LoopOutcome {
     Disconnected,
 }
 
-pub async fn fetch_ca_certificate(host: &str, http_port: u16) -> Result<Vec<u8>> {
-    let url = format!("http://{host}:{http_port}/api/v1/ca.crt");
+/// TLS mode for the CA certificate fetch via reqwest.
+pub enum TlsMode<'a> {
+    /// Accept any server cert (TOFU).
+    TrustFirstUse,
+    /// Use a pinned CA certificate.
+    PinnedCa(&'a [u8]),
+}
+
+/// Fetch the CA certificate bundle from the controller over HTTPS using reqwest.
+pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Result<Vec<u8>> {
+    let url = format!("{base_url}/api/v1/ca.crt");
     tracing::info!(url = %url, "fetching CA certificate");
 
-    let stream = tokio::net::TcpStream::connect((host, http_port))
-        .await
-        .context_to::<Error>()?;
-
-    let request = format!(
-        "GET /api/v1/ca.crt HTTP/1.1\r\nHost: {host}:{http_port}\r\nConnection: close\r\n\r\n"
-    );
-
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let mut stream = stream;
-    stream
-        .write_all(request.as_bytes())
-        .await
-        .context_to::<Error>()?;
-
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .await
-        .context_to::<Error>()?;
-
-    // Parse HTTP response - find body after \r\n\r\n
-    let response_str = String::from_utf8_lossy(&response);
-    let body_start = response_str
-        .find("\r\n\r\n")
-        .ok_or_else(|| report!(Error::FetchCaHttp("invalid HTTP response".to_string())))?
-        + 4;
-
-    let body = &response[body_start..];
-
-    // Check for HTTP error status
-    if !response_str.starts_with("HTTP/1.1 200") && !response_str.starts_with("HTTP/1.0 200") {
-        let status_line = response_str.lines().next().unwrap_or("unknown");
-        return Err(report!(Error::FetchCaHttp(format!(
-            "HTTP error: {status_line}"
-        ))));
+    let mut builder = reqwest::Client::builder();
+    match tls_mode {
+        TlsMode::TrustFirstUse => {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        TlsMode::PinnedCa(ca_pem) => {
+            let cert = reqwest::Certificate::from_pem(ca_pem)
+                .map_err(|e| report!(Error::FetchCa(format!("invalid CA PEM: {e}"))))?;
+            builder = builder
+                .tls_built_in_root_certs(false)
+                .add_root_certificate(cert);
+        }
     }
+
+    let client = builder
+        .build()
+        .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
+
+    if !resp.status().is_success() {
+        return Err(report!(Error::FetchCa(format!("HTTP {}", resp.status()))));
+    }
+
+    let body = resp
+        .bytes()
+        .await
+        .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
 
     tracing::info!(bytes = body.len(), "CA certificate fetched");
     Ok(body.to_vec())
 }
 
+/// Build a TLS connector that trusts only the given CA PEM (no client auth).
 pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
     let root_store = build_root_store(ca_pem)?;
 
@@ -82,6 +87,7 @@ pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
     Ok(TlsConnector::from(Arc::new(config)))
 }
 
+/// Build a TLS connector that trusts only the given CA PEM, with client cert (mTLS).
 pub fn build_tls_connector_with_client_cert(
     ca_pem: &[u8],
     cert_pem: &str,
@@ -90,6 +96,40 @@ pub fn build_tls_connector_with_client_cert(
     use rustls::pki_types::PrivateKeyDer;
 
     let root_store = build_root_store(ca_pem)?;
+
+    let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context_to::<Error>()?;
+
+    let client_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<Error>()?;
+
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_client_auth_cert(client_certs, client_key)
+        .context_to::<Error>()?;
+
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
+/// Build a TLS connector using system/webpki root certificates (no client auth).
+pub fn build_system_trust_tls_connector() -> Result<TlsConnector> {
+    let root_store = build_webpki_root_store();
+
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
+/// Build a TLS connector using system/webpki root certs with client cert (mTLS).
+pub fn build_system_trust_tls_connector_with_client_cert(
+    cert_pem: &str,
+    key_pem: &str,
+) -> Result<TlsConnector> {
+    use rustls::pki_types::PrivateKeyDer;
+
+    let root_store = build_webpki_root_store();
 
     let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -120,6 +160,12 @@ fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
     }
 
     Ok(root_store)
+}
+
+fn build_webpki_root_store() -> RootCertStore {
+    let mut root_store = RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    root_store
 }
 
 /// Type alias for the WebSocket stream produced by `connect_ws`.
@@ -339,6 +385,8 @@ fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> s
 pub async fn run_authenticated_loop(
     host: &str,
     port: u16,
+    base_url: &str,
+    ca_pem: Option<&[u8]>,
     tls_connector: TlsConnector,
     cert_not_after_ts: Option<i64>,
     data_dir: &std::path::Path,
@@ -449,7 +497,11 @@ pub async fn run_authenticated_loop(
                                     let local_hash = compute_local_ca_hash(data_dir);
                                     if local_hash != settings.ca_bundle_hash {
                                         tracing::info!("CA bundle hash mismatch, fetching updated bundle");
-                                        match fetch_ca_certificate(host, port).await {
+                                        let tls_mode = match ca_pem {
+                                            Some(pem) => TlsMode::PinnedCa(pem),
+                                            None => TlsMode::TrustFirstUse,
+                                        };
+                                        match fetch_ca_certificate(base_url, tls_mode).await {
                                             Ok(pem) => {
                                                 if let Err(e) = crate::state::save_ca_cert(data_dir, &pem) {
                                                     tracing::warn!("failed to save updated CA: {e}");

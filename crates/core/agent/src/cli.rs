@@ -6,17 +6,19 @@ use clap::Parser;
 #[command(name = "uptrakit-agent")]
 #[command(about = "Uptrakit agent that connects to the controller")]
 pub struct Args {
-    /// Controller hostname or IP address
+    /// Controller URL in the format https://host:port.
+    /// Port defaults to 443 if omitted.
     #[arg(long)]
-    pub host: String,
+    pub url: String,
 
-    /// Controller HTTPS/WSS port
-    #[arg(long, default_value = "8443")]
-    pub port: u16,
+    /// Trust the controller's TLS certificate on first connection (TOFU).
+    /// Only effective when no CA certificate is cached locally.
+    #[arg(long, conflicts_with = "ca_cert")]
+    pub trust_first_use: bool,
 
-    /// Controller HTTP port (for fetching CA certificate)
-    #[arg(long, default_value = "8080")]
-    pub http_port: u16,
+    /// Path to a PEM-encoded CA certificate file.
+    #[arg(long)]
+    pub ca_cert: Option<PathBuf>,
 
     /// Data directory for persistent state (CA cert, agent.json).
     /// Supports `~` for home directory expansion.
@@ -50,8 +52,91 @@ impl Args {
         };
         Ok(path)
     }
+
+    /// Parse `--url` into `(host, port)`.
+    pub fn parsed_url(&self) -> Result<(String, u16), String> {
+        let url_str = self.url.trim_end_matches('/');
+        let parsed = url::Url::parse(url_str).map_err(|e| format!("invalid URL: {e}"))?;
+        if parsed.scheme() != "https" {
+            return Err("URL scheme must be https".to_string());
+        }
+        let host = parsed
+            .host_str()
+            .ok_or("URL must contain a host")?
+            .to_string();
+        let port = parsed.port().unwrap_or(443);
+        Ok((host, port))
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Args;
+
+    #[test]
+    fn defaults_parse() {
+        let args =
+            Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
+                .expect("should parse defaults");
+        assert!(!args.trust_first_use);
+        assert!(args.ca_cert.is_none());
+        assert!(args.friendly_name.is_none());
+        assert!(args.enrollment_token.is_none());
+        assert!(!args.force_enroll);
+    }
+
+    #[test]
+    fn trust_first_use_and_ca_cert_conflict() {
+        let result = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://host:8443",
+            "--trust-first-use",
+            "--ca-cert",
+            "/some/path.pem",
+        ]);
+        assert!(
+            result.is_err(),
+            "--trust-first-use and --ca-cert should conflict"
+        );
+    }
+
+    #[test]
+    fn parsed_url_with_port() {
+        let args =
+            Args::try_parse_from(["uptrakit-agent", "--url", "https://myhost:9443"]).unwrap();
+        let (host, port) = args.parsed_url().unwrap();
+        assert_eq!(host, "myhost");
+        assert_eq!(port, 9443);
+    }
+
+    #[test]
+    fn parsed_url_default_port() {
+        let args = Args::try_parse_from(["uptrakit-agent", "--url", "https://myhost"]).unwrap();
+        let (host, port) = args.parsed_url().unwrap();
+        assert_eq!(host, "myhost");
+        assert_eq!(port, 443);
+    }
+
+    #[test]
+    fn parsed_url_trailing_slash() {
+        let args =
+            Args::try_parse_from(["uptrakit-agent", "--url", "https://myhost:8443/"]).unwrap();
+        let (host, port) = args.parsed_url().unwrap();
+        assert_eq!(host, "myhost");
+        assert_eq!(port, 8443);
+    }
+
+    #[test]
+    fn parsed_url_rejects_http() {
+        let args = Args::try_parse_from(["uptrakit-agent", "--url", "http://myhost:8443"]).unwrap();
+        let err = args.parsed_url().unwrap_err();
+        assert!(err.contains("https"), "should reject non-https: {err}");
+    }
 }

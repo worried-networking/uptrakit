@@ -54,7 +54,7 @@ Uptrakit operates an internal PKI for mTLS agent authentication. The controller 
 | Server HTTPS certificate | 90 days | 30 days before expiry (automatic renewal) |
 | Agent client certificate | 365 days (configurable) | Configurable via `renewal_window_hours` |
 
-CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued.
+CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/ca.crl`.
 
 At startup, the controller validates that `--san` CLI values are present in the managed server certificate's SANs. Mismatches trigger automatic regeneration when the cert was signed by the active CA, or a guided error when the cert was signed by a previous CA (preventing accidental re-signing under a rotated CA).
 
