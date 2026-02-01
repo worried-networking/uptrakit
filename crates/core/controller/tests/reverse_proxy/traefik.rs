@@ -25,7 +25,7 @@ async fn traefik_l7_forwards_client_cert() {
 
     let container = GenericImage::new("traefik", "v3")
         .with_exposed_port(443u16.tcp())
-        .with_wait_for(WaitFor::Log(LogWaitStrategy::stdout("Configuration loaded")))
+        .with_wait_for(WaitFor::Log(LogWaitStrategy::stdout("Creating middleware")))
         .with_mount(
             Mount::bind_mount(
                 tmp.path().to_str().expect("tmpdir path"),
@@ -35,6 +35,7 @@ async fn traefik_l7_forwards_client_cert() {
         )
         .with_host("host.docker.internal", Host::HostGateway)
         .with_cmd([
+            "--log.level=DEBUG",
             "--entrypoints.websecure.address=:443",
             "--providers.file.filename=/etc/traefik/dynamic.yaml",
         ])
@@ -101,11 +102,13 @@ fn write_traefik_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
     // Write Traefik dynamic configuration
     let dynamic = format!(
         r#"tls:
-  certificates:
-    - certFile: /etc/traefik/server.crt
-      keyFile: /etc/traefik/server.key
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/server.crt
+        keyFile: /etc/traefik/server.key
   options:
-    mtls:
+    default:
       clientAuth:
         caFiles:
           - /etc/traefik/ca.crt
@@ -117,8 +120,7 @@ http:
       rule: "PathPrefix(`/`)"
       entryPoints:
         - websecure
-      tls:
-        options: mtls
+      tls: {{}}
       middlewares:
         - clientcert
       service: uptrakit
@@ -139,7 +141,7 @@ http:
       loadBalancer:
         servers:
           - url: "https://host.docker.internal:{backend_port}"
-        serversTransport: insecure
+        serversTransport: insecure@file
 
   serversTransports:
     insecure:
