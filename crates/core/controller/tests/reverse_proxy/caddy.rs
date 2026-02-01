@@ -1,9 +1,9 @@
 use tempfile::TempDir;
+use testcontainers::GenericImage;
+use testcontainers::ImageExt;
 use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{AccessMode, Host, IntoContainerPort, Mount, WaitFor};
-use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::GenericImage;
 
 use super::pki::TestPki;
 use super::server::{IdentityResponse, TestServer};
@@ -28,7 +28,10 @@ async fn caddy_l7_forwards_client_cert() {
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr("serving initial")))
         .with_mount(
             Mount::bind_mount(
-                tmp.path().join("Caddyfile").to_str().expect("caddyfile path"),
+                tmp.path()
+                    .join("Caddyfile")
+                    .to_str()
+                    .expect("caddyfile path"),
                 "/etc/caddy/Caddyfile",
             )
             .with_access_mode(AccessMode::ReadOnly),
@@ -132,8 +135,7 @@ fn write_caddy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
 }
 
 fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
-    let ca_cert =
-        reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
+    let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
     let mut builder = reqwest::Client::builder()
         .add_root_certificate(ca_cert)

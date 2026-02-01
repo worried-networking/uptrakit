@@ -1,6 +1,6 @@
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
-    IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
 use std::net::Ipv4Addr;
 
@@ -48,15 +48,13 @@ impl TestPki {
         ca_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
         ca_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 
-        let ca_cert = ca_params
-            .self_signed(&ca_key)
-            .expect("CA self-sign failed");
+        let ca_cert = ca_params.self_signed(&ca_key).expect("CA self-sign failed");
 
         let ca_cert_pem = ca_cert.pem();
 
         // Build an Issuer for signing child certificates.
-        let ca_issuer = Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key)
-            .expect("CA issuer creation failed");
+        let ca_issuer =
+            Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key).expect("CA issuer creation failed");
 
         // --- Server cert ---
         let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
@@ -70,10 +68,8 @@ impl TestPki {
         server_params
             .subject_alt_names
             .push(SanType::IpAddress(Ipv4Addr::LOCALHOST.into()));
-        server_params.not_before =
-            ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
-        server_params.not_after =
-            ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
+        server_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
+        server_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 
         let server_cert = server_params
             .signed_by(&server_key, &ca_issuer)
@@ -93,10 +89,8 @@ impl TestPki {
             .distinguished_name
             .push(DnType::CommonName, agent_id.to_string());
         agent_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-        agent_params.not_before =
-            ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
-        agent_params.not_after =
-            ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
+        agent_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
+        agent_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 
         let agent_cert = agent_params
             .signed_by(&agent_key, &ca_issuer)

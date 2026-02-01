@@ -97,10 +97,10 @@ fn try_info_header(
     let fields = parse_info_fields(&decoded);
 
     // 1. Cert field (Envoy XFCC) — provides complete identity
-    if let Some(cert_field) = fields.get("Cert").or(fields.get("cert")) {
-        if let Some(identity) = try_parse_cert_field(cert_field, state) {
-            return Some(identity);
-        }
+    if let Some(cert_field) = fields.get("Cert").or(fields.get("cert"))
+        && let Some(identity) = try_parse_cert_field(cert_field, state)
+    {
+        return Some(identity);
     }
 
     // 2. Subject/SerialNumber/Issuer (Traefik, Nginx, HAProxy) — fallback
@@ -147,7 +147,10 @@ fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<AgentIdent
         let (_, cert) = x509_parser::parse_x509_certificate(&pem_block.contents).ok()?;
         let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
         if !verify_issuer_cn_str(issuer_cn, state) {
-            tracing::warn!(issuer = issuer_cn, "forwarded cert issuer CN does not match any known CA");
+            tracing::warn!(
+                issuer = issuer_cn,
+                "forwarded cert issuer CN does not match any known CA"
+            );
             return None;
         }
         return Some(identity);
@@ -163,7 +166,10 @@ fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<AgentIdent
     let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
     let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
     if !verify_issuer_cn_str(issuer_cn, state) {
-        tracing::warn!(issuer = issuer_cn, "forwarded cert issuer CN does not match any known CA");
+        tracing::warn!(
+            issuer = issuer_cn,
+            "forwarded cert issuer CN does not match any known CA"
+        );
         return None;
     }
     Some(identity)

@@ -1,9 +1,9 @@
 use tempfile::TempDir;
+use testcontainers::GenericImage;
+use testcontainers::ImageExt;
 use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{AccessMode, Host, IntoContainerPort, Mount, WaitFor};
-use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::GenericImage;
 
 use super::pki::TestPki;
 use super::server::{IdentityResponse, TestServer};
@@ -19,8 +19,7 @@ use super::server::{IdentityResponse, TestServer};
 #[ignore = "Docker integration test (envoyproxy/envoy:v1.31-latest). Run: cargo test -p uptrakit-controller reverse_proxy::envoy -- --ignored"]
 async fn envoy_l7_forwards_client_cert() {
     let pki = TestPki::generate();
-    let server =
-        TestServer::start(&pki, Some("X-Forwarded-Client-Cert"), None).await;
+    let server = TestServer::start(&pki, Some("X-Forwarded-Client-Cert"), None).await;
 
     let tmp = TempDir::new().expect("tempdir");
     write_envoy_config(&tmp, &pki, server.port);
@@ -32,7 +31,10 @@ async fn envoy_l7_forwards_client_cert() {
         )))
         .with_mount(
             Mount::bind_mount(
-                tmp.path().join("envoy.yaml").to_str().expect("envoy cfg path"),
+                tmp.path()
+                    .join("envoy.yaml")
+                    .to_str()
+                    .expect("envoy cfg path"),
                 "/etc/envoy/envoy.yaml",
             )
             .with_access_mode(AccessMode::ReadOnly),
@@ -186,8 +188,7 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
 }
 
 fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
-    let ca_cert =
-        reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
+    let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
     let mut builder = reqwest::Client::builder()
         .add_root_certificate(ca_cert)
