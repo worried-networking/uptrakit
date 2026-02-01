@@ -44,7 +44,7 @@ uptrakit/
 │   ├── tailwind.config.ts              # Tailwind + Skeleton theme
 │   └── vite.config.ts                  # Vite config (dev proxy → controller)
 ├── .github/
-│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, frontend check + build
+│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend check + build
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
 ├── CONTRIBUTING.md
 ├── README.md
@@ -65,6 +65,8 @@ cargo clippy --workspace --all-targets --no-default-features --features db-sqlit
 cargo clippy --workspace --all-targets --all-features -- -D warnings # Lint with Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
+# Docker integration tests (requires Docker, not part of normal CI gate):
+# cargo test -p uptrakit-controller reverse_proxy -- --ignored
 ```
 
 ### Frontend (SvelteKit)
@@ -436,6 +438,7 @@ Every behaviour change must include tests. Types of tests used:
 - **Provider tests**: parsing upstream metadata, mapping to internal models.
 - **API boundary tests**: request/response (de)serialisation, backwards compatibility.
 - **Error path tests**: expected failures produce correct error types and messages.
+- **Docker integration tests**: reverse proxy tests using real containers (see below).
 
 Run tests with:
 
@@ -444,6 +447,35 @@ cargo test --all-features
 # or with nextest:
 cargo nextest run --all-features
 ```
+
+### Reverse proxy integration tests
+
+Docker-based integration tests in `crates/core/controller/tests/reverse_proxy/` validate that the controller's middleware correctly extracts `AgentIdentity` from forwarded headers when behind real reverse proxies. Each test uses `testcontainers` to spin up a Docker container.
+
+```text
+crates/core/controller/tests/
+  reverse_proxy.rs              -- test binary entry point
+  reverse_proxy/
+    pki.rs                      -- TestPki: CA + server cert + agent cert generation (rcgen)
+    server.rs                   -- TestServer: lightweight Axum HTTPS server with real middleware
+    nginx.rs                    -- Nginx L7 test (nginx:latest)
+    traefik.rs                  -- Traefik L7 test (traefik:v3)
+    caddy.rs                    -- Caddy L7 test (caddy:latest)
+    haproxy.rs                  -- HAProxy L7 test (haproxy:latest)
+    envoy.rs                    -- Envoy L7 test (envoyproxy/envoy:v1.31-latest)
+```
+
+All tests are `#[ignore]` with descriptive messages and never run in normal `cargo test`. They require Docker.
+
+```sh
+# Run all reverse proxy tests
+cargo test -p uptrakit-controller reverse_proxy -- --ignored
+
+# Run a single proxy test
+cargo test -p uptrakit-controller reverse_proxy::nginx -- --ignored
+```
+
+A dedicated `reverse-proxy-tests` CI job runs these on `ubuntu-latest` (Docker pre-installed).
 
 ## Provider architecture
 

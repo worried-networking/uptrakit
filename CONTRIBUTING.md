@@ -109,6 +109,7 @@ cargo nextest run --all-features
 - **Provider behaviour**: parsing, version comparison, mapping upstream metadata → internal model.
 - **API boundaries**: request/response types, (de)serialisation, backwards compatibility where relevant.
 - **Error paths**: tests for expected failures and good error messages.
+- **Reverse proxy integration**: Docker-based tests (`#[ignore]`) with real proxy containers (Nginx, Traefik, Caddy, HAProxy, Envoy). Run with `cargo test -p uptrakit-controller reverse_proxy -- --ignored`. Requires Docker.
 
 A PR that changes behaviour without adding/adjusting tests will usually be sent back for more work.
 
