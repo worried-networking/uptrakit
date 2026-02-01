@@ -539,6 +539,46 @@ Provider crates:
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 
+### GitHub Releases provider (`uptrakit-provider-github`)
+
+Fetches release metadata from the GitHub API and converts it into `UpstreamRelease` values.
+
+**Config fields (`GitHubConfig`):**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `owner` | String | Yes | — | GitHub repository owner |
+| `repo` | String | Yes | — | GitHub repository name |
+| `auth_token` | String | No | `null` | Personal access token (for private repos / higher rate limits) |
+| `api_base_url` | String | No | `https://api.github.com` | API base URL (for GitHub Enterprise) |
+| `include_prereleases` | bool | No | `false` | Whether to include pre-release versions |
+| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings |
+| `asset_patterns` | Vec\<String\> | No | `[]` | Regex patterns to filter release assets (empty = include all) |
+
+**Behaviour:**
+- Drafts are always skipped
+- Rate limit headers are checked; warnings logged when remaining < 10
+- 403/429 responses with `x-ratelimit-remaining: 0` return a rate-limit error
+- Asset filtering uses regex matching against asset names
+
+### Provider configuration management
+
+Provider-specific configurations are stored in the `provider_configs` table and managed via CRUD API endpoints:
+
+| Method | Path | Permission | Action |
+|--------|------|------------|--------|
+| GET | `/api/v1/provider-configs` | ViewSettings | List all non-deactivated configs |
+| GET | `/api/v1/provider-configs/{id}` | ViewSettings | Get a specific config |
+| POST | `/api/v1/provider-configs` | ManageSettings | Create a new config |
+| PUT | `/api/v1/provider-configs/{id}` | ManageSettings | Update a config (partial) |
+| DELETE | `/api/v1/provider-configs/{id}` | ManageSettings | Soft-delete a config |
+
+**Config validation:** On create/update, the JSON config is deserialized into the provider-specific config type (e.g. `GitHubConfig`) and validated. Unknown `provider_type` values return 400.
+
+**Secret masking:** `auth_token` fields in config JSON are replaced with `"***"` in GET responses. On PUT, if `auth_token` is `"***"`, the existing value from the DB is preserved.
+
+**Supported provider types:** `github_releases`.
+
 When adding or changing a provider, document in the same PR:
 
 - How installed version is detected (agent side)

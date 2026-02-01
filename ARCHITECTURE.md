@@ -169,13 +169,15 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 19 entities in `crates/shared/db/src/entity/`:
+The data model comprises 20 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `host`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `host`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
 
 The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
+
+The `provider_config` entity stores per-provider-type configuration (e.g. GitHub owner/repo, auth tokens, asset filters). Multiple configs can exist per provider type (e.g. tracking releases from several GitHub repositories). Configs are managed via CRUD API endpoints with secret masking (auth tokens are replaced with `"***"` in responses) and provider-specific validation.
 
 ### Migrations
 
@@ -200,6 +202,17 @@ Providers define how software items are tracked and updated. Each provider split
 | Proxmox Helper-Scripts | `crates/providers/proxmox-helper-scripts/` | Auto-discovers and manages PVE helper-script-installed apps |
 
 The update step can always be overridden by a custom shell script, regardless of provider.
+
+### Provider configuration storage
+
+Provider-specific configurations are stored in the `provider_configs` database table as JSON blobs. Each config record has:
+
+- A user-friendly `name` (e.g. "Prometheus GitHub Releases")
+- A `provider_type` discriminator (e.g. `github_releases`)
+- A `config` JSON object validated against the provider's config schema on create/update
+- An `enabled` flag and soft-delete via `deactivated_at`
+
+The web API exposes CRUD endpoints at `/api/v1/provider-configs` with `ViewSettings` / `ManageSettings` permissions. Secret fields (e.g. `auth_token`) are masked with `"***"` in API responses and preserved on update when the masked value is sent back.
 
 ## Frontend Architecture
 

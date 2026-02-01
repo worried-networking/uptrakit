@@ -46,9 +46,9 @@ Essential infrastructure needed before feature development.
 - [ ] Define Rust structs for core entities
   - [ ] Host model with serialization
   - [ ] SoftwareItem model with provider-specific fields
-  - [ ] Version model with comparison and ordering
+  - [x] Version model with comparison and ordering
   - [ ] UpdateRecord model for tracking history
-- [ ] Implement version comparison logic (semver, custom formats)
+- [x] Implement version comparison logic (semver, custom formats)
 - [ ] Create repositories/DAOs for each entity
 - [ ] Add validation logic for data models
 - [x] Store JSON encoded strings as settings values
@@ -139,15 +139,15 @@ Essential infrastructure needed before feature development.
 
 ### Provider Trait System
 
-- [ ] Refine Provider trait definition
-  - [ ] Methods for version detection
-  - [ ] Methods for version checking
-  - [ ] Methods for update execution
-  - [ ] Error handling patterns
+- [x] Refine Provider trait definition
+  - [x] Methods for version detection
+  - [x] Methods for version checking
+  - [x] Methods for update execution
+  - [x] Error handling patterns
 - [ ] Create provider registry system
-- [ ] Implement provider configuration mechanism
+- [x] Implement provider configuration mechanism
 - [ ] Add provider capability discovery
-- [ ] Design provider-specific configuration storage
+- [x] Design provider-specific configuration storage
 
 ---
 
@@ -170,22 +170,22 @@ Main functionality that delivers the core value proposition.
 ### Version Checking (Controller-Side)
 
 - [ ] Implement provider-specific version checking
-  - [ ] GitHub releases API integration
+  - [x] GitHub releases API integration
   - [ ] Package repository API integration
   - [ ] Docker registry API integration
   - [ ] Proxmox Helper Scripts repository check
-- [ ] Add version comparison logic per provider
+- [x] Add version comparison logic per provider
 - [ ] Implement channel support (stable, beta, nightly)
 - [ ] Cache available versions with TTL
-- [ ] Handle API rate limiting
+- [x] Handle API rate limiting
 - [ ] Add retry logic for failed checks
 
 ### Provider Implementations
 
-- [ ] Complete GitHub releases provider
-  - [ ] Asset detection and selection
-  - [ ] Release notes extraction
-  - [ ] Pre-release handling
+- [x] Complete GitHub releases provider (controller-side remote provider)
+  - [x] Asset detection and selection
+  - [x] Release notes extraction
+  - [x] Pre-release handling
 - [ ] Implement Proxmox Helper Scripts provider
   - [ ] Script version detection
   - [ ] Script update mechanism
