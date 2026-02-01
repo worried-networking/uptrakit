@@ -8,3 +8,12 @@ version.workspace = true
 publish = false
 
 [dependencies]
+uptrakit-provider-core = { path = "../core" }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true, features = ["parsing"] }
+thiserror = { workspace = true }
+rootcause = { workspace = true }
+tracing = { workspace = true }
+regex = "1"
