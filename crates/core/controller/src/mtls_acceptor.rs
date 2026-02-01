@@ -7,10 +7,11 @@ use axum::http::Request;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::server::TlsStream;
 use tower::Service;
-use uptrakit_web_api::extract::AgentIdentity;
 
 use axum_server::accept::Accept;
 use axum_server::tls_rustls::RustlsAcceptor;
+
+use uptrakit_web_api::extract::AgentIdentity;
 
 /// Pinned, boxed future returned by the inner TLS acceptor.
 type BoxedAcceptFuture<I, S> = Pin<Box<dyn Future<Output = io::Result<(TlsStream<I>, S)>> + Send>>;
@@ -111,12 +112,5 @@ where
     let (_, conn) = stream.get_ref();
     let certs = conn.peer_certificates()?;
     let leaf = certs.first()?;
-    let (_, cert) = x509_parser::parse_x509_certificate(leaf.as_ref()).ok()?;
-    let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
-    let agent_id = uuid::Uuid::parse_str(cn).ok()?;
-    let cert_serial = cert.raw_serial_as_string();
-    Some(AgentIdentity {
-        agent_id,
-        cert_serial,
-    })
+    uptrakit_web_api::extract::agent_identity_from_der(leaf.as_ref())
 }
