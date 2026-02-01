@@ -123,7 +123,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     )
     .await
     .context(AppError::Settings)?;
-    settings.set_trusted_proxies(trusted_proxies).await;
+    settings.set_trusted_proxies(trusted_proxies.clone()).await;
 
     let real_ip_header = reconcile::reconcile_setting(
         &db_conn,
@@ -140,6 +140,86 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     .await
     .context(AppError::Settings)?;
     settings.set_real_ip_header(real_ip_header).await;
+
+    let forwarded_cert_info_header = reconcile::reconcile_setting(
+        &db_conn,
+        SettingKey::ForwardedClientCertInfoHeader,
+        &raw_settings,
+        args.forwarded_client_cert_info_header,
+        String::new(), // empty = disabled
+        force,
+        reconcile::JsonConvert {
+            to_json: |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            from_json: |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        },
+    )
+    .await
+    .context(AppError::Settings)?;
+    let forwarded_cert_info_opt = if forwarded_cert_info_header.is_empty() {
+        None
+    } else {
+        Some(forwarded_cert_info_header)
+    };
+    settings
+        .set_forwarded_client_cert_info_header(forwarded_cert_info_opt.clone())
+        .await;
+
+    let forwarded_cert_pem_header = reconcile::reconcile_setting(
+        &db_conn,
+        SettingKey::ForwardedClientCertPemHeader,
+        &raw_settings,
+        args.forwarded_client_cert_pem_header,
+        String::new(), // empty = disabled
+        force,
+        reconcile::JsonConvert {
+            to_json: |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            from_json: |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        },
+    )
+    .await
+    .context(AppError::Settings)?;
+    let forwarded_cert_pem_opt = if forwarded_cert_pem_header.is_empty() {
+        None
+    } else {
+        Some(forwarded_cert_pem_header)
+    };
+    settings
+        .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
+        .await;
+
+    // Warn if cert headers are configured but no trusted proxies
+    if (forwarded_cert_info_opt.is_some() || forwarded_cert_pem_opt.is_some())
+        && trusted_proxies.is_empty()
+    {
+        tracing::warn!(
+            "forwarded client cert header(s) configured but no --trusted-proxy set; \
+             cert headers will be stripped from all requests"
+        );
+    }
 
     let extra_sans = reconcile_setting_vec::<String>(
         &db_conn,

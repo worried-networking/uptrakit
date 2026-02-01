@@ -70,6 +70,21 @@ pub struct Args {
     #[arg(long = "san")]
     pub sans: Vec<String>,
 
+    /// Header name for structured forwarded client certificate info
+    /// (e.g. `X-Forwarded-Tls-Client-Cert-Info` for Traefik).
+    /// Requires `--trusted-proxy` to take effect.
+    /// Stored in DB as `network.forwarded_client_cert_info_header`.
+    #[arg(long)]
+    pub forwarded_client_cert_info_header: Option<String>,
+
+    /// Header name for PEM-encoded forwarded client certificate
+    /// (e.g. `X-Forwarded-Tls-Client-Cert` for Traefik/Caddy).
+    /// Used as fallback when the info header is absent.
+    /// Requires `--trusted-proxy` to take effect.
+    /// Stored in DB as `network.forwarded_client_cert_pem_header`.
+    #[arg(long)]
+    pub forwarded_client_cert_pem_header: Option<String>,
+
     /// Path to the built frontend directory. Enables SPA serving.
     #[arg(long)]
     pub static_dir: Option<PathBuf>,
@@ -279,6 +294,34 @@ mod tests {
         assert_eq!(
             args.mqtt.mqtt_topic_prefix.as_deref(),
             Some("home/uptrakit")
+        );
+    }
+
+    #[test]
+    fn forwarded_cert_headers_not_set_by_default() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(args.forwarded_client_cert_info_header.is_none());
+        assert!(args.forwarded_client_cert_pem_header.is_none());
+    }
+
+    #[test]
+    fn forwarded_cert_headers_custom_values() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--forwarded-client-cert-info-header",
+            "X-Forwarded-Tls-Client-Cert-Info",
+            "--forwarded-client-cert-pem-header",
+            "X-Forwarded-Tls-Client-Cert",
+        ])
+        .expect("should parse custom values");
+        assert_eq!(
+            args.forwarded_client_cert_info_header.as_deref(),
+            Some("X-Forwarded-Tls-Client-Cert-Info")
+        );
+        assert_eq!(
+            args.forwarded_client_cert_pem_header.as_deref(),
+            Some("X-Forwarded-Tls-Client-Cert")
         );
     }
 
