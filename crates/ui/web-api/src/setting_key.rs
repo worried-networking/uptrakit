@@ -23,6 +23,8 @@ pub enum SettingKey {
     MqttPassword,
     MqttTopicPrefix,
     EnrollmentTokenHash,
+    ForwardedClientCertInfoHeader,
+    ForwardedClientCertPemHeader,
 }
 
 impl SettingKey {
@@ -44,6 +46,8 @@ impl SettingKey {
         Self::MqttPassword,
         Self::MqttTopicPrefix,
         Self::EnrollmentTokenHash,
+        Self::ForwardedClientCertInfoHeader,
+        Self::ForwardedClientCertPemHeader,
     ];
 
     /// The DB string representation of this key.
@@ -65,6 +69,10 @@ impl SettingKey {
             Self::MqttPassword => "mqtt.password",
             Self::MqttTopicPrefix => "mqtt.topic_prefix",
             Self::EnrollmentTokenHash => "agent_enrollment.token_hash",
+            Self::ForwardedClientCertInfoHeader => {
+                "network.forwarded_client_cert_info_header"
+            }
+            Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
         }
     }
 
@@ -87,6 +95,12 @@ impl SettingKey {
             "mqtt.password" => Some(Self::MqttPassword),
             "mqtt.topic_prefix" => Some(Self::MqttTopicPrefix),
             "agent_enrollment.token_hash" => Some(Self::EnrollmentTokenHash),
+            "network.forwarded_client_cert_info_header" => {
+                Some(Self::ForwardedClientCertInfoHeader)
+            }
+            "network.forwarded_client_cert_pem_header" => {
+                Some(Self::ForwardedClientCertPemHeader)
+            }
             _ => None,
         }
     }
@@ -126,7 +140,7 @@ mod tests {
 
     #[test]
     fn all_has_correct_count() {
-        // 16 variants defined in the enum
-        assert_eq!(SettingKey::ALL.len(), 16);
+        // 18 variants defined in the enum
+        assert_eq!(SettingKey::ALL.len(), 18);
     }
 }
