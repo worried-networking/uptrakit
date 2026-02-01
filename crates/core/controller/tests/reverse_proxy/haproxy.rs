@@ -25,7 +25,7 @@ async fn haproxy_l7_forwards_client_cert() {
 
     let container = GenericImage::new("haproxy", "latest")
         .with_exposed_port(443u16.tcp())
-        .with_wait_for(WaitFor::Log(LogWaitStrategy::stdout("Proxy")))
+        .with_wait_for(WaitFor::Log(LogWaitStrategy::stderr("Loading success")))
         .with_mount(
             Mount::bind_mount(
                 tmp.path().join("haproxy.cfg").to_str().expect("cfg path"),
@@ -112,13 +112,15 @@ fn write_haproxy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
 defaults
     mode http
     log global
+    option httplog
     timeout client 30s
     timeout server 30s
     timeout connect 5s
 
 frontend https_front
     bind *:443 ssl crt /etc/haproxy/ssl/server.pem ca-file /etc/haproxy/ssl/ca.crt verify optional
-    http-request set-header X-Forwarded-Client-Cert-Info Subject="%[ssl_c_s_dn]";SerialNumber="%[ssl_c_serial]";Issuer="%[ssl_c_i_dn]" if {{ ssl_c_used }}
+    option forwardfor
+    http-request set-header X-Forwarded-Client-Cert-Info "Subject=%[ssl_c_s_dn];SerialNumber=%[ssl_c_serial,hex];Issuer=%[ssl_c_i_dn]" if {{ ssl_c_used }}
     http-request del-header X-Forwarded-Client-Cert-Info unless {{ ssl_c_used }}
     default_backend uptrakit_https
 
