@@ -71,9 +71,7 @@ pub fn extract_cn_from_dn(dn: &str) -> Option<&str> {
             let value_start = start + 5; // len("cn%3d")
             let value = &dn[value_start..];
             // Value ends at comma, slash, or end
-            let end = value
-                .find(|c: char| c == ',' || c == '/' || c == '+')
-                .unwrap_or(value.len());
+            let end = value.find([',', '/', '+']).unwrap_or(value.len());
             let cn = &value[..end];
             if !cn.is_empty() {
                 return Some(cn);
@@ -85,10 +83,10 @@ pub fn extract_cn_from_dn(dn: &str) -> Option<&str> {
     // OpenSSL format: /CN=uuid/O=Org
     if dn.starts_with('/') {
         for part in dn.split('/') {
-            if let Some(value) = part.strip_prefix("CN=") {
-                if !value.is_empty() {
-                    return Some(value);
-                }
+            if let Some(value) = part.strip_prefix("CN=")
+                && !value.is_empty()
+            {
+                return Some(value);
             }
         }
         return None;
@@ -97,10 +95,10 @@ pub fn extract_cn_from_dn(dn: &str) -> Option<&str> {
     // RFC 2253 format: CN=uuid,O=Org or CN=uuid
     for part in dn.split(',') {
         let trimmed = part.trim();
-        if let Some(value) = trimmed.strip_prefix("CN=") {
-            if !value.is_empty() {
-                return Some(value);
-            }
+        if let Some(value) = trimmed.strip_prefix("CN=")
+            && !value.is_empty()
+        {
+            return Some(value);
         }
     }
 
@@ -212,11 +210,8 @@ mod tests {
 
     #[test]
     fn identity_from_info_without_serial() {
-        let id = agent_identity_from_info(
-            "CN=550e8400-e29b-41d4-a716-446655440000",
-            None,
-        )
-        .expect("should parse");
+        let id = agent_identity_from_info("CN=550e8400-e29b-41d4-a716-446655440000", None)
+            .expect("should parse");
         assert_eq!(
             id.agent_id,
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
@@ -232,8 +227,7 @@ mod tests {
     #[test]
     fn identity_from_der_valid_cert() {
         // Generate a test certificate with a UUID CN
-        let agent_id =
-            uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let agent_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let key_pair =
             rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
         let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
@@ -243,8 +237,7 @@ mod tests {
             .push(rcgen::DnType::CommonName, agent_id.to_string());
         let cert = params.self_signed(&key_pair).expect("self-sign");
 
-        let identity =
-            agent_identity_from_der(cert.der()).expect("should parse DER cert");
+        let identity = agent_identity_from_der(cert.der()).expect("should parse DER cert");
         assert_eq!(identity.agent_id, agent_id);
         assert!(!identity.cert_serial.is_empty());
     }

@@ -69,9 +69,7 @@ impl SettingKey {
             Self::MqttPassword => "mqtt.password",
             Self::MqttTopicPrefix => "mqtt.topic_prefix",
             Self::EnrollmentTokenHash => "agent_enrollment.token_hash",
-            Self::ForwardedClientCertInfoHeader => {
-                "network.forwarded_client_cert_info_header"
-            }
+            Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
         }
     }
@@ -98,9 +96,7 @@ impl SettingKey {
             "network.forwarded_client_cert_info_header" => {
                 Some(Self::ForwardedClientCertInfoHeader)
             }
-            "network.forwarded_client_cert_pem_header" => {
-                Some(Self::ForwardedClientCertPemHeader)
-            }
+            "network.forwarded_client_cert_pem_header" => Some(Self::ForwardedClientCertPemHeader),
             _ => None,
         }
     }

@@ -152,7 +152,11 @@ pub async fn update_network_settings(
 
     // Validate and apply forwarded_client_cert_info_header (runtime-changeable)
     if let Some(ref header) = req.forwarded_client_cert_info_header {
-        let value = if header.is_empty() { None } else { Some(header.clone()) };
+        let value = if header.is_empty() {
+            None
+        } else {
+            Some(header.clone())
+        };
         let json_val = match &value {
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,
@@ -175,7 +179,11 @@ pub async fn update_network_settings(
 
     // Validate and apply forwarded_client_cert_pem_header (runtime-changeable)
     if let Some(ref header) = req.forwarded_client_cert_pem_header {
-        let value = if header.is_empty() { None } else { Some(header.clone()) };
+        let value = if header.is_empty() {
+            None
+        } else {
+            Some(header.clone())
+        };
         let json_val = match &value {
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,

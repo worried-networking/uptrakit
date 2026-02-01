@@ -118,8 +118,7 @@ fn try_info_header(
             }
         }
 
-        let identity =
-            crate::extract::agent_identity_from_info(&subject_decoded, serial);
+        let identity = crate::extract::agent_identity_from_info(&subject_decoded, serial);
         return identity;
     }
 
@@ -208,19 +207,19 @@ fn verify_issuer_cn_str(issuer_cn: &str, state: &AppState) -> bool {
     let snapshot = state.ca_snapshot.borrow().clone();
 
     // Check active CA CN
-    if let Some(active_cn) = ca_cn_from_pem(&snapshot.active_cert_pem) {
-        if active_cn == issuer_cn {
-            return true;
-        }
+    if let Some(active_cn) = ca_cn_from_pem(&snapshot.active_cert_pem)
+        && active_cn == issuer_cn
+    {
+        return true;
     }
 
     // Check previous CA CN (only if not expired)
-    if let Some(ref prev_pem) = snapshot.previous_cert_pem {
-        if let Some(prev_cn) = ca_cn_from_pem(prev_pem) {
-            if prev_cn == issuer_cn && !is_cert_expired(prev_pem) {
-                return true;
-            }
-        }
+    if let Some(ref prev_pem) = snapshot.previous_cert_pem
+        && let Some(prev_cn) = ca_cn_from_pem(prev_pem)
+        && prev_cn == issuer_cn
+        && !is_cert_expired(prev_pem)
+    {
+        return true;
     }
 
     false
@@ -276,10 +275,10 @@ fn resolve_external_base_url(headers: &HeaderMap, from_trusted_proxy: bool) -> O
         .get("origin")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.trim_end_matches('/'));
-    if let Some(o) = origin {
-        if !o.is_empty() {
-            return Some(o.to_string());
-        }
+    if let Some(o) = origin
+        && !o.is_empty()
+    {
+        return Some(o.to_string());
     }
 
     // 2. X-Forwarded-Proto + X-Forwarded-Host (trusted proxy only)
@@ -292,22 +291,14 @@ fn resolve_external_base_url(headers: &HeaderMap, from_trusted_proxy: bool) -> O
             .and_then(|v| v.to_str().ok());
 
         if let (Some(proto), Some(host)) = (proto, fwd_host) {
-            return Some(format!(
-                "{}://{}",
-                proto,
-                host.trim_end_matches('/')
-            ));
+            return Some(format!("{}://{}", proto, host.trim_end_matches('/')));
         }
 
         // 3. X-Forwarded-Proto + Host
-        if let Some(proto) = proto {
-            if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
-                return Some(format!(
-                    "{}://{}",
-                    proto,
-                    host.trim_end_matches('/')
-                ));
-            }
+        if let Some(proto) = proto
+            && let Some(host) = headers.get("host").and_then(|v| v.to_str().ok())
+        {
+            return Some(format!("{}://{}", proto, host.trim_end_matches('/')));
         }
     }
 
@@ -325,8 +316,7 @@ mod tests {
 
     #[test]
     fn parse_info_fields_semicolon_separated() {
-        let input =
-            r#"Subject="CN=550e8400-e29b-41d4-a716-446655440000,O=Uptrakit";Issuer="CN=Uptrakit CA";SerialNumber="01ABCDEF""#;
+        let input = r#"Subject="CN=550e8400-e29b-41d4-a716-446655440000,O=Uptrakit";Issuer="CN=Uptrakit CA";SerialNumber="01ABCDEF""#;
         let fields = parse_info_fields(input);
         assert_eq!(
             fields.get("Subject").map(|s| s.as_str()),
@@ -346,14 +336,8 @@ mod tests {
     fn parse_info_fields_xfcc_comma_separated() {
         let input = r#"Subject="CN=test",Issuer="CN=CA""#;
         let fields = parse_info_fields(input);
-        assert_eq!(
-            fields.get("Subject").map(|s| s.as_str()),
-            Some("CN=test")
-        );
-        assert_eq!(
-            fields.get("Issuer").map(|s| s.as_str()),
-            Some("CN=CA")
-        );
+        assert_eq!(fields.get("Subject").map(|s| s.as_str()), Some("CN=test"));
+        assert_eq!(fields.get("Issuer").map(|s| s.as_str()), Some("CN=CA"));
     }
 
     #[test]
@@ -365,11 +349,7 @@ mod tests {
         headers.insert("x-forwarded-host", HeaderValue::from_static("example.com"));
         headers.insert("host", HeaderValue::from_static("internal"));
 
-        strip_proxy_headers(
-            &mut headers,
-            Some("X-Custom-Info"),
-            Some("X-Custom-Pem"),
-        );
+        strip_proxy_headers(&mut headers, Some("X-Custom-Info"), Some("X-Custom-Pem"));
 
         assert!(headers.get("X-Custom-Info").is_none());
         assert!(headers.get("X-Custom-Pem").is_none());
@@ -393,7 +373,10 @@ mod tests {
     #[test]
     fn external_base_url_from_origin() {
         let mut headers = HeaderMap::new();
-        headers.insert("origin", HeaderValue::from_static("https://app.example.com/"));
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://app.example.com/"),
+        );
         headers.insert("host", HeaderValue::from_static("internal:8443"));
 
         let url = resolve_external_base_url(&headers, false);
@@ -418,10 +401,7 @@ mod tests {
     fn external_base_url_forwarded_ignored_for_non_proxy() {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
-        headers.insert(
-            "x-forwarded-host",
-            HeaderValue::from_static("attacker.com"),
-        );
+        headers.insert("x-forwarded-host", HeaderValue::from_static("attacker.com"));
         headers.insert("host", HeaderValue::from_static("internal:8443"));
 
         // from_trusted_proxy = false, so X-Forwarded-* should be ignored

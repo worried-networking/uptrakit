@@ -20,6 +20,18 @@ Entry point for all Uptrakit documentation.
 | OpenAPI / Swagger UI | Available at `/swagger-ui` when the controller is built with the `swagger-ui` feature flag |
 | [AsyncAPI spec](../crates/shared/wire/asyncapi.yaml) | Agent-controller WebSocket wire protocol (message types, payloads, connection lifecycle) |
 
+## Deployment Guides
+
+| Resource | Description |
+| --- | --- |
+| [Reverse Proxy Overview](reverse-proxy/README.md) | L4 passthrough vs L7 TLS termination, controller configuration, security model |
+| [Traefik](reverse-proxy/traefik.md) | TCP passthrough and L7 with `passTLSClientCert` |
+| [Caddy](reverse-proxy/caddy.md) | L4 (layer4 plugin) and L7 with PEM cert forwarding |
+| [Nginx](reverse-proxy/nginx.md) | Stream passthrough and L7 with `ssl_verify_client` |
+| [Nginx Proxy Manager](reverse-proxy/nginx-proxy-manager.md) | GUI setup and custom Nginx config for cert forwarding |
+| [Envoy](reverse-proxy/envoy.md) | TCP proxy and L7 with XFCC header |
+| [HAProxy](reverse-proxy/haproxy.md) | TCP mode and L7 with `ssl_c_s_dn` / `ssl_c_serial` |
+
 ## Planned Documentation
 
 The following guides are planned but not yet written. Contributions are welcome.
