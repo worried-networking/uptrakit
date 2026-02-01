@@ -4,6 +4,7 @@ edition = "2024"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-rust-version = "1.91"
+version.workspace = true
+publish = false
 
 [dependencies]

@@ -4243,7 +4243,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-core"
-version = "0.0.0"
+version = "0.0.1"
 
 [[package]]
 name = "uptrakit-internal-wire"
@@ -4256,7 +4256,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-mqtt"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "rootcause",
  "rumqttc",
@@ -4267,15 +4267,15 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-provider-core"
-version = "0.0.0"
+version = "0.0.1"
 
 [[package]]
 name = "uptrakit-provider-github"
-version = "0.0.0"
+version = "0.0.1"
 
 [[package]]
 name = "uptrakit-provider-proxmox-helper-scripts"
-version = "0.0.0"
+version = "0.0.1"
 
 [[package]]
 name = "uptrakit-shared-db"
@@ -4291,7 +4291,7 @@ dependencies = [
 
 [[package]]
 name = "uptrakit-web-api"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "argon2",
  "axum",
