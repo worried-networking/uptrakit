@@ -264,7 +264,7 @@ pub(crate) async fn do_lookup_by_secret(
 /// Sign certificate for an approved agent, invalidate secret.
 pub(crate) async fn do_sign_certificate(
     cert_signer: &dyn crate::cert_signer::AgentCertSigner,
-    _settings: &crate::settings::Settings,
+    settings: &crate::settings::Settings,
     db: &sea_orm::DatabaseConnection,
     agent: agent::Model,
 ) -> Result<AgentCertBundle, Report<AgentRouteError>> {
@@ -274,7 +274,7 @@ pub(crate) async fn do_sign_certificate(
         )));
     }
 
-    let lifetime = time::Duration::days(1); //settings.agent_cert_lifetime().await;
+    let lifetime = time::Duration::days(i64::from(settings.agent_cert_lifetime_days().await));
 
     let ca_fp = cert_signer.active_ca_fingerprint();
 
