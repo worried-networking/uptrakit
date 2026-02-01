@@ -46,6 +46,9 @@ impl TestServer {
         let router = build_router(state);
 
         let listener = TcpListener::bind("0.0.0.0:0").expect("bind to random port");
+        listener
+            .set_nonblocking(true)
+            .expect("set listener nonblocking");
         let port = listener.local_addr().expect("local addr").port();
 
         let rustls_config = build_rustls_config(pki);
@@ -215,10 +218,15 @@ fn build_rustls_config(pki: &TestPki) -> axum_server::tls_rustls::RustlsConfig {
     let key_der = rustls::pki_types::PrivateKeyDer::try_from(pem_to_der(&pki.server_key_pem))
         .expect("server key DER");
 
-    let server_config = rustls::ServerConfig::builder()
+    let mut server_config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(vec![cert_der], key_der)
         .expect("rustls server config");
+
+    // RustlsConfig::from_config does not set ALPN automatically (unlike
+    // from_pem / from_der). Without ALPN, reverse proxies cannot negotiate
+    // HTTP/2 with the backend.
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
 }
