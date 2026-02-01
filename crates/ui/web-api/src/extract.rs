@@ -20,6 +20,12 @@ pub struct AgentIdentity {
     pub cert_serial: String,
 }
 
+/// The external base URL resolved from proxy headers or the Host header.
+/// Used for constructing redirect URLs (OIDC callbacks, device auth, etc.)
+/// when the controller is behind a reverse proxy.
+#[derive(Debug, Clone)]
+pub struct ExternalBaseUrl(pub String);
+
 /// Parse [`AgentIdentity`] from DER-encoded X.509 certificate bytes.
 pub fn agent_identity_from_der(der: &[u8]) -> Option<AgentIdentity> {
     let (_, cert) = x509_parser::parse_x509_certificate(der).ok()?;

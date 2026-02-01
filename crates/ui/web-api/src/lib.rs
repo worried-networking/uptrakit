@@ -342,6 +342,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     router
         .layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
+            middleware::resolve_proxy_headers::resolve_proxy_headers,
+        ))
+        .layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
             middleware::resolve_ip::resolve_ip,
         ))
         .layer(axum_mw::from_fn(middleware::request_log::request_log))
