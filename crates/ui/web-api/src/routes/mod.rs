@@ -8,6 +8,7 @@ pub mod health;
 pub mod hosts;
 pub mod oidc_auth;
 pub mod oidc_providers;
+pub mod provider_configs;
 pub mod server_cert;
 pub mod settings;
 pub mod settings_agent_certs;

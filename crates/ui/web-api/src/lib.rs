@@ -95,7 +95,8 @@ pub struct AppState {
         (name = "Agents", description = "Agent enrollment and management"),
         (name = "OIDC Providers", description = "OIDC provider configuration"),
         (name = "API Tokens", description = "Personal access token management"),
-        (name = "Hosts", description = "Host machine management")
+        (name = "Hosts", description = "Host machine management"),
+        (name = "Provider Configs", description = "Provider configuration management")
     ),
     paths(
         routes::auth::register,
@@ -144,7 +145,12 @@ pub struct AppState {
         routes::hosts::list_hosts,
         routes::hosts::get_host,
         routes::hosts::update_host,
-        routes::hosts::deactivate_host
+        routes::hosts::deactivate_host,
+        routes::provider_configs::create_provider_config,
+        routes::provider_configs::list_provider_configs,
+        routes::provider_configs::get_provider_config,
+        routes::provider_configs::update_provider_config,
+        routes::provider_configs::delete_provider_config
     ),
     components(
         schemas(
@@ -196,7 +202,10 @@ pub struct AppState {
             routes::hosts::HostResponse,
             routes::hosts::HostAgentSummary,
             routes::hosts::UpdateHostRequest,
-            routes::hosts::HostMessageResponse
+            routes::hosts::HostMessageResponse,
+            routes::provider_configs::CreateProviderConfigRequest,
+            routes::provider_configs::UpdateProviderConfigRequest,
+            routes::provider_configs::ProviderConfigResponse
         )
     ),
     info(
@@ -314,6 +323,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::hosts::get_host))
         .routes(routes!(routes::hosts::update_host))
         .routes(routes!(routes::hosts::deactivate_host))
+        .routes(routes!(
+            routes::provider_configs::create_provider_config,
+            routes::provider_configs::list_provider_configs
+        ))
+        .routes(routes!(routes::provider_configs::get_provider_config))
+        .routes(routes!(routes::provider_configs::update_provider_config))
+        .routes(routes!(routes::provider_configs::delete_provider_config))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,
