@@ -58,7 +58,9 @@ pub async fn resolve_ip(
 /// - Peer is NOT a trusted proxy → `(Some(peer), None)` — direct client
 /// - Peer IS trusted → extract from configured header
 ///   - Header present and parseable → `(Some(header_ip), Some(peer))`
-///   - Header missing/unparseable → `(Some(peer), None)` — fall back to peer
+///   - Header missing/unparseable → `(Some(peer), Some(peer))` — peer is
+///     still a trusted proxy (important for cert-header trust), but the
+///     client IP falls back to the peer address.
 fn resolve_client_ip(
     peer_ip: Option<IpAddr>,
     headers: &HeaderMap,
@@ -77,7 +79,7 @@ fn resolve_client_ip(
 
     match extract_real_ip(headers, real_ip_header) {
         Some(real_ip) => (Some(canonicalize(real_ip)), Some(peer)),
-        None => (Some(peer), None),
+        None => (Some(peer), Some(peer)),
     }
 }
 
@@ -333,8 +335,10 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
             .await
             .unwrap();
-        // Falls back to peer IP as client, no proxy extension
-        assert_eq!(body, "client=10.0.0.1 proxy=-");
+        // Client IP falls back to peer, but ProxyIp is still set because
+        // the peer is in the trusted_proxies list. This ensures cert-header
+        // trust works even when the proxy doesn't send X-Forwarded-For.
+        assert_eq!(body, "client=10.0.0.1 proxy=10.0.0.1");
     }
 
     #[tokio::test]
