@@ -350,7 +350,67 @@ Ways users interact with the system.
 
 ---
 
-## Phase 4: Provider Ecosystem (Priority 3-4)
+## Phase 4: SSH Agent (Priority 3)
+
+A new agent type that communicates with the controller over WebSocket (like the regular agent) but executes version detection and updates on remote hosts over SSH instead of locally. This is a separate crate (`crates/core/agent-ssh/`) — not integrated into the existing agent or the controller.
+
+Use case: managing hosts where installing a persistent daemon is impractical (appliances, locked-down systems, minimal containers, or environments where outbound-only WebSocket is not feasible but inbound SSH is available).
+
+### New Crate & Architecture
+
+- [ ] Create `crates/core/agent-ssh/` crate (`uptrakit-agent-ssh` binary)
+- [ ] Reuse the existing wire protocol and WebSocket transport to the controller
+- [ ] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
+- [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
+- [ ] Clearly separate SSH transport logic from provider execution logic so providers remain transport-agnostic
+
+### SSH Transport Layer
+
+- [ ] Key-based authentication only (no password auth)
+- [ ] Support Ed25519 (preferred) and RSA keys
+- [ ] Strict host key verification (TOFU with persisted known_hosts, or pre-seeded fingerprints)
+- [ ] Reject connections on host key mismatch — never silently accept
+- [ ] Connection pooling and multiplexing (reuse connections across checks and updates for the same host)
+- [ ] Configurable connection and command timeouts
+- [ ] Jump host / bastion support for reaching hosts behind NAT or firewalls
+- [ ] Support for custom SSH ports per host
+
+### Remote Execution
+
+- [ ] Run provider detection commands on the remote host over SSH and parse output locally
+- [ ] Execute updates via sudo on the remote host (same sudo allowlist model as the regular agent)
+- [ ] Stream command output back for progress reporting
+- [ ] Enforce per-host update locking (no concurrent updates to the same host)
+- [ ] Timeout and kill long-running remote commands
+- [ ] Handle connection drops mid-command gracefully (report failure, do not leave orphan processes)
+
+### Provider Compatibility
+
+- [ ] All agent-side providers must work over SSH (same commands, different transport)
+- [ ] Provider trait may need a transport abstraction so the same provider logic works for both local and SSH execution
+- [ ] Provider-level capability flag indicating SSH compatibility
+
+### Security Considerations
+
+- [ ] Least-privilege SSH user on each managed host (e.g. `uptrakit`, mirrors the regular agent model)
+- [ ] Sudo allowlist identical to regular agent: only specific update commands, NOPASSWD, no shell access
+- [ ] No shell injection: remote commands constructed from validated inputs, never string-interpolated
+- [ ] SSH private keys stored on the machine running the SSH agent — never sent to the controller or exposed in API responses
+- [ ] Audit trail: log every SSH session (host, user, command, timestamp, exit code) without capturing secrets or key material
+- [ ] Limit concurrent SSH sessions per host and globally to prevent resource exhaustion on both the SSH agent and the remote hosts
+- [ ] Host key fingerprints should be verifiable through the controller UI (display, not edit)
+
+### Configuration & Management
+
+- [ ] Config file format for defining target hosts and their SSH credentials
+- [ ] CLI flags for overrides (key path, known_hosts path, concurrency limits)
+- [ ] Health checks: periodic SSH connectivity test to each managed host, reported to controller
+- [ ] Controller UI and API: SSH-managed hosts appear alongside regular agents with a transport type indicator
+- [ ] MQTT/Home Assistant entities work identically regardless of agent transport
+
+---
+
+## Phase 5: Provider Ecosystem (Priority 3-4)
 
 Expanding the provider system with more integrations.
 
@@ -393,7 +453,7 @@ Expanding the provider system with more integrations.
 
 ---
 
-## Phase 5: Advanced Features (Priority 4)
+## Phase 6: Advanced Features (Priority 4)
 
 Polish and additional capabilities for production use.
 
@@ -459,7 +519,7 @@ Polish and additional capabilities for production use.
 
 ---
 
-## Phase 6: Security Enhancements (Priority 2-3)
+## Phase 7: Security Enhancements (Priority 2-3)
 
 Comprehensive security hardening.
 
@@ -543,7 +603,7 @@ Comprehensive security hardening.
 
 ---
 
-## Phase 7: Quality & Reliability (Ongoing)
+## Phase 8: Quality & Reliability (Ongoing)
 
 Ensuring robustness and maintainability.
 
@@ -608,7 +668,7 @@ Ensuring robustness and maintainability.
 
 ---
 
-## Phase 8: Documentation & Operations (Ongoing)
+## Phase 9: Documentation & Operations (Ongoing)
 
 Making the system usable and maintainable.
 
@@ -682,7 +742,7 @@ Making the system usable and maintainable.
 
 ---
 
-## Phase 9: Project Infrastructure (Ongoing)
+## Phase 10: Project Infrastructure (Ongoing)
 
 Development and release automation.
 
