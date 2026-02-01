@@ -1,8 +1,8 @@
 # Traefik Reverse Proxy
 
-## L4 TCP Passthrough
+## L4 TLS Passthrough
 
-Forward raw TCP to the controller without TLS termination.
+Forward raw TCP to the controller without TLS termination. The controller handles mTLS directly with agents.
 
 ### Docker Compose
 
@@ -101,7 +101,8 @@ http:
 
 - Use `RequestClientCert` (not `RequireAndVerifyClientCert`) so browsers can access the web UI without a client certificate.
 - `passTLSClientCert` sends the `X-Forwarded-Tls-Client-Cert-Info` header with structured Subject, Issuer, and SerialNumber fields.
-- The `serversTransport` section ensures Traefik trusts the controller's internal CA when connecting to the backend.
+- **`serversTransport` requires the `@file` qualifier** (e.g., `uptrakit@file`) when referencing a transport defined in the file provider. Without it, Traefik cannot resolve the transport and falls back to the default (which verifies backend certificates against system CAs, causing connection failures).
+- Traefik uses form-URL-encoding (`+` for space) in the `passTLSClientCert` header values. The controller handles this automatically.
 - Replace `172.16.0.0/12` with your Docker network CIDR.
 
 ### Obtaining the CA Certificate

@@ -4,9 +4,9 @@ This guide covers deploying Uptrakit behind a reverse proxy. Two deployment mode
 
 ## Deployment Modes
 
-### L4 Passthrough (TCP/TLS passthrough)
+### L4 TLS Passthrough
 
-The proxy forwards raw TCP traffic to the controller without terminating TLS. The controller handles mTLS directly with agents.
+The proxy forwards raw TCP traffic to the controller without terminating TLS. The controller handles mTLS directly with agents. No `--trusted-proxy` or cert-forwarding flags are needed.
 
 **Pros:** Simplest setup, full mTLS preserved, no certificate configuration on the proxy.
 **Cons:** Proxy cannot inspect HTTP traffic, no path-based routing, no HTTP-level load balancing.
@@ -26,7 +26,7 @@ The proxy terminates TLS, optionally verifies client certificates, and forwards 
 
 | Flag | DB Key | Description |
 | --- | --- | --- |
-| `--trusted-proxy` | `network.trusted_proxies` | Proxy IP/CIDR (repeatable). **Required** for L7 mode. |
+| `--trusted-proxy` | `network.trusted_proxies` | Proxy IP/CIDR (repeatable). Required for L7 mode; not needed for L4 passthrough. |
 | `--real-ip-header` | `network.real_ip_header` | Header for real client IP (default: `X-Forwarded-For`) |
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | Header for structured cert info (L7 only) |
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | Header for PEM-encoded cert (L7 fallback) |
@@ -39,16 +39,28 @@ The structured info header uses semicolon-separated `key="value"` pairs:
 Subject="CN=<agent-uuid>,O=Uptrakit";Issuer="CN=Uptrakit Internal CA";SerialNumber="01:ab:cd:ef"
 ```
 
+Envoy's XFCC header uses comma-separated pairs (also supported):
+
+```
+Subject="CN=<agent-uuid>",Cert="<url-encoded-PEM>"
+```
+
 Fields:
-- **Subject** (required): Distinguished name containing the agent UUID as CN
-- **Issuer** (required for CA verification): Distinguished name of the issuing CA
+- **Cert** (preferred when present): URL-encoded PEM certificate. Provides full identity extraction including serial number and issuer verification. Used by Envoy XFCC.
+- **Subject** (required if no Cert): Distinguished name containing the agent UUID as CN
+- **Issuer** (required for CA verification when using Subject): Distinguished name of the issuing CA
 - **SerialNumber** / **Serial** (optional): Certificate serial number in hex
 
-When the serial number is absent, the controller uses agent-id-only lookup (finds any non-revoked cert for the agent UUID).
+When a `Cert` field is present, the controller parses the full certificate from it. Otherwise it falls back to the Subject/SerialNumber/Issuer fields. When the serial number is absent in Subject-only mode, the controller uses agent-id-only lookup (finds any non-revoked cert for the agent UUID).
 
 ### PEM Header Format
 
-The PEM header contains the URL-encoded full client certificate in PEM format. The controller parses it to extract the agent identity and verify the issuer.
+The PEM header contains the client certificate in one of two formats:
+
+- **Base64-DER** (recommended): The raw DER certificate encoded as standard base64. HTTP-header safe. Used by Caddy (`certificate_der_base64`).
+- **URL-encoded PEM**: The full PEM certificate with URL-encoding applied to handle newlines and special characters.
+
+The controller auto-detects the format and parses it to extract the agent identity and verify the issuer.
 
 ## Security Model
 

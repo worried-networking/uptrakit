@@ -1,6 +1,8 @@
 # Envoy Reverse Proxy
 
-## L4 TCP Passthrough
+## L4 TLS Passthrough
+
+Forward raw TCP traffic to the controller without terminating TLS. The controller handles mTLS directly with agents.
 
 ```yaml
 static_resources:
@@ -32,6 +34,8 @@ static_resources:
                       address: uptrakit
                       port_value: 8443
 ```
+
+No controller flags needed for passthrough mode.
 
 ## L7 TLS Termination
 
@@ -65,11 +69,11 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: ingress_http
+                use_remote_address: true
                 forward_client_cert_details: SANITIZE_SET
                 set_current_client_cert_details:
                   subject: true
                   cert: true
-                  uri: true
                 upgrade_configs:
                   - upgrade_type: websocket
                 route_config:
@@ -99,6 +103,9 @@ static_resources:
             validation_context:
               trusted_ca:
                 filename: /etc/envoy/ssl/ca.crt
+            alpn_protocols:
+              - h2
+              - http/1.1
       load_assignment:
         cluster_name: uptrakit_cluster
         endpoints:
@@ -120,12 +127,13 @@ uptrakit-controller \
 
 ### Notes
 
-- **XFCC lacks SerialNumber:** Envoy's XFCC header does not include the certificate serial number. The controller falls back to agent-id-only lookup when serial is absent.
-- **`Cert=` field:** Envoy includes the full DER-encoded certificate (base64) in the `Cert=` field of the XFCC header. The controller can parse this to extract the full identity including serial number.
+- **`use_remote_address: true` is recommended.** It causes Envoy to set `X-Forwarded-For` so the controller can resolve the real client IP for logging and rate limiting. It also affects how `SANITIZE_SET` processes the XFCC header.
+- **`Cert=` field (preferred):** Envoy includes the URL-encoded PEM certificate in the `Cert` field of the XFCC header. The controller parses this to extract the full identity including serial number and verifies the issuer CN.
+- **`Subject=` field (fallback):** When `Cert` is absent, the controller falls back to the `Subject` field. However, Envoy's XFCC does not include a `SerialNumber` field, so this path uses agent-id-only lookup.
 - `forward_client_cert_details: SANITIZE_SET` ensures the XFCC header is set by Envoy and not spoofed by clients.
 - `require_client_certificate: false` allows browsers to connect without client certificates.
 - The `upgrade_configs` section enables WebSocket support.
-- The upstream cluster uses TLS with the controller's CA for backend trust.
+- The upstream cluster uses TLS with the controller's CA for backend trust. The `alpn_protocols` setting enables HTTP/2 negotiation with the backend.
 
 ### Obtaining the CA Certificate
 

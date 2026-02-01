@@ -1,8 +1,8 @@
 # Nginx Reverse Proxy
 
-## L4 TCP Passthrough
+## L4 TLS Passthrough
 
-Use the `stream` module to forward raw TCP traffic.
+Use the `stream` module to forward raw TCP traffic. The controller handles mTLS directly with agents.
 
 ```nginx
 stream {
@@ -16,6 +16,8 @@ stream {
     }
 }
 ```
+
+No controller flags needed for passthrough mode.
 
 **Note:** L4 passthrough does not support SNI-based routing with multiple backends unless you use the `ngx_stream_ssl_preread_module`:
 

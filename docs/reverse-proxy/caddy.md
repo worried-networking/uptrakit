@@ -1,8 +1,8 @@
 # Caddy Reverse Proxy
 
-## L4 TCP Passthrough
+## L4 TLS Passthrough
 
-Requires the [layer4](https://github.com/mholt/caddy-l4) plugin.
+Requires the [layer4](https://github.com/mholt/caddy-l4) plugin. The proxy forwards raw TCP traffic to the controller without terminating TLS. The controller handles mTLS directly with agents.
 
 ```
 {
@@ -25,6 +25,8 @@ Requires the [layer4](https://github.com/mholt/caddy-l4) plugin.
 }
 ```
 
+No controller flags needed for passthrough mode — mTLS is handled end-to-end by the controller.
+
 ## L7 TLS Termination
 
 Caddy terminates TLS, requests client certificates, and forwards the PEM-encoded cert to the controller.
@@ -36,7 +38,9 @@ uptrakit.example.com {
     tls {
         client_auth {
             mode request
-            trusted_ca_certs_pem_file /etc/caddy/ca.crt
+            trust_pool file {
+                pem_file /etc/caddy/ca.crt
+            }
         }
     }
 
@@ -46,9 +50,7 @@ uptrakit.example.com {
             tls_server_name uptrakit.example.com
         }
 
-        header_up X-Forwarded-Tls-Client-Cert {http.request.tls.client.certificate_pem}
-        header_up X-Forwarded-Proto {scheme}
-        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Tls-Client-Cert {http.request.tls.client.certificate_der_base64}
     }
 }
 ```
@@ -64,7 +66,9 @@ uptrakit-controller \
 ### Notes
 
 - `mode request` makes client certificates optional (browsers work without one).
-- Caddy URL-encodes the PEM certificate in the header value; the controller handles URL-decoding automatically.
+- `trust_pool file` is the modern syntax (Caddy 2.8+). Older versions used the deprecated `trusted_ca_cert_file` directive.
+- `certificate_der_base64` sends the client certificate as base64-encoded DER, which is HTTP-header safe. The older `certificate_pem` placeholder contains raw PEM with newlines, which is **not valid** in HTTP headers.
+- Caddy sets `X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Host` automatically — no explicit `header_up` directives are needed for these.
 - The `tls_trusted_ca_certs` directive ensures Caddy trusts the controller's internal CA.
 
 ### Obtaining the CA Certificate
