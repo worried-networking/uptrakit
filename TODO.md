@@ -505,6 +505,7 @@ Polish and additional capabilities for production use.
 - [ ] Add notification configuration UI
 - [ ] Implement notification filtering/preferences
 - [ ] Add notification history
+- [ ] Support actionable notifications
 
 ### Update Windows
 
