@@ -112,7 +112,9 @@ fn write_caddy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
     tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key {{
         client_auth {{
             mode request
-            trusted_ca_cert_file /etc/caddy/certs/ca.crt
+            trust_pool file {{
+                pem_file /etc/caddy/certs/ca.crt
+            }}
         }}
     }}
 
@@ -121,9 +123,7 @@ fn write_caddy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
             tls_insecure_skip_verify
         }}
 
-        header_up X-Forwarded-Tls-Client-Cert "{{http.request.tls.client.certificate_pem}}"
-        header_up X-Forwarded-Proto "{{scheme}}"
-        header_up X-Forwarded-Host "{{host}}"
+        header_up X-Forwarded-Tls-Client-Cert "{{http.request.tls.client.certificate_der_base64}}"
     }}
 }}
 "#
