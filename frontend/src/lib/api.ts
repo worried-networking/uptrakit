@@ -7,6 +7,7 @@ import type {
 	CreateOidcProviderRequest,
 	EnrollmentTokenResponse,
 	EnrollmentTokenStatus,
+	HostResponse,
 	LoginRequest,
 	MessageResponse,
 	MqttSettingsResponse,
@@ -20,6 +21,7 @@ import type {
 	SystemAlertsResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
+	UpdateHostRequest,
 	UpdateMqttSettings,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
@@ -177,6 +179,24 @@ export function mergeAgent(targetId: string, sourceId: string): Promise<AgentRes
 		method: 'POST',
 		body: JSON.stringify({ source_id: sourceId })
 	});
+}
+
+// --- Host APIs ---
+
+export function getHosts(): Promise<HostResponse[]> {
+	return request('/hosts');
+}
+
+export function getHost(id: string): Promise<HostResponse> {
+	return request(`/hosts/${id}`);
+}
+
+export function updateHost(id: string, data: UpdateHostRequest): Promise<HostResponse> {
+	return request(`/hosts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export function deactivateHost(id: string): Promise<MessageResponse> {
+	return request(`/hosts/${id}`, { method: 'DELETE' });
 }
 
 // --- Settings APIs ---

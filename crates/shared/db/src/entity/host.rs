@@ -2,16 +2,18 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "agents")]
+#[sea_orm(table_name = "hosts")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    #[sea_orm(unique)]
+    pub machine_id: String,
     pub hostname: String,
     pub friendly_name: String,
+    pub os_type: Option<String>,
+    pub os_version: Option<String>,
+    pub architecture: Option<String>,
     pub ip_address: Option<String>,
-    pub status: String,
-    #[sea_orm(unique)]
-    pub enrollment_secret_hash: String,
     pub last_seen_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -19,24 +21,15 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(has_many = "super::agent_certificate::Entity")]
-    AgentCertificate,
-}
+pub enum Relation {}
 
-impl Related<super::agent_certificate::Entity> for Entity {
+impl Related<super::agent::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::AgentCertificate.def()
-    }
-}
-
-impl Related<super::host::Entity> for Entity {
-    fn to() -> RelationDef {
-        super::agent_host::Relation::Host.def()
+        super::agent_host::Relation::Agent.def()
     }
 
     fn via() -> Option<RelationDef> {
-        Some(super::agent_host::Relation::Agent.def().rev())
+        Some(super::agent_host::Relation::Host.def().rev())
     }
 }
 

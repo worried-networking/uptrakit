@@ -1,7 +1,9 @@
 pub mod agent;
 pub mod agent_certificate;
+pub mod agent_host;
 pub mod api_token;
 pub mod auth_method;
+pub mod host;
 pub mod oidc_provider;
 pub mod pending_account_link;
 pub mod pending_device_flow;

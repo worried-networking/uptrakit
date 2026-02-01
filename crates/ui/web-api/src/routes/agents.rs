@@ -21,9 +21,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
+use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, HostInfo, RejectedPayload};
 use uptrakit_shared_db::entity::prelude::RevocationReason;
-use uptrakit_shared_db::entity::{agent, agent_certificate, prelude::*};
+use uptrakit_shared_db::entity::{agent, agent_certificate, agent_host, host, prelude::*};
 use utoipa::ToSchema;
 
 // --- Agent status enum ---
@@ -153,6 +153,7 @@ pub(crate) async fn do_enroll(
     friendly_name: &str,
     enrollment_token: Option<&str>,
     ip_address: Option<IpAddr>,
+    host_info: Option<&HostInfo>,
 ) -> Result<EnrollResult, Report<AgentRouteError>> {
     if hostname.trim().is_empty() {
         return Err(report!(AgentRouteError::BadRequest(
@@ -222,7 +223,7 @@ pub(crate) async fn do_enroll(
         id: Set(agent_id),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
-        ip_address: Set(ip_str),
+        ip_address: Set(ip_str.clone()),
         status: Set(status.as_str().to_string()),
         enrollment_secret_hash: Set(secret_hash),
         last_seen_at: Set(Some(now)),
@@ -233,11 +234,100 @@ pub(crate) async fn do_enroll(
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
 
+    // Link agent to host (non-fatal on failure)
+    if let Some(info) = host_info
+        && let Err(e) =
+            find_or_create_host_and_link(db, inserted.id, info, hostname, ip_str.as_deref()).await
+    {
+        tracing::warn!(error = %e, "failed to link agent to host during enrollment");
+    }
+
     Ok(EnrollResult {
         agent: inserted,
         enrollment_secret,
         status,
     })
+}
+
+/// Find or create a host by machine_id, then link it to the given agent.
+///
+/// Skips silently when `machine_id == "unknown"`.
+pub(crate) async fn find_or_create_host_and_link(
+    db: &sea_orm::DatabaseConnection,
+    agent_id: uuid::Uuid,
+    host_info: &HostInfo,
+    hostname: &str,
+    ip_address: Option<&str>,
+) -> Result<(), Report<AgentRouteError>> {
+    if host_info.machine_id == "unknown" {
+        return Ok(());
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    let existing = Host::find()
+        .filter(host::Column::MachineId.eq(&host_info.machine_id))
+        .one(db)
+        .await
+        .context_to::<AgentRouteError>()?;
+
+    let host_id = if let Some(existing_host) = existing {
+        // Update mutable fields
+        let mut active: host::ActiveModel = existing_host.clone().into();
+        active.hostname = Set(hostname.to_string());
+        if let Some(ip) = ip_address {
+            active.ip_address = Set(Some(ip.to_string()));
+        }
+        if let Some(ref os_type) = host_info.os_type {
+            active.os_type = Set(Some(os_type.clone()));
+        }
+        if let Some(ref os_version) = host_info.os_version {
+            active.os_version = Set(Some(os_version.clone()));
+        }
+        if let Some(ref architecture) = host_info.architecture {
+            active.architecture = Set(Some(architecture.clone()));
+        }
+        active.last_seen_at = Set(Some(now));
+        active.updated_at = Set(now);
+        active.update(db).await.context_to::<AgentRouteError>()?;
+        existing_host.id
+    } else {
+        // Create new host
+        let host_id = token::generate_uuid();
+        let new_host = host::ActiveModel {
+            id: Set(host_id),
+            machine_id: Set(host_info.machine_id.clone()),
+            hostname: Set(hostname.to_string()),
+            friendly_name: Set(hostname.to_string()),
+            os_type: Set(host_info.os_type.clone()),
+            os_version: Set(host_info.os_version.clone()),
+            architecture: Set(host_info.architecture.clone()),
+            ip_address: Set(ip_address.map(|s| s.to_string())),
+            last_seen_at: Set(Some(now)),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        new_host.insert(db).await.context_to::<AgentRouteError>()?;
+        host_id
+    };
+
+    // Upsert agent_host link — insert if not exists
+    let existing_link = AgentHost::find_by_id((agent_id, host_id))
+        .one(db)
+        .await
+        .context_to::<AgentRouteError>()?;
+
+    if existing_link.is_none() {
+        let link = agent_host::ActiveModel {
+            agent_id: Set(agent_id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        };
+        link.insert(db).await.context_to::<AgentRouteError>()?;
+    }
+
+    Ok(())
 }
 
 /// Look up an agent by hashed enrollment_secret.
@@ -981,6 +1071,29 @@ pub async fn merge_agent(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // Copy source agent's host links to target (INSERT ON CONFLICT DO NOTHING)
+    if let Ok(source_links) = AgentHost::find()
+        .filter(agent_host::Column::AgentId.eq(source_uuid))
+        .all(&state.db)
+        .await
+    {
+        for link in source_links {
+            let existing = AgentHost::find_by_id((target_uuid, link.host_id))
+                .one(&state.db)
+                .await;
+            if matches!(existing, Ok(None)) {
+                let new_link = agent_host::ActiveModel {
+                    agent_id: Set(target_uuid),
+                    host_id: Set(link.host_id),
+                    linked_at: Set(now),
+                };
+                if let Err(e) = new_link.insert(&state.db).await {
+                    tracing::warn!("failed to copy host link during merge: {}", e);
+                }
+            }
+        }
+    }
 
     // Terminate source's WebSocket connection
     state.agent_connections.unregister(&source_uuid).await;

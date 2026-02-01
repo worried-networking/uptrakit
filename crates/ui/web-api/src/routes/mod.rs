@@ -5,6 +5,7 @@ pub mod auth;
 pub mod ca;
 pub mod device_auth;
 pub mod health;
+pub mod hosts;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod server_cert;

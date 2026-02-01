@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Agent-Controller Protocol
-  version: 0.0.3
+  version: 0.0.4
   description: |
     WebSocket protocol for communication between Uptrakit agents and the controller.
 
@@ -75,6 +75,8 @@ channels:
         $ref: "#/components/messages/certificate"
       error:
         $ref: "#/components/messages/error"
+      reportHostInfo:
+        $ref: "#/components/messages/reportHostInfo"
 
 operations:
   sendPing:
@@ -170,6 +172,18 @@ operations:
       The controller responds to `RequestCertificate` with the signed
       client certificate PEM, private key PEM, and certificate lifetime.
       The agent should persist these and reconnect using mTLS.
+
+  sendReportHostInfo:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/reportHostInfo"
+    summary: Agent reports host machine information
+    description: |
+      Authenticated agents send this message immediately after connecting via mTLS.
+      The controller uses the machine_id to find or create a Host entity and link
+      it to the agent. This enables host tracking across agent re-enrollments.
 
   receiveError:
     action: receive
@@ -275,6 +289,14 @@ components:
       payload:
         $ref: "#/components/schemas/errorPayload"
 
+    reportHostInfo:
+      name: report_host_info
+      title: Report Host Info Message
+      summary: Agent reports host machine information to the controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/reportHostInfoPayload"
+
   schemas:
     pingPayload:
       type: object
@@ -323,6 +345,7 @@ components:
         - type
         - hostname
         - friendly_name
+        - host_info
       properties:
         type:
           type: string
@@ -343,6 +366,9 @@ components:
           description: Optional pre-shared enrollment token for auto-approval
           examples:
             - tok-abc123
+        host_info:
+          $ref: "#/components/schemas/hostInfo"
+          description: Host machine information for automatic host matching
 
     enrolledPayload:
       type: object
@@ -468,3 +494,47 @@ components:
           description: Human-readable error description
           examples:
             - The enrollment token is invalid
+
+    hostInfo:
+      type: object
+      required:
+        - machine_id
+      properties:
+        machine_id:
+          type: string
+          description: |
+            Persistent machine identifier. On Linux this is `/etc/machine-id`,
+            on macOS this is the `IOPlatformUUID`. Falls back to "unknown" if
+            the identifier cannot be read.
+          examples:
+            - ab1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e
+        os_type:
+          type: string
+          description: Operating system type (e.g. "linux", "macos")
+          examples:
+            - linux
+        os_version:
+          type: string
+          description: Human-readable OS version string
+          examples:
+            - Ubuntu 24.04 LTS
+        architecture:
+          type: string
+          description: CPU architecture
+          examples:
+            - x86_64
+            - aarch64
+
+    reportHostInfoPayload:
+      type: object
+      required:
+        - type
+        - host_info
+      properties:
+        type:
+          type: string
+          const: report_host_info
+          description: Message type discriminator
+        host_info:
+          $ref: "#/components/schemas/hostInfo"
+          description: Host machine information

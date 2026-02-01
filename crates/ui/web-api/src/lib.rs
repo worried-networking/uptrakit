@@ -94,7 +94,8 @@ pub struct AppState {
         (name = "Settings", description = "Application settings management"),
         (name = "Agents", description = "Agent enrollment and management"),
         (name = "OIDC Providers", description = "OIDC provider configuration"),
-        (name = "API Tokens", description = "Personal access token management")
+        (name = "API Tokens", description = "Personal access token management"),
+        (name = "Hosts", description = "Host machine management")
     ),
     paths(
         routes::auth::register,
@@ -139,7 +140,11 @@ pub struct AppState {
         routes::settings_network::get_network_settings,
         routes::settings_network::update_network_settings,
         routes::settings_mqtt::get_mqtt_settings,
-        routes::settings_mqtt::update_mqtt_settings
+        routes::settings_mqtt::update_mqtt_settings,
+        routes::hosts::list_hosts,
+        routes::hosts::get_host,
+        routes::hosts::update_host,
+        routes::hosts::deactivate_host
     ),
     components(
         schemas(
@@ -187,7 +192,11 @@ pub struct AppState {
             routes::settings_network::NetworkSettingsResponse,
             routes::settings_network::UpdateNetworkSettingsRequest,
             routes::settings_mqtt::MqttSettingsResponse,
-            routes::settings_mqtt::UpdateMqttSettingsRequest
+            routes::settings_mqtt::UpdateMqttSettingsRequest,
+            routes::hosts::HostResponse,
+            routes::hosts::HostAgentSummary,
+            routes::hosts::UpdateHostRequest,
+            routes::hosts::HostMessageResponse
         )
     ),
     info(
@@ -301,6 +310,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings_mqtt::update_mqtt_settings
         ))
         .routes(routes!(routes::device_auth::device_auth_approve))
+        .routes(routes!(routes::hosts::list_hosts))
+        .routes(routes!(routes::hosts::get_host))
+        .routes(routes!(routes::hosts::update_host))
+        .routes(routes!(routes::hosts::deactivate_host))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,

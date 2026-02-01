@@ -15,6 +15,7 @@ mod m20260130_000009_jwt_refresh_tokens;
 mod m20260131_000010_create_api_tokens;
 mod m20260131_000011_update_rbac_permissions;
 mod m20260131_000012_create_pending_auth_stores;
+mod m20260201_000013_create_hosts;
 
 pub struct Migrator;
 
@@ -34,6 +35,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260131_000010_create_api_tokens::Migration),
             Box::new(m20260131_000011_update_rbac_permissions::Migration),
             Box::new(m20260131_000012_create_pending_auth_stores::Migration),
+            Box::new(m20260201_000013_create_hosts::Migration),
         ]
     }
 }

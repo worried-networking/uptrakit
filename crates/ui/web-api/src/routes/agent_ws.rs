@@ -17,7 +17,8 @@ use uptrakit_internal_wire::{
 use crate::AppState;
 use crate::extract::{AgentIdentity, ClientIp};
 use crate::routes::agents::{
-    AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate, revoke_certificate,
+    AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate, find_or_create_host_and_link,
+    revoke_certificate,
 };
 
 /// Serialize a [`ControllerMessage`] to JSON, logging on failure.
@@ -286,6 +287,25 @@ async fn handle_authenticated(
                                     break;
                                 }
                             }
+                            AgentMessage::ReportHostInfo(payload) => {
+                                // Look up agent hostname from DB for host linking
+                                let agent_model = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+                                    .one(&state.db)
+                                    .await
+                                {
+                                    Ok(Some(a)) => a,
+                                    _ => continue,
+                                };
+                                if let Err(e) = find_or_create_host_and_link(
+                                    &state.db,
+                                    agent_id,
+                                    &payload.host_info,
+                                    &agent_model.hostname,
+                                    agent_model.ip_address.as_deref(),
+                                ).await {
+                                    tracing::warn!(error = %e, "failed to link host on ReportHostInfo");
+                                }
+                            }
                             AgentMessage::RenewCertificate(_) => {
                                 // Re-fetch agent from DB, verify still approved
                                 let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
@@ -485,6 +505,7 @@ async fn handle_anonymous(
                             &payload.friendly_name,
                             payload.enrollment_token.as_deref(),
                             client_ip,
+                            Some(&payload.host_info),
                         )
                         .await;
 
@@ -677,6 +698,9 @@ async fn run_enrolled_loop(
                                         break;
                                     }
                                 }
+                            }
+                            AgentMessage::ReportHostInfo(_) => {
+                                // Host linking happens at enrollment; ignore during enrolled loop
                             }
                             AgentMessage::Enroll(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {

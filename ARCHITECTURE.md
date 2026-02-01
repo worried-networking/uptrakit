@@ -88,7 +88,7 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 
 ### Message types
 
-Defined in `crates/shared/wire/`: `ping`, `pong`, `enroll`, `enrolled`, `approved`, `rejected`, `request_certificate`, `certificate`, `error`, and others.
+Defined in `crates/shared/wire/`: `ping`, `pong`, `enroll`, `enrolled`, `approved`, `rejected`, `request_certificate`, `certificate`, `report_host_info`, `error`, and others.
 
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
@@ -169,9 +169,11 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 17 entities in `crates/shared/db/src/entity/`:
+The data model comprises 19 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `api_token`, `auth_method`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `host`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
+
+The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
 
 The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
 

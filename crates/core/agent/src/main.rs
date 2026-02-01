@@ -1,6 +1,7 @@
 mod cli;
 mod client;
 mod error;
+mod host_info;
 mod state;
 
 use std::path::Path;
@@ -195,11 +196,15 @@ async fn do_enrollment(
             .clone()
             .unwrap_or_else(|| system_hostname.clone());
 
+        let host_info = host_info::collect_host_info();
+        tracing::info!(machine_id = %host_info.machine_id, "collected host info");
+
         let enrolled = client::send_enroll(
             &mut ws,
             &system_hostname,
             &friendly_name,
             args.enrollment_token.as_deref(),
+            host_info,
         )
         .await?;
 
