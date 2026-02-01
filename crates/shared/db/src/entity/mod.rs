@@ -10,6 +10,7 @@ pub mod pending_device_flow;
 pub mod pending_oidc_flow;
 pub mod pending_oidc_token_exchange;
 pub mod permission;
+pub mod provider_config;
 pub mod role;
 pub mod role_permission;
 pub mod session;

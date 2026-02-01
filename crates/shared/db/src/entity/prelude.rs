@@ -18,6 +18,7 @@ pub use super::pending_oidc_token_exchange::{
     Entity as PendingOidcTokenExchange, Model as PendingOidcTokenExchangeModel,
 };
 pub use super::permission::{Entity as Permission, Model as PermissionModel};
+pub use super::provider_config::{Entity as ProviderConfig, Model as ProviderConfigModel};
 pub use super::role::{Entity as Role, Model as RoleModel};
 pub use super::role_permission::{Entity as RolePermission, Model as RolePermissionModel};
 pub use super::session::{Entity as Session, Model as SessionModel};
