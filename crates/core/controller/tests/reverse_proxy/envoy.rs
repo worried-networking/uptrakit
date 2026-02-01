@@ -133,6 +133,7 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: ingress_http
+                use_remote_address: true
                 forward_client_cert_details: SANITIZE_SET
                 set_current_client_cert_details:
                   subject: true
@@ -158,6 +159,7 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
     - name: uptrakit_cluster
       connect_timeout: 5s
       type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
       transport_socket:
         name: envoy.transport_sockets.tls
         typed_config:
@@ -166,6 +168,9 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
             validation_context:
               trusted_ca:
                 filename: /etc/envoy/ssl/ca.crt
+            alpn_protocols:
+              - h2
+              - http/1.1
       load_assignment:
         cluster_name: uptrakit_cluster
         endpoints:
