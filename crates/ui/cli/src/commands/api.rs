@@ -3,6 +3,7 @@ use crate::config::{load_config, load_credentials};
 use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_value};
 use rootcause::prelude::*;
+use serde::Serialize;
 
 /// Execute a raw API call and print the response in the requested format.
 pub async fn execute(
@@ -45,12 +46,25 @@ pub async fn execute(
 
     let (status, response) = client.request(method, &path, body).await?;
 
-    // Print status
-    eprintln!("HTTP {} {}", status, status_text(status));
-
-    // Print response body in the requested format
-    if !response.is_null() {
-        print_value(format, &response)?;
+    match format {
+        OutputFormat::Human => {
+            eprintln!("HTTP {} {}", status, status_text(status));
+            if !response.is_null() {
+                print_value(format, &response)?;
+            }
+        }
+        OutputFormat::Json | OutputFormat::Yaml => {
+            let envelope = ApiResponse {
+                status,
+                status_text: status_text(status),
+                body: if response.is_null() {
+                    None
+                } else {
+                    Some(response)
+                },
+            };
+            print_value(format, &serde_json::to_value(&envelope).context_to()?)?;
+        }
     }
 
     if status >= 400 {
@@ -58,6 +72,13 @@ pub async fn execute(
     }
 
     Ok(())
+}
+
+#[derive(Serialize)]
+struct ApiResponse {
+    status: u16,
+    status_text: &'static str,
+    body: Option<serde_json::Value>,
 }
 
 fn status_text(code: u16) -> &'static str {
