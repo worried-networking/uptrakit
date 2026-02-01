@@ -326,7 +326,7 @@ Ways users interact with the system.
   - [ ] `uptrakit-cli controller` - various commands proxied to the controller. Plus
     `uptrakit-cli agent install` to install the agent locally
 - [ ] Implement CLI commands
-- [ ] Add output formatting (table, JSON, YAML)
+- [x] Add output formatting (table, JSON, YAML)
 - [ ] Implement filtering and query options
 - [ ] Add interactive mode for confirmations
 - [ ] Support configuration file for CLI

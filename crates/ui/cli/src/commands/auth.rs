@@ -3,7 +3,49 @@ use crate::config::{
     Config, Credentials, load_config, load_credentials, save_config, save_credentials,
 };
 use crate::error::{CliError, Result};
+use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use serde::Serialize;
+
+/// Serializable output for `auth status`.
+#[derive(Debug, Serialize)]
+pub struct AuthStatusOutput {
+    pub server: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub email: String,
+    pub user_id: String,
+    pub roles: Vec<String>,
+}
+
+/// Serializable output for `auth token create`.
+#[derive(Debug, Serialize)]
+pub struct TokenCreateOutput {
+    pub id: String,
+    pub token: String,
+}
+
+/// Serializable output for `auth token list`.
+#[derive(Debug, Serialize)]
+pub struct TokenListOutput {
+    pub tokens: Vec<TokenEntry>,
+}
+
+/// A single token entry in `auth token list`.
+#[derive(Debug, Serialize)]
+pub struct TokenEntry {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+    pub status: String,
+}
+
+/// Serializable output for `auth token revoke`.
+#[derive(Debug, Serialize)]
+pub struct TokenRevokeOutput {
+    pub id: String,
+    pub revoked: bool,
+}
 
 /// Interactive login flow using device authorization.
 ///
@@ -168,7 +210,11 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
 }
 
 /// Show current authentication status.
-pub async fn status(server_override: Option<&str>, token_override: Option<&str>) -> Result<()> {
+pub async fn status(
+    server_override: Option<&str>,
+    token_override: Option<&str>,
+    format: OutputFormat,
+) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
     let client = ApiClient::with_token(&server, &token)?;
 
@@ -185,20 +231,38 @@ pub async fn status(server_override: Option<&str>, token_override: Option<&str>)
         }));
     }
 
-    println!("Server:     {}", server);
-    println!(
-        "User:       {} {}",
-        body["first_name"].as_str().unwrap_or(""),
-        body["last_name"].as_str().unwrap_or("")
-    );
-    println!("Email:      {}", body["email"].as_str().unwrap_or(""));
-    println!("User ID:    {}", body["id"].as_str().unwrap_or(""));
-    if let Some(roles) = body["roles"].as_array() {
-        let role_names: Vec<&str> = roles.iter().filter_map(|r| r.as_str()).collect();
-        println!("Roles:      {}", role_names.join(", "));
+    let first_name = body["first_name"].as_str().unwrap_or("").to_string();
+    let last_name = body["last_name"].as_str().unwrap_or("").to_string();
+    let email = body["email"].as_str().unwrap_or("").to_string();
+    let user_id = body["id"].as_str().unwrap_or("").to_string();
+    let roles: Vec<String> = body["roles"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| r.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut human = String::new();
+    human.push_str(&format!("Server:     {}\n", server));
+    human.push_str(&format!("User:       {} {}\n", first_name, last_name));
+    human.push_str(&format!("Email:      {}\n", email));
+    human.push_str(&format!("User ID:    {}\n", user_id));
+    if !roles.is_empty() {
+        human.push_str(&format!("Roles:      {}\n", roles.join(", ")));
     }
 
-    Ok(())
+    let data = AuthStatusOutput {
+        server,
+        first_name,
+        last_name,
+        email,
+        user_id,
+        roles,
+    };
+
+    print_output(format, &human, &data)
 }
 
 /// Create a new API token.
@@ -206,6 +270,7 @@ pub async fn token_create(
     name: &str,
     server_override: Option<&str>,
     token_override: Option<&str>,
+    format: OutputFormat,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
     let client = ApiClient::with_token(&server, &token)?;
@@ -226,17 +291,30 @@ pub async fn token_create(
         }));
     }
 
-    println!("Token created:");
-    println!("  ID:    {}", body["id"].as_str().unwrap_or(""));
-    println!("  Token: {}", body["token"].as_str().unwrap_or(""));
-    println!();
-    println!("Store this token securely - it will not be shown again.");
+    let id = body["id"].as_str().unwrap_or("").to_string();
+    let new_token = body["token"].as_str().unwrap_or("").to_string();
 
-    Ok(())
+    let mut human = String::new();
+    human.push_str("Token created:\n");
+    human.push_str(&format!("  ID:    {}\n", id));
+    human.push_str(&format!("  Token: {}\n", new_token));
+    human.push('\n');
+    human.push_str("Store this token securely - it will not be shown again.\n");
+
+    let data = TokenCreateOutput {
+        id,
+        token: new_token,
+    };
+
+    print_output(format, &human, &data)
 }
 
 /// List API tokens.
-pub async fn token_list(server_override: Option<&str>, token_override: Option<&str>) -> Result<()> {
+pub async fn token_list(
+    server_override: Option<&str>,
+    token_override: Option<&str>,
+    format: OutputFormat,
+) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
     let client = ApiClient::with_token(&server, &token)?;
 
@@ -253,30 +331,45 @@ pub async fn token_list(server_override: Option<&str>, token_override: Option<&s
     }
 
     let tokens = body["tokens"].as_array();
-    match tokens {
-        Some(tokens) if !tokens.is_empty() => {
-            println!("{:<38} {:<30} {:<25} STATUS", "ID", "NAME", "CREATED");
-            for t in tokens {
+    let entries: Vec<TokenEntry> = match tokens {
+        Some(tokens) => tokens
+            .iter()
+            .map(|t| {
                 let status_str = if t["revoked_at"].is_string() {
                     "revoked"
                 } else {
                     "active"
                 };
-                println!(
-                    "{:<38} {:<30} {:<25} {}",
-                    t["id"].as_str().unwrap_or(""),
-                    t["name"].as_str().unwrap_or(""),
-                    t["created_at"].as_str().unwrap_or(""),
-                    status_str,
-                );
-            }
-        }
-        _ => {
-            println!("No API tokens found.");
+                TokenEntry {
+                    id: t["id"].as_str().unwrap_or("").to_string(),
+                    name: t["name"].as_str().unwrap_or("").to_string(),
+                    created_at: t["created_at"].as_str().unwrap_or("").to_string(),
+                    status: status_str.to_string(),
+                }
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
+    let mut human = String::new();
+    if entries.is_empty() {
+        human.push_str("No API tokens found.\n");
+    } else {
+        human.push_str(&format!(
+            "{:<38} {:<30} {:<25} STATUS\n",
+            "ID", "NAME", "CREATED"
+        ));
+        for t in &entries {
+            human.push_str(&format!(
+                "{:<38} {:<30} {:<25} {}\n",
+                t.id, t.name, t.created_at, t.status,
+            ));
         }
     }
 
-    Ok(())
+    let data = TokenListOutput { tokens: entries };
+
+    print_output(format, &human, &data)
 }
 
 /// Revoke an API token.
@@ -284,6 +377,7 @@ pub async fn token_revoke(
     id: &str,
     server_override: Option<&str>,
     token_override: Option<&str>,
+    format: OutputFormat,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
     let client = ApiClient::with_token(&server, &token)?;
@@ -302,9 +396,13 @@ pub async fn token_revoke(
         }));
     }
 
-    println!("Token {} revoked.", id);
+    let human = format!("Token {} revoked.\n", id);
+    let data = TokenRevokeOutput {
+        id: id.to_string(),
+        revoked: true,
+    };
 
-    Ok(())
+    print_output(format, &human, &data)
 }
 
 /// Resolve server and token from overrides or stored config.
@@ -373,4 +471,75 @@ fn chrono_date() -> String {
 
 fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_status_output_serialization() {
+        let output = AuthStatusOutput {
+            server: "https://example.com".to_string(),
+            first_name: "John".to_string(),
+            last_name: "Doe".to_string(),
+            email: "john@example.com".to_string(),
+            user_id: "abc-123".to_string(),
+            roles: vec!["admin".to_string(), "user".to_string()],
+        };
+        let json = serde_json::to_string(&output).expect("serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed["server"], "https://example.com");
+        assert_eq!(parsed["first_name"], "John");
+        assert_eq!(parsed["roles"][0], "admin");
+    }
+
+    #[test]
+    fn token_create_output_serialization() {
+        let output = TokenCreateOutput {
+            id: "tok-1".to_string(),
+            token: "secret-value".to_string(),
+        };
+        let json = serde_json::to_string(&output).expect("serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed["id"], "tok-1");
+        assert_eq!(parsed["token"], "secret-value");
+    }
+
+    #[test]
+    fn token_list_output_serialization() {
+        let output = TokenListOutput {
+            tokens: vec![
+                TokenEntry {
+                    id: "tok-1".to_string(),
+                    name: "my-token".to_string(),
+                    created_at: "2025-01-01T00:00:00Z".to_string(),
+                    status: "active".to_string(),
+                },
+                TokenEntry {
+                    id: "tok-2".to_string(),
+                    name: "old-token".to_string(),
+                    created_at: "2024-06-15T12:00:00Z".to_string(),
+                    status: "revoked".to_string(),
+                },
+            ],
+        };
+        let json = serde_json::to_string(&output).expect("serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed["tokens"].as_array().expect("array").len(), 2);
+        assert_eq!(parsed["tokens"][0]["status"], "active");
+        assert_eq!(parsed["tokens"][1]["status"], "revoked");
+    }
+
+    #[test]
+    fn token_revoke_output_serialization() {
+        let output = TokenRevokeOutput {
+            id: "tok-1".to_string(),
+            revoked: true,
+        };
+        let json = serde_json::to_string(&output).expect("serialize");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        assert_eq!(parsed["id"], "tok-1");
+        assert_eq!(parsed["revoked"], true);
+    }
 }

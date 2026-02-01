@@ -2,8 +2,10 @@ mod client;
 mod commands;
 mod config;
 mod error;
+mod output;
 
 use clap::{Parser, Subcommand};
+use output::OutputFormat;
 
 #[derive(Parser)]
 #[command(name = "uptrakit-cli", about = "Uptrakit CLI")]
@@ -15,6 +17,10 @@ struct Cli {
     /// API token (overrides stored credentials)
     #[arg(long, global = true)]
     token: Option<String>,
+
+    /// Output format
+    #[arg(long, short, global = true, default_value_t, value_enum)]
+    output: OutputFormat,
 
     #[command(subcommand)]
     command: Commands,
@@ -79,19 +85,35 @@ async fn main() {
         Commands::Auth { command } => match command {
             AuthCommands::Login => commands::auth::login(cli.server.as_deref()).await,
             AuthCommands::Status => {
-                commands::auth::status(cli.server.as_deref(), cli.token.as_deref()).await
+                commands::auth::status(cli.server.as_deref(), cli.token.as_deref(), cli.output)
+                    .await
             }
             AuthCommands::Token { command } => match command {
                 TokenCommands::Create { name } => {
-                    commands::auth::token_create(&name, cli.server.as_deref(), cli.token.as_deref())
-                        .await
+                    commands::auth::token_create(
+                        &name,
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        cli.output,
+                    )
+                    .await
                 }
                 TokenCommands::List => {
-                    commands::auth::token_list(cli.server.as_deref(), cli.token.as_deref()).await
+                    commands::auth::token_list(
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        cli.output,
+                    )
+                    .await
                 }
                 TokenCommands::Revoke { id } => {
-                    commands::auth::token_revoke(&id, cli.server.as_deref(), cli.token.as_deref())
-                        .await
+                    commands::auth::token_revoke(
+                        &id,
+                        cli.server.as_deref(),
+                        cli.token.as_deref(),
+                        cli.output,
+                    )
+                    .await
                 }
             },
         },
@@ -102,6 +124,7 @@ async fn main() {
                 data.as_deref(),
                 cli.server.as_deref(),
                 cli.token.as_deref(),
+                cli.output,
             )
             .await
         }

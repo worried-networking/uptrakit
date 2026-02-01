@@ -16,3 +16,4 @@ rootcause = { workspace = true }
 thiserror = { workspace = true }
 open = "5"
 hostname = { workspace = true }
+serde_yml = "0.0.12"

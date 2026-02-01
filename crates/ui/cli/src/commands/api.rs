@@ -1,15 +1,17 @@
 use crate::client::ApiClient;
 use crate::config::{load_config, load_credentials};
 use crate::error::{CliError, Result};
+use crate::output::{OutputFormat, print_value};
 use rootcause::prelude::*;
 
-/// Execute a raw API call and pretty-print the response.
+/// Execute a raw API call and print the response in the requested format.
 pub async fn execute(
     method: &str,
     path: &str,
     data: Option<&str>,
     server_override: Option<&str>,
     token_override: Option<&str>,
+    format: OutputFormat,
 ) -> Result<()> {
     let config = load_config()?;
     let creds = load_credentials()?;
@@ -46,12 +48,9 @@ pub async fn execute(
     // Print status
     eprintln!("HTTP {} {}", status, status_text(status));
 
-    // Pretty-print response body
+    // Print response body in the requested format
     if !response.is_null() {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&response).unwrap_or_else(|_| response.to_string())
-        );
+        print_value(format, &response)?;
     }
 
     if status >= 400 {
