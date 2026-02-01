@@ -32,7 +32,7 @@ Essential infrastructure needed before feature development.
 
 - [x] Select and integrate database solution (SQLite for simplicity, PostgreSQL for production)
 - [ ] Design core database schema
-  - [ ] Hosts table (agent ID, hostname, last seen, status)
+  - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
   - [ ] Software items table (host ID, provider, package name, current version)
   - [ ] Available versions table (software item ID, version, release date, channels)
   - [ ] Update history table (software item ID, from version, to version, timestamp, status)
@@ -135,7 +135,7 @@ Essential infrastructure needed before feature development.
 - [ ] Create agent inventory tracking
 - [x] Add agent heartbeat mechanism
 - [x] Implement agent status monitoring (online/offline)
-- [ ] Add agent metadata collection (OS, architecture, capabilities)
+- [x] Add agent metadata collection (OS, architecture, machine_id via HostInfo)
 
 ### Provider Trait System
 

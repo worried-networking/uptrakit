@@ -2,8 +2,10 @@ pub use super::agent::{Entity as Agent, Model as AgentModel};
 pub use super::agent_certificate::{
     Entity as AgentCertificate, Model as AgentCertificateModel, RevocationReason,
 };
+pub use super::agent_host::{Entity as AgentHost, Model as AgentHostModel};
 pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::auth_method::AuthMethod;
+pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::pending_account_link::{
     Entity as PendingAccountLink, Model as PendingAccountLinkModel,

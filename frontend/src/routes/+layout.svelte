@@ -53,6 +53,7 @@
 	const allNavItems = [
 		{ href: '/', label: 'Home' },
 		{ href: '/agents', label: 'Agents' },
+		{ href: '/hosts', label: 'Hosts' },
 		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings }
 	];
 

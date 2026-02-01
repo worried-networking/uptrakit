@@ -185,6 +185,31 @@ export interface UpdateMqttSettings {
 	topic_prefix?: string;
 }
 
+export interface HostAgentSummary {
+	id: string;
+	friendly_name: string;
+	status: 'pending' | 'approved' | 'rejected';
+}
+
+export interface HostResponse {
+	id: string;
+	machine_id: string;
+	hostname: string;
+	friendly_name: string;
+	os_type: string | null;
+	os_version: string | null;
+	architecture: string | null;
+	ip_address: string | null;
+	last_seen_at: string | null;
+	created_at: string;
+	updated_at: string;
+	agents: HostAgentSummary[];
+}
+
+export interface UpdateHostRequest {
+	friendly_name?: string;
+}
+
 export interface UpdateOidcProviderRequest {
 	name?: string;
 	slug?: string;

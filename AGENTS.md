@@ -428,6 +428,48 @@ Do NOT use `.map_err()` to convert `PoisonError` into an application error — t
 5. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
 6. **Implement `ReportConversion`** for every foreign error type your boundary may encounter.
 
+## Host entity
+
+A `Host` represents a physical or virtual machine, decoupled from the `Agent` process identity. Hosts are identified by `machine_id` — a persistent system identifier (`/etc/machine-id` on Linux, `IOPlatformUUID` on macOS).
+
+### Database tables
+
+- **`hosts`**: `id` (UUID PK), `machine_id` (unique), `hostname`, `friendly_name`, `os_type?`, `os_version?`, `architecture?`, `ip_address?`, `last_seen_at?`, `created_at`, `updated_at`, `deactivated_at?`
+- **`agent_hosts`**: junction table with composite PK `(agent_id, host_id)` and `linked_at` timestamp. FKs cascade on delete.
+
+### Wire protocol additions
+
+- `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`
+- `EnrollPayload` includes a required `host_info: HostInfo` field
+- `ReportHostInfo(ReportHostInfoPayload)` variant in `AgentMessage` — sent by authenticated agents immediately after mTLS WebSocket connect
+
+### Agent host info collection
+
+`crates/core/agent/src/host_info.rs` provides `collect_host_info() -> HostInfo`:
+- `machine_id`: Linux `/etc/machine-id`, macOS `IOPlatformUUID`, fallback `"unknown"`
+- `os_type`: `std::env::consts::OS`
+- `os_version`: Linux `/etc/os-release` PRETTY_NAME, macOS `sw_vers`
+- `architecture`: `std::env::consts::ARCH`
+
+### Controller host logic
+
+`find_or_create_host_and_link()` in `routes/agents.rs`:
+- Skips if `machine_id == "unknown"`
+- Finds host by `machine_id` → updates mutable fields (hostname, IP, OS info, `last_seen_at`)
+- Or creates new host with `friendly_name` defaulting to hostname
+- Upserts `agent_host` link (insert if not exists)
+- Called during enrollment and on `ReportHostInfo` messages
+- Non-fatal on failure
+
+### REST API
+
+| Method | Path | Permission | Action |
+|--------|------|------------|--------|
+| GET | `/api/v1/hosts` | ViewAgents | List non-deactivated hosts with linked agents |
+| GET | `/api/v1/hosts/{id}` | ViewAgents | Get single host with linked agents |
+| PUT | `/api/v1/hosts/{id}` | ManageAgents | Update friendly_name |
+| DELETE | `/api/v1/hosts/{id}` | ManageAgents | Soft-delete (set deactivated_at) |
+
 ## Testing expectations
 
 Every behaviour change must include tests. Types of tests used:

@@ -18,6 +18,7 @@ pub enum AgentMessage {
     Enroll(EnrollPayload),
     RequestCertificate(RequestCertificatePayload),
     RenewCertificate(RenewCertificatePayload),
+    ReportHostInfo(ReportHostInfoPayload),
 }
 
 /// Messages sent from the controller to the agent.
@@ -50,6 +51,22 @@ pub struct PongPayload {
     pub controller_ts: Timestamp,
 }
 
+/// Information about the host machine running the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostInfo {
+    /// Persistent machine identifier (e.g. `/etc/machine-id` on Linux, `IOPlatformUUID` on macOS).
+    pub machine_id: String,
+    /// Operating system type (e.g. "linux", "macos").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os_type: Option<String>,
+    /// Operating system version (e.g. "Ubuntu 24.04 LTS").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    /// CPU architecture (e.g. "x86_64", "aarch64").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub architecture: Option<String>,
+}
+
 /// Payload for agent enrollment request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrollPayload {
@@ -57,6 +74,8 @@ pub struct EnrollPayload {
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrollment_token: Option<String>,
+    /// Host machine information for automatic host matching.
+    pub host_info: HostInfo,
 }
 
 /// Payload for requesting a client certificate after approval.
@@ -66,6 +85,13 @@ pub struct RequestCertificatePayload {}
 /// Payload for requesting certificate renewal (mTLS-authenticated agents).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenewCertificatePayload {}
+
+/// Payload for reporting host information (sent by authenticated agents on connect).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportHostInfoPayload {
+    /// Host machine information.
+    pub host_info: HostInfo,
+}
 
 /// Payload for enrollment confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,14 +208,17 @@ mod tests {
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some("tok-123".to_string()),
+            host_info: HostInfo {
+                machine_id: "abc123".to_string(),
+                os_type: Some("linux".to_string()),
+                os_version: Some("Ubuntu 24.04".to_string()),
+                architecture: Some("x86_64".to_string()),
+            },
         });
         let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(
-            json,
-            r#"{"type":"enroll","hostname":"node-1","friendly_name":"Node One","enrollment_token":"tok-123"}"#
-        );
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+        assert!(json.contains(r#""machine_id":"abc123"#));
     }
 
     #[test]
@@ -198,12 +227,18 @@ mod tests {
             hostname: "node-2".to_string(),
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
+            host_info: HostInfo {
+                machine_id: "def456".to_string(),
+                os_type: None,
+                os_version: None,
+                architecture: None,
+            },
         });
         let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(
-            json,
-            r#"{"type":"enroll","hostname":"node-2","friendly_name":"Node Two"}"#
-        );
+        // enrollment_token should be omitted when None
+        assert!(!json.contains("enrollment_token"));
+        // Optional host_info fields should be omitted when None
+        assert!(!json.contains("os_type"));
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -351,5 +386,57 @@ mod tests {
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn host_info_serialization_roundtrip() {
+        let info = HostInfo {
+            machine_id: "abc-123-def".to_string(),
+            os_type: Some("linux".to_string()),
+            os_version: Some("Debian GNU/Linux 12 (bookworm)".to_string()),
+            architecture: Some("aarch64".to_string()),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: HostInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn host_info_minimal_serialization_roundtrip() {
+        let info = HostInfo {
+            machine_id: "unknown".to_string(),
+            os_type: None,
+            os_version: None,
+            architecture: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert_eq!(json, r#"{"machine_id":"unknown"}"#);
+        let deserialized: HostInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn report_host_info_serialization_roundtrip() {
+        let msg = AgentMessage::ReportHostInfo(ReportHostInfoPayload {
+            host_info: HostInfo {
+                machine_id: "machine-42".to_string(),
+                os_type: Some("linux".to_string()),
+                os_version: Some("Ubuntu 24.04 LTS".to_string()),
+                architecture: Some("x86_64".to_string()),
+            },
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"report_host_info"#));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn enroll_backward_compat_without_host_info() {
+        // Older agents may not send host_info — this should fail deserialization
+        // since host_info is required. This test documents the breaking change.
+        let json = r#"{"type":"enroll","hostname":"node-old","friendly_name":"Old Node"}"#;
+        let result: std::result::Result<AgentMessage, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "EnrollPayload requires host_info");
     }
 }

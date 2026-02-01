@@ -10,8 +10,9 @@ use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
-    AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload,
-    PingPayload, RenewCertificatePayload, RequestCertificatePayload, now_millis,
+    AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, HostInfo,
+    PingPayload, RenewCertificatePayload, ReportHostInfoPayload, RequestCertificatePayload,
+    now_millis,
 };
 
 use crate::error::{Error, Result};
@@ -224,11 +225,13 @@ pub async fn send_enroll(
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
+    host_info: HostInfo,
 ) -> Result<EnrolledPayload> {
     let msg = AgentMessage::Enroll(EnrollPayload {
         hostname: hostname.to_string(),
         friendly_name: friendly_name.to_string(),
         enrollment_token: enrollment_token.map(|s| s.to_string()),
+        host_info,
     });
     let json = serde_json::to_string(&msg).context_to::<Error>()?;
     ws.send(Message::Text(json.into()))
@@ -397,6 +400,16 @@ pub async fn run_authenticated_loop(
     const PING_INTERVAL: Duration = Duration::from_secs(300);
 
     let mut ws_stream = connect_ws(host, port, &tls_connector, None).await?;
+
+    // Send host info immediately after connecting
+    let host_info = crate::host_info::collect_host_info();
+    let report_msg = AgentMessage::ReportHostInfo(ReportHostInfoPayload { host_info });
+    let report_json = serde_json::to_string(&report_msg).context_to::<Error>()?;
+    ws_stream
+        .send(Message::Text(report_json.into()))
+        .await
+        .context_to::<Error>()?;
+    tracing::debug!("sent ReportHostInfo");
 
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
