@@ -4697,10 +4697,30 @@ dependencies = [
 [[package]]
 name = "uptrakit-provider-core"
 version = "0.0.1"
+dependencies = [
+ "rootcause",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tracing",
+]
 
 [[package]]
 name = "uptrakit-provider-github"
 version = "0.0.1"
+dependencies = [
+ "regex",
+ "reqwest",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tracing",
+ "uptrakit-provider-core",
+]
 
 [[package]]
 name = "uptrakit-provider-proxmox-helper-scripts"
@@ -4749,6 +4769,8 @@ dependencies = [
  "tower-cookies",
  "tracing",
  "uptrakit-internal-wire",
+ "uptrakit-provider-core",
+ "uptrakit-provider-github",
  "uptrakit-shared-db",
  "url",
  "urlencoding",
