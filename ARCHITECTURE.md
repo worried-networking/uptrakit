@@ -122,7 +122,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
-| Network | `network.*` | Proxies, header, SANs: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
+| Network | `network.*` | Proxies, headers, SANs, forwarded cert headers: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
 | MQTT | `mqtt.*` | No (all require restart) | `GET/PUT /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
@@ -147,6 +147,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 
 - **Enrollment**: One-time token, then mTLS client certificate issuance.
 - **Normal operation**: mTLS on every WebSocket connection; CRL checked per connection.
+- **Reverse proxy**: When behind a trusted proxy, agent identity is extracted from forwarded headers (`X-Forwarded-Tls-Client-Cert-Info` or `X-Forwarded-Tls-Client-Cert`). Issuer CN is verified against known CA certificates. See [docs/reverse-proxy/](docs/reverse-proxy/) for deployment guides.
 
 ### Authorization (RBAC)
 
@@ -231,4 +232,5 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
 | **HTTPS-only controller** | The controller listens only on HTTPS (no plain HTTP listener). All agent and browser connections use TLS. |
-| **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--trust-first-use` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. |
+| **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. |
+| **Reverse proxy support** | L4 passthrough and L7 TLS termination. Agent identity forwarded via structured info or PEM headers with CA CN verification. Header stripping prevents spoofing from non-proxy clients. |

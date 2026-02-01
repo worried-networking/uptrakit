@@ -101,10 +101,7 @@ mod tests {
             "--ca-cert",
             "/some/path.pem",
         ]);
-        assert!(
-            result.is_err(),
-            "--tofu and --ca-cert should conflict"
-        );
+        assert!(result.is_err(), "--tofu and --ca-cert should conflict");
     }
 
     #[test]

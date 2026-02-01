@@ -40,6 +40,8 @@ pub struct NetworkSettings {
     pub real_ip_header: String,
     pub extra_sans: Vec<String>,
     pub https_addr: SocketAddr,
+    pub forwarded_client_cert_info_header: Option<String>,
+    pub forwarded_client_cert_pem_header: Option<String>,
 }
 
 impl Default for NetworkSettings {
@@ -49,6 +51,8 @@ impl Default for NetworkSettings {
             real_ip_header: DEFAULT_REAL_IP_HEADER.to_string(),
             extra_sans: Vec::new(),
             https_addr: DEFAULT_HTTPS_ADDR.parse().unwrap(),
+            forwarded_client_cert_info_header: None,
+            forwarded_client_cert_pem_header: None,
         }
     }
 }
@@ -190,11 +194,25 @@ impl Settings {
                     .expect("valid default HTTPS addr")
             });
 
+        let forwarded_client_cert_info_header = raw
+            .get_setting(SettingKey::ForwardedClientCertInfoHeader)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
+        let forwarded_client_cert_pem_header = raw
+            .get_setting(SettingKey::ForwardedClientCertPemHeader)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         NetworkSettings {
             trusted_proxies,
             real_ip_header,
             extra_sans,
             https_addr,
+            forwarded_client_cert_info_header,
+            forwarded_client_cert_pem_header,
         }
     }
 
@@ -334,6 +352,44 @@ impl Settings {
     /// Update only HTTPS listen address.
     pub async fn set_https_addr(&self, addr: SocketAddr) {
         self.inner.network.write().await.https_addr = addr;
+    }
+
+    /// Read forwarded client cert info header name.
+    pub async fn forwarded_client_cert_info_header(&self) -> Option<String> {
+        self.inner
+            .network
+            .read()
+            .await
+            .forwarded_client_cert_info_header
+            .clone()
+    }
+
+    /// Update forwarded client cert info header name.
+    pub async fn set_forwarded_client_cert_info_header(&self, header: Option<String>) {
+        self.inner
+            .network
+            .write()
+            .await
+            .forwarded_client_cert_info_header = header;
+    }
+
+    /// Read forwarded client cert PEM header name.
+    pub async fn forwarded_client_cert_pem_header(&self) -> Option<String> {
+        self.inner
+            .network
+            .read()
+            .await
+            .forwarded_client_cert_pem_header
+            .clone()
+    }
+
+    /// Update forwarded client cert PEM header name.
+    pub async fn set_forwarded_client_cert_pem_header(&self, header: Option<String>) {
+        self.inner
+            .network
+            .write()
+            .await
+            .forwarded_client_cert_pem_header = header;
     }
 
     // --- MQTT settings ---

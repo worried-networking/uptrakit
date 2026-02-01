@@ -70,9 +70,21 @@ For the full operational flow (rotation steps, bundle distribution, `CaSnapshot`
 | Device authorization | CLI login | Short-lived user code + browser approval; results in API token |
 | API tokens | Programmatic access | Long-lived bearer tokens; revocable |
 | mTLS client certificates | Agent connections | Issued during enrollment; validated on every WebSocket connection |
+| Forwarded client certificates | Agent connections via reverse proxy | Trusted proxy forwards cert info/PEM headers; issuer CN verified against known CAs |
 | Enrollment tokens | Agent registration | One-time tokens with expiry for initial agent enrollment |
 
 Authorization is permission-based (typed `Permission` enum), not role-string-based. See [AGENTS.md](AGENTS.md) section "Permissions model" for the full RBAC design.
+
+## Reverse Proxy Security
+
+When the controller is behind a reverse proxy, agent identity is extracted from forwarded headers. Security measures:
+
+- **Trusted proxies required**: Only requests from IP addresses listed in `--trusted-proxy` / `network.trusted_proxies` are trusted for forwarded headers. Requests from untrusted sources have all cert-related and proxy headers stripped.
+- **CA CN verification**: The issuer CN in forwarded certificates is verified against known CA common names (active CA and non-expired previous CA). Mismatched issuers are rejected.
+- **Header stripping**: `X-Forwarded-Proto`, `X-Forwarded-Host`, and configured cert headers are removed from non-proxy requests to prevent spoofing.
+- **PEM and info header support**: Both structured info headers (Traefik, Nginx, HAProxy) and raw PEM headers (Caddy, Envoy) are supported, with info preferred when both are available.
+
+For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 
 ## Secrets Handling
 

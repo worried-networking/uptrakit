@@ -242,9 +242,12 @@ Main functionality that delivers the core value proposition.
 
 ### User convenience
 
-- [ ] Reverse proxy support and documentation
-  - [ ] mTLS authentication handled by reverse proxy
-  - [ ] Certificates revokation is checked on the reverse proxy
+- [x] Reverse proxy support and documentation
+  - [x] Agent identity forwarded via headers (info + PEM) with CA verification
+  - [x] Header stripping for non-proxy clients
+  - [x] External base URL resolution for OIDC/device auth redirects
+  - [x] Agent-id-only lookup when cert serial unavailable
+  - [x] Deployment guides for Traefik, Caddy, Nginx, NPM, Envoy, HAProxy
 - [ ] SIGHUP support for graceful reloading
   - [ ] All possible settings are reloaded
   - [ ] Agents should not be disconnected during reload (but there should be a "please reconnect" message)

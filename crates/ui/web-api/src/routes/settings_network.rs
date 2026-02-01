@@ -21,6 +21,8 @@ pub struct NetworkSettingsResponse {
     pub real_ip_header: String,
     pub extra_sans: Vec<String>,
     pub https_addr: String,
+    pub forwarded_client_cert_info_header: Option<String>,
+    pub forwarded_client_cert_pem_header: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -29,6 +31,12 @@ pub struct UpdateNetworkSettingsRequest {
     pub real_ip_header: Option<String>,
     pub extra_sans: Option<Vec<String>>,
     pub https_addr: Option<String>,
+    /// Header name for structured client certificate info (e.g. `X-Forwarded-Tls-Client-Cert-Info`).
+    /// Empty string disables.
+    pub forwarded_client_cert_info_header: Option<String>,
+    /// Header name for PEM-encoded client certificate (e.g. `X-Forwarded-Tls-Client-Cert`).
+    /// Empty string disables.
+    pub forwarded_client_cert_pem_header: Option<String>,
 }
 
 /// Get network settings
@@ -61,6 +69,8 @@ pub async fn get_network_settings(
         real_ip_header: network.real_ip_header,
         extra_sans: network.extra_sans,
         https_addr: network.https_addr.to_string(),
+        forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
+        forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -140,6 +150,60 @@ pub async fn update_network_settings(
         state.settings.set_extra_sans(sans.clone()).await;
     }
 
+    // Validate and apply forwarded_client_cert_info_header (runtime-changeable)
+    if let Some(ref header) = req.forwarded_client_cert_info_header {
+        let value = if header.is_empty() {
+            None
+        } else {
+            Some(header.clone())
+        };
+        let json_val = match &value {
+            Some(v) => serde_json::json!(v),
+            None => serde_json::Value::Null,
+        };
+        if let Err(e) = upsert_setting(
+            &state.db,
+            SettingKey::ForwardedClientCertInfoHeader,
+            json_val,
+        )
+        .await
+        {
+            tracing::error!("Failed to save forwarded_client_cert_info_header: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        state
+            .settings
+            .set_forwarded_client_cert_info_header(value)
+            .await;
+    }
+
+    // Validate and apply forwarded_client_cert_pem_header (runtime-changeable)
+    if let Some(ref header) = req.forwarded_client_cert_pem_header {
+        let value = if header.is_empty() {
+            None
+        } else {
+            Some(header.clone())
+        };
+        let json_val = match &value {
+            Some(v) => serde_json::json!(v),
+            None => serde_json::Value::Null,
+        };
+        if let Err(e) = upsert_setting(
+            &state.db,
+            SettingKey::ForwardedClientCertPemHeader,
+            json_val,
+        )
+        .await
+        {
+            tracing::error!("Failed to save forwarded_client_cert_pem_header: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        state
+            .settings
+            .set_forwarded_client_cert_pem_header(value)
+            .await;
+    }
+
     // Validate and apply https_addr (requires restart — save to DB only)
     if let Some(ref addr_str) = req.https_addr {
         let addr: SocketAddr = match addr_str.parse() {
@@ -175,6 +239,8 @@ pub async fn update_network_settings(
         real_ip_header: network.real_ip_header,
         extra_sans: network.extra_sans,
         https_addr: network.https_addr.to_string(),
+        forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
+        forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
     };
     (StatusCode::OK, Json(response)).into_response()
 }

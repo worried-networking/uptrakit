@@ -7,7 +7,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     AgentMessage, AgentSettingsPayload, ApprovedPayload, CertificatePayload, ControllerMessage,
@@ -124,43 +124,75 @@ async fn handle_authenticated(
 
     let (mut sink, mut stream) = socket.split();
 
-    // 1. Certificate validation check — query by (agent_id, serial) since
-    // the composite PK is (ca_fingerprint, serial_number) and we don't know
-    // the CA fingerprint at this point.
-    let cert_record = match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
-        .filter(
-            uptrakit_shared_db::entity::agent_certificate::Column::SerialNumber
-                .eq(cert_serial.clone()),
-        )
-        .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
-        .one(&state.db)
-        .await
-    {
-        Ok(Some(record)) => {
-            if record.revoked_at.is_some() {
+    // 1. Certificate validation check
+    // If cert_serial is empty (proxy-forwarded without serial), use agent-id-only
+    // lookup: find any non-revoked cert for this agent.
+    let cert_record = if cert_serial.is_empty() {
+        match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
+            .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
+            .filter(uptrakit_shared_db::entity::agent_certificate::Column::RevokedAt.is_null())
+            .order_by_desc(uptrakit_shared_db::entity::agent_certificate::Column::CreatedAt)
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(record)) => {
+                tracing::warn!(
+                    %agent_id,
+                    "agent connected via proxy without cert serial, using agent-id-only lookup"
+                );
+                record
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    %agent_id,
+                    "rejected connection: no non-revoked certificate found for agent"
+                );
+                let _ = close_with_reason(&mut sink, "no valid certificate").await;
+                return;
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "certificate validation check failed");
+                let _ = close_with_reason(&mut sink, "internal error").await;
+                return;
+            }
+        }
+    } else {
+        // Standard lookup: query by (agent_id, serial)
+        match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
+            .filter(
+                uptrakit_shared_db::entity::agent_certificate::Column::SerialNumber
+                    .eq(cert_serial.clone()),
+            )
+            .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(record)) => {
+                if record.revoked_at.is_some() {
+                    tracing::warn!(
+                        %agent_id,
+                        serial_number = %cert_serial,
+                        "rejected connection: certificate is revoked"
+                    );
+                    let _ = close_with_reason(&mut sink, "certificate revoked").await;
+                    return;
+                }
+                record
+            }
+            Ok(None) => {
                 tracing::warn!(
                     %agent_id,
                     serial_number = %cert_serial,
-                    "rejected connection: certificate is revoked"
+                    "rejected connection: certificate not recognized"
                 );
-                let _ = close_with_reason(&mut sink, "certificate revoked").await;
+                let _ = close_with_reason(&mut sink, "certificate not recognized").await;
                 return;
             }
-            record
-        }
-        Ok(None) => {
-            tracing::warn!(
-                %agent_id,
-                serial_number = %cert_serial,
-                "rejected connection: certificate not recognized"
-            );
-            let _ = close_with_reason(&mut sink, "certificate not recognized").await;
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "certificate validation check failed");
-            let _ = close_with_reason(&mut sink, "internal error").await;
-            return;
+            Err(e) => {
+                tracing::error!(error = %e, "certificate validation check failed");
+                let _ = close_with_reason(&mut sink, "internal error").await;
+                return;
+            }
         }
     };
 

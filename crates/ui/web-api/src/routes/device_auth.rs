@@ -64,6 +64,7 @@ pub struct DeviceAuthApproveResponse {
 )]
 pub async fn device_auth_start(
     State(state): State<Arc<AppState>>,
+    external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
     headers: HeaderMap,
     Json(req): Json<DeviceAuthStartRequest>,
 ) -> Response {
@@ -75,11 +76,15 @@ pub async fn device_auth_start(
         }
     };
 
-    // Derive verification URL from Host or Origin header
-    let host = headers
-        .get("origin")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
+    // Derive verification URL: prefer ExternalBaseUrl, then Origin, then Host
+    let host = external_base_url
+        .map(|axum::Extension(u)| u.0)
+        .or_else(|| {
+            headers
+                .get("origin")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        })
         .or_else(|| {
             headers
                 .get("host")
