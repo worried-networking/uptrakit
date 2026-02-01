@@ -77,8 +77,10 @@ pub async fn resolve_proxy_headers(
 /// `key="value"` pairs. Expected fields: `Subject`, `Issuer`,
 /// `SerialNumber`/`Serial`.
 ///
-/// For Envoy XFCC format without Subject, falls back to `Cert=` field
-/// containing a URL-encoded DER certificate.
+/// When a `Cert` field is present (Envoy XFCC), it is preferred because
+/// it carries the full certificate — providing both the agent UUID and the
+/// serial number. Falls back to Subject/SerialNumber/Issuer fields used
+/// by Traefik, Nginx, and HAProxy.
 fn try_info_header(
     headers: &HeaderMap,
     header_name: Option<&str>,
@@ -86,12 +88,22 @@ fn try_info_header(
 ) -> Option<AgentIdentity> {
     let header_name = header_name?;
     let raw = headers.get(header_name)?.to_str().ok()?;
-    let decoded = urlencoding::decode(raw).ok()?;
+    // Traefik uses form-URL-encoding (+ = space); urlencoding only handles
+    // percent-encoding, so normalise '+' first.
+    let raw_normalised = raw.replace('+', " ");
+    let decoded = urlencoding::decode(&raw_normalised).ok()?;
 
     // Parse semicolon-separated key="value" or key=value pairs
     let fields = parse_info_fields(&decoded);
 
-    // Try standard Subject/SerialNumber/Issuer approach
+    // 1. Cert field (Envoy XFCC) — provides complete identity
+    if let Some(cert_field) = fields.get("Cert").or(fields.get("cert")) {
+        if let Some(identity) = try_parse_cert_field(cert_field, state) {
+            return Some(identity);
+        }
+    }
+
+    // 2. Subject/SerialNumber/Issuer (Traefik, Nginx, HAProxy) — fallback
     if let Some(subject) = fields.get("Subject").or(fields.get("subject")) {
         let subject_decoded = urlencoding::decode(subject).ok()?;
         let issuer_raw = fields
@@ -122,34 +134,45 @@ fn try_info_header(
         return identity;
     }
 
-    // Envoy XFCC fallback: Cert= field contains URL-encoded DER cert
-    if let Some(cert_field) = fields.get("Cert").or(fields.get("cert")) {
-        let cert_decoded = urlencoding::decode(cert_field).ok()?;
-        let der = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            cert_decoded.as_bytes(),
-        )
-        .ok()?;
-        let identity = crate::extract::agent_identity_from_der(&der)?;
-
-        // Verify issuer from the cert itself
-        let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
-        let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
-        if !verify_issuer_cn_str(issuer_cn, state) {
-            tracing::warn!(
-                issuer = issuer_cn,
-                "forwarded cert issuer CN does not match any known CA"
-            );
-            return None;
-        }
-
-        return Some(identity);
-    }
-
     None
 }
 
-/// Try to extract agent identity from a PEM-encoded certificate header.
+/// Parse a Cert field value (URL-encoded PEM or base64-DER).
+fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<AgentIdentity> {
+    let cert_decoded = urlencoding::decode(cert_field).ok()?;
+
+    // Try PEM first (Envoy sends URL-encoded PEM)
+    if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(cert_decoded.as_bytes()) {
+        let identity = crate::extract::agent_identity_from_der(&pem_block.contents)?;
+        let (_, cert) = x509_parser::parse_x509_certificate(&pem_block.contents).ok()?;
+        let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
+        if !verify_issuer_cn_str(issuer_cn, state) {
+            tracing::warn!(issuer = issuer_cn, "forwarded cert issuer CN does not match any known CA");
+            return None;
+        }
+        return Some(identity);
+    }
+
+    // Fallback: raw base64-DER
+    let der = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        cert_decoded.as_bytes(),
+    )
+    .ok()?;
+    let identity = crate::extract::agent_identity_from_der(&der)?;
+    let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
+    let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
+    if !verify_issuer_cn_str(issuer_cn, state) {
+        tracing::warn!(issuer = issuer_cn, "forwarded cert issuer CN does not match any known CA");
+        return None;
+    }
+    Some(identity)
+}
+
+/// Try to extract agent identity from a PEM-encoded (or base64-DER) certificate header.
+///
+/// Supports URL-encoded PEM (Caddy `certificate_pem`) and raw base64-DER
+/// (Caddy `certificate_der_base64`, Envoy fallback).
 fn try_pem_header(
     headers: &HeaderMap,
     header_name: Option<&str>,
@@ -159,11 +182,22 @@ fn try_pem_header(
     let raw = headers.get(header_name)?.to_str().ok()?;
     let decoded = urlencoding::decode(raw).ok()?;
 
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(decoded.as_bytes()).ok()?;
-    let identity = crate::extract::agent_identity_from_der(&pem_block.contents)?;
+    // Try PEM first
+    let der = if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(decoded.as_bytes()) {
+        pem_block.contents
+    } else {
+        // Fallback: base64-DER (Caddy certificate_der_base64)
+        base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            decoded.as_bytes(),
+        )
+        .ok()?
+    };
+
+    let identity = crate::extract::agent_identity_from_der(&der)?;
 
     // Verify issuer CN from the parsed cert
-    let (_, cert) = x509_parser::parse_x509_certificate(&pem_block.contents).ok()?;
+    let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
     let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
     if !verify_issuer_cn_str(issuer_cn, state) {
         tracing::warn!(
