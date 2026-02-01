@@ -6,7 +6,7 @@ use crate::auth::password;
 use crate::auth::session::SessionService;
 use crate::auth::token::{generate_secure_token, generate_uuid};
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Redirect, Response},
@@ -115,9 +115,13 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
 pub async fn oidc_authorize(
     State(state): State<Arc<AppState>>,
     Path(provider_id): Path<String>,
+    external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
     headers: HeaderMap,
 ) -> Response {
-    let base_url = match base_url_from_headers(&headers) {
+    let base_url = external_base_url
+        .map(|Extension(u)| u.0)
+        .or_else(|| base_url_from_headers(&headers));
+    let base_url = match base_url {
         Some(url) => url,
         None => return (StatusCode::BAD_REQUEST, "Missing Host header").into_response(),
     };
@@ -224,6 +228,7 @@ pub async fn oidc_authorize(
 pub async fn oidc_callback(
     State(state): State<Arc<AppState>>,
     Query(params): Query<OidcCallbackParams>,
+    external_base_url: Option<Extension<crate::extract::ExternalBaseUrl>>,
     headers: HeaderMap,
 ) -> Response {
     // Handle error from provider
@@ -252,7 +257,10 @@ pub async fn oidc_callback(
         None => return Redirect::to("/login?error=oidc_provider_gone").into_response(),
     };
 
-    let base_url = match base_url_from_headers(&headers) {
+    let base_url = external_base_url
+        .map(|Extension(u)| u.0)
+        .or_else(|| base_url_from_headers(&headers));
+    let base_url = match base_url {
         Some(url) => url,
         None => return Redirect::to("/login?error=oidc_missing_host").into_response(),
     };
