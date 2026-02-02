@@ -15,7 +15,7 @@ pub struct AuthStatusOutput {
     pub last_name: String,
     pub email: String,
     pub user_id: String,
-    pub roles: Vec<String>,
+    pub permissions: Vec<String>,
 }
 
 /// Serializable output for `auth token create`.
@@ -231,35 +231,34 @@ pub async fn status(
         }));
     }
 
-    let first_name = body["first_name"].as_str().unwrap_or("").to_string();
-    let last_name = body["last_name"].as_str().unwrap_or("").to_string();
-    let email = body["email"].as_str().unwrap_or("").to_string();
-    let user_id = body["id"].as_str().unwrap_or("").to_string();
-    let roles: Vec<String> = body["roles"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| r.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
+    let user: uptrakit_web_api_types::auth::UserResponse =
+        serde_json::from_value(body).map_err(|e| {
+            report!(CliError::Other(format!(
+                "Failed to parse user response: {e}"
+            )))
+        })?;
+
+    let permissions: Vec<String> = user.permissions.iter().map(|p| p.to_string()).collect();
 
     let mut human = String::new();
-    human.push_str(&format!("Server:     {}\n", server));
-    human.push_str(&format!("User:       {} {}\n", first_name, last_name));
-    human.push_str(&format!("Email:      {}\n", email));
-    human.push_str(&format!("User ID:    {}\n", user_id));
-    if !roles.is_empty() {
-        human.push_str(&format!("Roles:      {}\n", roles.join(", ")));
+    human.push_str(&format!("Server:      {}\n", server));
+    human.push_str(&format!(
+        "User:        {} {}\n",
+        user.first_name, user.last_name
+    ));
+    human.push_str(&format!("Email:       {}\n", user.email));
+    human.push_str(&format!("User ID:     {}\n", user.id));
+    if !permissions.is_empty() {
+        human.push_str(&format!("Permissions: {}\n", permissions.join(", ")));
     }
 
     let data = AuthStatusOutput {
         server,
-        first_name,
-        last_name,
-        email,
-        user_id,
-        roles,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        email: user.email,
+        user_id: user.id,
+        permissions,
     };
 
     print_output(format, &human, &data)
@@ -485,13 +484,13 @@ mod tests {
             last_name: "Doe".to_string(),
             email: "john@example.com".to_string(),
             user_id: "abc-123".to_string(),
-            roles: vec!["admin".to_string(), "user".to_string()],
+            permissions: vec!["view_settings".to_string(), "manage_agents".to_string()],
         };
         let json = serde_json::to_string(&output).expect("serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(parsed["server"], "https://example.com");
         assert_eq!(parsed["first_name"], "John");
-        assert_eq!(parsed["roles"][0], "admin");
+        assert_eq!(parsed["permissions"][0], "view_settings");
     }
 
     #[test]

@@ -39,6 +39,7 @@ hostname = "0.4"
 sha2 = "0.10"
 hex = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+utoipa = { version = "5.4", features = ["uuid"] }
 
 [profile.release]
 opt-level = 3

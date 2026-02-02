@@ -4673,6 +4673,7 @@ dependencies = [
  "serde_yml",
  "thiserror 2.0.18",
  "tokio",
+ "uptrakit-web-api-types",
 ]
 
 [[package]]
@@ -4822,6 +4823,7 @@ dependencies = [
  "uptrakit-provider-core",
  "uptrakit-provider-github",
  "uptrakit-shared-db",
+ "uptrakit-web-api-types",
  "url",
  "urlencoding",
  "utoipa",
@@ -4831,6 +4833,15 @@ dependencies = [
  "x509-cert",
  "x509-ocsp",
  "x509-parser",
+]
+
+[[package]]
+name = "uptrakit-web-api-types"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "utoipa",
 ]
 
 [[package]]

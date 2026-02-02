@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::routes::agents::AgentStatus;
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -8,49 +9,14 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{agent, agent_host, host, prelude::*};
-use utoipa::ToSchema;
 
-use crate::routes::agents::AgentStatus;
-
-// --- Response/Request types ---
-
-#[derive(Serialize, ToSchema)]
-pub struct HostResponse {
-    pub id: String,
-    pub machine_id: String,
-    pub hostname: String,
-    pub friendly_name: String,
-    pub os_type: Option<String>,
-    pub os_version: Option<String>,
-    pub architecture: Option<String>,
-    pub ip_address: Option<String>,
-    pub last_seen_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub agents: Vec<HostAgentSummary>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct HostAgentSummary {
-    pub id: String,
-    pub friendly_name: String,
-    pub status: AgentStatus,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateHostRequest {
-    pub friendly_name: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct HostMessageResponse {
-    pub message: String,
-}
+pub use uptrakit_web_api_types::hosts::{
+    HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
+};
 
 // --- Endpoints ---
 

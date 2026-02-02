@@ -8,21 +8,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
-pub struct RegistrationSettingsResponse {
-    pub mode: RegistrationMode,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateRegistrationSettingsRequest {
-    pub mode: RegistrationMode,
-    /// Required when mode is `invite`. The plaintext token will be hashed before storage.
-    pub token: Option<String>,
-}
+pub use uptrakit_web_api_types::settings::{
+    RegistrationSettingsResponse, UpdateRegistrationSettingsRequest,
+};
 
 /// Get current registration settings
 #[utoipa::path(

@@ -59,6 +59,7 @@ crates/
 ├── shared/
 │   ├── core/                      # uptrakit-core (lib) — shared domain models
 │   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities & migrations
+│   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/
     ├── cli/                       # uptrakit-cli (bin)

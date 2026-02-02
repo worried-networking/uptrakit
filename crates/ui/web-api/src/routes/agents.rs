@@ -15,7 +15,6 @@ use rootcause::{Report, ReportConversion, markers, prelude::*};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, sea_query::Expr,
 };
-use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -24,70 +23,11 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, HostInfo, RejectedPayload};
 use uptrakit_shared_db::entity::prelude::RevocationReason;
 use uptrakit_shared_db::entity::{agent, agent_certificate, agent_host, host, prelude::*};
-use utoipa::ToSchema;
 
-// --- Agent status enum ---
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentStatus {
-    Pending,
-    Approved,
-    Rejected,
-}
-
-impl AgentStatus {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Approved => "approved",
-            Self::Rejected => "rejected",
-        }
-    }
-
-    pub(crate) fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(Self::Pending),
-            "approved" => Some(Self::Approved),
-            "rejected" => Some(Self::Rejected),
-            _ => None,
-        }
-    }
-}
-
-// --- Request/Response types ---
-
-#[derive(Serialize, ToSchema)]
-pub struct AgentResponse {
-    pub id: String,
-    pub hostname: String,
-    pub friendly_name: String,
-    pub ip_address: Option<String>,
-    pub status: AgentStatus,
-    pub last_seen_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct ListAgentsQuery {
-    pub status: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct EnrollmentTokenResponse {
-    pub token: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct MessageResponse {
-    pub message: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct EnrollmentTokenStatusResponse {
-    pub configured: bool,
-}
+pub use uptrakit_web_api_types::agents::{
+    AgentResponse, AgentStatus, EnrollmentTokenResponse, EnrollmentTokenStatusResponse,
+    ListAgentsQuery, MergeAgentRequest, MessageResponse,
+};
 
 // --- Agent route error type ---
 
@@ -928,11 +868,6 @@ fn parse_cert_metadata(
 }
 
 // --- Merge endpoint ---
-
-#[derive(Deserialize, ToSchema)]
-pub struct MergeAgentRequest {
-    pub source_id: String,
-}
 
 /// Merge a pending (source) agent into an existing approved (target) agent.
 #[utoipa::path(

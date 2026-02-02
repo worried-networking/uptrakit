@@ -9,29 +9,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
-pub struct MqttSettingsResponse {
-    pub host: Option<String>,
-    pub port: u16,
-    pub client_id: String,
-    pub username: Option<String>,
-    pub has_password: bool,
-    pub topic_prefix: String,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateMqttSettingsRequest {
-    pub host: Option<serde_json::Value>,
-    pub port: Option<u16>,
-    pub client_id: Option<String>,
-    pub username: Option<serde_json::Value>,
-    pub password: Option<String>,
-    pub topic_prefix: Option<String>,
-}
+pub use uptrakit_web_api_types::settings_mqtt::{MqttSettingsResponse, UpdateMqttSettingsRequest};
 
 /// Get MQTT settings
 #[utoipa::path(

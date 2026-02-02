@@ -7,35 +7,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utoipa::ToSchema;
 
-#[derive(Deserialize, ToSchema)]
-pub struct CreateApiTokenRequest {
-    pub name: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct CreateApiTokenResponse {
-    pub id: String,
-    pub token: String,
-    pub created_at: String,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ApiTokenResponse {
-    pub id: String,
-    pub name: String,
-    pub created_at: String,
-    pub last_used_at: Option<String>,
-    pub revoked_at: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ApiTokenListResponse {
-    pub tokens: Vec<ApiTokenResponse>,
-}
+pub use uptrakit_web_api_types::api_tokens::{
+    ApiTokenListResponse, ApiTokenResponse, CreateApiTokenRequest, CreateApiTokenResponse,
+};
 
 /// Create a new API token
 #[utoipa::path(

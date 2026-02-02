@@ -9,21 +9,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
-pub struct AgentCertificateSettingsResponse {
-    pub lifetime_days: u16,
-    pub renewal_window_hours: u16,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateAgentCertificateSettingsRequest {
-    pub lifetime_days: Option<u16>,
-    pub renewal_window_hours: Option<u16>,
-}
+pub use uptrakit_web_api_types::settings_agent_certs::{
+    AgentCertificateSettingsResponse, UpdateAgentCertificateSettingsRequest,
+};
 
 /// Get agent certificate settings
 #[utoipa::path(

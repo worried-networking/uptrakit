@@ -13,79 +13,15 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     Set,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
-use utoipa::ToSchema;
 
-#[derive(Deserialize, ToSchema)]
-#[schema(example = json!({
-    "email": "admin@example.com",
-    "first_name": "Admin",
-    "last_name": "User",
-    "password": "SecurePass123"
-}))]
-pub struct RegisterRequest {
-    #[schema(example = "admin@example.com")]
-    pub email: String,
-    #[schema(example = "Admin")]
-    pub first_name: String,
-    #[schema(example = "User")]
-    pub last_name: String,
-    #[schema(example = "SecurePass123", min_length = 8)]
-    pub password: String,
-    /// Required when registration mode is `invite`.
-    pub registration_token: Option<String>,
-}
-
-#[derive(Deserialize, ToSchema)]
-#[schema(example = json!({
-    "email": "admin@example.com",
-    "password": "SecurePass123"
-}))]
-pub struct LoginRequest {
-    #[schema(example = "admin@example.com")]
-    pub email: String,
-    #[schema(example = "SecurePass123")]
-    pub password: String,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct LogoutRequest {
-    pub refresh_token: String,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct RefreshRequest {
-    pub refresh_token: String,
-}
-
-#[derive(Serialize, ToSchema, Clone)]
-pub struct AuthResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_in: i64,
-    pub token_type: String,
-    pub user: UserResponse,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct RefreshResponse {
-    pub access_token: String,
-    pub expires_in: i64,
-    pub token_type: String,
-}
-
-#[derive(Serialize, ToSchema, Clone)]
-pub struct UserResponse {
-    pub id: String,
-    pub email: String,
-    pub first_name: String,
-    pub last_name: String,
-    pub permissions: Vec<Permission>,
-}
+pub use uptrakit_web_api_types::auth::{
+    AuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RefreshResponse, RegisterRequest,
+    UserResponse,
+};
 
 /// Register a new user
 #[utoipa::path(

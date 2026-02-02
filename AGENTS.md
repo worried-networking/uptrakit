@@ -30,6 +30,7 @@ uptrakit/
 │   ├── shared/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
+│   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — agent<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
@@ -250,7 +251,7 @@ The CLI uses an RFC 8628-style device authorization flow instead of password-bas
 
 ## Permissions model
 
-Authorization uses a typed `Permission` enum (`crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
+Authorization uses a typed `Permission` enum (defined in `crates/shared/web-api-types/src/permissions.rs`, re-exported from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name strings. The enum variants are:
 
 | Permission | Serialized name | Purpose |
 | --- | --- | --- |
@@ -278,7 +279,7 @@ The first registered user gets the `admin` role. Subsequent users (password or O
 
 ### Adding a new permission
 
-1. Add a variant to the `Permission` enum in `permissions.rs` (with `as_str` / `parse` arms).
+1. Add a variant to the `Permission` enum in `crates/shared/web-api-types/src/permissions.rs` (with `as_str` / `parse` arms).
 2. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate roles.
 3. Add the check in the relevant route handler(s).
 4. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.

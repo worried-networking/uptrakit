@@ -11,95 +11,37 @@ use axum::{
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Set,
 };
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
-use utoipa::ToSchema;
 
-#[derive(Deserialize, ToSchema)]
-pub struct CreateOidcProviderRequest {
-    pub name: String,
-    pub slug: String,
-    pub logo_url: Option<String>,
-    pub issuer_url: String,
-    pub client_id: String,
-    pub client_secret: String,
-    #[serde(default = "default_scopes")]
-    pub scopes: String,
-    #[serde(default = "default_auto_create")]
-    pub auto_create_users: bool,
-    pub role_claim_path: Option<String>,
-    #[serde(default)]
-    pub role_mapping: HashMap<String, String>,
-}
+pub use uptrakit_web_api_types::oidc_providers::{
+    CreateOidcProviderRequest, OidcProviderResponse, UpdateOidcProviderRequest,
+};
 
-fn default_scopes() -> String {
-    "openid email profile groups".to_string()
-}
-
-fn default_auto_create() -> bool {
-    true
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateOidcProviderRequest {
-    pub name: Option<String>,
-    pub slug: Option<String>,
-    pub logo_url: Option<String>,
-    pub issuer_url: Option<String>,
-    pub client_id: Option<String>,
-    pub client_secret: Option<String>,
-    pub scopes: Option<String>,
-    pub auto_create_users: Option<bool>,
-    pub role_claim_path: Option<String>,
-    pub role_mapping: Option<HashMap<String, String>>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct OidcProviderResponse {
-    pub id: String,
-    pub name: String,
-    pub slug: String,
-    pub logo_url: Option<String>,
-    pub issuer_url: String,
-    pub client_id: String,
-    pub has_client_secret: bool,
-    pub scopes: String,
-    pub auto_create_users: bool,
-    pub role_claim_path: Option<String>,
-    pub role_mapping: HashMap<String, String>,
-    pub is_active: bool,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-impl From<oidc_provider::Model> for OidcProviderResponse {
-    fn from(m: oidc_provider::Model) -> Self {
-        Self {
-            id: m.id.to_string(),
-            name: m.name,
-            slug: m.slug,
-            logo_url: m.logo_url,
-            issuer_url: m.issuer_url,
-            client_id: m.client_id,
-            has_client_secret: !m.client_secret.is_empty(),
-            scopes: m.scopes,
-            auto_create_users: m.auto_create_users,
-            role_claim_path: m.role_claim_path,
-            role_mapping: m.role_mapping.0,
-            is_active: m.is_active,
-            created_at: m
-                .created_at
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default(),
-            updated_at: m
-                .updated_at
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default(),
-        }
+fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse {
+    OidcProviderResponse {
+        id: m.id.to_string(),
+        name: m.name,
+        slug: m.slug,
+        logo_url: m.logo_url,
+        issuer_url: m.issuer_url,
+        client_id: m.client_id,
+        has_client_secret: !m.client_secret.is_empty(),
+        scopes: m.scopes,
+        auto_create_users: m.auto_create_users,
+        role_claim_path: m.role_claim_path,
+        role_mapping: m.role_mapping.0,
+        is_active: m.is_active,
+        created_at: m
+            .created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
+        updated_at: m
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
     }
 }
 
@@ -165,7 +107,11 @@ pub async fn create_provider(
     };
 
     match provider.insert(&state.db).await {
-        Ok(model) => (StatusCode::CREATED, Json(OidcProviderResponse::from(model))).into_response(),
+        Ok(model) => (
+            StatusCode::CREATED,
+            Json(oidc_provider_response_from(model)),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!("Failed to create OIDC provider: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -200,7 +146,7 @@ pub async fn list_providers(
         Ok(providers) => {
             let resp: Vec<OidcProviderResponse> = providers
                 .into_iter()
-                .map(OidcProviderResponse::from)
+                .map(oidc_provider_response_from)
                 .collect();
             (StatusCode::OK, Json(resp)).into_response()
         }
@@ -239,7 +185,7 @@ pub async fn get_provider(
 
     match find_non_deleted_provider(&state.db, provider_id).await {
         Some(provider) => {
-            (StatusCode::OK, Json(OidcProviderResponse::from(provider))).into_response()
+            (StatusCode::OK, Json(oidc_provider_response_from(provider))).into_response()
         }
         None => (StatusCode::NOT_FOUND, "Provider not found").into_response(),
     }
@@ -329,7 +275,7 @@ pub async fn update_provider(
     model.updated_at = Set(now);
 
     match model.update(&state.db).await {
-        Ok(updated) => (StatusCode::OK, Json(OidcProviderResponse::from(updated))).into_response(),
+        Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
         Err(e) => {
             tracing::error!("Failed to update OIDC provider: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -463,7 +409,7 @@ pub async fn activate_provider(
     model.updated_at = Set(now);
 
     match model.update(&state.db).await {
-        Ok(updated) => (StatusCode::OK, Json(OidcProviderResponse::from(updated))).into_response(),
+        Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
         Err(e) => {
             tracing::error!("Failed to activate OIDC provider: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -522,7 +468,7 @@ pub async fn deactivate_provider(
     model.updated_at = Set(now);
 
     match model.update(&state.db).await {
-        Ok(updated) => (StatusCode::OK, Json(OidcProviderResponse::from(updated))).into_response(),
+        Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
         Err(e) => {
             tracing::error!("Failed to deactivate OIDC provider: {e}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()

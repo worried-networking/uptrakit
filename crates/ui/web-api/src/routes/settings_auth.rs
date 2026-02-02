@@ -8,21 +8,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uptrakit_shared_db::entity::oidc_provider;
 use uptrakit_shared_db::entity::prelude::*;
-use utoipa::ToSchema;
 
-#[derive(Serialize, ToSchema)]
-pub struct AuthenticationSettingsResponse {
-    pub password_auth_enabled: bool,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateAuthenticationSettingsRequest {
-    pub password_auth_enabled: Option<bool>,
-}
+pub use uptrakit_web_api_types::settings_auth::{
+    AuthenticationSettingsResponse, UpdateAuthenticationSettingsRequest,
+};
 
 /// Get authentication settings
 #[utoipa::path(

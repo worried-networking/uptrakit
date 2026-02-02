@@ -18,50 +18,23 @@ use openidconnect::{
     reqwest,
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link};
-use utoipa::ToSchema;
 
-use super::auth::AuthResponse;
-
-#[derive(Serialize, ToSchema)]
-pub struct OidcProviderInfo {
-    pub id: String,
-    pub name: String,
-    pub slug: String,
-    pub logo_url: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct AuthMethodsResponse {
-    pub password: bool,
-    pub oidc_providers: Vec<OidcProviderInfo>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct OidcAuthorizeResponse {
-    pub authorize_url: String,
-}
+pub use super::auth::AuthResponse;
+pub use uptrakit_web_api_types::oidc_auth::{
+    AuthMethodsResponse, OidcAuthorizeResponse, OidcExchangeRequest, OidcLinkRequest,
+    OidcProviderInfo,
+};
 
 #[derive(Deserialize)]
 pub struct OidcCallbackParams {
     pub code: Option<String>,
     pub state: Option<String>,
     pub error: Option<String>,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct OidcLinkRequest {
-    pub link_token: String,
-    pub password: Option<String>,
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct OidcExchangeRequest {
-    pub code: String,
 }
 
 /// Get available auth methods (public)

@@ -9,69 +9,34 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_provider_core::ProviderType;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::provider_config;
-use utoipa::ToSchema;
 
 /// Sentinel value used to indicate a masked secret in API responses.
 const SECRET_MASK: &str = "***";
 
-#[derive(Deserialize, ToSchema)]
-pub struct CreateProviderConfigRequest {
-    pub name: String,
-    /// Provider type identifier (e.g. "github_releases", "proxmox_helper_scripts").
-    pub provider_type: String,
-    /// Provider-specific configuration blob.
-    pub config: serde_json::Value,
-    /// Whether the config is enabled. Defaults to true.
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-}
+pub use uptrakit_web_api_types::provider_configs::{
+    CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
+};
 
-fn default_enabled() -> bool {
-    true
-}
-
-#[derive(Deserialize, ToSchema)]
-pub struct UpdateProviderConfigRequest {
-    pub name: Option<String>,
-    pub config: Option<serde_json::Value>,
-    pub enabled: Option<bool>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ProviderConfigResponse {
-    pub id: String,
-    pub name: String,
-    pub provider_type: String,
-    /// Provider-specific configuration with secrets masked.
-    pub config: serde_json::Value,
-    pub enabled: bool,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-impl From<provider_config::Model> for ProviderConfigResponse {
-    fn from(m: provider_config::Model) -> Self {
-        Self {
-            id: m.id.to_string(),
-            name: m.name,
-            provider_type: m.provider_type.clone(),
-            config: mask_secrets(&m.provider_type, &m.config),
-            enabled: m.enabled,
-            created_at: m
-                .created_at
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default(),
-            updated_at: m
-                .updated_at
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_default(),
-        }
+fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigResponse {
+    ProviderConfigResponse {
+        id: m.id.to_string(),
+        name: m.name,
+        provider_type: m.provider_type.clone(),
+        config: mask_secrets(&m.provider_type, &m.config),
+        enabled: m.enabled,
+        created_at: m
+            .created_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
+        updated_at: m
+            .updated_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default(),
     }
 }
 
@@ -188,7 +153,7 @@ pub async fn create_provider_config(
     match model.insert(&state.db).await {
         Ok(inserted) => (
             StatusCode::CREATED,
-            Json(ProviderConfigResponse::from(inserted)),
+            Json(provider_config_response_from(inserted)),
         )
             .into_response(),
         Err(e) => {
@@ -225,7 +190,7 @@ pub async fn list_provider_configs(
         Ok(configs) => {
             let resp: Vec<ProviderConfigResponse> = configs
                 .into_iter()
-                .map(ProviderConfigResponse::from)
+                .map(provider_config_response_from)
                 .collect();
             (StatusCode::OK, Json(resp)).into_response()
         }
@@ -264,7 +229,7 @@ pub async fn get_provider_config(
 
     match find_active_config(&state.db, config_id).await {
         Some(config) => {
-            (StatusCode::OK, Json(ProviderConfigResponse::from(config))).into_response()
+            (StatusCode::OK, Json(provider_config_response_from(config))).into_response()
         }
         None => (StatusCode::NOT_FOUND, "Provider config not found").into_response(),
     }
@@ -336,7 +301,7 @@ pub async fn update_provider_config(
 
     match model.update(&state.db).await {
         Ok(updated) => {
-            (StatusCode::OK, Json(ProviderConfigResponse::from(updated))).into_response()
+            (StatusCode::OK, Json(provider_config_response_from(updated))).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to update provider config: {e}");

@@ -3,16 +3,11 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use http::StatusCode;
-use serde::Serialize;
-use utoipa::ToSchema;
 
 use crate::AppState;
 use crate::pki_utils::{self, SanCollection};
 
-#[derive(Debug, Serialize, ToSchema)]
-pub struct RenewServerCertResponse {
-    pub message: String,
-}
+pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
 
 /// Renew the server TLS certificate using the current active CA.
 #[utoipa::path(

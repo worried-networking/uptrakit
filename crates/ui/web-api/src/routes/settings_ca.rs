@@ -3,15 +3,10 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use http::StatusCode;
-use serde::Serialize;
-use utoipa::ToSchema;
 
 use crate::AppState;
 
-#[derive(Serialize, ToSchema)]
-pub struct RotateCaResponse {
-    pub message: String,
-}
+pub use uptrakit_web_api_types::settings_ca::RotateCaResponse;
 
 /// Trigger an immediate CA rotation.
 ///

@@ -5,40 +5,9 @@ use crate::settings_store::{
 };
 use rootcause::prelude::*;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
-use serde::{Deserialize, Serialize};
 use uptrakit_shared_db::entity::prelude::*;
-use utoipa::ToSchema;
 
-/// Registration mode controlling how new users can sign up.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RegistrationMode {
-    /// Anyone can register without a token.
-    Open,
-    /// Registration requires a valid token.
-    Invite,
-    /// Registration is disabled.
-    Closed,
-}
-
-impl RegistrationMode {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Invite => "invite",
-            Self::Closed => "closed",
-        }
-    }
-
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "open" => Some(Self::Open),
-            "invite" => Some(Self::Invite),
-            "closed" => Some(Self::Closed),
-            _ => None,
-        }
-    }
-}
+pub use uptrakit_web_api_types::registration::RegistrationMode;
 
 /// Cached registration settings held in AppState.
 #[derive(Clone, Debug)]

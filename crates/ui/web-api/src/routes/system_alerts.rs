@@ -2,25 +2,10 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use serde::Serialize;
-use utoipa::ToSchema;
 
 use crate::AppState;
 
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SystemAlert {
-    pub id: String,
-    pub severity: String,
-    pub title: String,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub action: Option<String>,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SystemAlertsResponse {
-    pub alerts: Vec<SystemAlert>,
-}
+pub use uptrakit_web_api_types::system_alerts::{SystemAlert, SystemAlertsResponse};
 
 /// Get system alerts for the admin dashboard.
 #[utoipa::path(

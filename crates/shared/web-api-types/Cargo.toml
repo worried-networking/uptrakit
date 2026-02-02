@@ -1,0 +1,20 @@
+[package]
+name = "uptrakit-web-api-types"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+description = "Shared HTTP request/response types for the Uptrakit web API"
+
+[features]
+default = []
+openapi = ["dep:utoipa"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+utoipa = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
