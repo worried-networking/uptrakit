@@ -150,7 +150,7 @@ validation_context:
     filename: /etc/envoy/ssl/ca.crl
 ```
 
-`only_verify_leaf_cert_crl: true` ensures only the leaf (agent) certificate is checked against the CRL, not the CA certificate itself.
+`only_verify_leaf_cert_crl: true` ensures only the leaf (agent) certificate is checked against the CRL, not the CA certificate itself. The CRL file must be in PEM format.
 
 Periodic refresh example (sidecar script or cron):
 
