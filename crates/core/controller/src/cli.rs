@@ -86,8 +86,10 @@ pub struct Args {
     pub forwarded_client_cert_pem_header: Option<String>,
 
     /// URL for PKI endpoints (OCSP, CRL, CA cert) embedded in certificate extensions.
-    /// Supports both http:// and https:// schemes.
-    /// Example: http://controller:8080 or https://controller.internal:8443
+    /// Supports both http:// and https:// schemes. http:// is recommended because
+    /// Nginx only supports http:// OCSP responder URLs — https:// AIA URLs are
+    /// silently ignored by Nginx's ssl_ocsp directive.
+    /// Example: http://controller:8080 (recommended) or https://controller.internal:8443
     /// Stored in DB as `network.pki_addr`. CLI value used only on first run
     /// or with `--force-settings-override`.
     #[arg(long, value_parser = parse_pki_addr)]

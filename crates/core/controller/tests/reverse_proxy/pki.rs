@@ -141,6 +141,45 @@ impl TestPki {
         (cert.pem(), agent_key.serialize_pem(), agent_id)
     }
 
+    /// Generate a second agent certificate with an AIA extension embedding the given OCSP URL.
+    ///
+    /// Returns `(cert_pem, key_pem, agent_id)`.
+    pub fn generate_extra_agent_cert_with_aia(
+        &self,
+        ocsp_url: &str,
+    ) -> (String, String, uuid::Uuid) {
+        let ca_issuer = Issuer::from_ca_cert_pem(&self.ca_cert_pem, self.ca_key_pair())
+            .expect("CA issuer from PEM");
+
+        let agent_id = uuid::Uuid::now_v7();
+        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("AIA agent key generation failed");
+
+        let mut agent_params = CertificateParams::new(vec![]).expect("AIA agent cert params");
+        agent_params.distinguished_name = DistinguishedName::new();
+        agent_params
+            .distinguished_name
+            .push(DnType::CommonName, agent_id.to_string());
+        agent_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        agent_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
+        agent_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
+
+        // Embed AIA extension with the OCSP responder URL
+        let aia_der = build_aia_extension_der(ocsp_url);
+        agent_params
+            .custom_extensions
+            .push(rcgen::CustomExtension::from_oid_content(
+                &[1, 3, 6, 1, 5, 5, 7, 1, 1],
+                aia_der,
+            ));
+
+        let cert = agent_params
+            .signed_by(&agent_key, &ca_issuer)
+            .expect("AIA agent cert signing failed");
+
+        (cert.pem(), agent_key.serialize_pem(), agent_id)
+    }
+
     /// Generate a PEM-encoded CRL containing the specified revoked certificate
     /// serial numbers. The serial numbers should be the hex-encoded serials
     /// from the X.509 certificates.
@@ -202,4 +241,53 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).expect("valid hex"))
         .collect()
+}
+
+// --- DER encoding helpers for AIA extension (mirrors production crates/core/controller/src/pki.rs) ---
+
+/// Build the DER-encoded value for an Authority Information Access (AIA) extension
+/// containing only an OCSP responder URL.
+fn build_aia_extension_der(ocsp_url: &str) -> Vec<u8> {
+    // OCSP access description: SEQUENCE { OID(id-ad-ocsp), [6] URI }
+    let access_descriptions = encode_access_description(
+        &[0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01], // id-ad-ocsp OID
+        ocsp_url,
+    );
+
+    // Wrap in SEQUENCE (AuthorityInfoAccessSyntax)
+    encode_der_sequence(&access_descriptions)
+}
+
+/// Encode a single AccessDescription as a DER SEQUENCE.
+fn encode_access_description(method_oid_der: &[u8], uri: &str) -> Vec<u8> {
+    let uri_bytes = uri.as_bytes();
+    // GeneralName uniformResourceIdentifier [6] IMPLICIT IA5String
+    let mut general_name = vec![0x86]; // context tag 6, primitive
+    general_name.extend_from_slice(&encode_der_length(uri_bytes.len()));
+    general_name.extend_from_slice(uri_bytes);
+
+    let mut content = Vec::new();
+    content.extend_from_slice(method_oid_der);
+    content.extend_from_slice(&general_name);
+
+    encode_der_sequence(&content)
+}
+
+/// Encode a DER SEQUENCE tag + length + content.
+fn encode_der_sequence(content: &[u8]) -> Vec<u8> {
+    let mut result = vec![0x30]; // SEQUENCE tag
+    result.extend_from_slice(&encode_der_length(content.len()));
+    result.extend_from_slice(content);
+    result
+}
+
+/// Encode a DER length in the minimum number of octets.
+fn encode_der_length(len: usize) -> Vec<u8> {
+    if len < 0x80 {
+        vec![len as u8]
+    } else if len < 0x100 {
+        vec![0x81, len as u8]
+    } else {
+        vec![0x82, (len >> 8) as u8, len as u8]
+    }
 }

@@ -6,10 +6,10 @@ use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair};
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::post;
+use axum::routing::{get, post};
 use der::asn1::{BitString, OctetString};
 use der::{Decode, Encode};
 use x509_ocsp::{
@@ -24,7 +24,7 @@ const SHA1_OID: const_oid::ObjectIdentifier =
 const SHA256_OID: const_oid::ObjectIdentifier =
     const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
 
-/// Standalone plain-HTTP OCSP responder for integration testing.
+/// Standalone HTTP and HTTPS OCSP responder for integration testing.
 ///
 /// Does NOT use the production OCSP code to avoid DB migrations.
 /// Signs responses with the CA key using ECDSA P-256 SHA-256.
@@ -45,28 +45,72 @@ struct OcspState {
     request_count: AtomicUsize,
 }
 
+/// Build the shared Axum router for both HTTP and HTTPS modes.
+///
+/// Handles:
+/// - `POST /` and `POST /api/v1/pki/ocsp` — standard OCSP POST requests
+/// - `GET /healthz` — health check
+/// - Any other request — treated as GET OCSP (RFC 6960 Appendix A.1)
+///   where the base64-encoded DER request is in the URL path
+fn build_router(state: Arc<OcspState>) -> Router {
+    Router::new()
+        .route("/", post(handle_ocsp))
+        .route("/api/v1/pki/ocsp", post(handle_ocsp))
+        .route("/healthz", get(|| async { "ok" }))
+        .fallback(handle_ocsp_get)
+        .with_state(state)
+}
+
+fn build_ocsp_state(
+    ca_cert_pem: &str,
+    ca_key_pem: &str,
+    revoked_serials: Vec<String>,
+) -> Arc<OcspState> {
+    let ca_public_key_bytes = extract_public_key_bytes(ca_cert_pem);
+    let ca_key_der = pem_to_der(ca_key_pem);
+
+    Arc::new(OcspState {
+        ca_public_key_bytes,
+        ca_key_der,
+        revoked_serials,
+        request_count: AtomicUsize::new(0),
+    })
+}
+
 impl OcspResponder {
-    /// Start a test OCSP responder on a random port.
+    /// Start a test OCSP responder on a random port (plain HTTP).
     ///
     /// - `ca_cert_pem`: PEM-encoded CA certificate
     /// - `ca_key_pem`: PEM-encoded CA private key
     /// - `revoked_serials`: serial numbers (lowercase hex) to report as revoked
     pub async fn start(ca_cert_pem: &str, ca_key_pem: &str, revoked_serials: Vec<String>) -> Self {
-        let ca_public_key_bytes = extract_public_key_bytes(ca_cert_pem);
-        let ca_key_der = pem_to_der(ca_key_pem);
-
-        let state = Arc::new(OcspState {
-            ca_public_key_bytes,
-            ca_key_der,
-            revoked_serials,
-            request_count: AtomicUsize::new(0),
-        });
-
-        let router = Router::new()
-            .route("/", post(handle_ocsp))
-            .with_state(Arc::clone(&state));
-
         let listener = TcpListener::bind("0.0.0.0:0").expect("bind OCSP responder");
+        Self::start_http_with_listener(listener, ca_cert_pem, ca_key_pem, revoked_serials).await
+    }
+
+    /// Start a test OCSP responder on a specific port (plain HTTP).
+    ///
+    /// Panics if the port cannot be bound.
+    pub async fn start_on_port(
+        port: u16,
+        ca_cert_pem: &str,
+        ca_key_pem: &str,
+        revoked_serials: Vec<String>,
+    ) -> Self {
+        let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
+            .unwrap_or_else(|e| panic!("failed to bind OCSP responder to port {port}: {e}"));
+        Self::start_http_with_listener(listener, ca_cert_pem, ca_key_pem, revoked_serials).await
+    }
+
+    async fn start_http_with_listener(
+        listener: TcpListener,
+        ca_cert_pem: &str,
+        ca_key_pem: &str,
+        revoked_serials: Vec<String>,
+    ) -> Self {
+        let state = build_ocsp_state(ca_cert_pem, ca_key_pem, revoked_serials);
+        let router = build_router(Arc::clone(&state));
+
         listener
             .set_nonblocking(true)
             .expect("set listener nonblocking");
@@ -93,6 +137,106 @@ impl OcspResponder {
         }
     }
 
+    /// Start a test OCSP responder on a random port (HTTPS / TLS).
+    ///
+    /// - `ca_cert_pem`: PEM-encoded CA certificate (for OCSP signing)
+    /// - `ca_key_pem`: PEM-encoded CA private key (for OCSP signing)
+    /// - `server_cert_pem`: PEM-encoded server certificate (for TLS)
+    /// - `server_key_pem`: PEM-encoded server private key (for TLS)
+    /// - `revoked_serials`: serial numbers (lowercase hex) to report as revoked
+    #[allow(dead_code)]
+    pub async fn start_https(
+        ca_cert_pem: &str,
+        ca_key_pem: &str,
+        server_cert_pem: &str,
+        server_key_pem: &str,
+        revoked_serials: Vec<String>,
+    ) -> Self {
+        let listener = TcpListener::bind("0.0.0.0:0").expect("bind HTTPS OCSP responder");
+        Self::start_https_with_listener(
+            listener,
+            ca_cert_pem,
+            ca_key_pem,
+            server_cert_pem,
+            server_key_pem,
+            revoked_serials,
+        )
+        .await
+    }
+
+    /// Start a test OCSP responder on a specific port (HTTPS / TLS).
+    ///
+    /// Panics if the port cannot be bound.
+    pub async fn start_https_on_port(
+        port: u16,
+        ca_cert_pem: &str,
+        ca_key_pem: &str,
+        server_cert_pem: &str,
+        server_key_pem: &str,
+        revoked_serials: Vec<String>,
+    ) -> Self {
+        let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
+            .unwrap_or_else(|e| panic!("failed to bind HTTPS OCSP responder to port {port}: {e}"));
+        Self::start_https_with_listener(
+            listener,
+            ca_cert_pem,
+            ca_key_pem,
+            server_cert_pem,
+            server_key_pem,
+            revoked_serials,
+        )
+        .await
+    }
+
+    async fn start_https_with_listener(
+        listener: TcpListener,
+        ca_cert_pem: &str,
+        ca_key_pem: &str,
+        server_cert_pem: &str,
+        server_key_pem: &str,
+        revoked_serials: Vec<String>,
+    ) -> Self {
+        let state = build_ocsp_state(ca_cert_pem, ca_key_pem, revoked_serials);
+        let router = build_router(Arc::clone(&state));
+
+        listener
+            .set_nonblocking(true)
+            .expect("set listener nonblocking");
+        let port = listener.local_addr().expect("local addr").port();
+
+        let rustls_config = build_rustls_config(server_cert_pem, server_key_pem);
+
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+        let handle = axum_server::Handle::new();
+        let server_handle = handle.clone();
+
+        tokio::spawn(async move {
+            axum_server::from_tcp_rustls(listener, rustls_config)
+                .expect("from_tcp_rustls OCSP")
+                .handle(server_handle)
+                .serve(router.into_make_service())
+                .await
+                .expect("HTTPS OCSP responder serve error");
+        });
+
+        // Bridge watch-based shutdown to axum_server Handle
+        let shutdown_handle = handle.clone();
+        tokio::spawn(async move {
+            shutdown_rx.changed().await.ok();
+            shutdown_handle.graceful_shutdown(None);
+        });
+
+        // Wait until the server is actually listening.
+        handle.listening().await;
+
+        Self {
+            port,
+            state,
+            shutdown: shutdown_tx,
+        }
+    }
+
     /// The port the responder is listening on.
     pub fn port(&self) -> u16 {
         self.port
@@ -109,6 +253,27 @@ impl OcspResponder {
     }
 }
 
+fn build_rustls_config(
+    server_cert_pem: &str,
+    server_key_pem: &str,
+) -> axum_server::tls_rustls::RustlsConfig {
+    let (_, cert_pem) = x509_parser::pem::parse_x509_pem(server_cert_pem.as_bytes())
+        .expect("parse OCSP server cert PEM");
+    let cert_der = rustls::pki_types::CertificateDer::from(cert_pem.contents);
+
+    let key_der = rustls::pki_types::PrivateKeyDer::try_from(pem_to_der(server_key_pem))
+        .expect("OCSP server key DER");
+
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der], key_der)
+        .expect("rustls OCSP server config");
+
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+}
+
 async fn handle_ocsp(State(state): State<Arc<OcspState>>, body: Bytes) -> impl IntoResponse {
     state.request_count.fetch_add(1, Ordering::Relaxed);
 
@@ -119,6 +284,78 @@ async fn handle_ocsp(State(state): State<Arc<OcspState>>, body: Bytes) -> impl I
         [("content-type", "application/ocsp-response")],
         response_der,
     )
+}
+
+/// Handle GET-based OCSP requests (RFC 6960 Appendix A.1).
+///
+/// Nginx sends OCSP requests as GET with the URL path containing the
+/// URL-encoded base64-encoded DER OCSP request:
+///   GET /{url-encoding of base-64 encoding of the DER encoding of OCSPRequest}
+async fn handle_ocsp_get(
+    State(state): State<Arc<OcspState>>,
+    request: Request,
+) -> impl IntoResponse {
+    use base64::Engine;
+
+    let path = request.uri().path();
+
+    // RFC 6960: GET {url}/{url-encoding of base64(DER(OCSPRequest))}
+    // The base64 content is in the last path segment (after the last '/').
+    let b64_segment = path.rsplit('/').next().unwrap_or("");
+    if b64_segment.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            [("content-type", "text/plain")],
+            Vec::from("empty OCSP request path"),
+        );
+    }
+
+    // URL-decode the segment (percent-decoding)
+    let url_decoded = percent_decode(b64_segment);
+
+    // Try standard base64 first, then URL-safe
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(&url_decoded)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(&url_decoded));
+
+    match der {
+        Ok(der_bytes) => {
+            state.request_count.fetch_add(1, Ordering::Relaxed);
+            let response_der = build_response(&der_bytes, &state);
+            (
+                StatusCode::OK,
+                [("content-type", "application/ocsp-response")],
+                response_der,
+            )
+        }
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            [("content-type", "text/plain")],
+            Vec::from("invalid base64 in OCSP request"),
+        ),
+    }
+}
+
+/// Simple percent-decoding for URL paths.
+fn percent_decode(input: &str) -> String {
+    let mut result = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+        {
+            result.push(byte);
+            i += 3;
+            continue;
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    // Return as a string; base64 chars are ASCII so this is safe
+    String::from_utf8(result).unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into())
 }
 
 fn build_response(request_der: &[u8], state: &OcspState) -> Vec<u8> {

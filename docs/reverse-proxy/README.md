@@ -38,7 +38,7 @@ CLI flags seed the database on first run. After that, the database value takes p
 | `--real-ip-header` | `network.real_ip_header` | Header for real client IP (default: `X-Forwarded-For`) |
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | Header for structured cert info (L7 only) |
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | Header for PEM-encoded cert (L7 fallback) |
-| `--pki-addr` | `network.pki_addr` | URL for PKI endpoints (e.g. `https://controller.internal:8443` or `http://controller:8080`). Embeds OCSP, CRL, and CA Issuer URLs in certificates via AIA/CDP extensions. Supports both `http://` and `https://` schemes. |
+| `--pki-addr` | `network.pki_addr` | URL for PKI endpoints (e.g. `http://controller:8080` or `https://controller.internal:8443`). Embeds OCSP, CRL, and CA Issuer URLs in certificates via AIA/CDP extensions. Supports both `http://` and `https://` schemes. **`http://` is recommended** — Nginx only supports `http://` OCSP responder URLs, so `https://` AIA URLs are silently ignored by Nginx's `ssl_ocsp` directive. Use with `--pki-http=listener`. |
 
 ### Info Header Format
 
@@ -143,7 +143,7 @@ All PKI endpoints are unauthenticated.
 
 | Proxy | OCSP support (client certs) | CRL support | Notes |
 | --- | --- | --- | --- |
-| **Nginx** | `ssl_ocsp leaf` (1.19.0+) | `ssl_crl` directive | OCSP recommended |
+| **Nginx** | `ssl_ocsp leaf` (1.19.0+) | `ssl_crl` directive | OCSP recommended; **requires `http://` responder URL** (`--pki-addr=http://... --pki-http listener`). `https://` OCSP URLs (both AIA-embedded and explicit `ssl_ocsp_responder`) are silently ignored. |
 | **HAProxy** | No | `crl-file` on `bind` | CRL only; requires periodic refresh |
 | **Envoy** | No | `crl` in `validation_context` | CRL only; requires sidecar refresh |
 | **Traefik** | No | No | Revocation handled at the application layer |

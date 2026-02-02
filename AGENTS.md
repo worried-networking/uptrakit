@@ -135,7 +135,7 @@ When `--pki-addr` is configured, the controller embeds AIA (Authority Informatio
 | AIA CA Issuers | `{pki_addr}/api/v1/pki/ca.crt` |
 | CDP CRL | `{pki_addr}/api/v1/pki/ca.crl` |
 
-`--pki-addr` accepts both `http://` and `https://` URLs. When the PKI address uses `http://`, the `--pki-http` flag controls how plain HTTP serving is handled:
+`--pki-addr` accepts both `http://` and `https://` URLs. **`http://` is recommended** because Nginx only supports `http://` OCSP responder URLs — `https://` AIA URLs are silently ignored by Nginx's `ssl_ocsp` directive. When the PKI address uses `http://`, the `--pki-http` flag controls how plain HTTP serving is handled:
 
 | `--pki-http` value | Behaviour |
 | --- | --- |
@@ -696,7 +696,7 @@ crates/core/controller/tests/
   reverse_proxy/
     pki.rs                      -- TestPki: CA + server cert + agent cert generation (rcgen)
     server.rs                   -- TestServer: lightweight Axum HTTPS server with real middleware
-    ocsp_responder.rs           -- OcspResponder: standalone plain-HTTP OCSP responder for testing
+    ocsp_responder.rs           -- OcspResponder: HTTP and HTTPS OCSP responder for testing
     nginx.rs                    -- Nginx L7 test (nginx:latest)
     traefik.rs                  -- Traefik L7 test (traefik:v3)
     caddy.rs                    -- Caddy L7 test (caddy:latest)
@@ -705,7 +705,7 @@ crates/core/controller/tests/
     nginx_crl.rs                -- Nginx CRL revocation test
     haproxy_crl.rs              -- HAProxy CRL revocation test
     envoy_crl.rs                -- Envoy CRL revocation test
-    nginx_ocsp.rs               -- Nginx OCSP revocation test (ssl_ocsp leaf)
+    nginx_ocsp.rs               -- Nginx OCSP revocation tests (HTTP, HTTPS, AIA)
 ```
 
 All tests are `#[ignore]` with descriptive messages and never run in normal `cargo test`. They require Docker.
