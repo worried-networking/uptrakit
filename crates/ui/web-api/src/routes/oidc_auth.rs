@@ -17,12 +17,15 @@ use openidconnect::{
     core::{CoreClient, CoreProviderMetadata, CoreResponseType},
     reqwest,
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    Set,
+};
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link};
+use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
 
 pub use super::auth::AuthResponse;
 pub use uptrakit_web_api_types::oidc_auth::{
@@ -67,9 +70,16 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
         })
         .collect();
 
+    let setup_required = User::find()
+        .count(&state.db)
+        .await
+        .map(|c| c == 0)
+        .unwrap_or(false);
+
     let response = AuthMethodsResponse {
         password: auth_settings.password_auth_enabled,
         oidc_providers,
+        setup_required,
     };
 
     (StatusCode::OK, Json(response)).into_response()
@@ -362,6 +372,43 @@ pub async fn oidc_callback(
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
+            // Check if this is the first user in the system
+            let is_first_user = User::find()
+                .count(&state.db)
+                .await
+                .map(|c| c == 1)
+                .unwrap_or(false);
+
+            if is_first_user {
+                // Delete the default 'user' role assigned by resolve_oidc_user
+                let _ = UserRole::delete_many()
+                    .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
+                    .filter(user_role::Column::UserId.eq(user_id))
+                    .exec(&state.db)
+                    .await;
+
+                // Assign owner role
+                if let Err(e) =
+                    super::auth::assign_owner_role(&state.db, state.default_tenant_id, user_id)
+                        .await
+                {
+                    tracing::error!("Failed to assign owner role to first OIDC user: {e:?}");
+                }
+
+                // Complete initial setup (close registration, remove token)
+                if let Err(e) = state
+                    .settings
+                    .registration_write()
+                    .await
+                    .complete_initial_setup(&state.db, state.default_tenant_id)
+                    .await
+                {
+                    tracing::error!("Failed to complete initial setup for first OIDC user: {e:?}");
+                }
+
+                tracing::info!("first user registered via OIDC, assigned owner role");
+            }
+
             let _ = sync_oidc_roles(
                 &state.db,
                 state.default_tenant_id,
