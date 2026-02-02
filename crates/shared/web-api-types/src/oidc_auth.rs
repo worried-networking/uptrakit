@@ -14,6 +14,7 @@ pub struct OidcProviderInfo {
 pub struct AuthMethodsResponse {
     pub password: bool,
     pub oidc_providers: Vec<OidcProviderInfo>,
+    pub setup_required: bool,
 }
 
 #[derive(Serialize, Deserialize)]

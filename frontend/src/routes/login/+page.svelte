@@ -70,7 +70,7 @@
 			})
 			.catch(() => {
 				// Fallback: assume password auth
-				authMethods = { password: true, oidc_providers: [] };
+				authMethods = { password: true, oidc_providers: [], setup_required: false };
 			});
 	});
 
@@ -126,6 +126,17 @@
 		<p class="mb-4 text-center text-sm text-surface-600-300-token">
 			An account with email <strong>{linkEmail}</strong> already exists. Verify your identity to link it.
 		</p>
+	{:else if authMethods?.setup_required}
+		<h2 class="h2 mb-6 text-center">Welcome to Uptrakit</h2>
+		{#if authMethods.oidc_providers.length > 0}
+			<p class="mb-4 text-center text-sm text-surface-600-300-token">
+				Sign in with your identity provider to set up your account.
+			</p>
+		{:else if authMethods.password}
+			<p class="mb-4 text-center text-sm text-surface-600-300-token">
+				Register your first account to get started.
+			</p>
+		{/if}
 	{:else}
 		<h2 class="h2 mb-6 text-center">Login</h2>
 	{/if}
@@ -227,9 +238,13 @@
 					<button type="submit" class="btn variant-filled-primary w-full">Login</button>
 				</form>
 
+				{#if authMethods?.setup_required && !authMethods.oidc_providers.length}
+				<a href="/register" class="btn variant-filled-primary w-full mt-4">Register</a>
+			{:else}
 				<p class="mt-4 text-center">
 					Don't have an account? <a href="/register" class="anchor">Register</a>
 				</p>
+			{/if}
 			{/if}
 		{:else}
 			<p class="text-center text-surface-600-300-token">Loading...</p>

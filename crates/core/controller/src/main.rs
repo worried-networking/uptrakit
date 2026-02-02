@@ -473,6 +473,110 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             .await;
     }
 
+    // --- Bootstrap OIDC provider from CLI flags ---
+    {
+        let oidc = &args.oidc_bootstrap;
+        let any_set = oidc.oidc_issuer_url.is_some()
+            || oidc.oidc_client_id.is_some()
+            || oidc.oidc_client_secret.is_some();
+
+        if any_set {
+            let issuer_url = oidc.oidc_issuer_url.as_deref().ok_or_else(|| {
+                report!(AppError::Config(
+                    "--oidc-issuer-url is required when any OIDC bootstrap flag is set".into()
+                ))
+            })?;
+            let client_id = oidc.oidc_client_id.as_deref().ok_or_else(|| {
+                report!(AppError::Config(
+                    "--oidc-client-id is required with --oidc-issuer-url".into()
+                ))
+            })?;
+            let client_secret = oidc.oidc_client_secret.as_deref().ok_or_else(|| {
+                report!(AppError::Config(
+                    "--oidc-client-secret is required with --oidc-issuer-url".into()
+                ))
+            })?;
+
+            let slug = oidc.oidc_provider_slug.as_deref().unwrap_or("sso");
+            let name = oidc.oidc_provider_name.as_deref().unwrap_or("SSO");
+            let scopes = oidc
+                .oidc_scopes
+                .as_deref()
+                .unwrap_or("openid email profile groups");
+
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            use uptrakit_shared_db::entity::{oidc_provider, prelude::OidcProvider};
+
+            let existing = OidcProvider::find()
+                .filter(oidc_provider::Column::Slug.eq(slug))
+                .filter(oidc_provider::Column::TenantId.eq(default_tenant_id))
+                .filter(oidc_provider::Column::DeletedAt.is_null())
+                .one(&db_conn)
+                .await
+                .context(AppError::Database)?;
+
+            match existing {
+                None => {
+                    use sea_orm::ActiveModelTrait;
+                    use sea_orm::Set;
+                    use time::OffsetDateTime;
+
+                    let now = OffsetDateTime::now_utc();
+                    let provider = oidc_provider::ActiveModel {
+                        id: Set(uuid::Uuid::now_v7()),
+                        tenant_id: Set(default_tenant_id),
+                        name: Set(name.to_string()),
+                        slug: Set(slug.to_string()),
+                        logo_url: Set(None),
+                        issuer_url: Set(issuer_url.to_string()),
+                        client_id: Set(client_id.to_string()),
+                        client_secret: Set(client_secret.to_string()),
+                        scopes: Set(scopes.to_string()),
+                        auto_create_users: Set(true),
+                        role_claim_path: Set(None),
+                        role_mapping: Set(
+                            uptrakit_shared_db::entity::oidc_provider::RoleMapping::default(),
+                        ),
+                        is_active: Set(true),
+                        created_at: Set(now),
+                        updated_at: Set(now),
+                        deleted_at: Set(None),
+                    };
+                    provider
+                        .insert(&db_conn)
+                        .await
+                        .context(AppError::Database)?;
+                    tracing::info!(slug = slug, name = name, "bootstrapped OIDC provider");
+                }
+                Some(existing_provider) if force => {
+                    use sea_orm::Set;
+                    use sea_orm::{ActiveModelTrait, IntoActiveModel};
+                    use time::OffsetDateTime;
+
+                    let mut model = existing_provider.into_active_model();
+                    model.issuer_url = Set(issuer_url.to_string());
+                    model.client_id = Set(client_id.to_string());
+                    model.client_secret = Set(client_secret.to_string());
+                    model.is_active = Set(true);
+                    model.updated_at = Set(OffsetDateTime::now_utc());
+                    model.update(&db_conn).await.context(AppError::Database)?;
+                    tracing::info!(
+                        slug = slug,
+                        name = name,
+                        "force-updated bootstrapped OIDC provider"
+                    );
+                }
+                Some(_) => {
+                    tracing::info!(
+                        slug = slug,
+                        "OIDC provider already exists, skipping bootstrap \
+                         (pass --force-settings-override to overwrite)"
+                    );
+                }
+            }
+        }
+    }
+
     // Resolve static directory for SPA serving
     let static_dir = resolve_static_dir(args.static_dir)?;
 

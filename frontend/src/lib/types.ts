@@ -66,6 +66,7 @@ export interface OidcProviderInfo {
 export interface AuthMethodsResponse {
 	password: boolean;
 	oidc_providers: OidcProviderInfo[];
+	setup_required: boolean;
 }
 
 export interface OidcLinkRequest {

@@ -139,7 +139,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
 | Agent certificates | `agent_certificates.*` | Yes | `GET/PUT /api/v1/settings/agent-certificates` |
 
-**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
+**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` (OIDC bootstrap flags write directly to the `oidc_providers` table).
 
 The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for each settings group, allowing runtime-changeable settings to take effect immediately without restart. See [AGENTS.md](AGENTS.md) section "DB-managed settings" for the full key reference.
 
@@ -148,7 +148,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 ### User authentication
 
 - **Password**: Argon2id with OWASP-recommended parameters.
-- **OIDC**: External identity providers with auto-create or account linking.
+- **OIDC**: External identity providers with auto-create or account linking. Can be bootstrapped at startup via `--oidc-*` CLI flags (see [AGENTS.md](AGENTS.md) "OIDC provider bootstrap").
 - **Device authorization**: RFC 8628-style flow for CLI login. The CLI requests a device code, the user approves in the browser, and the CLI receives an API token. Works with any auth method (password or OIDC).
 - **Sessions**: SHA-256 hashed tokens, 7-day expiry, 30-min sliding window.
 - **JWT**: Access and refresh tokens carrying resolved permissions.
