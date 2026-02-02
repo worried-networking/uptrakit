@@ -160,7 +160,7 @@ Main functionality that delivers the core value proposition.
 - [ ] Implement provider-specific version detection
   - [ ] GitHub releases provider
   - [ ] System package managers (apt, yum, pacman)
-  - [ ] Docker container provider
+  - [x] Docker container provider (controller-side remote provider)
   - [ ] Proxmox Helper Scripts provider
 - [ ] Add caching for detected versions
 - [ ] Implement periodic inventory scanning
@@ -172,7 +172,7 @@ Main functionality that delivers the core value proposition.
 - [ ] Implement provider-specific version checking
   - [x] GitHub releases API integration
   - [ ] Package repository API integration
-  - [ ] Docker registry API integration
+  - [x] Docker registry API integration (semver tag filtering + digest tracking)
   - [ ] Proxmox Helper Scripts repository check
 - [x] Add version comparison logic per provider
 - [ ] Implement channel support (stable, beta, nightly)
@@ -193,10 +193,10 @@ Main functionality that delivers the core value proposition.
 - [ ] Add system package manager provider
   - [ ] Support for multiple package managers
   - [ ] Package dependency handling
-- [ ] Create Docker container provider
-  - [ ] Image version checking
-  - [ ] Registry authentication
-  - [ ] Multi-registry support
+- [x] Create Docker container provider (controller-side remote provider)
+  - [x] Image version checking (semver tag filtering + digest change detection)
+  - [x] Registry authentication (anonymous, basic, bearer with OCI token flow)
+  - [x] Multi-registry support (Docker Hub, GHCR, any OCI-compliant registry)
 
 ### Update Execution
 

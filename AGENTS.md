@@ -25,6 +25,7 @@ uptrakit/
 │   │   └── controller/                 # uptrakit-controller                    (bin)  — central server
 │   ├── providers/
 │   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions
+│   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   └── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   ├── shared/
@@ -823,6 +824,7 @@ Provider crates:
 | Crate | Path | Purpose |
 | --- | --- | --- |
 | `uptrakit-provider-core` | `crates/providers/core/` | Shared provider traits and abstractions |
+| `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: controller tracks container image tags via semver filtering or digest change detection |
 | `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: controller fetches release metadata; agent installs from artifacts |
 | `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE Helper-Scripts: agent auto-discovers and manages helper-script-installed apps |
 
@@ -863,6 +865,43 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 - 403/429 responses with `x-ratelimit-remaining: 0` return a rate-limit error
 - Asset filtering uses regex matching against asset names
 
+### Docker Registry provider (`uptrakit-provider-docker-registry`)
+
+Tracks container image tags from OCI/Docker registries. Supports Docker Hub, GHCR, and any OCI Distribution Spec-compliant registry. This is a **RemoteProvider only** (controller-side); agent-side container discovery is not implemented.
+
+**Config fields (`DockerRegistryConfig`):**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `image` | String | Yes | -- | Full image reference (e.g. `nginx`, `ghcr.io/owner/repo`) |
+| `registry` | Option\<String\> | No | inferred from `image` | Override registry hostname |
+| `auth` | Option\<DockerAuth\> | No | `null` | Authentication credentials |
+| `tracking_mode` | TrackingMode | No | `semver_tags` | `semver_tags` or `digest_tracking` |
+| `tag_patterns` | Vec\<String\> | No | `[]` | Regex patterns to filter tags (semver mode, OR logic) |
+| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip before semver parsing |
+| `include_prereleases` | bool | No | `false` | Include pre-release versions |
+| `tracked_tag` | Option\<String\> | No | `"latest"` | Tag to track (digest mode) |
+| `page_size` | u32 | No | `1000` | Max tags per API request |
+
+**DockerAuth** (tagged enum with `#[serde(tag = "type")]`):
+- `basic`: `username` + `password`
+- `bearer`: `token`
+
+**Tracking modes:**
+
+- **SemverTags** (default): Lists tags from the registry, filters by `tag_patterns` (OR logic, empty = all), strips `tag_strip_prefix`, parses as semver (non-semver tags excluded), filters pre-releases unless `include_prereleases`, sorts descending by version. Each tag becomes an `UpstreamRelease` (no `release_notes`, no `published_at`, no `assets`).
+- **DigestTracking**: Gets the manifest digest for `tracked_tag` (default `"latest"`). Returns a single `UpstreamRelease` with the digest as the version string. Useful for detecting when a mutable tag has been updated.
+
+**Registry resolution:**
+- `nginx` -> `registry-1.docker.io` / `library/nginx`
+- `user/repo` -> `registry-1.docker.io` / `user/repo`
+- `ghcr.io/owner/repo` -> `ghcr.io` / `owner/repo`
+- `registry.example.com/path/repo` -> `registry.example.com` / `path/repo`
+
+**Auth flow:** Uses OCI Distribution Spec token authentication. On 401, parses the `WWW-Authenticate: Bearer` challenge header, fetches a token from the realm endpoint (with Basic/Bearer credentials if configured), caches the token with expiry tracking, and retries the original request.
+
+**Secret masking:** `auth.password` and `auth.token` fields are replaced with `"***"` in GET responses. On PUT, masked values are restored from the existing DB record.
+
 ### Provider configuration management
 
 Provider-specific configurations are stored in the `provider_configs` table and managed via CRUD API endpoints:
@@ -879,7 +918,7 @@ Provider-specific configurations are stored in the `provider_configs` table and 
 
 **Secret masking:** `auth_token` fields in config JSON are replaced with `"***"` in GET responses. On PUT, if `auth_token` is `"***"`, the existing value from the DB is preserved.
 
-**Supported provider types:** `github_releases`.
+**Supported provider types:** `github_releases`, `docker_registry`.
 
 When adding or changing a provider, document in the same PR:
 

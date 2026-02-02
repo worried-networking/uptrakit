@@ -47,6 +47,8 @@ x509-cert = { version = "0.2", default-features = false }
 const-oid = { version = "0.9", features = ["db"] }
 aws-lc-rs = "1"
 strum = { version = "0.27", features = ["derive"] }
+regex = "1"
+semver = "1"
 
 [profile.release]
 opt-level = 3
