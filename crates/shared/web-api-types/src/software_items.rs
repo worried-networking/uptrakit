@@ -80,5 +80,6 @@ pub struct SoftwareItemHostSummary {
     pub friendly_name: String,
     pub installed_version: Option<String>,
     pub installed_version_detected_at: Option<String>,
+    pub last_updated_at: Option<String>,
     pub linked_at: String,
 }

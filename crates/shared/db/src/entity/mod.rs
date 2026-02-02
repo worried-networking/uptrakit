@@ -3,6 +3,7 @@ pub mod agent_certificate;
 pub mod agent_host;
 pub mod api_token;
 pub mod auth_method;
+pub mod available_version;
 pub mod host;
 pub mod host_software_item;
 pub mod oidc_provider;

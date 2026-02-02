@@ -21,6 +21,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::available_version::Entity")]
+    AvailableVersion,
     #[sea_orm(
         belongs_to = "super::provider_config::Entity",
         from = "Column::ProviderConfigId",
@@ -33,6 +35,12 @@ pub enum Relation {
         to = "super::tenant::Column::Id"
     )]
     Tenant,
+}
+
+impl Related<super::available_version::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AvailableVersion.def()
+    }
 }
 
 impl Related<super::provider_config::Entity> for Entity {

@@ -328,7 +328,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 
 ### Tables NOT changed (remain global)
 
-`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `agent_certificates`, `pending_*` tables, `agent_hosts`, `host_software_items`.
+`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `agent_certificates`, `pending_*` tables, `agent_hosts`, `host_software_items`, `available_versions`.
 
 ### TenantContext extractor
 
@@ -637,12 +637,16 @@ A `SoftwareItem` defines what to track: a named piece of software linked to a `P
 - **`software_items`**: `id` (UUID PK), `name`, `provider_config_id` (FK → `provider_configs.id`, ON DELETE RESTRICT), `package_identifier` (default `""`), `config_override?` (JSON), `enabled` (default `true`), `last_checked_at?`, `created_at`, `updated_at`, `deactivated_at?`
   - Unique constraint: `(provider_config_id, package_identifier)` — prevents duplicate tracking of the same package from the same source
   - Indexes: `idx_software_items_provider_config_id`, `idx_software_items_deactivated_at`
-- **`host_software_items`**: junction table with composite PK `(host_id, software_item_id)`, `installed_version?`, `installed_version_detected_at?`, `linked_at`. FKs cascade on delete.
+- **`host_software_items`**: junction table with composite PK `(host_id, software_item_id)`, `installed_version?`, `installed_version_detected_at?`, `last_updated_at?`, `linked_at`. FKs cascade on delete.
+- **`available_versions`**: `id` (UUID PK), `software_item_id` (FK → `software_items.id`, ON DELETE CASCADE), `version?`, `release_date?`, `release_notes?` (text), `extra?` (JSON — provider-specific metadata such as tag, is_prerelease, release_url), `created_at`, `updated_at`
+  - CHECK constraint: at least one of `version` or `release_date` must be non-null
+  - Index: `idx_available_versions_software_item_id`
 
 ### Relationships
 
 - `SoftwareItem` belongs_to `ProviderConfig` (many:1 — multiple items can share one config)
 - `ProviderConfig` has_many `SoftwareItem`
+- `SoftwareItem` has_many `AvailableVersion` (one:many — upstream release records per item)
 - `SoftwareItem` ↔ `Host` via `HostSoftwareItem` junction (many:many)
 - `package_identifier` distinguishes items within a shared config (e.g. different assets from the same GitHub repo)
 - `config_override` extends/overrides the base ProviderConfig at resolution time (e.g. different `asset_patterns` or `tag_strip_prefix`)
