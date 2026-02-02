@@ -76,7 +76,7 @@ pub async fn update_registration_settings(
         .settings
         .registration_write()
         .await
-        .update(&state.db, req.mode, req.token)
+        .update(&state.db, state.default_tenant_id, req.mode, req.token)
         .await
     {
         tracing::error!("Failed to update registration settings: {:?}", e);

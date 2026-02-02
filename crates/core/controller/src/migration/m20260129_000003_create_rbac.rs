@@ -2,6 +2,8 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 use uuid::Uuid;
 
+use super::m20260129_000001_initial::Tenants;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -74,19 +76,28 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create user_roles junction table
+        // Create user_roles junction table with tenant_id
         manager
             .create_table(
                 Table::create()
                     .table(UserRoles::Table)
                     .if_not_exists()
+                    .col(ColumnDef::new(UserRoles::TenantId).uuid().not_null())
                     .col(ColumnDef::new(UserRoles::UserId).uuid().not_null())
                     .col(ColumnDef::new(UserRoles::RoleId).uuid().not_null())
                     .col(timestamp(UserRoles::AssignedAt))
                     .primary_key(
                         Index::create()
+                            .col(UserRoles::TenantId)
                             .col(UserRoles::UserId)
                             .col(UserRoles::RoleId),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_user_roles_tenant")
+                            .from(UserRoles::Table, UserRoles::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
                     )
                     .foreign_key(
                         ForeignKey::create()
@@ -215,6 +226,7 @@ enum RolePermissions {
 #[derive(DeriveIden)]
 enum UserRoles {
     Table,
+    TenantId,
     UserId,
     RoleId,
     AssignedAt,

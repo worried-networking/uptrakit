@@ -196,6 +196,7 @@ mod tests {
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             db: db.clone(),
+            default_tenant_id: uuid::Uuid::nil(),
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),

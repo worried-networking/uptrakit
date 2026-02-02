@@ -190,7 +190,7 @@ These are non-negotiable design constraints. Do not violate them.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
-12. **Do not add any `allow()`** without excpicit approval from the user.
+12. **Do not add any `allow()`** without excpicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`).
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
 ## CLI output formatting
@@ -284,6 +284,78 @@ The first registered user gets the `admin` role. Subsequent users (password or O
 3. Add the check in the relevant route handler(s).
 4. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
 
+## Multi-tenancy
+
+The codebase supports multi-tenancy at the database and API levels. Currently only **single-tenant mode** is active — multi-tenant mode is planned for a future release.
+
+### Tenants table
+
+The `tenants` table stores tenant records. A seeded **default tenant** (with `is_default = true`) is created by the initial migration. All data in single-tenant mode is associated with this default tenant.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | `Uuid::now_v7()` |
+| `name` | String | Human-readable name |
+| `slug` | String (unique) | URL-safe identifier |
+| `is_default` | Bool | Exactly one row has `true` |
+| `created_at` | Timestamp | |
+| `updated_at` | Timestamp | |
+| `deactivated_at` | Timestamp? | Soft-delete |
+
+### Tenant-scoped tables
+
+The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenants(id)` ON DELETE RESTRICT:
+
+| Table | Unique constraint change |
+| --- | --- |
+| `agents` | — (index on `tenant_id`) |
+| `hosts` | `machine_id` unique → `(tenant_id, machine_id)` |
+| `provider_configs` | — (index on `tenant_id`) |
+| `software_items` | `(provider_config_id, package_identifier)` → `(tenant_id, provider_config_id, package_identifier)` |
+| `oidc_providers` | `slug` unique → `(tenant_id, slug)` |
+| `user_roles` | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)` |
+| `settings` | PK `(key)` → `(tenant_id, key)` |
+
+### Tables NOT changed (remain global)
+
+`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `agent_certificates`, `pending_*` tables, `agent_hosts`, `host_software_items`.
+
+### TenantContext extractor
+
+Route handlers that operate on tenant-scoped data accept a `TenantContext` extractor (`crates/ui/web-api/src/middleware/tenant_context.rs`). It implements `FromRequestParts<Arc<AppState>>`:
+
+1. Reads the `X-Tenant-Id` HTTP header.
+2. If present and non-empty: parses as UUID, uses it as the tenant.
+3. If absent: falls back to `state.default_tenant_id`.
+
+In single-tenant mode, the header is optional — all requests default to the default tenant.
+
+### AppState.default_tenant_id
+
+`AppState` has a `default_tenant_id: uuid::Uuid` field, loaded at startup by querying the seeded default tenant from the DB. It is used:
+
+- As the fallback in `TenantContext` when no header is provided.
+- For global settings (via `resolve_tenant_for_key()`).
+- In middleware and auth flows that don't have a per-request tenant context.
+
+### Global vs tenant-scoped settings
+
+`SettingKey::is_global()` returns `true` for settings that apply system-wide (not per-tenant). Global settings are always stored under `default_tenant_id`:
+
+- `TrustedProxies`, `RealIpHeader`, `ExtraSans`, `HttpsAddr`
+- `ForwardedClientCertInfoHeader`, `ForwardedClientCertPemHeader`
+- `MultiTenancyEnabled`
+
+The helper `resolve_tenant_for_key(key, tenant_id, default_tenant_id)` in `settings_store.rs` returns the correct tenant ID based on whether the key is global.
+
+### Future multi-tenancy work
+
+- Tenant management API (CRUD for tenants)
+- Multi-tenant JWT (per-tenant permissions in token)
+- Tenant-aware MQTT (per-tenant broker config or topic prefix)
+- Tenant switching UI
+- API token scoping per tenant
+
 ## DB-managed settings
 
 Most CLI arguments are reconciled with DB-persisted values at startup. The reconciliation module (`crates/core/controller/src/reconcile.rs`) implements a generic 5-case priority logic. Settings are stored in the `setting` DB entity as JSON values.
@@ -310,7 +382,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 
 ### Bulk loading and known-keys registry
 
-At startup, `Settings::load()` issues a single `SELECT * FROM settings` via `load_all_settings()` and distributes the resulting `RawSettings` (`HashMap<String, serde_json::Value>`) to all sub-loaders. This replaces the previous pattern of one query per key.
+At startup, `Settings::load(db, tenant_id)` issues a single `SELECT * FROM settings WHERE tenant_id = ?` via `load_all_settings(db, tenant_id)` and distributes the resulting `RawSettings` (`HashMap<String, serde_json::Value>`) to all sub-loaders. This replaces the previous pattern of one query per key.
 
 After the bulk load, `warn_unrecognised_keys()` logs a warning for any DB key not recognised by `SettingKey::from_db_key()`. The `SettingKey` enum (defined in `crates/ui/web-api/src/setting_key.rs`) is the single source of truth for all known setting keys. `SettingKey::ALL` provides an array of every variant.
 

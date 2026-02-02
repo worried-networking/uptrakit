@@ -25,6 +25,7 @@ pub use super::role_permission::{Entity as RolePermission, Model as RolePermissi
 pub use super::session::{Entity as Session, Model as SessionModel};
 pub use super::setting::{Entity as Setting, Model as SettingModel};
 pub use super::software_item::{Entity as SoftwareItem, Model as SoftwareItemModel};
+pub use super::tenant::{Entity as Tenant, Model as TenantModel};
 pub use super::user::{Entity as User, Model as UserModel};
 pub use super::user_oidc_link::{Entity as UserOidcLink, Model as UserOidcLinkModel};
 pub use super::user_role::{Entity as UserRole, Model as UserRoleModel};

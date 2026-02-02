@@ -6,6 +6,7 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{prelude::*, setting};
+use uuid::Uuid;
 
 /// All settings from the DB, keyed by setting name.
 pub type RawSettings = HashMap<String, serde_json::Value>;
@@ -22,20 +23,36 @@ impl RawSettingsExt for RawSettings {
     }
 }
 
-/// Load every row from the `settings` table in a single query.
-pub async fn load_all_settings(db: &DatabaseConnection) -> Result<RawSettings> {
-    let rows = Setting::find().all(db).await.context_to()?;
+/// Resolve which tenant_id to use for a given setting key.
+///
+/// Global settings are always stored under the default tenant.
+pub fn resolve_tenant_for_key(key: SettingKey, tenant_id: Uuid, default_tenant_id: Uuid) -> Uuid {
+    if key.is_global() {
+        default_tenant_id
+    } else {
+        tenant_id
+    }
+}
+
+/// Load every row from the `settings` table for a given tenant in a single query.
+pub async fn load_all_settings(db: &DatabaseConnection, tenant_id: Uuid) -> Result<RawSettings> {
+    let rows = Setting::find()
+        .filter(setting::Column::TenantId.eq(tenant_id))
+        .all(db)
+        .await
+        .context_to()?;
     Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
 }
 
 pub async fn upsert_setting(
     db: &DatabaseConnection,
+    tenant_id: Uuid,
     key: SettingKey,
     value: serde_json::Value,
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
     let db_key = key.as_str();
-    let existing = Setting::find_by_id(db_key.to_string())
+    let existing = Setting::find_by_id((tenant_id, db_key.to_string()))
         .one(db)
         .await
         .context_to()?;
@@ -47,6 +64,7 @@ pub async fn upsert_setting(
         model.update(db).await.context_to()?;
     } else {
         let model = setting::ActiveModel {
+            tenant_id: Set(tenant_id),
             key: Set(db_key.to_string()),
             value: Set(value),
             updated_at: Set(now),
@@ -59,17 +77,23 @@ pub async fn upsert_setting(
 
 pub async fn load_setting(
     db: &DatabaseConnection,
+    tenant_id: Uuid,
     key: SettingKey,
 ) -> Result<Option<serde_json::Value>> {
-    let setting = Setting::find_by_id(key.as_str().to_string())
+    let setting = Setting::find_by_id((tenant_id, key.as_str().to_string()))
         .one(db)
         .await
         .context_to()?;
     Ok(setting.map(|s| s.value))
 }
 
-pub async fn delete_setting(db: &DatabaseConnection, key: SettingKey) -> Result<()> {
+pub async fn delete_setting(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    key: SettingKey,
+) -> Result<()> {
     Setting::delete_many()
+        .filter(setting::Column::TenantId.eq(tenant_id))
         .filter(setting::Column::Key.eq(key.as_str()))
         .exec(db)
         .await

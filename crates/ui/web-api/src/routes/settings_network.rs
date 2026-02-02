@@ -97,7 +97,14 @@ pub async fn update_network_settings(
             }
         }
         let json_val = serde_json::json!(parsed.iter().map(|n| n.to_string()).collect::<Vec<_>>());
-        if let Err(e) = upsert_setting(&state.db, SettingKey::TrustedProxies, json_val).await {
+        if let Err(e) = upsert_setting(
+            &state.db,
+            state.default_tenant_id,
+            SettingKey::TrustedProxies,
+            json_val,
+        )
+        .await
+        {
             tracing::error!("Failed to save trusted_proxies: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
@@ -108,6 +115,7 @@ pub async fn update_network_settings(
     if let Some(ref header) = req.real_ip_header {
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::RealIpHeader,
             serde_json::json!(header),
         )
@@ -121,8 +129,13 @@ pub async fn update_network_settings(
 
     // Validate and apply extra_sans (runtime-changeable)
     if let Some(ref sans) = req.extra_sans {
-        if let Err(e) =
-            upsert_setting(&state.db, SettingKey::ExtraSans, serde_json::json!(sans)).await
+        if let Err(e) = upsert_setting(
+            &state.db,
+            state.default_tenant_id,
+            SettingKey::ExtraSans,
+            serde_json::json!(sans),
+        )
+        .await
         {
             tracing::error!("Failed to save extra_sans: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -143,6 +156,7 @@ pub async fn update_network_settings(
         };
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::ForwardedClientCertInfoHeader,
             json_val,
         )
@@ -170,6 +184,7 @@ pub async fn update_network_settings(
         };
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::ForwardedClientCertPemHeader,
             json_val,
         )
@@ -222,7 +237,7 @@ pub async fn update_network_settings(
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,
         };
-        if let Err(e) = upsert_setting(&state.db, SettingKey::BackendUrl, json_val).await {
+        if let Err(e) = upsert_setting(&state.db, state.default_tenant_id, SettingKey::BackendUrl, json_val).await {
             tracing::error!("Failed to save backend_url: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
@@ -243,6 +258,7 @@ pub async fn update_network_settings(
         };
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::HttpsAddr,
             serde_json::json!(addr.to_string()),
         )

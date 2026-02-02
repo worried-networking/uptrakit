@@ -26,6 +26,7 @@ pub enum SettingKey {
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
     BackendUrl,
+    MultiTenancyEnabled,
 }
 
 impl SettingKey {
@@ -50,6 +51,7 @@ impl SettingKey {
         Self::ForwardedClientCertInfoHeader,
         Self::ForwardedClientCertPemHeader,
         Self::BackendUrl,
+        Self::MultiTenancyEnabled,
     ];
 
     /// The DB string representation of this key.
@@ -74,6 +76,7 @@ impl SettingKey {
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
             Self::BackendUrl => "network.backend_url",
+            Self::MultiTenancyEnabled => "multi_tenancy.enabled",
         }
     }
 
@@ -101,8 +104,24 @@ impl SettingKey {
             }
             "network.forwarded_client_cert_pem_header" => Some(Self::ForwardedClientCertPemHeader),
             "network.backend_url" => Some(Self::BackendUrl),
+            "multi_tenancy.enabled" => Some(Self::MultiTenancyEnabled),
             _ => None,
         }
+    }
+
+    /// Returns `true` for settings that are global (not per-tenant).
+    pub const fn is_global(self) -> bool {
+        matches!(
+            self,
+            Self::TrustedProxies
+                | Self::RealIpHeader
+                | Self::ExtraSans
+                | Self::HttpsAddr
+                | Self::ForwardedClientCertInfoHeader
+                | Self::ForwardedClientCertPemHeader
+                | Self::BackendUrl
+                | Self::MultiTenancyEnabled
+        )
     }
 }
 
@@ -140,7 +159,23 @@ mod tests {
 
     #[test]
     fn all_has_correct_count() {
-        // 19 variants defined in the enum
-        assert_eq!(SettingKey::ALL.len(), 19);
+        // 20 variants defined in the enum
+        assert_eq!(SettingKey::ALL.len(), 20);
+    }
+
+    #[test]
+    fn global_keys_identified() {
+        assert!(SettingKey::TrustedProxies.is_global());
+        assert!(SettingKey::RealIpHeader.is_global());
+        assert!(SettingKey::ExtraSans.is_global());
+        assert!(SettingKey::HttpsAddr.is_global());
+        assert!(SettingKey::ForwardedClientCertInfoHeader.is_global());
+        assert!(SettingKey::ForwardedClientCertPemHeader.is_global());
+        assert!(SettingKey::BackendUrl.is_global());
+        assert!(SettingKey::MultiTenancyEnabled.is_global());
+        // Per-tenant keys
+        assert!(!SettingKey::RegistrationMode.is_global());
+        assert!(!SettingKey::MqttHost.is_global());
+        assert!(!SettingKey::EnrollmentTokenHash.is_global());
     }
 }

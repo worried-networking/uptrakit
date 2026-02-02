@@ -6,6 +6,7 @@ use time::OffsetDateTime;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub provider_config_id: Uuid,
     pub package_identifier: String,
@@ -26,11 +27,23 @@ pub enum Relation {
         to = "super::provider_config::Column::Id"
     )]
     ProviderConfig,
+    #[sea_orm(
+        belongs_to = "super::tenant::Entity",
+        from = "Column::TenantId",
+        to = "super::tenant::Column::Id"
+    )]
+    Tenant,
 }
 
 impl Related<super::provider_config::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ProviderConfig.def()
+    }
+}
+
+impl Related<super::tenant::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Tenant.def()
     }
 }
 

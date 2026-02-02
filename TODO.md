@@ -817,7 +817,17 @@ Development and release automation.
 
 Items to consider for future versions but not currently prioritized:
 
-- [ ] Multi-tenant support
+- [x] Multi-tenant support (database infrastructure, single-tenant mode)
+  - [x] Tenants table with default tenant seeding
+  - [x] `tenant_id` FK on all scoped tables (agents, hosts, provider_configs, software_items, oidc_providers, user_roles, settings)
+  - [x] TenantContext extractor (X-Tenant-Id header with default tenant fallback)
+  - [x] Global vs tenant-scoped settings (SettingKey::is_global())
+  - [x] All route handlers updated for tenant awareness
+  - [ ] Tenant management API (CRUD)
+  - [ ] Multi-tenant JWT (per-tenant permissions)
+  - [ ] Tenant-aware MQTT
+  - [ ] Tenant switching UI
+  - [ ] API token scoping per tenant
 - [ ] Agent clustering
 - [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready)
 - [ ] Update preview/dry-run mode

@@ -62,8 +62,8 @@ impl sea_orm::TryGetable for RoleMapping {
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
-    #[sea_orm(unique)]
     pub slug: String,
     pub logo_url: Option<String>,
     pub issuer_url: String,
@@ -86,6 +86,12 @@ pub enum Relation {
     UserOidcLinks,
     #[sea_orm(has_many = "super::session::Entity")]
     Sessions,
+    #[sea_orm(
+        belongs_to = "super::tenant::Entity",
+        from = "Column::TenantId",
+        to = "super::tenant::Column::Id"
+    )]
+    Tenant,
 }
 
 impl Related<super::user_oidc_link::Entity> for Entity {
@@ -97,6 +103,12 @@ impl Related<super::user_oidc_link::Entity> for Entity {
 impl Related<super::session::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Sessions.def()
+    }
+}
+
+impl Related<super::tenant::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Tenant.def()
     }
 }
 

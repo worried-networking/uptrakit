@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::tenant_context::TenantContext;
 use axum::{
     Json,
     extract::{Path, State},
@@ -60,6 +61,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
 )]
 pub async fn create_provider(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateOidcProviderRequest>,
 ) -> Response {
@@ -76,8 +78,9 @@ pub async fn create_provider(
         return (StatusCode::BAD_REQUEST, "Missing required fields").into_response();
     }
 
-    // Check slug uniqueness among non-deleted providers
+    // Check slug uniqueness among non-deleted providers within tenant
     let existing = OidcProvider::find()
+        .filter(oidc_provider::Column::TenantId.eq(tenant.tenant_id))
         .filter(oidc_provider::Column::Slug.eq(&req.slug))
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .one(&state.db)
@@ -90,6 +93,7 @@ pub async fn create_provider(
     let now = OffsetDateTime::now_utc();
     let provider = oidc_provider::ActiveModel {
         id: Set(generate_uuid()),
+        tenant_id: Set(tenant.tenant_id),
         name: Set(req.name),
         slug: Set(req.slug),
         logo_url: Set(req.logo_url),
@@ -131,6 +135,7 @@ pub async fn create_provider(
 )]
 pub async fn list_providers(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
@@ -138,6 +143,7 @@ pub async fn list_providers(
     }
 
     match OidcProvider::find()
+        .filter(oidc_provider::Column::TenantId.eq(tenant.tenant_id))
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .order_by_asc(oidc_provider::Column::Name)
         .all(&state.db)
@@ -171,6 +177,7 @@ pub async fn list_providers(
 )]
 pub async fn get_provider(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -183,7 +190,7 @@ pub async fn get_provider(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    match find_non_deleted_provider(&state.db, provider_id).await {
+    match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(provider) => {
             (StatusCode::OK, Json(oidc_provider_response_from(provider))).into_response()
         }
@@ -206,6 +213,7 @@ pub async fn get_provider(
 )]
 pub async fn update_provider(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<UpdateOidcProviderRequest>,
@@ -219,7 +227,7 @@ pub async fn update_provider(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    let provider = match find_non_deleted_provider(&state.db, provider_id).await {
+    let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
     };
@@ -229,6 +237,7 @@ pub async fn update_provider(
         && *new_slug != provider.slug
     {
         let existing = OidcProvider::find()
+            .filter(oidc_provider::Column::TenantId.eq(tenant.tenant_id))
             .filter(oidc_provider::Column::Slug.eq(new_slug.as_str()))
             .filter(oidc_provider::Column::DeletedAt.is_null())
             .filter(oidc_provider::Column::Id.ne(provider_id))
@@ -298,6 +307,7 @@ pub async fn update_provider(
 )]
 pub async fn delete_provider(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -310,7 +320,7 @@ pub async fn delete_provider(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    let provider = match find_non_deleted_provider(&state.db, provider_id).await {
+    let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
     };
@@ -359,6 +369,7 @@ pub async fn delete_provider(
 )]
 pub async fn activate_provider(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -371,7 +382,7 @@ pub async fn activate_provider(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    let provider = match find_non_deleted_provider(&state.db, provider_id).await {
+    let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
     };
@@ -386,8 +397,9 @@ pub async fn activate_provider(
 
     let now = OffsetDateTime::now_utc();
 
-    // Deactivate all other providers
+    // Deactivate all other providers within the tenant
     let all_active = OidcProvider::find()
+        .filter(oidc_provider::Column::TenantId.eq(tenant.tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::Id.ne(provider_id))
         .filter(oidc_provider::Column::DeletedAt.is_null())
@@ -432,6 +444,7 @@ pub async fn activate_provider(
 )]
 pub async fn deactivate_provider(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -444,7 +457,7 @@ pub async fn deactivate_provider(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    let provider = match find_non_deleted_provider(&state.db, provider_id).await {
+    let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
     };
@@ -478,9 +491,11 @@ pub async fn deactivate_provider(
 
 async fn find_non_deleted_provider(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     id: uuid::Uuid,
 ) -> Option<oidc_provider::Model> {
     OidcProvider::find_by_id(id)
+        .filter(oidc_provider::Column::TenantId.eq(tenant_id))
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .one(db)
         .await

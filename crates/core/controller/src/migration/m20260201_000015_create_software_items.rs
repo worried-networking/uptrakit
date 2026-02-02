@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::m20260129_000001_initial::Tenants;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -19,6 +21,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
+                    .col(ColumnDef::new(SoftwareItems::TenantId).uuid().not_null())
                     .col(string(SoftwareItems::Name))
                     .col(
                         ColumnDef::new(SoftwareItems::ProviderConfigId)
@@ -34,6 +37,13 @@ impl MigrationTrait for Migration {
                     .col(timestamp_null(SoftwareItems::DeactivatedAt))
                     .foreign_key(
                         ForeignKey::create()
+                            .name("fk_software_items_tenant")
+                            .from(SoftwareItems::Table, SoftwareItems::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
                             .name("fk_software_items_provider_config")
                             .from(SoftwareItems::Table, SoftwareItems::ProviderConfigId)
                             .to(ProviderConfigs::Table, ProviderConfigs::Id)
@@ -43,15 +53,27 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Unique constraint: (provider_config_id, package_identifier)
+        // Unique constraint: (tenant_id, provider_config_id, package_identifier)
         manager
             .create_index(
                 Index::create()
-                    .name("uq_software_items_provider_config_package")
+                    .name("uq_software_items_tenant_provider_config_package")
                     .table(SoftwareItems::Table)
+                    .col(SoftwareItems::TenantId)
                     .col(SoftwareItems::ProviderConfigId)
                     .col(SoftwareItems::PackageIdentifier)
                     .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on tenant_id
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_software_items_tenant_id")
+                    .table(SoftwareItems::Table)
+                    .col(SoftwareItems::TenantId)
                     .to_owned(),
             )
             .await?;
@@ -136,6 +158,7 @@ impl MigrationTrait for Migration {
 enum SoftwareItems {
     Table,
     Id,
+    TenantId,
     Name,
     ProviderConfigId,
     PackageIdentifier,

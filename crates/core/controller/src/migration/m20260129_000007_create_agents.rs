@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::m20260129_000001_initial::Tenants;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -13,6 +15,7 @@ impl MigrationTrait for Migration {
                     .table(Agents::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(Agents::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Agents::TenantId).uuid().not_null())
                     .col(string(Agents::Hostname))
                     .col(string(Agents::FriendlyName))
                     .col(string_null(Agents::IpAddress))
@@ -27,6 +30,24 @@ impl MigrationTrait for Migration {
                     .col(timestamp(Agents::CreatedAt))
                     .col(timestamp(Agents::UpdatedAt))
                     .col(timestamp_null(Agents::DeactivatedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_agents_tenant")
+                            .from(Agents::Table, Agents::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on tenant_id for tenant-scoped queries
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_agents_tenant_id")
+                    .table(Agents::Table)
+                    .col(Agents::TenantId)
                     .to_owned(),
             )
             .await?;
@@ -78,6 +99,7 @@ impl MigrationTrait for Migration {
 enum Agents {
     Table,
     Id,
+    TenantId,
     Hostname,
     FriendlyName,
     IpAddress,

@@ -179,6 +179,7 @@ async fn build_state(
         rustls_config: rustls_cfg,
         crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
         ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+        default_tenant_id: uuid::Uuid::nil(),
     })
 }
 

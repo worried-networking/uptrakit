@@ -77,6 +77,7 @@ pub async fn update_authentication_settings(
 
             // Safety: at least one auth method must remain
             let active_providers = OidcProvider::find()
+                .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
                 .filter(oidc_provider::Column::IsActive.eq(true))
                 .filter(oidc_provider::Column::DeletedAt.is_null())
                 .all(&state.db)
@@ -94,7 +95,7 @@ pub async fn update_authentication_settings(
 
         let mut auth_settings = state.settings.authentication_write().await;
         auth_settings.password_auth_enabled = password_enabled;
-        if let Err(e) = auth_settings.save(&state.db).await {
+        if let Err(e) = auth_settings.save(&state.db, state.default_tenant_id).await {
             tracing::error!("Failed to save authentication settings: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }

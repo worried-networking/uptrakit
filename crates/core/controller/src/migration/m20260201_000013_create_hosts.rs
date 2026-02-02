@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::m20260129_000001_initial::Tenants;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -14,7 +16,8 @@ impl MigrationTrait for Migration {
                     .table(Hosts::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(Hosts::Id).uuid().not_null().primary_key())
-                    .col(string_uniq(Hosts::MachineId))
+                    .col(ColumnDef::new(Hosts::TenantId).uuid().not_null())
+                    .col(string(Hosts::MachineId))
                     .col(string(Hosts::Hostname))
                     .col(string(Hosts::FriendlyName))
                     .col(string_null(Hosts::OsType))
@@ -25,17 +28,37 @@ impl MigrationTrait for Migration {
                     .col(timestamp(Hosts::CreatedAt))
                     .col(timestamp(Hosts::UpdatedAt))
                     .col(timestamp_null(Hosts::DeactivatedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_hosts_tenant")
+                            .from(Hosts::Table, Hosts::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
                     .to_owned(),
             )
             .await?;
 
-        // Index on machine_id for fast lookups
+        // Index on tenant_id
         manager
             .create_index(
                 Index::create()
-                    .name("idx_hosts_machine_id")
+                    .name("idx_hosts_tenant_id")
                     .table(Hosts::Table)
+                    .col(Hosts::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Unique constraint: (tenant_id, machine_id)
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_hosts_tenant_machine_id")
+                    .table(Hosts::Table)
+                    .col(Hosts::TenantId)
                     .col(Hosts::MachineId)
+                    .unique()
                     .to_owned(),
             )
             .await?;
@@ -101,6 +124,7 @@ impl MigrationTrait for Migration {
 enum Hosts {
     Table,
     Id,
+    TenantId,
     MachineId,
     Hostname,
     FriendlyName,

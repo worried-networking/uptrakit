@@ -6,6 +6,7 @@ use crate::settings_store::{
 use rootcause::prelude::*;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use uptrakit_shared_db::entity::prelude::*;
+use uuid::Uuid;
 
 pub use uptrakit_web_api_types::registration::RegistrationMode;
 
@@ -25,6 +26,7 @@ impl RegistrationSettings {
     ///   (defaulting to Closed if absent).
     pub async fn initialize(
         db: &DatabaseConnection,
+        tenant_id: Uuid,
         raw: &RawSettings,
     ) -> Result<(Self, Option<String>)> {
         let user_count = User::find().count(db).await.context_to()?;
@@ -37,6 +39,7 @@ impl RegistrationSettings {
             // Upsert mode = invite
             upsert_setting(
                 db,
+                tenant_id,
                 SettingKey::RegistrationMode,
                 serde_json::Value::String(RegistrationMode::Invite.as_str().to_string()),
             )
@@ -44,6 +47,7 @@ impl RegistrationSettings {
             // Upsert token hash
             upsert_setting(
                 db,
+                tenant_id,
                 SettingKey::RegistrationTokenHash,
                 serde_json::Value::String(hash.clone()),
             )
@@ -112,15 +116,20 @@ impl RegistrationSettings {
 
     /// First admin registered — set mode to Closed, clear token hash.
     /// Updates both DB and in-memory state.
-    pub async fn complete_initial_setup(&mut self, db: &DatabaseConnection) -> Result<()> {
+    pub async fn complete_initial_setup(
+        &mut self,
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+    ) -> Result<()> {
         // Update DB
         upsert_setting(
             db,
+            tenant_id,
             SettingKey::RegistrationMode,
             serde_json::Value::String(RegistrationMode::Closed.as_str().to_string()),
         )
         .await?;
-        delete_setting(db, SettingKey::RegistrationTokenHash).await?;
+        delete_setting(db, tenant_id, SettingKey::RegistrationTokenHash).await?;
 
         // Update in-memory state
         self.mode = RegistrationMode::Closed;
@@ -134,12 +143,14 @@ impl RegistrationSettings {
     pub async fn update(
         &mut self,
         db: &DatabaseConnection,
+        tenant_id: Uuid,
         mode: RegistrationMode,
         token: Option<String>,
     ) -> Result<()> {
         // Update mode in DB
         upsert_setting(
             db,
+            tenant_id,
             SettingKey::RegistrationMode,
             serde_json::Value::String(mode.as_str().to_string()),
         )
@@ -151,6 +162,7 @@ impl RegistrationSettings {
                 let hash = password::hash_password(plaintext)?;
                 upsert_setting(
                     db,
+                    tenant_id,
                     SettingKey::RegistrationTokenHash,
                     serde_json::Value::String(hash.clone()),
                 )
@@ -159,13 +171,13 @@ impl RegistrationSettings {
             } else {
                 // Keep existing hash if no new token provided (shouldn't happen per API contract,
                 // but handled defensively)
-                load_setting(db, SettingKey::RegistrationTokenHash)
+                load_setting(db, tenant_id, SettingKey::RegistrationTokenHash)
                     .await?
                     .and_then(|v| v.as_str().map(String::from))
             }
         } else {
             // Open or Closed: clear any stored token
-            delete_setting(db, SettingKey::RegistrationTokenHash).await?;
+            delete_setting(db, tenant_id, SettingKey::RegistrationTokenHash).await?;
             None
         };
 

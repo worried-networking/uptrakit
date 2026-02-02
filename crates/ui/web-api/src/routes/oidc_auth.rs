@@ -50,6 +50,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
     let auth_settings = state.settings.authentication().await;
 
     let providers = OidcProvider::find()
+        .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .all(&state.db)
@@ -112,7 +113,9 @@ pub async fn oidc_authorize(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid provider ID").into_response(),
     };
 
-    let provider = match find_active_provider(&state.db, provider_uuid).await {
+    let provider = match find_active_provider(&state.db, state.default_tenant_id, provider_uuid)
+        .await
+    {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "Provider not found or inactive").into_response(),
     };
@@ -225,10 +228,11 @@ pub async fn oidc_callback(
     };
 
     // Load provider
-    let provider = match find_active_provider(&state.db, flow.provider_id).await {
-        Some(p) => p,
-        None => return Redirect::to("/login?error=oidc_provider_gone").into_response(),
-    };
+    let provider =
+        match find_active_provider(&state.db, state.default_tenant_id, flow.provider_id).await {
+            Some(p) => p,
+            None => return Redirect::to("/login?error=oidc_provider_gone").into_response(),
+        };
 
     let base_url = external_base_url
         .map(|Extension(u)| u.0)
@@ -327,6 +331,7 @@ pub async fn oidc_callback(
     // Resolve user
     let resolution = match resolve_oidc_user(
         &state.db,
+        state.default_tenant_id,
         flow.provider_id,
         &sub,
         &email,
@@ -346,11 +351,25 @@ pub async fn oidc_callback(
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
             // Sync roles and create session
-            let _ = sync_oidc_roles(&state.db, user_id, &provider, &additional_claims).await;
+            let _ = sync_oidc_roles(
+                &state.db,
+                state.default_tenant_id,
+                user_id,
+                &provider,
+                &additional_claims,
+            )
+            .await;
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
-            let _ = sync_oidc_roles(&state.db, user_id, &provider, &additional_claims).await;
+            let _ = sync_oidc_roles(
+                &state.db,
+                state.default_tenant_id,
+                user_id,
+                &provider,
+                &additional_claims,
+            )
+            .await;
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::AutoLink { user_id } => {
@@ -366,7 +385,14 @@ pub async fn oidc_callback(
                 tracing::error!("Failed to auto-link OIDC account: {e}");
                 return Redirect::to("/login?error=oidc_link_failed").into_response();
             }
-            let _ = sync_oidc_roles(&state.db, user_id, &provider, &additional_claims).await;
+            let _ = sync_oidc_roles(
+                &state.db,
+                state.default_tenant_id,
+                user_id,
+                &provider,
+                &additional_claims,
+            )
+            .await;
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
@@ -501,9 +527,10 @@ pub async fn oidc_exchange(
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let permissions = super::auth::get_user_permissions(&state.db, pending.user_id)
-        .await
-        .unwrap_or_default();
+    let permissions =
+        super::auth::get_user_permissions(&state.db, state.default_tenant_id, pending.user_id)
+            .await
+            .unwrap_or_default();
 
     // Create JWT access token
     let access_token = match state.jwt.create_access_token(
@@ -629,7 +656,9 @@ pub async fn oidc_link(
     // Sync roles if we have mapped roles
     if !pending.mapped_roles.is_empty() {
         // Load provider for role sync
-        if let Some(provider) = find_active_provider(&state.db, pending.provider_id).await {
+        if let Some(provider) =
+            find_active_provider(&state.db, state.default_tenant_id, pending.provider_id).await
+        {
             // Build a minimal claims object just for role sync
             // We already have the mapped roles, so we build fake claims matching the mapping
             let mut fake_claims = serde_json::Map::new();
@@ -660,6 +689,7 @@ pub async fn oidc_link(
             }
             let _ = sync_oidc_roles(
                 &state.db,
+                state.default_tenant_id,
                 pending.user_id,
                 &provider,
                 &serde_json::Value::Object(fake_claims),
@@ -694,9 +724,10 @@ pub async fn oidc_link(
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    let permissions = super::auth::get_user_permissions(&state.db, pending.user_id)
-        .await
-        .unwrap_or_default();
+    let permissions =
+        super::auth::get_user_permissions(&state.db, state.default_tenant_id, pending.user_id)
+            .await
+            .unwrap_or_default();
 
     // Create JWT access token
     let access_token = match state.jwt.create_access_token(
@@ -733,9 +764,11 @@ pub async fn oidc_link(
 
 async fn find_active_provider(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     id: uuid::Uuid,
 ) -> Option<oidc_provider::Model> {
     OidcProvider::find_by_id(id)
+        .filter(oidc_provider::Column::TenantId.eq(tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .one(db)

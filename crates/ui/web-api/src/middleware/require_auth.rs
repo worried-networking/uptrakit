@@ -108,7 +108,7 @@ async fn authenticate_api_token(
     }
 
     // Fetch permissions from DB
-    let permissions = get_user_permissions(&state.db, user_id)
+    let permissions = get_user_permissions(&state.db, state.default_tenant_id, user_id)
         .await
         .unwrap_or_default();
 
@@ -242,6 +242,7 @@ mod tests {
             ),
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
             db,
+            default_tenant_id: uuid::Uuid::nil(),
             settings: Settings::new(
                 RegistrationSettings {
                     mode: RegistrationMode::Open,

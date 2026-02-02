@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::m20260129_000001_initial::Tenants;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -19,8 +21,9 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
+                    .col(ColumnDef::new(OidcProviders::TenantId).uuid().not_null())
                     .col(string(OidcProviders::Name))
-                    .col(string_uniq(OidcProviders::Slug))
+                    .col(string(OidcProviders::Slug))
                     .col(string_null(OidcProviders::LogoUrl))
                     .col(string(OidcProviders::IssuerUrl))
                     .col(string(OidcProviders::ClientId))
@@ -33,16 +36,37 @@ impl MigrationTrait for Migration {
                     .col(timestamp(OidcProviders::CreatedAt))
                     .col(timestamp(OidcProviders::UpdatedAt))
                     .col(timestamp_null(OidcProviders::DeletedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_oidc_providers_tenant")
+                            .from(OidcProviders::Table, OidcProviders::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
                     .to_owned(),
             )
             .await?;
 
+        // Index on tenant_id
         manager
             .create_index(
                 Index::create()
-                    .name("idx_oidc_providers_slug")
+                    .name("idx_oidc_providers_tenant_id")
                     .table(OidcProviders::Table)
+                    .col(OidcProviders::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Unique constraint: (tenant_id, slug)
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_oidc_providers_tenant_slug")
+                    .table(OidcProviders::Table)
+                    .col(OidcProviders::TenantId)
                     .col(OidcProviders::Slug)
+                    .unique()
                     .to_owned(),
             )
             .await?;
@@ -152,6 +176,7 @@ impl MigrationTrait for Migration {
 enum OidcProviders {
     Table,
     Id,
+    TenantId,
     Name,
     Slug,
     LogoUrl,

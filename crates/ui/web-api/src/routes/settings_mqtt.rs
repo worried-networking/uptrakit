@@ -74,8 +74,13 @@ pub async fn update_mqtt_settings(
     if let Some(ref host_val) = req.host {
         if host_val.is_null() {
             mqtt.host = None;
-            if let Err(e) =
-                upsert_setting(&state.db, SettingKey::MqttHost, serde_json::Value::Null).await
+            if let Err(e) = upsert_setting(
+                &state.db,
+                state.default_tenant_id,
+                SettingKey::MqttHost,
+                serde_json::Value::Null,
+            )
+            .await
             {
                 tracing::error!("Failed to save mqtt.host: {e:?}");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -83,16 +88,26 @@ pub async fn update_mqtt_settings(
         } else if let Some(s) = host_val.as_str() {
             if s.is_empty() {
                 mqtt.host = None;
-                if let Err(e) =
-                    upsert_setting(&state.db, SettingKey::MqttHost, serde_json::Value::Null).await
+                if let Err(e) = upsert_setting(
+                    &state.db,
+                    state.default_tenant_id,
+                    SettingKey::MqttHost,
+                    serde_json::Value::Null,
+                )
+                .await
                 {
                     tracing::error!("Failed to save mqtt.host: {e:?}");
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                 }
             } else {
                 mqtt.host = Some(s.to_string());
-                if let Err(e) =
-                    upsert_setting(&state.db, SettingKey::MqttHost, serde_json::json!(s)).await
+                if let Err(e) = upsert_setting(
+                    &state.db,
+                    state.default_tenant_id,
+                    SettingKey::MqttHost,
+                    serde_json::json!(s),
+                )
+                .await
                 {
                     tracing::error!("Failed to save mqtt.host: {e:?}");
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -105,8 +120,13 @@ pub async fn update_mqtt_settings(
 
     if let Some(port) = req.port {
         mqtt.port = port;
-        if let Err(e) =
-            upsert_setting(&state.db, SettingKey::MqttPort, serde_json::json!(port)).await
+        if let Err(e) = upsert_setting(
+            &state.db,
+            state.default_tenant_id,
+            SettingKey::MqttPort,
+            serde_json::json!(port),
+        )
+        .await
         {
             tracing::error!("Failed to save mqtt.port: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -120,6 +140,7 @@ pub async fn update_mqtt_settings(
         mqtt.client_id = client_id.clone();
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::MqttClientId,
             serde_json::json!(client_id),
         )
@@ -134,8 +155,13 @@ pub async fn update_mqtt_settings(
     if let Some(ref username_val) = req.username {
         if username_val.is_null() {
             mqtt.username = None;
-            if let Err(e) =
-                upsert_setting(&state.db, SettingKey::MqttUsername, serde_json::Value::Null).await
+            if let Err(e) = upsert_setting(
+                &state.db,
+                state.default_tenant_id,
+                SettingKey::MqttUsername,
+                serde_json::Value::Null,
+            )
+            .await
             {
                 tracing::error!("Failed to save mqtt.username: {e:?}");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -143,17 +169,26 @@ pub async fn update_mqtt_settings(
         } else if let Some(s) = username_val.as_str() {
             if s.is_empty() {
                 mqtt.username = None;
-                if let Err(e) =
-                    upsert_setting(&state.db, SettingKey::MqttUsername, serde_json::Value::Null)
-                        .await
+                if let Err(e) = upsert_setting(
+                    &state.db,
+                    state.default_tenant_id,
+                    SettingKey::MqttUsername,
+                    serde_json::Value::Null,
+                )
+                .await
                 {
                     tracing::error!("Failed to save mqtt.username: {e:?}");
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
                 }
             } else {
                 mqtt.username = Some(s.to_string());
-                if let Err(e) =
-                    upsert_setting(&state.db, SettingKey::MqttUsername, serde_json::json!(s)).await
+                if let Err(e) = upsert_setting(
+                    &state.db,
+                    state.default_tenant_id,
+                    SettingKey::MqttUsername,
+                    serde_json::json!(s),
+                )
+                .await
                 {
                     tracing::error!("Failed to save mqtt.username: {e:?}");
                     return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -168,8 +203,13 @@ pub async fn update_mqtt_settings(
     if let Some(ref password) = req.password {
         if password.is_empty() {
             mqtt.password = None;
-            if let Err(e) =
-                upsert_setting(&state.db, SettingKey::MqttPassword, serde_json::Value::Null).await
+            if let Err(e) = upsert_setting(
+                &state.db,
+                state.default_tenant_id,
+                SettingKey::MqttPassword,
+                serde_json::Value::Null,
+            )
+            .await
             {
                 tracing::error!("Failed to save mqtt.password: {e:?}");
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -178,6 +218,7 @@ pub async fn update_mqtt_settings(
             mqtt.password = Some(password.clone());
             if let Err(e) = upsert_setting(
                 &state.db,
+                state.default_tenant_id,
                 SettingKey::MqttPassword,
                 serde_json::json!(password),
             )
@@ -196,6 +237,7 @@ pub async fn update_mqtt_settings(
         mqtt.topic_prefix = topic_prefix.clone();
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::MqttTopicPrefix,
             serde_json::json!(topic_prefix),
         )

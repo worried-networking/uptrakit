@@ -4,6 +4,7 @@ use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
 use crate::cert_signer::AgentCertBundle;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::tenant_context::TenantContext;
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
 use axum::{
     Extension, Json,
@@ -86,9 +87,11 @@ pub(crate) struct EnrollResult {
 }
 
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn do_enroll(
     db: &sea_orm::DatabaseConnection,
     settings: &crate::settings::Settings,
+    tenant_id: uuid::Uuid,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
@@ -103,7 +106,7 @@ pub(crate) async fn do_enroll(
 
     // Determine status based on enrollment token
     let status = if let Some(enrollment_token) = enrollment_token {
-        let token_hash = match load_setting(db, SettingKey::EnrollmentTokenHash).await {
+        let token_hash = match load_setting(db, tenant_id, SettingKey::EnrollmentTokenHash).await {
             Ok(Some(v)) => match v.as_str() {
                 Some(hash) => hash.to_string(),
                 None => {
@@ -161,6 +164,7 @@ pub(crate) async fn do_enroll(
     let now = OffsetDateTime::now_utc();
     let model = agent::ActiveModel {
         id: Set(agent_id),
+        tenant_id: Set(tenant_id),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
         ip_address: Set(ip_str.clone()),
@@ -176,8 +180,15 @@ pub(crate) async fn do_enroll(
 
     // Link agent to host (non-fatal on failure)
     if let Some(info) = host_info
-        && let Err(e) =
-            find_or_create_host_and_link(db, inserted.id, info, hostname, ip_str.as_deref()).await
+        && let Err(e) = find_or_create_host_and_link(
+            db,
+            tenant_id,
+            inserted.id,
+            info,
+            hostname,
+            ip_str.as_deref(),
+        )
+        .await
     {
         tracing::warn!(error = %e, "failed to link agent to host during enrollment");
     }
@@ -194,6 +205,7 @@ pub(crate) async fn do_enroll(
 /// Skips silently when `machine_id == "unknown"`.
 pub(crate) async fn find_or_create_host_and_link(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
     agent_id: uuid::Uuid,
     host_info: &HostInfo,
     hostname: &str,
@@ -206,6 +218,7 @@ pub(crate) async fn find_or_create_host_and_link(
     let now = OffsetDateTime::now_utc();
 
     let existing = Host::find()
+        .filter(host::Column::TenantId.eq(tenant_id))
         .filter(host::Column::MachineId.eq(&host_info.machine_id))
         .one(db)
         .await
@@ -236,6 +249,7 @@ pub(crate) async fn find_or_create_host_and_link(
         let host_id = token::generate_uuid();
         let new_host = host::ActiveModel {
             id: Set(host_id),
+            tenant_id: Set(tenant_id),
             machine_id: Set(host_info.machine_id.clone()),
             hostname: Set(hostname.to_string()),
             friendly_name: Set(hostname.to_string()),
@@ -354,6 +368,7 @@ pub(crate) async fn do_sign_certificate(
 )]
 pub async fn list_agents(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Query(query): Query<ListAgentsQuery>,
 ) -> Response {
@@ -361,7 +376,9 @@ pub async fn list_agents(
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let mut q = Agent::find().filter(agent::Column::DeactivatedAt.is_null());
+    let mut q = Agent::find()
+        .filter(agent::Column::TenantId.eq(tenant.tenant_id))
+        .filter(agent::Column::DeactivatedAt.is_null());
 
     if let Some(ref status) = query.status {
         q = q.filter(agent::Column::Status.eq(status.as_str()));
@@ -401,6 +418,7 @@ pub async fn list_agents(
 )]
 pub async fn approve_agent(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -414,6 +432,7 @@ pub async fn approve_agent(
     };
 
     let agent = match Agent::find_by_id(agent_id)
+        .filter(agent::Column::TenantId.eq(tenant.tenant_id))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
@@ -475,6 +494,7 @@ pub async fn approve_agent(
 )]
 pub async fn reject_agent(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -488,6 +508,7 @@ pub async fn reject_agent(
     };
 
     let agent = match Agent::find_by_id(agent_id)
+        .filter(agent::Column::TenantId.eq(tenant.tenant_id))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
@@ -553,6 +574,7 @@ pub async fn reject_agent(
 )]
 pub async fn deactivate_agent(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -566,6 +588,7 @@ pub async fn deactivate_agent(
     };
 
     let agent = match Agent::find_by_id(agent_id)
+        .filter(agent::Column::TenantId.eq(tenant.tenant_id))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
@@ -658,6 +681,7 @@ pub async fn create_enrollment_token(
 
     if let Err(e) = upsert_setting(
         &state.db,
+        state.default_tenant_id,
         SettingKey::EnrollmentTokenHash,
         serde_json::Value::String(hash),
     )
@@ -694,7 +718,13 @@ pub async fn revoke_enrollment_token(
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    if let Err(e) = delete_setting(&state.db, SettingKey::EnrollmentTokenHash).await {
+    if let Err(e) = delete_setting(
+        &state.db,
+        state.default_tenant_id,
+        SettingKey::EnrollmentTokenHash,
+    )
+    .await
+    {
         tracing::error!("Failed to delete enrollment token: {:?}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
@@ -729,7 +759,12 @@ pub async fn enrollment_token_status(
     }
 
     let configured = matches!(
-        load_setting(&state.db, SettingKey::EnrollmentTokenHash).await,
+        load_setting(
+            &state.db,
+            state.default_tenant_id,
+            SettingKey::EnrollmentTokenHash
+        )
+        .await,
         Ok(Some(_))
     );
 
@@ -889,6 +924,7 @@ fn parse_cert_metadata(
 )]
 pub async fn merge_agent(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(target_id): Path<String>,
     Json(body): Json<MergeAgentRequest>,
@@ -913,6 +949,7 @@ pub async fn merge_agent(
 
     // Find target agent (must be approved, not deactivated)
     let target = match Agent::find_by_id(target_uuid)
+        .filter(agent::Column::TenantId.eq(tenant.tenant_id))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
@@ -935,6 +972,7 @@ pub async fn merge_agent(
 
     // Find source agent (must be pending, not deactivated)
     let source = match Agent::find_by_id(source_uuid)
+        .filter(agent::Column::TenantId.eq(tenant.tenant_id))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await

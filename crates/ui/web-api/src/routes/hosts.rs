@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::tenant_context::TenantContext;
 use crate::routes::agents::AgentStatus;
 use axum::{
     Extension, Json,
@@ -34,6 +35,7 @@ pub use uptrakit_web_api_types::hosts::{
 )]
 pub async fn list_hosts(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewAgents) {
@@ -41,6 +43,7 @@ pub async fn list_hosts(
     }
 
     let hosts = match Host::find()
+        .filter(host::Column::TenantId.eq(tenant.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .order_by_desc(host::Column::CreatedAt)
         .all(&state.db)
@@ -80,6 +83,7 @@ pub async fn list_hosts(
 )]
 pub async fn get_host(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -93,6 +97,7 @@ pub async fn get_host(
     };
 
     let host_model = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
@@ -128,6 +133,7 @@ pub async fn get_host(
 )]
 pub async fn update_host(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
     Json(body): Json<UpdateHostRequest>,
@@ -142,6 +148,7 @@ pub async fn update_host(
     };
 
     let host_model = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
@@ -190,6 +197,7 @@ pub async fn update_host(
 )]
 pub async fn deactivate_host(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -203,6 +211,7 @@ pub async fn deactivate_host(
     };
 
     let host_model = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await

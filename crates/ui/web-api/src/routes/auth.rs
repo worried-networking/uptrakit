@@ -115,7 +115,7 @@ pub async fn register(
 
     // If first user, assign admin role and complete initial setup
     if is_first_user {
-        if let Err(e) = assign_admin_role(&state.db, user_id).await {
+        if let Err(e) = assign_admin_role(&state.db, state.default_tenant_id, user_id).await {
             tracing::error!("Failed to assign admin role to first user: {:?}", e);
             // Continue anyway - user is created
         }
@@ -123,20 +123,21 @@ pub async fn register(
             .settings
             .registration_write()
             .await
-            .complete_initial_setup(&state.db)
+            .complete_initial_setup(&state.db, state.default_tenant_id)
             .await
         {
             tracing::error!("Failed to complete initial registration setup: {:?}", e);
         }
     } else {
         // Non-first users get the 'user' role
-        if let Err(e) = assign_user_role(&state.db, user_id).await {
+        if let Err(e) = assign_user_role(&state.db, state.default_tenant_id, user_id).await {
             tracing::error!("Failed to assign user role: {:?}", e);
         }
     }
 
     // Get user permissions
-    let permissions = match get_user_permissions(&state.db, user_id).await {
+    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user_id).await
+    {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Failed to get user permissions: {:?}", e);
@@ -242,7 +243,8 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     }
 
     // Get user permissions
-    let permissions = match get_user_permissions(&state.db, user.id).await {
+    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user.id).await
+    {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Failed to get user permissions: {:?}", e);
@@ -346,7 +348,8 @@ pub async fn me(
     }
 
     // Get fresh user permissions from DB
-    let permissions = match get_user_permissions(&state.db, user.id).await {
+    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user.id).await
+    {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Failed to get user permissions: {:?}", e);
@@ -405,7 +408,8 @@ pub async fn refresh(
     }
 
     // Get fresh permissions from DB
-    let permissions = match get_user_permissions(&state.db, user.id).await {
+    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user.id).await
+    {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Failed to get user permissions: {:?}", e);
@@ -442,6 +446,7 @@ pub async fn refresh(
 
 async fn assign_admin_role(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
     let admin_role = Role::find()
@@ -454,6 +459,7 @@ async fn assign_admin_role(
     let now = OffsetDateTime::now_utc();
 
     let user_role_model = user_role::ActiveModel {
+        tenant_id: Set(tenant_id),
         user_id: Set(user_id),
         role_id: Set(admin_role.id),
         assigned_at: Set(now),
@@ -466,6 +472,7 @@ async fn assign_admin_role(
 
 pub async fn assign_user_role(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
     let user_role_entity = Role::find()
@@ -478,6 +485,7 @@ pub async fn assign_user_role(
     let now = OffsetDateTime::now_utc();
 
     let user_role_model = user_role::ActiveModel {
+        tenant_id: Set(tenant_id),
         user_id: Set(user_id),
         role_id: Set(user_role_entity.id),
         assigned_at: Set(now),
@@ -491,10 +499,12 @@ pub async fn assign_user_role(
 /// Resolve the deduplicated set of permissions for a user via user_roles -> role_permissions -> permissions.
 pub async fn get_user_permissions(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<Vec<Permission>> {
     // Get user's role IDs
     let user_roles = UserRole::find()
+        .filter(user_role::Column::TenantId.eq(tenant_id))
         .filter(user_role::Column::UserId.eq(user_id))
         .all(db)
         .await

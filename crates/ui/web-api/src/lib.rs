@@ -88,6 +88,8 @@ pub struct AppState {
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
     /// Trigger for immediate CA rotation (fired by the rotate-ca API endpoint).
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
+    /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
+    pub default_tenant_id: uuid::Uuid,
 }
 
 /// OpenAPI documentation
@@ -524,6 +526,7 @@ mod tests {
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            default_tenant_id: uuid::Uuid::nil(),
             db,
         })
     }

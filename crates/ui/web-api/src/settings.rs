@@ -4,6 +4,7 @@ use std::sync::Arc;
 use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
 use tokio::sync::{RwLock, RwLockWriteGuard};
+use uuid::Uuid;
 
 use crate::SettingKey;
 use crate::auth;
@@ -124,11 +125,12 @@ impl Settings {
     /// can pass the raw map to reconciliation without re-reading from DB.
     pub async fn load(
         db: &DatabaseConnection,
+        tenant_id: Uuid,
     ) -> auth::Result<(Self, RawSettings, Option<String>)> {
-        let raw = crate::settings_store::load_all_settings(db).await?;
+        let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
         warn_unrecognised_keys(&raw);
 
-        let (registration, token) = RegistrationSettings::initialize(db, &raw).await?;
+        let (registration, token) = RegistrationSettings::initialize(db, tenant_id, &raw).await?;
         let authentication = AuthenticationSettings::from_raw(&raw);
 
         let agent_cert_lifetime_days = raw

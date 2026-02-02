@@ -17,6 +17,7 @@ pub mod role_permission;
 pub mod session;
 pub mod setting;
 pub mod software_item;
+pub mod tenant;
 pub mod user;
 pub mod user_oidc_link;
 pub mod user_role;

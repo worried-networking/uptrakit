@@ -85,9 +85,26 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     tracing::info!("database initialized successfully");
 
+    // Load the default tenant (seeded by the initial migration)
+    let default_tenant = {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use uptrakit_shared_db::entity::{prelude::Tenant, tenant};
+
+        Tenant::find()
+            .filter(tenant::Column::IsDefault.eq(true))
+            .filter(tenant::Column::DeactivatedAt.is_null())
+            .one(&db_conn)
+            .await
+            .context(AppError::Database)?
+            .ok_or_else(|| report!(AppError::Database))?
+    };
+    let default_tenant_id = default_tenant.id;
+    tracing::info!(%default_tenant_id, "loaded default tenant");
+
     // Initialize settings (bulk-loads all values from DB in a single query)
-    let (settings, raw_settings, reg_token) =
-        Settings::load(&db_conn).await.context(AppError::Settings)?;
+    let (settings, raw_settings, reg_token) = Settings::load(&db_conn, default_tenant_id)
+        .await
+        .context(AppError::Settings)?;
     if let Some(token) = reg_token {
         tracing::info!("==========================================================");
         tracing::info!("  No users found. Use this one-time registration token:");
@@ -101,6 +118,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Network settings
     let trusted_proxies = reconcile_setting_vec::<IpNet>(
         &db_conn,
+        default_tenant_id,
         SettingKey::TrustedProxies,
         &raw_settings,
         if args.trusted_proxies.is_empty() {
@@ -127,6 +145,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let real_ip_header = reconcile::reconcile_setting(
         &db_conn,
+        default_tenant_id,
         SettingKey::RealIpHeader,
         &raw_settings,
         args.real_ip_header,
@@ -143,6 +162,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let forwarded_cert_info_header = reconcile::reconcile_setting(
         &db_conn,
+        default_tenant_id,
         SettingKey::ForwardedClientCertInfoHeader,
         &raw_settings,
         args.forwarded_client_cert_info_header,
@@ -178,6 +198,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let forwarded_cert_pem_header = reconcile::reconcile_setting(
         &db_conn,
+        default_tenant_id,
         SettingKey::ForwardedClientCertPemHeader,
         &raw_settings,
         args.forwarded_client_cert_pem_header,
@@ -213,6 +234,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let backend_url = reconcile::reconcile_setting(
         &db_conn,
+        default_tenant_id,
         SettingKey::BackendUrl,
         &raw_settings,
         args.backend_url.clone(),
@@ -255,6 +277,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let extra_sans = reconcile_setting_vec::<String>(
         &db_conn,
+        default_tenant_id,
         SettingKey::ExtraSans,
         &raw_settings,
         if args.sans.is_empty() {
@@ -281,6 +304,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     let https_addr = reconcile_socket_addr(
         &db_conn,
+        default_tenant_id,
         SettingKey::HttpsAddr,
         &raw_settings,
         args.https_addr,
@@ -297,6 +321,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     {
         let mqtt_host = reconcile::reconcile_setting(
             &db_conn,
+            default_tenant_id,
             SettingKey::MqttHost,
             &raw_settings,
             args.mqtt.mqtt_host.clone(),
@@ -329,6 +354,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_port = reconcile_u16(
             &db_conn,
+            default_tenant_id,
             SettingKey::MqttPort,
             &raw_settings,
             args.mqtt.mqtt_port,
@@ -339,6 +365,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_client_id = reconcile::reconcile_setting(
             &db_conn,
+            default_tenant_id,
             SettingKey::MqttClientId,
             &raw_settings,
             args.mqtt.mqtt_client_id.clone(),
@@ -354,6 +381,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_username = reconcile::reconcile_setting(
             &db_conn,
+            default_tenant_id,
             SettingKey::MqttUsername,
             &raw_settings,
             args.mqtt.mqtt_username.clone(),
@@ -386,6 +414,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_password = reconcile::reconcile_setting(
             &db_conn,
+            default_tenant_id,
             SettingKey::MqttPassword,
             &raw_settings,
             args.mqtt.mqtt_password.clone(),
@@ -418,6 +447,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
         let mqtt_topic_prefix = reconcile::reconcile_setting(
             &db_conn,
+            default_tenant_id,
             SettingKey::MqttTopicPrefix,
             &raw_settings,
             args.mqtt.mqtt_topic_prefix.clone(),
@@ -630,6 +660,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         rustls_config: rustls_config.clone(),
         crl_pem_cache,
         ca_rotation_trigger: Arc::clone(&ca_rotation_trigger),
+        default_tenant_id,
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
@@ -888,8 +919,10 @@ impl<T: fmt::Display> fmt::Display for DisplayVec<'_, T> {
 }
 
 /// Reconcile a `Vec<T>` setting. Empty CLI vec is treated as "not provided".
+#[allow(clippy::too_many_arguments)]
 async fn reconcile_setting_vec<T>(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
     key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<Vec<T>>,
@@ -909,6 +942,7 @@ where
                 tracing::info!(key = db_key, cli = %DisplayVec(&cli_val), db = %DisplayVec(&db_val), "force-overriding DB setting with CLI value");
                 uptrakit_web_api::settings_store::upsert_setting(
                     db,
+                    tenant_id,
                     key,
                     (convert.to_json)(&cli_val),
                 )
@@ -931,15 +965,21 @@ where
         }
         (None, Some(cli_val)) => {
             tracing::info!(key = db_key, value = %DisplayVec(&cli_val), "seeding DB setting from CLI");
-            uptrakit_web_api::settings_store::upsert_setting(db, key, (convert.to_json)(&cli_val))
-                .await
-                .context(AppError::Settings)?;
+            uptrakit_web_api::settings_store::upsert_setting(
+                db,
+                tenant_id,
+                key,
+                (convert.to_json)(&cli_val),
+            )
+            .await
+            .context(AppError::Settings)?;
             Ok(cli_val)
         }
         (None, None) => {
             tracing::info!(key = db_key, value = %DisplayVec(&default_value), "seeding DB setting from default");
             uptrakit_web_api::settings_store::upsert_setting(
                 db,
+                tenant_id,
                 key,
                 (convert.to_json)(&default_value),
             )
@@ -953,6 +993,7 @@ where
 /// Reconcile a `SocketAddr` setting.
 async fn reconcile_socket_addr(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
     key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<SocketAddr>,
@@ -961,6 +1002,7 @@ async fn reconcile_socket_addr(
 ) -> Result<SocketAddr, Report<AppError>> {
     reconcile::reconcile_setting(
         db,
+        tenant_id,
         key,
         raw,
         cli_value,
@@ -979,6 +1021,7 @@ async fn reconcile_socket_addr(
 #[cfg(feature = "mqtt")]
 async fn reconcile_u16(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
     key: SettingKey,
     raw: &uptrakit_web_api::settings_store::RawSettings,
     cli_value: Option<u16>,
@@ -987,6 +1030,7 @@ async fn reconcile_u16(
 ) -> Result<u16, Report<AppError>> {
     reconcile::reconcile_setting(
         db,
+        tenant_id,
         key,
         raw,
         cli_value,

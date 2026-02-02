@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::tenant_context::TenantContext;
 use axum::{
     Json,
     extract::{Path, State},
@@ -115,6 +116,7 @@ fn parse_provider_type(s: &str) -> Option<ProviderType> {
 )]
 pub async fn create_provider_config(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateProviderConfigRequest>,
 ) -> Response {
@@ -141,6 +143,7 @@ pub async fn create_provider_config(
     let now = OffsetDateTime::now_utc();
     let model = provider_config::ActiveModel {
         id: Set(generate_uuid()),
+        tenant_id: Set(tenant.tenant_id),
         name: Set(req.name),
         provider_type: Set(req.provider_type),
         config: Set(req.config),
@@ -175,6 +178,7 @@ pub async fn create_provider_config(
 )]
 pub async fn list_provider_configs(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
@@ -182,6 +186,7 @@ pub async fn list_provider_configs(
     }
 
     match ProviderConfig::find()
+        .filter(provider_config::Column::TenantId.eq(tenant.tenant_id))
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .order_by_asc(provider_config::Column::Name)
         .all(&state.db)
@@ -215,6 +220,7 @@ pub async fn list_provider_configs(
 )]
 pub async fn get_provider_config(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -227,7 +233,7 @@ pub async fn get_provider_config(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    match find_active_config(&state.db, config_id).await {
+    match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(config) => {
             (StatusCode::OK, Json(provider_config_response_from(config))).into_response()
         }
@@ -250,6 +256,7 @@ pub async fn get_provider_config(
 )]
 pub async fn update_provider_config(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<UpdateProviderConfigRequest>,
@@ -263,7 +270,7 @@ pub async fn update_provider_config(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    let existing = match find_active_config(&state.db, config_id).await {
+    let existing = match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(c) => c,
         None => return (StatusCode::NOT_FOUND, "Provider config not found").into_response(),
     };
@@ -324,6 +331,7 @@ pub async fn update_provider_config(
 )]
 pub async fn delete_provider_config(
     State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -336,7 +344,7 @@ pub async fn delete_provider_config(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
     };
 
-    let config = match find_active_config(&state.db, config_id).await {
+    let config = match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(c) => c,
         None => return (StatusCode::NOT_FOUND, "Provider config not found").into_response(),
     };
@@ -356,12 +364,14 @@ pub async fn delete_provider_config(
     }
 }
 
-/// Find a non-deactivated provider config by ID.
+/// Find a non-deactivated provider config by ID, scoped to a tenant.
 async fn find_active_config(
     db: &sea_orm::DatabaseConnection,
+    tenant_id: uuid::Uuid,
     id: uuid::Uuid,
 ) -> Option<provider_config::Model> {
     ProviderConfig::find_by_id(id)
+        .filter(provider_config::Column::TenantId.eq(tenant_id))
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .one(db)
         .await

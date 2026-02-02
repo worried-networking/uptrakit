@@ -298,6 +298,7 @@ async fn handle_authenticated(
                                 };
                                 if let Err(e) = find_or_create_host_and_link(
                                     &state.db,
+                                    agent_model.tenant_id,
                                     agent_id,
                                     &payload.host_info,
                                     &agent_model.hostname,
@@ -501,6 +502,7 @@ async fn handle_anonymous(
                         let result = do_enroll(
                             &state.db,
                             &state.settings,
+                            state.default_tenant_id,
                             &payload.hostname,
                             &payload.friendly_name,
                             payload.enrollment_token.as_deref(),

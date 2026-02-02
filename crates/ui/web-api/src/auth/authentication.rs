@@ -35,9 +35,10 @@ impl AuthenticationSettings {
         }
     }
 
-    pub async fn save(&self, db: &DatabaseConnection) -> Result<()> {
+    pub async fn save(&self, db: &DatabaseConnection, tenant_id: uuid::Uuid) -> Result<()> {
         upsert_setting(
             db,
+            tenant_id,
             SettingKey::PasswordAuthEnabled,
             serde_json::Value::Bool(self.password_auth_enabled),
         )
@@ -76,8 +77,10 @@ pub enum OidcUserResolution {
 ///    c. Has password_hash -> `LinkViaPasswordRequired`.
 ///    d. Otherwise -> `AutoLink`.
 /// 3. Not found: auto_create -> create user + link -> `NewUser`. Else -> `NotAllowed`.
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_oidc_user(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     provider_id: uuid::Uuid,
     oidc_subject: &str,
     email: &str,
@@ -183,6 +186,7 @@ pub async fn resolve_oidc_user(
         .await
     {
         let user_role_model = user_role::ActiveModel {
+            tenant_id: Set(tenant_id),
             user_id: Set(user_id),
             role_id: Set(user_role_entity.id),
             assigned_at: Set(now),
@@ -196,6 +200,7 @@ pub async fn resolve_oidc_user(
 /// Sync OIDC roles for a user based on provider configuration and ID token claims.
 pub async fn sync_oidc_roles(
     db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
     provider: &oidc_provider::Model,
     claims: &serde_json::Value,
@@ -244,8 +249,9 @@ pub async fn sync_oidc_roles(
         return Ok(());
     }
 
-    // Delete existing user_role rows for this user
+    // Delete existing user_role rows for this user within this tenant
     UserRole::delete_many()
+        .filter(user_role::Column::TenantId.eq(tenant_id))
         .filter(user_role::Column::UserId.eq(user_id))
         .exec(db)
         .await
@@ -255,6 +261,7 @@ pub async fn sync_oidc_roles(
     let now = OffsetDateTime::now_utc();
     for local_role in &local_roles {
         let user_role_model = user_role::ActiveModel {
+            tenant_id: Set(tenant_id),
             user_id: Set(user_id),
             role_id: Set(local_role.id),
             assigned_at: Set(now),

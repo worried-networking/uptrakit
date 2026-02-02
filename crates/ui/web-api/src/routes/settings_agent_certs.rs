@@ -75,6 +75,7 @@ pub async fn update_agent_certificate_settings(
         }
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::AgentCertLifetimeDays,
             serde_json::json!(days),
         )
@@ -96,6 +97,7 @@ pub async fn update_agent_certificate_settings(
         }
         if let Err(e) = upsert_setting(
             &state.db,
+            state.default_tenant_id,
             SettingKey::AgentCertRenewalWindowHours,
             serde_json::json!(hours),
         )
