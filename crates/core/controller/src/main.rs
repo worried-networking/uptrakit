@@ -316,74 +316,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     .await?;
     settings.set_https_addr(https_addr).await;
 
-    // MQTT client — stored in the dedicated `mqtt_clients` table
-    #[cfg(feature = "mqtt")]
-    {
-        use uptrakit_web_api::mqtt_client_store;
-        use uptrakit_web_api_types::mqtt_url::MqttUrl;
-
-        let existing = mqtt_client_store::load_mqtt_client(&db_conn, default_tenant_id)
-            .await
-            .context(AppError::Settings)?;
-
-        if let Some(ref url_str) = args.mqtt.mqtt_url {
-            // CLI provides --mqtt-url
-            let parsed = MqttUrl::parse(url_str)
-                .map_err(|e| report!(AppError::Config(format!("invalid --mqtt-url: {e}"))))?;
-
-            if let Some(existing_model) = existing {
-                if force {
-                    tracing::info!("force-overriding MQTT client with CLI values");
-                    mqtt_client_store::update_mqtt_client(
-                        &db_conn,
-                        existing_model,
-                        None, // keep enabled
-                        Some(parsed.transport.as_str()),
-                        Some(&parsed.host),
-                        Some(parsed.port),
-                        Some(parsed.path.as_deref()),
-                        args.mqtt.mqtt_client_id.as_deref(),
-                        args.mqtt.mqtt_username.as_ref().map(|u| Some(u.as_str())),
-                        args.mqtt
-                            .mqtt_password
-                            .as_ref()
-                            .map(|p| if p.is_empty() { None } else { Some(p.as_str()) }),
-                        args.mqtt.mqtt_topic_prefix.as_deref(),
-                    )
-                    .await
-                    .context(AppError::Settings)?;
-                } else {
-                    tracing::info!(
-                        "MQTT client already configured in DB; using DB values (pass --force-settings-override to overwrite)"
-                    );
-                }
-            } else {
-                // No DB row — seed from CLI
-                tracing::info!("seeding MQTT client from CLI: {url_str}");
-                mqtt_client_store::create_mqtt_client(
-                    &db_conn,
-                    default_tenant_id,
-                    true,
-                    parsed.transport.as_str(),
-                    &parsed.host,
-                    parsed.port,
-                    parsed.path.as_deref(),
-                    args.mqtt
-                        .mqtt_client_id
-                        .as_deref()
-                        .unwrap_or("uptrakit-controller"),
-                    args.mqtt.mqtt_username.as_deref(),
-                    args.mqtt.mqtt_password.as_deref(),
-                    args.mqtt.mqtt_topic_prefix.as_deref().unwrap_or("uptrakit"),
-                )
-                .await
-                .context(AppError::Settings)?;
-            }
-        } else if existing.is_none() {
-            tracing::debug!("no MQTT client configured (no --mqtt-url, no DB row)");
-        }
-    }
-
     // --- Bootstrap OIDC provider from CLI flags ---
     {
         let oidc = &args.oidc_bootstrap;
@@ -889,47 +821,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         None
     };
 
-    // Start MQTT if configured (read from mqtt_clients table)
-    #[cfg(feature = "mqtt")]
-    let mqtt_handle = {
-        use uptrakit_web_api::mqtt_client_store;
-        use uptrakit_web_api_types::mqtt_transport::MqttTransport;
-
-        let mqtt_row = mqtt_client_store::load_mqtt_client(&app_state.db, default_tenant_id)
-            .await
-            .context(AppError::Settings)?;
-
-        if let Some(model) = mqtt_row.filter(|m| m.enabled) {
-            if model.password.is_some() && model.username.is_none() {
-                return Err(report!(AppError::Config(
-                    "MQTT password requires a username".into()
-                )));
-            }
-            let transport = MqttTransport::parse(&model.transport).unwrap_or_default();
-            let port = u16::try_from(model.port).unwrap_or(transport.default_port());
-            let config = uptrakit_mqtt::MqttConfig {
-                transport,
-                host: model.host,
-                port,
-                path: model.path,
-                client_id: model.client_id,
-                username: model.username,
-                password: model.password,
-                topic_prefix: model.topic_prefix,
-            };
-            tracing::info!("starting MQTT client: {config:?}");
-            match uptrakit_mqtt::start(config).await {
-                Ok(handle) => Some(handle),
-                Err(e) => {
-                    tracing::warn!("MQTT startup failed: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    };
-
     tokio::select! {
         result = server::run(server::ServerOptions {
             https_addr,
@@ -962,11 +853,6 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     }
     if let Some(h) = server_cert_renewal_handle {
         h.abort();
-    }
-
-    #[cfg(feature = "mqtt")]
-    if let Some(handle) = mqtt_handle {
-        handle.shutdown().await;
     }
 
     Ok(())

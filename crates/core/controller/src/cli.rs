@@ -106,7 +106,7 @@ pub struct Args {
     #[arg(long)]
     pub static_dir: Option<PathBuf>,
 
-    /// When set, CLI values for DB-managed settings (network, MQTT) overwrite
+    /// When set, CLI values for DB-managed settings (network, OIDC) overwrite
     /// any existing values in the database. Without this flag, DB values take
     /// priority and a warning is logged when CLI values differ.
     #[arg(long)]
@@ -114,10 +114,6 @@ pub struct Args {
 
     #[command(flatten)]
     pub oidc_bootstrap: OidcBootstrapArgs,
-
-    #[cfg(feature = "mqtt")]
-    #[command(flatten)]
-    pub mqtt: MqttArgs,
 }
 
 /// OIDC provider bootstrap options.
@@ -152,47 +148,6 @@ pub struct OidcBootstrapArgs {
     /// Space-separated OIDC scopes.
     #[arg(long, default_value = "openid email profile groups")]
     pub oidc_scopes: Option<String>,
-}
-
-/// MQTT broker connection options.
-#[cfg(feature = "mqtt")]
-#[derive(Parser, Debug)]
-pub struct MqttArgs {
-    /// MQTT broker URL. Required to enable MQTT.
-    /// Schemes: mqtt:// (TCP), mqtts:// (TLS), ws:// (WebSocket), wss:// (secure WebSocket).
-    /// Examples: mqtt://broker:1883, mqtts://broker:8883, ws://broker:80/mqtt
-    /// Stored in the `mqtt_clients` table. CLI value used only on first run
-    /// or with `--force-settings-override`.
-    #[arg(long, value_parser = parse_mqtt_url)]
-    pub mqtt_url: Option<String>,
-
-    /// MQTT client ID.
-    /// Stored in the `mqtt_clients` table. CLI value used only on first run
-    /// or with `--force-settings-override`.
-    #[arg(long)]
-    pub mqtt_client_id: Option<String>,
-
-    /// MQTT username.
-    #[arg(long)]
-    pub mqtt_username: Option<String>,
-
-    /// MQTT password. Requires --mqtt-username.
-    #[arg(long)]
-    pub mqtt_password: Option<String>,
-
-    /// MQTT topic prefix.
-    /// Stored in the `mqtt_clients` table. CLI value used only on first run
-    /// or with `--force-settings-override`.
-    #[arg(long)]
-    pub mqtt_topic_prefix: Option<String>,
-}
-
-/// Validate an MQTT URL argument.
-#[cfg(feature = "mqtt")]
-fn parse_mqtt_url(s: &str) -> Result<String, String> {
-    uptrakit_web_api_types::mqtt_url::MqttUrl::parse(s)
-        .map(|_| s.to_string())
-        .map_err(|e| format!("invalid MQTT URL: {e}"))
 }
 
 /// How to serve PKI endpoints over plain HTTP.
@@ -337,72 +292,6 @@ mod tests {
             super::Args::try_parse_from(["uptrakit-controller", "--force-settings-override"])
                 .expect("should parse force flag");
         assert!(args.force_settings_override);
-    }
-
-    #[cfg(feature = "mqtt")]
-    #[test]
-    fn mqtt_args_not_set_by_default() {
-        let args =
-            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
-        assert!(args.mqtt.mqtt_url.is_none());
-        assert!(args.mqtt.mqtt_client_id.is_none());
-        assert!(args.mqtt.mqtt_username.is_none());
-        assert!(args.mqtt.mqtt_password.is_none());
-        assert!(args.mqtt.mqtt_topic_prefix.is_none());
-    }
-
-    #[cfg(feature = "mqtt")]
-    #[test]
-    fn mqtt_args_custom_values() {
-        let args = super::Args::try_parse_from([
-            "uptrakit-controller",
-            "--mqtt-url",
-            "mqtts://broker.local:8883",
-            "--mqtt-client-id",
-            "my-controller",
-            "--mqtt-username",
-            "user",
-            "--mqtt-password",
-            "pass",
-            "--mqtt-topic-prefix",
-            "home/uptrakit",
-        ])
-        .expect("should parse custom values");
-
-        assert_eq!(
-            args.mqtt.mqtt_url.as_deref(),
-            Some("mqtts://broker.local:8883")
-        );
-        assert_eq!(args.mqtt.mqtt_client_id.as_deref(), Some("my-controller"));
-        assert_eq!(args.mqtt.mqtt_username.as_deref(), Some("user"));
-        assert_eq!(args.mqtt.mqtt_password.as_deref(), Some("pass"));
-        assert_eq!(
-            args.mqtt.mqtt_topic_prefix.as_deref(),
-            Some("home/uptrakit")
-        );
-    }
-
-    #[cfg(feature = "mqtt")]
-    #[test]
-    fn mqtt_url_invalid_rejected() {
-        let result =
-            super::Args::try_parse_from(["uptrakit-controller", "--mqtt-url", "not-a-valid-url"]);
-        assert!(result.is_err());
-    }
-
-    #[cfg(feature = "mqtt")]
-    #[test]
-    fn mqtt_url_all_schemes_accepted() {
-        for url in [
-            "mqtt://broker:1883",
-            "mqtts://broker:8883",
-            "ws://broker:80/mqtt",
-            "wss://broker:443/mqtt",
-        ] {
-            let args = super::Args::try_parse_from(["uptrakit-controller", "--mqtt-url", url])
-                .unwrap_or_else(|e| panic!("should parse {url}: {e}"));
-            assert_eq!(args.mqtt.mqtt_url.as_deref(), Some(url));
-        }
     }
 
     #[test]
