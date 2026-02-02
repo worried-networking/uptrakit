@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
     ViewSettings,
@@ -12,16 +13,6 @@ pub enum Permission {
 }
 
 impl Permission {
-    pub fn all() -> &'static [Permission] {
-        &[
-            Permission::ViewSettings,
-            Permission::ManageSettings,
-            Permission::ViewAgents,
-            Permission::ManageAgents,
-            Permission::ManageGlobalSettings,
-        ]
-    }
-
     pub fn as_str(&self) -> &'static str {
         match self {
             Permission::ViewSettings => "view_settings",

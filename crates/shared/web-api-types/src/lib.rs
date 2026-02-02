@@ -28,15 +28,16 @@ mod tests {
     use crate::provider_configs::CreateProviderConfigRequest;
     use crate::registration::RegistrationMode;
     use crate::software_items::CreateSoftwareItemRequest;
+    use strum::IntoEnumIterator;
 
     // ── 1. Permission enum round-trip ─────────────────────────────────────
 
     #[test]
     fn permission_serde_round_trip() {
-        for perm in Permission::all() {
-            let json = serde_json::to_string(perm).unwrap();
+        for perm in Permission::iter() {
+            let json = serde_json::to_string(&perm).unwrap();
             let deserialized: Permission = serde_json::from_str(&json).unwrap();
-            assert_eq!(&deserialized, perm);
+            assert_eq!(deserialized, perm);
         }
     }
 
@@ -85,23 +86,22 @@ mod tests {
 
     #[test]
     fn permission_display_matches_as_str() {
-        for perm in Permission::all() {
+        for perm in Permission::iter() {
             assert_eq!(format!("{perm}"), perm.as_str());
         }
     }
 
     #[test]
-    fn permission_all_returns_five_items() {
-        let all = Permission::all();
-        assert_eq!(all.len(), 5);
+    fn permission_iter_covers_all_variants() {
+        assert_eq!(Permission::iter().count(), 5);
     }
 
     #[test]
     fn permission_as_str_round_trips_through_parse() {
-        for perm in Permission::all() {
+        for perm in Permission::iter() {
             let s = perm.as_str();
             let parsed = Permission::parse(s).expect("parse should succeed for as_str output");
-            assert_eq!(&parsed, perm);
+            assert_eq!(parsed, perm);
         }
     }
 
