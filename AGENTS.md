@@ -279,7 +279,7 @@ Authorization uses a typed `Permission` enum (defined in `crates/shared/web-api-
 | `admin` | `view_settings`, `manage_settings`, `view_agents`, `manage_agents` |
 | `user` | `view_agents` only |
 
-The first registered user gets the `owner` role. Subsequent users (password or OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
+The first registered user gets the `owner` role — whether registered via password or OIDC. Subsequent users (password or OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
 
 ### How it works
 
@@ -391,6 +391,28 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--mqtt-topic-prefix` | `mqtt.topic_prefix` | `uptrakit` | No (restart) |
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
+
+### OIDC provider bootstrap
+
+The controller supports bootstrapping an OIDC provider at startup via CLI flags. This solves the chicken-and-egg problem where configuring OIDC requires ManageSettings permission, but the first user needs to log in via OIDC.
+
+| CLI flag | Default | Description |
+| --- | --- | --- |
+| `--oidc-issuer-url` | — | OIDC issuer URL; triggers bootstrap when set |
+| `--oidc-client-id` | — | Required with `--oidc-issuer-url` |
+| `--oidc-client-secret` | — | Required with `--oidc-issuer-url` |
+| `--oidc-provider-name` | `SSO` | Display name for the provider |
+| `--oidc-provider-slug` | `sso` | URL-safe slug (used for uniqueness check) |
+| `--oidc-scopes` | `openid email profile groups` | Space-separated scopes |
+
+**Bootstrap behavior:**
+1. If no provider with matching `(slug, tenant_id)` exists: INSERT with `auto_create_users=true`
+2. If a match exists and `--force-settings-override` is set: UPDATE issuer/client_id/client_secret
+3. If a match exists without force: skip with info log
+
+The client secret is never logged. The bootstrapped provider is created with `is_active=true` and `auto_create_users=true`.
+
+When the first user logs in via OIDC (bootstrapped or otherwise), they are automatically promoted to the `owner` role and initial setup is completed (registration mode set to closed).
 
 ### Bulk loading and known-keys registry
 
