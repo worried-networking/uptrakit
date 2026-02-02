@@ -3,6 +3,7 @@ pub mod auth;
 pub mod cert_signer;
 pub mod extract;
 pub mod middleware;
+pub mod ocsp;
 pub mod pki_utils;
 pub mod routes;
 pub mod setting_key;
@@ -50,6 +51,7 @@ pub mod ca_snapshot {
         pub bundle_hash: String,
         pub managed: bool,
         pub active_not_after: time::OffsetDateTime,
+        pub backend_url: Option<String>,
     }
 }
 
@@ -84,6 +86,8 @@ pub struct AppState {
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     /// Cached PEM-encoded CRL bundle, updated by the CRL manager.
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
+    /// Trigger for immediate CA rotation (fired by the rotate-ca API endpoint).
+    pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
 }
 
 /// OpenAPI documentation
@@ -144,7 +148,8 @@ pub struct AppState {
         routes::hosts::list_hosts,
         routes::hosts::get_host,
         routes::hosts::update_host,
-        routes::hosts::deactivate_host
+        routes::hosts::deactivate_host,
+        routes::settings_ca::rotate_ca
     ),
     components(
         schemas(
@@ -196,7 +201,8 @@ pub struct AppState {
             routes::hosts::HostResponse,
             routes::hosts::HostAgentSummary,
             routes::hosts::UpdateHostRequest,
-            routes::hosts::HostMessageResponse
+            routes::hosts::HostMessageResponse,
+            routes::settings_ca::RotateCaResponse
         )
     ),
     info(
@@ -310,6 +316,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings_mqtt::update_mqtt_settings
         ))
         .routes(routes!(routes::device_auth::device_auth_approve))
+        .routes(routes!(routes::settings_ca::rotate_ca))
         .routes(routes!(routes::hosts::list_hosts))
         .routes(routes!(routes::hosts::get_host))
         .routes(routes!(routes::hosts::update_host))
@@ -338,8 +345,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let mut router = api_router
         .route("/api/v1/ws/agent", get(routes::agent_ws::agent_ws))
         .route("/healthz", get(routes::health::healthz))
-        .route("/api/v1/ca.crt", get(routes::ca::ca_cert))
-        .route("/api/v1/ca.crl", get(routes::ca::ca_crl));
+        .route("/api/v1/pki/ca.crt", get(routes::ca::ca_cert))
+        .route("/api/v1/pki/ca.crl", get(routes::ca::ca_crl))
+        .route(
+            "/api/v1/pki/ocsp",
+            axum::routing::post(routes::ocsp::ocsp_post),
+        )
+        .route("/api/v1/pki/ocsp/{encoded}", get(routes::ocsp::ocsp_get));
 
     #[cfg(feature = "swagger-ui")]
     {
@@ -419,6 +431,7 @@ mod tests {
             bundle_hash: "0".repeat(64),
             managed: true,
             active_not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            backend_url: None,
         };
         let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
 
@@ -471,6 +484,7 @@ mod tests {
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             db,
         })
     }
@@ -492,7 +506,7 @@ mod tests {
     async fn ca_cert_returns_pem() {
         let app = build_router(test_state().await);
         let req = Request::builder()
-            .uri("/api/v1/ca.crt")
+            .uri("/api/v1/pki/ca.crt")
             .body(Body::empty())
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();

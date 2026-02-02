@@ -37,7 +37,7 @@ Uptrakit is designed with a defence-in-depth approach. Key principles:
 | --- | --- | --- |
 | TLS library | [Rustls](https://github.com/rustls/rustls) with [aws-lc-rs](https://github.com/aws/aws-lc-rs) backend | All controller HTTPS and agent WebSocket connections |
 | CA key algorithm | ECDSA P-256 | Internal CA and all issued certificates |
-| Certificate hashing | SHA-256 | Certificate signing and CRL generation |
+| Certificate hashing | SHA-256 | Certificate signing, CRL generation, and OCSP response signing |
 | Password hashing | [Argon2id](https://crates.io/crates/argon2) (OWASP-recommended: 19 MiB, 2 iterations) | User password storage |
 | JWT signing | [jsonwebtoken](https://crates.io/crates/jsonwebtoken) | Access and refresh tokens |
 | Session tokens | SHA-256 hashed, 7-day expiry, 30-min sliding window | Stateful user sessions |
@@ -54,7 +54,11 @@ Uptrakit operates an internal PKI for mTLS agent authentication. The controller 
 | Server HTTPS certificate | 90 days | 30 days before expiry (automatic renewal) |
 | Agent client certificate | 365 days (configurable) | Configurable via `renewal_window_hours` |
 
-CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/ca.crl`.
+CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
+
+An OCSP responder is available at `POST /api/v1/pki/ocsp` (and `GET /api/v1/pki/ocsp/{base64}`), providing real-time certificate revocation status per RFC 6960. OCSP responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
+
+When `--backend-url` is configured, certificates embed Authority Information Access (AIA) and CRL Distribution Points (CDP) extensions. These extensions point reverse proxies to the OCSP responder, CA certificate download, and CRL endpoints. At startup, the controller validates that an existing managed CA's embedded URLs match the reconciled `--backend-url` — mismatches cause a hard startup failure with actionable error messages.
 
 At startup, the controller validates that `--san` CLI values are present in the managed server certificate's SANs. Mismatches trigger automatic regeneration when the cert was signed by the active CA, or a guided error when the cert was signed by a previous CA (preventing accidental re-signing under a rotated CA).
 

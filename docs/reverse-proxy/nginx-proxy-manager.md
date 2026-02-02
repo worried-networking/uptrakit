@@ -35,7 +35,7 @@ proxy_set_header X-Forwarded-Client-Cert-Info "Subject=\"$ssl_client_s_dn\";Seri
 3. Copy the controller's CA certificate into NPM's data directory:
 
 ```bash
-curl -k https://uptrakit:8443/api/v1/ca.crt -o /path/to/npm/data/custom_ssl/ca.crt
+curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o /path/to/npm/data/custom_ssl/ca.crt
 ```
 
 ### Controller Configuration

@@ -28,7 +28,7 @@ impl AgentCertSigner for RcgenAgentCertSigner {
             .map_err(|e| report!(CertSignerError::CaKeyParse(e.to_string())))?;
         let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
             .map_err(|e| report!(CertSignerError::CaIssuer(e.to_string())))?;
-        generate_agent_cert(&issuer, agent_id, lifetime)
+        generate_agent_cert(&issuer, agent_id, lifetime, snapshot.backend_url.as_deref())
     }
 
     fn active_ca_fingerprint(&self) -> String {
@@ -40,6 +40,7 @@ fn generate_agent_cert(
     issuer: &Issuer<'_, KeyPair>,
     agent_id: &Uuid,
     lifetime: time::Duration,
+    backend_url: Option<&str>,
 ) -> std::result::Result<AgentCertBundle, Report<CertSignerError>> {
     let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
         .map_err(|e| report!(CertSignerError::KeyGeneration(e.to_string())))?;
@@ -60,6 +61,10 @@ fn generate_agent_cert(
     params.not_before = OffsetDateTime::now_utc();
     params.not_after = not_after;
 
+    if let Some(url) = backend_url {
+        crate::pki::add_pki_extensions(&mut params, url);
+    }
+
     let cert = params
         .signed_by(&key_pair, issuer)
         .map_err(|e| report!(CertSignerError::Signing(e.to_string())))?;
@@ -77,13 +82,13 @@ mod tests {
     use crate::pki;
 
     fn make_test_signer() -> (RcgenAgentCertSigner, watch::Sender<CaSnapshot>) {
-        let ca = pki::load_or_generate_ca(tempfile::tempdir().unwrap().path()).unwrap();
+        let ca = pki::load_or_generate_ca(tempfile::tempdir().unwrap().path(), None).unwrap();
         let state = pki::CaState {
             active: ca,
             previous: None,
             managed: true,
         };
-        let snapshot = state.to_snapshot().unwrap();
+        let snapshot = state.to_snapshot(None).unwrap();
         let (tx, rx) = watch::channel(snapshot);
         (RcgenAgentCertSigner::new(rx), tx)
     }

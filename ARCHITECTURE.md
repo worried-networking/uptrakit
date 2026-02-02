@@ -88,7 +88,11 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 
 ### Message types
 
-Defined in `crates/shared/wire/`: `ping`, `pong`, `enroll`, `enrolled`, `approved`, `rejected`, `request_certificate`, `certificate`, `report_host_info`, `error`, and others.
+Defined in `crates/shared/wire/`:
+
+**Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`
+
+**Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`
 
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
@@ -96,11 +100,14 @@ For the full message schema with payloads, see the [AsyncAPI specification](crat
 
 The controller operates an internal Certificate Authority for mutual TLS authentication with agents.
 
-- **CA rotation**: Automatic when the managed CA enters a 6-month expiry window. Produces a dual-CA trust bundle for seamless transition.
-- **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`). Combined PEM CRLs are served at `GET /api/v1/ca.crl`.
+- **CA rotation**: Automatic when the managed CA enters a 6-month expiry window. Can also be triggered on demand via `POST /api/v1/settings/rotate-ca`. Produces a dual-CA trust bundle for seamless transition.
+- **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`). Combined PEM CRLs are served at `GET /api/v1/pki/ca.crl`.
+- **OCSP responder**: `POST /api/v1/pki/ocsp` (and GET variant) provides real-time certificate revocation status per RFC 6960. Responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
+- **AIA/CDP extensions**: When `--backend-url` is configured, certificates embed Authority Information Access (OCSP, CA Issuers) and CRL Distribution Points extensions. This enables proxies like Nginx to discover and use the OCSP responder automatically.
 - **Runtime state**: CA material is shared via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct.
 - **External CA**: Supported via `--ca-cert` / `--ca-key` flags, which disable managed rotation.
 - **SAN sanity checks**: At startup, `--san` values are validated against the existing managed cert's SANs. Mismatched SANs trigger silent regeneration (same CA) or an error with fix instructions (different CA). `--san` is incompatible with `--tls-cert`/`--tls-key`.
+- **Backend URL validation**: At startup, the controller validates that an existing managed CA's AIA/CDP URLs match the reconciled `--backend-url`. Mismatches cause a hard startup failure with actionable error messages.
 
 For cryptographic algorithm details, see [SECURITY.md](SECURITY.md) section "Cryptographic Details". For the full operational flow (rotation steps, bundle distribution, agent update path), see [AGENTS.md](AGENTS.md) section "PKI & CA rotation".
 
@@ -122,7 +129,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
-| Network | `network.*` | Proxies, headers, SANs, forwarded cert headers: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
+| Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, backend URL: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
 | MQTT | `mqtt.*` | No (all require restart) | `GET/PUT /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |

@@ -1,9 +1,9 @@
 use tempfile::TempDir;
+use testcontainers::GenericImage;
+use testcontainers::ImageExt;
 use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{AccessMode, Host, IntoContainerPort, Mount, WaitFor};
-use testcontainers::ImageExt;
 use testcontainers::runners::AsyncRunner;
-use testcontainers::GenericImage;
 
 use super::pki::TestPki;
 use super::server::{IdentityResponse, TestServer};
@@ -17,8 +17,7 @@ use super::server::{IdentityResponse, TestServer};
 #[ignore = "Docker integration test (traefik:v3). Run: cargo test -p uptrakit-controller reverse_proxy::traefik -- --ignored"]
 async fn traefik_l7_forwards_client_cert() {
     let pki = TestPki::generate();
-    let server =
-        TestServer::start(&pki, Some("X-Forwarded-Tls-Client-Cert-Info"), None).await;
+    let server = TestServer::start(&pki, Some("X-Forwarded-Tls-Client-Cert-Info"), None).await;
 
     let tmp = TempDir::new().expect("tempdir");
     write_traefik_config(&tmp, &pki, server.port);
@@ -27,11 +26,8 @@ async fn traefik_l7_forwards_client_cert() {
         .with_exposed_port(443u16.tcp())
         .with_wait_for(WaitFor::Log(LogWaitStrategy::stdout("Creating middleware")))
         .with_mount(
-            Mount::bind_mount(
-                tmp.path().to_str().expect("tmpdir path"),
-                "/etc/traefik",
-            )
-            .with_access_mode(AccessMode::ReadOnly),
+            Mount::bind_mount(tmp.path().to_str().expect("tmpdir path"), "/etc/traefik")
+                .with_access_mode(AccessMode::ReadOnly),
         )
         .with_host("host.docker.internal", Host::HostGateway)
         .with_cmd([
@@ -152,8 +148,7 @@ http:
 }
 
 fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
-    let ca_cert =
-        reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
+    let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
     let mut builder = reqwest::Client::builder()
         .add_root_certificate(ca_cert)

@@ -1,15 +1,16 @@
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::Request;
 use axum::middleware as axum_mw;
 use axum::response::Json;
 use axum::routing::get;
-use axum::Router;
 use ipnet::IpNet;
 use sea_orm::{ConnectOptions, Database};
 use serde::{Deserialize, Serialize};
 
+use uptrakit_web_api::AppState;
 use uptrakit_web_api::auth::device_flow::DeviceFlowStore;
 use uptrakit_web_api::auth::jwt::JwtManager;
 use uptrakit_web_api::auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
@@ -19,7 +20,6 @@ use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner, CertSigner
 use uptrakit_web_api::extract::AgentIdentity;
 use uptrakit_web_api::middleware;
 use uptrakit_web_api::settings::Settings;
-use uptrakit_web_api::AppState;
 
 use super::pki::TestPki;
 
@@ -37,11 +37,7 @@ impl TestServer {
     ///
     /// - `info_header`: the forwarded client cert info header name (or `None`)
     /// - `pem_header`: the forwarded client cert PEM header name (or `None`)
-    pub async fn start(
-        pki: &TestPki,
-        info_header: Option<&str>,
-        pem_header: Option<&str>,
-    ) -> Self {
+    pub async fn start(pki: &TestPki, info_header: Option<&str>, pem_header: Option<&str>) -> Self {
         let state = build_state(pki, info_header, pem_header).await;
         let router = build_router(state);
 
@@ -116,6 +112,7 @@ async fn build_state(
         bundle_hash: "0".repeat(64),
         managed: true,
         active_not_after: ::time::OffsetDateTime::now_utc() + ::time::Duration::days(365),
+        backend_url: None,
     };
     let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
 
@@ -181,6 +178,7 @@ async fn build_state(
         pki_path: std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"),
         rustls_config: rustls_cfg,
         crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+        ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
     })
 }
 

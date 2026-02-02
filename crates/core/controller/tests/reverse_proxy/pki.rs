@@ -1,6 +1,7 @@
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
-    IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
+    BasicConstraints, CertificateParams, CertificateRevocationListParams, DistinguishedName,
+    DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyIdMethod, KeyPair, KeyUsagePurpose,
+    RevokedCertParams, SanType, SerialNumber,
 };
 use std::net::Ipv4Addr;
 
@@ -8,6 +9,8 @@ use std::net::Ipv4Addr;
 pub struct TestPki {
     /// PEM-encoded CA certificate.
     pub ca_cert_pem: String,
+    /// PEM-encoded CA private key.
+    pub ca_key_pem: String,
 
     /// PEM-encoded server certificate.
     pub server_cert_pem: String,
@@ -48,15 +51,14 @@ impl TestPki {
         ca_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
         ca_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 
-        let ca_cert = ca_params
-            .self_signed(&ca_key)
-            .expect("CA self-sign failed");
+        let ca_cert = ca_params.self_signed(&ca_key).expect("CA self-sign failed");
 
         let ca_cert_pem = ca_cert.pem();
+        let ca_key_pem_saved = ca_key.serialize_pem();
 
         // Build an Issuer for signing child certificates.
-        let ca_issuer = Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key)
-            .expect("CA issuer creation failed");
+        let ca_issuer =
+            Issuer::from_ca_cert_pem(&ca_cert_pem, ca_key).expect("CA issuer creation failed");
 
         // --- Server cert ---
         let server_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
@@ -70,10 +72,8 @@ impl TestPki {
         server_params
             .subject_alt_names
             .push(SanType::IpAddress(Ipv4Addr::LOCALHOST.into()));
-        server_params.not_before =
-            ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
-        server_params.not_after =
-            ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
+        server_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
+        server_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 
         let server_cert = server_params
             .signed_by(&server_key, &ca_issuer)
@@ -93,10 +93,8 @@ impl TestPki {
             .distinguished_name
             .push(DnType::CommonName, agent_id.to_string());
         agent_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
-        agent_params.not_before =
-            ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
-        agent_params.not_after =
-            ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
+        agent_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
+        agent_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 
         let agent_cert = agent_params
             .signed_by(&agent_key, &ca_issuer)
@@ -107,6 +105,7 @@ impl TestPki {
 
         Self {
             ca_cert_pem,
+            ca_key_pem: ca_key_pem_saved,
             server_cert_pem,
             server_key_pem,
             agent_cert_pem,
@@ -114,4 +113,93 @@ impl TestPki {
             agent_id,
         }
     }
+
+    /// Generate a second agent certificate (for revocation testing).
+    ///
+    /// Returns `(cert_pem, key_pem, agent_id)`.
+    pub fn generate_extra_agent_cert(&self) -> (String, String, uuid::Uuid) {
+        let ca_issuer = Issuer::from_ca_cert_pem(&self.ca_cert_pem, self.ca_key_pair())
+            .expect("CA issuer from PEM");
+
+        let agent_id = uuid::Uuid::now_v7();
+        let agent_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("extra agent key generation failed");
+
+        let mut agent_params = CertificateParams::new(vec![]).expect("extra agent cert params");
+        agent_params.distinguished_name = DistinguishedName::new();
+        agent_params
+            .distinguished_name
+            .push(DnType::CommonName, agent_id.to_string());
+        agent_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        agent_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
+        agent_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
+
+        let cert = agent_params
+            .signed_by(&agent_key, &ca_issuer)
+            .expect("extra agent cert signing failed");
+
+        (cert.pem(), agent_key.serialize_pem(), agent_id)
+    }
+
+    /// Generate a PEM-encoded CRL containing the specified revoked certificate
+    /// serial numbers. The serial numbers should be the hex-encoded serials
+    /// from the X.509 certificates.
+    pub fn generate_crl_pem(&self, revoked_serial_hex: &[&str]) -> String {
+        let ca_key = self.ca_key_pair();
+        let ca_issuer =
+            Issuer::from_ca_cert_pem(&self.ca_cert_pem, ca_key).expect("CA issuer for CRL");
+
+        let now = ::time::OffsetDateTime::now_utc();
+
+        let revoked_certs: Vec<RevokedCertParams> = revoked_serial_hex
+            .iter()
+            .map(|hex_serial| {
+                let bytes = hex_to_bytes(hex_serial);
+                RevokedCertParams {
+                    serial_number: SerialNumber::from(bytes),
+                    revocation_time: now - ::time::Duration::minutes(5),
+                    reason_code: Some(rcgen::RevocationReason::KeyCompromise),
+                    invalidity_date: None,
+                }
+            })
+            .collect();
+
+        let params = CertificateRevocationListParams {
+            this_update: now,
+            next_update: now + ::time::Duration::days(1),
+            crl_number: SerialNumber::from(1u64),
+            issuing_distribution_point: None,
+            revoked_certs,
+            key_identifier_method: KeyIdMethod::Sha256,
+        };
+
+        let crl = params.signed_by(&ca_issuer).expect("CRL signing failed");
+        crl.pem().expect("CRL PEM encoding failed")
+    }
+
+    fn ca_key_pair(&self) -> KeyPair {
+        KeyPair::from_pem(&self.ca_key_pem).expect("CA key pair from PEM")
+    }
+}
+
+/// Extract the hex-encoded serial number from a PEM certificate.
+pub fn extract_serial_hex(cert_pem: &str) -> String {
+    let (_, pem) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+        .expect("parse PEM for serial extraction");
+    let (_, cert) = x509_parser::parse_x509_certificate(&pem.contents)
+        .expect("parse X.509 for serial extraction");
+    let serial_bytes = cert.serial.to_bytes_be();
+    serial_bytes
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+}
+
+fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    // Support both with-colon and without-colon hex formats
+    let clean: String = hex.replace(':', "");
+    (0..clean.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).expect("valid hex"))
+        .collect()
 }

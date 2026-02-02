@@ -1,26 +1,30 @@
 use tempfile::TempDir;
-use testcontainers::GenericImage;
-use testcontainers::ImageExt;
 use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{AccessMode, Host, IntoContainerPort, Mount, WaitFor};
 use testcontainers::runners::AsyncRunner;
+use testcontainers::{GenericImage, ImageExt};
 
-use super::pki::TestPki;
-use super::server::{IdentityResponse, TestServer};
+use super::pki::{TestPki, extract_serial_hex};
+use super::server::TestServer;
 
-/// Nginx L7 TLS termination integration test.
+/// Nginx CRL revocation checking integration test.
 ///
-/// Spins up a real nginx:latest container that terminates TLS, optionally
-/// verifies client certificates, and forwards cert details via
-/// `X-Forwarded-Client-Cert-Info`.
+/// Validates that Nginx rejects client certificates that appear in a CRL
+/// while still accepting valid (non-revoked) certificates.
 #[tokio::test]
-#[ignore = "Docker integration test (nginx:latest). Run: cargo test -p uptrakit-controller reverse_proxy::nginx -- --ignored"]
-async fn nginx_l7_forwards_client_cert() {
+#[ignore = "Docker integration test (nginx:latest). Run: cargo test -p uptrakit-controller reverse_proxy::nginx_crl -- --ignored"]
+async fn nginx_crl_rejects_revoked_cert() {
     let pki = TestPki::generate();
+    let (revoked_cert_pem, revoked_key_pem, _revoked_id) = pki.generate_extra_agent_cert();
+
+    // Generate CRL containing the revoked cert's serial
+    let revoked_serial = extract_serial_hex(&revoked_cert_pem);
+    let crl_pem = pki.generate_crl_pem(&[&revoked_serial]);
+
     let server = TestServer::start(&pki, Some("X-Forwarded-Client-Cert-Info"), None).await;
 
     let tmp = TempDir::new().expect("tempdir");
-    write_nginx_config(&tmp, &pki, server.port);
+    write_nginx_crl_config(&tmp, &pki, &crl_pem, server.port);
 
     let container = GenericImage::new("nginx", "latest")
         .with_exposed_port(443u16.tcp())
@@ -42,53 +46,59 @@ async fn nginx_l7_forwards_client_cert() {
         .await
         .expect("get nginx mapped port");
 
-    let client_no_cert = build_client(None, &pki);
-    let client_with_cert = build_client(Some(&pki), &pki);
+    let client_no_cert = build_client(None, None, &pki);
+    let client_valid_cert = build_client(Some(&pki.agent_cert_pem), Some(&pki.agent_key_pem), &pki);
+    let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
 
-    // Health check: GET /healthz without client cert
+    // Health check without cert should succeed
     let resp = client_no_cert
         .get(format!("https://localhost:{proxy_port}/healthz"))
         .send()
         .await
         .expect("healthz request");
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().await.expect("body"), "ok");
 
-    // With client cert: GET /test/identity
-    let resp = client_with_cert
-        .get(format!("https://localhost:{proxy_port}/test/identity"))
+    // Valid cert should be accepted
+    let resp = client_valid_cert
+        .get(format!("https://localhost:{proxy_port}/healthz"))
         .send()
         .await
-        .expect("identity request with cert");
+        .expect("valid cert request");
     assert_eq!(resp.status(), 200);
-    let identity: IdentityResponse = resp.json().await.expect("parse identity");
-    assert_eq!(
-        identity.agent_id.as_deref(),
-        Some(pki.agent_id.to_string().as_str()),
-        "agent_id should match"
-    );
-    assert!(
-        identity.cert_serial.is_some(),
-        "cert_serial should be present"
-    );
 
-    // Without client cert: GET /test/identity
-    let resp = client_no_cert
-        .get(format!("https://localhost:{proxy_port}/test/identity"))
+    // Revoked cert should be rejected by Nginx at the TLS layer.
+    // Nginx returns 400 "The SSL certificate error" when CRL check fails.
+    let result = client_revoked_cert
+        .get(format!("https://localhost:{proxy_port}/healthz"))
         .send()
-        .await
-        .expect("identity request without cert");
-    assert_eq!(resp.status(), 200);
-    let identity: IdentityResponse = resp.json().await.expect("parse identity");
-    assert!(identity.agent_id.is_none(), "agent_id should be null");
+        .await;
+
+    match result {
+        Ok(resp) => {
+            // Nginx may return 400 instead of closing the connection
+            assert!(
+                resp.status() == 400 || resp.status() == 403,
+                "revoked cert should be rejected, got status {}",
+                resp.status()
+            );
+        }
+        Err(e) => {
+            // Connection reset or TLS error is also acceptable
+            assert!(
+                e.is_connect() || e.is_request(),
+                "expected connection error for revoked cert, got: {e}"
+            );
+        }
+    }
 
     server.shutdown();
 }
 
-fn write_nginx_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
+fn write_nginx_crl_config(tmp: &TempDir, pki: &TestPki, crl_pem: &str, backend_port: u16) {
     std::fs::write(tmp.path().join("ca.crt"), &pki.ca_cert_pem).expect("write ca.crt");
     std::fs::write(tmp.path().join("server.crt"), &pki.server_cert_pem).expect("write server.crt");
     std::fs::write(tmp.path().join("server.key"), &pki.server_key_pem).expect("write server.key");
+    std::fs::write(tmp.path().join("ca.crl"), crl_pem).expect("write ca.crl");
 
     let config = format!(
         r#"
@@ -100,6 +110,7 @@ server {{
     ssl_certificate_key /etc/nginx/conf.d/server.key;
 
     ssl_client_certificate /etc/nginx/conf.d/ca.crt;
+    ssl_crl /etc/nginx/conf.d/ca.crl;
     ssl_verify_client optional;
 
     location / {{
@@ -122,16 +133,20 @@ server {{
     std::fs::write(tmp.path().join("default.conf"), config).expect("write nginx config");
 }
 
-fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
+fn build_client(
+    cert_pem: Option<&str>,
+    key_pem: Option<&str>,
+    ca_pki: &TestPki,
+) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
     let mut builder = reqwest::Client::builder()
         .add_root_certificate(ca_cert)
         .danger_accept_invalid_certs(false);
 
-    if let Some(pki) = agent_pki {
-        let mut id_pem = pki.agent_cert_pem.as_bytes().to_vec();
-        id_pem.extend_from_slice(pki.agent_key_pem.as_bytes());
+    if let (Some(cert), Some(key)) = (cert_pem, key_pem) {
+        let mut id_pem = cert.as_bytes().to_vec();
+        id_pem.extend_from_slice(key.as_bytes());
         let identity = reqwest::Identity::from_pem(&id_pem).expect("client identity");
         builder = builder.identity(identity);
     }

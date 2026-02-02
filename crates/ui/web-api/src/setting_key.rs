@@ -25,6 +25,7 @@ pub enum SettingKey {
     EnrollmentTokenHash,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
+    BackendUrl,
 }
 
 impl SettingKey {
@@ -48,6 +49,7 @@ impl SettingKey {
         Self::EnrollmentTokenHash,
         Self::ForwardedClientCertInfoHeader,
         Self::ForwardedClientCertPemHeader,
+        Self::BackendUrl,
     ];
 
     /// The DB string representation of this key.
@@ -71,6 +73,7 @@ impl SettingKey {
             Self::EnrollmentTokenHash => "agent_enrollment.token_hash",
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
+            Self::BackendUrl => "network.backend_url",
         }
     }
 
@@ -97,6 +100,7 @@ impl SettingKey {
                 Some(Self::ForwardedClientCertInfoHeader)
             }
             "network.forwarded_client_cert_pem_header" => Some(Self::ForwardedClientCertPemHeader),
+            "network.backend_url" => Some(Self::BackendUrl),
             _ => None,
         }
     }
@@ -136,7 +140,7 @@ mod tests {
 
     #[test]
     fn all_has_correct_count() {
-        // 18 variants defined in the enum
-        assert_eq!(SettingKey::ALL.len(), 18);
+        // 19 variants defined in the enum
+        assert_eq!(SettingKey::ALL.len(), 19);
     }
 }

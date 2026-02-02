@@ -71,4 +71,13 @@ impl AgentConnectionRegistry {
         let msg = ControllerMessage::CaBundleUpdated(payload);
         self.broadcast(msg).await;
     }
+
+    /// Broadcast a certificate renewal request to all connected agents.
+    pub async fn broadcast_request_cert_renewal(
+        &self,
+        payload: uptrakit_internal_wire::RequestCertRenewalPayload,
+    ) {
+        let msg = ControllerMessage::RequestCertRenewal(payload);
+        self.broadcast(msg).await;
+    }
 }

@@ -71,8 +71,12 @@ uptrakit-controller \
 - Caddy sets `X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Host` automatically — no explicit `header_up` directives are needed for these.
 - The `tls_trusted_ca_certs` directive ensures Caddy trusts the controller's internal CA.
 
+### Revocation Checking
+
+Caddy does not natively support CRL or OCSP checking for client certificates. Revocation is handled at the application layer — the controller's mTLS verifier checks CRLs for direct (non-proxied) connections, and the proxy header middleware verifies forwarded certificate identity regardless.
+
 ### Obtaining the CA Certificate
 
 ```bash
-curl -k https://uptrakit:8443/api/v1/ca.crt -o /etc/caddy/ca.crt
+curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o /etc/caddy/ca.crt
 ```

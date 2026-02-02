@@ -71,8 +71,33 @@ defaults
     timeout tunnel  86400s
 ```
 
+### CRL Revocation Checking
+
+HAProxy supports CRL checking for client certificates. CRL files are static snapshots — you must periodically download a fresh CRL and reload. The controller rebuilds CRLs hourly and immediately on every revocation event.
+
+Add `crl-file` to the frontend `bind` directive:
+
+```
+bind *:443 ssl crt /etc/haproxy/ssl/server.pem ca-file /etc/haproxy/ssl/ca.crt crl-file /etc/haproxy/ssl/ca.crl verify optional
+```
+
+Periodic refresh example:
+
+```bash
+# crontab entry: refresh CRL every 30 minutes
+*/30 * * * * curl -sk https://controller:8443/api/v1/pki/ca.crl -o /etc/haproxy/ssl/ca.crl && echo "set ssl crl-file /etc/haproxy/ssl/ca.crl" | socat stdio /var/run/haproxy/admin.sock
+```
+
+Alternatively, reload HAProxy entirely:
+
+```bash
+*/30 * * * * curl -sk https://controller:8443/api/v1/pki/ca.crl -o /etc/haproxy/ssl/ca.crl && systemctl reload haproxy
+```
+
+HAProxy does not support OCSP checking for client certificates.
+
 ### Obtaining the CA Certificate
 
 ```bash
-curl -k https://uptrakit:8443/api/v1/ca.crt -o /etc/haproxy/ssl/ca.crt
+curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o /etc/haproxy/ssl/ca.crt
 ```

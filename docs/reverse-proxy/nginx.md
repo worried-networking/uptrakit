@@ -101,8 +101,38 @@ uptrakit-controller \
 - WebSocket support requires `proxy_http_version 1.1` and the Upgrade/Connection headers.
 - `proxy_read_timeout 86400` (24h) prevents Nginx from closing long-lived WebSocket connections.
 
+### OCSP Revocation Checking (Recommended)
+
+Nginx 1.19.0+ supports OCSP checking for client certificates. This is the recommended approach — it validates revocation in real-time with no staleness window.
+
+```nginx
+# Add to the server block, alongside ssl_client_certificate:
+ssl_ocsp leaf;
+ssl_ocsp_responder https://controller:8443/api/v1/pki/ocsp;
+```
+
+`ssl_ocsp leaf` validates only the leaf (agent) certificate, not the full chain. The `ssl_ocsp_responder` directive overrides the OCSP URL from the certificate's AIA extension if needed. When `--backend-url` is configured, agent certificates include the OCSP URL in their AIA extension, so `ssl_ocsp on` (without an explicit responder) also works if the controller is reachable at the embedded URL.
+
+**Note:** Nginx caches OCSP responses. After revoking an agent certificate, there may be a brief delay before Nginx rejects connections from that agent.
+
+### CRL Revocation Checking (Alternative)
+
+CRL files are static snapshots. You must periodically download a fresh CRL and reload Nginx. The controller rebuilds CRLs hourly and immediately on every revocation event. Recommended refresh: cron job every 30-60 minutes.
+
+```nginx
+# Add to the server block, alongside ssl_client_certificate:
+ssl_crl /etc/nginx/ssl/ca.crl;
+```
+
+Periodic refresh example:
+
+```bash
+# crontab entry: refresh CRL every 30 minutes
+*/30 * * * * curl -sk https://controller:8443/api/v1/pki/ca.crl -o /etc/nginx/ssl/ca.crl && nginx -s reload
+```
+
 ### Obtaining the CA Certificate
 
 ```bash
-curl -k https://uptrakit:8443/api/v1/ca.crt -o /etc/nginx/ssl/ca.crt
+curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o /etc/nginx/ssl/ca.crt
 ```

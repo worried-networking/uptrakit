@@ -1,28 +1,33 @@
 use tempfile::TempDir;
-use testcontainers::GenericImage;
-use testcontainers::ImageExt;
 use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{AccessMode, Host, IntoContainerPort, Mount, WaitFor};
 use testcontainers::runners::AsyncRunner;
+use testcontainers::{GenericImage, ImageExt};
 
-use super::pki::TestPki;
-use super::server::{IdentityResponse, TestServer};
+use super::pki::{TestPki, extract_serial_hex};
+use super::server::TestServer;
 
-/// Envoy L7 TLS termination integration test.
+/// Envoy CRL revocation checking integration test.
 ///
-/// Spins up a real envoyproxy/envoy:v1.31-latest container that terminates
-/// TLS, requests client certificates, and forwards the XFCC
-/// (X-Forwarded-Client-Cert) header with `Subject` and `Cert` fields.
-/// The controller parses the `Cert` field (DER base64) to extract full
-/// identity including serial number.
+/// Validates that Envoy rejects client certificates that appear in a CRL
+/// while still accepting valid (non-revoked) certificates.
 #[tokio::test]
-#[ignore = "Docker integration test (envoyproxy/envoy:v1.31-latest). Run: cargo test -p uptrakit-controller reverse_proxy::envoy -- --ignored"]
-async fn envoy_l7_forwards_client_cert() {
+#[ignore = "Docker integration test (envoyproxy/envoy:v1.31-latest). Run: cargo test -p uptrakit-controller reverse_proxy::envoy_crl -- --ignored"]
+async fn envoy_crl_rejects_revoked_cert() {
     let pki = TestPki::generate();
+    let (revoked_cert_pem, revoked_key_pem, _revoked_id) = pki.generate_extra_agent_cert();
+
+    // Generate CRL containing the revoked cert's serial
+    let revoked_serial = extract_serial_hex(&revoked_cert_pem);
+    let crl_pem = pki.generate_crl_pem(&[&revoked_serial]);
+
+    // Envoy needs DER-encoded CRL, not PEM.
+    let crl_der = pem_to_der(&crl_pem);
+
     let server = TestServer::start(&pki, Some("X-Forwarded-Client-Cert"), None).await;
 
     let tmp = TempDir::new().expect("tempdir");
-    write_envoy_config(&tmp, &pki, server.port);
+    write_envoy_crl_config(&tmp, &pki, &crl_der, server.port);
 
     let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
         .with_exposed_port(443u16.tcp())
@@ -56,56 +61,61 @@ async fn envoy_l7_forwards_client_cert() {
         .await
         .expect("get envoy mapped port");
 
-    let client_no_cert = build_client(None, &pki);
-    let client_with_cert = build_client(Some(&pki), &pki);
+    let client_no_cert = build_client(None, None, &pki);
+    let client_valid_cert = build_client(Some(&pki.agent_cert_pem), Some(&pki.agent_key_pem), &pki);
+    let client_revoked_cert = build_client(Some(&revoked_cert_pem), Some(&revoked_key_pem), &pki);
 
-    // Health check: GET /healthz without client cert
+    // Health check without cert should succeed
     let resp = client_no_cert
         .get(format!("https://localhost:{proxy_port}/healthz"))
         .send()
         .await
         .expect("healthz request");
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().await.expect("body"), "ok");
 
-    // With client cert: GET /test/identity
-    let resp = client_with_cert
-        .get(format!("https://localhost:{proxy_port}/test/identity"))
+    // Valid cert should be accepted
+    let resp = client_valid_cert
+        .get(format!("https://localhost:{proxy_port}/healthz"))
         .send()
         .await
-        .expect("identity request with cert");
+        .expect("valid cert request");
     assert_eq!(resp.status(), 200);
-    let identity: IdentityResponse = resp.json().await.expect("parse identity");
-    assert_eq!(
-        identity.agent_id.as_deref(),
-        Some(pki.agent_id.to_string().as_str()),
-        "agent_id should match"
-    );
-    assert!(
-        identity.cert_serial.is_some(),
-        "cert_serial should be present"
-    );
 
-    // Without client cert: GET /test/identity
-    let resp = client_no_cert
-        .get(format!("https://localhost:{proxy_port}/test/identity"))
+    // Revoked cert should be rejected by Envoy at the TLS layer.
+    let result = client_revoked_cert
+        .get(format!("https://localhost:{proxy_port}/healthz"))
         .send()
-        .await
-        .expect("identity request without cert");
-    assert_eq!(resp.status(), 200);
-    let identity: IdentityResponse = resp.json().await.expect("parse identity");
-    assert!(identity.agent_id.is_none(), "agent_id should be null");
+        .await;
+
+    match result {
+        Ok(resp) => {
+            // Envoy may return 503 or other error when CRL rejects the cert
+            assert!(
+                resp.status().is_client_error() || resp.status().is_server_error(),
+                "revoked cert should be rejected, got status {}",
+                resp.status()
+            );
+        }
+        Err(e) => {
+            // Connection reset or TLS error is also acceptable
+            assert!(
+                e.is_connect() || e.is_request(),
+                "expected connection error for revoked cert, got: {e}"
+            );
+        }
+    }
 
     server.shutdown();
 }
 
-fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
+fn write_envoy_crl_config(tmp: &TempDir, pki: &TestPki, crl_der: &[u8], backend_port: u16) {
     let ssl_dir = tmp.path().join("ssl");
     std::fs::create_dir_all(&ssl_dir).expect("create ssl dir");
 
     std::fs::write(ssl_dir.join("ca.crt"), &pki.ca_cert_pem).expect("write ca.crt");
     std::fs::write(ssl_dir.join("server.crt"), &pki.server_cert_pem).expect("write server.crt");
     std::fs::write(ssl_dir.join("server.key"), &pki.server_key_pem).expect("write server.key");
+    std::fs::write(ssl_dir.join("ca.crl"), crl_der).expect("write ca.crl (DER)");
 
     let config = format!(
         r#"static_resources:
@@ -129,6 +139,9 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
                 validation_context:
                   trusted_ca:
                     filename: /etc/envoy/ssl/ca.crt
+                  only_verify_leaf_cert_crl: true
+                  crl:
+                    filename: /etc/envoy/ssl/ca.crl
               require_client_certificate: false
           filters:
             - name: envoy.filters.network.http_connection_manager
@@ -187,16 +200,32 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
     std::fs::write(tmp.path().join("envoy.yaml"), config).expect("write envoy.yaml");
 }
 
-fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
+/// Decode a PEM-encoded CRL to raw DER bytes.
+fn pem_to_der(pem_str: &str) -> Vec<u8> {
+    use base64::Engine;
+    let b64: String = pem_str
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .expect("base64 decode CRL PEM")
+}
+
+fn build_client(
+    cert_pem: Option<&str>,
+    key_pem: Option<&str>,
+    ca_pki: &TestPki,
+) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
     let mut builder = reqwest::Client::builder()
         .add_root_certificate(ca_cert)
         .danger_accept_invalid_certs(false);
 
-    if let Some(pki) = agent_pki {
-        let mut id_pem = pki.agent_cert_pem.as_bytes().to_vec();
-        id_pem.extend_from_slice(pki.agent_key_pem.as_bytes());
+    if let (Some(cert), Some(key)) = (cert_pem, key_pem) {
+        let mut id_pem = cert.as_bytes().to_vec();
+        id_pem.extend_from_slice(key.as_bytes());
         let identity = reqwest::Identity::from_pem(&id_pem).expect("client identity");
         builder = builder.identity(identity);
     }

@@ -85,6 +85,14 @@ pub struct Args {
     #[arg(long)]
     pub forwarded_client_cert_pem_header: Option<String>,
 
+    /// URL that reverse proxies use to reach the controller backend.
+    /// Used to construct OCSP, CRL, and CA Issuer URLs embedded in certificates.
+    /// Example: https://controller.internal:8443
+    /// Stored in DB as `network.backend_url`. CLI value used only on first run
+    /// or with `--force-settings-override`.
+    #[arg(long, value_parser = parse_backend_url)]
+    pub backend_url: Option<String>,
+
     /// Path to the built frontend directory. Enables SPA serving.
     #[arg(long)]
     pub static_dir: Option<PathBuf>,
@@ -133,6 +141,22 @@ pub struct MqttArgs {
     /// or with `--force-settings-override`.
     #[arg(long)]
     pub mqtt_topic_prefix: Option<String>,
+}
+
+/// Validate a backend URL argument.
+/// Must be a valid URL with http or https scheme, and no trailing slash.
+fn parse_backend_url(s: &str) -> Result<String, String> {
+    let url: url::Url = s.parse().map_err(|e| format!("invalid URL: {e}"))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "unsupported URL scheme: {other} (expected http or https)"
+            ));
+        }
+    }
+    let result = s.trim_end_matches('/').to_string();
+    Ok(result)
 }
 
 /// Parse a trusted proxy argument. Accepts:

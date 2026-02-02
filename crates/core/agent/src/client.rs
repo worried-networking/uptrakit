@@ -37,7 +37,7 @@ pub enum TlsMode<'a> {
 
 /// Fetch the CA certificate bundle from the controller over HTTPS using reqwest.
 pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Result<Vec<u8>> {
-    let url = format!("{base_url}/api/v1/ca.crt");
+    let url = format!("{base_url}/api/v1/pki/ca.crt");
     tracing::info!(url = %url, "fetching CA certificate");
 
     let mut builder = reqwest::Client::builder();
@@ -534,6 +534,18 @@ pub async fn run_authenticated_loop(
                                 } else {
                                     tracing::info!("updated CA bundle saved to disk");
                                 }
+                            }
+                            ControllerMessage::RequestCertRenewal(payload) => {
+                                tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
+                                let renew_msg = serde_json::to_string(
+                                    &AgentMessage::RenewCertificate(RenewCertificatePayload {}),
+                                )
+                                .expect("serialize RenewCertificate");
+                                if let Err(e) = ws_stream.send(Message::Text(renew_msg.into())).await {
+                                    tracing::error!(error = %e, "failed to send renewal request");
+                                    break LoopOutcome::Disconnected;
+                                }
+                                tracing::debug!("sent RenewCertificate in response to RequestCertRenewal");
                             }
                             _ => {
                                 tracing::debug!("ignoring unrecognized message in authenticated loop");
