@@ -21,13 +21,10 @@ async fn envoy_crl_rejects_revoked_cert() {
     let revoked_serial = extract_serial_hex(&revoked_cert_pem);
     let crl_pem = pki.generate_crl_pem(&[&revoked_serial]);
 
-    // Envoy needs DER-encoded CRL, not PEM.
-    let crl_der = pem_to_der(&crl_pem);
-
     let server = TestServer::start(&pki, Some("X-Forwarded-Client-Cert"), None).await;
 
     let tmp = TempDir::new().expect("tempdir");
-    write_envoy_crl_config(&tmp, &pki, &crl_der, server.port);
+    write_envoy_crl_config(&tmp, &pki, &crl_pem, server.port);
 
     let container = GenericImage::new("envoyproxy/envoy", "v1.31-latest")
         .with_exposed_port(443u16.tcp())
@@ -108,14 +105,14 @@ async fn envoy_crl_rejects_revoked_cert() {
     server.shutdown();
 }
 
-fn write_envoy_crl_config(tmp: &TempDir, pki: &TestPki, crl_der: &[u8], backend_port: u16) {
+fn write_envoy_crl_config(tmp: &TempDir, pki: &TestPki, crl_pem: &str, backend_port: u16) {
     let ssl_dir = tmp.path().join("ssl");
     std::fs::create_dir_all(&ssl_dir).expect("create ssl dir");
 
     std::fs::write(ssl_dir.join("ca.crt"), &pki.ca_cert_pem).expect("write ca.crt");
     std::fs::write(ssl_dir.join("server.crt"), &pki.server_cert_pem).expect("write server.crt");
     std::fs::write(ssl_dir.join("server.key"), &pki.server_key_pem).expect("write server.key");
-    std::fs::write(ssl_dir.join("ca.crl"), crl_der).expect("write ca.crl (DER)");
+    std::fs::write(ssl_dir.join("ca.crl"), crl_pem).expect("write ca.crl");
 
     let config = format!(
         r#"static_resources:
@@ -199,19 +196,6 @@ fn write_envoy_crl_config(tmp: &TempDir, pki: &TestPki, crl_der: &[u8], backend_
     );
     std::fs::write(tmp.path().join("envoy.yaml"), config).expect("write envoy.yaml");
 }
-
-/// Decode a PEM-encoded CRL to raw DER bytes.
-fn pem_to_der(pem_str: &str) -> Vec<u8> {
-    use base64::Engine;
-    let b64: String = pem_str
-        .lines()
-        .filter(|l| !l.starts_with("-----"))
-        .collect();
-    base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .expect("base64 decode CRL PEM")
-}
-
 fn build_client(
     cert_pem: Option<&str>,
     key_pem: Option<&str>,

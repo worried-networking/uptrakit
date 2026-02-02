@@ -664,15 +664,13 @@ pub fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
                 for desc in &aia.accessdescs {
                     // id-ad-ocsp = 1.3.6.1.5.5.7.48.1
                     if desc.access_method.to_id_string() == "1.3.6.1.5.5.7.48.1"
-                        && let x509_parser::extensions::GeneralName::URI(uri) =
-                            desc.access_location
+                        && let x509_parser::extensions::GeneralName::URI(uri) = desc.access_location
                     {
                         urls.ocsp_url = Some(uri.to_string());
                     }
                     // id-ad-caIssuers = 1.3.6.1.5.5.7.48.2
                     if desc.access_method.to_id_string() == "1.3.6.1.5.5.7.48.2"
-                        && let x509_parser::extensions::GeneralName::URI(uri) =
-                            desc.access_location
+                        && let x509_parser::extensions::GeneralName::URI(uri) = desc.access_location
                     {
                         urls.ca_issuers_url = Some(uri.to_string());
                     }
