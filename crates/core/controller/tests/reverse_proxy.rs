@@ -7,4 +7,9 @@ mod reverse_proxy {
     mod haproxy;
     mod nginx;
     mod traefik;
+
+    // CRL revocation checking tests
+    mod envoy_crl;
+    mod haproxy_crl;
+    mod nginx_crl;
 }

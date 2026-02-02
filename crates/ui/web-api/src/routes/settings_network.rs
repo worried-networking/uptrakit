@@ -23,6 +23,10 @@ pub struct NetworkSettingsResponse {
     pub https_addr: String,
     pub forwarded_client_cert_info_header: Option<String>,
     pub forwarded_client_cert_pem_header: Option<String>,
+    pub backend_url: Option<String>,
+    /// Warning message when backend_url was changed, explaining that CA rotation is required.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_url_warning: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -37,6 +41,10 @@ pub struct UpdateNetworkSettingsRequest {
     /// Header name for PEM-encoded client certificate (e.g. `X-Forwarded-Tls-Client-Cert`).
     /// Empty string disables.
     pub forwarded_client_cert_pem_header: Option<String>,
+    /// URL that reverse proxies use to reach the controller backend.
+    /// Used to construct OCSP, CRL, and CA Issuer URLs embedded in certificates.
+    /// Empty string disables.
+    pub backend_url: Option<String>,
 }
 
 /// Get network settings
@@ -71,6 +79,8 @@ pub async fn get_network_settings(
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
+        backend_url: network.backend_url,
+        backend_url_warning: None,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -204,6 +214,51 @@ pub async fn update_network_settings(
             .await;
     }
 
+    // Track whether backend_url changed for the warning
+    let mut backend_url_changed = false;
+
+    // Validate and apply backend_url (requires CA rotation to take full effect)
+    if let Some(ref url_str) = req.backend_url {
+        let value = if url_str.is_empty() {
+            None
+        } else {
+            // Validate URL format
+            match url_str.parse::<url::Url>() {
+                Ok(url) => match url.scheme() {
+                    "http" | "https" => {}
+                    other => {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            format!("unsupported URL scheme: {other} (expected http or https)"),
+                        )
+                            .into_response();
+                    }
+                },
+                Err(e) => {
+                    return (StatusCode::BAD_REQUEST, format!("invalid backend URL: {e}"))
+                        .into_response();
+                }
+            }
+            Some(url_str.trim_end_matches('/').to_string())
+        };
+
+        // Check if the value actually changed
+        let current = state.settings.backend_url().await;
+        if current != value {
+            backend_url_changed = true;
+        }
+
+        let json_val = match &value {
+            Some(v) => serde_json::json!(v),
+            None => serde_json::Value::Null,
+        };
+        if let Err(e) = upsert_setting(&state.db, SettingKey::BackendUrl, json_val).await {
+            tracing::error!("Failed to save backend_url: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        state.settings.set_backend_url(value).await;
+    }
+
     // Validate and apply https_addr (requires restart — save to DB only)
     if let Some(ref addr_str) = req.https_addr {
         let addr: SocketAddr = match addr_str.parse() {
@@ -230,6 +285,15 @@ pub async fn update_network_settings(
     }
 
     let network = state.settings.network().await;
+    let warning = if backend_url_changed {
+        Some(
+            "Changing the backend URL requires CA rotation. All agent certificates will need \
+             to be renewed. Call POST /api/v1/settings/rotate-ca to apply the change."
+                .to_string(),
+        )
+    } else {
+        None
+    };
     let response = NetworkSettingsResponse {
         trusted_proxies: network
             .trusted_proxies
@@ -241,6 +305,8 @@ pub async fn update_network_settings(
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
+        backend_url: network.backend_url,
+        backend_url_warning: warning,
     };
     (StatusCode::OK, Json(response)).into_response()
 }

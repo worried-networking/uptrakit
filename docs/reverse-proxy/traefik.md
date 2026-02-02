@@ -105,8 +105,12 @@ http:
 - Traefik uses form-URL-encoding (`+` for space) in the `passTLSClientCert` header values. The controller handles this automatically.
 - Replace `172.16.0.0/12` with your Docker network CIDR.
 
+### Revocation Checking
+
+Traefik v3 does not support CRL or OCSP checking for client certificates. Revocation is handled at the application layer — the controller's mTLS verifier checks CRLs for direct (non-proxied) connections, and the proxy header middleware verifies forwarded certificate identity regardless.
+
 ### Obtaining the CA Certificate
 
 ```bash
-curl -k https://uptrakit:8443/api/v1/ca.crt -o ca.crt
+curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o ca.crt
 ```

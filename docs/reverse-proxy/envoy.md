@@ -135,8 +135,35 @@ uptrakit-controller \
 - The `upgrade_configs` section enables WebSocket support.
 - The upstream cluster uses TLS with the controller's CA for backend trust. The `alpn_protocols` setting enables HTTP/2 negotiation with the backend.
 
+### CRL Revocation Checking
+
+Envoy supports CRL checking for client certificates. CRL files are static — use an external sidecar or init container to periodically fetch a fresh CRL from the controller. The controller rebuilds CRLs hourly and immediately on every revocation event. Recommended refresh: every 30-60 minutes.
+
+Add `crl` to the `validation_context` in the downstream TLS context:
+
+```yaml
+validation_context:
+  trusted_ca:
+    filename: /etc/envoy/ssl/ca.crt
+  only_verify_leaf_cert_crl: true
+  crl:
+    filename: /etc/envoy/ssl/ca.crl
+```
+
+`only_verify_leaf_cert_crl: true` ensures only the leaf (agent) certificate is checked against the CRL, not the CA certificate itself. The CRL file must be in PEM format.
+
+Periodic refresh example (sidecar script or cron):
+
+```bash
+*/30 * * * * curl -sk https://controller:8443/api/v1/pki/ca.crl -o /etc/envoy/ssl/ca.crl
+```
+
+Note: Envoy requires a restart or SDS update to pick up CRL file changes — it does not watch the filesystem.
+
+Envoy does not support OCSP checking for client certificates.
+
 ### Obtaining the CA Certificate
 
 ```bash
-curl -k https://uptrakit:8443/api/v1/ca.crt -o /etc/envoy/ssl/ca.crt
+curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o /etc/envoy/ssl/ca.crt
 ```

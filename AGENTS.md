@@ -116,13 +116,41 @@ The controller manages a self-signed internal CA for mTLS agent authentication.
 
 ### CA rotation flow
 
-1. Background task checks every 24 hours whether the active CA enters the 6-month rotation window.
+1. Background task checks every 24 hours whether the active CA enters the 6-month rotation window. Can also be triggered on demand via `POST /api/v1/settings/rotate-ca`.
 2. On rotation: current CA files move to `ca-previous.{crt,key}`, a new CA is generated as `ca.{crt,key}`.
 3. Both CAs form a trust bundle (`bundle_pem`). The controller trusts client certs signed by either CA.
 4. CRLs are partitioned: each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint` column in `agent_certificates`).
-5. Connected agents receive a `CaBundleUpdated` WebSocket message with the new bundle PEM.
+5. Connected agents receive a `CaBundleUpdated` WebSocket message with the new bundle PEM, followed by `RequestCertRenewal` to trigger immediate cert renewal.
 6. Agents that were offline detect staleness via `ca_bundle_hash` in `AgentSettings` and fetch the updated bundle over HTTPS.
 7. New agent certs are always signed by the active CA.
+
+### Backend URL and AIA/CDP extensions
+
+When `--backend-url` is configured, the controller embeds AIA (Authority Information Access) and CDP (CRL Distribution Points) extensions in both CA and agent certificates:
+
+| Extension | URL |
+| --- | --- |
+| AIA OCSP | `{backend_url}/api/v1/pki/ocsp` |
+| AIA CA Issuers | `{backend_url}/api/v1/pki/ca.crt` |
+| CDP CRL | `{backend_url}/api/v1/pki/ca.crl` |
+
+At startup, the controller validates the existing CA certificate's embedded URLs against the reconciled `backend_url`:
+- Backend URL set and matching CA extensions: OK
+- Backend URL set but different from CA extensions: **startup failure** (suggests updating the setting or deleting CA files)
+- Backend URL set but CA has no extensions: **startup failure** (suggests deleting CA files to regenerate with extensions)
+- Backend URL not set but CA has extensions: **startup failure** (suggests providing `--backend-url` or deleting CA files)
+- Neither set: OK
+
+Changing the backend URL requires CA rotation (the URLs are embedded in the CA certificate). See the [reverse proxy guide](docs/reverse-proxy/README.md) for the full flow.
+
+### OCSP responder
+
+The controller provides an OCSP responder at `/api/v1/pki/ocsp` (both POST and GET). It accepts standard RFC 6960 OCSP requests and returns signed OCSP responses:
+- **good**: certificate is valid and not revoked
+- **revoked**: certificate has been revoked (includes revocation time and reason)
+- **unknown**: certificate serial not found
+
+Responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
 
 ### External CA
 
@@ -268,6 +296,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--san` | `network.extra_sans` | `[]` | Yes |
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | `null` | Yes |
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | `null` | Yes |
+| `--backend-url` | `network.backend_url` | `null` | Yes (requires CA rotation) |
 | `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
 | `--mqtt-host` | `mqtt.host` | `null` | No (restart) |
 | `--mqtt-port` | `mqtt.port` | `1883` | No (restart) |
@@ -309,9 +338,19 @@ The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettin
 | Endpoint | Permission | Purpose |
 | --- | --- | --- |
 | `GET /api/v1/settings/network` | ViewSettings | Read network settings |
-| `PUT /api/v1/settings/network` | ManageSettings | Update network settings |
+| `PUT /api/v1/settings/network` | ManageSettings | Update network settings (includes `backend_url`) |
 | `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT settings |
 | `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT settings |
+| `POST /api/v1/settings/rotate-ca` | ManageSettings | Trigger immediate CA rotation |
+
+### PKI API endpoints (unauthenticated)
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/v1/pki/ca.crt` | Download CA certificate bundle |
+| `GET /api/v1/pki/ca.crl` | Download CRL (combined PEM) |
+| `POST /api/v1/pki/ocsp` | OCSP responder (RFC 6960, `application/ocsp-request` body) |
+| `GET /api/v1/pki/ocsp/{encoded}` | OCSP responder (base64-encoded request in URL path) |
 
 MQTT password is never exposed in API responses; a `has_password: bool` field indicates whether one is set.
 
@@ -471,6 +510,10 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`
 - `EnrollPayload` includes a required `host_info: HostInfo` field
 - `ReportHostInfo(ReportHostInfoPayload)` variant in `AgentMessage` — sent by authenticated agents immediately after mTLS WebSocket connect
+- `RenewCertificate(RenewCertificatePayload)` variant in `AgentMessage` — agent requests certificate renewal (early or on-demand)
+- `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours` and `ca_bundle_hash`
+- `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new bundle PEM
+- `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or backend URL change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
 
 ### Agent host info collection
 

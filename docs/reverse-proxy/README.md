@@ -30,6 +30,7 @@ The proxy terminates TLS, optionally verifies client certificates, and forwards 
 | `--real-ip-header` | `network.real_ip_header` | Header for real client IP (default: `X-Forwarded-For`) |
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | Header for structured cert info (L7 only) |
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | Header for PEM-encoded cert (L7 fallback) |
+| `--backend-url` | `network.backend_url` | URL that reverse proxies use to reach the controller backend (e.g. `https://controller.internal:8443`). Embeds OCSP, CRL, and CA Issuer URLs in certificates via AIA/CDP extensions. |
 
 ### Info Header Format
 
@@ -83,10 +84,50 @@ The controller auto-detects the format and parses it to extract the agent identi
 Proxies in L7 mode need the controller's CA certificate to trust the backend connection:
 
 ```bash
-curl -k https://controller:8443/api/v1/ca.crt -o ca.crt
+curl -k https://controller:8443/api/v1/pki/ca.crt -o ca.crt
 ```
 
 Re-export after CA rotation (the controller broadcasts `CaBundleUpdated` to connected agents, but proxies must be updated manually or via automation).
+
+## OCSP and CRL Revocation Checking
+
+When `--backend-url` is configured, the controller embeds [AIA (Authority Information Access)](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.2.1) and [CDP (CRL Distribution Points)](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.13) extensions in both CA and agent certificates. These extensions point to the following controller endpoints:
+
+| Extension | Endpoint | Description |
+| --- | --- | --- |
+| AIA OCSP | `POST /api/v1/pki/ocsp` | OCSP responder (RFC 6960). Also supports `GET /api/v1/pki/ocsp/{base64}`. |
+| AIA CA Issuers | `GET /api/v1/pki/ca.crt` | CA certificate download |
+| CDP CRL | `GET /api/v1/pki/ca.crl` | Certificate Revocation List |
+
+All PKI endpoints are unauthenticated.
+
+### Recommended approach
+
+**OCSP is the preferred revocation checking method** when the proxy supports it. OCSP checks revocation in real-time on a per-certificate basis with no periodic refresh needed.
+
+**CRL-based checking** requires periodic download of the CRL file. The controller rebuilds CRLs every hour and immediately on revocation events. Proxies using CRL-based checking should configure periodic CRL refresh (recommended interval: 30-60 minutes) to stay in sync. OCSP avoids this staleness window entirely.
+
+### Proxy support matrix
+
+| Proxy | OCSP support (client certs) | CRL support | Notes |
+| --- | --- | --- | --- |
+| **Nginx** | `ssl_ocsp leaf` (1.19.0+) | `ssl_crl` directive | OCSP recommended |
+| **HAProxy** | No | `crl-file` on `bind` | CRL only; requires periodic refresh |
+| **Envoy** | No | `crl` in `validation_context` | CRL only; requires sidecar refresh |
+| **Traefik** | No | No | Revocation handled at the application layer |
+| **Caddy** | No | No | Revocation handled at the application layer |
+
+For proxies without OCSP or CRL support (Traefik, Caddy), the controller's mTLS verifier already checks CRLs for direct connections. In L7 mode, agents connect through the proxy without mTLS verification at the proxy level — revocation is enforced by the controller itself.
+
+### Changing the backend URL
+
+Changing `--backend-url` (or `network.backend_url` via the API) requires CA rotation because the URLs are embedded in the CA certificate. The process:
+
+1. Update the backend URL via `PUT /api/v1/settings/network` (the response includes a warning about required CA rotation).
+2. Trigger CA rotation via `POST /api/v1/settings/rotate-ca`.
+3. The controller generates a new CA with updated AIA/CDP URLs and broadcasts `CaBundleUpdated` + `RequestCertRenewal` to all connected agents.
+4. Connected agents refresh their CA bundle and renew certificates immediately.
+5. Offline agents detect CA staleness via `ca_bundle_hash` on reconnect.
 
 ## Proxy-Specific Guides
 

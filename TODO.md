@@ -96,7 +96,7 @@ Essential infrastructure needed before feature development.
   - [ ] Fallback handling for CA certificate issues
 - [x] CA rotation support
   - [x] Dual-CA validation (active + previous CA in trust bundle)
-  - [x] CA bundle update endpoint (`GET /api/v1/ca.crt` returns full bundle)
+  - [x] CA bundle update endpoint (`GET /api/v1/pki/ca.crt` returns full bundle)
   - [x] Agent CA update workflow (via `CaBundleUpdated` wire message + hash-based staleness check)
   - [x] Rotation state tracking in database (`ca_fingerprint` column on `agent_certificates`)
   - [x] Automatic rotation when managed CA enters 6-month expiry window
@@ -532,7 +532,7 @@ Comprehensive security hardening.
   - [x] Certificate delivery to agents
 - [x] Certificate revocation mechanism
   - [x] CRL generation and distribution (per-CA partitioned CRLs)
-  - [ ] OCSP responder implementation
+  - [x] OCSP responder implementation
   - [x] Revocation checking on agent connections
 - [x] Certificate expiration handling
   - [x] Expiration monitoring (system alerts API for admin UI)
@@ -619,6 +619,7 @@ Ensuring robustness and maintainability.
   - [ ] Database operations
   - [ ] Provider implementations
   - [ ] End-to-end update workflows
+  - [ ] OCSP revocation checking with reverse proxies (Nginx `ssl_ocsp leaf`). Requires solving Nginx's async OCSP HTTP subrequest within Docker — Nginx needs a working `resolver` directive and reachable OCSP responder from the container's network namespace. CRL tests exist for Nginx, HAProxy, and Envoy; OCSP tests are still missing.
 - [ ] Implement load testing
   - [ ] Many agents scenario
   - [ ] Concurrent update scenario

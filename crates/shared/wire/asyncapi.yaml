@@ -7,7 +7,7 @@ info:
 
     ## Agent Lifecycle
 
-    1. `HTTP GET /api/v1/ca.crt` — TOFU CA pinning (only HTTP endpoint used by agents)
+    1. `HTTP GET /api/v1/pki/ca.crt` — TOFU CA pinning (only HTTP endpoint used by agents)
     2. `WSS /api/v1/ws/agent` (no auth) — agent sends `Enroll` message
     3. Receives `Enrolled` response — agent persists `agent_id` + `enrollment_secret`
        (connection promoted in-place — controller now tracks this session)
@@ -77,6 +77,14 @@ channels:
         $ref: "#/components/messages/error"
       reportHostInfo:
         $ref: "#/components/messages/reportHostInfo"
+      renewCertificate:
+        $ref: "#/components/messages/renewCertificate"
+      agentSettings:
+        $ref: "#/components/messages/agentSettings"
+      caBundleUpdated:
+        $ref: "#/components/messages/caBundleUpdated"
+      requestCertRenewal:
+        $ref: "#/components/messages/requestCertRenewal"
 
 operations:
   sendPing:
@@ -197,6 +205,57 @@ operations:
       fulfilled (e.g., invalid enrollment token, certificate request
       before approval).
 
+  sendRenewCertificate:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/renewCertificate"
+    summary: Agent requests certificate renewal
+    description: |
+      Authenticated agents send this message to request a new client
+      certificate before the current one expires. Also sent in response
+      to a `RequestCertRenewal` push from the controller (e.g., after
+      CA rotation). The controller responds with a `Certificate` message.
+
+  receiveAgentSettings:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/agentSettings"
+    summary: Agent receives settings from the controller
+    description: |
+      The controller sends agent-specific settings after authentication.
+      Currently includes the ping interval that the agent should use
+      for heartbeat messages.
+
+  receiveCaBundleUpdated:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/caBundleUpdated"
+    summary: Agent receives an updated CA bundle
+    description: |
+      The controller pushes this message when the CA certificate bundle
+      changes (e.g., after CA rotation). The agent should update its
+      trust store with the new bundle PEM and prepare for certificate
+      renewal.
+
+  receiveRequestCertRenewal:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/requestCertRenewal"
+    summary: Agent receives a certificate renewal request
+    description: |
+      The controller pushes this message after CA rotation or backend
+      URL changes to prompt all connected agents to immediately renew
+      their certificates. The agent should respond by sending a
+      `RenewCertificate` message. Includes a human-readable reason.
+
 components:
   securitySchemes:
     mtls:
@@ -296,6 +355,38 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/reportHostInfoPayload"
+
+    renewCertificate:
+      name: renew_certificate
+      title: Renew Certificate Message
+      summary: Agent requests certificate renewal
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/renewCertificatePayload"
+
+    agentSettings:
+      name: agent_settings
+      title: Agent Settings Message
+      summary: Agent-specific settings pushed by controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/agentSettingsPayload"
+
+    caBundleUpdated:
+      name: ca_bundle_updated
+      title: CA Bundle Updated Message
+      summary: Updated CA certificate bundle pushed by controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/caBundleUpdatedPayload"
+
+    requestCertRenewal:
+      name: request_cert_renewal
+      title: Request Cert Renewal Message
+      summary: Controller requests that the agent renew its certificate
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/requestCertRenewalPayload"
 
   schemas:
     pingPayload:
@@ -538,3 +629,77 @@ components:
         host_info:
           $ref: "#/components/schemas/hostInfo"
           description: Host machine information
+
+    renewCertificatePayload:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: renew_certificate
+          description: Message type discriminator
+
+    agentSettingsPayload:
+      type: object
+      required:
+        - type
+        - renewal_window_hours
+      properties:
+        type:
+          type: string
+          const: agent_settings
+          description: Message type discriminator
+        renewal_window_hours:
+          type: integer
+          format: int32
+          description: |
+            Number of hours before certificate expiry when the agent
+            should initiate certificate renewal.
+          examples:
+            - 6
+        ca_bundle_hash:
+          type: string
+          description: |
+            SHA-256 hash of the current CA bundle PEM. The agent compares
+            this against its local CA bundle to detect staleness. If missing
+            or empty, the agent skips the check (backwards compatibility).
+          default: ""
+          examples:
+            - abc123def456
+
+    caBundleUpdatedPayload:
+      type: object
+      required:
+        - type
+        - ca_bundle_pem
+      properties:
+        type:
+          type: string
+          const: ca_bundle_updated
+          description: Message type discriminator
+        ca_bundle_pem:
+          type: string
+          description: |
+            PEM-encoded CA certificate bundle. May contain multiple
+            certificates during CA rotation (active + previous).
+          examples:
+            - "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+
+    requestCertRenewalPayload:
+      type: object
+      required:
+        - type
+        - reason
+      properties:
+        type:
+          type: string
+          const: request_cert_renewal
+          description: Message type discriminator
+        reason:
+          type: string
+          description: |
+            Human-readable reason for the renewal request (e.g.,
+            "CA rotation after backend URL change").
+          examples:
+            - CA rotation after backend URL change

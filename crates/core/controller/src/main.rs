@@ -211,6 +211,38 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
         .await;
 
+    let backend_url = reconcile::reconcile_setting(
+        &db_conn,
+        SettingKey::BackendUrl,
+        &raw_settings,
+        args.backend_url.clone(),
+        String::new(), // empty = not set
+        force,
+        reconcile::JsonConvert {
+            to_json: |v| {
+                if v.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(v)
+                }
+            },
+            from_json: |v| {
+                if v.is_null() {
+                    Some(String::new())
+                } else {
+                    v.as_str().map(String::from)
+                }
+            },
+        },
+    )
+    .await
+    .context(AppError::Settings)?;
+    let backend_url_opt = if backend_url.is_empty() {
+        None
+    } else {
+        Some(backend_url)
+    };
+    settings.set_backend_url(backend_url_opt.clone()).await;
     // Warn if cert headers are configured but no trusted proxies
     if (forwarded_cert_info_opt.is_some() || forwarded_cert_pem_opt.is_some())
         && trusted_proxies.is_empty()
@@ -450,18 +482,31 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             managed: false,
         }
     } else {
-        let mut state = pki::load_ca_state(&pki_path).context(AppError::Pki)?;
+        let mut state =
+            pki::load_ca_state(&pki_path, backend_url_opt.as_deref()).context(AppError::Pki)?;
 
         // Auto-rotate if managed and within rotation window
         if state.managed && pki::should_rotate_ca(&state.active.cert_pem) {
             tracing::info!("CA certificate is within rotation window, rotating now");
-            state = pki::rotate_ca(&pki_path).context(AppError::Pki)?;
+            state = pki::rotate_ca(&pki_path, backend_url_opt.as_deref()).context(AppError::Pki)?;
         }
 
         state
     };
 
-    let ca_snapshot = ca_state.to_snapshot().context(AppError::Pki)?;
+    // Validate CA extensions match backend_url (managed CAs only)
+    if ca_state.managed {
+        pki::validate_ca_backend_url(
+            &ca_state.active.cert_pem,
+            backend_url_opt.as_deref(),
+            &pki_path,
+        )
+        .context(AppError::Pki)?;
+    }
+
+    let ca_snapshot = ca_state
+        .to_snapshot(backend_url_opt.clone())
+        .context(AppError::Pki)?;
     let (ca_tx, ca_rx) = tokio::sync::watch::channel(ca_snapshot.clone());
 
     // Resolve server certificate (using reconciled extra_sans)
@@ -509,6 +554,9 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
 
     // Create revocation notify channel
     let revocation_notify = Arc::new(tokio::sync::Notify::const_new());
+
+    // Create CA rotation trigger (used by the rotate-ca API endpoint)
+    let ca_rotation_trigger = Arc::new(tokio::sync::Notify::const_new());
 
     // Build initial CRLs from DB before server starts
     let crl_pem_cache = Arc::new(tokio::sync::RwLock::new(String::new()));
@@ -581,6 +629,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         pki_path: pki_path.clone(),
         rustls_config: rustls_config.clone(),
         crl_pem_cache,
+        ca_rotation_trigger: Arc::clone(&ca_rotation_trigger),
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
@@ -595,12 +644,14 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         }
     });
 
-    // Spawn CA rotation background task (managed CAs only, every 24h)
+    // Spawn CA rotation background task (managed CAs only, every 24h or on API trigger)
     let ca_rotation_handle = if ca_state.managed {
         let pki_for_task = pki_path.clone();
         let ca_tx_for_task = ca_tx;
         let crl_mgr_for_task = Arc::clone(&crl_manager);
         let conns_for_task = agent_connections.clone();
+        let settings_for_rotation = app_state.settings.clone();
+        let trigger = Arc::clone(&ca_rotation_trigger);
 
         Some(tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
@@ -608,18 +659,28 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
             interval.tick().await;
 
             loop {
-                interval.tick().await;
-                tracing::debug!("checking CA rotation status");
+                // Wait for either the periodic timer or an API-triggered rotation
+                let forced = tokio::select! {
+                    _ = interval.tick() => false,
+                    () = trigger.notified() => true,
+                };
 
-                let snapshot = ca_tx_for_task.borrow().clone();
-                if !pki::should_rotate_ca(&snapshot.active_cert_pem) {
-                    continue;
+                if !forced {
+                    tracing::debug!("checking CA rotation status");
+                    let snapshot = ca_tx_for_task.borrow().clone();
+                    if !pki::should_rotate_ca(&snapshot.active_cert_pem) {
+                        continue;
+                    }
+                    tracing::info!("CA certificate is within rotation window, rotating");
+                } else {
+                    tracing::info!("CA rotation triggered via API");
                 }
 
-                tracing::info!("CA certificate is within rotation window, rotating");
-                match pki::rotate_ca(&pki_for_task) {
+                let current_backend_url = settings_for_rotation.backend_url().await;
+                match pki::rotate_ca(&pki_for_task, current_backend_url.as_deref()) {
                     Ok(new_state) => {
-                        match new_state.to_snapshot() {
+                        let rotation_backend_url = current_backend_url.clone();
+                        match new_state.to_snapshot(rotation_backend_url) {
                             Ok(new_snapshot) => {
                                 // Update CRL manager with new CA material
                                 if let Err(e) = crl_mgr_for_task.update_ca(&new_snapshot).await {
@@ -628,10 +689,19 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
                                 }
 
                                 // Broadcast CA bundle update to all connected agents
-                                let payload = uptrakit_internal_wire::CaBundleUpdatedPayload {
+                                let ca_payload = uptrakit_internal_wire::CaBundleUpdatedPayload {
                                     ca_bundle_pem: new_snapshot.bundle_pem.clone(),
                                 };
-                                conns_for_task.broadcast_ca_bundle_updated(payload).await;
+                                conns_for_task.broadcast_ca_bundle_updated(ca_payload).await;
+
+                                // Request all agents to renew their certificates
+                                let renewal_payload =
+                                    uptrakit_internal_wire::RequestCertRenewalPayload {
+                                        reason: "CA rotation".to_string(),
+                                    };
+                                conns_for_task
+                                    .broadcast_request_cert_renewal(renewal_payload)
+                                    .await;
 
                                 // Publish new snapshot via watch channel
                                 let _ = ca_tx_for_task.send(new_snapshot);

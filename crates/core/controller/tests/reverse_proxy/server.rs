@@ -112,6 +112,7 @@ async fn build_state(
         bundle_hash: "0".repeat(64),
         managed: true,
         active_not_after: ::time::OffsetDateTime::now_utc() + ::time::Duration::days(365),
+        backend_url: None,
     };
     let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
 
@@ -177,6 +178,7 @@ async fn build_state(
         pki_path: std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"),
         rustls_config: rustls_cfg,
         crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+        ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
     })
 }
 

@@ -33,6 +33,7 @@ pub enum ControllerMessage {
     Error(ErrorPayload),
     AgentSettings(AgentSettingsPayload),
     CaBundleUpdated(CaBundleUpdatedPayload),
+    RequestCertRenewal(RequestCertRenewalPayload),
 }
 
 /// Payload for ping messages.
@@ -161,6 +162,16 @@ pub struct AgentSettingsPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaBundleUpdatedPayload {
     pub ca_bundle_pem: String,
+}
+
+/// Payload for requesting immediate certificate renewal from agents.
+///
+/// Sent by the controller after CA rotation or backend URL change to prompt
+/// all connected agents to renew their certificates with the new CA.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestCertRenewalPayload {
+    /// Human-readable reason for the renewal request.
+    pub reason: String,
 }
 
 #[cfg(test)]
@@ -428,6 +439,17 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"report_host_info"#));
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn request_cert_renewal_serialization_roundtrip() {
+        let msg = ControllerMessage::RequestCertRenewal(RequestCertRenewalPayload {
+            reason: "CA rotation after backend URL change".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"request_cert_renewal"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
 
