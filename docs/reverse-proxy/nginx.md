@@ -17,7 +17,7 @@ stream {
 }
 ```
 
-No controller flags needed for passthrough mode.
+No controller configuration changes needed for passthrough mode.
 
 **Note:** L4 passthrough does not support SNI-based routing with multiple backends unless you use the `ngx_stream_ssl_preread_module`:
 
@@ -87,11 +87,33 @@ http {
 
 ### Controller Configuration
 
+The controller needs to know the proxy's IP and which header carries the client certificate info.
+
+**Option A — CLI flags:**
+
 ```bash
 uptrakit-controller \
   --trusted-proxy=<nginx-ip> \
   --forwarded-client-cert-info-header=X-Forwarded-Client-Cert-Info
 ```
+
+**Option B — Web UI:** Navigate to Settings > Network and set:
+- **Trusted Proxies**: the Nginx server's IP or CIDR
+- **Forwarded Client Cert Info Header**: `X-Forwarded-Client-Cert-Info`
+
+**Option C — API:**
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  https://controller:8443/api/v1/settings/network \
+  -d '{
+    "trusted_proxies": ["<nginx-ip>"],
+    "forwarded_client_cert_info_header": "X-Forwarded-Client-Cert-Info"
+  }'
+```
+
+Changes via Web UI or API apply immediately without a restart.
 
 ### Notes
 

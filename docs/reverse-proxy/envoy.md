@@ -35,7 +35,7 @@ static_resources:
                       port_value: 8443
 ```
 
-No controller flags needed for passthrough mode.
+No controller configuration changes needed for passthrough mode.
 
 ## L7 TLS Termination
 
@@ -119,11 +119,33 @@ static_resources:
 
 ### Controller Configuration
 
+The controller needs to know the proxy's IP and which header carries the XFCC data.
+
+**Option A — CLI flags:**
+
 ```bash
 uptrakit-controller \
   --trusted-proxy=<envoy-ip> \
   --forwarded-client-cert-info-header=X-Forwarded-Client-Cert
 ```
+
+**Option B — Web UI:** Navigate to Settings > Network and set:
+- **Trusted Proxies**: the Envoy server's IP or CIDR
+- **Forwarded Client Cert Info Header**: `X-Forwarded-Client-Cert`
+
+**Option C — API:**
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  https://controller:8443/api/v1/settings/network \
+  -d '{
+    "trusted_proxies": ["<envoy-ip>"],
+    "forwarded_client_cert_info_header": "X-Forwarded-Client-Cert"
+  }'
+```
+
+Changes via Web UI or API apply immediately without a restart.
 
 ### Notes
 

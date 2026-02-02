@@ -28,7 +28,7 @@ services:
       - traefik.tcp.services.uptrakit.loadbalancer.server.port=8443
 ```
 
-No controller flags needed beyond the defaults for passthrough mode.
+No controller configuration changes needed for passthrough mode.
 
 ## L7 TLS Termination
 
@@ -53,6 +53,8 @@ services:
 
   uptrakit:
     image: uptrakit-controller
+    # These flags seed the DB on first run. You can also configure them
+    # at runtime via the Web UI (Settings > Network) or the API.
     command:
       - --trusted-proxy=172.16.0.0/12
       - --forwarded-client-cert-info-header=X-Forwarded-Tls-Client-Cert-Info
@@ -97,13 +99,42 @@ http:
       serverName: "uptrakit.example.com"
 ```
 
+### Controller Configuration
+
+The controller needs to know the proxy's IP and which header carries the client certificate info.
+
+**Option A — CLI flags:**
+
+```bash
+uptrakit-controller \
+  --trusted-proxy=172.16.0.0/12 \
+  --forwarded-client-cert-info-header=X-Forwarded-Tls-Client-Cert-Info
+```
+
+**Option B — Web UI:** Navigate to Settings > Network and set:
+- **Trusted Proxies**: `172.16.0.0/12`
+- **Forwarded Client Cert Info Header**: `X-Forwarded-Tls-Client-Cert-Info`
+
+**Option C — API:**
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  https://controller:8443/api/v1/settings/network \
+  -d '{
+    "trusted_proxies": ["172.16.0.0/12"],
+    "forwarded_client_cert_info_header": "X-Forwarded-Tls-Client-Cert-Info"
+  }'
+```
+
+Replace `172.16.0.0/12` with your Docker network CIDR. Changes via Web UI or API apply immediately without a restart.
+
 ### Notes
 
 - Use `RequestClientCert` (not `RequireAndVerifyClientCert`) so browsers can access the web UI without a client certificate.
 - `passTLSClientCert` sends the `X-Forwarded-Tls-Client-Cert-Info` header with structured Subject, Issuer, and SerialNumber fields.
 - **`serversTransport` requires the `@file` qualifier** (e.g., `uptrakit@file`) when referencing a transport defined in the file provider. Without it, Traefik cannot resolve the transport and falls back to the default (which verifies backend certificates against system CAs, causing connection failures).
 - Traefik uses form-URL-encoding (`+` for space) in the `passTLSClientCert` header values. The controller handles this automatically.
-- Replace `172.16.0.0/12` with your Docker network CIDR.
 
 ### Revocation Checking
 

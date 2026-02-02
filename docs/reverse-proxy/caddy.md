@@ -25,7 +25,7 @@ Requires the [layer4](https://github.com/mholt/caddy-l4) plugin. The proxy forwa
 }
 ```
 
-No controller flags needed for passthrough mode — mTLS is handled end-to-end by the controller.
+No controller configuration changes needed for passthrough mode — mTLS is handled end-to-end by the controller.
 
 ## L7 TLS Termination
 
@@ -57,11 +57,33 @@ uptrakit.example.com {
 
 ### Controller Configuration
 
+The controller needs to know the proxy's IP and which header carries the PEM-encoded client certificate.
+
+**Option A — CLI flags:**
+
 ```bash
 uptrakit-controller \
   --trusted-proxy=<caddy-ip> \
   --forwarded-client-cert-pem-header=X-Forwarded-Tls-Client-Cert
 ```
+
+**Option B — Web UI:** Navigate to Settings > Network and set:
+- **Trusted Proxies**: the Caddy server's IP or CIDR
+- **Forwarded Client Cert PEM Header**: `X-Forwarded-Tls-Client-Cert`
+
+**Option C — API:**
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  https://controller:8443/api/v1/settings/network \
+  -d '{
+    "trusted_proxies": ["<caddy-ip>"],
+    "forwarded_client_cert_pem_header": "X-Forwarded-Tls-Client-Cert"
+  }'
+```
+
+Changes via Web UI or API apply immediately without a restart.
 
 ### Notes
 

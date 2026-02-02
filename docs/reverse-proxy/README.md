@@ -24,6 +24,14 @@ The proxy terminates TLS, optionally verifies client certificates, and forwards 
 
 ## Controller Configuration
 
+All settings below can be configured in three ways:
+
+- **CLI flags** — set at startup (e.g., `--trusted-proxy=10.0.0.1`)
+- **Web UI** — Settings > Network in the controller dashboard (changes apply immediately, no restart required)
+- **REST API** — `GET /api/v1/settings/network` and `PUT /api/v1/settings/network` (see [API reference](#api-reference) below)
+
+CLI flags seed the database on first run. After that, the database value takes precedence unless `--force-settings-override` is used. Runtime changes via the Web UI or API are applied immediately without restarting the controller.
+
 | Flag | DB Key | Description |
 | --- | --- | --- |
 | `--trusted-proxy` | `network.trusted_proxies` | Proxy IP/CIDR (repeatable). Required for L7 mode; not needed for L4 passthrough. |
@@ -63,9 +71,33 @@ The PEM header contains the client certificate in one of two formats:
 
 The controller auto-detects the format and parses it to extract the agent identity and verify the issuer.
 
+### API Reference
+
+**Read current settings:**
+
+```bash
+curl -s -H "Authorization: Bearer <token>" \
+  https://controller:8443/api/v1/settings/network
+```
+
+**Update settings** (all fields are optional — only included fields are changed):
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  https://controller:8443/api/v1/settings/network \
+  -d '{
+    "trusted_proxies": ["10.0.0.1/32", "172.16.0.0/12"],
+    "forwarded_client_cert_info_header": "X-Forwarded-Client-Cert-Info",
+    "pki_addr": "http://controller:8080"
+  }'
+```
+
+Requires `ManageSettings` permission. See the proxy-specific guides for which fields to set for each proxy.
+
 ## Security Model
 
-1. **Trusted proxies required:** Certificate headers are only processed from requests originating from configured `--trusted-proxy` addresses. All cert-related and proxy headers are stripped from non-proxy requests.
+1. **Trusted proxies required:** Certificate headers are only processed from requests originating from configured trusted proxy addresses (set via `--trusted-proxy`, the Web UI, or the API). All cert-related and proxy headers are stripped from non-proxy requests.
 
 2. **CA CN verification:** The forwarded certificate's issuer CN must match either:
    - The active CA certificate's CN
@@ -91,7 +123,7 @@ Re-export after CA rotation (the controller broadcasts `CaBundleUpdated` to conn
 
 ## OCSP and CRL Revocation Checking
 
-When `--pki-addr` is configured, the controller embeds [AIA (Authority Information Access)](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.2.1) and [CDP (CRL Distribution Points)](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.13) extensions in both CA and agent certificates. These extensions point to the following controller endpoints:
+When a PKI address is configured (via `--pki-addr`, the Web UI, or the API), the controller embeds [AIA (Authority Information Access)](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.2.1) and [CDP (CRL Distribution Points)](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.13) extensions in both CA and agent certificates. These extensions point to the following controller endpoints:
 
 | Extension | Endpoint | Description |
 | --- | --- | --- |
@@ -121,10 +153,10 @@ For proxies without OCSP or CRL support (Traefik, Caddy), the controller's mTLS 
 
 ### Changing the PKI address
 
-Changing `--pki-addr` (or `network.pki_addr` via the API) requires CA rotation because the URLs are embedded in the CA certificate. The process:
+Changing `--pki-addr` requires CA rotation because the URLs are embedded in the CA certificate. The process:
 
-1. Update the PKI address via `PUT /api/v1/settings/network` (the response includes a warning about required CA rotation).
-2. Trigger CA rotation via `POST /api/v1/settings/rotate-ca`.
+1. Update the PKI address via the **Web UI** (Settings > Network > PKI Address) or the **API** (`PUT /api/v1/settings/network` with `"pki_addr": "..."`). The response includes a warning about required CA rotation.
+2. Trigger CA rotation via the **Web UI** (Settings > PKI > Rotate CA) or the **API** (`POST /api/v1/settings/rotate-ca`).
 3. The controller generates a new CA with updated AIA/CDP URLs and broadcasts `CaBundleUpdated` + `RequestCertRenewal` to all connected agents.
 4. Connected agents refresh their CA bundle and renew certificates immediately.
 5. Offline agents detect CA staleness via `ca_bundle_hash` on reconnect.
