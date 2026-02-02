@@ -112,9 +112,46 @@ pub struct Args {
     #[arg(long)]
     pub force_settings_override: bool,
 
+    #[command(flatten)]
+    pub oidc_bootstrap: OidcBootstrapArgs,
+
     #[cfg(feature = "mqtt")]
     #[command(flatten)]
     pub mqtt: MqttArgs,
+}
+
+/// OIDC provider bootstrap options.
+///
+/// When `--oidc-issuer-url` is provided, the controller ensures an OIDC provider
+/// exists in the database at startup. This solves the chicken-and-egg problem
+/// where OIDC configuration requires ManageSettings permission, but the first
+/// user must log in via OIDC.
+#[derive(Parser, Debug)]
+pub struct OidcBootstrapArgs {
+    /// OIDC issuer URL. When set, bootstraps an OIDC provider at startup.
+    /// Requires --oidc-client-id and --oidc-client-secret.
+    #[arg(long)]
+    pub oidc_issuer_url: Option<String>,
+
+    /// OIDC client ID. Required when --oidc-issuer-url is set.
+    #[arg(long)]
+    pub oidc_client_id: Option<String>,
+
+    /// OIDC client secret. Required when --oidc-issuer-url is set.
+    #[arg(long)]
+    pub oidc_client_secret: Option<String>,
+
+    /// Display name for the bootstrapped OIDC provider.
+    #[arg(long, default_value = "SSO")]
+    pub oidc_provider_name: Option<String>,
+
+    /// URL-safe slug for the bootstrapped OIDC provider.
+    #[arg(long, default_value = "sso")]
+    pub oidc_provider_slug: Option<String>,
+
+    /// Space-separated OIDC scopes.
+    #[arg(long, default_value = "openid email profile groups")]
+    pub oidc_scopes: Option<String>,
 }
 
 /// MQTT broker connection options.
@@ -373,5 +410,86 @@ mod tests {
         let net = parse_proxy("192.168.1.1").unwrap();
         assert!(net.contains(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
         assert!(!net.contains(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))));
+    }
+
+    #[test]
+    fn oidc_bootstrap_not_set_by_default() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(args.oidc_bootstrap.oidc_issuer_url.is_none());
+        assert!(args.oidc_bootstrap.oidc_client_id.is_none());
+        assert!(args.oidc_bootstrap.oidc_client_secret.is_none());
+        assert_eq!(
+            args.oidc_bootstrap.oidc_provider_name.as_deref(),
+            Some("SSO")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_provider_slug.as_deref(),
+            Some("sso")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_scopes.as_deref(),
+            Some("openid email profile groups")
+        );
+    }
+
+    #[test]
+    fn oidc_bootstrap_custom_values() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--oidc-issuer-url",
+            "https://auth.example.com",
+            "--oidc-client-id",
+            "my-client",
+            "--oidc-client-secret",
+            "my-secret",
+            "--oidc-provider-name",
+            "My IdP",
+            "--oidc-provider-slug",
+            "my-idp",
+            "--oidc-scopes",
+            "openid email",
+        ])
+        .expect("should parse custom values");
+
+        assert_eq!(
+            args.oidc_bootstrap.oidc_issuer_url.as_deref(),
+            Some("https://auth.example.com")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_client_id.as_deref(),
+            Some("my-client")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_client_secret.as_deref(),
+            Some("my-secret")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_provider_name.as_deref(),
+            Some("My IdP")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_provider_slug.as_deref(),
+            Some("my-idp")
+        );
+        assert_eq!(
+            args.oidc_bootstrap.oidc_scopes.as_deref(),
+            Some("openid email")
+        );
+    }
+
+    #[test]
+    fn oidc_bootstrap_partial_requires_all_three() {
+        // Only issuer URL without client ID and secret should still parse
+        // (validation happens at runtime, not at CLI parse time)
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--oidc-issuer-url",
+            "https://auth.example.com",
+        ])
+        .expect("should parse with only issuer URL");
+        assert!(args.oidc_bootstrap.oidc_issuer_url.is_some());
+        assert!(args.oidc_bootstrap.oidc_client_id.is_none());
+        assert!(args.oidc_bootstrap.oidc_client_secret.is_none());
     }
 }
