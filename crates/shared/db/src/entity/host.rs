@@ -33,4 +33,14 @@ impl Related<super::agent::Entity> for Entity {
     }
 }
 
+impl Related<super::software_item::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::host_software_item::Relation::SoftwareItem.def()
+    }
+
+    fn via() -> Option<RelationDef> {
+        Some(super::host_software_item::Relation::Host.def().rev())
+    }
+}
+
 impl ActiveModelBehavior for ActiveModel {}

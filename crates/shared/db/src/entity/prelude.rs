@@ -6,6 +6,7 @@ pub use super::agent_host::{Entity as AgentHost, Model as AgentHostModel};
 pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::auth_method::AuthMethod;
 pub use super::host::{Entity as Host, Model as HostModel};
+pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::pending_account_link::{
     Entity as PendingAccountLink, Model as PendingAccountLinkModel,
@@ -23,6 +24,7 @@ pub use super::role::{Entity as Role, Model as RoleModel};
 pub use super::role_permission::{Entity as RolePermission, Model as RolePermissionModel};
 pub use super::session::{Entity as Session, Model as SessionModel};
 pub use super::setting::{Entity as Setting, Model as SettingModel};
+pub use super::software_item::{Entity as SoftwareItem, Model as SoftwareItemModel};
 pub use super::user::{Entity as User, Model as UserModel};
 pub use super::user_oidc_link::{Entity as UserOidcLink, Model as UserOidcLinkModel};
 pub use super::user_role::{Entity as UserRole, Model as UserRoleModel};
