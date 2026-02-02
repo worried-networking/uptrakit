@@ -48,7 +48,10 @@ impl GitHubProvider {
         }
 
         let client = reqwest::Client::builder()
-            .user_agent(concat!("uptrakit-provider-github/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                "uptrakit-provider-github/",
+                env!("CARGO_PKG_VERSION")
+            ))
             .default_headers(headers)
             .build()
             .map_err(|e| {
