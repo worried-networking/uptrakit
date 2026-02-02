@@ -828,6 +828,19 @@ Provider crates:
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 
+### Software discovery
+
+The `LocalProvider` trait includes an optional `discover_software()` method that allows providers to enumerate software they can manage on the local system. The method returns a `Vec<DiscoveredSoftware>`, where each entry contains:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `package_identifier` | `String` | Provider-specific identifier (maps to `SoftwareItem.package_identifier` in DB) |
+| `name` | `String` | Human-readable display name |
+| `installed_version` | `Option<Version>` | Currently installed version, if detected |
+| `extra` | `Option<serde_json::Value>` | Arbitrary provider-specific metadata (e.g., install path, detection method) |
+
+The default implementation returns an empty list. Providers that support discovery (e.g., Proxmox Helper-Scripts) override this method to scan the local system. When provider-specific configuration required for discovery is absent, implementations should return an empty list rather than an error.
+
 ### GitHub Releases provider (`uptrakit-provider-github`)
 
 Fetches release metadata from the GitHub API and converts it into `UpstreamRelease` values.

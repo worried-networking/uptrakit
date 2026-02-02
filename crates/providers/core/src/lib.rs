@@ -6,5 +6,5 @@ pub mod version;
 
 pub use error::{ProviderError, Result};
 pub use traits::{LocalProvider, RemoteProvider};
-pub use types::{ProviderType, ReleaseAsset, UpstreamRelease};
+pub use types::{DiscoveredSoftware, ProviderType, ReleaseAsset, UpstreamRelease};
 pub use version::Version;

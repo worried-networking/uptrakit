@@ -208,6 +208,7 @@ Providers define how software items are tracked and updated. Each provider split
 | --- | --- | --- |
 | Remote/upstream version | Controller | Fetch latest version metadata from upstream sources |
 | Local/installed version | Agent | Detect currently installed version on the host |
+| Software discovery | Agent | Enumerate software the provider can manage on the local system (optional, default returns empty list) |
 | Update execution | Agent | Run the update via sudo-allowlisted commands or custom scripts |
 
 ### Current providers
