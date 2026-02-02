@@ -26,10 +26,6 @@ pub trait LocalProvider: Send + Sync {
     /// Returns a list of discovered software with their identifiers and optionally
     /// detected installed versions. Providers that do not support discovery return
     /// an empty list via the default implementation.
-    ///
-    /// Discovery may require provider-specific configuration (e.g., a scan path).
-    /// When the necessary configuration is absent, implementations should return
-    /// an empty list rather than an error.
     fn discover_software(&self) -> impl Future<Output = Result<Vec<DiscoveredSoftware>>> + Send {
         std::future::ready(Ok(vec![]))
     }

@@ -839,7 +839,7 @@ The `LocalProvider` trait includes an optional `discover_software()` method that
 | `installed_version` | `Option<Version>` | Currently installed version, if detected |
 | `extra` | `Option<serde_json::Value>` | Arbitrary provider-specific metadata (e.g., install path, detection method) |
 
-The default implementation returns an empty list. Providers that support discovery (e.g., Proxmox Helper-Scripts) override this method to scan the local system. When provider-specific configuration required for discovery is absent, implementations should return an empty list rather than an error.
+The default implementation returns an empty list. Providers that support discovery (e.g., Proxmox Helper-Scripts) override this method to scan the local system.
 
 ### GitHub Releases provider (`uptrakit-provider-github`)
 
