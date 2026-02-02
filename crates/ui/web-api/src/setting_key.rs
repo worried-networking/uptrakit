@@ -6,6 +6,7 @@ use std::fmt;
 /// Use [`as_str`](SettingKey::as_str) for DB access and
 /// [`from_db_key`](SettingKey::from_db_key) to parse a raw DB key string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum SettingKey {
     RegistrationMode,
     RegistrationTokenHash,
@@ -30,30 +31,6 @@ pub enum SettingKey {
 }
 
 impl SettingKey {
-    /// Every known setting key, in definition order.
-    pub const ALL: &[SettingKey] = &[
-        Self::RegistrationMode,
-        Self::RegistrationTokenHash,
-        Self::PasswordAuthEnabled,
-        Self::AgentCertLifetimeDays,
-        Self::AgentCertRenewalWindowHours,
-        Self::TrustedProxies,
-        Self::RealIpHeader,
-        Self::ExtraSans,
-        Self::HttpsAddr,
-        Self::MqttHost,
-        Self::MqttPort,
-        Self::MqttClientId,
-        Self::MqttUsername,
-        Self::MqttPassword,
-        Self::MqttTopicPrefix,
-        Self::EnrollmentTokenHash,
-        Self::ForwardedClientCertInfoHeader,
-        Self::ForwardedClientCertPemHeader,
-        Self::BackendUrl,
-        Self::MultiTenancyEnabled,
-    ];
-
     /// The DB string representation of this key.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -133,11 +110,13 @@ impl fmt::Display for SettingKey {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use super::*;
 
     #[test]
     fn round_trip_all_variants() {
-        for &key in SettingKey::ALL {
+        for key in SettingKey::iter() {
             let s = key.as_str();
             let parsed = SettingKey::from_db_key(s);
             assert_eq!(parsed, Some(key), "round-trip failed for {s}");
@@ -152,15 +131,9 @@ mod tests {
 
     #[test]
     fn display_matches_as_str() {
-        for &key in SettingKey::ALL {
+        for key in SettingKey::iter() {
             assert_eq!(key.to_string(), key.as_str());
         }
-    }
-
-    #[test]
-    fn all_has_correct_count() {
-        // 20 variants defined in the enum
-        assert_eq!(SettingKey::ALL.len(), 20);
     }
 
     #[test]

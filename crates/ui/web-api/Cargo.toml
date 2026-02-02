@@ -63,3 +63,4 @@ aws-lc-rs = "1"
 tokio = { workspace = true }
 tower = { workspace = true }
 http-body-util = "0.1"
+strum = { version = "0.27", features = ["derive"] }
