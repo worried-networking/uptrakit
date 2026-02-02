@@ -700,9 +700,6 @@ mod tests {
             proxy_ip.is_some(),
             "ProxyIp should be present when request comes from a trusted proxy"
         );
-        assert_eq!(
-            proxy_ip.unwrap().0,
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
-        );
+        assert_eq!(proxy_ip.unwrap().0, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
     }
 }

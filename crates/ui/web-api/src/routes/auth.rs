@@ -444,7 +444,7 @@ pub async fn refresh(
 
 // Helper functions
 
-async fn assign_owner_role(
+pub async fn assign_owner_role(
     db: &DatabaseConnection,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
