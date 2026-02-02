@@ -17,12 +17,6 @@ pub enum SettingKey {
     RealIpHeader,
     ExtraSans,
     HttpsAddr,
-    MqttHost,
-    MqttPort,
-    MqttClientId,
-    MqttUsername,
-    MqttPassword,
-    MqttTopicPrefix,
     EnrollmentTokenHash,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
@@ -43,12 +37,6 @@ impl SettingKey {
             Self::RealIpHeader => "network.real_ip_header",
             Self::ExtraSans => "network.extra_sans",
             Self::HttpsAddr => "network.https_addr",
-            Self::MqttHost => "mqtt.host",
-            Self::MqttPort => "mqtt.port",
-            Self::MqttClientId => "mqtt.client_id",
-            Self::MqttUsername => "mqtt.username",
-            Self::MqttPassword => "mqtt.password",
-            Self::MqttTopicPrefix => "mqtt.topic_prefix",
             Self::EnrollmentTokenHash => "agent_enrollment.token_hash",
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
@@ -69,12 +57,6 @@ impl SettingKey {
             "network.real_ip_header" => Some(Self::RealIpHeader),
             "network.extra_sans" => Some(Self::ExtraSans),
             "network.https_addr" => Some(Self::HttpsAddr),
-            "mqtt.host" => Some(Self::MqttHost),
-            "mqtt.port" => Some(Self::MqttPort),
-            "mqtt.client_id" => Some(Self::MqttClientId),
-            "mqtt.username" => Some(Self::MqttUsername),
-            "mqtt.password" => Some(Self::MqttPassword),
-            "mqtt.topic_prefix" => Some(Self::MqttTopicPrefix),
             "agent_enrollment.token_hash" => Some(Self::EnrollmentTokenHash),
             "network.forwarded_client_cert_info_header" => {
                 Some(Self::ForwardedClientCertInfoHeader)
@@ -148,7 +130,6 @@ mod tests {
         assert!(SettingKey::MultiTenancyEnabled.is_global());
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());
-        assert!(!SettingKey::MqttHost.is_global());
         assert!(!SettingKey::EnrollmentTokenHash.is_global());
     }
 }

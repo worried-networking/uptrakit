@@ -18,6 +18,7 @@ mod m20260131_000012_create_pending_auth_stores;
 mod m20260201_000013_create_hosts;
 mod m20260201_000014_create_provider_configs;
 mod m20260201_000015_create_software_items;
+mod m20260202_000016_create_mqtt_clients;
 
 pub struct Migrator;
 
@@ -40,6 +41,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260201_000013_create_hosts::Migration),
             Box::new(m20260201_000014_create_provider_configs::Migration),
             Box::new(m20260201_000015_create_software_items::Migration),
+            Box::new(m20260202_000016_create_mqtt_clients::Migration),
         ]
     }
 }

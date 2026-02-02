@@ -18,9 +18,6 @@ const DEFAULT_RENEWAL_WINDOW_HOURS: u16 = 6;
 /// Default listen addresses used when neither CLI nor DB provides a value.
 pub const DEFAULT_HTTPS_ADDR: &str = "[::]:8443";
 pub const DEFAULT_REAL_IP_HEADER: &str = "X-Forwarded-For";
-pub const DEFAULT_MQTT_PORT: u16 = 1883;
-pub const DEFAULT_MQTT_CLIENT_ID: &str = "uptrakit-controller";
-pub const DEFAULT_MQTT_TOPIC_PREFIX: &str = "uptrakit";
 
 fn warn_unrecognised_keys(raw: &RawSettings) {
     for key in raw.keys() {
@@ -60,17 +57,6 @@ impl Default for NetworkSettings {
     }
 }
 
-/// MQTT broker settings persisted in the DB. All changes require a restart.
-#[derive(Clone, Debug, Default)]
-pub struct MqttSettings {
-    pub host: Option<String>,
-    pub port: u16,
-    pub client_id: String,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub topic_prefix: String,
-}
-
 #[derive(Clone)]
 pub struct Settings {
     inner: Arc<Inner>,
@@ -82,7 +68,6 @@ struct Inner {
     agent_cert_lifetime_days: RwLock<u16>,
     renewal_window_hours: RwLock<u16>,
     network: RwLock<NetworkSettings>,
-    mqtt: RwLock<MqttSettings>,
 }
 
 impl Settings {
@@ -108,12 +93,6 @@ impl Settings {
                 agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
                 renewal_window_hours: RwLock::new(renewal_window_hours),
                 network: RwLock::new(NetworkSettings::default()),
-                mqtt: RwLock::new(MqttSettings {
-                    port: DEFAULT_MQTT_PORT,
-                    client_id: DEFAULT_MQTT_CLIENT_ID.to_string(),
-                    topic_prefix: DEFAULT_MQTT_TOPIC_PREFIX.to_string(),
-                    ..Default::default()
-                }),
             }),
         }
     }
@@ -144,7 +123,6 @@ impl Settings {
             .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
 
         let network = Self::load_network_settings(&raw);
-        let mqtt = Self::load_mqtt_settings(&raw);
 
         let settings = Self {
             inner: Arc::new(Inner {
@@ -153,7 +131,6 @@ impl Settings {
                 agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
                 renewal_window_hours: RwLock::new(renewal_window_hours),
                 network: RwLock::new(network),
-                mqtt: RwLock::new(mqtt),
             }),
         };
 
@@ -224,46 +201,6 @@ impl Settings {
             forwarded_client_cert_info_header,
             forwarded_client_cert_pem_header,
             pki_addr,
-        }
-    }
-
-    fn load_mqtt_settings(raw: &RawSettings) -> MqttSettings {
-        let host = raw
-            .get_setting(SettingKey::MqttHost)
-            .and_then(|v| v.as_str().map(String::from));
-
-        let port = raw
-            .get_setting(SettingKey::MqttPort)
-            .and_then(|v| v.as_u64()?.try_into().ok())
-            .unwrap_or(DEFAULT_MQTT_PORT);
-
-        let client_id = raw
-            .get_setting(SettingKey::MqttClientId)
-            .and_then(|v| v.as_str())
-            .unwrap_or(DEFAULT_MQTT_CLIENT_ID)
-            .to_string();
-
-        let username = raw
-            .get_setting(SettingKey::MqttUsername)
-            .and_then(|v| v.as_str().map(String::from));
-
-        let password = raw
-            .get_setting(SettingKey::MqttPassword)
-            .and_then(|v| v.as_str().map(String::from));
-
-        let topic_prefix = raw
-            .get_setting(SettingKey::MqttTopicPrefix)
-            .and_then(|v| v.as_str())
-            .unwrap_or(DEFAULT_MQTT_TOPIC_PREFIX)
-            .to_string();
-
-        MqttSettings {
-            host,
-            port,
-            client_id,
-            username,
-            password,
-            topic_prefix,
         }
     }
 
@@ -411,17 +348,5 @@ impl Settings {
     /// Update the backend URL.
     pub async fn set_pki_addr(&self, url: Option<String>) {
         self.inner.network.write().await.pki_addr = url;
-    }
-
-    // --- MQTT settings ---
-
-    /// Read the full MQTT settings snapshot.
-    pub async fn mqtt(&self) -> MqttSettings {
-        self.inner.mqtt.read().await.clone()
-    }
-
-    /// Replace all MQTT settings.
-    pub async fn set_mqtt(&self, mqtt: MqttSettings) {
-        *self.inner.mqtt.write().await = mqtt;
     }
 }

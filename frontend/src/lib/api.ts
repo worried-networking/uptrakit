@@ -10,7 +10,8 @@ import type {
 	HostResponse,
 	LoginRequest,
 	MessageResponse,
-	MqttSettingsResponse,
+	MqttClientResponse,
+	CreateMqttClient,
 	NetworkSettings,
 	OidcLinkRequest,
 	OidcProviderResponse,
@@ -22,7 +23,7 @@ import type {
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
 	UpdateHostRequest,
-	UpdateMqttSettings,
+	UpdateMqttClient,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdateRegistrationSettings,
@@ -253,14 +254,22 @@ export function updateNetworkSettings(data: UpdateNetworkSettings): Promise<Netw
 	return request('/settings/network', { method: 'PUT', body: JSON.stringify(data) });
 }
 
-// --- MQTT Settings APIs ---
+// --- MQTT Client APIs ---
 
-export function getMqttSettings(): Promise<MqttSettingsResponse> {
+export function getMqttClient(): Promise<MqttClientResponse> {
 	return request('/settings/mqtt');
 }
 
-export function updateMqttSettings(data: UpdateMqttSettings): Promise<MqttSettingsResponse> {
+export function createMqttClient(data: CreateMqttClient): Promise<MqttClientResponse> {
+	return request('/settings/mqtt', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export function updateMqttClient(data: UpdateMqttClient): Promise<MqttClientResponse> {
 	return request('/settings/mqtt', { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export function deleteMqttClient(): Promise<void> {
+	return request('/settings/mqtt', { method: 'DELETE' });
 }
 
 // --- OIDC Provider APIs ---

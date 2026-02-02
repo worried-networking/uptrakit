@@ -1,8 +1,8 @@
 use crate::AppState;
-use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::settings_store::upsert_setting;
+use crate::middleware::tenant_context::TenantContext;
+use crate::mqtt_client_store;
 use axum::{
     Extension, Json,
     extract::State,
@@ -10,15 +10,46 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uptrakit_shared_db::entity::mqtt_client;
+use uptrakit_web_api_types::mqtt_transport::MqttTransport;
+use uptrakit_web_api_types::mqtt_url::MqttUrl;
 
-pub use uptrakit_web_api_types::settings_mqtt::{MqttSettingsResponse, UpdateMqttSettingsRequest};
+pub use uptrakit_web_api_types::settings_mqtt::{
+    CreateMqttClientRequest, MqttClientResponse, UpdateMqttClientRequest,
+};
 
-/// Get MQTT settings
+fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
+    let transport = MqttTransport::parse(&model.transport).unwrap_or_default();
+    let port = u16::try_from(model.port).unwrap_or(transport.default_port());
+    let url = uptrakit_web_api_types::mqtt_url::build_url(
+        transport,
+        &model.host,
+        port,
+        model.path.as_deref(),
+    );
+
+    MqttClientResponse {
+        id: model.id.to_string(),
+        enabled: model.enabled,
+        transport,
+        host: model.host.clone(),
+        port,
+        path: model.path.clone(),
+        url,
+        client_id: model.client_id.clone(),
+        username: model.username.clone(),
+        has_password: model.password.is_some(),
+        topic_prefix: model.topic_prefix.clone(),
+    }
+}
+
+/// Get MQTT client configuration
 #[utoipa::path(
     get,
     path = "/api/v1/settings/mqtt",
     responses(
-        (status = 200, description = "MQTT settings", body = MqttSettingsResponse),
+        (status = 200, description = "MQTT client configuration", body = MqttClientResponse),
+        (status = 404, description = "No MQTT client configured"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
@@ -28,33 +59,123 @@ pub use uptrakit_web_api_types::settings_mqtt::{MqttSettingsResponse, UpdateMqtt
 pub async fn get_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
+    tenant: TenantContext,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let mqtt = state.settings.mqtt().await;
-    let response = MqttSettingsResponse {
-        host: mqtt.host,
-        port: mqtt.port,
-        client_id: mqtt.client_id,
-        username: mqtt.username,
-        has_password: mqtt.password.is_some(),
-        topic_prefix: mqtt.topic_prefix,
-    };
-    (StatusCode::OK, Json(response)).into_response()
+    let tenant_id = tenant.tenant_id;
+    match mqtt_client_store::load_mqtt_client(&state.db, tenant_id).await {
+        Ok(Some(model)) => (StatusCode::OK, Json(model_to_response(&model))).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load MQTT client: {e:?}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
-/// Update MQTT settings
+/// Create MQTT client configuration
+#[utoipa::path(
+    post,
+    path = "/api/v1/settings/mqtt",
+    request_body = CreateMqttClientRequest,
+    responses(
+        (status = 201, description = "MQTT client created", body = MqttClientResponse),
+        (status = 400, description = "Invalid values"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 409, description = "MQTT client already exists")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn create_mqtt_settings(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    tenant: TenantContext,
+    Json(req): Json<CreateMqttClientRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let tenant_id = tenant.tenant_id;
+
+    // Resolve connection parameters from URL or individual fields
+    let (transport, host, port, path) = if let Some(ref url_str) = req.url {
+        match MqttUrl::parse(url_str) {
+            Ok(parsed) => (parsed.transport, parsed.host, parsed.port, parsed.path),
+            Err(e) => {
+                return (StatusCode::BAD_REQUEST, format!("invalid url: {e}")).into_response();
+            }
+        }
+    } else {
+        let host = match req.host {
+            Some(ref h) if !h.is_empty() => h.clone(),
+            _ => {
+                return (StatusCode::BAD_REQUEST, "host is required (or provide url)")
+                    .into_response();
+            }
+        };
+        let transport = req.transport.unwrap_or_default();
+        let port = req.port.unwrap_or(transport.default_port());
+        (transport, host, port, req.path.clone())
+    };
+
+    let enabled = req.enabled.unwrap_or(true);
+    let client_id = req.client_id.as_deref().unwrap_or("uptrakit-controller");
+    let topic_prefix = req.topic_prefix.as_deref().unwrap_or("uptrakit");
+
+    if client_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, "client_id must not be empty").into_response();
+    }
+    if topic_prefix.is_empty() {
+        return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
+    }
+
+    match mqtt_client_store::create_mqtt_client(
+        &state.db,
+        tenant_id,
+        enabled,
+        transport.as_str(),
+        &host,
+        port,
+        path.as_deref(),
+        client_id,
+        req.username.as_deref(),
+        req.password.as_deref(),
+        topic_prefix,
+    )
+    .await
+    {
+        Ok(model) => (StatusCode::CREATED, Json(model_to_response(&model))).into_response(),
+        Err(e) => {
+            if let mqtt_client_store::MqttClientError::AlreadyExists = e.current_context() {
+                return (
+                    StatusCode::CONFLICT,
+                    "MQTT client already exists for this tenant",
+                )
+                    .into_response();
+            }
+            tracing::error!("Failed to create MQTT client: {e:?}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Update MQTT client configuration
 #[utoipa::path(
     put,
     path = "/api/v1/settings/mqtt",
-    request_body = UpdateMqttSettingsRequest,
+    request_body = UpdateMqttClientRequest,
     responses(
-        (status = 200, description = "Settings updated", body = MqttSettingsResponse),
+        (status = 200, description = "Settings updated", body = MqttClientResponse),
         (status = 400, description = "Invalid values"),
         (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized")
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "No MQTT client configured")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
@@ -62,201 +183,153 @@ pub async fn get_mqtt_settings(
 pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-    Json(req): Json<UpdateMqttSettingsRequest>,
+    tenant: TenantContext,
+    Json(req): Json<UpdateMqttClientRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let mut mqtt = state.settings.mqtt().await;
+    let tenant_id = tenant.tenant_id;
+    let existing = match mqtt_client_store::load_mqtt_client(&state.db, tenant_id).await {
+        Ok(Some(model)) => model,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load MQTT client: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-    // host: JSON value can be string or null
-    if let Some(ref host_val) = req.host {
-        if host_val.is_null() {
-            mqtt.host = None;
-            if let Err(e) = upsert_setting(
-                &state.db,
-                state.default_tenant_id,
-                SettingKey::MqttHost,
-                serde_json::Value::Null,
-            )
-            .await
-            {
-                tracing::error!("Failed to save mqtt.host: {e:?}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    // Resolve URL-based overrides
+    let (url_transport, url_host, url_port, url_path) = if let Some(ref url_str) = req.url {
+        match MqttUrl::parse(url_str) {
+            Ok(parsed) => (
+                Some(parsed.transport),
+                Some(parsed.host),
+                Some(parsed.port),
+                Some(parsed.path),
+            ),
+            Err(e) => {
+                return (StatusCode::BAD_REQUEST, format!("invalid url: {e}")).into_response();
             }
-        } else if let Some(s) = host_val.as_str() {
+        }
+    } else {
+        (None, None, None, None)
+    };
+
+    let transport = url_transport
+        .or(req.transport)
+        .map(|t| t.as_str().to_string());
+    let host = url_host.or(req.host.clone());
+    let port = url_port.or(req.port);
+
+    // Path: from URL parsing, from req.path JSON value, or unchanged
+    let path: Option<Option<&str>> = if let Some(ref p) = url_path {
+        Some(p.as_deref())
+    } else if let Some(ref path_val) = req.path {
+        if path_val.is_null() {
+            Some(None)
+        } else if let Some(s) = path_val.as_str() {
             if s.is_empty() {
-                mqtt.host = None;
-                if let Err(e) = upsert_setting(
-                    &state.db,
-                    state.default_tenant_id,
-                    SettingKey::MqttHost,
-                    serde_json::Value::Null,
-                )
-                .await
-                {
-                    tracing::error!("Failed to save mqtt.host: {e:?}");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                }
+                Some(None)
             } else {
-                mqtt.host = Some(s.to_string());
-                if let Err(e) = upsert_setting(
-                    &state.db,
-                    state.default_tenant_id,
-                    SettingKey::MqttHost,
-                    serde_json::json!(s),
-                )
-                .await
-                {
-                    tracing::error!("Failed to save mqtt.host: {e:?}");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                }
+                Some(Some(s))
             }
         } else {
-            return (StatusCode::BAD_REQUEST, "host must be a string or null").into_response();
+            return (StatusCode::BAD_REQUEST, "path must be a string or null").into_response();
         }
-    }
+    } else {
+        None
+    };
 
-    if let Some(port) = req.port {
-        mqtt.port = port;
-        if let Err(e) = upsert_setting(
-            &state.db,
-            state.default_tenant_id,
-            SettingKey::MqttPort,
-            serde_json::json!(port),
-        )
-        .await
-        {
-            tracing::error!("Failed to save mqtt.port: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
-
-    if let Some(ref client_id) = req.client_id {
-        if client_id.is_empty() {
-            return (StatusCode::BAD_REQUEST, "client_id must not be empty").into_response();
-        }
-        mqtt.client_id = client_id.clone();
-        if let Err(e) = upsert_setting(
-            &state.db,
-            state.default_tenant_id,
-            SettingKey::MqttClientId,
-            serde_json::json!(client_id),
-        )
-        .await
-        {
-            tracing::error!("Failed to save mqtt.client_id: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
-
-    // username: JSON value can be string or null
-    if let Some(ref username_val) = req.username {
+    // Username: JSON value can be string or null
+    let username: Option<Option<&str>> = if let Some(ref username_val) = req.username {
         if username_val.is_null() {
-            mqtt.username = None;
-            if let Err(e) = upsert_setting(
-                &state.db,
-                state.default_tenant_id,
-                SettingKey::MqttUsername,
-                serde_json::Value::Null,
-            )
-            .await
-            {
-                tracing::error!("Failed to save mqtt.username: {e:?}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
+            Some(None)
         } else if let Some(s) = username_val.as_str() {
             if s.is_empty() {
-                mqtt.username = None;
-                if let Err(e) = upsert_setting(
-                    &state.db,
-                    state.default_tenant_id,
-                    SettingKey::MqttUsername,
-                    serde_json::Value::Null,
-                )
-                .await
-                {
-                    tracing::error!("Failed to save mqtt.username: {e:?}");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                }
+                Some(None)
             } else {
-                mqtt.username = Some(s.to_string());
-                if let Err(e) = upsert_setting(
-                    &state.db,
-                    state.default_tenant_id,
-                    SettingKey::MqttUsername,
-                    serde_json::json!(s),
-                )
-                .await
-                {
-                    tracing::error!("Failed to save mqtt.username: {e:?}");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                }
+                Some(Some(s))
             }
         } else {
             return (StatusCode::BAD_REQUEST, "username must be a string or null").into_response();
         }
-    }
-
-    // password: omitted = keep existing; empty string = clear; non-empty = set
-    if let Some(ref password) = req.password {
-        if password.is_empty() {
-            mqtt.password = None;
-            if let Err(e) = upsert_setting(
-                &state.db,
-                state.default_tenant_id,
-                SettingKey::MqttPassword,
-                serde_json::Value::Null,
-            )
-            .await
-            {
-                tracing::error!("Failed to save mqtt.password: {e:?}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        } else {
-            mqtt.password = Some(password.clone());
-            if let Err(e) = upsert_setting(
-                &state.db,
-                state.default_tenant_id,
-                SettingKey::MqttPassword,
-                serde_json::json!(password),
-            )
-            .await
-            {
-                tracing::error!("Failed to save mqtt.password: {e:?}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        }
-    }
-
-    if let Some(ref topic_prefix) = req.topic_prefix {
-        if topic_prefix.is_empty() {
-            return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
-        }
-        mqtt.topic_prefix = topic_prefix.clone();
-        if let Err(e) = upsert_setting(
-            &state.db,
-            state.default_tenant_id,
-            SettingKey::MqttTopicPrefix,
-            serde_json::json!(topic_prefix),
-        )
-        .await
-        {
-            tracing::error!("Failed to save mqtt.topic_prefix: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    }
-
-    state.settings.set_mqtt(mqtt.clone()).await;
-
-    let response = MqttSettingsResponse {
-        host: mqtt.host,
-        port: mqtt.port,
-        client_id: mqtt.client_id,
-        username: mqtt.username,
-        has_password: mqtt.password.is_some(),
-        topic_prefix: mqtt.topic_prefix,
+    } else {
+        None
     };
-    (StatusCode::OK, Json(response)).into_response()
+
+    // Password: omitted = keep existing; empty string = clear; non-empty = set
+    let password: Option<Option<&str>> = req
+        .password
+        .as_ref()
+        .map(|p| if p.is_empty() { None } else { Some(p.as_str()) });
+
+    if let Some(ref cid) = req.client_id
+        && cid.is_empty()
+    {
+        return (StatusCode::BAD_REQUEST, "client_id must not be empty").into_response();
+    }
+    if let Some(ref tp) = req.topic_prefix
+        && tp.is_empty()
+    {
+        return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
+    }
+
+    match mqtt_client_store::update_mqtt_client(
+        &state.db,
+        existing,
+        req.enabled,
+        transport.as_deref(),
+        host.as_deref(),
+        port,
+        path,
+        req.client_id.as_deref(),
+        username,
+        password,
+        req.topic_prefix.as_deref(),
+    )
+    .await
+    {
+        Ok(model) => (StatusCode::OK, Json(model_to_response(&model))).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to update MQTT client: {e:?}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Delete MQTT client configuration
+#[utoipa::path(
+    delete,
+    path = "/api/v1/settings/mqtt",
+    responses(
+        (status = 204, description = "MQTT client deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "No MQTT client configured")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn delete_mqtt_settings(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    tenant: TenantContext,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let tenant_id = tenant.tenant_id;
+    match mqtt_client_store::delete_mqtt_client(&state.db, tenant_id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            if let mqtt_client_store::MqttClientError::NotFound = e.current_context() {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+            tracing::error!("Failed to delete MQTT client: {e:?}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }

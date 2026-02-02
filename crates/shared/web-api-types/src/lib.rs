@@ -3,6 +3,8 @@ pub mod api_tokens;
 pub mod auth;
 pub mod device_auth;
 pub mod hosts;
+pub mod mqtt_transport;
+pub mod mqtt_url;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod permissions;

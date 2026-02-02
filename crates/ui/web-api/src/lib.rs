@@ -3,6 +3,7 @@ pub mod auth;
 pub mod cert_signer;
 pub mod extract;
 pub mod middleware;
+pub mod mqtt_client_store;
 pub mod ocsp;
 pub mod pki_utils;
 pub mod routes;
@@ -62,7 +63,7 @@ pub struct AppState {
     pub ca_snapshot: CaSnapshotReceiver,
     /// Database connection pool.
     pub db: DatabaseConnection,
-    /// Application settings catalogue (includes network/MQTT settings).
+    /// Application settings catalogue (includes network settings).
     pub settings: Settings,
     /// Agent certificate signer for mTLS enrollment.
     pub cert_signer: Arc<dyn cert_signer::AgentCertSigner>,
@@ -148,7 +149,9 @@ pub struct AppState {
         routes::settings_network::get_network_settings,
         routes::settings_network::update_network_settings,
         routes::settings_mqtt::get_mqtt_settings,
+        routes::settings_mqtt::create_mqtt_settings,
         routes::settings_mqtt::update_mqtt_settings,
+        routes::settings_mqtt::delete_mqtt_settings,
         routes::hosts::list_hosts,
         routes::hosts::get_host,
         routes::hosts::update_host,
@@ -212,8 +215,10 @@ pub struct AppState {
             routes::device_auth::DeviceAuthApproveResponse,
             routes::settings_network::NetworkSettingsResponse,
             routes::settings_network::UpdateNetworkSettingsRequest,
-            routes::settings_mqtt::MqttSettingsResponse,
-            routes::settings_mqtt::UpdateMqttSettingsRequest,
+            routes::settings_mqtt::MqttClientResponse,
+            routes::settings_mqtt::CreateMqttClientRequest,
+            routes::settings_mqtt::UpdateMqttClientRequest,
+            uptrakit_web_api_types::mqtt_transport::MqttTransport,
             routes::hosts::HostResponse,
             routes::hosts::HostAgentSummary,
             routes::hosts::UpdateHostRequest,
@@ -338,7 +343,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(
             routes::settings_mqtt::get_mqtt_settings,
-            routes::settings_mqtt::update_mqtt_settings
+            routes::settings_mqtt::create_mqtt_settings,
+            routes::settings_mqtt::update_mqtt_settings,
+            routes::settings_mqtt::delete_mqtt_settings
         ))
         .routes(routes!(routes::device_auth::device_auth_approve))
         .routes(routes!(routes::settings_ca::rotate_ca))

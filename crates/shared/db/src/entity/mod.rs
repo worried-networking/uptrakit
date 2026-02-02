@@ -6,6 +6,7 @@ pub mod auth_method;
 pub mod available_version;
 pub mod host;
 pub mod host_software_item;
+pub mod mqtt_client;
 pub mod oidc_provider;
 pub mod pending_account_link;
 pub mod pending_device_flow;

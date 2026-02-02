@@ -134,7 +134,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
 | Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, PKI address: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
-| MQTT | `mqtt.*` | No (all require restart) | `GET/PUT /api/v1/settings/mqtt` |
+| MQTT | Dedicated `mqtt_clients` table | Yes (via API); restart required for active connection | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
 | Agent certificates | `agent_certificates.*` | Yes | `GET/PUT /api/v1/settings/agent-certificates` |
@@ -180,9 +180,9 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 24 entities in `crates/shared/db/src/entity/`:
+The data model comprises 25 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
 
@@ -194,7 +194,7 @@ The `software_item` entity represents a trackable piece of software linked to a 
 
 ### Multi-tenancy
 
-The database supports multi-tenancy via a `tenants` table and `tenant_id` foreign keys on scoped tables (`agents`, `hosts`, `provider_configs`, `software_items`, `oidc_providers`, `user_roles`, `settings`). A seeded default tenant is used in single-tenant mode. Global tables (`users`, `roles`, `permissions`, `sessions`, `api_tokens`, `pending_*`, junction tables) remain unscoped. The `TenantContext` Axum extractor resolves the active tenant from the `X-Tenant-Id` header or falls back to the default tenant. See [AGENTS.md](AGENTS.md) section "Multi-tenancy" for details.
+The database supports multi-tenancy via a `tenants` table and `tenant_id` foreign keys on scoped tables (`agents`, `hosts`, `provider_configs`, `software_items`, `oidc_providers`, `user_roles`, `settings`, `mqtt_clients`). A seeded default tenant is used in single-tenant mode. Global tables (`users`, `roles`, `permissions`, `sessions`, `api_tokens`, `pending_*`, junction tables) remain unscoped. The `TenantContext` Axum extractor resolves the active tenant from the `X-Tenant-Id` header or falls back to the default tenant. See [AGENTS.md](AGENTS.md) section "Multi-tenancy" for details.
 
 ### Migrations
 
@@ -246,6 +246,8 @@ The Web UI is a SvelteKit single-page application using the static adapter (no S
 ## MQTT / Home Assistant Integration
 
 Each tracked software item is published as a Home Assistant `update` entity via MQTT auto-discovery (`crates/ui/mqtt/`). Entity attributes include installed version, latest version, changelog URL, release link, and more.
+
+The MQTT client supports four transport types: plain TCP (`mqtt://`), TLS (`mqtts://`), WebSocket (`ws://`), and secure WebSocket (`wss://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API or CLI `--mqtt-url` flag. See [AGENTS.md](AGENTS.md) section "MQTT client configuration" for schema and CLI details.
 
 Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all paths converge on the same controller API.
 

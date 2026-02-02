@@ -200,7 +200,7 @@ These are non-negotiable design constraints. Do not violate them.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
-12. **Do not add any `allow()`** without excpicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`) and `run_authenticated_loop` in the agent (gained `pki_addr` parameter).
+12. **Do not add any `allow()`** without excpicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`), `run_authenticated_loop` in the agent (gained `pki_addr` parameter), and `create_mqtt_client`/`update_mqtt_client` in `mqtt_client_store` (many connection parameters).
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
 ## CLI output formatting
@@ -327,6 +327,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 | `oidc_providers` | `slug` unique → `(tenant_id, slug)` |
 | `user_roles` | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)` |
 | `settings` | PK `(key)` → `(tenant_id, key)` |
+| `mqtt_clients` | UNIQUE on `tenant_id` (single client per tenant) |
 
 ### Tables NOT changed (remain global)
 
@@ -383,12 +384,6 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | `null` | Yes |
 | `--pki-addr` | `network.pki_addr` | `null` | Yes (requires CA rotation) |
 | `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
-| `--mqtt-host` | `mqtt.host` | `null` | No (restart) |
-| `--mqtt-port` | `mqtt.port` | `1883` | No (restart) |
-| `--mqtt-client-id` | `mqtt.client_id` | `uptrakit-controller` | No (restart) |
-| `--mqtt-username` | `mqtt.username` | `null` | No (restart) |
-| `--mqtt-password` | `mqtt.password` | `null` | No (restart) |
-| `--mqtt-topic-prefix` | `mqtt.topic_prefix` | `uptrakit` | No (restart) |
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
 
@@ -438,7 +433,7 @@ For each DB-managed setting at startup:
 
 ### In-memory settings
 
-The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettings` and `MqttSettings` behind `RwLock`s. Runtime-changeable fields (proxies, header, SANs) are updated in-memory immediately when changed via the API. Restart-required fields (addresses, MQTT) are saved to DB only.
+The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettings` behind a `RwLock`. Runtime-changeable fields (proxies, header, SANs) are updated in-memory immediately when changed via the API. Restart-required fields (addresses) are saved to DB only.
 
 ### Settings API endpoints
 
@@ -446,8 +441,10 @@ The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettin
 | --- | --- | --- |
 | `GET /api/v1/settings/network` | ManageGlobalSettings | Read network settings |
 | `PUT /api/v1/settings/network` | ManageGlobalSettings | Update network settings (includes `pki_addr`) |
-| `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT settings |
-| `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT settings |
+| `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT client configuration |
+| `POST /api/v1/settings/mqtt` | ManageSettings | Create MQTT client configuration |
+| `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT client configuration |
+| `DELETE /api/v1/settings/mqtt` | ManageSettings | Delete MQTT client configuration |
 | `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
 | `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
 | `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
@@ -462,6 +459,67 @@ The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettin
 | `GET /api/v1/pki/ocsp/{encoded}` | OCSP responder (base64-encoded request in URL path) |
 
 MQTT password is never exposed in API responses; a `has_password: bool` field indicates whether one is set.
+
+### MQTT client configuration
+
+MQTT settings are stored in a dedicated `mqtt_clients` table (one row per tenant) rather than in the key-value `settings` table. The table stores connection components; the URL is a computed presentation field.
+
+**Table schema (`mqtt_clients`):**
+
+| Column | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `id` | UUID PK | `Uuid::now_v7()` | |
+| `tenant_id` | UUID FK → tenants | | UNIQUE (single client per tenant) |
+| `enabled` | bool | `true` | |
+| `transport` | text | `tcp` | `tcp`, `tls`, `ws`, `wss` |
+| `host` | text | | Broker hostname |
+| `port` | integer | 1883 | |
+| `path` | text? | | WebSocket path (e.g. `/mqtt`) |
+| `client_id` | text | `uptrakit-controller` | |
+| `username` | text? | | |
+| `password` | text? | | |
+| `topic_prefix` | text | `uptrakit` | |
+| `created_at` | timestamptz | | |
+| `updated_at` | timestamptz | | |
+
+**MQTT URL scheme:**
+
+| URL example | Transport | Default port |
+| --- | --- | --- |
+| `mqtt://broker:1883` | tcp | 1883 |
+| `mqtts://broker:8883` | tls | 8883 |
+| `ws://broker:80/mqtt` | ws | 80 |
+| `wss://broker:443/mqtt` | wss | 443 |
+
+The API accepts either a `url` field (parsed into components) or individual `transport`/`host`/`port`/`path` fields. The response always includes the computed `url`.
+
+**CLI flags (bootstrap only, not DB-managed settings):**
+
+| Flag | Purpose |
+| --- | --- |
+| `--mqtt-url` | MQTT broker URL (e.g. `mqtt://broker:1883`, `wss://broker/mqtt`) |
+| `--mqtt-client-id` | MQTT client ID (default: `uptrakit-controller`) |
+| `--mqtt-username` | MQTT username |
+| `--mqtt-password` | MQTT password |
+| `--mqtt-topic-prefix` | MQTT topic prefix (default: `uptrakit`) |
+
+At startup, the controller reconciles CLI flags with the `mqtt_clients` DB row:
+- If `--mqtt-url` is provided and no DB row exists: creates a new row.
+- If `--mqtt-url` is provided and a DB row exists with `--force-settings-override`: updates the row.
+- If `--mqtt-url` is provided and a DB row exists without force: logs a warning, uses DB row.
+- If no `--mqtt-url` and no DB row: MQTT is disabled.
+
+**Key files:**
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls/Ws/Wss) |
+| `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
+| `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
+| `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity |
+| `crates/ui/web-api/src/mqtt_client_store.rs` | CRUD store |
+| `crates/ui/web-api/src/routes/settings_mqtt.rs` | API route handlers |
+| `crates/ui/mqtt/src/lib.rs` | MQTT client with transport support |
 
 ## Error handling
 

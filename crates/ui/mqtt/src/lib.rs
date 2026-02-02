@@ -2,15 +2,20 @@ use std::fmt;
 use std::time::Duration;
 
 use rootcause::{Report, ReportConversion, markers, prelude::*};
-use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS};
+use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, Transport};
 use thiserror::Error;
+use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 
 /// Configuration for connecting to an MQTT broker.
 pub struct MqttConfig {
+    /// Transport protocol.
+    pub transport: MqttTransport,
     /// Broker hostname.
     pub host: String,
     /// Broker port.
     pub port: u16,
+    /// WebSocket path (e.g. "/mqtt"), used for ws/wss transports.
+    pub path: Option<String>,
     /// MQTT client ID.
     pub client_id: String,
     /// Optional username for authentication.
@@ -24,8 +29,10 @@ pub struct MqttConfig {
 impl fmt::Debug for MqttConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MqttConfig")
+            .field("transport", &self.transport)
             .field("host", &self.host)
             .field("port", &self.port)
+            .field("path", &self.path)
             .field("client_id", &self.client_id)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
@@ -110,7 +117,16 @@ fn status_topic(prefix: &str) -> String {
 }
 
 fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
-    let mut opts = MqttOptions::new(&config.client_id, &config.host, config.port);
+    // For WebSocket transports, the host field carries the full URL
+    let host = match config.transport {
+        MqttTransport::Ws => build_ws_url("ws", &config.host, config.port, config.path.as_deref()),
+        MqttTransport::Wss => {
+            build_ws_url("wss", &config.host, config.port, config.path.as_deref())
+        }
+        _ => config.host.clone(),
+    };
+
+    let mut opts = MqttOptions::new(&config.client_id, &host, config.port);
     opts.set_keep_alive(Duration::from_secs(30));
     opts.set_clean_session(true);
 
@@ -126,7 +142,36 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
         opts.set_credentials(username, password.as_deref().unwrap_or(""));
     }
 
+    match config.transport {
+        MqttTransport::Tcp => {}
+        MqttTransport::Tls => {
+            let tls_config = rumqttc::TlsConfiguration::Simple {
+                ca: Vec::new(),
+                alpn: None,
+                client_auth: None,
+            };
+            opts.set_transport(Transport::Tls(tls_config));
+        }
+        MqttTransport::Ws => {
+            opts.set_transport(Transport::Ws);
+        }
+        MqttTransport::Wss => {
+            let tls_config = rumqttc::TlsConfiguration::Simple {
+                ca: Vec::new(),
+                alpn: None,
+                client_auth: None,
+            };
+            opts.set_transport(Transport::Wss(tls_config));
+        }
+    }
+
     opts
+}
+
+/// Build a WebSocket URL from components.
+fn build_ws_url(scheme: &str, host: &str, port: u16, path: Option<&str>) -> String {
+    let path = path.unwrap_or("/mqtt");
+    format!("{scheme}://{host}:{port}{path}")
 }
 
 async fn run_event_loop(mut event_loop: EventLoop, client: AsyncClient, topic: String) {
@@ -154,18 +199,22 @@ async fn run_event_loop(mut event_loop: EventLoop, client: AsyncClient, topic: S
 mod tests {
     use super::*;
 
-    #[test]
-    fn mqtt_options_sets_last_will() {
-        let config = MqttConfig {
+    fn tcp_config() -> MqttConfig {
+        MqttConfig {
+            transport: MqttTransport::Tcp,
             host: "localhost".into(),
             port: 1883,
+            path: None,
             client_id: "test".into(),
             username: None,
             password: None,
             topic_prefix: "myprefix".into(),
-        };
+        }
+    }
 
-        let opts = build_mqtt_options(&config);
+    #[test]
+    fn mqtt_options_sets_last_will() {
+        let opts = build_mqtt_options(&tcp_config());
         let lwt = opts.last_will().expect("LWT should be set");
 
         assert_eq!(lwt.topic, "myprefix/status");
@@ -176,12 +225,9 @@ mod tests {
     #[test]
     fn mqtt_options_sets_credentials_when_provided() {
         let config = MqttConfig {
-            host: "localhost".into(),
-            port: 1883,
-            client_id: "test".into(),
             username: Some("user".into()),
             password: Some("pass".into()),
-            topic_prefix: "t".into(),
+            ..tcp_config()
         };
 
         let opts = build_mqtt_options(&config);
@@ -193,16 +239,7 @@ mod tests {
 
     #[test]
     fn mqtt_options_no_credentials_when_none() {
-        let config = MqttConfig {
-            host: "localhost".into(),
-            port: 1883,
-            client_id: "test".into(),
-            username: None,
-            password: None,
-            topic_prefix: "t".into(),
-        };
-
-        let opts = build_mqtt_options(&config);
+        let opts = build_mqtt_options(&tcp_config());
         assert!(opts.credentials().is_none());
     }
 
@@ -215,12 +252,9 @@ mod tests {
     #[test]
     fn password_redacted_in_debug() {
         let config = MqttConfig {
-            host: "localhost".into(),
-            port: 1883,
-            client_id: "test".into(),
-            username: Some("user".into()),
             password: Some("super-secret-password".into()),
-            topic_prefix: "t".into(),
+            username: Some("user".into()),
+            ..tcp_config()
         };
 
         let debug_str = format!("{config:?}");
@@ -232,5 +266,67 @@ mod tests {
             debug_str.contains("[REDACTED]"),
             "debug output should show [REDACTED]"
         );
+    }
+
+    #[test]
+    fn debug_includes_transport_and_path() {
+        let config = MqttConfig {
+            transport: MqttTransport::Wss,
+            path: Some("/mqtt".into()),
+            ..tcp_config()
+        };
+
+        let debug_str = format!("{config:?}");
+        assert!(debug_str.contains("Wss"));
+        assert!(debug_str.contains("/mqtt"));
+    }
+
+    #[test]
+    fn build_ws_url_with_path() {
+        assert_eq!(
+            build_ws_url("ws", "broker", 80, Some("/mqtt")),
+            "ws://broker:80/mqtt"
+        );
+    }
+
+    #[test]
+    fn build_ws_url_default_path() {
+        assert_eq!(
+            build_ws_url("wss", "broker", 443, None),
+            "wss://broker:443/mqtt"
+        );
+    }
+
+    #[test]
+    fn tls_transport_sets_tls() {
+        let config = MqttConfig {
+            transport: MqttTransport::Tls,
+            port: 8883,
+            ..tcp_config()
+        };
+        // Just verify it doesn't panic
+        let _opts = build_mqtt_options(&config);
+    }
+
+    #[test]
+    fn ws_transport_sets_ws() {
+        let config = MqttConfig {
+            transport: MqttTransport::Ws,
+            port: 80,
+            path: Some("/mqtt".into()),
+            ..tcp_config()
+        };
+        let _opts = build_mqtt_options(&config);
+    }
+
+    #[test]
+    fn wss_transport_sets_wss() {
+        let config = MqttConfig {
+            transport: MqttTransport::Wss,
+            port: 443,
+            path: Some("/mqtt".into()),
+            ..tcp_config()
+        };
+        let _opts = build_mqtt_options(&config);
     }
 }

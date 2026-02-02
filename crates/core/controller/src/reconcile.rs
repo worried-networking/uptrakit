@@ -195,20 +195,20 @@ mod tests {
         upsert_setting(
             &db,
             tenant_id,
-            SettingKey::MqttHost,
+            SettingKey::RealIpHeader,
             serde_json::json!("db_val"),
         )
         .await
         .unwrap();
 
         let raw = HashMap::from([(
-            SettingKey::MqttHost.as_str().to_string(),
+            SettingKey::RealIpHeader.as_str().to_string(),
             serde_json::json!("db_val"),
         )]);
         let result = reconcile_setting(
             &db,
             tenant_id,
-            SettingKey::MqttHost,
+            SettingKey::RealIpHeader,
             &raw,
             None,
             "default_val".to_string(),
@@ -226,20 +226,20 @@ mod tests {
         upsert_setting(
             &db,
             tenant_id,
-            SettingKey::MqttClientId,
+            SettingKey::HttpsAddr,
             serde_json::json!("db_val"),
         )
         .await
         .unwrap();
 
         let raw = HashMap::from([(
-            SettingKey::MqttClientId.as_str().to_string(),
+            SettingKey::HttpsAddr.as_str().to_string(),
             serde_json::json!("db_val"),
         )]);
         let result = reconcile_setting(
             &db,
             tenant_id,
-            SettingKey::MqttClientId,
+            SettingKey::HttpsAddr,
             &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
@@ -257,20 +257,20 @@ mod tests {
         upsert_setting(
             &db,
             tenant_id,
-            SettingKey::MqttTopicPrefix,
+            SettingKey::PkiAddr,
             serde_json::json!("db_val"),
         )
         .await
         .unwrap();
 
         let raw = HashMap::from([(
-            SettingKey::MqttTopicPrefix.as_str().to_string(),
+            SettingKey::PkiAddr.as_str().to_string(),
             serde_json::json!("db_val"),
         )]);
         let result = reconcile_setting(
             &db,
             tenant_id,
-            SettingKey::MqttTopicPrefix,
+            SettingKey::PkiAddr,
             &raw,
             Some("cli_val".to_string()),
             "default_val".to_string(),
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(result, "cli_val");
 
         // Verify DB was updated
-        let saved = load_setting(&db, tenant_id, SettingKey::MqttTopicPrefix)
+        let saved = load_setting(&db, tenant_id, SettingKey::PkiAddr)
             .await
             .unwrap();
         assert_eq!(saved.unwrap().as_str(), Some("cli_val"));

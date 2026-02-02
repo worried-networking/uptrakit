@@ -17,8 +17,10 @@
 		deleteOidcProvider,
 		activateOidcProvider,
 		deactivateOidcProvider,
-		getMqttSettings,
-		updateMqttSettings
+		getMqttClient,
+		createMqttClient,
+		updateMqttClient,
+		deleteMqttClient
 	} from '$lib/api';
 	import {
 		Permission,
@@ -29,7 +31,7 @@
 		type OidcProviderResponse,
 		type CreateOidcProviderRequest,
 		type UpdateOidcProviderRequest,
-		type MqttSettingsResponse
+		type MqttClientResponse
 	} from '$lib/types';
 
 	// --- Global feedback ---
@@ -50,14 +52,16 @@
 
 	let oidcProviders: OidcProviderResponse[] = $state([]);
 
-	// --- MQTT Settings ---
-	let mqttHost: string = $state('');
-	let mqttPort: number = $state(1883);
+	// --- MQTT Client ---
+	let mqttConfigured: boolean = $state(false);
+	let mqttEnabled: boolean = $state(true);
+	let mqttUrl: string = $state('');
 	let mqttClientId: string = $state('uptrakit-controller');
 	let mqttUsername: string = $state('');
 	let mqttPassword: string = $state('');
 	let mqttHasPassword: boolean = $state(false);
 	let mqttTopicPrefix: string = $state('uptrakit');
+	let mqttDeleteConfirm: boolean = $state(false);
 
 	// --- OIDC modal state ---
 	let showOidcModal: boolean = $state(false);
@@ -136,7 +140,11 @@
 			getAgentCertificateSettings(),
 			getEnrollmentTokenStatus(),
 			getOidcProviders(),
-			getMqttSettings()
+			getMqttClient().catch((e) => {
+				// 404 means no MQTT client configured — not an error
+				if (e instanceof Error && e.message === 'Not Found') return null;
+				throw e;
+			})
 		]);
 
 		if (results[0].status === 'fulfilled') {
@@ -157,44 +165,89 @@
 		}
 		if (results[5].status === 'fulfilled') {
 			const mqtt = results[5].value;
-			mqttHost = mqtt.host ?? '';
-			mqttPort = mqtt.port;
-			mqttClientId = mqtt.client_id;
-			mqttUsername = mqtt.username ?? '';
-			mqttHasPassword = mqtt.has_password;
-			mqttTopicPrefix = mqtt.topic_prefix;
-			mqttPassword = '';
+			if (mqtt) {
+				mqttConfigured = true;
+				mqttEnabled = mqtt.enabled;
+				mqttUrl = mqtt.url;
+				mqttClientId = mqtt.client_id;
+				mqttUsername = mqtt.username ?? '';
+				mqttHasPassword = mqtt.has_password;
+				mqttTopicPrefix = mqtt.topic_prefix;
+				mqttPassword = '';
+			} else {
+				mqttConfigured = false;
+			}
 		}
 
 		loading = false;
 	}
 
-	// --- MQTT Settings ---
-	async function saveMqttSettings() {
+	// --- MQTT Client ---
+	function applyMqttResponse(res: MqttClientResponse) {
+		mqttConfigured = true;
+		mqttEnabled = res.enabled;
+		mqttUrl = res.url;
+		mqttClientId = res.client_id;
+		mqttUsername = res.username ?? '';
+		mqttHasPassword = res.has_password;
+		mqttTopicPrefix = res.topic_prefix;
+		mqttPassword = '';
+	}
+
+	async function saveMqttClient() {
 		clearError();
 		try {
-			const data: Record<string, unknown> = {
-				host: mqttHost || null,
-				port: mqttPort,
-				client_id: mqttClientId,
-				username: mqttUsername || null,
-				topic_prefix: mqttTopicPrefix
-			};
-			// Only send password if user typed something
-			if (mqttPassword) {
-				data.password = mqttPassword;
+			if (mqttConfigured) {
+				const data: Record<string, unknown> = {
+					url: mqttUrl || undefined,
+					enabled: mqttEnabled,
+					client_id: mqttClientId,
+					username: mqttUsername || null,
+					topic_prefix: mqttTopicPrefix
+				};
+				if (mqttPassword) {
+					data.password = mqttPassword;
+				}
+				const res = await updateMqttClient(data);
+				applyMqttResponse(res);
+			} else {
+				if (!mqttUrl) {
+					showError('URL is required to create an MQTT client');
+					return;
+				}
+				const data: Record<string, unknown> = {
+					url: mqttUrl,
+					enabled: mqttEnabled,
+					client_id: mqttClientId || undefined,
+					username: mqttUsername || undefined,
+					password: mqttPassword || undefined,
+					topic_prefix: mqttTopicPrefix || undefined
+				};
+				const res = await createMqttClient(data);
+				applyMqttResponse(res);
 			}
-			const res = await updateMqttSettings(data);
-			mqttHost = res.host ?? '';
-			mqttPort = res.port;
-			mqttClientId = res.client_id;
-			mqttUsername = res.username ?? '';
-			mqttHasPassword = res.has_password;
-			mqttTopicPrefix = res.topic_prefix;
-			mqttPassword = '';
 			showSuccess('MQTT settings saved.');
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to save MQTT settings');
+		}
+	}
+
+	async function handleDeleteMqtt() {
+		clearError();
+		mqttDeleteConfirm = false;
+		try {
+			await deleteMqttClient();
+			mqttConfigured = false;
+			mqttEnabled = true;
+			mqttUrl = '';
+			mqttClientId = 'uptrakit-controller';
+			mqttUsername = '';
+			mqttPassword = '';
+			mqttHasPassword = false;
+			mqttTopicPrefix = 'uptrakit';
+			showSuccess('MQTT client deleted.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to delete MQTT client');
 		}
 	}
 
@@ -477,28 +530,41 @@
 			</button>
 		</div>
 
-		<!-- Section 3: MQTT Settings -->
+		<!-- Section 3: MQTT Client -->
 		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">MQTT Settings</h2>
+			<div class="flex items-center justify-between mb-4">
+				<h2 class="h3">MQTT Client</h2>
+				{#if mqttConfigured}
+					<span class="badge variant-filled-success">Configured</span>
+				{:else}
+					<span class="badge variant-soft">Not configured</span>
+				{/if}
+			</div>
 			<p class="text-surface-600-300-token mb-4">
 				Configure MQTT broker connection for Home Assistant integration.
+				Use a URL like <code>mqtt://broker:1883</code>, <code>mqtts://broker:8883</code>,
+				<code>ws://broker:80/mqtt</code>, or <code>wss://broker:443/mqtt</code>.
 				All MQTT changes require a restart to take effect.
-				Leave the host empty to disable MQTT.
 			</p>
 
+			<label class="flex items-center gap-3 mb-4">
+				<input class="checkbox" type="checkbox" bind:checked={mqttEnabled} />
+				<span>Enabled</span>
+			</label>
+
 			<label class="label mb-4">
-				<span>Broker Host <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
-				<input class="input" type="text" placeholder="e.g. mqtt.local (empty to disable)" bind:value={mqttHost} />
+				<span>Broker URL <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+				<input class="input" type="text" placeholder="e.g. mqtt://broker:1883" bind:value={mqttUrl} />
 			</label>
 
 			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
 				<label class="label">
-					<span>Port <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
-					<input class="input" type="number" min="1" max="65535" bind:value={mqttPort} />
-				</label>
-				<label class="label">
 					<span>Client ID <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
 					<input class="input" type="text" bind:value={mqttClientId} />
+				</label>
+				<label class="label">
+					<span>Topic Prefix <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<input class="input" type="text" bind:value={mqttTopicPrefix} />
 				</label>
 			</div>
 
@@ -523,15 +589,39 @@
 				</label>
 			</div>
 
-			<label class="label mb-4">
-				<span>Topic Prefix <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
-				<input class="input" type="text" bind:value={mqttTopicPrefix} />
-			</label>
-
-			<button class="btn variant-filled-primary" onclick={saveMqttSettings}>
-				Save
-			</button>
+			<div class="flex gap-2">
+				<button class="btn variant-filled-primary" onclick={saveMqttClient}>
+					Save
+				</button>
+				{#if mqttConfigured}
+					<button class="btn variant-filled-error" onclick={() => { mqttDeleteConfirm = true; }}>
+						Delete
+					</button>
+				{/if}
+			</div>
 		</div>
+
+		<!-- MQTT Delete confirmation -->
+		{#if mqttDeleteConfirm}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+				onkeydown={(e) => { if (e.key === 'Escape') { mqttDeleteConfirm = false; } }}
+			>
+				<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+					<h3 class="h3">Delete MQTT Client</h3>
+					<p>Are you sure you want to remove the MQTT client configuration?</p>
+					<div class="flex justify-end gap-2">
+						<button class="btn variant-ghost-surface" onclick={() => { mqttDeleteConfirm = false; }}>
+							Cancel
+						</button>
+						<button class="btn variant-filled-error" onclick={handleDeleteMqtt}>
+							Delete
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		<!-- Section 5: OIDC Providers -->
 		<div class="card mb-6 p-6">

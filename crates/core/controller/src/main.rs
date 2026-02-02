@@ -316,161 +316,72 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     .await?;
     settings.set_https_addr(https_addr).await;
 
-    // MQTT settings
+    // MQTT client — stored in the dedicated `mqtt_clients` table
     #[cfg(feature = "mqtt")]
     {
-        let mqtt_host = reconcile::reconcile_setting(
-            &db_conn,
-            default_tenant_id,
-            SettingKey::MqttHost,
-            &raw_settings,
-            args.mqtt.mqtt_host.clone(),
-            String::new(), // empty = disabled
-            force,
-            reconcile::JsonConvert {
-                to_json: |v| {
-                    if v.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(v)
-                    }
-                },
-                from_json: |v| {
-                    if v.is_null() {
-                        Some(String::new())
-                    } else {
-                        v.as_str().map(String::from)
-                    }
-                },
-            },
-        )
-        .await
-        .context(AppError::Settings)?;
-        let mqtt_host_opt = if mqtt_host.is_empty() {
-            None
-        } else {
-            Some(mqtt_host)
-        };
+        use uptrakit_web_api::mqtt_client_store;
+        use uptrakit_web_api_types::mqtt_url::MqttUrl;
 
-        let mqtt_port = reconcile_u16(
-            &db_conn,
-            default_tenant_id,
-            SettingKey::MqttPort,
-            &raw_settings,
-            args.mqtt.mqtt_port,
-            uptrakit_web_api::settings::DEFAULT_MQTT_PORT,
-            force,
-        )
-        .await?;
+        let existing = mqtt_client_store::load_mqtt_client(&db_conn, default_tenant_id)
+            .await
+            .context(AppError::Settings)?;
 
-        let mqtt_client_id = reconcile::reconcile_setting(
-            &db_conn,
-            default_tenant_id,
-            SettingKey::MqttClientId,
-            &raw_settings,
-            args.mqtt.mqtt_client_id.clone(),
-            uptrakit_web_api::settings::DEFAULT_MQTT_CLIENT_ID.to_string(),
-            force,
-            reconcile::JsonConvert {
-                to_json: |v| serde_json::json!(v),
-                from_json: |v| v.as_str().map(String::from),
-            },
-        )
-        .await
-        .context(AppError::Settings)?;
+        if let Some(ref url_str) = args.mqtt.mqtt_url {
+            // CLI provides --mqtt-url
+            let parsed = MqttUrl::parse(url_str)
+                .map_err(|e| report!(AppError::Config(format!("invalid --mqtt-url: {e}"))))?;
 
-        let mqtt_username = reconcile::reconcile_setting(
-            &db_conn,
-            default_tenant_id,
-            SettingKey::MqttUsername,
-            &raw_settings,
-            args.mqtt.mqtt_username.clone(),
-            String::new(),
-            force,
-            reconcile::JsonConvert {
-                to_json: |v| {
-                    if v.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(v)
-                    }
-                },
-                from_json: |v| {
-                    if v.is_null() {
-                        Some(String::new())
-                    } else {
-                        v.as_str().map(String::from)
-                    }
-                },
-            },
-        )
-        .await
-        .context(AppError::Settings)?;
-        let mqtt_username_opt = if mqtt_username.is_empty() {
-            None
-        } else {
-            Some(mqtt_username)
-        };
-
-        let mqtt_password = reconcile::reconcile_setting(
-            &db_conn,
-            default_tenant_id,
-            SettingKey::MqttPassword,
-            &raw_settings,
-            args.mqtt.mqtt_password.clone(),
-            String::new(),
-            force,
-            reconcile::JsonConvert {
-                to_json: |v| {
-                    if v.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(v)
-                    }
-                },
-                from_json: |v| {
-                    if v.is_null() {
-                        Some(String::new())
-                    } else {
-                        v.as_str().map(String::from)
-                    }
-                },
-            },
-        )
-        .await
-        .context(AppError::Settings)?;
-        let mqtt_password_opt = if mqtt_password.is_empty() {
-            None
-        } else {
-            Some(mqtt_password)
-        };
-
-        let mqtt_topic_prefix = reconcile::reconcile_setting(
-            &db_conn,
-            default_tenant_id,
-            SettingKey::MqttTopicPrefix,
-            &raw_settings,
-            args.mqtt.mqtt_topic_prefix.clone(),
-            uptrakit_web_api::settings::DEFAULT_MQTT_TOPIC_PREFIX.to_string(),
-            force,
-            reconcile::JsonConvert {
-                to_json: |v| serde_json::json!(v),
-                from_json: |v| v.as_str().map(String::from),
-            },
-        )
-        .await
-        .context(AppError::Settings)?;
-
-        settings
-            .set_mqtt(uptrakit_web_api::settings::MqttSettings {
-                host: mqtt_host_opt.clone(),
-                port: mqtt_port,
-                client_id: mqtt_client_id,
-                username: mqtt_username_opt.clone(),
-                password: mqtt_password_opt.clone(),
-                topic_prefix: mqtt_topic_prefix,
-            })
-            .await;
+            if let Some(existing_model) = existing {
+                if force {
+                    tracing::info!("force-overriding MQTT client with CLI values");
+                    mqtt_client_store::update_mqtt_client(
+                        &db_conn,
+                        existing_model,
+                        None, // keep enabled
+                        Some(parsed.transport.as_str()),
+                        Some(&parsed.host),
+                        Some(parsed.port),
+                        Some(parsed.path.as_deref()),
+                        args.mqtt.mqtt_client_id.as_deref(),
+                        args.mqtt.mqtt_username.as_ref().map(|u| Some(u.as_str())),
+                        args.mqtt
+                            .mqtt_password
+                            .as_ref()
+                            .map(|p| if p.is_empty() { None } else { Some(p.as_str()) }),
+                        args.mqtt.mqtt_topic_prefix.as_deref(),
+                    )
+                    .await
+                    .context(AppError::Settings)?;
+                } else {
+                    tracing::info!(
+                        "MQTT client already configured in DB; using DB values (pass --force-settings-override to overwrite)"
+                    );
+                }
+            } else {
+                // No DB row — seed from CLI
+                tracing::info!("seeding MQTT client from CLI: {url_str}");
+                mqtt_client_store::create_mqtt_client(
+                    &db_conn,
+                    default_tenant_id,
+                    true,
+                    parsed.transport.as_str(),
+                    &parsed.host,
+                    parsed.port,
+                    parsed.path.as_deref(),
+                    args.mqtt
+                        .mqtt_client_id
+                        .as_deref()
+                        .unwrap_or("uptrakit-controller"),
+                    args.mqtt.mqtt_username.as_deref(),
+                    args.mqtt.mqtt_password.as_deref(),
+                    args.mqtt.mqtt_topic_prefix.as_deref().unwrap_or("uptrakit"),
+                )
+                .await
+                .context(AppError::Settings)?;
+            }
+        } else if existing.is_none() {
+            tracing::debug!("no MQTT client configured (no --mqtt-url, no DB row)");
+        }
     }
 
     // --- Bootstrap OIDC provider from CLI flags ---
@@ -978,23 +889,33 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         None
     };
 
-    // Start MQTT if configured (read from reconciled settings)
+    // Start MQTT if configured (read from mqtt_clients table)
     #[cfg(feature = "mqtt")]
     let mqtt_handle = {
-        let mqtt_settings = app_state.settings.mqtt().await;
-        if let Some(host) = mqtt_settings.host {
-            if mqtt_settings.password.is_some() && mqtt_settings.username.is_none() {
+        use uptrakit_web_api::mqtt_client_store;
+        use uptrakit_web_api_types::mqtt_transport::MqttTransport;
+
+        let mqtt_row = mqtt_client_store::load_mqtt_client(&app_state.db, default_tenant_id)
+            .await
+            .context(AppError::Settings)?;
+
+        if let Some(model) = mqtt_row.filter(|m| m.enabled) {
+            if model.password.is_some() && model.username.is_none() {
                 return Err(report!(AppError::Config(
                     "MQTT password requires a username".into()
                 )));
             }
+            let transport = MqttTransport::parse(&model.transport).unwrap_or_default();
+            let port = u16::try_from(model.port).unwrap_or(transport.default_port());
             let config = uptrakit_mqtt::MqttConfig {
-                host,
-                port: mqtt_settings.port,
-                client_id: mqtt_settings.client_id,
-                username: mqtt_settings.username,
-                password: mqtt_settings.password,
-                topic_prefix: mqtt_settings.topic_prefix,
+                transport,
+                host: model.host,
+                port,
+                path: model.path,
+                client_id: model.client_id,
+                username: model.username,
+                password: model.password,
+                topic_prefix: model.topic_prefix,
             };
             tracing::info!("starting MQTT client: {config:?}");
             match uptrakit_mqtt::start(config).await {
@@ -1160,34 +1081,6 @@ async fn reconcile_socket_addr(
         reconcile::JsonConvert {
             to_json: |v| serde_json::json!(v.to_string()),
             from_json: |v| v.as_str().and_then(|s| s.parse().ok()),
-        },
-    )
-    .await
-    .context(AppError::Settings)
-}
-
-/// Reconcile a `u16` setting.
-#[cfg(feature = "mqtt")]
-async fn reconcile_u16(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
-    key: SettingKey,
-    raw: &uptrakit_web_api::settings_store::RawSettings,
-    cli_value: Option<u16>,
-    default_value: u16,
-    force: bool,
-) -> Result<u16, Report<AppError>> {
-    reconcile::reconcile_setting(
-        db,
-        tenant_id,
-        key,
-        raw,
-        cli_value,
-        default_value,
-        force,
-        reconcile::JsonConvert {
-            to_json: |v| serde_json::json!(v),
-            from_json: |v| v.as_u64().and_then(|n| u16::try_from(n).ok()),
         },
     )
     .await
