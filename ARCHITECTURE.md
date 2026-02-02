@@ -169,15 +169,17 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 20 entities in `crates/shared/db/src/entity/`:
+The data model comprises 22 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `host`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `host`, `host_software_item`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
 
 The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
 
 The `provider_config` entity stores per-provider-type configuration (e.g. GitHub owner/repo, auth tokens, asset filters). Multiple configs can exist per provider type (e.g. tracking releases from several GitHub repositories). Configs are managed via CRUD API endpoints with secret masking (auth tokens are replaced with `"***"` in responses) and provider-specific validation.
+
+The `software_item` entity represents a trackable piece of software linked to a provider config. Each software item has a `package_identifier` (provider-specific, e.g. distinguishing multiple assets from the same GitHub repo) and an optional `config_override` JSON blob that extends/overrides the base provider config at resolution time. A unique constraint on `(provider_config_id, package_identifier)` prevents duplicate tracking. The `host_software_item` junction table assigns software items to hosts and stores per-host state (installed version, detection timestamp). Software items are managed via CRUD API endpoints at `/api/v1/software-items` with host assignment/unassignment sub-endpoints.
 
 ### Migrations
 

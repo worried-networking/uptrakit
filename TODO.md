@@ -33,7 +33,7 @@ Essential infrastructure needed before feature development.
 - [x] Select and integrate database solution (SQLite for simplicity, PostgreSQL for production)
 - [ ] Design core database schema
   - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
-  - [ ] Software items table (host ID, provider, package name, current version)
+  - [x] Software items table (provider config, package identifier, config override, host assignments)
   - [ ] Available versions table (software item ID, version, release date, channels)
   - [ ] Update history table (software item ID, from version, to version, timestamp, status)
   - [ ] Scheduled checks table (software item ID, schedule, last run, next run)
