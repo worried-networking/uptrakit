@@ -5,6 +5,7 @@ pub use super::agent_certificate::{
 pub use super::agent_host::{Entity as AgentHost, Model as AgentHostModel};
 pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::auth_method::AuthMethod;
+pub use super::available_version::{Entity as AvailableVersion, Model as AvailableVersionModel};
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};

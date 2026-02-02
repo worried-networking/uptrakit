@@ -116,6 +116,7 @@ impl MigrationTrait for Migration {
                     .col(timestamp_null(
                         HostSoftwareItems::InstalledVersionDetectedAt,
                     ))
+                    .col(timestamp_null(HostSoftwareItems::LastUpdatedAt))
                     .col(timestamp(HostSoftwareItems::LinkedAt))
                     .primary_key(
                         Index::create()
@@ -140,10 +141,67 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Create available_versions table
+        manager
+            .create_table(
+                Table::create()
+                    .table(AvailableVersions::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(AvailableVersions::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(AvailableVersions::SoftwareItemId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(string_null(AvailableVersions::Version))
+                    .col(timestamp_null(AvailableVersions::ReleaseDate))
+                    .col(
+                        ColumnDef::new(AvailableVersions::ReleaseNotes)
+                            .text()
+                            .null(),
+                    )
+                    .col(json_null(AvailableVersions::Extra))
+                    .col(timestamp(AvailableVersions::CreatedAt))
+                    .col(timestamp(AvailableVersions::UpdatedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_available_versions_software_item")
+                            .from(AvailableVersions::Table, AvailableVersions::SoftwareItemId)
+                            .to(SoftwareItems::Table, SoftwareItems::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .check(
+                        Expr::col(AvailableVersions::Version)
+                            .is_not_null()
+                            .or(Expr::col(AvailableVersions::ReleaseDate).is_not_null()),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on software_item_id for FK lookups
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_available_versions_software_item_id")
+                    .table(AvailableVersions::Table)
+                    .col(AvailableVersions::SoftwareItemId)
+                    .to_owned(),
+            )
+            .await?;
+
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(AvailableVersions::Table).to_owned())
+            .await?;
         manager
             .drop_table(Table::drop().table(HostSoftwareItems::Table).to_owned())
             .await?;
@@ -177,7 +235,21 @@ enum HostSoftwareItems {
     SoftwareItemId,
     InstalledVersion,
     InstalledVersionDetectedAt,
+    LastUpdatedAt,
     LinkedAt,
+}
+
+#[derive(DeriveIden)]
+enum AvailableVersions {
+    Table,
+    Id,
+    SoftwareItemId,
+    Version,
+    ReleaseDate,
+    ReleaseNotes,
+    Extra,
+    CreatedAt,
+    UpdatedAt,
 }
 
 #[derive(DeriveIden)]

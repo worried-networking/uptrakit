@@ -148,6 +148,7 @@ async fn load_item_hosts(
                 installed_version_detected_at: link
                     .installed_version_detected_at
                     .map(format_rfc3339),
+                last_updated_at: link.last_updated_at.map(format_rfc3339),
                 linked_at: format_rfc3339(link.linked_at),
             });
         }
@@ -667,6 +668,7 @@ pub async fn assign_hosts(
                     software_item_id: Set(item_id),
                     installed_version: Set(None),
                     installed_version_detected_at: Set(None),
+                    last_updated_at: Set(None),
                     linked_at: Set(now),
                 };
                 if let Err(e) = link.insert(&state.db).await {
@@ -849,6 +851,7 @@ mod tests {
             friendly_name: "Web Server 1".to_string(),
             installed_version: Some("7.2.4".to_string()),
             installed_version_detected_at: Some(format_rfc3339(now)),
+            last_updated_at: None,
             linked_at: format_rfc3339(now),
         }];
 
