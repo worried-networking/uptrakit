@@ -109,7 +109,7 @@ fn restore_secrets(
 }
 
 /// Validate the provider-specific config blob by deserializing and calling `.validate()`.
-fn validate_provider_config(
+pub fn validate_provider_config(
     provider_type: &str,
     config: &serde_json::Value,
 ) -> std::result::Result<(), String> {

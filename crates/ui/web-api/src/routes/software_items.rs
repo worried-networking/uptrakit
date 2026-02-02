@@ -1,0 +1,987 @@
+use crate::AppState;
+use crate::auth::permissions::Permission;
+use crate::auth::token::generate_uuid;
+use crate::middleware::require_auth::AuthenticatedUser;
+use axum::{
+    Extension, Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, Set,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+use uptrakit_shared_db::entity::{
+    host, host_software_item, prelude::*, provider_config, software_item,
+};
+use utoipa::ToSchema;
+
+use super::provider_configs::validate_provider_config;
+
+// --- Request types ---
+
+#[derive(Deserialize, ToSchema)]
+pub struct CreateSoftwareItemRequest {
+    /// Display name (e.g. "Node.js").
+    pub name: String,
+    /// UUID of the provider config to use.
+    pub provider_config_id: String,
+    /// Provider-specific identifier within the source. Defaults to "" if omitted.
+    pub package_identifier: Option<String>,
+    /// Provider-specific overrides merged onto the base ProviderConfig at resolution time.
+    pub config_override: Option<serde_json::Value>,
+    /// Whether version checking is active. Defaults to true.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateSoftwareItemRequest {
+    pub name: Option<String>,
+    pub package_identifier: Option<String>,
+    /// Provider-specific overrides. Send null to clear, an object to replace.
+    pub config_override: Option<serde_json::Value>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct AssignHostsRequest {
+    /// List of host UUIDs to assign.
+    pub host_ids: Vec<String>,
+}
+
+// --- Response types ---
+
+#[derive(Serialize, ToSchema)]
+pub struct SoftwareItemResponse {
+    pub id: String,
+    pub name: String,
+    pub provider_config_id: String,
+    pub provider_config_name: String,
+    pub provider_type: String,
+    pub package_identifier: String,
+    pub config_override: Option<serde_json::Value>,
+    pub enabled: bool,
+    pub last_checked_at: Option<String>,
+    pub host_count: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SoftwareItemDetailResponse {
+    pub id: String,
+    pub name: String,
+    pub provider_config_id: String,
+    pub provider_config_name: String,
+    pub provider_type: String,
+    pub package_identifier: String,
+    pub config_override: Option<serde_json::Value>,
+    pub enabled: bool,
+    pub last_checked_at: Option<String>,
+    pub host_count: u64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub hosts: Vec<SoftwareItemHostSummary>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SoftwareItemHostSummary {
+    pub host_id: String,
+    pub hostname: String,
+    pub friendly_name: String,
+    pub installed_version: Option<String>,
+    pub installed_version_detected_at: Option<String>,
+    pub linked_at: String,
+}
+
+// --- Helpers ---
+
+fn format_rfc3339(dt: OffsetDateTime) -> String {
+    dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
+}
+
+fn build_list_response(
+    item: software_item::Model,
+    config: &provider_config::Model,
+    host_count: u64,
+) -> SoftwareItemResponse {
+    SoftwareItemResponse {
+        id: item.id.to_string(),
+        name: item.name,
+        provider_config_id: item.provider_config_id.to_string(),
+        provider_config_name: config.name.clone(),
+        provider_type: config.provider_type.clone(),
+        package_identifier: item.package_identifier,
+        config_override: item.config_override,
+        enabled: item.enabled,
+        last_checked_at: item.last_checked_at.map(format_rfc3339),
+        host_count,
+        created_at: format_rfc3339(item.created_at),
+        updated_at: format_rfc3339(item.updated_at),
+    }
+}
+
+fn build_detail_response(
+    item: software_item::Model,
+    config: &provider_config::Model,
+    host_count: u64,
+    hosts: Vec<SoftwareItemHostSummary>,
+) -> SoftwareItemDetailResponse {
+    SoftwareItemDetailResponse {
+        id: item.id.to_string(),
+        name: item.name,
+        provider_config_id: item.provider_config_id.to_string(),
+        provider_config_name: config.name.clone(),
+        provider_type: config.provider_type.clone(),
+        package_identifier: item.package_identifier,
+        config_override: item.config_override,
+        enabled: item.enabled,
+        last_checked_at: item.last_checked_at.map(format_rfc3339),
+        host_count,
+        created_at: format_rfc3339(item.created_at),
+        updated_at: format_rfc3339(item.updated_at),
+        hosts,
+    }
+}
+
+/// Find a non-deactivated software item by ID.
+async fn find_active_item(
+    db: &sea_orm::DatabaseConnection,
+    id: uuid::Uuid,
+) -> Option<software_item::Model> {
+    SoftwareItem::find_by_id(id)
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Find a non-deactivated provider config by ID.
+async fn find_active_provider_config(
+    db: &sea_orm::DatabaseConnection,
+    id: uuid::Uuid,
+) -> Option<provider_config::Model> {
+    ProviderConfig::find_by_id(id)
+        .filter(provider_config::Column::DeactivatedAt.is_null())
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Count the number of hosts linked to a software item.
+async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: uuid::Uuid) -> u64 {
+    HostSoftwareItem::find()
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .count(db)
+        .await
+        .unwrap_or(0)
+}
+
+/// Load host summaries for a software item.
+async fn load_item_hosts(
+    db: &sea_orm::DatabaseConnection,
+    item_id: uuid::Uuid,
+) -> Vec<SoftwareItemHostSummary> {
+    let links = match HostSoftwareItem::find()
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .all(db)
+        .await
+    {
+        Ok(links) => links,
+        Err(e) => {
+            tracing::warn!("Failed to load software item hosts: {e}");
+            return Vec::new();
+        }
+    };
+
+    let mut summaries = Vec::with_capacity(links.len());
+    for link in links {
+        if let Ok(Some(h)) = Host::find_by_id(link.host_id)
+            .filter(host::Column::DeactivatedAt.is_null())
+            .one(db)
+            .await
+        {
+            summaries.push(SoftwareItemHostSummary {
+                host_id: h.id.to_string(),
+                hostname: h.hostname,
+                friendly_name: h.friendly_name,
+                installed_version: link.installed_version,
+                installed_version_detected_at: link
+                    .installed_version_detected_at
+                    .map(format_rfc3339),
+                linked_at: format_rfc3339(link.linked_at),
+            });
+        }
+    }
+
+    summaries
+}
+
+/// Validate `config_override` by merging it with the base provider config and running
+/// provider-specific validation.
+fn validate_config_override(
+    provider_type: &str,
+    base_config: &serde_json::Value,
+    override_config: &serde_json::Value,
+) -> std::result::Result<(), String> {
+    // Merge: base first, then overlay the override values
+    let mut merged = base_config.clone();
+    if let (Some(base_obj), Some(over_obj)) = (merged.as_object_mut(), override_config.as_object())
+    {
+        for (k, v) in over_obj {
+            base_obj.insert(k.clone(), v.clone());
+        }
+    } else {
+        return Err("config_override must be a JSON object".to_string());
+    }
+
+    validate_provider_config(provider_type, &merged)
+}
+
+// --- Endpoints ---
+
+/// Create a new software item.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items",
+    request_body = CreateSoftwareItemRequest,
+    responses(
+        (status = 201, description = "Software item created", body = SoftwareItemResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 409, description = "Duplicate software item")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn create_software_item(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Json(req): Json<CreateSoftwareItemRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    if req.name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
+    }
+
+    let provider_config_id = match uuid::Uuid::parse_str(&req.provider_config_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, "Invalid provider_config_id UUID").into_response();
+        }
+    };
+
+    let config = match find_active_provider_config(&state.db, provider_config_id).await {
+        Some(c) => c,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "provider_config_id does not reference an active provider config",
+            )
+                .into_response();
+        }
+    };
+
+    let package_identifier = req.package_identifier.unwrap_or_default();
+
+    // Validate config_override if provided
+    if let Some(ref override_val) = req.config_override
+        && let Err(e) =
+            validate_config_override(&config.provider_type, &config.config, override_val)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("config_override validation failed: {e}"),
+        )
+            .into_response();
+    }
+
+    // Check uniqueness: (provider_config_id, package_identifier) among active items
+    let duplicate = SoftwareItem::find()
+        .filter(software_item::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(software_item::Column::PackageIdentifier.eq(&package_identifier))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await;
+
+    match duplicate {
+        Ok(Some(_)) => {
+            return (
+                StatusCode::CONFLICT,
+                "A software item with this provider_config_id and package_identifier already exists",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to check for duplicate software item: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        Ok(None) => {}
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let model = software_item::ActiveModel {
+        id: Set(generate_uuid()),
+        name: Set(req.name),
+        provider_config_id: Set(provider_config_id),
+        package_identifier: Set(package_identifier),
+        config_override: Set(req.config_override),
+        enabled: Set(req.enabled),
+        last_checked_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        deactivated_at: Set(None),
+    };
+
+    match model.insert(&state.db).await {
+        Ok(inserted) => {
+            let resp = build_list_response(inserted, &config, 0);
+            (StatusCode::CREATED, Json(resp)).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to create software item: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// List all active software items (with host count).
+#[utoipa::path(
+    get,
+    path = "/api/v1/software-items",
+    responses(
+        (status = 200, description = "List of software items", body = Vec<SoftwareItemResponse>),
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn list_software_items(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let items = match SoftwareItem::find()
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .order_by_asc(software_item::Column::Name)
+        .all(&state.db)
+        .await
+    {
+        Ok(items) => items,
+        Err(e) => {
+            tracing::error!("Failed to list software items: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let mut response = Vec::with_capacity(items.len());
+    for item in items {
+        let config = match find_active_provider_config(&state.db, item.provider_config_id).await {
+            Some(c) => c,
+            None => {
+                tracing::warn!(
+                    "Software item {} references missing provider config {}",
+                    item.id,
+                    item.provider_config_id
+                );
+                continue;
+            }
+        };
+        let host_count = count_linked_hosts(&state.db, item.id).await;
+        response.push(build_list_response(item, &config, host_count));
+    }
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Get a software item with assigned hosts and installed versions.
+#[utoipa::path(
+    get,
+    path = "/api/v1/software-items/{id}",
+    params(("id" = String, Path, description = "Software item UUID")),
+    responses(
+        (status = 200, description = "Software item details", body = SoftwareItemDetailResponse),
+        (status = 404, description = "Software item not found")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn get_software_item(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+    };
+
+    let item = match find_active_item(&state.db, item_id).await {
+        Some(i) => i,
+        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+    };
+
+    let config = match find_active_provider_config(&state.db, item.provider_config_id).await {
+        Some(c) => c,
+        None => {
+            tracing::error!(
+                "Software item {} references missing provider config {}",
+                item.id,
+                item.provider_config_id
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let hosts = load_item_hosts(&state.db, item_id).await;
+    let host_count = hosts.len() as u64;
+    let resp = build_detail_response(item, &config, host_count, hosts);
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+/// Update a software item (partial update).
+#[utoipa::path(
+    put,
+    path = "/api/v1/software-items/{id}",
+    params(("id" = String, Path, description = "Software item UUID")),
+    request_body = UpdateSoftwareItemRequest,
+    responses(
+        (status = 200, description = "Software item updated", body = SoftwareItemResponse),
+        (status = 404, description = "Software item not found"),
+        (status = 409, description = "Duplicate software item")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn update_software_item(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateSoftwareItemRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+    };
+
+    let existing = match find_active_item(&state.db, item_id).await {
+        Some(i) => i,
+        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+    };
+
+    let config = match find_active_provider_config(&state.db, existing.provider_config_id).await {
+        Some(c) => c,
+        None => {
+            tracing::error!(
+                "Software item {} references missing provider config {}",
+                existing.id,
+                existing.provider_config_id
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Determine the effective package_identifier for uniqueness check
+    let new_package_id = req
+        .package_identifier
+        .as_deref()
+        .unwrap_or(&existing.package_identifier);
+
+    // If package_identifier is changing, check uniqueness
+    if new_package_id != existing.package_identifier {
+        let duplicate = SoftwareItem::find()
+            .filter(software_item::Column::ProviderConfigId.eq(existing.provider_config_id))
+            .filter(software_item::Column::PackageIdentifier.eq(new_package_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .filter(software_item::Column::Id.ne(item_id))
+            .one(&state.db)
+            .await;
+
+        match duplicate {
+            Ok(Some(_)) => {
+                return (
+                    StatusCode::CONFLICT,
+                    "A software item with this provider_config_id and package_identifier already exists",
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::error!("Failed to check for duplicate software item: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            Ok(None) => {}
+        }
+    }
+
+    // Validate config_override if provided (non-null value means replace, null means clear)
+    if let Some(ref override_val) = req.config_override
+        && !override_val.is_null()
+        && let Err(e) =
+            validate_config_override(&config.provider_type, &config.config, override_val)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("config_override validation failed: {e}"),
+        )
+            .into_response();
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let mut model: software_item::ActiveModel = existing.into();
+
+    if let Some(name) = req.name {
+        if name.is_empty() {
+            return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
+        }
+        model.name = Set(name);
+    }
+    if let Some(package_identifier) = req.package_identifier {
+        model.package_identifier = Set(package_identifier);
+    }
+    if let Some(config_override) = req.config_override {
+        if config_override.is_null() {
+            model.config_override = Set(None);
+        } else {
+            model.config_override = Set(Some(config_override));
+        }
+    }
+    if let Some(enabled) = req.enabled {
+        model.enabled = Set(enabled);
+    }
+    model.updated_at = Set(now);
+
+    match model.update(&state.db).await {
+        Ok(updated) => {
+            let host_count = count_linked_hosts(&state.db, item_id).await;
+            let resp = build_list_response(updated, &config, host_count);
+            (StatusCode::OK, Json(resp)).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to update software item: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Soft-delete a software item.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/software-items/{id}",
+    params(("id" = String, Path, description = "Software item UUID")),
+    responses(
+        (status = 204, description = "Software item deleted"),
+        (status = 404, description = "Software item not found")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn delete_software_item(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+    };
+
+    let item = match find_active_item(&state.db, item_id).await {
+        Some(i) => i,
+        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let mut model: software_item::ActiveModel = item.into();
+    model.deactivated_at = Set(Some(now));
+    model.enabled = Set(false);
+    model.updated_at = Set(now);
+
+    match model.update(&state.db).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to soft-delete software item: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Assign a software item to additional hosts.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/{id}/hosts",
+    params(("id" = String, Path, description = "Software item UUID")),
+    request_body = AssignHostsRequest,
+    responses(
+        (status = 200, description = "Hosts assigned", body = SoftwareItemDetailResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 404, description = "Software item not found")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn assign_hosts(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+    Json(req): Json<AssignHostsRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+    };
+
+    let item = match find_active_item(&state.db, item_id).await {
+        Some(i) => i,
+        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+    };
+
+    if req.host_ids.is_empty() {
+        return (StatusCode::BAD_REQUEST, "host_ids must not be empty").into_response();
+    }
+
+    let now = OffsetDateTime::now_utc();
+
+    for host_id_str in &req.host_ids {
+        let host_id = match uuid::Uuid::parse_str(host_id_str) {
+            Ok(id) => id,
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Invalid host UUID: {host_id_str}"),
+                )
+                    .into_response();
+            }
+        };
+
+        // Verify host exists and is active
+        let host_exists = Host::find_by_id(host_id)
+            .filter(host::Column::DeactivatedAt.is_null())
+            .one(&state.db)
+            .await;
+
+        match host_exists {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("Host {host_id_str} not found or deactivated"),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::error!("Failed to check host {host_id_str}: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        }
+
+        // Check if link already exists
+        let existing_link = HostSoftwareItem::find_by_id((host_id, item_id))
+            .one(&state.db)
+            .await;
+
+        match existing_link {
+            Ok(Some(_)) => {
+                // Already linked, skip
+                continue;
+            }
+            Ok(None) => {
+                let link = host_software_item::ActiveModel {
+                    host_id: Set(host_id),
+                    software_item_id: Set(item_id),
+                    installed_version: Set(None),
+                    installed_version_detected_at: Set(None),
+                    linked_at: Set(now),
+                };
+                if let Err(e) = link.insert(&state.db).await {
+                    tracing::error!("Failed to link host {host_id_str} to software item: {e}");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to check existing link for host {host_id_str}: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        }
+    }
+
+    // Reload the item to reflect the current state
+    let config = match find_active_provider_config(&state.db, item.provider_config_id).await {
+        Some(c) => c,
+        None => {
+            tracing::error!(
+                "Software item {} references missing provider config {}",
+                item.id,
+                item.provider_config_id
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let hosts = load_item_hosts(&state.db, item_id).await;
+    let host_count = hosts.len() as u64;
+    let resp = build_detail_response(item, &config, host_count, hosts);
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+/// Unassign a software item from a host.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/software-items/{id}/hosts/{host_id}",
+    params(
+        ("id" = String, Path, description = "Software item UUID"),
+        ("host_id" = String, Path, description = "Host UUID")
+    ),
+    responses(
+        (status = 204, description = "Host unassigned"),
+        (status = 404, description = "Software item or link not found")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn unassign_host(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path((id, host_id_str)): Path<(String, String)>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid software item UUID").into_response(),
+    };
+
+    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host UUID").into_response(),
+    };
+
+    // Verify the software item exists
+    if find_active_item(&state.db, item_id).await.is_none() {
+        return (StatusCode::NOT_FOUND, "Software item not found").into_response();
+    }
+
+    // Find and delete the link
+    let link = match HostSoftwareItem::find_by_id((host_id, item_id))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                "Host is not assigned to this software item",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to find host-software-item link: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    match link.delete(&state.db).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to delete host-software-item link: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_list_response_formats_timestamps() {
+        let now = OffsetDateTime::now_utc();
+        let item = software_item::Model {
+            id: uuid::Uuid::now_v7(),
+            name: "Node.js".to_string(),
+            provider_config_id: uuid::Uuid::now_v7(),
+            package_identifier: String::new(),
+            config_override: None,
+            enabled: true,
+            last_checked_at: Some(now),
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+        let config = provider_config::Model {
+            id: item.provider_config_id,
+            name: "My GitHub Config".to_string(),
+            provider_type: "github_releases".to_string(),
+            config: serde_json::json!({}),
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+
+        let resp = build_list_response(item, &config, 3);
+
+        assert_eq!(resp.name, "Node.js");
+        assert_eq!(resp.provider_config_name, "My GitHub Config");
+        assert_eq!(resp.provider_type, "github_releases");
+        assert_eq!(resp.host_count, 3);
+        assert!(resp.last_checked_at.is_some());
+        assert!(resp.config_override.is_none());
+    }
+
+    #[test]
+    fn build_detail_response_includes_hosts() {
+        let now = OffsetDateTime::now_utc();
+        let item = software_item::Model {
+            id: uuid::Uuid::now_v7(),
+            name: "Redis".to_string(),
+            provider_config_id: uuid::Uuid::now_v7(),
+            package_identifier: "redis-server".to_string(),
+            config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
+            enabled: true,
+            last_checked_at: None,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+        let config = provider_config::Model {
+            id: item.provider_config_id,
+            name: "Redis GitHub".to_string(),
+            provider_type: "github_releases".to_string(),
+            config: serde_json::json!({}),
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+        let hosts = vec![SoftwareItemHostSummary {
+            host_id: uuid::Uuid::now_v7().to_string(),
+            hostname: "web-01".to_string(),
+            friendly_name: "Web Server 1".to_string(),
+            installed_version: Some("7.2.4".to_string()),
+            installed_version_detected_at: Some(format_rfc3339(now)),
+            linked_at: format_rfc3339(now),
+        }];
+
+        let resp = build_detail_response(item, &config, 1, hosts);
+
+        assert_eq!(resp.name, "Redis");
+        assert_eq!(resp.package_identifier, "redis-server");
+        assert!(resp.config_override.is_some());
+        assert_eq!(resp.hosts.len(), 1);
+        assert_eq!(resp.hosts[0].hostname, "web-01");
+        assert_eq!(resp.hosts[0].installed_version, Some("7.2.4".to_string()));
+    }
+
+    #[test]
+    fn build_list_response_null_last_checked_at() {
+        let now = OffsetDateTime::now_utc();
+        let item = software_item::Model {
+            id: uuid::Uuid::now_v7(),
+            name: "Nginx".to_string(),
+            provider_config_id: uuid::Uuid::now_v7(),
+            package_identifier: String::new(),
+            config_override: None,
+            enabled: false,
+            last_checked_at: None,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+        let config = provider_config::Model {
+            id: item.provider_config_id,
+            name: "Config".to_string(),
+            provider_type: "github_releases".to_string(),
+            config: serde_json::json!({}),
+            enabled: true,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+
+        let resp = build_list_response(item, &config, 0);
+
+        assert!(!resp.enabled);
+        assert!(resp.last_checked_at.is_none());
+        assert_eq!(resp.host_count, 0);
+    }
+
+    #[test]
+    fn validate_config_override_valid_merge() {
+        let base = serde_json::json!({
+            "owner": "octocat",
+            "repo": "hello-world"
+        });
+        let override_val = serde_json::json!({
+            "tag_strip_prefix": "release-"
+        });
+
+        let result = validate_config_override("github_releases", &base, &override_val);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_config_override_invalid_merge() {
+        let base = serde_json::json!({
+            "owner": "octocat",
+            "repo": "hello-world"
+        });
+        // Override that clears a required field
+        let override_val = serde_json::json!({
+            "owner": ""
+        });
+
+        let result = validate_config_override("github_releases", &base, &override_val);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_config_override_non_object_rejected() {
+        let base = serde_json::json!({
+            "owner": "octocat",
+            "repo": "hello-world"
+        });
+        let override_val = serde_json::json!("not an object");
+
+        let result = validate_config_override("github_releases", &base, &override_val);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .contains("config_override must be a JSON object")
+        );
+    }
+}
