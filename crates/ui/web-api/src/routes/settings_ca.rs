@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use http::StatusCode;
 
 use crate::AppState;
+use crate::auth::permissions::Permission;
+use crate::middleware::require_auth::AuthenticatedUser;
 
 pub use uptrakit_web_api_types::settings_ca::RotateCaResponse;
 
@@ -21,10 +24,22 @@ pub use uptrakit_web_api_types::settings_ca::RotateCaResponse;
     responses(
         (status = 200, description = "CA rotation triggered", body = RotateCaResponse),
         (status = 400, description = "CA rotation not available"),
+        (status = 403, description = "Not authorized"),
     ),
     tag = "Settings"
 )]
-pub async fn rotate_ca(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn rotate_ca(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+) -> impl IntoResponse {
+    if !user.has_permission(Permission::ManageGlobalSettings) {
+        return (
+            StatusCode::FORBIDDEN,
+            axum::Json(serde_json::json!({"error": "Insufficient permissions"})),
+        )
+            .into_response();
+    }
+
     let snapshot = state.ca_snapshot.borrow().clone();
     if !snapshot.managed {
         return (

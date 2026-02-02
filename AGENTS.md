@@ -269,15 +269,17 @@ Authorization uses a typed `Permission` enum (defined in `crates/shared/web-api-
 | `ManageSettings` | `manage_settings` | Modify settings, OIDC providers, auth config |
 | `ViewAgents` | `view_agents` | List agents |
 | `ManageAgents` | `manage_agents` | Approve, reject, delete, merge agents; manage enrollment tokens |
+| `ManageGlobalSettings` | `manage_global_settings` | View and modify global settings (network, CA, TLS, system alerts) |
 
 ### Roles
 
 | Role | Permissions |
 | --- | --- |
-| `admin` | All four |
+| `owner` | All five (`view_settings`, `manage_settings`, `view_agents`, `manage_agents`, `manage_global_settings`) |
+| `admin` | `view_settings`, `manage_settings`, `view_agents`, `manage_agents` |
 | `user` | `view_agents` only |
 
-The first registered user gets the `admin` role. Subsequent users (password or OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
+The first registered user gets the `owner` role. Subsequent users (password or OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
 
 ### How it works
 
@@ -420,11 +422,13 @@ The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettin
 
 | Endpoint | Permission | Purpose |
 | --- | --- | --- |
-| `GET /api/v1/settings/network` | ViewSettings | Read network settings |
-| `PUT /api/v1/settings/network` | ManageSettings | Update network settings (includes `pki_addr`) |
+| `GET /api/v1/settings/network` | ManageGlobalSettings | Read network settings |
+| `PUT /api/v1/settings/network` | ManageGlobalSettings | Update network settings (includes `pki_addr`) |
 | `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT settings |
 | `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT settings |
-| `POST /api/v1/settings/rotate-ca` | ManageSettings | Trigger immediate CA rotation |
+| `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
+| `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
+| `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
 
 ### PKI API endpoints (unauthenticated)
 

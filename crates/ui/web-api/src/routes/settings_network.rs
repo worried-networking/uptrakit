@@ -33,7 +33,7 @@ pub async fn get_network_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ManageGlobalSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
@@ -74,7 +74,7 @@ pub async fn update_network_settings(
     Extension(user): Extension<AuthenticatedUser>,
     Json(req): Json<UpdateNetworkSettingsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageGlobalSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 

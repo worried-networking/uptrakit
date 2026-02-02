@@ -8,6 +8,7 @@ pub enum Permission {
     ManageSettings,
     ViewAgents,
     ManageAgents,
+    ManageGlobalSettings,
 }
 
 impl Permission {
@@ -17,6 +18,7 @@ impl Permission {
             Permission::ManageSettings,
             Permission::ViewAgents,
             Permission::ManageAgents,
+            Permission::ManageGlobalSettings,
         ]
     }
 
@@ -26,6 +28,7 @@ impl Permission {
             Permission::ManageSettings => "manage_settings",
             Permission::ViewAgents => "view_agents",
             Permission::ManageAgents => "manage_agents",
+            Permission::ManageGlobalSettings => "manage_global_settings",
         }
     }
 
@@ -35,6 +38,7 @@ impl Permission {
             "manage_settings" => Some(Permission::ManageSettings),
             "view_agents" => Some(Permission::ViewAgents),
             "manage_agents" => Some(Permission::ManageAgents),
+            "manage_global_settings" => Some(Permission::ManageGlobalSettings),
             _ => None,
         }
     }

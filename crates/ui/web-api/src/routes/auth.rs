@@ -113,10 +113,10 @@ pub async fn register(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // If first user, assign admin role and complete initial setup
+    // If first user, assign owner role and complete initial setup
     if is_first_user {
-        if let Err(e) = assign_admin_role(&state.db, state.default_tenant_id, user_id).await {
-            tracing::error!("Failed to assign admin role to first user: {:?}", e);
+        if let Err(e) = assign_owner_role(&state.db, state.default_tenant_id, user_id).await {
+            tracing::error!("Failed to assign owner role to first user: {:?}", e);
             // Continue anyway - user is created
         }
         if let Err(e) = state
@@ -444,24 +444,24 @@ pub async fn refresh(
 
 // Helper functions
 
-async fn assign_admin_role(
+async fn assign_owner_role(
     db: &DatabaseConnection,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
-    let admin_role = Role::find()
-        .filter(role::Column::Name.eq("admin"))
+    let owner_role = Role::find()
+        .filter(role::Column::Name.eq("owner"))
         .one(db)
         .await
         .context_to()?
-        .ok_or_else(|| report!(AuthError::Internal("admin role not found".to_string())))?;
+        .ok_or_else(|| report!(AuthError::Internal("owner role not found".to_string())))?;
 
     let now = OffsetDateTime::now_utc();
 
     let user_role_model = user_role::ActiveModel {
         tenant_id: Set(tenant_id),
         user_id: Set(user_id),
-        role_id: Set(admin_role.id),
+        role_id: Set(owner_role.id),
         assigned_at: Set(now),
     };
 

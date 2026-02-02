@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
+use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
+use http::StatusCode;
 
 use crate::AppState;
+use crate::auth::permissions::Permission;
+use crate::middleware::require_auth::AuthenticatedUser;
 
 pub use uptrakit_web_api_types::system_alerts::{SystemAlert, SystemAlertsResponse};
 
@@ -13,11 +17,19 @@ pub use uptrakit_web_api_types::system_alerts::{SystemAlert, SystemAlertsRespons
     path = "/api/v1/system/alerts",
     tag = "System",
     responses(
-        (status = 200, description = "System alerts", body = SystemAlertsResponse)
+        (status = 200, description = "System alerts", body = SystemAlertsResponse),
+        (status = 403, description = "Not authorized")
     ),
     security(("bearer_token" = []))
 )]
-pub async fn get_system_alerts(State(state): State<Arc<AppState>>) -> Json<SystemAlertsResponse> {
+pub async fn get_system_alerts(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+) -> Response {
+    if !user.has_permission(Permission::ManageGlobalSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
     let snapshot = state.ca_snapshot.borrow().clone();
     let mut alerts = Vec::new();
 
@@ -82,7 +94,7 @@ pub async fn get_system_alerts(State(state): State<Arc<AppState>>) -> Json<Syste
         }
     }
 
-    Json(SystemAlertsResponse { alerts })
+    (StatusCode::OK, Json(SystemAlertsResponse { alerts })).into_response()
 }
 
 /// Extract not_after timestamp from a PEM cert.

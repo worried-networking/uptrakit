@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
+use axum::{Extension, Json};
 use http::StatusCode;
 
 use crate::AppState;
+use crate::auth::permissions::Permission;
+use crate::middleware::require_auth::AuthenticatedUser;
 use crate::pki_utils::{self, SanCollection};
 
 pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
@@ -16,13 +18,19 @@ pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
     tag = "Settings",
     responses(
         (status = 200, description = "Server certificate renewed", body = RenewServerCertResponse),
+        (status = 403, description = "Not authorized"),
         (status = 500, description = "Renewal failed")
     ),
     security(("bearer_token" = []))
 )]
 pub async fn renew_server_certificate(
     State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
 ) -> Result<Json<RenewServerCertResponse>, StatusCode> {
+    if !user.has_permission(Permission::ManageGlobalSettings) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let snapshot = state.ca_snapshot.borrow().clone();
 
     // Build CA issuer from the active snapshot

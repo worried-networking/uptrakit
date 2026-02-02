@@ -43,7 +43,7 @@
 	});
 
 	$effect(() => {
-		if ($user?.permissions.includes(Permission.ManageSettings)) {
+		if ($user?.permissions.includes(Permission.ManageGlobalSettings)) {
 			fetchAlerts();
 		}
 	});
@@ -54,7 +54,8 @@
 		{ href: '/', label: 'Home' },
 		{ href: '/agents', label: 'Agents' },
 		{ href: '/hosts', label: 'Hosts' },
-		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings }
+		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings },
+		{ href: '/settings/global', label: 'Global Settings', permission: Permission.ManageGlobalSettings }
 	];
 
 	const navItems = $derived(
@@ -141,7 +142,7 @@
 						</div>
 						<div class="alert-actions">
 							{#if alert.action === 'renew_server_certificate'}
-								<a href="/settings" class="btn btn-sm variant-filled">Go to Settings</a>
+								<a href="/settings/global" class="btn btn-sm variant-filled">Go to Global Settings</a>
 							{/if}
 							<button class="btn btn-sm variant-soft" onclick={() => dismissAlert(alert.id)}>Dismiss</button>
 						</div>

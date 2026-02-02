@@ -46,6 +46,10 @@ mod tests {
         assert_eq!(Permission::ManageSettings.as_str(), "manage_settings");
         assert_eq!(Permission::ViewAgents.as_str(), "view_agents");
         assert_eq!(Permission::ManageAgents.as_str(), "manage_agents");
+        assert_eq!(
+            Permission::ManageGlobalSettings.as_str(),
+            "manage_global_settings"
+        );
     }
 
     #[test]
@@ -66,6 +70,10 @@ mod tests {
             Permission::parse("manage_agents"),
             Some(Permission::ManageAgents)
         );
+        assert_eq!(
+            Permission::parse("manage_global_settings"),
+            Some(Permission::ManageGlobalSettings)
+        );
     }
 
     #[test]
@@ -83,9 +91,9 @@ mod tests {
     }
 
     #[test]
-    fn permission_all_returns_four_items() {
+    fn permission_all_returns_five_items() {
         let all = Permission::all();
-        assert_eq!(all.len(), 4);
+        assert_eq!(all.len(), 5);
     }
 
     #[test]
@@ -376,28 +384,33 @@ mod tests {
     fn user_response_round_trip() {
         let user = UserResponse {
             id: "usr-001".to_string(),
-            email: "admin@example.com".to_string(),
-            first_name: "Admin".to_string(),
+            email: "owner@example.com".to_string(),
+            first_name: "Owner".to_string(),
             last_name: "User".to_string(),
             permissions: vec![
                 Permission::ViewSettings,
                 Permission::ManageSettings,
                 Permission::ViewAgents,
                 Permission::ManageAgents,
+                Permission::ManageGlobalSettings,
             ],
         };
         let json = serde_json::to_string(&user).unwrap();
         let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.id, "usr-001");
-        assert_eq!(deserialized.email, "admin@example.com");
-        assert_eq!(deserialized.first_name, "Admin");
+        assert_eq!(deserialized.email, "owner@example.com");
+        assert_eq!(deserialized.first_name, "Owner");
         assert_eq!(deserialized.last_name, "User");
-        assert_eq!(deserialized.permissions.len(), 4);
+        assert_eq!(deserialized.permissions.len(), 5);
         assert_eq!(deserialized.permissions[0], Permission::ViewSettings);
         assert_eq!(deserialized.permissions[1], Permission::ManageSettings);
         assert_eq!(deserialized.permissions[2], Permission::ViewAgents);
         assert_eq!(deserialized.permissions[3], Permission::ManageAgents);
+        assert_eq!(
+            deserialized.permissions[4],
+            Permission::ManageGlobalSettings
+        );
     }
 
     #[test]

@@ -22,12 +22,16 @@ impl MigrationTrait for Migration {
             .exec_stmt(Query::delete().from_table(Permissions::Table).to_owned())
             .await?;
 
-        // 2. Insert 4 new permissions
+        // 2. Insert 5 permissions
         let permissions = vec![
             ("view_settings", "View system settings"),
             ("manage_settings", "Create and modify system settings"),
             ("view_agents", "View monitoring agents"),
             ("manage_agents", "Approve, reject, and manage agents"),
+            (
+                "manage_global_settings",
+                "Manage global settings (network, CA, TLS, system alerts)",
+            ),
         ];
 
         let mut permission_ids = Vec::new();
@@ -56,7 +60,7 @@ impl MigrationTrait for Migration {
                 .await?;
         }
 
-        // 3. Find admin role and assign all 4 permissions
+        // 3. Find admin role and assign 4 permissions (exclude manage_global_settings)
         let select_admin = Query::select()
             .column(Roles::Id)
             .from(Roles::Table)
@@ -69,7 +73,10 @@ impl MigrationTrait for Migration {
             .ok_or(DbErr::Custom("admin role not found".to_string()))?
             .try_get("", "id")?;
 
-        for (perm_id, _) in &permission_ids {
+        for (perm_id, perm_name) in &permission_ids {
+            if *perm_name == "manage_global_settings" {
+                continue;
+            }
             manager
                 .exec_stmt(
                     Query::insert()
@@ -81,7 +88,36 @@ impl MigrationTrait for Migration {
                 .await?;
         }
 
-        // 4. Insert 'user' role
+        // 4. Insert 'owner' role with all 5 permissions
+        let owner_role_id = Uuid::now_v7();
+        manager
+            .exec_stmt(
+                Query::insert()
+                    .into_table(Roles::Table)
+                    .columns([Roles::Id, Roles::Name, Roles::Description, Roles::CreatedAt])
+                    .values_panic([
+                        owner_role_id.into(),
+                        "owner".into(),
+                        "Owner with full access including global settings".into(),
+                        now.into(),
+                    ])
+                    .to_owned(),
+            )
+            .await?;
+
+        for (perm_id, _) in &permission_ids {
+            manager
+                .exec_stmt(
+                    Query::insert()
+                        .into_table(RolePermissions::Table)
+                        .columns([RolePermissions::RoleId, RolePermissions::PermissionId])
+                        .values_panic([owner_role_id.into(), (*perm_id).into()])
+                        .to_owned(),
+                )
+                .await?;
+        }
+
+        // 5. Insert 'user' role with view_agents only
         let user_role_id = Uuid::now_v7();
         manager
             .exec_stmt(
@@ -98,7 +134,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // 5. Assign view_agents to user role
         let view_agents_id = permission_ids
             .iter()
             .find(|(_, name)| *name == "view_agents")
@@ -117,10 +152,32 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // 6. Migrate existing admin users to owner role
+        // Find all user_role entries pointing to the admin role and reassign them to owner
+        manager
+            .exec_stmt(
+                Query::update()
+                    .table(UserRoles::Table)
+                    .value(UserRoles::RoleId, owner_role_id)
+                    .and_where(Expr::col(UserRoles::RoleId).eq(admin_role_id))
+                    .to_owned(),
+            )
+            .await?;
+
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Remove owner role (cascades to role_permissions and user_roles)
+        manager
+            .exec_stmt(
+                Query::delete()
+                    .from_table(Roles::Table)
+                    .and_where(Expr::col(Roles::Name).eq("owner"))
+                    .to_owned(),
+            )
+            .await?;
+
         // Remove user role (cascades to role_permissions and user_roles)
         manager
             .exec_stmt(
@@ -137,6 +194,7 @@ impl MigrationTrait for Migration {
             "manage_settings",
             "view_agents",
             "manage_agents",
+            "manage_global_settings",
         ];
         for name in new_perms {
             manager
@@ -176,4 +234,10 @@ enum RolePermissions {
     Table,
     RoleId,
     PermissionId,
+}
+
+#[derive(DeriveIden)]
+enum UserRoles {
+    Table,
+    RoleId,
 }

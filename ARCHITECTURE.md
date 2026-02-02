@@ -164,7 +164,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 
 Uses a typed `Permission` enum -- route handlers check `user.has_permission(Permission::...)`, never raw role strings. JWT tokens carry resolved permissions; the frontend receives permissions as `string[]`.
 
-Roles: `admin` (all permissions) and `user` (`view_agents` only). First registered user gets `admin`.
+Roles: `owner` (all permissions including global settings), `admin` (all except global settings), and `user` (`view_agents` only). First registered user gets `owner`.
 
 For the full permissions table and instructions on adding new permissions, see [AGENTS.md](AGENTS.md) section "Permissions model".
 

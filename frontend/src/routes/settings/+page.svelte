@@ -17,10 +17,6 @@
 		deleteOidcProvider,
 		activateOidcProvider,
 		deactivateOidcProvider,
-		getSystemAlerts,
-		renewServerCertificate,
-		getNetworkSettings,
-		updateNetworkSettings,
 		getMqttSettings,
 		updateMqttSettings
 	} from '$lib/api';
@@ -33,8 +29,6 @@
 		type OidcProviderResponse,
 		type CreateOidcProviderRequest,
 		type UpdateOidcProviderRequest,
-		type SystemAlert,
-		type NetworkSettings,
 		type MqttSettingsResponse
 	} from '$lib/types';
 
@@ -56,12 +50,6 @@
 
 	let oidcProviders: OidcProviderResponse[] = $state([]);
 
-	// --- Network Settings ---
-	let trustedProxiesText: string = $state('');
-	let realIpHeader: string = $state('X-Forwarded-For');
-	let extraSansText: string = $state('');
-	let httpsAddr: string = $state('[::]:8443');
-
 	// --- MQTT Settings ---
 	let mqttHost: string = $state('');
 	let mqttPort: number = $state(1883);
@@ -70,10 +58,6 @@
 	let mqttPassword: string = $state('');
 	let mqttHasPassword: boolean = $state(false);
 	let mqttTopicPrefix: string = $state('uptrakit');
-
-	// --- TLS Certificate ---
-	let tlsAlerts: SystemAlert[] = $state([]);
-	let renewingCert: boolean = $state(false);
 
 	// --- OIDC modal state ---
 	let showOidcModal: boolean = $state(false);
@@ -152,8 +136,6 @@
 			getAgentCertificateSettings(),
 			getEnrollmentTokenStatus(),
 			getOidcProviders(),
-			getSystemAlerts(),
-			getNetworkSettings(),
 			getMqttSettings()
 		]);
 
@@ -174,19 +156,7 @@
 			oidcProviders = results[4].value;
 		}
 		if (results[5].status === 'fulfilled') {
-			tlsAlerts = results[5].value.alerts.filter(
-				(a) => a.id === 'server_cert_old_ca' || a.id === 'server_cert_expiring'
-			);
-		}
-		if (results[6].status === 'fulfilled') {
-			const net = results[6].value;
-			trustedProxiesText = net.trusted_proxies.join('\n');
-			realIpHeader = net.real_ip_header;
-			extraSansText = net.extra_sans.join('\n');
-			httpsAddr = net.https_addr;
-		}
-		if (results[7].status === 'fulfilled') {
-			const mqtt = results[7].value;
+			const mqtt = results[5].value;
 			mqttHost = mqtt.host ?? '';
 			mqttPort = mqtt.port;
 			mqttClientId = mqtt.client_id;
@@ -197,34 +167,6 @@
 		}
 
 		loading = false;
-	}
-
-	// --- Network Settings ---
-	async function saveNetworkSettings() {
-		clearError();
-		try {
-			const proxies = trustedProxiesText
-				.split('\n')
-				.map((s) => s.trim())
-				.filter((s) => s.length > 0);
-			const sans = extraSansText
-				.split('\n')
-				.map((s) => s.trim())
-				.filter((s) => s.length > 0);
-			const res = await updateNetworkSettings({
-				trusted_proxies: proxies,
-				real_ip_header: realIpHeader,
-				extra_sans: sans,
-				https_addr: httpsAddr
-			});
-			trustedProxiesText = res.trusted_proxies.join('\n');
-			realIpHeader = res.real_ip_header;
-			extraSansText = res.extra_sans.join('\n');
-			httpsAddr = res.https_addr;
-			showSuccess('Network settings saved.');
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to save network settings');
-		}
 	}
 
 	// --- MQTT Settings ---
@@ -327,21 +269,6 @@
 			showSuccess('Enrollment token revoked.');
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to revoke enrollment token');
-		}
-	}
-
-	// --- Server Certificate ---
-	async function handleRenewServerCert() {
-		clearError();
-		renewingCert = true;
-		try {
-			await renewServerCertificate();
-			tlsAlerts = tlsAlerts.filter((a) => a.id !== 'server_cert_old_ca' && a.id !== 'server_cert_expiring');
-			showSuccess('Server certificate renewed successfully.');
-		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to renew server certificate');
-		} finally {
-			renewingCert = false;
 		}
 	}
 
@@ -550,56 +477,7 @@
 			</button>
 		</div>
 
-		<!-- Section 3: Network Settings -->
-		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">Network Settings</h2>
-			<p class="text-surface-600-300-token mb-4">
-				Configure reverse proxy trust, client IP detection, and listen addresses.
-				Changes to listen addresses require a restart to take effect.
-			</p>
-
-			<label class="label mb-4">
-				<span>Trusted Proxies (one IP/CIDR per line)</span>
-				<textarea
-					class="textarea"
-					rows="3"
-					placeholder="e.g. 10.0.0.0/8&#10;192.168.1.1"
-					bind:value={trustedProxiesText}
-				></textarea>
-			</label>
-
-			<label class="label mb-4">
-				<span>Real IP Header</span>
-				<select class="select" bind:value={realIpHeader}>
-					<option value="X-Forwarded-For">X-Forwarded-For</option>
-					<option value="Forwarded">Forwarded (RFC 7239)</option>
-					<option value="X-Real-Ip">X-Real-Ip</option>
-					<option value="CF-Connecting-IP">CF-Connecting-IP</option>
-					<option value="True-Client-IP">True-Client-IP</option>
-				</select>
-			</label>
-
-			<label class="label mb-4">
-				<span>Extra SANs (one IP or DNS name per line)</span>
-				<textarea
-					class="textarea"
-					rows="3"
-					placeholder="e.g. controller.local&#10;192.168.1.100"
-					bind:value={extraSansText}
-				></textarea>
-			</label>
-
-			<label class="label mb-4">
-				<span>HTTPS Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
-				<input class="input" type="text" bind:value={httpsAddr} />
-			</label>
-
-			<button class="btn variant-filled-primary" onclick={saveNetworkSettings}>
-				Save
-			</button>
-		</div>
-
-		<!-- Section 4: MQTT Settings -->
+		<!-- Section 3: MQTT Settings -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">MQTT Settings</h2>
 			<p class="text-surface-600-300-token mb-4">
@@ -760,34 +638,7 @@
 			</button>
 		</div>
 
-		<!-- Section 5: Controller TLS Certificate -->
-		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">Controller TLS Certificate</h2>
-			<p class="text-surface-600-300-token mb-4">
-				The controller's HTTPS certificate is automatically renewed before expiration.
-				You can manually renew it here to re-issue under the current active CA.
-			</p>
-
-			{#if tlsAlerts.length > 0}
-				{#each tlsAlerts as alert (alert.id)}
-					<aside class="alert {alert.severity === 'warning' ? 'variant-filled-warning' : 'variant-filled-surface'} mb-4">
-						<div class="alert-message">
-							<p>{alert.message}</p>
-						</div>
-					</aside>
-				{/each}
-			{/if}
-
-			<button
-				class="btn variant-filled-primary"
-				onclick={handleRenewServerCert}
-				disabled={renewingCert}
-			>
-				{renewingCert ? 'Renewing...' : 'Renew Server Certificate'}
-			</button>
-		</div>
-
-		<!-- Section 6: Enrollment Token -->
+		<!-- Section 5: Enrollment Token -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Enrollment Token</h2>
 			<div class="flex items-center gap-3 mb-4">

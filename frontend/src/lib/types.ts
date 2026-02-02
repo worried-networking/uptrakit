@@ -2,7 +2,8 @@ export enum Permission {
 	ViewSettings = 'view_settings',
 	ManageSettings = 'manage_settings',
 	ViewAgents = 'view_agents',
-	ManageAgents = 'manage_agents'
+	ManageAgents = 'manage_agents',
+	ManageGlobalSettings = 'manage_global_settings'
 }
 
 export interface User {
