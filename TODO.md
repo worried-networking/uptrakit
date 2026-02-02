@@ -619,6 +619,7 @@ Ensuring robustness and maintainability.
   - [ ] Database operations
   - [ ] Provider implementations
   - [ ] End-to-end update workflows
+  - [ ] OCSP revocation checking with reverse proxies (Nginx `ssl_ocsp leaf`). Requires solving Nginx's async OCSP HTTP subrequest within Docker — Nginx needs a working `resolver` directive and reachable OCSP responder from the container's network namespace. CRL tests exist for Nginx, HAProxy, and Envoy; OCSP tests are still missing.
 - [ ] Implement load testing
   - [ ] Many agents scenario
   - [ ] Concurrent update scenario
