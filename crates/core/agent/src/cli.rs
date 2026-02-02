@@ -13,7 +13,7 @@ pub struct Args {
 
     /// Trust the controller's TLS certificate on first connection (TOFU).
     /// Only effective when no CA certificate is cached locally.
-    #[arg(long, conflicts_with = "ca_cert")]
+    #[arg(long, conflicts_with_all = ["ca_cert", "pki_addr"])]
     pub tofu: bool,
 
     /// Path to a PEM-encoded CA certificate file.
@@ -128,6 +128,19 @@ mod tests {
             "/some/path.pem",
         ]);
         assert!(result.is_err(), "--tofu and --ca-cert should conflict");
+    }
+
+    #[test]
+    fn tofu_and_pki_addr_conflict() {
+        let result = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://host:8443",
+            "--tofu",
+            "--pki-addr",
+            "http://pki.local:8080",
+        ]);
+        assert!(result.is_err(), "--tofu and --pki-addr should conflict");
     }
 
     #[test]

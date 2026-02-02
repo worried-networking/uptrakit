@@ -59,29 +59,26 @@ pub enum LoopOutcome {
 
 /// TLS mode for the CA certificate fetch via reqwest.
 pub enum TlsMode<'a> {
+    /// Use system/built-in root certificates (for https:// pki_addr).
+    SystemTrust,
     /// Accept any server cert (TOFU).
-    TrustFirstUse,
+    TrustOnFirstUse,
     /// Use a pinned CA certificate.
     PinnedCa(&'a [u8]),
 }
 
-/// Fetch the CA certificate bundle from the controller using reqwest.
+/// Fetch the CA certificate bundle using reqwest.
 ///
-/// When `pki_addr` is set, the CA is fetched from that URL instead of
-/// `base_url`. If the PKI address uses `http://`, plain HTTP is used
-/// (no TLS configuration needed). Otherwise the provided `tls_mode` applies.
+/// The caller passes the correct `base_url` (either the main controller URL
+/// or the `--pki-addr` value). If `base_url` starts with `http://`, plain
+/// HTTP is used (no TLS configuration needed). Otherwise the provided
+/// `tls_mode` applies.
 pub async fn fetch_ca_certificate(
     base_url: &str,
-    pki_addr: Option<&str>,
     tls_mode: TlsMode<'_>,
 ) -> Result<Vec<u8>> {
-    let (fetch_url, use_plain_http) = match pki_addr {
-        Some(pki) => {
-            let is_http = pki.starts_with("http://");
-            (format!("{pki}/api/v1/pki/ca.crt"), is_http)
-        }
-        None => (format!("{base_url}/api/v1/pki/ca.crt"), false),
-    };
+    let fetch_url = format!("{base_url}/api/v1/pki/ca.crt");
+    let use_plain_http = base_url.starts_with("http://");
 
     tracing::info!(url = %fetch_url, "fetching CA certificate");
 
@@ -90,7 +87,10 @@ pub async fn fetch_ca_certificate(
         // Plain HTTP — no TLS configuration needed
     } else {
         match tls_mode {
-            TlsMode::TrustFirstUse => {
+            TlsMode::SystemTrust => {
+                // reqwest defaults to system/built-in roots — nothing to configure
+            }
+            TlsMode::TrustOnFirstUse => {
                 builder = builder.danger_accept_invalid_certs(true);
             }
             TlsMode::PinnedCa(ca_pem) => {
@@ -592,11 +592,12 @@ pub async fn run_authenticated_loop(
                                     let local_hash = compute_local_ca_hash(data_dir);
                                     if local_hash != settings.ca_bundle_hash {
                                         tracing::info!("CA bundle hash mismatch, fetching updated bundle");
+                                        let ca_fetch_url = pki_addr.unwrap_or(base_url);
                                         let tls_mode = match ca_pem {
                                             Some(pem) => TlsMode::PinnedCa(pem),
-                                            None => TlsMode::TrustFirstUse,
+                                            None => TlsMode::SystemTrust,
                                         };
-                                        match fetch_ca_certificate(base_url, pki_addr, tls_mode).await {
+                                        match fetch_ca_certificate(ca_fetch_url, tls_mode).await {
                                             Ok(pem) => {
                                                 if let Err(e) = crate::state::save_ca_cert(data_dir, &pem) {
                                                     tracing::warn!("failed to save updated CA: {e}");

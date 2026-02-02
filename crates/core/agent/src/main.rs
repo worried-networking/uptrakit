@@ -63,7 +63,7 @@ async fn run(args: &Args) -> error::Result<()> {
         state::delete_agent_key(&data_dir)?;
     }
 
-    // CA bootstrap: cached → --ca-cert file → --tofu TOFU → system trust
+    // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust
     let ca_pem: Option<Vec<u8>> = if let Some(cached) = state::load_ca_cert(&data_dir)? {
         tracing::info!("loaded CA certificate from disk");
         if args.tofu {
@@ -77,10 +77,17 @@ async fn run(args: &Args) -> error::Result<()> {
         state::save_ca_cert(&data_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
+    } else if let Some(pki) = pki_addr {
+        tracing::info!("fetching CA certificate from --pki-addr {pki}");
+        let pem =
+            client::fetch_ca_certificate(pki, client::TlsMode::SystemTrust).await?;
+        state::save_ca_cert(&data_dir, &pem)?;
+        tracing::info!("CA certificate saved to disk");
+        Some(pem)
     } else if args.tofu {
         tracing::info!("TOFU: fetching CA (accepting any server certificate)");
-        let pem = client::fetch_ca_certificate(base_url, pki_addr, client::TlsMode::TrustFirstUse)
-            .await?;
+        let pem =
+            client::fetch_ca_certificate(base_url, client::TlsMode::TrustOnFirstUse).await?;
         state::save_ca_cert(&data_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
