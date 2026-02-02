@@ -42,7 +42,6 @@ pub struct Args {
     /// When set, the agent fetches the CA certificate from this address
     /// instead of from the main --url.
     /// Supports both http:// and https:// schemes.
-    /// When http:// is used, the CA is fetched over plain HTTP (no TLS).
     #[arg(long, value_parser = parse_pki_addr)]
     pub pki_addr: Option<String>,
 }
