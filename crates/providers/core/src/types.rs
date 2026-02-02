@@ -25,6 +25,7 @@ pub struct DiscoveredSoftware {
 pub enum ProviderType {
     GithubReleases,
     ProxmoxHelperScripts,
+    DockerRegistry,
 }
 
 impl fmt::Display for ProviderType {
@@ -32,6 +33,7 @@ impl fmt::Display for ProviderType {
         match self {
             Self::GithubReleases => write!(f, "github_releases"),
             Self::ProxmoxHelperScripts => write!(f, "proxmox_helper_scripts"),
+            Self::DockerRegistry => write!(f, "docker_registry"),
         }
     }
 }
@@ -98,12 +100,23 @@ mod tests {
     }
 
     #[test]
+    fn provider_type_docker_registry_serialization() {
+        let dr = ProviderType::DockerRegistry;
+        let json = serde_json::to_string(&dr).expect("serialize");
+        assert_eq!(json, r#""docker_registry""#);
+
+        let deserialized: ProviderType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, dr);
+    }
+
+    #[test]
     fn provider_type_display() {
         assert_eq!(ProviderType::GithubReleases.to_string(), "github_releases");
         assert_eq!(
             ProviderType::ProxmoxHelperScripts.to_string(),
             "proxmox_helper_scripts"
         );
+        assert_eq!(ProviderType::DockerRegistry.to_string(), "docker_registry");
     }
 
     #[test]

@@ -4844,6 +4844,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-provider-docker-registry"
+version = "0.0.1"
+dependencies = [
+ "regex",
+ "reqwest",
+ "rootcause",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tracing",
+ "uptrakit-provider-core",
+]
+
+[[package]]
 name = "uptrakit-provider-github"
 version = "0.0.1"
 dependencies = [
@@ -4911,6 +4927,7 @@ dependencies = [
  "tracing",
  "uptrakit-internal-wire",
  "uptrakit-provider-core",
+ "uptrakit-provider-docker-registry",
  "uptrakit-provider-github",
  "uptrakit-shared-db",
  "uptrakit-web-api-types",

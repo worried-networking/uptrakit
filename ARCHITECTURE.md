@@ -54,6 +54,7 @@ crates/
 │   └── controller/                # uptrakit-controller (bin)
 ├── providers/
 │   ├── core/                      # uptrakit-provider-core (lib) — provider traits
+│   ├── docker-registry/           # uptrakit-provider-docker-registry (lib)
 │   ├── github/                    # uptrakit-provider-github (lib)
 │   └── proxmox-helper-scripts/    # uptrakit-provider-proxmox-helper-scripts (lib)
 ├── shared/
@@ -217,6 +218,7 @@ Providers define how software items are tracked and updated. Each provider split
 | --- | --- | --- |
 | Provider Core | `crates/providers/core/` | Shared traits and abstractions |
 | GitHub Releases | `crates/providers/github/` | Tracks GitHub release metadata; agent installs from artifacts |
+| Docker Registry | `crates/providers/docker-registry/` | Tracks container image tags from OCI/Docker registries |
 | Proxmox Helper-Scripts | `crates/providers/proxmox-helper-scripts/` | Auto-discovers and manages PVE helper-script-installed apps |
 
 The update step can always be overridden by a custom shell script, regardless of provider.
@@ -230,7 +232,7 @@ Provider-specific configurations are stored in the `provider_configs` database t
 - A `config` JSON object validated against the provider's config schema on create/update
 - An `enabled` flag and soft-delete via `deactivated_at`
 
-The web API exposes CRUD endpoints at `/api/v1/provider-configs` with `ViewSettings` / `ManageSettings` permissions. Secret fields (e.g. `auth_token`) are masked with `"***"` in API responses and preserved on update when the masked value is sent back.
+The web API exposes CRUD endpoints at `/api/v1/provider-configs` with `ViewSettings` / `ManageSettings` permissions. Secret fields (e.g. `auth_token` for GitHub, `auth.password`/`auth.token` for Docker Registry) are masked with `"***"` in API responses and preserved on update when the masked value is sent back.
 
 ## Frontend Architecture
 
