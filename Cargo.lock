@@ -4642,6 +4642,7 @@ dependencies = [
  "hex",
  "hostname",
  "http",
+ "rcgen",
  "reqwest",
  "rootcause",
  "rustls",
@@ -4649,6 +4650,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
@@ -4656,6 +4658,7 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-internal-wire",
  "url",
+ "uuid",
  "webpki-roots 1.0.5",
 ]
 

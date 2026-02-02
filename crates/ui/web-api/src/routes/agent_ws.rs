@@ -17,8 +17,8 @@ use uptrakit_internal_wire::{
 use crate::AppState;
 use crate::extract::{AgentIdentity, ClientIp};
 use crate::routes::agents::{
-    AgentStatus, do_enroll, do_lookup_by_secret, do_sign_certificate, find_or_create_host_and_link,
-    revoke_certificate,
+    AgentRouteError, AgentStatus, do_enroll, do_lookup_by_secret, do_sign_csr,
+    find_or_create_host_and_link, revoke_certificate,
 };
 
 /// Serialize a [`ControllerMessage`] to JSON, logging on failure.
@@ -307,7 +307,7 @@ async fn handle_authenticated(
                                     tracing::warn!(error = %e, "failed to link host on ReportHostInfo");
                                 }
                             }
-                            AgentMessage::RenewCertificate(_) => {
+                            AgentMessage::RenewCertificate(payload) => {
                                 // Re-fetch agent from DB, verify still approved
                                 let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
                                     .one(&state.db)
@@ -326,17 +326,17 @@ async fn handle_authenticated(
                                     }
                                 };
 
-                                // Sign new certificate
-                                match do_sign_certificate(
+                                // Sign new certificate from agent's CSR
+                                match do_sign_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
                                     &state.db,
                                     agent,
+                                    &payload.csr_pem,
                                 ).await {
                                     Ok(bundle) => {
                                         let cert_msg = ControllerMessage::Certificate(CertificatePayload {
                                             cert_pem: bundle.cert_pem,
-                                            key_pem: bundle.key_pem,
                                             not_after: bundle.not_after,
                                         });
                                         if let Some(json) = serialize_msg(&cert_msg) {
@@ -503,6 +503,7 @@ async fn handle_anonymous(
                             &state.db,
                             &state.settings,
                             state.default_tenant_id,
+                            &payload.client_id,
                             &payload.hostname,
                             &payload.friendly_name,
                             payload.enrollment_token.as_deref(),
@@ -549,10 +550,14 @@ async fn handle_anonymous(
                                 break agent_id;
                             }
                             Err(e) => {
-                                let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "enrollment_failed".to_string(),
-                                    message: e.current_context().to_string(),
-                                });
+                                let (code, message) = match e.current_context() {
+                                    AgentRouteError::ClientIdCollision => (
+                                        "client_id_collision".to_string(),
+                                        "client_id already exists".to_string(),
+                                    ),
+                                    other => ("enrollment_failed".to_string(), other.to_string()),
+                                };
+                                let err = ControllerMessage::Error(ErrorPayload { code, message });
                                 if let Some(json) = serialize_msg(&err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
@@ -641,7 +646,7 @@ async fn run_enrolled_loop(
                                 }
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
                             }
-                            AgentMessage::RequestCertificate(_) => {
+                            AgentMessage::RequestCertificate(payload) => {
                                 if !approved {
                                     let err = ControllerMessage::Error(ErrorPayload {
                                         code: "not_approved".to_string(),
@@ -671,16 +676,16 @@ async fn run_enrolled_loop(
                                     }
                                 };
 
-                                match do_sign_certificate(
+                                match do_sign_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
                                     &state.db,
                                     agent,
+                                    &payload.csr_pem,
                                 ).await {
                                     Ok(bundle) => {
                                         let cert_msg = ControllerMessage::Certificate(CertificatePayload {
                                             cert_pem: bundle.cert_pem,
-                                            key_pem: bundle.key_pem,
                                             not_after: bundle.not_after,
                                         });
                                         if let Some(json) = serialize_msg(&cert_msg) {

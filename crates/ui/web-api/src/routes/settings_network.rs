@@ -237,7 +237,14 @@ pub async fn update_network_settings(
             Some(v) => serde_json::json!(v),
             None => serde_json::Value::Null,
         };
-        if let Err(e) = upsert_setting(&state.db, state.default_tenant_id, SettingKey::BackendUrl, json_val).await {
+        if let Err(e) = upsert_setting(
+            &state.db,
+            state.default_tenant_id,
+            SettingKey::BackendUrl,
+            json_val,
+        )
+        .await
+        {
             tracing::error!("Failed to save backend_url: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }

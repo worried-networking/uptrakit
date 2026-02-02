@@ -81,11 +81,13 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 
 ### Agent lifecycle
 
-1. Agent connects anonymously and sends an `enroll` message with a one-time enrollment token.
-2. Controller responds with `enrolled` (token-based auth for next step) or `rejected`.
-3. Agent requests a client certificate via `request_certificate`.
-4. Controller issues the certificate; agent reconnects with mTLS.
-5. Normal operation: `ping`/`pong` heartbeats, status updates, version reports, update commands.
+1. Agent generates a UUIDv7 `client_id` and ECDSA P-256 keypair locally, creates a PKCS#10 CSR with CN=client_id.
+2. Agent connects anonymously and sends an `enroll` message with `client_id`, `csr_pem`, hostname, and optional enrollment token.
+3. Controller validates the CSR, checks for client_id collisions, and responds with `enrolled` (token-based auth for next step) or `rejected`.
+4. After approval, agent generates a fresh keypair + CSR and sends `request_certificate` with the new `csr_pem`.
+5. Controller validates the CSR and signs the certificate. Agent receives `certificate` (cert PEM only — the private key never leaves the agent).
+6. Agent reconnects with mTLS.
+7. Normal operation: `ping`/`pong` heartbeats, status updates, version reports, update commands.
 
 ### Message types
 
@@ -153,7 +155,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 
 ### Agent authentication
 
-- **Enrollment**: One-time token, then mTLS client certificate issuance.
+- **Enrollment**: Agent generates ECDSA P-256 keypair + CSR locally, enrolls with one-time token. After approval, a fresh keypair + CSR is used for certificate issuance. The private key never leaves the agent.
 - **Normal operation**: mTLS on every WebSocket connection; CRL checked per connection.
 - **Reverse proxy**: When behind a trusted proxy, agent identity is extracted from forwarded headers (`X-Forwarded-Tls-Client-Cert-Info` or `X-Forwarded-Tls-Client-Cert`). Issuer CN is verified against known CA certificates. See [docs/reverse-proxy/](docs/reverse-proxy/) for deployment guides.
 
@@ -253,6 +255,7 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **No automatic updates** | Users must explicitly trigger updates. The scheduler only checks for new versions. This prevents unattended breakage in homelab environments. |
 | **Outbound-only agents** | Agents connect to the controller; never the reverse. Simplifies firewall rules and eliminates the need for agents to expose network services. |
 | **mTLS for agents** | Client certificates provide strong identity without shared secrets. The internal CA avoids dependency on external PKI infrastructure. |
+| **CSR-based certificate issuance** | Agents generate their own ECDSA P-256 keypairs and submit CSRs to the controller for signing. The private key never leaves the agent. A fresh keypair is generated for each CSR (enrollment and renewals). The controller validates CSR signatures and controls all certificate parameters (DN, EKU, validity). |
 | **Permission enum over role strings** | Typed permissions catch authorization bugs at compile time and make the permission model explicit in code. |
 | **SeaORM multi-backend** | SQLite for development simplicity; PostgreSQL/MySQL for production. Feature flags keep the binary lean. |
 | **rootcause + thiserror** | rootcause provides `Report`-based error propagation with structured context. thiserror generates the error enums. Together they enforce boundary-aware error handling without boilerplate. |

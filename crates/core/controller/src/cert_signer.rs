@@ -1,8 +1,11 @@
-use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair};
+use rcgen::{
+    CertificateParams, CertificateSigningRequestParams, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair,
+};
 use rootcause::{Report, prelude::*};
 use time::{OffsetDateTime, UtcDateTime};
 use tokio::sync::watch;
-use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
+use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
 use uuid::Uuid;
 
 use crate::pki::CaSnapshot;
@@ -18,17 +21,24 @@ impl RcgenAgentCertSigner {
 }
 
 impl AgentCertSigner for RcgenAgentCertSigner {
-    fn sign_agent_cert(
+    fn sign_agent_csr(
         &self,
+        csr_pem: &str,
         agent_id: &Uuid,
         lifetime: time::Duration,
-    ) -> std::result::Result<AgentCertBundle, Report<CertSignerError>> {
+    ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
         let snapshot = self.ca_rx.borrow();
         let key_pair = KeyPair::from_pem(&snapshot.active_key_pem)
             .map_err(|e| report!(CertSignerError::CaKeyParse(e.to_string())))?;
         let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
             .map_err(|e| report!(CertSignerError::CaIssuer(e.to_string())))?;
-        generate_agent_cert(&issuer, agent_id, lifetime, snapshot.backend_url.as_deref())
+        sign_agent_csr(
+            csr_pem,
+            &issuer,
+            agent_id,
+            lifetime,
+            snapshot.backend_url.as_deref(),
+        )
     }
 
     fn active_ca_fingerprint(&self) -> String {
@@ -36,15 +46,49 @@ impl AgentCertSigner for RcgenAgentCertSigner {
     }
 }
 
-fn generate_agent_cert(
+fn sign_agent_csr(
+    csr_pem: &str,
     issuer: &Issuer<'_, KeyPair>,
     agent_id: &Uuid,
     lifetime: time::Duration,
     backend_url: Option<&str>,
-) -> std::result::Result<AgentCertBundle, Report<CertSignerError>> {
-    let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-        .map_err(|e| report!(CertSignerError::KeyGeneration(e.to_string())))?;
+) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
+    // Parse and validate CSR signature
+    let csr_params = CertificateSigningRequestParams::from_pem(csr_pem)
+        .map_err(|e| report!(CertSignerError::CsrValidation(format!("invalid CSR: {e}"))))?;
 
+    // Extract CN from CSR and verify it matches agent_id
+    let csr_cn = csr_params
+        .params
+        .distinguished_name
+        .iter()
+        .find_map(|(dn_type, value)| {
+            if dn_type == &DnType::CommonName {
+                match value {
+                    rcgen::DnValue::Utf8String(s) => Some(s.clone()),
+                    rcgen::DnValue::PrintableString(s) => Some(s.to_string()),
+                    rcgen::DnValue::TeletexString(s) => Some(s.to_string()),
+                    rcgen::DnValue::Ia5String(s) => Some(s.to_string()),
+                    // UniversalString and BmpString are raw byte-based; not expected in agent CSRs
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            report!(CertSignerError::CsrValidation(
+                "CSR has no CommonName".to_string()
+            ))
+        })?;
+
+    if csr_cn != agent_id.to_string() {
+        return Err(report!(CertSignerError::CsrValidation(format!(
+            "CSR CN '{csr_cn}' does not match agent_id '{agent_id}'"
+        ))));
+    }
+
+    // Build new CertificateParams with controller-controlled values
     let not_after = OffsetDateTime::now_utc() + lifetime;
 
     let mut params = CertificateParams::default();
@@ -65,13 +109,13 @@ fn generate_agent_cert(
         crate::pki::add_pki_extensions(&mut params, url);
     }
 
+    // Sign using the public key from the CSR
     let cert = params
-        .signed_by(&key_pair, issuer)
+        .signed_by(&csr_params.public_key, issuer)
         .map_err(|e| report!(CertSignerError::Signing(e.to_string())))?;
 
-    Ok(AgentCertBundle {
+    Ok(SignedCertBundle {
         cert_pem: cert.pem(),
-        key_pem: key_pair.serialize_pem(),
         not_after: UtcDateTime::from(not_after),
     })
 }
@@ -93,19 +137,33 @@ mod tests {
         (RcgenAgentCertSigner::new(rx), tx)
     }
 
+    /// Generate a test CSR with the given CN using rcgen.
+    fn generate_test_csr(cn: &str) -> String {
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = CertificateParams::default();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, cn.to_string());
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Uptrakit Agent");
+        let csr = params.serialize_request(&key_pair).unwrap();
+        csr.pem().unwrap()
+    }
+
     #[test]
-    fn agent_cert_signed_by_ca() {
+    fn agent_csr_signed_by_ca() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (signer, _tx) = make_test_signer();
 
         let agent_id = Uuid::now_v7();
+        let csr_pem = generate_test_csr(&agent_id.to_string());
         let bundle = signer
-            .sign_agent_cert(&agent_id, time::Duration::days(7))
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7))
             .unwrap();
 
         assert!(bundle.cert_pem.contains("BEGIN CERTIFICATE"));
-        assert!(bundle.key_pem.contains("BEGIN"));
         // not_after should be ~7 days from now
         let now = UtcDateTime::now();
         assert!(bundle.not_after > now + time::Duration::days(6));
@@ -141,8 +199,9 @@ mod tests {
         let (signer, _tx) = make_test_signer();
 
         let agent_id = Uuid::now_v7();
+        let csr_pem = generate_test_csr(&agent_id.to_string());
         let bundle = signer
-            .sign_agent_cert(&agent_id, time::Duration::days(30))
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(30))
             .unwrap();
 
         let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
@@ -156,6 +215,43 @@ mod tests {
             .unwrap();
         let parsed = Uuid::parse_str(cn).unwrap();
         assert_eq!(parsed, agent_id);
+    }
+
+    #[test]
+    fn csr_cn_mismatch_rejected() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer();
+
+        let agent_id = Uuid::now_v7();
+        let wrong_id = Uuid::now_v7();
+        let csr_pem = generate_test_csr(&wrong_id.to_string());
+
+        let result = signer.sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.current_context().to_string();
+        assert!(
+            msg.contains("does not match"),
+            "expected CN mismatch error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_csr_rejected() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer();
+
+        let agent_id = Uuid::now_v7();
+        let result = signer.sign_agent_csr("not-a-csr", &agent_id, time::Duration::days(7));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.current_context().to_string();
+        assert!(
+            msg.contains("invalid CSR"),
+            "expected invalid CSR error, got: {msg}"
+        );
     }
 
     #[test]

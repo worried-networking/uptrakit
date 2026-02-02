@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
-use crate::cert_signer::AgentCertBundle;
+use crate::cert_signer::SignedCertBundle;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
@@ -51,6 +51,9 @@ pub(crate) enum AgentRouteError {
 
     #[error("certificate signing error")]
     CertSigning,
+
+    #[error("client_id collision")]
+    ClientIdCollision,
 }
 
 impl AgentRouteError {
@@ -59,6 +62,7 @@ impl AgentRouteError {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::ClientIdCollision => StatusCode::CONFLICT,
             Self::Internal(_) | Self::Database(_) | Self::CertSigning => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -87,11 +91,15 @@ pub(crate) struct EnrollResult {
 }
 
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
+///
+/// The `client_id` is an agent-generated UUIDv7. If an active agent with that
+/// UUID already exists, enrollment is rejected with `ClientIdCollision`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn do_enroll(
     db: &sea_orm::DatabaseConnection,
     settings: &crate::settings::Settings,
     tenant_id: uuid::Uuid,
+    client_id: &str,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
@@ -102,6 +110,25 @@ pub(crate) async fn do_enroll(
         return Err(report!(AgentRouteError::BadRequest(
             "hostname must not be empty".into()
         )));
+    }
+
+    // Parse client_id as UUID
+    let agent_id = uuid::Uuid::parse_str(client_id).map_err(|e| {
+        report!(AgentRouteError::BadRequest(format!(
+            "invalid client_id: {e}"
+        )))
+    })?;
+
+    // Collision detection: reject if an active agent with this UUID exists in this tenant
+    let existing = Agent::find_by_id(agent_id)
+        .filter(agent::Column::TenantId.eq(tenant_id))
+        .filter(agent::Column::DeactivatedAt.is_null())
+        .one(db)
+        .await
+        .context_to::<AgentRouteError>()?;
+
+    if existing.is_some() {
+        return Err(report!(AgentRouteError::ClientIdCollision));
     }
 
     // Determine status based on enrollment token
@@ -146,7 +173,6 @@ pub(crate) async fn do_enroll(
         AgentStatus::Pending
     };
 
-    let agent_id = token::generate_uuid();
     let enrollment_secret = match token::generate_secure_token() {
         Ok(s) => s,
         Err(e) => {
@@ -305,13 +331,14 @@ pub(crate) async fn do_lookup_by_secret(
     })
 }
 
-/// Sign certificate for an approved agent, invalidate secret.
-pub(crate) async fn do_sign_certificate(
+/// Sign a certificate from the agent's CSR, invalidate enrollment secret.
+pub(crate) async fn do_sign_csr(
     cert_signer: &dyn crate::cert_signer::AgentCertSigner,
     settings: &crate::settings::Settings,
     db: &sea_orm::DatabaseConnection,
     agent: agent::Model,
-) -> Result<AgentCertBundle, Report<AgentRouteError>> {
+    csr_pem: &str,
+) -> Result<SignedCertBundle, Report<AgentRouteError>> {
     if agent.status != AgentStatus::Approved.as_str() {
         return Err(report!(AgentRouteError::Forbidden(
             "Agent is not approved".into()
@@ -323,7 +350,7 @@ pub(crate) async fn do_sign_certificate(
     let ca_fp = cert_signer.active_ca_fingerprint();
 
     let bundle = cert_signer
-        .sign_agent_cert(&agent.id, lifetime)
+        .sign_agent_csr(csr_pem, &agent.id, lifetime)
         .map_err(|e| {
             tracing::error!("Failed to sign agent certificate: {e}");
             report!(AgentRouteError::CertSigning)

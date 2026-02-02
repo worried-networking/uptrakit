@@ -54,6 +54,12 @@ Uptrakit operates an internal PKI for mTLS agent authentication. The controller 
 | Server HTTPS certificate | 90 days | 30 days before expiry (automatic renewal) |
 | Agent client certificate | 365 days (configurable) | Configurable via `renewal_window_hours` |
 
+### CSR-based certificate issuance
+
+Agent certificates are issued via a CSR (Certificate Signing Request) flow. The agent generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its client_id (a UUIDv7). The controller validates the CSR signature, verifies the CN matches the authenticated agent identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals.
+
+During enrollment, the controller also performs collision detection: if the agent-generated client_id already exists as an active agent, enrollment is rejected, and the agent retries with a new UUIDv7.
+
 CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
 
 An OCSP responder is available at `POST /api/v1/pki/ocsp` (and `GET /api/v1/pki/ocsp/{base64}`), providing real-time certificate revocation status per RFC 6960. OCSP responses are signed with the active CA's private key using ECDSA P-256 SHA-256.

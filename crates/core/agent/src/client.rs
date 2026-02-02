@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use http::Uri;
+use rcgen::{CertificateParams, DnType, KeyPair};
 use rootcause::prelude::*;
 use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
@@ -16,6 +17,35 @@ use uptrakit_internal_wire::{
 };
 
 use crate::error::{Error, Result};
+
+/// Generate an ECDSA P-256 keypair and a CSR with CN=client_id.
+/// Returns `(key_pem, csr_pem)`.
+pub fn generate_keypair_and_csr(client_id: &str) -> Result<(String, String)> {
+    let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .map_err(|e| report!(Error::CsrGeneration(format!("key generation failed: {e}"))))?;
+
+    let mut params = CertificateParams::default();
+    params
+        .distinguished_name
+        .push(DnType::CommonName, client_id.to_string());
+    params
+        .distinguished_name
+        .push(DnType::OrganizationName, "Uptrakit Agent");
+
+    let csr = params.serialize_request(&key_pair).map_err(|e| {
+        report!(Error::CsrGeneration(format!(
+            "CSR serialization failed: {e}"
+        )))
+    })?;
+
+    let csr_pem = csr.pem().map_err(|e| {
+        report!(Error::CsrGeneration(format!(
+            "CSR PEM encoding failed: {e}"
+        )))
+    })?;
+
+    Ok((key_pair.serialize_pem(), csr_pem))
+}
 
 /// Outcome of the authenticated event loop.
 pub enum LoopOutcome {
@@ -220,14 +250,21 @@ pub async fn connect_ws(
 }
 
 /// Send Enroll message and read Enrolled response.
+///
+/// Returns `Err(Error::ClientIdCollision)` if the controller rejects the
+/// client_id as a duplicate.
 pub async fn send_enroll(
     ws: &mut WsStream,
+    client_id: &str,
+    csr_pem: &str,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
     host_info: HostInfo,
 ) -> Result<EnrolledPayload> {
     let msg = AgentMessage::Enroll(EnrollPayload {
+        client_id: client_id.to_string(),
+        csr_pem: csr_pem.to_string(),
         hostname: hostname.to_string(),
         friendly_name: friendly_name.to_string(),
         enrollment_token: enrollment_token.map(|s| s.to_string()),
@@ -254,6 +291,9 @@ pub async fn send_enroll(
 
                 match controller_msg {
                     ControllerMessage::Enrolled(payload) => return Ok(payload),
+                    ControllerMessage::Error(err) if err.code == "client_id_collision" => {
+                        return Err(report!(Error::ClientIdCollision));
+                    }
                     ControllerMessage::Error(err) => {
                         return Err(report!(Error::Enrollment(format!(
                             "{}: {}",
@@ -325,9 +365,14 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
     }
 }
 
-/// Send RequestCertificate and read Certificate response.
-pub async fn request_certificate_ws(ws: &mut WsStream) -> Result<CertificatePayload> {
-    let msg = AgentMessage::RequestCertificate(RequestCertificatePayload {});
+/// Send RequestCertificate with a CSR and read Certificate response.
+pub async fn request_certificate_ws(
+    ws: &mut WsStream,
+    csr_pem: &str,
+) -> Result<CertificatePayload> {
+    let msg = AgentMessage::RequestCertificate(RequestCertificatePayload {
+        csr_pem: csr_pem.to_string(),
+    });
     let json = serde_json::to_string(&msg).context_to::<Error>()?;
     ws.send(Message::Text(json.into()))
         .await
@@ -421,6 +466,9 @@ pub async fn run_authenticated_loop(
     // Renewal timer — initially far-future, reset when AgentSettings arrives
     let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
 
+    // Holds the private key for a pending renewal CSR until the cert arrives
+    let mut pending_renewal_key: Option<String> = None;
+
     let outcome = loop {
         tokio::select! {
             _ = ping_interval.tick() => {
@@ -436,7 +484,13 @@ pub async fn run_authenticated_loop(
             }
             _ = &mut renewal_sleep => {
                 tracing::info!("renewal window reached, requesting certificate renewal");
-                let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {});
+                // Extract client_id from the current cert CN
+                let client_id_str = extract_client_id_from_cert(data_dir);
+                let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)?;
+                pending_renewal_key = Some(key_pem);
+                let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {
+                    csr_pem,
+                });
                 let json = serde_json::to_string(&msg).context_to::<Error>()?;
                 ws_stream.send(Message::Text(json.into())).await.context_to::<Error>()?;
                 // Reset to far-future so it doesn't fire again
@@ -480,10 +534,17 @@ pub async fn run_authenticated_loop(
                                 );
                             }
                             ControllerMessage::Certificate(payload) => {
-                                // Save new cert to disk
+                                // Save new cert + new key to disk
+                                let key_pem = match pending_renewal_key.take() {
+                                    Some(k) => k,
+                                    None => {
+                                        tracing::error!("received certificate but no pending renewal key");
+                                        break LoopOutcome::Disconnected;
+                                    }
+                                };
                                 let cert_state = crate::state::AgentCertState {
                                     cert_pem: payload.cert_pem,
-                                    key_pem: payload.key_pem,
+                                    key_pem,
                                 };
                                 cert_state.save(data_dir)?;
                                 let not_after_ms = payload.not_after.unix_timestamp() * 1000
@@ -537,10 +598,21 @@ pub async fn run_authenticated_loop(
                             }
                             ControllerMessage::RequestCertRenewal(payload) => {
                                 tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
+                                let client_id_str = extract_client_id_from_cert(data_dir);
+                                let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str) {
+                                    Ok(pair) => pair,
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "failed to generate keypair for renewal");
+                                        break LoopOutcome::Disconnected;
+                                    }
+                                };
+                                pending_renewal_key = Some(key_pem);
                                 let renew_msg = serde_json::to_string(
-                                    &AgentMessage::RenewCertificate(RenewCertificatePayload {}),
+                                    &AgentMessage::RenewCertificate(RenewCertificatePayload {
+                                        csr_pem,
+                                    }),
                                 )
-                                .expect("serialize RenewCertificate");
+                                .context_to::<Error>()?;
                                 if let Err(e) = ws_stream.send(Message::Text(renew_msg.into())).await {
                                     tracing::error!(error = %e, "failed to send renewal request");
                                     break LoopOutcome::Disconnected;
@@ -600,6 +672,16 @@ fn compute_local_ca_hash(data_dir: &std::path::Path) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Extract the client_id (CN) from the agent's current certificate on disk.
+/// Falls back to loading from AgentState if cert parsing fails.
+fn extract_client_id_from_cert(data_dir: &std::path::Path) -> String {
+    if let Ok(Some(state)) = crate::state::AgentState::load(data_dir) {
+        return state.client_id;
+    }
+    // Fallback: this shouldn't happen in normal flow
+    "unknown".to_string()
 }
 
 fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {

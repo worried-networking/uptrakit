@@ -46,6 +46,12 @@ pub enum Error {
 
     #[error("enrollment rejected by controller")]
     EnrollmentRejected,
+
+    #[error("CSR generation error: {0}")]
+    CsrGeneration(String),
+
+    #[error("client_id collision, retrying with new ID")]
+    ClientIdCollision,
 }
 
 impl Error {

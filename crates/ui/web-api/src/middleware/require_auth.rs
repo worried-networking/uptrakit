@@ -184,14 +184,15 @@ mod tests {
     }
 
     async fn test_state(db: DatabaseConnection) -> Arc<AppState> {
-        use crate::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
+        use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
         struct NoopCertSigner;
         impl AgentCertSigner for NoopCertSigner {
-            fn sign_agent_cert(
+            fn sign_agent_csr(
                 &self,
+                _: &str,
                 _: &uuid::Uuid,
                 _: time::Duration,
-            ) -> std::result::Result<AgentCertBundle, rootcause::Report<CertSignerError>>
+            ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>>
             {
                 unimplemented!()
             }

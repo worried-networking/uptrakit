@@ -71,6 +71,10 @@ pub struct HostInfo {
 /// Payload for agent enrollment request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrollPayload {
+    /// Agent-generated UUIDv7 client identifier.
+    pub client_id: String,
+    /// PEM-encoded Certificate Signing Request with CN=client_id.
+    pub csr_pem: String,
     pub hostname: String,
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,11 +85,17 @@ pub struct EnrollPayload {
 
 /// Payload for requesting a client certificate after approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RequestCertificatePayload {}
+pub struct RequestCertificatePayload {
+    /// PEM-encoded Certificate Signing Request.
+    pub csr_pem: String,
+}
 
 /// Payload for requesting certificate renewal (mTLS-authenticated agents).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RenewCertificatePayload {}
+pub struct RenewCertificatePayload {
+    /// PEM-encoded Certificate Signing Request with CN=client_id.
+    pub csr_pem: String,
+}
 
 /// Payload for reporting host information (sent by authenticated agents on connect).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,7 +128,6 @@ pub struct RejectedPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CertificatePayload {
     pub cert_pem: String,
-    pub key_pem: String,
     /// Certificate "not valid after" timestamp.
     #[serde(with = "utc_datetime_millis")]
     pub not_after: UtcDateTime,
@@ -216,6 +225,10 @@ mod tests {
     #[test]
     fn enroll_serialization_roundtrip() {
         let msg = AgentMessage::Enroll(EnrollPayload {
+            client_id: "01936a1e-7e8c-7f00-8000-000000000001".to_string(),
+            csr_pem:
+                "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
+                    .to_string(),
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some("tok-123".to_string()),
@@ -230,11 +243,17 @@ mod tests {
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
         assert!(json.contains(r#""machine_id":"abc123"#));
+        assert!(json.contains(r#""client_id":"01936a1e"#));
+        assert!(json.contains(r#""csr_pem":"#));
     }
 
     #[test]
     fn enroll_without_token_serialization_roundtrip() {
         let msg = AgentMessage::Enroll(EnrollPayload {
+            client_id: "01936a1e-7e8c-7f00-8000-000000000002".to_string(),
+            csr_pem:
+                "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
+                    .to_string(),
             hostname: "node-2".to_string(),
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
@@ -256,9 +275,14 @@ mod tests {
 
     #[test]
     fn request_certificate_serialization_roundtrip() {
-        let msg = AgentMessage::RequestCertificate(RequestCertificatePayload {});
+        let msg = AgentMessage::RequestCertificate(RequestCertificatePayload {
+            csr_pem:
+                "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
+                    .to_string(),
+        });
         let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(json, r#"{"type":"request_certificate"}"#);
+        assert!(json.contains(r#""type":"request_certificate"#));
+        assert!(json.contains(r#""csr_pem":"#));
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -312,20 +336,24 @@ mod tests {
         let msg = ControllerMessage::Certificate(CertificatePayload {
             cert_pem: "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"
                 .to_string(),
-            key_pem: "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n"
-                .to_string(),
             not_after: UtcDateTime::from_unix_timestamp(1_706_400_000).unwrap(),
         });
         let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("key_pem"));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
 
     #[test]
     fn renew_certificate_serialization_roundtrip() {
-        let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {});
+        let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {
+            csr_pem:
+                "-----BEGIN CERTIFICATE REQUEST-----\nrenew\n-----END CERTIFICATE REQUEST-----\n"
+                    .to_string(),
+        });
         let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(json, r#"{"type":"renew_certificate"}"#);
+        assert!(json.contains(r#""type":"renew_certificate"#));
+        assert!(json.contains(r#""csr_pem":"#));
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -454,11 +482,14 @@ mod tests {
     }
 
     #[test]
-    fn enroll_backward_compat_without_host_info() {
-        // Older agents may not send host_info — this should fail deserialization
-        // since host_info is required. This test documents the breaking change.
+    fn enroll_backward_compat_without_required_fields() {
+        // Older agents may not send client_id/csr_pem/host_info — this should fail
+        // deserialization since these are required. This test documents the breaking change.
         let json = r#"{"type":"enroll","hostname":"node-old","friendly_name":"Old Node"}"#;
         let result: std::result::Result<AgentMessage, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "EnrollPayload requires host_info");
+        assert!(
+            result.is_err(),
+            "EnrollPayload requires client_id, csr_pem, and host_info"
+        );
     }
 }

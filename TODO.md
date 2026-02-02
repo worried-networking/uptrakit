@@ -527,7 +527,7 @@ Comprehensive security hardening.
 ### mTLS Implementation Details
 
 - [x] Automated client certificate issuance
-  - [ ] Certificate signing request (CSR) handling
+  - [x] Certificate signing request (CSR) handling
   - [x] Automated CA signing
   - [x] Certificate delivery to agents
 - [x] Certificate revocation mechanism

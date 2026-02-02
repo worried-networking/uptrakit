@@ -16,7 +16,7 @@ use uptrakit_web_api::auth::jwt::JwtManager;
 use uptrakit_web_api::auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
 use uptrakit_web_api::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api::ca_snapshot::CaSnapshotData;
-use uptrakit_web_api::cert_signer::{AgentCertBundle, AgentCertSigner, CertSignerError};
+use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
 use uptrakit_web_api::extract::AgentIdentity;
 use uptrakit_web_api::middleware;
 use uptrakit_web_api::settings::Settings;
@@ -83,11 +83,12 @@ pub struct IdentityResponse {
 struct NoopCertSigner;
 
 impl AgentCertSigner for NoopCertSigner {
-    fn sign_agent_cert(
+    fn sign_agent_csr(
         &self,
+        _: &str,
         _: &uuid::Uuid,
         _: ::time::Duration,
-    ) -> std::result::Result<AgentCertBundle, rootcause::Report<CertSignerError>> {
+    ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>> {
         unimplemented!("not used in integration tests")
     }
 

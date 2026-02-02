@@ -9,26 +9,27 @@ pub enum CertSignerError {
     #[error("CA issuer creation error: {0}")]
     CaIssuer(String),
 
-    #[error("key generation error: {0}")]
-    KeyGeneration(String),
+    #[error("CSR validation error: {0}")]
+    CsrValidation(String),
 
     #[error("certificate signing error: {0}")]
     Signing(String),
 }
 
-pub struct AgentCertBundle {
+#[derive(Debug)]
+pub struct SignedCertBundle {
     pub cert_pem: String,
-    pub key_pem: String,
     /// Certificate "not valid after" timestamp.
     pub not_after: time::UtcDateTime,
 }
 
 pub trait AgentCertSigner: Send + Sync + 'static {
-    fn sign_agent_cert(
+    fn sign_agent_csr(
         &self,
+        csr_pem: &str,
         agent_id: &uuid::Uuid,
         lifetime: time::Duration,
-    ) -> std::result::Result<AgentCertBundle, Report<CertSignerError>>;
+    ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>>;
 
     /// Return the SHA-256 hex fingerprint of the active CA cert.
     fn active_ca_fingerprint(&self) -> String;

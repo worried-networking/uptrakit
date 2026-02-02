@@ -13,7 +13,7 @@ const CERT_NOT_AFTER_FILE: &str = "cert_not_after_ts";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentState {
-    pub agent_id: String,
+    pub client_id: String,
     pub enrollment_secret: String,
 }
 
@@ -126,6 +126,33 @@ pub fn load_cert_not_after_ts(data_dir: &Path) -> Result<Option<i64>> {
 
 pub fn delete_cert_not_after_ts(data_dir: &Path) -> Result<()> {
     let path = data_dir.join(CERT_NOT_AFTER_FILE);
+    if path.exists() {
+        std::fs::remove_file(path).context_to::<Error>()?;
+    }
+    Ok(())
+}
+
+/// Save a private key PEM to disk during enrollment (before cert exists).
+pub fn save_agent_key(data_dir: &Path, key_pem: &str) -> Result<()> {
+    let path = data_dir.join(AGENT_KEY_FILE);
+    std::fs::write(&path, key_pem).context_to::<Error>()?;
+    set_secure_permissions(&path)?;
+    Ok(())
+}
+
+/// Load the private key PEM from disk.
+pub fn load_agent_key(data_dir: &Path) -> Result<Option<String>> {
+    let path = data_dir.join(AGENT_KEY_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(&path).context_to::<Error>()?;
+    Ok(Some(contents))
+}
+
+/// Delete the agent key file.
+pub fn delete_agent_key(data_dir: &Path) -> Result<()> {
+    let path = data_dir.join(AGENT_KEY_FILE);
     if path.exists() {
         std::fs::remove_file(path).context_to::<Error>()?;
     }

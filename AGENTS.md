@@ -581,9 +581,12 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 ### Wire protocol additions
 
 - `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`
-- `EnrollPayload` includes a required `host_info: HostInfo` field
+- `EnrollPayload` includes required `client_id: String` (agent-generated UUIDv7), `csr_pem: String` (PKCS#10 CSR with CN=client_id), and `host_info: HostInfo` fields
+- `RequestCertificatePayload` includes `csr_pem: String` — a fresh CSR for certificate issuance after approval
+- `RenewCertificatePayload` includes `csr_pem: String` — a fresh CSR for certificate renewal
+- `CertificatePayload` contains `cert_pem: String` and `not_after: UtcDateTime` (no `key_pem` — the private key never leaves the agent)
 - `ReportHostInfo(ReportHostInfoPayload)` variant in `AgentMessage` — sent by authenticated agents immediately after mTLS WebSocket connect
-- `RenewCertificate(RenewCertificatePayload)` variant in `AgentMessage` — agent requests certificate renewal (early or on-demand)
+- `RenewCertificate(RenewCertificatePayload)` variant in `AgentMessage` — agent requests certificate renewal with a fresh CSR (early or on-demand)
 - `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours` and `ca_bundle_hash`
 - `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new bundle PEM
 - `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or backend URL change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
