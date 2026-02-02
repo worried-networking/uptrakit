@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-mqtt-service"
+name = "uptrakit-mqtt"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
