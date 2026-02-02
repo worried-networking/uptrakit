@@ -73,10 +73,7 @@ pub enum TlsMode<'a> {
 /// or the `--pki-addr` value). If `base_url` starts with `http://`, plain
 /// HTTP is used (no TLS configuration needed). Otherwise the provided
 /// `tls_mode` applies.
-pub async fn fetch_ca_certificate(
-    base_url: &str,
-    tls_mode: TlsMode<'_>,
-) -> Result<Vec<u8>> {
+pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Result<Vec<u8>> {
     let fetch_url = format!("{base_url}/api/v1/pki/ca.crt");
     let use_plain_http = base_url.starts_with("http://");
 
