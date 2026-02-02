@@ -74,8 +74,11 @@ pub async fn run_pki_http(addr: SocketAddr, app_state: Arc<AppState>) -> Result<
         .await
         .context_to::<ServerError>()?;
     tracing::info!("PKI HTTP server listening on {addr}");
-    axum::serve(listener, router.into_make_service())
-        .await
-        .context_to::<ServerError>()?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context_to::<ServerError>()?;
     Ok(())
 }

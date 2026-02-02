@@ -422,6 +422,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 ///
 /// Used by `--pki-http listener` to expose OCSP, CRL, and CA cert endpoints
 /// without TLS (required by Nginx `ssl_ocsp_responder` which only supports http://).
+///
+/// Applies the same IP-resolution and request-logging middleware as the main
+/// router so that client/proxy IPs are properly detected and every request is
+/// logged. The `resolve_proxy_headers` layer is intentionally omitted because
+/// PKI endpoints do not need agent certificate identity or external base URL
+/// resolution.
 pub fn build_pki_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(routes::health::healthz))
@@ -432,6 +438,11 @@ pub fn build_pki_router(state: Arc<AppState>) -> Router {
             axum::routing::post(routes::ocsp::ocsp_post),
         )
         .route("/api/v1/pki/ocsp/{encoded}", get(routes::ocsp::ocsp_get))
+        .layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
+            middleware::resolve_ip::resolve_ip,
+        ))
+        .layer(axum_mw::from_fn(middleware::request_log::request_log))
         .with_state(state)
 }
 
@@ -450,7 +461,7 @@ mod tests {
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
     use crate::settings::Settings;
-    use crate::{AppState, build_router};
+    use crate::{AppState, build_pki_router, build_router};
 
     struct NoopCertSigner;
     impl AgentCertSigner for NoopCertSigner {
@@ -630,6 +641,68 @@ mod tests {
         assert_eq!(
             client_ip.unwrap().0,
             IpAddr::V4(Ipv4Addr::new(203, 0, 113, 45))
+        );
+    }
+
+    /// Verify the PKI router resolves client IPs the same way the main router
+    /// does — through `resolve_ip` middleware and `ConnectInfo<SocketAddr>`.
+    #[tokio::test]
+    async fn pki_router_resolves_client_ip() {
+        let router = build_pki_router(test_state().await);
+        let mut make_svc = router.into_make_service_with_connect_info::<SocketAddr>();
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7)), 54321);
+        let svc = <_ as tower::Service<SocketAddr>>::call(&mut make_svc, addr)
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .uri("/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let resp = svc.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let client_ip = resp.extensions().get::<crate::extract::ClientIp>();
+        assert!(
+            client_ip.is_some(),
+            "ClientIp should be present in PKI router response extensions"
+        );
+        assert_eq!(
+            client_ip.unwrap().0,
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7))
+        );
+    }
+
+    /// Verify the PKI router honours trusted proxies when resolving client IPs.
+    #[tokio::test]
+    async fn pki_router_resolves_proxy_ip() {
+        let proxy_net: IpNet = "10.0.0.0/8".parse().unwrap();
+        let state = test_state_with_proxies(vec![proxy_net]).await;
+        let router = build_pki_router(state);
+        let mut make_svc = router.into_make_service_with_connect_info::<SocketAddr>();
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 54321);
+        let svc = <_ as tower::Service<SocketAddr>>::call(&mut make_svc, addr)
+            .await
+            .unwrap();
+
+        let req = Request::builder()
+            .uri("/api/v1/pki/ca.crt")
+            .header("x-forwarded-for", "203.0.113.45, 10.0.0.1")
+            .body(Body::empty())
+            .unwrap();
+        let resp = svc.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+
+        let proxy_ip = resp.extensions().get::<crate::extract::ProxyIp>();
+        assert!(
+            proxy_ip.is_some(),
+            "ProxyIp should be present when request comes from a trusted proxy"
+        );
+        assert_eq!(
+            proxy_ip.unwrap().0,
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))
         );
     }
 }
