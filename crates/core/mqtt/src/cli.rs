@@ -39,8 +39,7 @@ mod tests {
 
     #[test]
     fn defaults_parse() {
-        let args =
-            Args::try_parse_from(["uptrakit-mqtt", "--db-url", "sqlite::memory:"]).unwrap();
+        let args = Args::try_parse_from(["uptrakit-mqtt", "--db-url", "sqlite::memory:"]).unwrap();
         assert_eq!(args.max_tenants, 0);
         assert_eq!(args.heartbeat_interval, 15);
         assert_eq!(args.poll_interval, 10);
@@ -72,8 +71,7 @@ mod tests {
 
     #[test]
     fn max_tenants_zero_default() {
-        let args =
-            Args::try_parse_from(["uptrakit-mqtt", "--db-url", "sqlite::memory:"]).unwrap();
+        let args = Args::try_parse_from(["uptrakit-mqtt", "--db-url", "sqlite::memory:"]).unwrap();
         assert_eq!(args.max_tenants, 0);
     }
 

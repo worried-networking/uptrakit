@@ -39,8 +39,8 @@ impl LeaseManager {
     /// Delete leases with heartbeat_at older than lease_timeout.
     /// Returns the tenant_ids that were freed.
     pub async fn cleanup_stale_leases(&self) -> Result<Vec<Uuid>> {
-        let cutoff = OffsetDateTime::now_utc()
-            - time::Duration::seconds(self.lease_timeout_secs as i64);
+        let cutoff =
+            OffsetDateTime::now_utc() - time::Duration::seconds(self.lease_timeout_secs as i64);
 
         let stale = mqtt_lease::Entity::find()
             .filter(mqtt_lease::Column::HeartbeatAt.lt(cutoff))
@@ -93,8 +93,7 @@ impl LeaseManager {
             .await
             .context_to::<DbError>()?;
 
-        let mut query = mqtt_client::Entity::find()
-            .filter(mqtt_client::Column::Enabled.eq(true));
+        let mut query = mqtt_client::Entity::find().filter(mqtt_client::Column::Enabled.eq(true));
 
         if !leased.is_empty() {
             query = query.filter(mqtt_client::Column::TenantId.is_not_in(leased));

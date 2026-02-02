@@ -195,7 +195,8 @@ Guidelines:
 ## Design principles
 
 - Keep boundaries crisp:
-  - **Controller**: orchestration, scheduling, remote provider logic, MQTT integration, API/UI
+  - **Controller**: orchestration, scheduling, remote provider logic, API/UI
+  - **MQTT Service**: standalone binary for MQTT/Home Assistant integration (lease-based multi-instance)
   - **Agent**: local inspection + update execution, outbound-only WS connection
   - **Providers**: small, composable units with clear responsibilities
 - Authorization uses a typed `Permission` enum, not raw role-name strings:

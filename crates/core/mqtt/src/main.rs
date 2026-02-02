@@ -47,10 +47,7 @@ async fn run(args: cli::Args) -> Result<(), rootcause::Report<AppError>> {
     tracing::info!(%instance_id, "starting uptrakit-mqtt service");
 
     // Connect to database
-    tracing::info!(
-        "connecting to database: {}",
-        db::sanitize_url(&args.db_url)
-    );
+    tracing::info!("connecting to database: {}", db::sanitize_url(&args.db_url));
     let db_conn = db::connect(&args.db_url)
         .await
         .context(AppError::Database)?;
@@ -59,12 +56,7 @@ async fn run(args: cli::Args) -> Result<(), rootcause::Report<AppError>> {
     let poll_interval = Duration::from_secs(args.poll_interval);
     let heartbeat_interval = Duration::from_secs(args.heartbeat_interval);
 
-    let lease_mgr = LeaseManager::new(
-        db_conn,
-        instance_id,
-        args.max_tenants,
-        args.lease_timeout,
-    );
+    let lease_mgr = LeaseManager::new(db_conn, instance_id, args.max_tenants, args.lease_timeout);
 
     let mut tenant_mgr = TenantManager::new();
 

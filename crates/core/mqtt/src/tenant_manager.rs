@@ -86,12 +86,12 @@ impl TenantManager {
             }
 
             // Check for config change (updated_at differs from cached)
-            if let Some(state) = self.tenants.get(tenant_id) {
-                if model.updated_at != state.updated_at {
-                    tracing::info!(%tenant_id, "MQTT config changed, reloading");
-                    self.stop_tenant(*tenant_id).await;
-                    self.start_tenant(lease_mgr.db(), *tenant_id).await;
-                }
+            if let Some(state) = self.tenants.get(tenant_id)
+                && model.updated_at != state.updated_at
+            {
+                tracing::info!(%tenant_id, "MQTT config changed, reloading");
+                self.stop_tenant(*tenant_id).await;
+                self.start_tenant(lease_mgr.db(), *tenant_id).await;
             }
         }
     }
@@ -120,13 +120,8 @@ impl TenantManager {
         tracing::info!(%tenant_id, config = ?config, "starting MQTT client");
         match crate::mqtt_client::start(config).await {
             Ok(handle) => {
-                self.tenants.insert(
-                    tenant_id,
-                    TenantState {
-                        handle,
-                        updated_at,
-                    },
-                );
+                self.tenants
+                    .insert(tenant_id, TenantState { handle, updated_at });
             }
             Err(e) => {
                 tracing::warn!(%tenant_id, error = ?e, "MQTT client startup failed");
@@ -149,7 +144,6 @@ impl TenantManager {
             self.stop_tenant(tenant_id).await;
         }
     }
-
 }
 
 fn build_config_from_model(model: &mqtt_client::Model) -> MqttConfig {
