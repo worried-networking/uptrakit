@@ -9,10 +9,10 @@ pub struct NetworkSettingsResponse {
     pub https_addr: String,
     pub forwarded_client_cert_info_header: Option<String>,
     pub forwarded_client_cert_pem_header: Option<String>,
-    pub backend_url: Option<String>,
-    /// Warning message when backend_url was changed, explaining that CA rotation is required.
+    pub pki_addr: Option<String>,
+    /// Warning message when pki_addr was changed, explaining that CA rotation is required.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub backend_url_warning: Option<String>,
+    pub pki_addr_warning: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -28,8 +28,8 @@ pub struct UpdateNetworkSettingsRequest {
     /// Header name for PEM-encoded client certificate (e.g. `X-Forwarded-Tls-Client-Cert`).
     /// Empty string disables.
     pub forwarded_client_cert_pem_header: Option<String>,
-    /// URL that reverse proxies use to reach the controller backend.
-    /// Used to construct OCSP, CRL, and CA Issuer URLs embedded in certificates.
+    /// URL for PKI endpoints (OCSP, CRL, CA cert) embedded in certificate extensions.
+    /// Supports both http:// and https:// schemes.
     /// Empty string disables.
-    pub backend_url: Option<String>,
+    pub pki_addr: Option<String>,
 }

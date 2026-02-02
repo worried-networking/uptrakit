@@ -37,6 +37,14 @@ pub struct Args {
     /// Use when the agent's certificate has been revoked.
     #[arg(long)]
     pub force_enroll: bool,
+
+    /// Optional URL for PKI endpoints (CA certificate, OCSP).
+    /// When set, the agent fetches the CA certificate from this address
+    /// instead of from the main --url.
+    /// Supports both http:// and https:// schemes.
+    /// When http:// is used, the CA is fetched over plain HTTP (no TLS).
+    #[arg(long, value_parser = parse_pki_addr)]
+    pub pki_addr: Option<String>,
 }
 
 impl Args {
@@ -71,6 +79,25 @@ impl Args {
 
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// Validate `--pki-addr`: must be http:// or https://, must have a host,
+/// trailing slashes are stripped.
+fn parse_pki_addr(s: &str) -> std::result::Result<String, String> {
+    let trimmed = s.trim_end_matches('/');
+    let parsed = url::Url::parse(trimmed).map_err(|e| format!("invalid PKI address URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "unsupported URL scheme: {other} (expected http or https)"
+            ));
+        }
+    }
+    if parsed.host_str().is_none() {
+        return Err("PKI address URL must contain a host".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 #[cfg(test)]
@@ -135,5 +162,56 @@ mod tests {
         let args = Args::try_parse_from(["uptrakit-agent", "--url", "http://myhost:8443"]).unwrap();
         let err = args.parsed_url().unwrap_err();
         assert!(err.contains("https"), "should reject non-https: {err}");
+    }
+
+    #[test]
+    fn pki_addr_accepts_http() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://controller:8443",
+            "--pki-addr",
+            "http://controller:8080",
+        ])
+        .expect("should parse --pki-addr with http://");
+        assert_eq!(args.pki_addr.as_deref(), Some("http://controller:8080"));
+    }
+
+    #[test]
+    fn pki_addr_accepts_https() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://controller:8443",
+            "--pki-addr",
+            "https://pki.example.com",
+        ])
+        .expect("should parse --pki-addr with https://");
+        assert_eq!(args.pki_addr.as_deref(), Some("https://pki.example.com"));
+    }
+
+    #[test]
+    fn pki_addr_strips_trailing_slash() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://controller:8443",
+            "--pki-addr",
+            "http://controller:8080/",
+        ])
+        .expect("should strip trailing slash");
+        assert_eq!(args.pki_addr.as_deref(), Some("http://controller:8080"));
+    }
+
+    #[test]
+    fn pki_addr_rejects_ftp() {
+        let result = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://controller:8443",
+            "--pki-addr",
+            "ftp://controller:21",
+        ]);
+        assert!(result.is_err(), "should reject ftp:// scheme");
     }
 }

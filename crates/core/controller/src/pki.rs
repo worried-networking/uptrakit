@@ -69,10 +69,10 @@ fn encode_der_length(len: usize) -> Vec<u8> {
 }
 
 /// Add AIA and CDP extensions to certificate parameters when a backend URL is set.
-pub fn add_pki_extensions(params: &mut CertificateParams, backend_url: &str) {
-    let ocsp_url = format!("{backend_url}/api/v1/pki/ocsp");
-    let ca_issuers_url = format!("{backend_url}/api/v1/pki/ca.crt");
-    let crl_url = format!("{backend_url}/api/v1/pki/ca.crl");
+pub fn add_pki_extensions(params: &mut CertificateParams, pki_addr: &str) {
+    let ocsp_url = format!("{pki_addr}/api/v1/pki/ocsp");
+    let ca_issuers_url = format!("{pki_addr}/api/v1/pki/ca.crt");
+    let crl_url = format!("{pki_addr}/api/v1/pki/ca.crl");
 
     // AIA extension (OID 1.3.6.1.5.5.7.1.1)
     let aia_der = build_aia_extension_der(&ocsp_url, &ca_issuers_url);
@@ -216,7 +216,7 @@ impl CaState {
     }
 
     /// Build a shareable snapshot.
-    pub fn to_snapshot(&self, backend_url: Option<String>) -> Result<CaSnapshot> {
+    pub fn to_snapshot(&self, pki_addr: Option<String>) -> Result<CaSnapshot> {
         let active_fingerprint = ca_fingerprint(&self.active.cert_pem)?;
         let previous_fingerprint = match &self.previous {
             Some(prev) => Some(ca_fingerprint(&prev.cert_pem)?),
@@ -237,7 +237,7 @@ impl CaState {
             bundle_hash,
             managed: self.managed,
             active_not_after,
-            backend_url,
+            pki_addr,
         })
     }
 }
@@ -250,8 +250,8 @@ pub fn pki_dir(data_dir: &Path) -> Result<PathBuf> {
 }
 
 /// Load the full CA state from the PKI directory (active + optional previous).
-pub fn load_ca_state(pki: &Path, backend_url: Option<&str>) -> Result<CaState> {
-    let active = load_or_generate_ca(pki, backend_url)?;
+pub fn load_ca_state(pki: &Path, pki_addr: Option<&str>) -> Result<CaState> {
+    let active = load_or_generate_ca(pki, pki_addr)?;
     let previous = load_previous_ca(pki)?;
     let managed = is_ca_managed(pki);
 
@@ -263,14 +263,14 @@ pub fn load_ca_state(pki: &Path, backend_url: Option<&str>) -> Result<CaState> {
 }
 
 /// Load or generate the internal CA.
-pub fn load_or_generate_ca(pki: &Path, backend_url: Option<&str>) -> Result<CaBundle> {
+pub fn load_or_generate_ca(pki: &Path, pki_addr: Option<&str>) -> Result<CaBundle> {
     let cert_path = pki.join("ca.crt");
     let key_path = pki.join("ca.key");
 
     if cert_path.exists() && key_path.exists() {
         load_ca(&cert_path, &key_path)
     } else {
-        let bundle = generate_ca(backend_url)?;
+        let bundle = generate_ca(pki_addr)?;
         fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
         fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;
         mark_ca_managed(pki)?;
@@ -293,7 +293,7 @@ fn load_previous_ca(pki: &Path) -> Result<Option<CaBundle>> {
     }
 }
 
-fn generate_ca(backend_url: Option<&str>) -> Result<CaBundle> {
+fn generate_ca(pki_addr: Option<&str>) -> Result<CaBundle> {
     let key_pair =
         KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).context_to::<PkiError>()?;
 
@@ -308,7 +308,7 @@ fn generate_ca(backend_url: Option<&str>) -> Result<CaBundle> {
     params.not_before = OffsetDateTime::now_utc();
     params.not_after = OffsetDateTime::now_utc() + time::Duration::days(1825);
 
-    if let Some(url) = backend_url {
+    if let Some(url) = pki_addr {
         add_pki_extensions(&mut params, url);
     }
 
@@ -484,7 +484,7 @@ pub fn should_rotate_ca(cert_pem: &str) -> bool {
 }
 
 /// Rotate the CA: move current → previous, generate new active CA.
-pub fn rotate_ca(pki: &Path, backend_url: Option<&str>) -> Result<CaState> {
+pub fn rotate_ca(pki: &Path, pki_addr: Option<&str>) -> Result<CaState> {
     let active_cert = pki.join("ca.crt");
     let active_key = pki.join("ca.key");
     let prev_cert = pki.join("ca-previous.crt");
@@ -495,7 +495,7 @@ pub fn rotate_ca(pki: &Path, backend_url: Option<&str>) -> Result<CaState> {
     fs::copy(&active_key, &prev_key).context_to::<PkiError>()?;
 
     // Generate new CA
-    let new_ca = generate_ca(backend_url)?;
+    let new_ca = generate_ca(pki_addr)?;
     fs::write(&active_cert, &new_ca.cert_pem).context_to::<PkiError>()?;
     fs::write(&active_key, &new_ca.key_pem).context_to::<PkiError>()?;
 
@@ -698,20 +698,16 @@ pub fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
 }
 
 /// Validate that the existing CA certificate's AIA/CDP extensions match the
-/// reconciled `backend_url`. Only applies to managed CAs.
+/// reconciled `pki_addr`. Only applies to managed CAs.
 ///
 /// Call this after loading CA state and before building the snapshot.
 /// Mismatch causes a hard startup failure with descriptive error.
-pub fn validate_ca_backend_url(
-    cert_pem: &str,
-    backend_url: Option<&str>,
-    pki_path: &Path,
-) -> Result<()> {
+pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>, pki_path: &Path) -> Result<()> {
     let cert_urls = extract_cert_pki_urls(cert_pem)?;
     let has_extensions = cert_urls.has_extensions();
 
-    match (backend_url, has_extensions) {
-        // backend_url set, CA has extensions — check they match
+    match (pki_addr, has_extensions) {
+        // pki_addr set, CA has extensions — check they match
         (Some(url), true) => {
             let expected_ocsp = format!("{url}/api/v1/pki/ocsp");
             let expected_ca_issuers = format!("{url}/api/v1/pki/ca.crt");
@@ -723,20 +719,20 @@ pub fn validate_ca_backend_url(
 
             if mismatch {
                 return Err(report!(PkiError::CaValidation(format!(
-                    "The CA certificate's AIA/CDP URLs do not match --backend-url ({url}).\n\
+                    "The CA certificate's AIA/CDP URLs do not match --pki-addr ({url}).\n\
                      \n\
                      CA certificate contains:\n\
                      \x20 OCSP:       {}\n\
                      \x20 CA Issuers: {}\n\
                      \x20 CRL:        {}\n\
                      \n\
-                     Expected (from --backend-url):\n\
+                     Expected (from --pki-addr):\n\
                      \x20 OCSP:       {expected_ocsp}\n\
                      \x20 CA Issuers: {expected_ca_issuers}\n\
                      \x20 CRL:        {expected_crl}\n\
                      \n\
                      To fix this, either:\n\
-                     \x20 1. Update --backend-url to match the CA certificate's URLs, or\n\
+                     \x20 1. Update --pki-addr to match the CA certificate's URLs, or\n\
                      \x20 2. Delete the CA files in {} and restart to regenerate with the new URL",
                     cert_urls.ocsp_url.as_deref().unwrap_or("<none>"),
                     cert_urls.ca_issuers_url.as_deref().unwrap_or("<none>"),
@@ -746,9 +742,9 @@ pub fn validate_ca_backend_url(
             }
             Ok(())
         }
-        // backend_url set, CA has no extensions — need to regenerate
+        // pki_addr set, CA has no extensions — need to regenerate
         (Some(url), false) => Err(report!(PkiError::CaValidation(format!(
-            "The CA certificate has no AIA/CDP extensions, but --backend-url ({url}) is set.\n\
+            "The CA certificate has no AIA/CDP extensions, but --pki-addr ({url}) is set.\n\
                  \n\
                  The CA needs to be regenerated with the backend URL to embed OCSP, CA Issuers,\n\
                  and CRL Distribution Point URLs in certificates.\n\
@@ -757,9 +753,9 @@ pub fn validate_ca_backend_url(
                  A new CA will be generated with the correct extensions.",
             pki_path.display(),
         )))),
-        // backend_url not set, CA has extensions — unexpected
+        // pki_addr not set, CA has extensions — unexpected
         (None, true) => Err(report!(PkiError::CaValidation(format!(
-            "The CA certificate contains AIA/CDP extensions but no --backend-url is configured.\n\
+            "The CA certificate contains AIA/CDP extensions but no --pki-addr is configured.\n\
                  \n\
                  CA certificate contains:\n\
                  \x20 OCSP:       {}\n\
@@ -767,14 +763,14 @@ pub fn validate_ca_backend_url(
                  \x20 CRL:        {}\n\
                  \n\
                  To fix this, either:\n\
-                 \x20 1. Provide --backend-url matching the URLs in the CA certificate, or\n\
+                 \x20 1. Provide --pki-addr matching the URLs in the CA certificate, or\n\
                  \x20 2. Delete the CA files in {} and restart to regenerate without extensions",
             cert_urls.ocsp_url.as_deref().unwrap_or("<none>"),
             cert_urls.ca_issuers_url.as_deref().unwrap_or("<none>"),
             cert_urls.crl_url.as_deref().unwrap_or("<none>"),
             pki_path.display(),
         )))),
-        // backend_url not set, CA has no extensions — OK
+        // pki_addr not set, CA has no extensions — OK
         (None, false) => Ok(()),
     }
 }
@@ -1135,7 +1131,7 @@ mod tests {
     // --- AIA/CDP extension tests ---
 
     #[test]
-    fn ca_with_backend_url_has_aia_cdp() {
+    fn ca_with_pki_addr_has_aia_cdp() {
         let ca = generate_ca(Some("https://controller.example.com")).unwrap();
         let urls = extract_cert_pki_urls(&ca.cert_pem).unwrap();
         assert!(urls.has_extensions());
@@ -1154,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn ca_without_backend_url_has_no_aia_cdp() {
+    fn ca_without_pki_addr_has_no_aia_cdp() {
         let ca = generate_ca(None).unwrap();
         let urls = extract_cert_pki_urls(&ca.cert_pem).unwrap();
         assert!(!urls.has_extensions());
@@ -1165,32 +1161,32 @@ mod tests {
 
     #[test]
     fn extract_pki_urls_roundtrip() {
-        let backend_url = "https://my-controller:8443";
-        let ca = generate_ca(Some(backend_url)).unwrap();
+        let pki_addr = "https://my-controller:8443";
+        let ca = generate_ca(Some(pki_addr)).unwrap();
         let urls = extract_cert_pki_urls(&ca.cert_pem).unwrap();
         assert_eq!(
             urls,
             CertPkiUrls {
-                ocsp_url: Some(format!("{backend_url}/api/v1/pki/ocsp")),
-                ca_issuers_url: Some(format!("{backend_url}/api/v1/pki/ca.crt")),
-                crl_url: Some(format!("{backend_url}/api/v1/pki/ca.crl")),
+                ocsp_url: Some(format!("{pki_addr}/api/v1/pki/ocsp")),
+                ca_issuers_url: Some(format!("{pki_addr}/api/v1/pki/ca.crt")),
+                crl_url: Some(format!("{pki_addr}/api/v1/pki/ca.crl")),
             }
         );
     }
 
     #[test]
-    fn validate_ca_backend_url_matching() {
+    fn validate_ca_pki_addr_matching() {
         let url = "https://controller.example.com";
         let ca = generate_ca(Some(url)).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        assert!(validate_ca_backend_url(&ca.cert_pem, Some(url), dir.path()).is_ok());
+        assert!(validate_ca_pki_addr(&ca.cert_pem, Some(url), dir.path()).is_ok());
     }
 
     #[test]
-    fn validate_ca_backend_url_mismatched() {
+    fn validate_ca_pki_addr_mismatched() {
         let ca = generate_ca(Some("https://old-url.example.com")).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let result = validate_ca_backend_url(
+        let result = validate_ca_pki_addr(
             &ca.cert_pem,
             Some("https://new-url.example.com"),
             dir.path(),
@@ -1201,39 +1197,39 @@ mod tests {
     }
 
     #[test]
-    fn validate_ca_backend_url_set_but_no_extensions() {
+    fn validate_ca_pki_addr_set_but_no_extensions() {
         let ca = generate_ca(None).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let result = validate_ca_backend_url(&ca.cert_pem, Some("https://example.com"), dir.path());
+        let result = validate_ca_pki_addr(&ca.cert_pem, Some("https://example.com"), dir.path());
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("no AIA/CDP extensions"));
     }
 
     #[test]
-    fn validate_ca_backend_url_not_set_but_has_extensions() {
+    fn validate_ca_pki_addr_not_set_but_has_extensions() {
         let ca = generate_ca(Some("https://example.com")).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let result = validate_ca_backend_url(&ca.cert_pem, None, dir.path());
+        let result = validate_ca_pki_addr(&ca.cert_pem, None, dir.path());
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
-        assert!(err.contains("no --backend-url is configured"));
+        assert!(err.contains("no --pki-addr is configured"));
     }
 
     #[test]
-    fn validate_ca_backend_url_neither_set() {
+    fn validate_ca_pki_addr_neither_set() {
         let ca = generate_ca(None).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        assert!(validate_ca_backend_url(&ca.cert_pem, None, dir.path()).is_ok());
+        assert!(validate_ca_pki_addr(&ca.cert_pem, None, dir.path()).is_ok());
     }
 
     #[test]
-    fn rotate_ca_with_backend_url_preserves_extensions() {
+    fn rotate_ca_with_pki_addr_preserves_extensions() {
         let dir = tempfile::tempdir().unwrap();
         let pki = dir.path();
         let url = "https://controller.internal:8443";
 
-        // Generate initial CA with backend_url
+        // Generate initial CA with pki_addr
         let _initial = load_or_generate_ca(pki, Some(url)).unwrap();
 
         // Rotate with same URL

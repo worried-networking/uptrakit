@@ -40,6 +40,12 @@ sha2 = "0.10"
 hex = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 utoipa = { version = "5.4", features = ["uuid"] }
+x509-ocsp = "0.2"
+der = { version = "0.7", features = ["alloc", "derive", "oid"] }
+spki = { version = "0.7", features = ["alloc"] }
+x509-cert = { version = "0.2", default-features = false }
+const-oid = { version = "0.9", features = ["db"] }
+aws-lc-rs = "1"
 
 [profile.release]
 opt-level = 3

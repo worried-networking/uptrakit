@@ -37,7 +37,7 @@ impl AgentCertSigner for RcgenAgentCertSigner {
             &issuer,
             agent_id,
             lifetime,
-            snapshot.backend_url.as_deref(),
+            snapshot.pki_addr.as_deref(),
         )
     }
 
@@ -51,7 +51,7 @@ fn sign_agent_csr(
     issuer: &Issuer<'_, KeyPair>,
     agent_id: &Uuid,
     lifetime: time::Duration,
-    backend_url: Option<&str>,
+    pki_addr: Option<&str>,
 ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
     // Parse and validate CSR signature
     let csr_params = CertificateSigningRequestParams::from_pem(csr_pem)
@@ -105,7 +105,7 @@ fn sign_agent_csr(
     params.not_before = OffsetDateTime::now_utc();
     params.not_after = not_after;
 
-    if let Some(url) = backend_url {
+    if let Some(url) = pki_addr {
         crate::pki::add_pki_extensions(&mut params, url);
     }
 

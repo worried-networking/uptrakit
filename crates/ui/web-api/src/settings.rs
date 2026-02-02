@@ -43,7 +43,7 @@ pub struct NetworkSettings {
     pub https_addr: SocketAddr,
     pub forwarded_client_cert_info_header: Option<String>,
     pub forwarded_client_cert_pem_header: Option<String>,
-    pub backend_url: Option<String>,
+    pub pki_addr: Option<String>,
 }
 
 impl Default for NetworkSettings {
@@ -55,7 +55,7 @@ impl Default for NetworkSettings {
             https_addr: DEFAULT_HTTPS_ADDR.parse().unwrap(),
             forwarded_client_cert_info_header: None,
             forwarded_client_cert_pem_header: None,
-            backend_url: None,
+            pki_addr: None,
         }
     }
 }
@@ -210,8 +210,8 @@ impl Settings {
             .filter(|s| !s.is_empty())
             .map(String::from);
 
-        let backend_url = raw
-            .get_setting(SettingKey::BackendUrl)
+        let pki_addr = raw
+            .get_setting(SettingKey::PkiAddr)
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
@@ -223,7 +223,7 @@ impl Settings {
             https_addr,
             forwarded_client_cert_info_header,
             forwarded_client_cert_pem_header,
-            backend_url,
+            pki_addr,
         }
     }
 
@@ -404,13 +404,13 @@ impl Settings {
     }
 
     /// Read the backend URL.
-    pub async fn backend_url(&self) -> Option<String> {
-        self.inner.network.read().await.backend_url.clone()
+    pub async fn pki_addr(&self) -> Option<String> {
+        self.inner.network.read().await.pki_addr.clone()
     }
 
     /// Update the backend URL.
-    pub async fn set_backend_url(&self, url: Option<String>) {
-        self.inner.network.write().await.backend_url = url;
+    pub async fn set_pki_addr(&self, url: Option<String>) {
+        self.inner.network.write().await.pki_addr = url;
     }
 
     // --- MQTT settings ---

@@ -49,8 +49,8 @@ pub async fn get_network_settings(
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
-        backend_url: network.backend_url,
-        backend_url_warning: None,
+        pki_addr: network.pki_addr,
+        pki_addr_warning: None,
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -199,11 +199,11 @@ pub async fn update_network_settings(
             .await;
     }
 
-    // Track whether backend_url changed for the warning
-    let mut backend_url_changed = false;
+    // Track whether pki_addr changed for the warning
+    let mut pki_addr_changed = false;
 
-    // Validate and apply backend_url (requires CA rotation to take full effect)
-    if let Some(ref url_str) = req.backend_url {
+    // Validate and apply pki_addr (requires CA rotation to fully take effect)
+    if let Some(ref url_str) = req.pki_addr {
         let value = if url_str.is_empty() {
             None
         } else {
@@ -220,7 +220,10 @@ pub async fn update_network_settings(
                     }
                 },
                 Err(e) => {
-                    return (StatusCode::BAD_REQUEST, format!("invalid backend URL: {e}"))
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("invalid PKI address URL: {e}"),
+                    )
                         .into_response();
                 }
             }
@@ -228,9 +231,9 @@ pub async fn update_network_settings(
         };
 
         // Check if the value actually changed
-        let current = state.settings.backend_url().await;
+        let current = state.settings.pki_addr().await;
         if current != value {
-            backend_url_changed = true;
+            pki_addr_changed = true;
         }
 
         let json_val = match &value {
@@ -240,15 +243,15 @@ pub async fn update_network_settings(
         if let Err(e) = upsert_setting(
             &state.db,
             state.default_tenant_id,
-            SettingKey::BackendUrl,
+            SettingKey::PkiAddr,
             json_val,
         )
         .await
         {
-            tracing::error!("Failed to save backend_url: {e:?}");
+            tracing::error!("Failed to save pki_addr: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
-        state.settings.set_backend_url(value).await;
+        state.settings.set_pki_addr(value).await;
     }
 
     // Validate and apply https_addr (requires restart — save to DB only)
@@ -278,9 +281,9 @@ pub async fn update_network_settings(
     }
 
     let network = state.settings.network().await;
-    let warning = if backend_url_changed {
+    let warning = if pki_addr_changed {
         Some(
-            "Changing the backend URL requires CA rotation. All agent certificates will need \
+            "Changing the PKI address requires CA rotation. All agent certificates will need \
              to be renewed. Call POST /api/v1/settings/rotate-ca to apply the change."
                 .to_string(),
         )
@@ -298,8 +301,8 @@ pub async fn update_network_settings(
         https_addr: network.https_addr.to_string(),
         forwarded_client_cert_info_header: network.forwarded_client_cert_info_header,
         forwarded_client_cert_pem_header: network.forwarded_client_cert_pem_header,
-        backend_url: network.backend_url,
-        backend_url_warning: warning,
+        pki_addr: network.pki_addr,
+        pki_addr_warning: warning,
     };
     (StatusCode::OK, Json(response)).into_response()
 }

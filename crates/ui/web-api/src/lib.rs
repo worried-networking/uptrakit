@@ -51,7 +51,7 @@ pub mod ca_snapshot {
         pub bundle_hash: String,
         pub managed: bool,
         pub active_not_after: time::OffsetDateTime,
-        pub backend_url: Option<String>,
+        pub pki_addr: Option<String>,
     }
 }
 
@@ -418,6 +418,23 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Build a minimal router serving only PKI endpoints over plain HTTP.
+///
+/// Used by `--pki-http listener` to expose OCSP, CRL, and CA cert endpoints
+/// without TLS (required by Nginx `ssl_ocsp_responder` which only supports http://).
+pub fn build_pki_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/healthz", get(routes::health::healthz))
+        .route("/api/v1/pki/ca.crt", get(routes::ca::ca_cert))
+        .route("/api/v1/pki/ca.crl", get(routes::ca::ca_crl))
+        .route(
+            "/api/v1/pki/ocsp",
+            axum::routing::post(routes::ocsp::ocsp_post),
+        )
+        .route("/api/v1/pki/ocsp/{encoded}", get(routes::ocsp::ocsp_get))
+        .with_state(state)
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -473,7 +490,7 @@ mod tests {
             bundle_hash: "0".repeat(64),
             managed: true,
             active_not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
-            backend_url: None,
+            pki_addr: None,
         };
         let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
 

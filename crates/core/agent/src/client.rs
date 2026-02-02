@@ -65,22 +65,41 @@ pub enum TlsMode<'a> {
     PinnedCa(&'a [u8]),
 }
 
-/// Fetch the CA certificate bundle from the controller over HTTPS using reqwest.
-pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Result<Vec<u8>> {
-    let url = format!("{base_url}/api/v1/pki/ca.crt");
-    tracing::info!(url = %url, "fetching CA certificate");
+/// Fetch the CA certificate bundle from the controller using reqwest.
+///
+/// When `pki_addr` is set, the CA is fetched from that URL instead of
+/// `base_url`. If the PKI address uses `http://`, plain HTTP is used
+/// (no TLS configuration needed). Otherwise the provided `tls_mode` applies.
+pub async fn fetch_ca_certificate(
+    base_url: &str,
+    pki_addr: Option<&str>,
+    tls_mode: TlsMode<'_>,
+) -> Result<Vec<u8>> {
+    let (fetch_url, use_plain_http) = match pki_addr {
+        Some(pki) => {
+            let is_http = pki.starts_with("http://");
+            (format!("{pki}/api/v1/pki/ca.crt"), is_http)
+        }
+        None => (format!("{base_url}/api/v1/pki/ca.crt"), false),
+    };
+
+    tracing::info!(url = %fetch_url, "fetching CA certificate");
 
     let mut builder = reqwest::Client::builder();
-    match tls_mode {
-        TlsMode::TrustFirstUse => {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
-        TlsMode::PinnedCa(ca_pem) => {
-            let cert = reqwest::Certificate::from_pem(ca_pem)
-                .map_err(|e| report!(Error::FetchCa(format!("invalid CA PEM: {e}"))))?;
-            builder = builder
-                .tls_built_in_root_certs(false)
-                .add_root_certificate(cert);
+    if use_plain_http {
+        // Plain HTTP — no TLS configuration needed
+    } else {
+        match tls_mode {
+            TlsMode::TrustFirstUse => {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+            TlsMode::PinnedCa(ca_pem) => {
+                let cert = reqwest::Certificate::from_pem(ca_pem)
+                    .map_err(|e| report!(Error::FetchCa(format!("invalid CA PEM: {e}"))))?;
+                builder = builder
+                    .tls_built_in_root_certs(false)
+                    .add_root_certificate(cert);
+            }
         }
     }
 
@@ -89,7 +108,7 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Resu
         .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
 
     let resp = client
-        .get(&url)
+        .get(&fetch_url)
         .send()
         .await
         .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
@@ -430,10 +449,12 @@ fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> s
 }
 
 /// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_authenticated_loop(
     host: &str,
     port: u16,
     base_url: &str,
+    pki_addr: Option<&str>,
     ca_pem: Option<&[u8]>,
     tls_connector: TlsConnector,
     cert_not_after_ts: Option<i64>,
@@ -575,7 +596,7 @@ pub async fn run_authenticated_loop(
                                             Some(pem) => TlsMode::PinnedCa(pem),
                                             None => TlsMode::TrustFirstUse,
                                         };
-                                        match fetch_ca_certificate(base_url, tls_mode).await {
+                                        match fetch_ca_certificate(base_url, pki_addr, tls_mode).await {
                                             Ok(pem) => {
                                                 if let Err(e) = crate::state::save_ca_cert(data_dir, &pem) {
                                                     tracing::warn!("failed to save updated CA: {e}");

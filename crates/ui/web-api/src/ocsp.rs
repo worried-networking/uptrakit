@@ -1,7 +1,6 @@
 use der::asn1::{BitString, OctetString};
 use der::{Decode, Encode};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
-use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use x509_cert::ext::pkix::CrlReason;
 use x509_ocsp::{
@@ -11,9 +10,17 @@ use x509_ocsp::{
 
 use crate::ca_snapshot::CaSnapshotData;
 
+/// SHA-1 OID (`1.3.14.3.2.26`) — used by Nginx/OpenSSL in OCSP requests.
+const SHA1_OID: const_oid::ObjectIdentifier =
+    const_oid::ObjectIdentifier::new_unwrap("1.3.14.3.2.26");
+/// SHA-256 OID (`2.16.840.1.101.3.4.2.1`).
+const SHA256_OID: const_oid::ObjectIdentifier =
+    const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+
 /// Build an OCSP response for the given DER-encoded OCSP request.
 ///
 /// Queries the `agent_certificates` table to determine certificate status.
+/// Supports both SHA-1 and SHA-256 hash algorithms in requests per RFC 6960.
 pub async fn build_ocsp_response(
     request_der: &[u8],
     ca_snapshot: &CaSnapshotData,
@@ -25,27 +32,50 @@ pub async fn build_ocsp_response(
         Err(_) => return build_error_response(OcspResponseStatus::MalformedRequest),
     };
 
-    // Build responder ID (by key hash of CA public key)
-    let (responder_id, ca_key_hash) = match build_responder_id(&ca_snapshot.active_cert_pem) {
+    // Extract the raw CA public key bytes (used to compute hashes on demand)
+    let active_pub_key = match extract_ca_public_key_bytes(&ca_snapshot.active_cert_pem) {
         Ok(v) => v,
         Err(_) => return build_error_response(OcspResponseStatus::InternalError),
     };
 
-    // Optionally compute previous CA key hash
-    let prev_key_hash = ca_snapshot
+    let prev_pub_key = ca_snapshot
         .previous_cert_pem
         .as_deref()
-        .and_then(|pem| extract_ca_key_hash(pem).ok());
+        .and_then(|pem| extract_ca_public_key_bytes(pem).ok());
+
+    // Build responder ID using SHA-1 per RFC 6960 Section 2.3
+    let responder_id = match build_responder_id(&active_pub_key) {
+        Ok(v) => v,
+        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+    };
 
     // Process each request in the list
     let mut single_responses = Vec::new();
 
     for request in &ocsp_request.tbs_request.request_list {
         let cert_id = &request.req_cert;
+        let hash_oid = &cert_id.hash_algorithm.oid;
+
+        // Compute the CA key hash using the same algorithm the client used
+        let active_hash = match compute_key_hash(&active_pub_key, hash_oid) {
+            Some(h) => h,
+            None => {
+                // Unsupported hash algorithm — return unknown
+                single_responses.push(build_single_response(
+                    cert_id.clone(),
+                    CertStatus::unknown(),
+                ));
+                continue;
+            }
+        };
+
+        let prev_hash = prev_pub_key
+            .as_ref()
+            .and_then(|pk| compute_key_hash(pk, hash_oid));
 
         // Validate that the issuer key hash matches our CA (active or previous)
-        let matches_active = cert_id.issuer_key_hash.as_bytes() == ca_key_hash.as_slice();
-        let matches_previous = prev_key_hash
+        let matches_active = cert_id.issuer_key_hash.as_bytes() == active_hash.as_slice();
+        let matches_previous = prev_hash
             .as_ref()
             .is_some_and(|h| cert_id.issuer_key_hash.as_bytes() == h.as_slice());
 
@@ -102,29 +132,45 @@ fn build_error_response(status: OcspResponseStatus) -> Vec<u8> {
     response.to_der().unwrap_or_default()
 }
 
-/// Build the responder ID from the CA certificate (by key hash).
-fn build_responder_id(
-    ca_cert_pem: &str,
-) -> Result<(ResponderId, Vec<u8>), Box<dyn std::error::Error>> {
-    let key_hash = extract_ca_key_hash(ca_cert_pem)?;
+/// Build the responder ID from the CA public key bytes.
+///
+/// Per RFC 6960 Section 2.3, `ResponderID::ByKey` MUST use SHA-1.
+fn build_responder_id(pub_key_bytes: &[u8]) -> Result<ResponderId, Box<dyn std::error::Error>> {
+    let key_hash =
+        compute_key_hash(pub_key_bytes, &SHA1_OID).ok_or("failed to compute SHA-1 key hash")?;
     let responder_id = ResponderId::ByKey(
-        OctetString::new(key_hash.clone()).map_err(|e| format!("OctetString error: {e}"))?,
+        OctetString::new(key_hash).map_err(|e| format!("OctetString error: {e}"))?,
     );
-    Ok((responder_id, key_hash))
+    Ok(responder_id)
 }
 
-/// Extract the SHA-256 hash of the CA's public key (SubjectPublicKeyInfo.subjectPublicKey).
-fn extract_ca_key_hash(ca_cert_pem: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+/// Extract the raw public key bytes (BIT STRING content) from a PEM-encoded certificate.
+fn extract_ca_public_key_bytes(ca_cert_pem: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let (_, pem_block) =
         x509_parser::pem::parse_x509_pem(ca_cert_pem.as_bytes()).map_err(|_| "PEM parse error")?;
     let cert = pem_block.parse_x509().map_err(|_| "X.509 parse error")?;
+    Ok(cert
+        .tbs_certificate
+        .subject_pki
+        .subject_public_key
+        .data
+        .to_vec())
+}
 
-    // Hash the raw public key bytes (the BIT STRING content, not the SPKI wrapper)
-    let pub_key_bytes = cert.tbs_certificate.subject_pki.subject_public_key.data;
-
-    let mut hasher = Sha256::new();
-    hasher.update(pub_key_bytes);
-    Ok(hasher.finalize().to_vec())
+/// Compute a hash of the given bytes using the algorithm identified by `oid`.
+///
+/// Supports SHA-1 (used by Nginx/OpenSSL) and SHA-256.
+/// Returns `None` for unsupported algorithms.
+fn compute_key_hash(data: &[u8], oid: &const_oid::ObjectIdentifier) -> Option<Vec<u8>> {
+    if *oid == SHA1_OID {
+        let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY, data);
+        Some(digest.as_ref().to_vec())
+    } else if *oid == SHA256_OID {
+        let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, data);
+        Some(digest.as_ref().to_vec())
+    } else {
+        None
+    }
 }
 
 /// Create an OcspGeneralizedTime from an OffsetDateTime.
@@ -332,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_ca_key_hash_works() {
+    fn extract_ca_public_key_and_hash_works() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
         let mut params = rcgen::CertificateParams::default();
@@ -343,12 +389,62 @@ mod tests {
         let cert = params.self_signed(&key_pair).unwrap();
         let pem = cert.pem();
 
-        let hash = extract_ca_key_hash(&pem).unwrap();
-        assert_eq!(hash.len(), 32); // SHA-256 is 32 bytes
+        let pub_key = extract_ca_public_key_bytes(&pem).unwrap();
+        assert!(!pub_key.is_empty());
 
-        // Should be deterministic
-        let hash2 = extract_ca_key_hash(&pem).unwrap();
-        assert_eq!(hash, hash2);
+        // SHA-256 hash should be 32 bytes
+        let hash_256 = compute_key_hash(&pub_key, &SHA256_OID).unwrap();
+        assert_eq!(hash_256.len(), 32);
+
+        // SHA-1 hash should be 20 bytes
+        let hash_1 = compute_key_hash(&pub_key, &SHA1_OID).unwrap();
+        assert_eq!(hash_1.len(), 20);
+
+        // Hashes should be deterministic
+        let hash_256_2 = compute_key_hash(&pub_key, &SHA256_OID).unwrap();
+        assert_eq!(hash_256, hash_256_2);
+
+        let hash_1_2 = compute_key_hash(&pub_key, &SHA1_OID).unwrap();
+        assert_eq!(hash_1, hash_1_2);
+
+        // SHA-1 and SHA-256 should produce different hashes
+        assert_ne!(hash_1.as_slice(), hash_256.as_slice());
+    }
+
+    #[test]
+    fn unsupported_hash_algorithm_returns_none() {
+        let unknown_oid = const_oid::ObjectIdentifier::new_unwrap("1.2.3.4.5.6.7.8.9");
+        assert!(compute_key_hash(b"some data", &unknown_oid).is_none());
+    }
+
+    #[test]
+    fn responder_id_uses_sha1() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params.self_signed(&key_pair).unwrap();
+        let pem = cert.pem();
+
+        let pub_key = extract_ca_public_key_bytes(&pem).unwrap();
+        let responder_id = build_responder_id(&pub_key).unwrap();
+
+        // ResponderID::ByKey should contain a SHA-1 hash (20 bytes)
+        match responder_id {
+            ResponderId::ByKey(key_hash) => {
+                assert_eq!(
+                    key_hash.as_bytes().len(),
+                    20,
+                    "ResponderID must use SHA-1 (20 bytes)"
+                );
+                let expected = compute_key_hash(&pub_key, &SHA1_OID).unwrap();
+                assert_eq!(key_hash.as_bytes(), expected.as_slice());
+            }
+            _ => panic!("expected ResponderID::ByKey"),
+        }
     }
 
     #[test]
@@ -370,7 +466,7 @@ mod tests {
                 bundle_hash: String::new(),
                 managed: true,
                 active_not_after: OffsetDateTime::now_utc(),
-                backend_url: None,
+                pki_addr: None,
             };
 
             let db = {

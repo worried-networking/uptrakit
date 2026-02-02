@@ -12,4 +12,8 @@ mod reverse_proxy {
     mod envoy_crl;
     mod haproxy_crl;
     mod nginx_crl;
+
+    // OCSP revocation checking tests
+    mod nginx_ocsp;
+    mod ocsp_responder;
 }

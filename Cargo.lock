@@ -4700,10 +4700,13 @@ name = "uptrakit-controller"
 version = "0.0.1"
 dependencies = [
  "argon2",
+ "aws-lc-rs",
  "axum",
  "axum-server",
  "base64 0.22.1",
  "clap",
+ "const-oid",
+ "der",
  "hex",
  "hostname",
  "ipnet",
@@ -4716,7 +4719,9 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
+ "spki",
  "tempfile",
  "testcontainers",
  "thiserror 2.0.18",
@@ -4733,6 +4738,8 @@ dependencies = [
  "uptrakit-web-api",
  "url",
  "uuid",
+ "x509-cert",
+ "x509-ocsp",
  "x509-parser",
 ]
 

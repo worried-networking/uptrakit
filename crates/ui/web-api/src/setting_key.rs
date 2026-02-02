@@ -26,7 +26,7 @@ pub enum SettingKey {
     EnrollmentTokenHash,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
-    BackendUrl,
+    PkiAddr,
     MultiTenancyEnabled,
 }
 
@@ -52,7 +52,7 @@ impl SettingKey {
             Self::EnrollmentTokenHash => "agent_enrollment.token_hash",
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
-            Self::BackendUrl => "network.backend_url",
+            Self::PkiAddr => "network.pki_addr",
             Self::MultiTenancyEnabled => "multi_tenancy.enabled",
         }
     }
@@ -80,7 +80,7 @@ impl SettingKey {
                 Some(Self::ForwardedClientCertInfoHeader)
             }
             "network.forwarded_client_cert_pem_header" => Some(Self::ForwardedClientCertPemHeader),
-            "network.backend_url" => Some(Self::BackendUrl),
+            "network.pki_addr" => Some(Self::PkiAddr),
             "multi_tenancy.enabled" => Some(Self::MultiTenancyEnabled),
             _ => None,
         }
@@ -96,7 +96,7 @@ impl SettingKey {
                 | Self::HttpsAddr
                 | Self::ForwardedClientCertInfoHeader
                 | Self::ForwardedClientCertPemHeader
-                | Self::BackendUrl
+                | Self::PkiAddr
                 | Self::MultiTenancyEnabled
         )
     }
@@ -144,7 +144,7 @@ mod tests {
         assert!(SettingKey::HttpsAddr.is_global());
         assert!(SettingKey::ForwardedClientCertInfoHeader.is_global());
         assert!(SettingKey::ForwardedClientCertPemHeader.is_global());
-        assert!(SettingKey::BackendUrl.is_global());
+        assert!(SettingKey::PkiAddr.is_global());
         assert!(SettingKey::MultiTenancyEnabled.is_global());
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());

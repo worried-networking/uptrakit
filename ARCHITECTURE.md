@@ -105,12 +105,13 @@ The controller operates an internal Certificate Authority for mutual TLS authent
 
 - **CA rotation**: Automatic when the managed CA enters a 6-month expiry window. Can also be triggered on demand via `POST /api/v1/settings/rotate-ca`. Produces a dual-CA trust bundle for seamless transition.
 - **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`). Combined PEM CRLs are served at `GET /api/v1/pki/ca.crl`.
-- **OCSP responder**: `POST /api/v1/pki/ocsp` (and GET variant) provides real-time certificate revocation status per RFC 6960. Responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
-- **AIA/CDP extensions**: When `--backend-url` is configured, certificates embed Authority Information Access (OCSP, CA Issuers) and CRL Distribution Points extensions. This enables proxies like Nginx to discover and use the OCSP responder automatically.
+- **OCSP responder**: `POST /api/v1/pki/ocsp` (and GET variant) provides real-time certificate revocation status per RFC 6960. Supports SHA-1 and SHA-256 hash algorithms (Nginx/OpenSSL uses SHA-1). `ResponderID::ByKey` uses SHA-1 per RFC 6960 Section 2.3. Responses are signed with the active CA's private key using ECDSA P-256 SHA-256. Only Nginx natively supports OCSP verification of client certificates (via `ssl_ocsp` directive).
+- **AIA/CDP extensions**: When `--pki-addr` is configured, certificates embed Authority Information Access (OCSP, CA Issuers) and CRL Distribution Points extensions. This enables proxies like Nginx to discover and use the OCSP responder automatically.
+- **Optional PKI HTTP listener**: When `--pki-http listener` is set alongside `--pki-addr`, the controller starts a plain HTTP listener serving only PKI routes. Required for Nginx `ssl_ocsp_responder` which only supports `http://` OCSP responder URLs. Use `--pki-http external` to suppress the warning when PKI HTTP is handled by a reverse proxy.
 - **Runtime state**: CA material is shared via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct.
 - **External CA**: Supported via `--ca-cert` / `--ca-key` flags, which disable managed rotation.
 - **SAN sanity checks**: At startup, `--san` values are validated against the existing managed cert's SANs. Mismatched SANs trigger silent regeneration (same CA) or an error with fix instructions (different CA). `--san` is incompatible with `--tls-cert`/`--tls-key`.
-- **Backend URL validation**: At startup, the controller validates that an existing managed CA's AIA/CDP URLs match the reconciled `--backend-url`. Mismatches cause a hard startup failure with actionable error messages.
+- **PKI address validation**: At startup, the controller validates that an existing managed CA's AIA/CDP URLs match the reconciled `--pki-addr`. Mismatches cause a hard startup failure with actionable error messages.
 
 For cryptographic algorithm details, see [SECURITY.md](SECURITY.md) section "Cryptographic Details". For the full operational flow (rotation steps, bundle distribution, agent update path), see [AGENTS.md](AGENTS.md) section "PKI & CA rotation".
 
@@ -132,7 +133,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
-| Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, backend URL: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
+| Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, PKI address: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
 | MQTT | `mqtt.*` | No (all require restart) | `GET/PUT /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
@@ -263,6 +264,6 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **SvelteKit static adapter** | No server-side rendering needed -- the controller serves the pre-built SPA. Keeps deployment simple (single binary + static files). |
 | **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
-| **HTTPS-only controller** | The controller listens only on HTTPS (no plain HTTP listener). All agent and browser connections use TLS. |
-| **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. |
+| **HTTPS-only controller** | The controller listens on HTTPS by default. An optional plain HTTP listener (`--pki-http listener`) can be started for PKI-only endpoints (OCSP, CRL, CA cert) when needed by Nginx `ssl_ocsp_responder`. All agent and browser connections use TLS. |
+| **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
 | **Reverse proxy support** | L4 passthrough and L7 TLS termination. Agent identity forwarded via structured info or PEM headers with CA CN verification. Header stripping prevents spoofing from non-proxy clients. Docker integration tests validate all 5 supported proxies (Nginx, Traefik, Caddy, HAProxy, Envoy). |

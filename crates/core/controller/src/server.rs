@@ -63,3 +63,19 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
 
     Ok(())
 }
+
+/// Run a plain HTTP server for PKI-only endpoints (OCSP, CRL, CA cert).
+///
+/// Started when `--pki-http listener` is set. Required for Nginx `ssl_ocsp_responder`
+/// which only supports `http://` OCSP responder URLs.
+pub async fn run_pki_http(addr: SocketAddr, app_state: Arc<AppState>) -> Result<()> {
+    let router = uptrakit_web_api::build_pki_router(app_state);
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .context_to::<ServerError>()?;
+    tracing::info!("PKI HTTP server listening on {addr}");
+    axum::serve(listener, router.into_make_service())
+        .await
+        .context_to::<ServerError>()?;
+    Ok(())
+}

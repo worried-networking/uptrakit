@@ -42,6 +42,7 @@ async fn run(args: &Args) -> error::Result<()> {
         .parsed_url()
         .map_err(|s| report!(Error::Enrollment(s)))?;
     let base_url = args.url.trim_end_matches('/');
+    let pki_addr = args.pki_addr.as_deref();
 
     // Install the default crypto provider for rustls
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -78,7 +79,8 @@ async fn run(args: &Args) -> error::Result<()> {
         Some(pem)
     } else if args.tofu {
         tracing::info!("TOFU: fetching CA (accepting any server certificate)");
-        let pem = client::fetch_ca_certificate(base_url, client::TlsMode::TrustFirstUse).await?;
+        let pem = client::fetch_ca_certificate(base_url, pki_addr, client::TlsMode::TrustFirstUse)
+            .await?;
         state::save_ca_cert(&data_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
@@ -104,6 +106,7 @@ async fn run(args: &Args) -> error::Result<()> {
                 &host,
                 port,
                 base_url,
+                pki_addr,
                 &data_dir,
                 ca_pem.as_deref(),
             )
@@ -146,7 +149,15 @@ async fn run(args: &Args) -> error::Result<()> {
     }
 
     // Enter mTLS loop with reconnect
-    run_authenticated_with_reconnect(&host, port, base_url, &data_dir, ca_pem.as_deref()).await
+    run_authenticated_with_reconnect(
+        &host,
+        port,
+        base_url,
+        pki_addr,
+        &data_dir,
+        ca_pem.as_deref(),
+    )
+    .await
 }
 
 /// Maximum number of client_id collision retries during fresh enrollment.
@@ -290,6 +301,7 @@ async fn run_authenticated_with_reconnect(
     host: &str,
     port: u16,
     base_url: &str,
+    pki_addr: Option<&str>,
     data_dir: &Path,
     ca_pem: Option<&[u8]>,
 ) -> error::Result<()> {
@@ -314,6 +326,7 @@ async fn run_authenticated_with_reconnect(
             host,
             port,
             base_url,
+            pki_addr,
             ca_pem,
             mtls_connector,
             cert_not_after_ts,

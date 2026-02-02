@@ -113,7 +113,7 @@ async fn build_state(
         bundle_hash: "0".repeat(64),
         managed: true,
         active_not_after: ::time::OffsetDateTime::now_utc() + ::time::Duration::days(365),
-        backend_url: None,
+        pki_addr: None,
     };
     let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
 

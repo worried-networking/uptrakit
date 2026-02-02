@@ -85,13 +85,20 @@ pub struct Args {
     #[arg(long)]
     pub forwarded_client_cert_pem_header: Option<String>,
 
-    /// URL that reverse proxies use to reach the controller backend.
-    /// Used to construct OCSP, CRL, and CA Issuer URLs embedded in certificates.
-    /// Example: https://controller.internal:8443
-    /// Stored in DB as `network.backend_url`. CLI value used only on first run
+    /// URL for PKI endpoints (OCSP, CRL, CA cert) embedded in certificate extensions.
+    /// Supports both http:// and https:// schemes.
+    /// Example: http://controller:8080 or https://controller.internal:8443
+    /// Stored in DB as `network.pki_addr`. CLI value used only on first run
     /// or with `--force-settings-override`.
-    #[arg(long, value_parser = parse_backend_url)]
-    pub backend_url: Option<String>,
+    #[arg(long, value_parser = parse_pki_addr)]
+    pub pki_addr: Option<String>,
+
+    /// How to serve PKI endpoints over plain HTTP.
+    /// Use `listener` to start a built-in HTTP server on the port from --pki-addr,
+    /// or `external` if PKI HTTP is handled by a reverse proxy (suppresses the
+    /// http:// scheme warning when --pki-addr uses http://).
+    #[arg(long, value_enum)]
+    pub pki_http: Option<PkiHttpMode>,
 
     /// Path to the built frontend directory. Enables SPA serving.
     #[arg(long)]
@@ -143,9 +150,19 @@ pub struct MqttArgs {
     pub mqtt_topic_prefix: Option<String>,
 }
 
-/// Validate a backend URL argument.
+/// How to serve PKI endpoints over plain HTTP.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum PkiHttpMode {
+    /// Start a built-in plain HTTP listener for PKI endpoints.
+    Listener,
+    /// PKI HTTP is handled externally (e.g., by a reverse proxy).
+    /// Suppresses the warning about http:// pki-addr without a listener.
+    External,
+}
+
+/// Validate a PKI address URL argument.
 /// Must be a valid URL with http or https scheme, and no trailing slash.
-fn parse_backend_url(s: &str) -> Result<String, String> {
+fn parse_pki_addr(s: &str) -> Result<String, String> {
     let url: url::Url = s.parse().map_err(|e| format!("invalid URL: {e}"))?;
     match url.scheme() {
         "http" | "https" => {}

@@ -125,24 +125,32 @@ The controller manages a self-signed internal CA for mTLS agent authentication.
 6. Agents that were offline detect staleness via `ca_bundle_hash` in `AgentSettings` and fetch the updated bundle over HTTPS.
 7. New agent certs are always signed by the active CA.
 
-### Backend URL and AIA/CDP extensions
+### PKI address and AIA/CDP extensions
 
-When `--backend-url` is configured, the controller embeds AIA (Authority Information Access) and CDP (CRL Distribution Points) extensions in both CA and agent certificates:
+When `--pki-addr` is configured, the controller embeds AIA (Authority Information Access) and CDP (CRL Distribution Points) extensions in both CA and agent certificates:
 
 | Extension | URL |
 | --- | --- |
-| AIA OCSP | `{backend_url}/api/v1/pki/ocsp` |
-| AIA CA Issuers | `{backend_url}/api/v1/pki/ca.crt` |
-| CDP CRL | `{backend_url}/api/v1/pki/ca.crl` |
+| AIA OCSP | `{pki_addr}/api/v1/pki/ocsp` |
+| AIA CA Issuers | `{pki_addr}/api/v1/pki/ca.crt` |
+| CDP CRL | `{pki_addr}/api/v1/pki/ca.crl` |
 
-At startup, the controller validates the existing CA certificate's embedded URLs against the reconciled `backend_url`:
-- Backend URL set and matching CA extensions: OK
-- Backend URL set but different from CA extensions: **startup failure** (suggests updating the setting or deleting CA files)
-- Backend URL set but CA has no extensions: **startup failure** (suggests deleting CA files to regenerate with extensions)
-- Backend URL not set but CA has extensions: **startup failure** (suggests providing `--backend-url` or deleting CA files)
+`--pki-addr` accepts both `http://` and `https://` URLs. When the PKI address uses `http://`, the `--pki-http` flag controls how plain HTTP serving is handled:
+
+| `--pki-http` value | Behaviour |
+| --- | --- |
+| `listener` | The controller starts a plain HTTP listener on the port from `--pki-addr`, serving only PKI routes (`/healthz`, `/api/v1/pki/ca.crt`, `/api/v1/pki/ca.crl`, `/api/v1/pki/ocsp`). Required for Nginx `ssl_ocsp_responder` which only supports `http://` OCSP responder URLs. |
+| `external` | PKI HTTP is handled by an external component (e.g. reverse proxy). Suppresses the warning about `http://` scheme without `--pki-http`. |
+| (not set) | If `--pki-addr` uses `http://`, the controller logs a warning. |
+
+At startup, the controller validates the existing CA certificate's embedded URLs against the reconciled `pki_addr`:
+- PKI address set and matching CA extensions: OK
+- PKI address set but different from CA extensions: **startup failure** (suggests updating the setting or deleting CA files)
+- PKI address set but CA has no extensions: **startup failure** (suggests deleting CA files to regenerate with extensions)
+- PKI address not set but CA has extensions: **startup failure** (suggests providing `--pki-addr` or deleting CA files)
 - Neither set: OK
 
-Changing the backend URL requires CA rotation (the URLs are embedded in the CA certificate). See the [reverse proxy guide](docs/reverse-proxy/README.md) for the full flow.
+Changing the PKI address requires CA rotation (the URLs are embedded in the CA certificate). See the [reverse proxy guide](docs/reverse-proxy/README.md) for the full flow.
 
 ### OCSP responder
 
@@ -151,7 +159,9 @@ The controller provides an OCSP responder at `/api/v1/pki/ocsp` (both POST and G
 - **revoked**: certificate has been revoked (includes revocation time and reason)
 - **unknown**: certificate serial not found
 
-Responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
+The responder supports both SHA-1 and SHA-256 hash algorithms in requests per RFC 6960. Nginx/OpenSSL always uses SHA-1 (`1.3.14.3.2.26`) for OCSP requests. `ResponderID::ByKey` uses SHA-1 as required by RFC 6960 Section 2.3. Responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
+
+Only Nginx natively supports OCSP verification of client certificates (via `ssl_ocsp` directive, since v1.19.0). HAProxy, Envoy, Traefik, and Caddy do not.
 
 ### External CA
 
@@ -190,7 +200,7 @@ These are non-negotiable design constraints. Do not violate them.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
-12. **Do not add any `allow()`** without excpicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`).
+12. **Do not add any `allow()`** without excpicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`) and `run_authenticated_loop` in the agent (gained `pki_addr` parameter).
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
 ## CLI output formatting
@@ -369,7 +379,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--san` | `network.extra_sans` | `[]` | Yes |
 | `--forwarded-client-cert-info-header` | `network.forwarded_client_cert_info_header` | `null` | Yes |
 | `--forwarded-client-cert-pem-header` | `network.forwarded_client_cert_pem_header` | `null` | Yes |
-| `--backend-url` | `network.backend_url` | `null` | Yes (requires CA rotation) |
+| `--pki-addr` | `network.pki_addr` | `null` | Yes (requires CA rotation) |
 | `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
 | `--mqtt-host` | `mqtt.host` | `null` | No (restart) |
 | `--mqtt-port` | `mqtt.port` | `1883` | No (restart) |
@@ -411,7 +421,7 @@ The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettin
 | Endpoint | Permission | Purpose |
 | --- | --- | --- |
 | `GET /api/v1/settings/network` | ViewSettings | Read network settings |
-| `PUT /api/v1/settings/network` | ManageSettings | Update network settings (includes `backend_url`) |
+| `PUT /api/v1/settings/network` | ManageSettings | Update network settings (includes `pki_addr`) |
 | `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT settings |
 | `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT settings |
 | `POST /api/v1/settings/rotate-ca` | ManageSettings | Trigger immediate CA rotation |
@@ -589,7 +599,7 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `RenewCertificate(RenewCertificatePayload)` variant in `AgentMessage` — agent requests certificate renewal with a fresh CSR (early or on-demand)
 - `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours` and `ca_bundle_hash`
 - `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new bundle PEM
-- `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or backend URL change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
+- `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or PKI address change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
 
 ### Agent host info collection
 
@@ -686,11 +696,16 @@ crates/core/controller/tests/
   reverse_proxy/
     pki.rs                      -- TestPki: CA + server cert + agent cert generation (rcgen)
     server.rs                   -- TestServer: lightweight Axum HTTPS server with real middleware
+    ocsp_responder.rs           -- OcspResponder: standalone plain-HTTP OCSP responder for testing
     nginx.rs                    -- Nginx L7 test (nginx:latest)
     traefik.rs                  -- Traefik L7 test (traefik:v3)
     caddy.rs                    -- Caddy L7 test (caddy:latest)
     haproxy.rs                  -- HAProxy L7 test (haproxy:latest)
     envoy.rs                    -- Envoy L7 test (envoyproxy/envoy:v1.31-latest)
+    nginx_crl.rs                -- Nginx CRL revocation test
+    haproxy_crl.rs              -- HAProxy CRL revocation test
+    envoy_crl.rs                -- Envoy CRL revocation test
+    nginx_ocsp.rs               -- Nginx OCSP revocation test (ssl_ocsp leaf)
 ```
 
 All tests are `#[ignore]` with descriptive messages and never run in normal `cargo test`. They require Docker.

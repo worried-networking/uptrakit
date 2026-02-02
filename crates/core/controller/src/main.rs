@@ -232,12 +232,12 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
         .await;
 
-    let backend_url = reconcile::reconcile_setting(
+    let pki_addr = reconcile::reconcile_setting(
         &db_conn,
         default_tenant_id,
-        SettingKey::BackendUrl,
+        SettingKey::PkiAddr,
         &raw_settings,
-        args.backend_url.clone(),
+        args.pki_addr.clone(),
         String::new(), // empty = not set
         force,
         reconcile::JsonConvert {
@@ -259,12 +259,12 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     )
     .await
     .context(AppError::Settings)?;
-    let backend_url_opt = if backend_url.is_empty() {
+    let pki_addr_opt = if pki_addr.is_empty() {
         None
     } else {
-        Some(backend_url)
+        Some(pki_addr)
     };
-    settings.set_backend_url(backend_url_opt.clone()).await;
+    settings.set_pki_addr(pki_addr_opt.clone()).await;
     // Warn if cert headers are configured but no trusted proxies
     if (forwarded_cert_info_opt.is_some() || forwarded_cert_pem_opt.is_some())
         && trusted_proxies.is_empty()
@@ -499,6 +499,40 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         )));
     }
 
+    // Validate --pki-http
+    let pki_http_port: Option<u16> = if let Some(mode) = args.pki_http {
+        let pki_url = pki_addr_opt.as_deref().ok_or_else(|| {
+            report!(AppError::Config(
+                "--pki-http requires --pki-addr to be set".into()
+            ))
+        })?;
+        match mode {
+            cli::PkiHttpMode::Listener => {
+                let parsed: url::Url = pki_url.parse().expect("already validated");
+                let port = parsed.port_or_known_default().ok_or_else(|| {
+                    report!(AppError::Config(
+                        "--pki-addr URL must have an explicit or default port".into()
+                    ))
+                })?;
+                Some(port)
+            }
+            cli::PkiHttpMode::External => None,
+        }
+    } else {
+        // Warn if pki_addr has http:// but no --pki-http is set
+        if let Some(ref url) = pki_addr_opt
+            && url.starts_with("http://")
+        {
+            tracing::warn!(
+                "--pki-addr uses http:// scheme but --pki-http is not set; \
+                 the controller is NOT serving PKI endpoints over plain HTTP. \
+                 Add --pki-http listener to start the HTTP listener, or \
+                 --pki-http external if PKI HTTP is handled by a reverse proxy."
+            );
+        }
+        None
+    };
+
     // Initialize PKI
     let pki_path = pki::pki_dir(&data_dir).context(AppError::Pki)?;
 
@@ -513,29 +547,29 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         }
     } else {
         let mut state =
-            pki::load_ca_state(&pki_path, backend_url_opt.as_deref()).context(AppError::Pki)?;
+            pki::load_ca_state(&pki_path, pki_addr_opt.as_deref()).context(AppError::Pki)?;
 
         // Auto-rotate if managed and within rotation window
         if state.managed && pki::should_rotate_ca(&state.active.cert_pem) {
             tracing::info!("CA certificate is within rotation window, rotating now");
-            state = pki::rotate_ca(&pki_path, backend_url_opt.as_deref()).context(AppError::Pki)?;
+            state = pki::rotate_ca(&pki_path, pki_addr_opt.as_deref()).context(AppError::Pki)?;
         }
 
         state
     };
 
-    // Validate CA extensions match backend_url (managed CAs only)
+    // Validate CA extensions match pki_addr (managed CAs only)
     if ca_state.managed {
-        pki::validate_ca_backend_url(
+        pki::validate_ca_pki_addr(
             &ca_state.active.cert_pem,
-            backend_url_opt.as_deref(),
+            pki_addr_opt.as_deref(),
             &pki_path,
         )
         .context(AppError::Pki)?;
     }
 
     let ca_snapshot = ca_state
-        .to_snapshot(backend_url_opt.clone())
+        .to_snapshot(pki_addr_opt.clone())
         .context(AppError::Pki)?;
     let (ca_tx, ca_rx) = tokio::sync::watch::channel(ca_snapshot.clone());
 
@@ -707,11 +741,11 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
                     tracing::info!("CA rotation triggered via API");
                 }
 
-                let current_backend_url = settings_for_rotation.backend_url().await;
-                match pki::rotate_ca(&pki_for_task, current_backend_url.as_deref()) {
+                let current_pki_addr = settings_for_rotation.pki_addr().await;
+                match pki::rotate_ca(&pki_for_task, current_pki_addr.as_deref()) {
                     Ok(new_state) => {
-                        let rotation_backend_url = current_backend_url.clone();
-                        match new_state.to_snapshot(rotation_backend_url) {
+                        let rotation_pki_addr = current_pki_addr.clone();
+                        match new_state.to_snapshot(rotation_pki_addr) {
                             Ok(new_snapshot) => {
                                 // Update CRL manager with new CA material
                                 if let Err(e) = crl_mgr_for_task.update_ca(&new_snapshot).await {
@@ -875,9 +909,20 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         result = server::run(server::ServerOptions {
             https_addr,
             rustls_config,
-            app_state,
+            app_state: Arc::clone(&app_state),
             static_dir,
         }) => {
+            result.context(AppError::Server)?;
+        }
+        result = async {
+            match pki_http_port {
+                Some(port) => {
+                    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+                    server::run_pki_http(addr, app_state).await
+                }
+                None => std::future::pending().await,
+            }
+        } => {
             result.context(AppError::Server)?;
         }
         _ = tokio::signal::ctrl_c() => {
