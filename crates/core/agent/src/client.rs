@@ -317,6 +317,10 @@ pub async fn send_enroll(
                             err.code, err.message
                         ))));
                     }
+                    ControllerMessage::ServerRestarting(payload) => {
+                        tracing::info!(reason = %payload.reason, "controller is restarting during enrollment");
+                        return Err(report!(Error::ReceiveClosed));
+                    }
                     _ => {
                         return Err(report!(Error::UnexpectedMessage));
                     }
@@ -370,6 +374,10 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
                             err.code, err.message
                         ))));
                     }
+                    ControllerMessage::ServerRestarting(payload) => {
+                        tracing::info!(reason = %payload.reason, "controller is restarting while waiting for approval");
+                        return Err(report!(Error::ReceiveClosed));
+                    }
                     _ => continue,
                 }
             }
@@ -416,6 +424,10 @@ pub async fn request_certificate_ws(
                             "{}: {}",
                             err.code, err.message
                         ))));
+                    }
+                    ControllerMessage::ServerRestarting(payload) => {
+                        tracing::info!(reason = %payload.reason, "controller is restarting during certificate request");
+                        return Err(report!(Error::ReceiveClosed));
                     }
                     _ => {
                         return Err(report!(Error::UnexpectedMessage));
