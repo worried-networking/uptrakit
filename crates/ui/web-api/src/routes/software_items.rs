@@ -957,9 +957,9 @@ pub async fn trigger_update(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // 8. Merge hooks from provider config + config_override
-    let (pre_update_commands, post_update_commands) =
-        crate::update_hooks::merge_hooks(&provider_config.config, item.config_override.as_ref());
+    // 8. Resolve hooks from provider config + config_override
+    let resolved_hooks =
+        crate::update_hooks::resolve_hooks(&provider_config.config, item.config_override.as_ref());
 
     // 9. Merge config
     let merged_config =
@@ -978,6 +978,15 @@ pub async fn trigger_update(
         }
     };
 
+    // Determine shell type - use pre_update shell if available, otherwise post_update shell
+    let shell = if !resolved_hooks.pre_update_commands.is_empty() {
+        Some(resolved_hooks.pre_update_shell.as_str().to_string())
+    } else if !resolved_hooks.post_update_commands.is_empty() {
+        Some(resolved_hooks.post_update_shell.as_str().to_string())
+    } else {
+        None
+    };
+
     // 11. Build ExecuteUpdatePayload
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
         update_history_id: update_history_id.to_string(),
@@ -987,8 +996,8 @@ pub async fn trigger_update(
         to_version: req.to_version,
         provider_type,
         provider_config: merged_config,
-        pre_update_commands,
-        post_update_commands,
+        pre_update_commands: resolved_hooks.pre_update_commands,
+        post_update_commands: resolved_hooks.post_update_commands,
         release_info: req
             .release_info
             .map(|ri| uptrakit_internal_wire::ReleaseInfo {
@@ -1005,6 +1014,7 @@ pub async fn trigger_update(
                     .collect(),
             }),
         timeout_seconds: 300, // Default timeout
+        shell,
     };
 
     // 12. Check if agent is connected and send

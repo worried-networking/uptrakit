@@ -306,6 +306,10 @@ pub struct ExecuteUpdatePayload {
     pub release_info: Option<ReleaseInfo>,
     #[serde(default = "default_update_timeout")]
     pub timeout_seconds: u32,
+    /// Shell to use for hook execution ("bash", "sh", or future "powershell").
+    /// Default: "bash" when not specified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
 }
 
 /// Agent -> Controller: Update is starting.
@@ -732,10 +736,12 @@ mod tests {
                 }],
             }),
             timeout_seconds: 600,
+            shell: Some("bash".to_string()),
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"execute_update"#));
         assert!(json.contains(r#""provider_type":"github_releases"#));
+        assert!(json.contains(r#""shell":"bash"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -754,12 +760,14 @@ mod tests {
             post_update_commands: vec![],
             release_info: None,
             timeout_seconds: 300,
+            shell: None,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         // Empty vectors should be omitted
         assert!(!json.contains("pre_update_commands"));
         assert!(!json.contains("post_update_commands"));
         assert!(!json.contains("release_info"));
+        assert!(!json.contains("shell"));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -781,6 +789,28 @@ mod tests {
             assert_eq!(payload.timeout_seconds, 300);
             assert!(payload.pre_update_commands.is_empty());
             assert!(payload.post_update_commands.is_empty());
+            assert!(payload.shell.is_none());
+        } else {
+            panic!("Expected ExecuteUpdate");
+        }
+    }
+
+    #[test]
+    fn execute_update_with_shell_field() {
+        let json = r#"{
+            "type": "execute_update",
+            "update_history_id": "id-1",
+            "software_item_id": "id-2",
+            "software_item_name": "Test",
+            "package_identifier": "test",
+            "to_version": "1.0.0",
+            "provider_type": "github_releases",
+            "provider_config": {},
+            "shell": "sh"
+        }"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        if let ControllerMessage::ExecuteUpdate(payload) = msg {
+            assert_eq!(payload.shell, Some("sh".to_string()));
         } else {
             panic!("Expected ExecuteUpdate");
         }

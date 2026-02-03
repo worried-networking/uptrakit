@@ -851,6 +851,159 @@ Responses include denormalized `host_name` and `software_item_name` fields.
 | `crates/shared/web-api-types/src/update_history.rs` | API types (response, query, status enum) |
 | `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |
 
+## Update hooks
+
+Update hooks allow running commands before and after software updates. They support two configuration formats: structured hooks (with predefined templates) and legacy format (plain command arrays).
+
+### Configuration format
+
+Hooks are configured in the provider config or software item's `config_override` under a `hooks` key:
+
+```json
+{
+  "hooks": {
+    "pre_update": { ... },
+    "post_update": { ... }
+  }
+}
+```
+
+Each hook phase (`pre_update`, `post_update`) can use:
+
+1. **Predefined templates** — structured actions that map directly to commands
+2. **Custom commands** — arbitrary shell commands
+
+### Predefined hook templates
+
+#### Systemd service
+
+Manages systemd services with explicit actions:
+
+```json
+{
+  "hooks": {
+    "pre_update": {
+      "predefined": {
+        "systemd_service": {
+          "service_name": "myapp",
+          "action": "stop"
+        }
+      }
+    },
+    "post_update": {
+      "predefined": {
+        "systemd_service": {
+          "service_name": "myapp",
+          "action": "start"
+        }
+      }
+    }
+  }
+}
+```
+
+**Available actions:** `start`, `stop`, `restart`, `reload`
+
+Maps to: `systemctl {action} {service_name}`
+
+#### Docker Compose
+
+Manages docker-compose deployments with explicit actions:
+
+```json
+{
+  "hooks": {
+    "pre_update": {
+      "predefined": {
+        "docker_compose": {
+          "action": "down",
+          "project_dir": "/opt/myapp"
+        }
+      }
+    },
+    "post_update": {
+      "predefined": {
+        "docker_compose": {
+          "action": "up",
+          "project_dir": "/opt/myapp"
+        }
+      }
+    }
+  }
+}
+```
+
+**Available actions:** `up`, `down`, `restart`, `pull`
+
+**Optional fields:**
+- `project_dir` — directory to run the command in
+- `compose_file` — path to compose file (uses `-f` flag)
+
+Maps to: `cd {project_dir} && docker-compose [-f {compose_file}] {action} [-d]` (the `-d` flag is added automatically for `up`)
+
+### Custom commands
+
+For commands not covered by predefined templates:
+
+```json
+{
+  "hooks": {
+    "pre_update": {
+      "commands": ["echo 'Starting backup'", "backup.sh"],
+      "shell": "bash"
+    },
+    "post_update": {
+      "commands": ["systemctl restart myapp"],
+      "shell": "bash"
+    }
+  }
+}
+```
+
+### Shell types
+
+The `shell` field controls which shell interpreter and fail-early settings are used:
+
+| Shell | Fail-early settings | Description |
+|-------|---------------------|-------------|
+| `bash` (default) | `set -euo pipefail` | Exit on error, undefined vars, pipe failures |
+| `sh` | `set -eu` | POSIX-compatible exit on error, undefined vars |
+| `powershell` | `$ErrorActionPreference = 'Stop'` | Future Windows support |
+
+Commands are wrapped with fail-early settings before execution to ensure hooks fail fast on errors.
+
+### Merge strategy
+
+When both provider config and software item `config_override` define hooks:
+
+1. If override has a `hooks` key, it completely replaces the base config's hooks
+2. If override doesn't have `hooks`, fall back to base config's hooks
+3. Legacy format (`pre_update_commands`, `post_update_commands`) is supported for backward compatibility
+
+### Phase markers in output
+
+Hook output includes clear phase markers for debugging:
+
+```
+[pre-hook] Starting pre-update hooks...
+[pre-hook] Running: systemctl stop myapp
+[pre-hook] (exit code 0)
+[update] Executing update to version 2.0.0...
+[post-hook] Starting post-update hooks...
+[post-hook] Running: systemctl start myapp
+[post-hook] (exit code 0)
+[update] Update completed successfully
+```
+
+### Key files
+
+| File | Purpose |
+|------|---------|
+| `crates/shared/web-api-types/src/update_hooks.rs` | Hook configuration types (`HookShell`, `PredefinedHook`, `HooksConfig`) |
+| `crates/ui/web-api/src/update_hooks.rs` | Hook resolution and merge logic |
+| `crates/core/agent/src/update.rs` | Hook execution with shell wrapper |
+| `crates/shared/wire/asyncapi.yaml` | Wire protocol documentation (includes `shell` field) |
+
 ## Testing expectations
 
 Every behaviour change must include tests. Types of tests used:

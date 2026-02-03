@@ -8,6 +8,13 @@
 //! 5. Run post-update commands sequentially, streaming output
 //! 6. Detect to_version post-update
 //! 7. Send UpdateResult with final status and accumulated output
+//!
+//! ## Shell Execution
+//!
+//! Commands are executed with fail-early shell settings:
+//! - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
+//! - **Sh**: `set -eu` (exit on error, undefined vars)
+//! - **PowerShell** (future): `$ErrorActionPreference = 'Stop'`
 
 use std::process::Stdio;
 
@@ -19,6 +26,9 @@ use uptrakit_internal_wire::{
 };
 
 use crate::error::Error;
+
+/// Default shell to use when not specified.
+const DEFAULT_SHELL: &str = "bash";
 
 /// Result of an update execution.
 pub struct UpdateExecutionResult {
@@ -41,6 +51,7 @@ pub async fn execute_update(
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateExecutionResult {
     let update_history_id = payload.update_history_id.clone();
+    let shell = payload.shell.as_deref().unwrap_or(DEFAULT_SHELL);
 
     // Detect current version (from_version)
     let from_version = detect_current_version(&payload).await;
@@ -56,18 +67,33 @@ pub async fn execute_update(
         if !payload.pre_update_commands.is_empty() {
             send_output(
                 &output_tx,
-                "[system] Running pre-update hooks...",
+                "[pre-hook] Starting pre-update hooks...",
                 OutputStreamType::System,
             )
             .await;
 
             for cmd in &payload.pre_update_commands {
-                match run_command(cmd, OutputStreamType::PreHook, &output_tx).await {
-                    Ok(output) => {
+                send_output(
+                    &output_tx,
+                    &format!("[pre-hook] Running: {cmd}"),
+                    OutputStreamType::PreHook,
+                )
+                .await;
+
+                match run_command_with_shell(cmd, shell, OutputStreamType::PreHook, &output_tx)
+                    .await
+                {
+                    Ok((output, exit_code)) => {
                         accumulated_output.push_str(&output);
+                        send_output(
+                            &output_tx,
+                            &format!("[pre-hook] (exit code {exit_code})"),
+                            OutputStreamType::PreHook,
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        let error_msg = format!("Pre-update hook failed: {e}");
+                        let error_msg = format!("[pre-hook] Failed: {e}");
                         send_output(&output_tx, &error_msg, OutputStreamType::System).await;
                         return Err(Error::PreUpdateHookFailed(e));
                     }
@@ -79,7 +105,7 @@ pub async fn execute_update(
         send_output(
             &output_tx,
             &format!(
-                "[system] Executing update to version {}...",
+                "[update] Executing update to version {}...",
                 payload.to_version
             ),
             OutputStreamType::System,
@@ -99,18 +125,33 @@ pub async fn execute_update(
         if !payload.post_update_commands.is_empty() {
             send_output(
                 &output_tx,
-                "[system] Running post-update hooks...",
+                "[post-hook] Starting post-update hooks...",
                 OutputStreamType::System,
             )
             .await;
 
             for cmd in &payload.post_update_commands {
-                match run_command(cmd, OutputStreamType::PostHook, &output_tx).await {
-                    Ok(output) => {
+                send_output(
+                    &output_tx,
+                    &format!("[post-hook] Running: {cmd}"),
+                    OutputStreamType::PostHook,
+                )
+                .await;
+
+                match run_command_with_shell(cmd, shell, OutputStreamType::PostHook, &output_tx)
+                    .await
+                {
+                    Ok((output, exit_code)) => {
                         accumulated_output.push_str(&output);
+                        send_output(
+                            &output_tx,
+                            &format!("[post-hook] (exit code {exit_code})"),
+                            OutputStreamType::PostHook,
+                        )
+                        .await;
                     }
                     Err(e) => {
-                        let error_msg = format!("Post-update hook failed: {e}");
+                        let error_msg = format!("[post-hook] Failed: {e}");
                         send_output(&output_tx, &error_msg, OutputStreamType::System).await;
                         return Err(Error::PostUpdateHookFailed(e));
                     }
@@ -127,7 +168,7 @@ pub async fn execute_update(
         Ok(Ok(())) => {
             send_output(
                 &output_tx,
-                "[system] Update completed successfully",
+                "[update] Update completed successfully",
                 OutputStreamType::System,
             )
             .await;
@@ -148,7 +189,7 @@ pub async fn execute_update(
             send_output(
                 &output_tx,
                 &format!(
-                    "[system] Update timed out after {} seconds",
+                    "[update] Update timed out after {} seconds",
                     payload.timeout_seconds
                 ),
                 OutputStreamType::System,
@@ -361,15 +402,45 @@ async fn execute_docker_registry_update(
     Ok(output)
 }
 
-/// Run a shell command and stream output.
-async fn run_command(
+/// Wrap a command with fail-early shell settings.
+///
+/// - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
+/// - **Sh**: `set -eu` (exit on error, undefined vars)
+/// - **PowerShell** (future): `$ErrorActionPreference = 'Stop'`
+fn wrap_command_for_shell(cmd: &str, shell: &str) -> String {
+    match shell {
+        "bash" => format!("set -euo pipefail\n{cmd}"),
+        "sh" => format!("set -eu\n{cmd}"),
+        "powershell" => format!("$ErrorActionPreference = 'Stop'\n{cmd}"),
+        _ => cmd.to_string(),
+    }
+}
+
+/// Get the shell executable and arguments for a given shell type.
+fn get_shell_args(shell: &str) -> (&str, &str) {
+    match shell {
+        "bash" => ("bash", "-c"),
+        "sh" => ("sh", "-c"),
+        "powershell" => ("powershell", "-Command"),
+        _ => ("sh", "-c"),
+    }
+}
+
+/// Run a command with the specified shell and fail-early settings.
+///
+/// Returns the accumulated output and exit code on success.
+async fn run_command_with_shell(
     cmd: &str,
+    shell: &str,
     stream_type: OutputStreamType,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<String, String> {
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
+) -> Result<(String, i32), String> {
+    let wrapped_cmd = wrap_command_for_shell(cmd, shell);
+    let (shell_exec, shell_arg) = get_shell_args(shell);
+
+    let mut child = Command::new(shell_exec)
+        .arg(shell_arg)
+        .arg(&wrapped_cmd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -434,12 +505,23 @@ async fn run_command(
         .await
         .map_err(|e| format!("Failed to wait for command: {e}"))?;
 
+    let exit_code = status.code().unwrap_or(-1);
+
     if !status.success() {
-        let exit_code = status.code().unwrap_or(-1);
         return Err(format!("Command exited with code {exit_code}"));
     }
 
-    Ok(accumulated)
+    Ok((accumulated, exit_code))
+}
+
+/// Run a shell command and stream output (legacy function for provider updates).
+async fn run_command(
+    cmd: &str,
+    stream_type: OutputStreamType,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+) -> Result<String, String> {
+    let (output, _) = run_command_with_shell(cmd, DEFAULT_SHELL, stream_type, output_tx).await?;
+    Ok(output)
 }
 
 /// Send an output message.
@@ -475,7 +557,58 @@ mod tests {
             post_update_commands: vec![],
             release_info: None,
             timeout_seconds: 60,
+            shell: None,
         }
+    }
+
+    // ── Shell wrapper tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn wrap_command_for_bash() {
+        let wrapped = wrap_command_for_shell("echo hello", "bash");
+        assert!(wrapped.starts_with("set -euo pipefail\n"));
+        assert!(wrapped.ends_with("echo hello"));
+    }
+
+    #[test]
+    fn wrap_command_for_sh() {
+        let wrapped = wrap_command_for_shell("echo hello", "sh");
+        assert!(wrapped.starts_with("set -eu\n"));
+        assert!(wrapped.ends_with("echo hello"));
+    }
+
+    #[test]
+    fn wrap_command_for_powershell() {
+        let wrapped = wrap_command_for_shell("echo hello", "powershell");
+        assert!(wrapped.starts_with("$ErrorActionPreference = 'Stop'\n"));
+        assert!(wrapped.ends_with("echo hello"));
+    }
+
+    #[test]
+    fn wrap_command_for_unknown_shell() {
+        let wrapped = wrap_command_for_shell("echo hello", "zsh");
+        assert_eq!(wrapped, "echo hello");
+    }
+
+    #[test]
+    fn get_shell_args_bash() {
+        let (exec, arg) = get_shell_args("bash");
+        assert_eq!(exec, "bash");
+        assert_eq!(arg, "-c");
+    }
+
+    #[test]
+    fn get_shell_args_sh() {
+        let (exec, arg) = get_shell_args("sh");
+        assert_eq!(exec, "sh");
+        assert_eq!(arg, "-c");
+    }
+
+    #[test]
+    fn get_shell_args_unknown() {
+        let (exec, arg) = get_shell_args("unknown");
+        assert_eq!(exec, "sh");
+        assert_eq!(arg, "-c");
     }
 
     #[tokio::test]
@@ -549,6 +682,62 @@ mod tests {
             error_msg.contains("Pre-update hook failed"),
             "Expected error to contain 'Pre-update hook failed', got: {error_msg}"
         );
+
+        // Drain the channel
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn test_execute_update_with_sh_shell() {
+        let (tx, mut rx) = mpsc::channel(100);
+
+        let mut payload = test_payload();
+        payload.shell = Some("sh".to_string());
+        payload.pre_update_commands = vec!["echo 'using sh shell'".to_string()];
+
+        let result = execute_update(payload, tx).await;
+
+        // Should complete (though the actual update may fail)
+        assert_eq!(result.result.update_history_id, "test-id");
+
+        // Drain the channel and check for sh output
+        rx.close();
+        let mut found_output = false;
+        while let Some(msg) = rx.recv().await {
+            if msg.output.contains("using sh shell") {
+                found_output = true;
+            }
+        }
+        assert!(found_output);
+    }
+
+    #[tokio::test]
+    async fn test_run_command_with_shell_success() {
+        let (tx, mut rx) = mpsc::channel(100);
+
+        let result =
+            run_command_with_shell("echo 'test'", "bash", OutputStreamType::Stdout, &tx).await;
+
+        assert!(result.is_ok());
+        let (output, exit_code) = result.unwrap();
+        assert!(output.contains("test"));
+        assert_eq!(exit_code, 0);
+
+        // Drain the channel
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn test_run_command_with_shell_failure() {
+        let (tx, mut rx) = mpsc::channel(100);
+
+        let result = run_command_with_shell("exit 42", "bash", OutputStreamType::Stdout, &tx).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("exited with code 42"));
 
         // Drain the channel
         rx.close();

@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Agent-Controller Protocol
-  version: 0.0.6
+  version: 0.0.7
   description: |
     WebSocket protocol for communication between Uptrakit agents and the controller.
 
@@ -1076,6 +1076,19 @@ components:
           description: Optional list of release assets
           default: []
 
+    hookShell:
+      type: string
+      enum:
+        - bash
+        - sh
+        - powershell
+      default: bash
+      description: |
+        Shell type for hook execution. Determines fail-early settings:
+        - **bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
+        - **sh**: `set -eu` (exit on error, undefined vars)
+        - **powershell**: `$ErrorActionPreference = 'Stop'` (future Windows support)
+
     executeUpdatePayload:
       type: object
       required:
@@ -1126,7 +1139,10 @@ components:
           type: array
           items:
             type: string
-          description: Commands to run before the update
+          description: |
+            Commands to run before the update. Resolved from structured hooks
+            configuration or legacy format. Each command is wrapped with
+            fail-early shell settings before execution.
           default: []
           examples:
             - ["systemctl stop app"]
@@ -1134,7 +1150,10 @@ components:
           type: array
           items:
             type: string
-          description: Commands to run after the update
+          description: |
+            Commands to run after the update. Resolved from structured hooks
+            configuration or legacy format. Each command is wrapped with
+            fail-early shell settings before execution.
           default: []
           examples:
             - ["systemctl start app"]
@@ -1148,6 +1167,12 @@ components:
           default: 300
           examples:
             - 300
+        shell:
+          $ref: "#/components/schemas/hookShell"
+          description: |
+            Shell to use for hook command execution. When not specified,
+            defaults to "bash". The agent wraps each hook command with
+            fail-early settings appropriate for the shell type.
 
     updateStartedPayload:
       type: object

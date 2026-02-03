@@ -20,6 +20,7 @@ pub mod settings_network;
 pub mod software_items;
 pub mod system_alerts;
 pub mod update_history;
+pub mod update_hooks;
 
 #[cfg(test)]
 mod tests {

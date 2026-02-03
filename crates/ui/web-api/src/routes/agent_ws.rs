@@ -1141,11 +1141,20 @@ async fn deliver_pending_updates(
             }
         };
 
-        // Merge hooks and config
-        let (pre_update_commands, post_update_commands) =
-            crate::update_hooks::merge_hooks(&provider_cfg.config, item.config_override.as_ref());
+        // Resolve hooks and merge config
+        let resolved_hooks =
+            crate::update_hooks::resolve_hooks(&provider_cfg.config, item.config_override.as_ref());
         let merged_config =
             crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
+
+        // Determine shell type
+        let shell = if !resolved_hooks.pre_update_commands.is_empty() {
+            Some(resolved_hooks.pre_update_shell.as_str().to_string())
+        } else if !resolved_hooks.post_update_commands.is_empty() {
+            Some(resolved_hooks.post_update_shell.as_str().to_string())
+        } else {
+            None
+        };
 
         // Build payload
         let execute_payload = ExecuteUpdatePayload {
@@ -1156,10 +1165,11 @@ async fn deliver_pending_updates(
             to_version: update_record.to_version.clone(),
             provider_type,
             provider_config: merged_config,
-            pre_update_commands,
-            post_update_commands,
+            pre_update_commands: resolved_hooks.pre_update_commands,
+            post_update_commands: resolved_hooks.post_update_commands,
             release_info: None, // Not stored in update_history
             timeout_seconds: 300,
+            shell,
         };
 
         // Send to agent

@@ -1,8 +1,175 @@
-//! Hook merging logic for software updates.
+//! Hook merging and resolution logic for software updates.
+//!
+//! Supports two configuration formats:
+//!
+//! ## Legacy format (backward compatible)
+//! - `pre_update_commands: Vec<String>`
+//! - `post_update_commands: Vec<String>`
+//!
+//! ## Structured format (new)
+//! - `hooks: HooksConfig` with predefined templates or custom commands
 //!
 //! Merges pre/post-update commands from provider config (base) with
 //! software item config_override (override). The override completely
 //! replaces the base when present.
+
+use uptrakit_web_api_types::update_hooks::{
+    DockerComposeAction, DockerComposeHook, HookShell, HooksConfig, PredefinedHook,
+    SystemdServiceHook, UpdateHookConfig,
+};
+
+/// Resolved hooks ready for execution.
+#[derive(Debug, Clone, Default)]
+pub struct ResolvedHooks {
+    /// Pre-update commands to execute.
+    pub pre_update_commands: Vec<String>,
+    /// Post-update commands to execute.
+    pub post_update_commands: Vec<String>,
+    /// Shell to use for pre-update hooks.
+    pub pre_update_shell: HookShell,
+    /// Shell to use for post-update hooks.
+    pub post_update_shell: HookShell,
+}
+
+/// Resolve hooks from provider config and config_override.
+///
+/// Supports both legacy format (`pre_update_commands`, `post_update_commands`)
+/// and new structured format (`hooks: HooksConfig`).
+///
+/// # Arguments
+///
+/// * `provider_config` - Base provider configuration JSON
+/// * `config_override` - Optional override configuration JSON from software item
+///
+/// # Returns
+///
+/// Resolved hooks with commands and shell type.
+pub fn resolve_hooks(
+    provider_config: &serde_json::Value,
+    config_override: Option<&serde_json::Value>,
+) -> ResolvedHooks {
+    // First, try to parse structured hooks from override, then from base
+    let merged_hooks = merge_hooks_config(provider_config, config_override);
+
+    if let Some(hooks_config) = merged_hooks {
+        return resolve_hooks_config(&hooks_config);
+    }
+
+    // Fall back to legacy format
+    let (pre, post) = merge_hooks(provider_config, config_override);
+    ResolvedHooks {
+        pre_update_commands: pre,
+        post_update_commands: post,
+        pre_update_shell: HookShell::default(),
+        post_update_shell: HookShell::default(),
+    }
+}
+
+/// Parse HooksConfig from a JSON value's "hooks" key.
+fn parse_hooks_config(value: &serde_json::Value) -> Option<HooksConfig> {
+    value
+        .get("hooks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
+/// Merge structured hooks config from provider config and override.
+///
+/// Strategy: Override's hooks completely replace base's hooks when present.
+fn merge_hooks_config(
+    provider_config: &serde_json::Value,
+    config_override: Option<&serde_json::Value>,
+) -> Option<HooksConfig> {
+    // Check if override has hooks
+    if let Some(override_val) = config_override
+        && override_val.get("hooks").is_some()
+    {
+        return parse_hooks_config(override_val);
+    }
+
+    // Fall back to base config hooks
+    parse_hooks_config(provider_config)
+}
+
+/// Resolve a HooksConfig into commands and shell types.
+fn resolve_hooks_config(config: &HooksConfig) -> ResolvedHooks {
+    let (pre_commands, pre_shell) = resolve_update_hook_config(config.pre_update.as_ref());
+    let (post_commands, post_shell) = resolve_update_hook_config(config.post_update.as_ref());
+
+    ResolvedHooks {
+        pre_update_commands: pre_commands,
+        post_update_commands: post_commands,
+        pre_update_shell: pre_shell,
+        post_update_shell: post_shell,
+    }
+}
+
+/// Resolve a single UpdateHookConfig into commands and shell type.
+fn resolve_update_hook_config(config: Option<&UpdateHookConfig>) -> (Vec<String>, HookShell) {
+    let Some(config) = config else {
+        return (Vec::new(), HookShell::default());
+    };
+
+    let shell = config.shell.unwrap_or_default();
+
+    // Predefined takes precedence over commands
+    if let Some(predefined) = &config.predefined {
+        let cmd = resolve_predefined_hook(predefined);
+        return (vec![cmd], shell);
+    }
+
+    // Fall back to custom commands
+    let commands = config.commands.clone().unwrap_or_default();
+    (commands, shell)
+}
+
+/// Resolve a predefined hook to its command string.
+///
+/// Direct mapping - no hidden magic:
+/// - `SystemdService { service_name: "x", action: Stop }` → `"systemctl stop x"`
+/// - `DockerCompose { action: Down, project_dir: Some("/opt/x"), .. }` → `"cd /opt/x && docker-compose down"`
+pub fn resolve_predefined_hook(hook: &PredefinedHook) -> String {
+    match hook {
+        PredefinedHook::SystemdService(systemd) => resolve_systemd_hook(systemd),
+        PredefinedHook::DockerCompose(compose) => resolve_docker_compose_hook(compose),
+    }
+}
+
+/// Resolve a systemd service hook to a command.
+fn resolve_systemd_hook(hook: &SystemdServiceHook) -> String {
+    format!("systemctl {} {}", hook.action.as_str(), hook.service_name)
+}
+
+/// Resolve a docker-compose hook to a command.
+fn resolve_docker_compose_hook(hook: &DockerComposeHook) -> String {
+    let mut parts = Vec::new();
+
+    // Add cd to project directory if specified
+    if let Some(project_dir) = &hook.project_dir {
+        parts.push(format!("cd {project_dir}"));
+    }
+
+    // Build the docker-compose command
+    let mut compose_cmd = String::from("docker-compose");
+
+    // Add compose file flag if specified
+    if let Some(compose_file) = &hook.compose_file {
+        compose_cmd.push_str(&format!(" -f {compose_file}"));
+    }
+
+    // Add the action
+    compose_cmd.push(' ');
+    compose_cmd.push_str(hook.action.as_str());
+
+    // Add -d flag for "up" action
+    if hook.action == DockerComposeAction::Up {
+        compose_cmd.push_str(" -d");
+    }
+
+    parts.push(compose_cmd);
+
+    // Join with && for sequential execution
+    parts.join(" && ")
+}
 
 /// Extract string array from JSON value at the given key.
 fn extract_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
@@ -82,6 +249,279 @@ pub fn merge_config(
 mod tests {
     use super::*;
     use serde_json::json;
+    use uptrakit_web_api_types::update_hooks::{
+        DockerComposeAction, DockerComposeHook, HookShell, PredefinedHook, SystemdAction,
+        SystemdServiceHook,
+    };
+
+    // ── Predefined hook resolution tests ─────────────────────────────────────
+
+    #[test]
+    fn resolve_systemd_hook_stop() {
+        let hook = PredefinedHook::SystemdService(SystemdServiceHook {
+            service_name: "myapp".to_string(),
+            action: SystemdAction::Stop,
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "systemctl stop myapp");
+    }
+
+    #[test]
+    fn resolve_systemd_hook_start() {
+        let hook = PredefinedHook::SystemdService(SystemdServiceHook {
+            service_name: "nginx".to_string(),
+            action: SystemdAction::Start,
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "systemctl start nginx");
+    }
+
+    #[test]
+    fn resolve_systemd_hook_restart() {
+        let hook = PredefinedHook::SystemdService(SystemdServiceHook {
+            service_name: "postgresql".to_string(),
+            action: SystemdAction::Restart,
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "systemctl restart postgresql");
+    }
+
+    #[test]
+    fn resolve_systemd_hook_reload() {
+        let hook = PredefinedHook::SystemdService(SystemdServiceHook {
+            service_name: "apache2".to_string(),
+            action: SystemdAction::Reload,
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "systemctl reload apache2");
+    }
+
+    #[test]
+    fn resolve_docker_compose_down_with_project_dir() {
+        let hook = PredefinedHook::DockerCompose(DockerComposeHook {
+            action: DockerComposeAction::Down,
+            compose_file: None,
+            project_dir: Some("/opt/myapp".to_string()),
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "cd /opt/myapp && docker-compose down");
+    }
+
+    #[test]
+    fn resolve_docker_compose_up_with_project_dir() {
+        let hook = PredefinedHook::DockerCompose(DockerComposeHook {
+            action: DockerComposeAction::Up,
+            compose_file: None,
+            project_dir: Some("/opt/myapp".to_string()),
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "cd /opt/myapp && docker-compose up -d");
+    }
+
+    #[test]
+    fn resolve_docker_compose_with_compose_file() {
+        let hook = PredefinedHook::DockerCompose(DockerComposeHook {
+            action: DockerComposeAction::Pull,
+            compose_file: Some("docker-compose.prod.yml".to_string()),
+            project_dir: Some("/app".to_string()),
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(
+            cmd,
+            "cd /app && docker-compose -f docker-compose.prod.yml pull"
+        );
+    }
+
+    #[test]
+    fn resolve_docker_compose_restart_no_project_dir() {
+        let hook = PredefinedHook::DockerCompose(DockerComposeHook {
+            action: DockerComposeAction::Restart,
+            compose_file: None,
+            project_dir: None,
+        });
+        let cmd = resolve_predefined_hook(&hook);
+        assert_eq!(cmd, "docker-compose restart");
+    }
+
+    // ── Structured hooks resolution tests ────────────────────────────────────
+
+    #[test]
+    fn resolve_hooks_structured_systemd() {
+        let config = json!({
+            "hooks": {
+                "pre_update": {
+                    "predefined": {
+                        "systemd_service": {
+                            "service_name": "myapp",
+                            "action": "stop"
+                        }
+                    }
+                },
+                "post_update": {
+                    "predefined": {
+                        "systemd_service": {
+                            "service_name": "myapp",
+                            "action": "start"
+                        }
+                    }
+                }
+            }
+        });
+
+        let resolved = resolve_hooks(&config, None);
+
+        assert_eq!(resolved.pre_update_commands, vec!["systemctl stop myapp"]);
+        assert_eq!(resolved.post_update_commands, vec!["systemctl start myapp"]);
+        assert_eq!(resolved.pre_update_shell, HookShell::Bash);
+        assert_eq!(resolved.post_update_shell, HookShell::Bash);
+    }
+
+    #[test]
+    fn resolve_hooks_structured_docker_compose() {
+        let config = json!({
+            "hooks": {
+                "pre_update": {
+                    "predefined": {
+                        "docker_compose": {
+                            "action": "down",
+                            "project_dir": "/opt/myapp"
+                        }
+                    }
+                },
+                "post_update": {
+                    "predefined": {
+                        "docker_compose": {
+                            "action": "up",
+                            "project_dir": "/opt/myapp"
+                        }
+                    }
+                }
+            }
+        });
+
+        let resolved = resolve_hooks(&config, None);
+
+        assert_eq!(
+            resolved.pre_update_commands,
+            vec!["cd /opt/myapp && docker-compose down"]
+        );
+        assert_eq!(
+            resolved.post_update_commands,
+            vec!["cd /opt/myapp && docker-compose up -d"]
+        );
+    }
+
+    #[test]
+    fn resolve_hooks_structured_custom_commands() {
+        let config = json!({
+            "hooks": {
+                "pre_update": {
+                    "commands": ["echo 'Starting backup'", "backup.sh"],
+                    "shell": "sh"
+                },
+                "post_update": {
+                    "commands": ["systemctl restart myapp"],
+                    "shell": "bash"
+                }
+            }
+        });
+
+        let resolved = resolve_hooks(&config, None);
+
+        assert_eq!(
+            resolved.pre_update_commands,
+            vec!["echo 'Starting backup'", "backup.sh"]
+        );
+        assert_eq!(
+            resolved.post_update_commands,
+            vec!["systemctl restart myapp"]
+        );
+        assert_eq!(resolved.pre_update_shell, HookShell::Sh);
+        assert_eq!(resolved.post_update_shell, HookShell::Bash);
+    }
+
+    #[test]
+    fn resolve_hooks_override_replaces_base_structured() {
+        let base = json!({
+            "hooks": {
+                "pre_update": {
+                    "predefined": {
+                        "systemd_service": {
+                            "service_name": "base-service",
+                            "action": "stop"
+                        }
+                    }
+                }
+            }
+        });
+        let override_config = json!({
+            "hooks": {
+                "pre_update": {
+                    "predefined": {
+                        "systemd_service": {
+                            "service_name": "override-service",
+                            "action": "restart"
+                        }
+                    }
+                }
+            }
+        });
+
+        let resolved = resolve_hooks(&base, Some(&override_config));
+
+        assert_eq!(
+            resolved.pre_update_commands,
+            vec!["systemctl restart override-service"]
+        );
+    }
+
+    #[test]
+    fn resolve_hooks_fallback_to_legacy_format() {
+        let config = json!({
+            "pre_update_commands": ["legacy-pre"],
+            "post_update_commands": ["legacy-post"]
+        });
+
+        let resolved = resolve_hooks(&config, None);
+
+        assert_eq!(resolved.pre_update_commands, vec!["legacy-pre"]);
+        assert_eq!(resolved.post_update_commands, vec!["legacy-post"]);
+        assert_eq!(resolved.pre_update_shell, HookShell::Bash);
+        assert_eq!(resolved.post_update_shell, HookShell::Bash);
+    }
+
+    #[test]
+    fn resolve_hooks_empty_config() {
+        let config = json!({});
+
+        let resolved = resolve_hooks(&config, None);
+
+        assert!(resolved.pre_update_commands.is_empty());
+        assert!(resolved.post_update_commands.is_empty());
+    }
+
+    #[test]
+    fn resolve_hooks_predefined_takes_precedence_over_commands() {
+        let config = json!({
+            "hooks": {
+                "pre_update": {
+                    "predefined": {
+                        "systemd_service": {
+                            "service_name": "myapp",
+                            "action": "stop"
+                        }
+                    },
+                    "commands": ["should-be-ignored"]
+                }
+            }
+        });
+
+        let resolved = resolve_hooks(&config, None);
+
+        assert_eq!(resolved.pre_update_commands, vec!["systemctl stop myapp"]);
+    }
+
+    // ── Legacy merge_hooks tests ─────────────────────────────────────────────
 
     #[test]
     fn merge_hooks_base_only() {
