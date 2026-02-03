@@ -11,8 +11,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     AgentMessage, AgentSettingsPayload, ApprovedPayload, CertificatePayload, ControllerMessage,
-    EnrolledPayload, ErrorPayload, ExecuteUpdatePayload, PingPayload, PongPayload, RejectedPayload,
-    UpdateFinalStatus, UpdateProviderType, now_millis,
+    EnrolledPayload, ErrorPayload, ExecuteUpdatePayload, PingPayload, PongPayload, ProviderType,
+    RejectedPayload, UpdateFinalStatus, now_millis,
 };
 use uptrakit_shared_db::entity::{
     agent_host, host_software_item, provider_config, software_item, update_history,
@@ -1144,14 +1144,14 @@ async fn deliver_pending_updates(
         };
 
         // Convert provider type
-        let provider_type = match provider_cfg.provider_type.as_str() {
-            "github_releases" => UpdateProviderType::GithubReleases,
-            "proxmox_helper_scripts" => UpdateProviderType::ProxmoxHelperScripts,
-            "docker_registry" => UpdateProviderType::DockerRegistry,
-            other => {
+        let provider_type: ProviderType = match serde_json::from_value(serde_json::Value::String(
+            provider_cfg.provider_type.clone(),
+        )) {
+            Ok(pt) => pt,
+            Err(_) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    provider_type = other,
+                    provider_type = %provider_cfg.provider_type,
                     "unknown provider type, skipping pending update"
                 );
                 continue;

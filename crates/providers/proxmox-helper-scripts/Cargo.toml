@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 uptrakit-provider-core = { path = "../core" }
 rootcause = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

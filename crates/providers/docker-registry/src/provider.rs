@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use regex::Regex;
 use rootcause::report;
 
@@ -76,6 +77,7 @@ impl DockerRegistryProvider {
     }
 }
 
+#[async_trait]
 impl RemoteProvider for DockerRegistryProvider {
     async fn fetch_releases(&self) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         match self.config.tracking_mode {

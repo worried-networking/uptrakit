@@ -29,7 +29,8 @@ uptrakit/
 │   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
-│   │   └── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
+│   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
+│   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
@@ -1136,10 +1137,19 @@ Provider crates:
 
 | Crate | Path | Purpose |
 | --- | --- | --- |
-| `uptrakit-provider-core` | `crates/providers/core/` | Shared provider traits and abstractions |
+| `uptrakit-provider-core` | `crates/providers/core/` | Shared provider traits (`LocalProvider`, `RemoteProvider`) and abstractions |
+| `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: controller tracks container image tags via semver filtering or digest change detection |
 | `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: controller fetches release metadata; agent installs from artifacts |
 | `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE Helper-Scripts: agent auto-discovers and manages helper-script-installed apps |
+
+The **Provider Registry** crate centralizes all provider operations:
+- `ProviderRegistry::create_local_provider()` — creates `LocalProvider` instances from `ProviderType` and config
+- `ProviderRegistry::create_remote_provider()` — creates `RemoteProvider` instances from `ProviderType` and config
+- `ProviderRegistry::validate_config()` — validates provider configuration JSON
+- `ProviderRegistry::mask_secrets()` / `restore_secrets()` — handles secret masking for API responses
+
+The agent and web-api crates import only `uptrakit-provider-registry` — not individual provider crates. This eliminates scattered string-based provider matching and keeps all dispatch logic in one place.
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 

@@ -61,7 +61,8 @@ crates/
 │   ├── core/                      # uptrakit-provider-core (lib) — provider traits
 │   ├── docker-registry/           # uptrakit-provider-docker-registry (lib)
 │   ├── github/                    # uptrakit-provider-github (lib)
-│   └── proxmox-helper-scripts/    # uptrakit-provider-proxmox-helper-scripts (lib)
+│   ├── proxmox-helper-scripts/    # uptrakit-provider-proxmox-helper-scripts (lib)
+│   └── registry/                  # uptrakit-provider-registry (lib) — provider dispatch
 ├── shared/
 │   ├── core/                      # uptrakit-core (lib) — shared domain models
 │   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities & migrations
@@ -223,10 +224,18 @@ Providers define how software items are tracked and updated. Each provider split
 
 | Provider | Path | Description |
 | --- | --- | --- |
-| Provider Core | `crates/providers/core/` | Shared traits and abstractions |
+| Provider Core | `crates/providers/core/` | Shared traits and abstractions (`LocalProvider`, `RemoteProvider`) |
+| Provider Registry | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | GitHub Releases | `crates/providers/github/` | Tracks GitHub release metadata; agent installs from artifacts |
 | Docker Registry | `crates/providers/docker-registry/` | Tracks container image tags from OCI/Docker registries |
 | Proxmox Helper-Scripts | `crates/providers/proxmox-helper-scripts/` | Auto-discovers and manages PVE helper-script-installed apps |
+
+The **Provider Registry** crate (`uptrakit-provider-registry`) centralizes all provider-related operations:
+- Creating `LocalProvider` and `RemoteProvider` instances from `ProviderType` and config JSON
+- Validating provider configuration before storage
+- Masking and restoring secrets in config JSON for API responses
+
+The agent and web-api crates import only the registry — not individual provider crates — eliminating scattered string-based provider matching.
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 

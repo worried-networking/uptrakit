@@ -22,7 +22,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    ExecuteUpdatePayload, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
+    ExecuteUpdatePayload, OutputStreamType, ProviderType, UpdateFinalStatus, UpdateResultPayload,
 };
 
 use crate::error::Error;
@@ -228,18 +228,12 @@ async fn execute_provider_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
 ) -> Result<String, String> {
-    use uptrakit_internal_wire::UpdateProviderType;
-
     match payload.provider_type {
-        UpdateProviderType::GithubReleases => {
-            execute_github_releases_update(payload, output_tx).await
-        }
-        UpdateProviderType::ProxmoxHelperScripts => {
+        ProviderType::GithubReleases => execute_github_releases_update(payload, output_tx).await,
+        ProviderType::ProxmoxHelperScripts => {
             execute_proxmox_helper_scripts_update(payload, output_tx).await
         }
-        UpdateProviderType::DockerRegistry => {
-            execute_docker_registry_update(payload, output_tx).await
-        }
+        ProviderType::DockerRegistry => execute_docker_registry_update(payload, output_tx).await,
     }
 }
 
@@ -542,7 +536,6 @@ async fn send_output(
 mod tests {
     use super::*;
     use serde_json::json;
-    use uptrakit_internal_wire::UpdateProviderType;
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
@@ -551,7 +544,7 @@ mod tests {
             software_item_name: "Test App".to_string(),
             package_identifier: "test-app".to_string(),
             to_version: "2.0.0".to_string(),
-            provider_type: UpdateProviderType::GithubReleases,
+            provider_type: ProviderType::GithubReleases,
             provider_config: json!({}),
             pre_update_commands: vec![],
             post_update_commands: vec![],

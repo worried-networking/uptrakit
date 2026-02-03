@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use regex::Regex;
 use rootcause::report;
 use time::OffsetDateTime;
@@ -171,6 +172,7 @@ impl GitHubProvider {
     }
 }
 
+#[async_trait]
 impl RemoteProvider for GitHubProvider {
     async fn fetch_releases(&self) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         let url = self.releases_url();

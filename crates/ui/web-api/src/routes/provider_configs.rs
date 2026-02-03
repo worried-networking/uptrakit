@@ -12,12 +12,9 @@ use axum::{
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_provider_core::ProviderType;
+use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::provider_config;
-
-/// Sentinel value used to indicate a masked secret in API responses.
-const SECRET_MASK: &str = "***";
 
 pub use uptrakit_web_api_types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
@@ -28,7 +25,7 @@ fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigRes
         id: m.id.to_string(),
         name: m.name,
         provider_type: m.provider_type.clone(),
-        config: mask_secrets(&m.provider_type, &m.config),
+        config: ProviderRegistry::mask_secrets_str(&m.provider_type, &m.config),
         enabled: m.enabled,
         created_at: m
             .created_at
@@ -39,129 +36,6 @@ fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigRes
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
     }
-}
-
-/// Mask secret fields in provider config JSON before returning to the client.
-fn mask_secrets(provider_type: &str, config: &serde_json::Value) -> serde_json::Value {
-    let mut masked = config.clone();
-    match provider_type {
-        "github_releases" => {
-            if let Some(obj) = masked.as_object_mut()
-                && let Some(token) = obj.get("auth_token")
-                && !token.is_null()
-            {
-                obj.insert(
-                    "auth_token".to_string(),
-                    serde_json::Value::String(SECRET_MASK.to_string()),
-                );
-            }
-        }
-        "docker_registry" => {
-            if let Some(obj) = masked.as_object_mut()
-                && let Some(auth) = obj.get_mut("auth")
-                && let Some(auth_obj) = auth.as_object_mut()
-            {
-                if let Some(password) = auth_obj.get("password")
-                    && !password.is_null()
-                {
-                    auth_obj.insert(
-                        "password".to_string(),
-                        serde_json::Value::String(SECRET_MASK.to_string()),
-                    );
-                }
-                if let Some(token) = auth_obj.get("token")
-                    && !token.is_null()
-                {
-                    auth_obj.insert(
-                        "token".to_string(),
-                        serde_json::Value::String(SECRET_MASK.to_string()),
-                    );
-                }
-            }
-        }
-        _ => {}
-    }
-    masked
-}
-
-/// Restore preserved secrets from the existing DB value when the client sends the mask sentinel.
-fn restore_secrets(
-    provider_type: &str,
-    incoming: &mut serde_json::Value,
-    existing: &serde_json::Value,
-) {
-    match provider_type {
-        "github_releases" => {
-            if let (Some(incoming_obj), Some(existing_obj)) =
-                (incoming.as_object_mut(), existing.as_object())
-                && let Some(token) = incoming_obj.get("auth_token")
-                && token.as_str() == Some(SECRET_MASK)
-                && let Some(existing_token) = existing_obj.get("auth_token")
-            {
-                incoming_obj.insert("auth_token".to_string(), existing_token.clone());
-            }
-        }
-        "docker_registry" => {
-            if let (Some(incoming_obj), Some(existing_obj)) =
-                (incoming.as_object_mut(), existing.as_object())
-                && let Some(incoming_auth) = incoming_obj.get_mut("auth")
-                && let Some(incoming_auth_obj) = incoming_auth.as_object_mut()
-                && let Some(existing_auth) = existing_obj.get("auth")
-                && let Some(existing_auth_obj) = existing_auth.as_object()
-            {
-                if let Some(password) = incoming_auth_obj.get("password")
-                    && password.as_str() == Some(SECRET_MASK)
-                    && let Some(existing_password) = existing_auth_obj.get("password")
-                {
-                    incoming_auth_obj.insert("password".to_string(), existing_password.clone());
-                }
-                if let Some(token) = incoming_auth_obj.get("token")
-                    && token.as_str() == Some(SECRET_MASK)
-                    && let Some(existing_token) = existing_auth_obj.get("token")
-                {
-                    incoming_auth_obj.insert("token".to_string(), existing_token.clone());
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Validate the provider-specific config blob by deserializing and calling `.validate()`.
-pub fn validate_provider_config(
-    provider_type: &str,
-    config: &serde_json::Value,
-) -> std::result::Result<(), String> {
-    match provider_type {
-        "github_releases" => {
-            let gh_config: uptrakit_provider_github::GitHubConfig =
-                serde_json::from_value(config.clone())
-                    .map_err(|e| format!("invalid GitHub config: {e}"))?;
-            gh_config
-                .validate()
-                .map_err(|e| format!("GitHub config validation failed: {e}"))?;
-            Ok(())
-        }
-        "proxmox_helper_scripts" => {
-            // No validation yet for this provider type
-            Ok(())
-        }
-        "docker_registry" => {
-            let dr_config: uptrakit_provider_docker_registry::DockerRegistryConfig =
-                serde_json::from_value(config.clone())
-                    .map_err(|e| format!("invalid Docker Registry config: {e}"))?;
-            dr_config
-                .validate()
-                .map_err(|e| format!("Docker Registry config validation failed: {e}"))?;
-            Ok(())
-        }
-        _ => Err(format!("unknown provider_type: {provider_type}")),
-    }
-}
-
-/// Parse a provider_type string into a `ProviderType`, returning None if unknown.
-fn parse_provider_type(s: &str) -> Option<ProviderType> {
-    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
 }
 
 /// Create a new provider configuration.
@@ -190,7 +64,7 @@ pub async fn create_provider_config(
         return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
     }
 
-    if parse_provider_type(&req.provider_type).is_none() {
+    if ProviderRegistry::parse_provider_type(&req.provider_type).is_none() {
         return (
             StatusCode::BAD_REQUEST,
             format!("unknown provider_type: {}", req.provider_type),
@@ -198,7 +72,7 @@ pub async fn create_provider_config(
             .into_response();
     }
 
-    if let Err(e) = validate_provider_config(&req.provider_type, &req.config) {
+    if let Err(e) = ProviderRegistry::validate_config_str(&req.provider_type, &req.config) {
         return (StatusCode::BAD_REQUEST, e).into_response();
     }
 
@@ -342,9 +216,9 @@ pub async fn update_provider_config(
     // Validate new config if provided
     if let Some(ref mut new_config) = req.config.clone() {
         // Restore masked secrets from existing config
-        restore_secrets(&provider_type, new_config, &existing.config);
+        ProviderRegistry::restore_secrets_str(&provider_type, new_config, &existing.config);
 
-        if let Err(e) = validate_provider_config(&provider_type, new_config) {
+        if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
             return (StatusCode::BAD_REQUEST, e).into_response();
         }
     }
@@ -360,7 +234,7 @@ pub async fn update_provider_config(
     }
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being saved
-        restore_secrets(&provider_type, &mut config, model.config.as_ref());
+        ProviderRegistry::restore_secrets_str(&provider_type, &mut config, model.config.as_ref());
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
@@ -445,6 +319,9 @@ async fn find_active_config(
 mod tests {
     use super::*;
 
+    /// Sentinel value used to indicate a masked secret in API responses.
+    const SECRET_MASK: &str = "***";
+
     #[test]
     fn mask_github_auth_token() {
         let config = serde_json::json!({
@@ -452,7 +329,7 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_secret123"
         });
-        let masked = mask_secrets("github_releases", &config);
+        let masked = ProviderRegistry::mask_secrets_str("github_releases", &config);
         assert_eq!(masked["auth_token"], SECRET_MASK);
         assert_eq!(masked["owner"], "octocat");
     }
@@ -464,7 +341,7 @@ mod tests {
             "repo": "hello-world",
             "auth_token": null
         });
-        let masked = mask_secrets("github_releases", &config);
+        let masked = ProviderRegistry::mask_secrets_str("github_releases", &config);
         assert!(masked["auth_token"].is_null());
     }
 
@@ -474,7 +351,7 @@ mod tests {
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let masked = mask_secrets("github_releases", &config);
+        let masked = ProviderRegistry::mask_secrets_str("github_releases", &config);
         // No auth_token field should be added
         assert!(masked.get("auth_token").is_none());
     }
@@ -482,7 +359,7 @@ mod tests {
     #[test]
     fn mask_unknown_provider_type() {
         let config = serde_json::json!({"key": "value"});
-        let masked = mask_secrets("unknown_type", &config);
+        let masked = ProviderRegistry::mask_secrets_str("unknown_type", &config);
         assert_eq!(masked, config);
     }
 
@@ -498,7 +375,7 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_real_token"
         });
-        restore_secrets("github_releases", &mut incoming, &existing);
+        ProviderRegistry::restore_secrets_str("github_releases", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
@@ -514,7 +391,7 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_old_token"
         });
-        restore_secrets("github_releases", &mut incoming, &existing);
+        ProviderRegistry::restore_secrets_str("github_releases", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_new_token");
     }
 
@@ -524,7 +401,7 @@ mod tests {
             "owner": "octocat",
             "repo": "hello-world"
         });
-        assert!(validate_provider_config("github_releases", &config).is_ok());
+        assert!(ProviderRegistry::validate_config_str("github_releases", &config).is_ok());
     }
 
     #[test]
@@ -533,21 +410,21 @@ mod tests {
             "owner": "",
             "repo": "hello-world"
         });
-        assert!(validate_provider_config("github_releases", &config).is_err());
+        assert!(ProviderRegistry::validate_config_str("github_releases", &config).is_err());
     }
 
     #[test]
     fn validate_unknown_provider_type() {
         let config = serde_json::json!({});
-        assert!(validate_provider_config("nonexistent", &config).is_err());
+        assert!(ProviderRegistry::validate_config_str("nonexistent", &config).is_err());
     }
 
     #[test]
     fn parse_known_provider_types() {
-        assert!(parse_provider_type("github_releases").is_some());
-        assert!(parse_provider_type("proxmox_helper_scripts").is_some());
-        assert!(parse_provider_type("docker_registry").is_some());
-        assert!(parse_provider_type("unknown").is_none());
+        assert!(ProviderRegistry::parse_provider_type("github_releases").is_some());
+        assert!(ProviderRegistry::parse_provider_type("proxmox_helper_scripts").is_some());
+        assert!(ProviderRegistry::parse_provider_type("docker_registry").is_some());
+        assert!(ProviderRegistry::parse_provider_type("unknown").is_none());
     }
 
     // --- Docker Registry provider tests ---
@@ -562,7 +439,7 @@ mod tests {
                 "password": "secret123"
             }
         });
-        let masked = mask_secrets("docker_registry", &config);
+        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
         assert_eq!(masked["auth"]["password"], SECRET_MASK);
         assert_eq!(masked["auth"]["username"], "user");
     }
@@ -576,7 +453,7 @@ mod tests {
                 "token": "ghcr_token_secret"
             }
         });
-        let masked = mask_secrets("docker_registry", &config);
+        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
         assert_eq!(masked["auth"]["token"], SECRET_MASK);
     }
 
@@ -585,7 +462,7 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let masked = mask_secrets("docker_registry", &config);
+        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
         assert!(masked.get("auth").is_none());
     }
 
@@ -595,7 +472,7 @@ mod tests {
             "image": "nginx",
             "auth": null
         });
-        let masked = mask_secrets("docker_registry", &config);
+        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
         assert!(masked["auth"].is_null());
     }
 
@@ -617,7 +494,7 @@ mod tests {
                 "password": "real_password"
             }
         });
-        restore_secrets("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_secrets_str("docker_registry", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "real_password");
     }
 
@@ -637,7 +514,7 @@ mod tests {
                 "token": "real_token"
             }
         });
-        restore_secrets("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_secrets_str("docker_registry", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["token"], "real_token");
     }
 
@@ -659,7 +536,7 @@ mod tests {
                 "password": "old_password"
             }
         });
-        restore_secrets("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_secrets_str("docker_registry", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "new_password");
     }
 
@@ -668,7 +545,7 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        assert!(validate_provider_config("docker_registry", &config).is_ok());
+        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_ok());
     }
 
     #[test]
@@ -683,7 +560,7 @@ mod tests {
                 "token": "ghcr_token"
             }
         });
-        assert!(validate_provider_config("docker_registry", &config).is_ok());
+        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_ok());
     }
 
     #[test]
@@ -691,7 +568,7 @@ mod tests {
         let config = serde_json::json!({
             "image": ""
         });
-        assert!(validate_provider_config("docker_registry", &config).is_err());
+        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_err());
     }
 
     #[test]
@@ -700,6 +577,6 @@ mod tests {
             "image": "nginx",
             "tag_patterns": ["[invalid"]
         });
-        assert!(validate_provider_config("docker_registry", &config).is_err());
+        assert!(ProviderRegistry::validate_config_str("docker_registry", &config).is_err());
     }
 }

@@ -4749,9 +4749,7 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-internal-wire",
  "uptrakit-provider-core",
- "uptrakit-provider-docker-registry",
- "uptrakit-provider-github",
- "uptrakit-provider-proxmox-helper-scripts",
+ "uptrakit-provider-registry",
  "url",
  "uuid",
  "webpki-roots 1.0.5",
@@ -4832,6 +4830,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+ "uptrakit-provider-core",
 ]
 
 [[package]]
@@ -4857,6 +4856,7 @@ dependencies = [
 name = "uptrakit-provider-core"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "rootcause",
  "semver",
  "serde",
@@ -4871,6 +4871,7 @@ dependencies = [
 name = "uptrakit-provider-docker-registry"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "regex",
  "reqwest",
  "rootcause",
@@ -4888,6 +4889,7 @@ dependencies = [
 name = "uptrakit-provider-github"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "regex",
  "reqwest",
  "rootcause",
@@ -4904,9 +4906,26 @@ dependencies = [
 name = "uptrakit-provider-proxmox-helper-scripts"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "rootcause",
  "tokio",
  "uptrakit-provider-core",
+]
+
+[[package]]
+name = "uptrakit-provider-registry"
+version = "0.0.1"
+dependencies = [
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-provider-core",
+ "uptrakit-provider-docker-registry",
+ "uptrakit-provider-github",
+ "uptrakit-provider-proxmox-helper-scripts",
 ]
 
 [[package]]
@@ -4959,8 +4978,7 @@ dependencies = [
  "tracing",
  "uptrakit-internal-wire",
  "uptrakit-provider-core",
- "uptrakit-provider-docker-registry",
- "uptrakit-provider-github",
+ "uptrakit-provider-registry",
  "uptrakit-shared-db",
  "uptrakit-web-api-types",
  "url",

@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 rootcause = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

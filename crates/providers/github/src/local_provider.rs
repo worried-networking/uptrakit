@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use rootcause::report;
 use uptrakit_provider_core::{LocalProvider, ProviderError, Result, UpstreamRelease, Version};
 
@@ -23,19 +24,17 @@ impl GitHubLocalProvider {
     }
 }
 
+#[async_trait]
 impl LocalProvider for GitHubLocalProvider {
-    fn detect_installed_version(&self) -> impl Future<Output = Result<Option<Version>>> + Send {
+    async fn detect_installed_version(&self) -> Result<Option<Version>> {
         // Stub: version detection not yet implemented
-        std::future::ready(Ok(None))
+        Ok(None)
     }
 
-    fn execute_update(
-        &self,
-        _release: &UpstreamRelease,
-    ) -> impl Future<Output = Result<()>> + Send {
-        std::future::ready(Err(report!(ProviderError::Configuration(
+    async fn execute_update(&self, _release: &UpstreamRelease) -> Result<()> {
+        Err(report!(ProviderError::Configuration(
             "execute_update not yet implemented for GitHub provider".to_string()
-        ))))
+        )))
     }
 }
 

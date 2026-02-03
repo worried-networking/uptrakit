@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
+// Re-export ProviderType from provider-core for use in wire protocol messages.
+pub use uptrakit_provider_core::ProviderType;
+
 /// Unix epoch timestamp in milliseconds.
 pub type Timestamp = i64;
 
@@ -226,8 +229,8 @@ pub struct VersionCheckAssignment {
     pub software_item_id: String,
     /// Human-readable name for logging.
     pub name: String,
-    /// Provider type (e.g., "github_releases", "docker_registry").
-    pub provider_type: String,
+    /// Provider type.
+    pub provider_type: ProviderType,
     /// Package identifier for the provider.
     pub package_identifier: String,
     /// Provider-specific configuration.
@@ -255,15 +258,6 @@ pub struct VersionCheckResult {
 }
 
 // --- Update execution messages ---
-
-/// Provider type for update execution (matches ProviderType in provider-core).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateProviderType {
-    GithubReleases,
-    ProxmoxHelperScripts,
-    DockerRegistry,
-}
 
 /// Output stream source for UpdateOutput messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -316,7 +310,7 @@ pub struct ExecuteUpdatePayload {
     pub software_item_name: String,
     pub package_identifier: String,
     pub to_version: String,
-    pub provider_type: UpdateProviderType,
+    pub provider_type: ProviderType,
     /// Merged provider config (base + override).
     pub provider_config: serde_json::Value,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -718,7 +712,7 @@ mod tests {
             assignments: vec![VersionCheckAssignment {
                 software_item_id: "item-1".to_string(),
                 name: "Test Software".to_string(),
-                provider_type: "github_releases".to_string(),
+                provider_type: ProviderType::GithubReleases,
                 package_identifier: "owner/repo".to_string(),
                 config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
             }],
@@ -726,6 +720,7 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"check_versions"#));
         assert!(json.contains(r#""software_item_id":"item-1"#));
+        assert!(json.contains(r#""provider_type":"github_releases"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -760,11 +755,12 @@ mod tests {
         let assignment = VersionCheckAssignment {
             software_item_id: "uuid-123".to_string(),
             name: "Docker Image".to_string(),
-            provider_type: "docker_registry".to_string(),
+            provider_type: ProviderType::DockerRegistry,
             package_identifier: "nginx:latest".to_string(),
             config: serde_json::json!({}),
         };
         let json = serde_json::to_string(&assignment).unwrap();
+        assert!(json.contains(r#""provider_type":"docker_registry""#));
         let deserialized: VersionCheckAssignment = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, assignment);
     }
@@ -779,7 +775,7 @@ mod tests {
             software_item_name: "Node.js".to_string(),
             package_identifier: "nodejs".to_string(),
             to_version: "20.10.0".to_string(),
-            provider_type: UpdateProviderType::GithubReleases,
+            provider_type: ProviderType::GithubReleases,
             provider_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
             pre_update_commands: vec!["systemctl stop myapp".to_string()],
             post_update_commands: vec!["systemctl start myapp".to_string()],
@@ -811,7 +807,7 @@ mod tests {
             software_item_name: "Redis".to_string(),
             package_identifier: "redis-server".to_string(),
             to_version: "7.2.0".to_string(),
-            provider_type: UpdateProviderType::ProxmoxHelperScripts,
+            provider_type: ProviderType::ProxmoxHelperScripts,
             provider_config: serde_json::json!({}),
             pre_update_commands: vec![],
             post_update_commands: vec![],
@@ -979,18 +975,15 @@ mod tests {
     }
 
     #[test]
-    fn update_provider_type_all_variants() {
+    fn provider_type_all_variants() {
         for (provider, expected) in [
-            (UpdateProviderType::GithubReleases, "github_releases"),
-            (
-                UpdateProviderType::ProxmoxHelperScripts,
-                "proxmox_helper_scripts",
-            ),
-            (UpdateProviderType::DockerRegistry, "docker_registry"),
+            (ProviderType::GithubReleases, "github_releases"),
+            (ProviderType::ProxmoxHelperScripts, "proxmox_helper_scripts"),
+            (ProviderType::DockerRegistry, "docker_registry"),
         ] {
             let json = serde_json::to_string(&provider).unwrap();
             assert_eq!(json, format!(r#""{expected}""#));
-            let deserialized: UpdateProviderType = serde_json::from_str(&json).unwrap();
+            let deserialized: ProviderType = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, provider);
         }
     }

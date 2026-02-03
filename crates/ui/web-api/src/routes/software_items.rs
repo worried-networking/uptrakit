@@ -21,7 +21,7 @@ use uptrakit_shared_db::entity::{
     update_history,
 };
 
-use super::provider_configs::validate_provider_config;
+use uptrakit_provider_registry::ProviderRegistry;
 
 pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
@@ -177,7 +177,7 @@ fn validate_config_override(
         return Err("config_override must be a JSON object".to_string());
     }
 
-    validate_provider_config(provider_type, &merged)
+    ProviderRegistry::validate_config_str(provider_type, &merged)
 }
 
 // --- Endpoints ---
@@ -966,14 +966,12 @@ pub async fn trigger_update(
         crate::update_hooks::merge_config(&provider_config.config, item.config_override.as_ref());
 
     // 10. Convert provider type
-    let provider_type = match provider_config.provider_type.as_str() {
-        "github_releases" => uptrakit_internal_wire::UpdateProviderType::GithubReleases,
-        "proxmox_helper_scripts" => {
-            uptrakit_internal_wire::UpdateProviderType::ProxmoxHelperScripts
-        }
-        "docker_registry" => uptrakit_internal_wire::UpdateProviderType::DockerRegistry,
-        other => {
-            tracing::error!("Unknown provider type: {other}");
+    let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
+        serde_json::Value::String(provider_config.provider_type.clone()),
+    ) {
+        Ok(pt) => pt,
+        Err(_) => {
+            tracing::error!("Unknown provider type: {}", provider_config.provider_type);
             return (StatusCode::BAD_REQUEST, "Unknown provider type").into_response();
         }
     };
