@@ -82,8 +82,6 @@ pub struct HostInfo {
 /// Payload for agent enrollment request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrollPayload {
-    /// Agent-generated UUIDv7 client identifier.
-    pub client_id: String,
     pub hostname: String,
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,7 +100,7 @@ pub struct RequestCertificatePayload {
 /// Payload for requesting certificate renewal (mTLS-authenticated agents).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenewCertificatePayload {
-    /// PEM-encoded Certificate Signing Request with CN=client_id.
+    /// PEM-encoded Certificate Signing Request with CN=agent_id.
     pub csr_pem: String,
 }
 
@@ -416,7 +414,6 @@ mod tests {
     #[test]
     fn enroll_serialization_roundtrip() {
         let msg = AgentMessage::Enroll(EnrollPayload {
-            client_id: "01936a1e-7e8c-7f00-8000-000000000001".to_string(),
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some("tok-123".to_string()),
@@ -431,13 +428,11 @@ mod tests {
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
         assert!(json.contains(r#""machine_id":"abc123"#));
-        assert!(json.contains(r#""client_id":"01936a1e"#));
     }
 
     #[test]
     fn enroll_without_token_serialization_roundtrip() {
         let msg = AgentMessage::Enroll(EnrollPayload {
-            client_id: "01936a1e-7e8c-7f00-8000-000000000002".to_string(),
             hostname: "node-2".to_string(),
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
@@ -687,14 +682,11 @@ mod tests {
 
     #[test]
     fn enroll_backward_compat_without_required_fields() {
-        // Older agents may not send client_id/host_info — this should fail
-        // deserialization since these are required. This test documents the breaking change.
+        // Older agents may not send host_info — this should fail
+        // deserialization since it is required. This test documents the breaking change.
         let json = r#"{"type":"enroll","hostname":"node-old","friendly_name":"Old Node"}"#;
         let result: std::result::Result<AgentMessage, _> = serde_json::from_str(json);
-        assert!(
-            result.is_err(),
-            "EnrollPayload requires client_id and host_info"
-        );
+        assert!(result.is_err(), "EnrollPayload requires host_info");
     }
 
     #[test]

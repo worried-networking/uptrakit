@@ -167,9 +167,6 @@ async fn run(args: &Args) -> error::Result<()> {
     .await
 }
 
-/// Maximum number of client_id collision retries during fresh enrollment.
-const MAX_COLLISION_RETRIES: u8 = 3;
-
 /// Consolidates the existing enrollment logic (bearer reconnect + fresh enroll).
 /// On success, cert and key are saved to disk before returning.
 async fn do_enrollment(
@@ -181,7 +178,7 @@ async fn do_enrollment(
 ) -> error::Result<()> {
     if let Some(existing) = state::AgentState::load(data_dir)? {
         // Reconnect with Bearer header (existing agent.json)
-        tracing::info!(client_id = %existing.client_id, "reconnecting with enrollment secret");
+        tracing::info!(agent_id = %existing.agent_id, "reconnecting with enrollment secret");
         let auth_header = format!("Bearer {}", existing.enrollment_secret);
         let mut ws = client::connect_ws(host, port, tls_connector, Some(&auth_header)).await?;
 
@@ -189,7 +186,7 @@ async fn do_enrollment(
         client::wait_for_approval(&mut ws).await?;
 
         // Generate new keypair + CSR for certificate request
-        let (key_pem, csr_pem) = client::generate_keypair_and_csr(&existing.client_id)?;
+        let (key_pem, csr_pem) = client::generate_keypair_and_csr(&existing.agent_id)?;
         state::save_agent_key(data_dir, &key_pem)?;
 
         // Request certificate
@@ -201,7 +198,7 @@ async fn do_enrollment(
         save_cert_from_payload(data_dir, &cert.cert_pem, &cert.not_after)?;
         Ok(())
     } else {
-        // Fresh enrollment — retry on client_id collision
+        // Fresh enrollment — controller generates agent_id
         let system_hostname = hostname::get()
             .map(|h| h.to_string_lossy().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
@@ -212,67 +209,47 @@ async fn do_enrollment(
         let host_info = host_info::collect_host_info();
         tracing::info!(machine_id = %host_info.machine_id, "collected host info");
 
-        for attempt in 0..MAX_COLLISION_RETRIES {
-            let client_id = uuid::Uuid::now_v7().to_string();
+        tracing::info!("enrolling via WebSocket");
+        let mut ws = client::connect_ws(host, port, tls_connector, None).await?;
 
-            tracing::info!(client_id = %client_id, "enrolling via WebSocket (attempt {})", attempt + 1);
-            let mut ws = client::connect_ws(host, port, tls_connector, None).await?;
+        let enrolled = client::send_enroll(
+            &mut ws,
+            &system_hostname,
+            &friendly_name,
+            args.enrollment_token.as_deref(),
+            host_info,
+        )
+        .await?;
 
-            let enrolled = match client::send_enroll(
-                &mut ws,
-                &client_id,
-                &system_hostname,
-                &friendly_name,
-                args.enrollment_token.as_deref(),
-                host_info.clone(),
-            )
-            .await
-            {
-                Ok(e) => e,
-                Err(mut e) => {
-                    if matches!(e.current_context_mut(), Error::ClientIdCollision) {
-                        tracing::warn!("client_id collision, retrying with new ID");
-                        continue;
-                    }
-                    return Err(e);
-                }
-            };
+        tracing::info!(
+            agent_id = %enrolled.agent_id,
+            status = %enrolled.status,
+            "enrollment response received"
+        );
 
-            tracing::info!(
-                agent_id = %enrolled.agent_id,
-                status = %enrolled.status,
-                "enrollment response received"
-            );
+        // Persist agent state using agent_id from controller response
+        let agent_state = state::AgentState {
+            agent_id: enrolled.agent_id.clone(),
+            enrollment_secret: enrolled.enrollment_secret,
+        };
+        agent_state.save(data_dir)?;
+        tracing::info!("agent state persisted");
 
-            // Persist agent state
-            let agent_state = state::AgentState {
-                client_id,
-                enrollment_secret: enrolled.enrollment_secret,
-            };
-            agent_state.save(data_dir)?;
-            tracing::info!("agent state persisted");
+        // Wait for approval (may come immediately if auto-approved)
+        client::wait_for_approval(&mut ws).await?;
 
-            // Wait for approval (may come immediately if auto-approved)
-            client::wait_for_approval(&mut ws).await?;
+        // Generate new keypair + CSR for certificate request
+        let (cert_key_pem, cert_csr_pem) = client::generate_keypair_and_csr(&agent_state.agent_id)?;
+        state::save_agent_key(data_dir, &cert_key_pem)?;
 
-            // Generate new keypair + CSR for certificate request (fresh keypair per CSR)
-            let (cert_key_pem, cert_csr_pem) =
-                client::generate_keypair_and_csr(&agent_state.client_id)?;
-            state::save_agent_key(data_dir, &cert_key_pem)?;
-
-            // Request certificate
-            let cert = client::request_certificate_ws(&mut ws, &cert_csr_pem).await?;
-            tracing::info!(
-                not_after = %cert.not_after,
-                "received client certificate"
-            );
-            save_cert_from_payload(data_dir, &cert.cert_pem, &cert.not_after)?;
-            return Ok(());
-        }
-
-        Err(report!(Error::Enrollment(
-            "client_id collision after maximum retries".to_string()
-        )))
+        // Request certificate
+        let cert = client::request_certificate_ws(&mut ws, &cert_csr_pem).await?;
+        tracing::info!(
+            not_after = %cert.not_after,
+            "received client certificate"
+        );
+        save_cert_from_payload(data_dir, &cert.cert_pem, &cert.not_after)?;
+        Ok(())
     }
 }
 

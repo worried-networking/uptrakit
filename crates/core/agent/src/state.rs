@@ -13,7 +13,10 @@ const CERT_NOT_AFTER_FILE: &str = "cert_not_after_ts";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentState {
-    pub client_id: String,
+    /// Agent identity UUID assigned by the controller.
+    /// Serde alias "client_id" provides backward compatibility with existing agent.json files.
+    #[serde(alias = "client_id")]
+    pub agent_id: String,
     pub enrollment_secret: String,
 }
 

@@ -24,8 +24,8 @@ const MIN_AGENT_VERSION: &str = "0.0.1";
 use crate::AppState;
 use crate::extract::{AgentIdentity, ClientIp};
 use crate::routes::agents::{
-    AgentRouteError, AgentStatus, do_enroll, do_lookup_by_secret, do_sign_csr,
-    find_or_create_host_and_link, revoke_certificate,
+    AgentStatus, do_enroll, do_lookup_by_secret, do_sign_csr, find_or_create_host_and_link,
+    revoke_certificate,
 };
 
 /// Serialize a [`ControllerMessage`] to JSON, logging on failure.
@@ -765,7 +765,6 @@ async fn handle_anonymous(
                             &state.db,
                             &state.settings,
                             state.default_tenant_id,
-                            &payload.client_id,
                             &payload.hostname,
                             &payload.friendly_name,
                             payload.enrollment_token.as_deref(),
@@ -812,14 +811,10 @@ async fn handle_anonymous(
                                 break agent_id;
                             }
                             Err(e) => {
-                                let (code, message) = match e.current_context() {
-                                    AgentRouteError::ClientIdCollision => (
-                                        "client_id_collision".to_string(),
-                                        "client_id already exists".to_string(),
-                                    ),
-                                    other => ("enrollment_failed".to_string(), other.to_string()),
-                                };
-                                let err = ControllerMessage::Error(ErrorPayload { code, message });
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "enrollment_failed".to_string(),
+                                    message: e.current_context().to_string(),
+                                });
                                 if let Some(json) = serialize_msg(&err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }

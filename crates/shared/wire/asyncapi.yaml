@@ -8,9 +8,9 @@ info:
     ## Agent Lifecycle
 
     1. `HTTP GET /api/v1/pki/ca.crt` — TOFU CA pinning (only HTTP endpoint used by agents)
-    2. Agent generates a UUIDv7 `client_id` locally
-    3. `WSS /api/v1/ws/agent` (no auth) — agent sends `Enroll` message with `client_id`
-    4. Receives `Enrolled` response — agent persists `client_id` + `enrollment_secret`
+    2. `WSS /api/v1/ws/agent` (no auth) — agent sends `Enroll` message with hostname and host_info
+    3. Controller generates UUIDv7 `agent_id` and responds with `Enrolled` message
+    4. Agent persists `agent_id` + `enrollment_secret`
        (connection promoted in-place — controller now tracks this session)
     5. Waits for `Approved` push — no polling, no reconnect needed
     6. Agent generates an ECDSA P-256 keypair + CSR, sends `RequestCertificate` with `csr_pem`
@@ -35,12 +35,6 @@ info:
     5. Agent generates new keypair + CSR, sends `RequestCertificate` with `csr_pem`
     6. Receives `Certificate` (cert PEM only)
     7. Disconnect, reconnect with mTLS
-
-    ## Collision Detection
-
-    During anonymous enrollment, if the `client_id` already exists as an active
-    agent, the controller rejects with a `client_id_collision` error code.
-    The agent generates a new UUIDv7 and retries (up to 3 attempts).
 
     ## Three Connection Types (determined at WS upgrade time)
 
@@ -151,12 +145,11 @@ operations:
       - $ref: "#/channels/agentConnection/messages/enroll"
     summary: Agent sends an enrollment request
     description: |
-      An anonymous agent sends its `client_id` (UUIDv7), hostname, friendly name,
-      host info, and optional enrollment token. The controller checks for client_id
-      collisions, creates an agent record, and responds with an `Enrolled` message
-      containing the agent_id and enrollment_secret. If the client_id already exists
-      as an active agent, the controller responds with a `client_id_collision` error.
-      The actual keypair generation and CSR are deferred until after approval.
+      An anonymous agent sends its hostname, friendly name, host info, and optional
+      enrollment token. The controller generates a UUIDv7 `agent_id`, creates an
+      agent record, and responds with an `Enrolled` message containing the agent_id
+      and enrollment_secret. The actual keypair generation and CSR are deferred
+      until after approval.
 
   receiveEnrolled:
     action: receive
@@ -202,7 +195,7 @@ operations:
     summary: Agent requests a client certificate
     description: |
       After receiving `Approved`, the agent generates a new ECDSA P-256 keypair,
-      creates a CSR with CN=client_id, and sends this message with the `csr_pem`.
+      creates a CSR with CN=agent_id, and sends this message with the `csr_pem`.
       The controller validates the CSR, signs the certificate, and responds with
       a `Certificate` message (cert PEM only — the private key stays on the agent).
 
@@ -252,7 +245,7 @@ operations:
     summary: Agent requests certificate renewal
     description: |
       Authenticated agents generate a new ECDSA P-256 keypair, create a CSR
-      with CN=client_id, and send this message with the `csr_pem` to request
+      with CN=agent_id, and send this message with the `csr_pem` to request
       a new client certificate before the current one expires. Also sent in
       response to a `RequestCertRenewal` push from the controller (e.g., after
       CA rotation). The controller validates the CSR and responds with a
@@ -641,7 +634,6 @@ components:
       type: object
       required:
         - type
-        - client_id
         - hostname
         - friendly_name
         - host_info
@@ -650,16 +642,6 @@ components:
           type: string
           const: enroll
           description: Message type discriminator
-        client_id:
-          type: string
-          format: uuid
-          description: |
-            Agent-generated UUIDv7 client identifier. The agent generates this
-            locally. If the controller detects a collision with an existing
-            active agent, it responds with a `client_id_collision` error and
-            the agent retries with a new UUID.
-          examples:
-            - 01932f0e-7b3a-7def-8c5e-6a1b2c3d4e5f
         hostname:
           type: string
           description: System hostname of the agent
@@ -759,7 +741,7 @@ components:
           type: string
           description: |
             PEM-encoded PKCS#10 Certificate Signing Request. The agent generates
-            a fresh ECDSA P-256 keypair and creates a CSR with CN=client_id.
+            a fresh ECDSA P-256 keypair and creates a CSR with CN=agent_id.
             The controller validates the CSR signature, verifies CN matches the
             authenticated agent identity, and signs the certificate.
           examples:
@@ -807,7 +789,7 @@ components:
             - invalid_token
             - not_approved
             - bad_request
-            - client_id_collision
+            - enrollment_failed
         message:
           type: string
           description: Human-readable error description
@@ -880,7 +862,7 @@ components:
           description: |
             PEM-encoded PKCS#10 Certificate Signing Request for renewal.
             The agent generates a fresh ECDSA P-256 keypair and creates a CSR
-            with CN=client_id. The controller validates the CSR signature,
+            with CN=agent_id. The controller validates the CSR signature,
             verifies CN matches the mTLS-authenticated agent identity, and
             signs a new certificate with the CSR's public key.
           examples:

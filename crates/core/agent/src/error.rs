@@ -50,9 +50,6 @@ pub enum Error {
     #[error("CSR generation error: {0}")]
     CsrGeneration(String),
 
-    #[error("client_id collision, retrying with new ID")]
-    ClientIdCollision,
-
     #[error("update execution failed: {0}")]
     UpdateExecution(String),
 

@@ -51,9 +51,6 @@ pub(crate) enum AgentRouteError {
 
     #[error("certificate signing error")]
     CertSigning,
-
-    #[error("client_id collision")]
-    ClientIdCollision,
 }
 
 impl AgentRouteError {
@@ -62,7 +59,6 @@ impl AgentRouteError {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::ClientIdCollision => StatusCode::CONFLICT,
             Self::Internal(_) | Self::Database(_) | Self::CertSigning => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -92,14 +88,12 @@ pub(crate) struct EnrollResult {
 
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
 ///
-/// The `client_id` is an agent-generated UUIDv7. If an active agent with that
-/// UUID already exists, enrollment is rejected with `ClientIdCollision`.
+/// The controller generates a UUIDv7 `agent_id` for the enrolling agent.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn do_enroll(
     db: &sea_orm::DatabaseConnection,
     settings: &crate::settings::Settings,
     tenant_id: uuid::Uuid,
-    client_id: &str,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
@@ -112,24 +106,8 @@ pub(crate) async fn do_enroll(
         )));
     }
 
-    // Parse client_id as UUID
-    let agent_id = uuid::Uuid::parse_str(client_id).map_err(|e| {
-        report!(AgentRouteError::BadRequest(format!(
-            "invalid client_id: {e}"
-        )))
-    })?;
-
-    // Collision detection: reject if an active agent with this UUID exists in this tenant
-    let existing = Agent::find_by_id(agent_id)
-        .filter(agent::Column::TenantId.eq(tenant_id))
-        .filter(agent::Column::DeactivatedAt.is_null())
-        .one(db)
-        .await
-        .context_to::<AgentRouteError>()?;
-
-    if existing.is_some() {
-        return Err(report!(AgentRouteError::ClientIdCollision));
-    }
+    // Generate agent_id server-side (single source of truth)
+    let agent_id = uuid::Uuid::now_v7();
 
     // Determine status based on enrollment token
     let status = if let Some(enrollment_token) = enrollment_token {

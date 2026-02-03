@@ -19,16 +19,16 @@ use uptrakit_internal_wire::{
 
 use crate::error::{Error, Result};
 
-/// Generate an ECDSA P-256 keypair and a CSR with CN=client_id.
+/// Generate an ECDSA P-256 keypair and a CSR with CN=agent_id.
 /// Returns `(key_pem, csr_pem)`.
-pub fn generate_keypair_and_csr(client_id: &str) -> Result<(String, String)> {
+pub fn generate_keypair_and_csr(agent_id: &str) -> Result<(String, String)> {
     let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
         .map_err(|e| report!(Error::CsrGeneration(format!("key generation failed: {e}"))))?;
 
     let mut params = CertificateParams::default();
     params
         .distinguished_name
-        .push(DnType::CommonName, client_id.to_string());
+        .push(DnType::CommonName, agent_id.to_string());
     params
         .distinguished_name
         .push(DnType::OrganizationName, "Uptrakit Agent");
@@ -269,19 +269,14 @@ pub async fn connect_ws(
 }
 
 /// Send Enroll message and read Enrolled response.
-///
-/// Returns `Err(Error::ClientIdCollision)` if the controller rejects the
-/// client_id as a duplicate.
 pub async fn send_enroll(
     ws: &mut WsStream,
-    client_id: &str,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
     host_info: HostInfo,
 ) -> Result<EnrolledPayload> {
     let msg = AgentMessage::Enroll(EnrollPayload {
-        client_id: client_id.to_string(),
         hostname: hostname.to_string(),
         friendly_name: friendly_name.to_string(),
         enrollment_token: enrollment_token.map(|s| s.to_string()),
@@ -308,9 +303,6 @@ pub async fn send_enroll(
 
                 match controller_msg {
                     ControllerMessage::Enrolled(payload) => return Ok(payload),
-                    ControllerMessage::Error(err) if err.code == "client_id_collision" => {
-                        return Err(report!(Error::ClientIdCollision));
-                    }
                     ControllerMessage::Error(err) => {
                         return Err(report!(Error::Enrollment(format!(
                             "{}: {}",
@@ -580,7 +572,7 @@ pub async fn run_authenticated_loop(
             _ = &mut renewal_sleep => {
                 tracing::info!("renewal window reached, requesting certificate renewal");
                 // Extract client_id from the current cert CN
-                let client_id_str = extract_client_id_from_cert(data_dir);
+                let client_id_str = extract_agent_id_from_state(data_dir);
                 let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)?;
                 pending_renewal_key = Some(key_pem);
                 let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {
@@ -696,7 +688,7 @@ pub async fn run_authenticated_loop(
                             }
                             ControllerMessage::RequestCertRenewal(payload) => {
                                 tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
-                                let client_id_str = extract_client_id_from_cert(data_dir);
+                                let client_id_str = extract_agent_id_from_state(data_dir);
                                 let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str) {
                                     Ok(pair) => pair,
                                     Err(e) => {
@@ -1015,11 +1007,10 @@ fn compute_local_ca_hash(data_dir: &std::path::Path) -> String {
     }
 }
 
-/// Extract the client_id (CN) from the agent's current certificate on disk.
-/// Falls back to loading from AgentState if cert parsing fails.
-fn extract_client_id_from_cert(data_dir: &std::path::Path) -> String {
+/// Extract the agent_id (CN) from the agent's current state on disk.
+fn extract_agent_id_from_state(data_dir: &std::path::Path) -> String {
     if let Ok(Some(state)) = crate::state::AgentState::load(data_dir) {
-        return state.client_id;
+        return state.agent_id;
     }
     // Fallback: this shouldn't happen in normal flow
     "unknown".to_string()
