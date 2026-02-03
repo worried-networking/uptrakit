@@ -704,6 +704,10 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `CheckVersions(CheckVersionsPayload)` variant in `ControllerMessage` — requests installed version detection from agents
 - `VersionCheckResults(VersionCheckResultsPayload)` variant in `AgentMessage` — agent response with detected versions or errors
 - `ReportHostInfoPayload` includes `agent_version: String` — agent binary version (from `CARGO_PKG_VERSION`)
+- `ExecuteUpdate(ExecuteUpdatePayload)` variant in `ControllerMessage` — triggers a software update on the agent (boxed to avoid large enum variant)
+- `UpdateStarted(UpdateStartedPayload)` variant in `AgentMessage` — agent acknowledges update start with detected from_version
+- `UpdateOutput(UpdateOutputPayload)` variant in `AgentMessage` — agent streams update output (stdout, stderr, pre/post-hook, system)
+- `UpdateResult(UpdateResultPayload)` variant in `AgentMessage` — agent reports final update status with accumulated output
 
 ### Agent version tracking
 

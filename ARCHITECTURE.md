@@ -98,9 +98,9 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 
 Defined in `crates/shared/wire/`:
 
-**Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`, `version_check_results`
+**Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
-**Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`
+**Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`, `execute_update`
 
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
