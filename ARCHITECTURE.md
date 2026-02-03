@@ -100,7 +100,7 @@ Defined in `crates/shared/wire/`:
 
 **Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
-**Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`, `execute_update`
+**Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`, `execute_update`, `server_restarting`
 
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
@@ -280,3 +280,4 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **HTTPS-only controller** | The controller listens on HTTPS by default. An optional plain HTTP listener (`--pki-http listener`) can be started for PKI-only endpoints (OCSP, CRL, CA cert) when needed by Nginx `ssl_ocsp_responder`. All agent and browser connections use TLS. |
 | **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
 | **Reverse proxy support** | L4 passthrough and L7 TLS termination. Agent identity forwarded via structured info or PEM headers with CA CN verification. Header stripping prevents spoofing from non-proxy clients. Docker integration tests validate all 5 supported proxies (Nginx, Traefik, Caddy, HAProxy, Envoy). |
+| **Zero-downtime graceful restart** | HAProxy-style restart using `SO_REUSEPORT`. New process binds the same port, starts accepting immediately, then signals the old process (SIGUSR1). Old process stops accepting, scatters `ServerRestarting` notifications to agents over 5 seconds to avoid thundering herd, drains existing connections, then exits. Agents may not notice the restart if their connection stays open. |

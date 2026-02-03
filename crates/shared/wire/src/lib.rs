@@ -40,6 +40,7 @@ pub enum ControllerMessage {
     RequestCertRenewal(RequestCertRenewalPayload),
     CheckVersions(CheckVersionsPayload),
     ExecuteUpdate(Box<ExecuteUpdatePayload>),
+    ServerRestarting(ServerRestartingPayload),
 }
 
 /// Payload for ping messages.
@@ -188,6 +189,17 @@ pub struct CaBundleUpdatedPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestCertRenewalPayload {
     /// Human-readable reason for the renewal request.
+    pub reason: String,
+}
+
+/// Payload for server restarting notification.
+///
+/// Sent by the controller during graceful shutdown to notify connected agents
+/// that the server is restarting. Agents should expect the connection to close
+/// and reconnect automatically.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerRestartingPayload {
+    /// Human-readable reason for the restart.
     pub reason: String,
 }
 
@@ -989,5 +1001,24 @@ mod tests {
         }"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert!(matches!(msg, ControllerMessage::ExecuteUpdate(_)));
+    }
+
+    #[test]
+    fn server_restarting_serialization_roundtrip() {
+        let msg = ControllerMessage::ServerRestarting(ServerRestartingPayload {
+            reason: "controller restarting for upgrade".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"server_restarting"#));
+        assert!(json.contains(r#""reason":"controller restarting for upgrade"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn server_restarting_backward_compat_extra_fields() {
+        let json = r#"{"type":"server_restarting","reason":"restart","unknown_field":"ignored"}"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ControllerMessage::ServerRestarting(_)));
     }
 }

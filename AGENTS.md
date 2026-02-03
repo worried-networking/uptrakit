@@ -387,7 +387,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--pki-addr` | `network.pki_addr` | `null` | Yes (requires CA rotation) |
 | `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
 
-**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`.
+**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--reuseport`, `--takeover-from`, `--shutdown-timeout-secs`.
 
 ### OIDC provider bootstrap
 
@@ -410,6 +410,43 @@ The controller supports bootstrapping an OIDC provider at startup via CLI flags.
 The client secret is never logged. The bootstrapped provider is created with `is_active=true` and `auto_create_users=true`.
 
 When the first user logs in via OIDC (bootstrapped or otherwise), they are automatically promoted to the `owner` role and initial setup is completed (registration mode set to closed).
+
+### Zero-downtime graceful restart
+
+The controller supports HAProxy-style zero-downtime restarts using `SO_REUSEPORT`. This allows a new controller process to start accepting connections while the old process drains existing ones.
+
+**CLI flags:**
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--reuseport` | `false` | Enable `SO_REUSEPORT` socket option (required on both processes) |
+| `--takeover-from <PID>` | — | PID of old process to take over from; sends SIGUSR1 to initiate graceful shutdown |
+| `--shutdown-timeout-secs` | `30` | Graceful shutdown timeout (how long to drain connections) |
+
+**Restart sequence:**
+
+1. Old process is running with `--reuseport`
+2. New process starts with `--reuseport --takeover-from <OLD_PID>`
+3. New process binds to the same port (SO_REUSEPORT allows this)
+4. New process starts accepting connections immediately
+5. New process sends SIGUSR1 to old process
+6. Old process stops accepting new connections
+7. Old process scatters `ServerRestarting` notifications to agents over 5 seconds (avoids thundering herd)
+8. Old process cancels background tasks and waits for drain timeout
+9. Old process exits cleanly
+10. New process serves all traffic
+
+**Signal handling:**
+
+| Signal | Action |
+| --- | --- |
+| SIGTERM | Initiate graceful shutdown |
+| SIGINT | Initiate graceful shutdown |
+| SIGUSR1 | Initiate graceful shutdown (used for takeover) |
+
+**Wire protocol:** The `ServerRestarting` message (`ControllerMessage::ServerRestarting(ServerRestartingPayload)`) notifies agents that the controller is restarting. Agents log the message and allow the connection to close naturally; their existing reconnect logic handles the rest.
+
+**Platform support:** `SO_REUSEPORT` is available on Linux, macOS, FreeBSD, and OpenBSD. Not available on Windows.
 
 ### Bulk loading and known-keys registry
 
@@ -708,6 +745,7 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `UpdateStarted(UpdateStartedPayload)` variant in `AgentMessage` — agent acknowledges update start with detected from_version
 - `UpdateOutput(UpdateOutputPayload)` variant in `AgentMessage` — agent streams update output (stdout, stderr, pre/post-hook, system)
 - `UpdateResult(UpdateResultPayload)` variant in `AgentMessage` — agent reports final update status with accumulated output
+- `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify agents; includes a human-readable `reason` field
 
 ### Agent version tracking
 

@@ -114,6 +114,24 @@ pub struct Args {
 
     #[command(flatten)]
     pub oidc_bootstrap: OidcBootstrapArgs,
+
+    /// Enable SO_REUSEPORT socket option for zero-downtime restarts.
+    /// Required on both the first process and the takeover process.
+    /// This allows a new process to bind to the same port while the old
+    /// process is still running.
+    #[arg(long)]
+    pub reuseport: bool,
+
+    /// PID of old controller process to take over from.
+    /// Sends SIGUSR1 to the old process to initiate graceful shutdown.
+    /// Should be used together with --reuseport.
+    #[arg(long)]
+    pub takeover_from: Option<u32>,
+
+    /// Graceful shutdown timeout in seconds.
+    /// The time to wait for existing connections to drain before forcing shutdown.
+    #[arg(long, default_value = "30")]
+    pub shutdown_timeout_secs: u64,
 }
 
 /// OIDC provider bootstrap options.
@@ -408,5 +426,47 @@ mod tests {
         assert!(args.oidc_bootstrap.oidc_issuer_url.is_some());
         assert!(args.oidc_bootstrap.oidc_client_id.is_none());
         assert!(args.oidc_bootstrap.oidc_client_secret.is_none());
+    }
+
+    #[test]
+    fn graceful_restart_defaults() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(!args.reuseport);
+        assert!(args.takeover_from.is_none());
+        assert_eq!(args.shutdown_timeout_secs, 30);
+    }
+
+    #[test]
+    fn graceful_restart_reuseport_flag() {
+        let args = super::Args::try_parse_from(["uptrakit-controller", "--reuseport"])
+            .expect("should parse reuseport flag");
+        assert!(args.reuseport);
+    }
+
+    #[test]
+    fn graceful_restart_takeover_from() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--reuseport",
+            "--takeover-from",
+            "12345",
+        ])
+        .expect("should parse takeover-from");
+        assert!(args.reuseport);
+        assert_eq!(args.takeover_from, Some(12345));
+    }
+
+    #[test]
+    fn graceful_restart_custom_timeout() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--reuseport",
+            "--shutdown-timeout-secs",
+            "60",
+        ])
+        .expect("should parse custom timeout");
+        assert!(args.reuseport);
+        assert_eq!(args.shutdown_timeout_secs, 60);
     }
 }

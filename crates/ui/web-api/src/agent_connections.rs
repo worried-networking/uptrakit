@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
+use rand::Rng;
 use tokio::sync::{RwLock, mpsc};
 use uptrakit_internal_wire::ControllerMessage;
 use uuid::Uuid;
@@ -79,5 +81,54 @@ impl AgentConnectionRegistry {
     ) {
         let msg = ControllerMessage::RequestCertRenewal(payload);
         self.broadcast(msg).await;
+    }
+
+    /// Get the current number of connected agents.
+    pub async fn connection_count(&self) -> usize {
+        self.inner.read().await.len()
+    }
+
+    /// Broadcast server restarting notification to all agents, scattered over time.
+    ///
+    /// This avoids a thundering herd when agents reconnect by spreading out the
+    /// notifications randomly over the specified duration. Each agent receives
+    /// the message at a random time within the scatter window.
+    pub async fn broadcast_server_restarting_scattered(
+        &self,
+        payload: uptrakit_internal_wire::ServerRestartingPayload,
+        scatter_duration: Duration,
+    ) {
+        let guard = self.inner.read().await;
+        let agent_ids: Vec<Uuid> = guard.keys().copied().collect();
+        let count = agent_ids.len();
+        drop(guard);
+
+        if count == 0 {
+            return;
+        }
+
+        let msg = ControllerMessage::ServerRestarting(payload);
+        let scatter_ms = scatter_duration.as_millis() as u64;
+
+        for agent_id in agent_ids {
+            // Random delay within scatter window
+            let delay_ms = if scatter_ms > 0 {
+                rand::rng().random_range(0..scatter_ms)
+            } else {
+                0
+            };
+            let delay = Duration::from_millis(delay_ms);
+
+            let msg_clone = msg.clone();
+            let inner = Arc::clone(&self.inner);
+
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                let guard = inner.read().await;
+                if let Some(tx) = guard.get(&agent_id) {
+                    let _ = tx.send(msg_clone).await;
+                }
+            });
+        }
     }
 }

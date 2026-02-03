@@ -12,11 +12,14 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use ipnet::IpNet;
 use rootcause::{Report, prelude::*};
 use thiserror::Error;
+use tokio::signal::unix::{signal, SignalKind};
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use uptrakit_web_api::AppState;
@@ -604,8 +607,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         .context(AppError::Pki)?,
     );
 
+    // Create CancellationToken for graceful shutdown of background tasks
+    let shutdown_token = CancellationToken::new();
+
+    // Create axum_server Handle for graceful shutdown
+    let server_handle = axum_server::Handle::new();
+
     // Spawn CRL manager background task
-    let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run());
+    let crl_shutdown_token = shutdown_token.child_token();
+    let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run(Some(crl_shutdown_token)));
 
     // Create agent certificate signer (reads from watch receiver)
     let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(ca_rx.clone()));
@@ -645,18 +655,27 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
+    let oidc_cleanup_token = shutdown_token.child_token();
     let oidc_cleanup_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
         loop {
-            interval.tick().await;
-            oidc_flow_store.cleanup_expired().await;
-            account_link_store.cleanup_expired().await;
-            oidc_token_exchange_store.cleanup_expired().await;
-            device_flow_store.cleanup_expired().await;
+            tokio::select! {
+                _ = interval.tick() => {
+                    oidc_flow_store.cleanup_expired().await;
+                    account_link_store.cleanup_expired().await;
+                    oidc_token_exchange_store.cleanup_expired().await;
+                    device_flow_store.cleanup_expired().await;
+                }
+                _ = oidc_cleanup_token.cancelled() => {
+                    tracing::debug!("auth state cleanup task shutting down");
+                    break;
+                }
+            }
         }
     });
 
     // Spawn CA rotation background task (managed CAs only, every 24h or on API trigger)
+    let ca_rotation_token = shutdown_token.child_token();
     let ca_rotation_handle = if ca_state.managed {
         let pki_for_task = pki_path.clone();
         let ca_tx_for_task = ca_tx;
@@ -664,17 +683,22 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let conns_for_task = agent_connections.clone();
         let settings_for_rotation = app_state.settings.clone();
         let trigger = Arc::clone(&ca_rotation_trigger);
+        let token = ca_rotation_token;
 
         Some(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            let mut interval = tokio::time::interval(Duration::from_secs(24 * 3600));
             // Skip the first immediate tick
             interval.tick().await;
 
             loop {
-                // Wait for either the periodic timer or an API-triggered rotation
+                // Wait for either the periodic timer, an API-triggered rotation, or shutdown
                 let forced = tokio::select! {
                     _ = interval.tick() => false,
                     () = trigger.notified() => true,
+                    _ = token.cancelled() => {
+                        tracing::debug!("CA rotation task shutting down");
+                        return;
+                    }
                 };
 
                 if !forced {
@@ -741,19 +765,27 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     };
 
     // Spawn server cert renewal background task (every 24h)
+    let server_cert_renewal_token = shutdown_token.child_token();
     let server_cert_renewal_handle = if args.tls_cert.is_none() {
         // Only auto-renew when using internally-generated server certs
         let pki_for_task = pki_path;
         let crl_mgr_for_task = Arc::clone(&crl_manager);
         let app_state_for_task = Arc::clone(&app_state);
+        let token = server_cert_renewal_token;
 
         Some(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+            let mut interval = tokio::time::interval(Duration::from_secs(24 * 3600));
             // Skip the first immediate tick
             interval.tick().await;
 
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = token.cancelled() => {
+                        tracing::debug!("server cert renewal task shutting down");
+                        return;
+                    }
+                }
                 tracing::debug!("checking server certificate renewal status");
 
                 // Read current server cert from disk
@@ -821,40 +853,141 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         None
     };
 
-    tokio::select! {
-        result = server::run(server::ServerOptions {
-            https_addr,
-            rustls_config,
-            app_state: Arc::clone(&app_state),
-            static_dir,
-        }) => {
-            result.context(AppError::Server)?;
+    // Set up signal handlers
+    let mut sigterm = signal(SignalKind::terminate()).context_transform(|e| {
+        AppError::Config(format!("failed to set up SIGTERM handler: {e}"))
+    })?;
+    let mut sigint = signal(SignalKind::interrupt()).context_transform(|e| {
+        AppError::Config(format!("failed to set up SIGINT handler: {e}"))
+    })?;
+    let mut sigusr1 = signal(SignalKind::user_defined1()).context_transform(|e| {
+        AppError::Config(format!("failed to set up SIGUSR1 handler: {e}"))
+    })?;
+
+    // Spawn the HTTPS server
+    let server_options = server::ServerOptions {
+        https_addr,
+        rustls_config,
+        app_state: Arc::clone(&app_state),
+        static_dir,
+        handle: server_handle.clone(),
+        enable_reuseport: args.reuseport,
+    };
+    let server_task = tokio::spawn(server::run(server_options));
+
+    // If taking over, signal old process after we're ready
+    if let Some(old_pid) = args.takeover_from {
+        // Wait briefly for server to start accepting connections
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Signal old process to begin graceful shutdown
+        match nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(old_pid as i32),
+            nix::sys::signal::Signal::SIGUSR1,
+        ) {
+            Ok(()) => tracing::info!(pid = old_pid, "sent SIGUSR1 to old process"),
+            Err(e) => tracing::warn!(pid = old_pid, error = %e, "failed to signal old process"),
         }
-        result = async {
-            match pki_http_port {
-                Some(port) => {
-                    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-                    server::run_pki_http(addr, app_state).await
+    }
+
+    // Spawn PKI HTTP server if needed
+    let pki_http_task = if let Some(port) = pki_http_port {
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let app_state_for_pki = Arc::clone(&app_state);
+        Some(tokio::spawn(server::run_pki_http(addr, app_state_for_pki)))
+    } else {
+        None
+    };
+
+    // Main event loop - wait for shutdown signal
+    let mut server_task = server_task;
+    let shutdown_reason = tokio::select! {
+        result = &mut server_task => {
+            match result {
+                Ok(Ok(())) => {
+                    tracing::info!("server task exited normally");
+                    "server exit"
                 }
-                None => std::future::pending().await,
+                Ok(Err(e)) => {
+                    tracing::error!(error = ?e, "server error");
+                    return Err(e).context(AppError::Server)?;
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "server task panicked");
+                    "server panic"
+                }
             }
-        } => {
-            result.context(AppError::Server)?;
         }
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("received shutdown signal");
+        _ = sigterm.recv() => {
+            tracing::info!("received SIGTERM, initiating graceful shutdown");
+            "SIGTERM"
         }
+        _ = sigint.recv() => {
+            tracing::info!("received SIGINT, initiating graceful shutdown");
+            "SIGINT"
+        }
+        _ = sigusr1.recv() => {
+            tracing::info!("received SIGUSR1 (new process ready), initiating graceful shutdown");
+            "SIGUSR1 (takeover)"
+        }
+    };
+
+    // Graceful shutdown sequence
+    tracing::info!(reason = shutdown_reason, "beginning graceful shutdown");
+
+    // 1. Stop accepting new connections immediately via the server handle
+    let shutdown_timeout = Duration::from_secs(args.shutdown_timeout_secs);
+    server_handle.graceful_shutdown(Some(shutdown_timeout));
+
+    // 2. Scatter ServerRestarting notifications over 5 seconds to avoid thundering herd
+    let connected_count = agent_connections.connection_count().await;
+    if connected_count > 0 {
+        tracing::info!(
+            connected_agents = connected_count,
+            "sending server restarting notifications"
+        );
+        let scatter_duration = Duration::from_secs(5);
+        agent_connections
+            .broadcast_server_restarting_scattered(
+                uptrakit_internal_wire::ServerRestartingPayload {
+                    reason: "controller restarting".to_string(),
+                },
+                scatter_duration,
+            )
+            .await;
+
+        // Wait for notifications to be scattered before proceeding
+        tokio::time::sleep(scatter_duration).await;
     }
 
+    // 3. Cancel background tasks (they check CancellationToken)
+    shutdown_token.cancel();
+
+    // 4. Wait for background task handles to complete gracefully
+    tracing::debug!("waiting for background tasks to complete");
+
+    // Wait for CRL manager
     crl_handle.abort();
-    oidc_cleanup_handle.abort();
+
+    // Wait for cleanup task
+    let _ = tokio::time::timeout(Duration::from_secs(5), oidc_cleanup_handle).await;
+
+    // Wait for CA rotation task
     if let Some(h) = ca_rotation_handle {
-        h.abort();
-    }
-    if let Some(h) = server_cert_renewal_handle {
-        h.abort();
+        let _ = tokio::time::timeout(Duration::from_secs(5), h).await;
     }
 
+    // Wait for server cert renewal task
+    if let Some(h) = server_cert_renewal_handle {
+        let _ = tokio::time::timeout(Duration::from_secs(5), h).await;
+    }
+
+    // Wait for PKI HTTP server
+    if let Some(task) = pki_http_task {
+        task.abort();
+    }
+
+    tracing::info!("graceful shutdown complete");
     Ok(())
 }
 

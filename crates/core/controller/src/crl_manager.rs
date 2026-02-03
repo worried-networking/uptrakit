@@ -191,7 +191,10 @@ impl CrlManager {
     }
 
     /// Background task: rebuilds CRL on revocation events or periodic timer.
-    pub async fn run(self: Arc<Self>) {
+    ///
+    /// Accepts an optional `CancellationToken` for graceful shutdown. When the
+    /// token is cancelled, the task exits cleanly.
+    pub async fn run(self: Arc<Self>, shutdown_token: Option<tokio_util::sync::CancellationToken>) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
         // The first tick completes immediately — skip it since we already
         // built the initial CRL synchronously before starting.
@@ -204,6 +207,16 @@ impl CrlManager {
                 }
                 _ = self.config.revocation_notify.notified() => {
                     tracing::debug!("CRL rebuild triggered by revocation event");
+                }
+                _ = async {
+                    if let Some(ref token) = shutdown_token {
+                        token.cancelled().await
+                    } else {
+                        std::future::pending::<()>().await
+                    }
+                } => {
+                    tracing::debug!("CRL manager shutting down");
+                    return;
                 }
             }
 

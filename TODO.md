@@ -251,7 +251,12 @@ Main functionality that delivers the core value proposition.
 - [ ] SIGHUP support for graceful reloading
   - [ ] All possible settings are reloaded
   - [ ] Agents should not be disconnected during reload (but there should be a "please reconnect" message)
-- [ ] Add support for a graceful restart (probably via `so_reuseport`)
+- [x] Add support for a graceful restart (via `SO_REUSEPORT`)
+  - [x] `--reuseport` flag enables `SO_REUSEPORT` socket option
+  - [x] `--takeover-from <PID>` signals old process to begin graceful shutdown
+  - [x] `--shutdown-timeout-secs` configures drain timeout (default: 30)
+  - [x] `ServerRestarting` wire message notifies agents (scattered to avoid thundering herd)
+  - [x] Background tasks support `CancellationToken` for clean shutdown
 - [ ] Certificate renewal on the controller through API must enable that certificate for new connections
 
 ---

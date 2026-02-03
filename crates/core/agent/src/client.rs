@@ -777,6 +777,10 @@ pub async fn run_authenticated_loop(
                                     }
                                 }
                             }
+                            ControllerMessage::ServerRestarting(payload) => {
+                                tracing::info!(reason = %payload.reason, "controller is restarting");
+                                // Connection will close, agent's reconnect logic handles the rest
+                            }
                             _ => {
                                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                                 continue;

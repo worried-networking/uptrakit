@@ -115,6 +115,8 @@ channels:
         $ref: "#/components/messages/updateOutput"
       updateResult:
         $ref: "#/components/messages/updateResult"
+      serverRestarting:
+        $ref: "#/components/messages/serverRestarting"
 
 operations:
   sendPing:
@@ -368,6 +370,20 @@ operations:
       error message. On success, the controller updates the host_software_item
       installed_version.
 
+  receiveServerRestarting:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/serverRestarting"
+    summary: Agent receives server restarting notification
+    description: |
+      The controller pushes this message during graceful shutdown to notify
+      connected agents that the server is restarting. The agent should expect
+      the connection to close shortly and reconnect automatically. During a
+      zero-downtime restart, agents may not even notice the restart if a new
+      controller process is already accepting connections.
+
 components:
   securitySchemes:
     mtls:
@@ -547,6 +563,14 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/updateResultPayload"
+
+    serverRestarting:
+      name: server_restarting
+      title: Server Restarting Message
+      summary: Controller notifies agent that the server is restarting
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/serverRestartingPayload"
 
   schemas:
     pingPayload:
@@ -912,6 +936,26 @@ components:
             "CA rotation after backend URL change").
           examples:
             - CA rotation after backend URL change
+
+    serverRestartingPayload:
+      type: object
+      required:
+        - type
+        - reason
+      properties:
+        type:
+          type: string
+          const: server_restarting
+          description: Message type discriminator
+        reason:
+          type: string
+          description: |
+            Human-readable reason for the restart (e.g., "controller restarting",
+            "upgrade in progress"). The agent should expect the connection to
+            close shortly and reconnect automatically.
+          examples:
+            - controller restarting
+            - upgrade in progress
 
     checkVersionsPayload:
       type: object
