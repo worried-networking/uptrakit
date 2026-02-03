@@ -23,6 +23,7 @@ pub enum AgentMessage {
     UpdateStarted(UpdateStartedPayload),
     UpdateOutput(UpdateOutputPayload),
     UpdateResult(UpdateResultPayload),
+    Disconnecting(DisconnectingPayload),
 }
 
 /// Messages sent from the controller to the agent.
@@ -168,12 +169,20 @@ pub struct ErrorPayload {
     pub message: String,
 }
 
+/// Default shutdown timeout in seconds for graceful shutdown.
+fn default_shutdown_timeout_seconds() -> u32 {
+    120
+}
+
 /// Payload for agent runtime settings pushed by the controller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentSettingsPayload {
     pub renewal_window_hours: u16,
     #[serde(default)]
     pub ca_bundle_hash: String,
+    /// Maximum time in seconds to wait for in-flight updates during shutdown.
+    #[serde(default = "default_shutdown_timeout_seconds")]
+    pub shutdown_timeout_seconds: u32,
 }
 
 /// Payload for CA bundle update notification.
@@ -353,6 +362,24 @@ pub struct UpdateResultPayload {
     pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+// --- Graceful shutdown messages ---
+
+/// Reason for agent disconnection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisconnectReason {
+    /// SIGTERM/SIGINT - clean exit.
+    Shutdown,
+    /// SIGHUP - will reconnect after external restart.
+    Restart,
+}
+
+/// Agent -> Controller: Notification before disconnecting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisconnectingPayload {
+    pub reason: DisconnectReason,
 }
 
 #[cfg(test)]
@@ -535,11 +562,12 @@ mod tests {
         let msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123".to_string(),
+            shutdown_timeout_seconds: 120,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"agent_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123"}"#
+            r#"{"type":"agent_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","shutdown_timeout_seconds":120}"#
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -548,13 +576,14 @@ mod tests {
     #[test]
     fn agent_settings_backward_compat_extra_fields() {
         // Future-proof: extra fields in JSON should be ignored
-        let json = r#"{"type":"agent_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","some_future_field":"value"}"#;
+        let json = r#"{"type":"agent_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","shutdown_timeout_seconds":60,"some_future_field":"value"}"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert_eq!(
             msg,
             ControllerMessage::AgentSettings(AgentSettingsPayload {
                 renewal_window_hours: 12,
                 ca_bundle_hash: "def456".to_string(),
+                shutdown_timeout_seconds: 60,
             })
         );
     }
@@ -569,6 +598,22 @@ mod tests {
             ControllerMessage::AgentSettings(AgentSettingsPayload {
                 renewal_window_hours: 6,
                 ca_bundle_hash: String::new(),
+                shutdown_timeout_seconds: 120, // default
+            })
+        );
+    }
+
+    #[test]
+    fn agent_settings_backward_compat_missing_shutdown_timeout() {
+        // Agents running older protocol without shutdown_timeout_seconds should still parse
+        let json = r#"{"type":"agent_settings","renewal_window_hours":6,"ca_bundle_hash":"abc"}"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            msg,
+            ControllerMessage::AgentSettings(AgentSettingsPayload {
+                renewal_window_hours: 6,
+                ca_bundle_hash: "abc".to_string(),
+                shutdown_timeout_seconds: 120, // default
             })
         );
     }
@@ -1020,5 +1065,42 @@ mod tests {
         let json = r#"{"type":"server_restarting","reason":"restart","unknown_field":"ignored"}"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert!(matches!(msg, ControllerMessage::ServerRestarting(_)));
+    }
+
+    // --- Graceful shutdown message tests ---
+
+    #[test]
+    fn disconnecting_shutdown_serialization_roundtrip() {
+        let msg = AgentMessage::Disconnecting(DisconnectingPayload {
+            reason: DisconnectReason::Shutdown,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"disconnecting","reason":"shutdown"}"#);
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn disconnecting_restart_serialization_roundtrip() {
+        let msg = AgentMessage::Disconnecting(DisconnectingPayload {
+            reason: DisconnectReason::Restart,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"disconnecting","reason":"restart"}"#);
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn disconnect_reason_all_variants() {
+        for (reason, expected) in [
+            (DisconnectReason::Shutdown, "shutdown"),
+            (DisconnectReason::Restart, "restart"),
+        ] {
+            let json = serde_json::to_string(&reason).unwrap();
+            assert_eq!(json, format!(r#""{expected}""#));
+            let deserialized: DisconnectReason = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, reason);
+        }
     }
 }

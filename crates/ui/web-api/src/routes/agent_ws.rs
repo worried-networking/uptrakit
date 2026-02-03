@@ -250,6 +250,7 @@ async fn handle_authenticated(
     let settings_msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
         renewal_window_hours,
         ca_bundle_hash,
+        shutdown_timeout_seconds: 120, // hardcoded for now
     });
     let Some(json) = serialize_msg(&settings_msg) else {
         return;
@@ -617,6 +618,14 @@ async fn handle_authenticated(
                                         }
                                     }
                                 }
+                            }
+                            AgentMessage::Disconnecting(payload) => {
+                                tracing::info!(
+                                    %agent_id,
+                                    reason = ?payload.reason,
+                                    "agent disconnecting gracefully"
+                                );
+                                break;
                             }
                             _ => {
                                 let err = ControllerMessage::Error(ErrorPayload {
@@ -994,6 +1003,14 @@ async fn run_enrolled_loop(
                                 if let Some(json) = serialize_msg(&err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
+                            }
+                            AgentMessage::Disconnecting(payload) => {
+                                tracing::info!(
+                                    %agent_id,
+                                    reason = ?payload.reason,
+                                    "agent disconnecting gracefully during enrollment"
+                                );
+                                break;
                             }
                         }
                     }

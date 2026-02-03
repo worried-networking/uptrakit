@@ -351,6 +351,10 @@ async fn run_authenticated_with_reconnect(
                 tracing::warn!("disconnected by controller");
                 return Ok(());
             }
+            LoopOutcome::Restart => {
+                tracing::info!("restart requested, exiting for external restart");
+                return Ok(());
+            }
         }
     }
 }

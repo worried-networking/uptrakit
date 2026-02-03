@@ -11,10 +11,10 @@ use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
-    AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, HostInfo,
-    PingPayload, RenewCertificatePayload, ReportHostInfoPayload, RequestCertificatePayload,
-    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResult,
-    VersionCheckResultsPayload, now_millis,
+    AgentMessage, CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload,
+    EnrollPayload, EnrolledPayload, HostInfo, PingPayload, RenewCertificatePayload,
+    ReportHostInfoPayload, RequestCertificatePayload, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload, now_millis,
 };
 
 use crate::error::{Error, Result};
@@ -56,6 +56,8 @@ pub enum LoopOutcome {
     Reconnect,
     /// Connection closed by controller — no special action.
     Disconnected,
+    /// SIGHUP received — exit for external restart.
+    Restart,
 }
 
 /// TLS mode for the CA certificate fetch via reqwest.
@@ -458,6 +460,13 @@ fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> s
     }
 }
 
+/// State for an in-flight update execution.
+struct InFlightUpdate {
+    update_history_id: String,
+    handle: tokio::task::JoinHandle<crate::update::UpdateExecutionResult>,
+    output_rx: tokio::sync::mpsc::Receiver<crate::update::UpdateOutputMessage>,
+}
+
 /// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_authenticated_loop(
@@ -474,6 +483,7 @@ pub async fn run_authenticated_loop(
     use std::time::Duration;
 
     const PING_INTERVAL: Duration = Duration::from_secs(300);
+    const DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120;
 
     let mut ws_stream = connect_ws(host, port, &tls_connector, None).await?;
 
@@ -493,7 +503,9 @@ pub async fn run_authenticated_loop(
         env!("CARGO_PKG_VERSION")
     );
 
-    let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context_to::<Error>()?;
+    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
         .context_to::<Error>()?;
 
     // First tick completes immediately, sending an initial ping on connect
@@ -506,8 +518,56 @@ pub async fn run_authenticated_loop(
     // Holds the private key for a pending renewal CSR until the cert arrives
     let mut pending_renewal_key: Option<String> = None;
 
+    // Shutdown timeout from controller settings
+    let mut shutdown_timeout_seconds: u32 = DEFAULT_SHUTDOWN_TIMEOUT;
+
+    // Track in-flight update (only one at a time)
+    let mut in_flight_update: Option<InFlightUpdate> = None;
+
     let outcome = loop {
+        // If there's an in-flight update, poll it alongside other events
+        let update_poll = async {
+            if let Some(ref mut update) = in_flight_update {
+                tokio::select! {
+                    biased;
+                    Some(output_msg) = update.output_rx.recv() => {
+                        Some(UpdateEvent::Output(output_msg))
+                    }
+                    result = &mut update.handle => {
+                        Some(UpdateEvent::Completed(result))
+                    }
+                }
+            } else {
+                std::future::pending::<Option<UpdateEvent>>().await
+            }
+        };
+
         tokio::select! {
+            biased;
+
+            // Handle in-flight update events first
+            Some(event) = update_poll => {
+                let update = in_flight_update.as_ref().expect("update must exist");
+                let update_history_id = update.update_history_id.clone();
+
+                match event {
+                    UpdateEvent::Output(output_msg) => {
+                        let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                            update_history_id,
+                            output: output_msg.output,
+                            stream: output_msg.stream,
+                        });
+                        if let Ok(json) = serde_json::to_string(&output) {
+                            let _ = ws_stream.send(Message::Text(json.into())).await;
+                        }
+                    }
+                    UpdateEvent::Completed(result) => {
+                        send_update_result(&mut ws_stream, &update_history_id, result).await;
+                        in_flight_update = None;
+                    }
+                }
+            }
+
             _ = ping_interval.tick() => {
                 let agent_ts = now_millis();
                 let ping = AgentMessage::Ping(PingPayload { agent_ts });
@@ -593,8 +653,10 @@ pub async fn run_authenticated_loop(
                             ControllerMessage::AgentSettings(settings) => {
                                 tracing::trace!(
                                     renewal_window_hours = settings.renewal_window_hours,
+                                    shutdown_timeout = settings.shutdown_timeout_seconds,
                                     "received agent settings"
                                 );
+                                shutdown_timeout_seconds = settings.shutdown_timeout_seconds;
                                 renewal_sleep.as_mut().reset(
                                     tokio::time::Instant::now()
                                         + compute_renewal_delay(
@@ -697,19 +759,38 @@ pub async fn run_authenticated_loop(
                                     "received update request"
                                 );
 
+                                // If there's already an in-flight update, reject this one
+                                if in_flight_update.is_some() {
+                                    tracing::warn!(
+                                        update_id = %payload.update_history_id,
+                                        "rejecting update: another update is already in progress"
+                                    );
+                                    let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+                                        update_history_id: payload.update_history_id,
+                                        status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                                        from_version: None,
+                                        to_version: None,
+                                        output: String::new(),
+                                        error: Some("Another update is already in progress".to_string()),
+                                    });
+                                    if let Ok(json) = serde_json::to_string(&result_msg) {
+                                        let _ = ws_stream.send(Message::Text(json.into())).await;
+                                    }
+                                    continue;
+                                }
+
                                 // Create a channel for output streaming
-                                let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
+                                let (output_tx, output_rx) = tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
 
                                 // Clone what we need for the spawned task
                                 let update_history_id = payload.update_history_id.clone();
 
                                 // Spawn update execution task
-                                let mut update_handle = tokio::spawn(async move {
+                                let handle = tokio::spawn(async move {
                                     crate::update::execute_update(payload, output_tx).await
                                 });
 
-                                // Send UpdateStarted (we'll get started info from the result)
-                                // For now, send a placeholder started message
+                                // Send UpdateStarted
                                 let started_msg = AgentMessage::UpdateStarted(UpdateStartedPayload {
                                     update_history_id: update_history_id.clone(),
                                     from_version: None,
@@ -719,75 +800,12 @@ pub async fn run_authenticated_loop(
                                     tracing::error!(error = %e, "failed to send UpdateStarted");
                                 }
 
-                                // Stream output lines to controller
-                                loop {
-                                    tokio::select! {
-                                        Some(output_msg) = output_rx.recv() => {
-                                            let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
-                                                update_history_id: update_history_id.clone(),
-                                                output: output_msg.output,
-                                                stream: output_msg.stream,
-                                            });
-                                            let output_json = match serde_json::to_string(&output) {
-                                                Ok(j) => j,
-                                                Err(e) => {
-                                                    tracing::warn!(error = %e, "failed to serialize UpdateOutput");
-                                                    continue;
-                                                }
-                                            };
-                                            if let Err(e) = ws_stream.send(Message::Text(output_json.into())).await {
-                                                tracing::warn!(error = %e, "failed to send UpdateOutput");
-                                            }
-                                        }
-                                        result = &mut update_handle => {
-                                            match result {
-                                                Ok(exec_result) => {
-                                                    // Send final result
-                                                    let result_msg = AgentMessage::UpdateResult(exec_result.result);
-                                                    let result_json = match serde_json::to_string(&result_msg) {
-                                                        Ok(j) => j,
-                                                        Err(e) => {
-                                                            tracing::error!(error = %e, "failed to serialize UpdateResult");
-                                                            break;
-                                                        }
-                                                    };
-                                                    if let Err(e) = ws_stream.send(Message::Text(result_json.into())).await {
-                                                        tracing::error!(error = %e, "failed to send UpdateResult");
-                                                    }
-                                                    tracing::info!(update_id = %update_history_id, "update execution completed");
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!(error = %e, "update task panicked");
-                                                    // Send a failed result
-                                                    let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
-                                                        update_history_id: update_history_id.clone(),
-                                                        status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
-                                                        from_version: None,
-                                                        to_version: None,
-                                                        output: String::new(),
-                                                        error: Some("Update task panicked".to_string()),
-                                                    });
-                                                    if let Ok(json) = serde_json::to_string(&result_msg) {
-                                                        let _ = ws_stream.send(Message::Text(json.into())).await;
-                                                    }
-                                                }
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                // Drain any remaining output messages
-                                while let Ok(output_msg) = output_rx.try_recv() {
-                                    let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
-                                        update_history_id: update_history_id.clone(),
-                                        output: output_msg.output,
-                                        stream: output_msg.stream,
-                                    });
-                                    if let Ok(json) = serde_json::to_string(&output) {
-                                        let _ = ws_stream.send(Message::Text(json.into())).await;
-                                    }
-                                }
+                                // Track the in-flight update
+                                in_flight_update = Some(InFlightUpdate {
+                                    update_history_id,
+                                    handle,
+                                    output_rx,
+                                });
                             }
                             ControllerMessage::ServerRestarting(payload) => {
                                 tracing::info!(reason = %payload.reason, "controller is restarting");
@@ -816,12 +834,34 @@ pub async fn run_authenticated_loop(
                 }
             }
             _ = tokio::signal::ctrl_c() => {
-                tracing::info!("received SIGINT, shutting down");
-                break LoopOutcome::Shutdown;
+                tracing::info!("received SIGINT, initiating graceful shutdown");
+                break handle_graceful_shutdown(
+                    &mut ws_stream,
+                    in_flight_update.take(),
+                    shutdown_timeout_seconds,
+                    DisconnectReason::Shutdown,
+                    LoopOutcome::Shutdown,
+                ).await;
             }
-            _ = shutdown.recv() => {
-                tracing::info!("received SIGTERM, shutting down");
-                break LoopOutcome::Shutdown;
+            _ = sigterm.recv() => {
+                tracing::info!("received SIGTERM, initiating graceful shutdown");
+                break handle_graceful_shutdown(
+                    &mut ws_stream,
+                    in_flight_update.take(),
+                    shutdown_timeout_seconds,
+                    DisconnectReason::Shutdown,
+                    LoopOutcome::Shutdown,
+                ).await;
+            }
+            _ = sighup.recv() => {
+                tracing::info!("received SIGHUP, initiating graceful restart");
+                break handle_graceful_shutdown(
+                    &mut ws_stream,
+                    in_flight_update.take(),
+                    shutdown_timeout_seconds,
+                    DisconnectReason::Restart,
+                    LoopOutcome::Restart,
+                ).await;
             }
         }
     };
@@ -834,6 +874,135 @@ pub async fn run_authenticated_loop(
     }
 
     Ok(outcome)
+}
+
+/// Events from an in-flight update.
+enum UpdateEvent {
+    Output(crate::update::UpdateOutputMessage),
+    Completed(std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>),
+}
+
+/// Send the final update result to the controller.
+async fn send_update_result(
+    ws_stream: &mut WsStream,
+    update_history_id: &str,
+    result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
+) {
+    match result {
+        Ok(exec_result) => {
+            let result_msg = AgentMessage::UpdateResult(exec_result.result);
+            if let Ok(json) = serde_json::to_string(&result_msg) {
+                let _ = ws_stream.send(Message::Text(json.into())).await;
+            }
+            tracing::info!(update_id = %update_history_id, "update execution completed");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "update task panicked");
+            let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+                update_history_id: update_history_id.to_string(),
+                status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                from_version: None,
+                to_version: None,
+                output: String::new(),
+                error: Some("Update task panicked".to_string()),
+            });
+            if let Ok(json) = serde_json::to_string(&result_msg) {
+                let _ = ws_stream.send(Message::Text(json.into())).await;
+            }
+        }
+    }
+}
+
+/// Handle graceful shutdown sequence:
+/// 1. Wait for in-flight update to complete (with timeout)
+/// 2. Send Disconnecting message to controller
+/// 3. Return the appropriate LoopOutcome
+async fn handle_graceful_shutdown(
+    ws_stream: &mut WsStream,
+    in_flight_update: Option<InFlightUpdate>,
+    timeout_seconds: u32,
+    disconnect_reason: DisconnectReason,
+    outcome: LoopOutcome,
+) -> LoopOutcome {
+    use std::time::Duration;
+
+    if let Some(mut update) = in_flight_update {
+        tracing::info!(
+            update_id = %update.update_history_id,
+            timeout_seconds,
+            "waiting for in-flight update to complete before shutdown"
+        );
+
+        let timeout = Duration::from_secs(u64::from(timeout_seconds));
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        // Continue processing output and wait for completion
+        loop {
+            tokio::select! {
+                biased;
+
+                Some(output_msg) = update.output_rx.recv() => {
+                    let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                        update_history_id: update.update_history_id.clone(),
+                        output: output_msg.output,
+                        stream: output_msg.stream,
+                    });
+                    if let Ok(json) = serde_json::to_string(&output) {
+                        let _ = ws_stream.send(Message::Text(json.into())).await;
+                    }
+                }
+                result = &mut update.handle => {
+                    send_update_result(ws_stream, &update.update_history_id, result).await;
+                    break;
+                }
+                _ = tokio::time::sleep_until(deadline) => {
+                    tracing::warn!(
+                        update_id = %update.update_history_id,
+                        "shutdown timeout reached, abandoning in-flight update"
+                    );
+                    // Send a timeout failure result
+                    let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+                        update_history_id: update.update_history_id.clone(),
+                        status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                        from_version: None,
+                        to_version: None,
+                        output: String::new(),
+                        error: Some(format!("Agent shutdown timeout ({timeout_seconds}s) reached")),
+                    });
+                    if let Ok(json) = serde_json::to_string(&result_msg) {
+                        let _ = ws_stream.send(Message::Text(json.into())).await;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Drain any remaining output messages
+        while let Ok(output_msg) = update.output_rx.try_recv() {
+            let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                update_history_id: update.update_history_id.clone(),
+                output: output_msg.output,
+                stream: output_msg.stream,
+            });
+            if let Ok(json) = serde_json::to_string(&output) {
+                let _ = ws_stream.send(Message::Text(json.into())).await;
+            }
+        }
+    }
+
+    // Send Disconnecting message to controller
+    let disconnecting_msg = AgentMessage::Disconnecting(DisconnectingPayload {
+        reason: disconnect_reason,
+    });
+    if let Ok(json) = serde_json::to_string(&disconnecting_msg) {
+        if let Err(e) = ws_stream.send(Message::Text(json.into())).await {
+            tracing::debug!(error = %e, "failed to send Disconnecting message");
+        } else {
+            tracing::debug!(reason = ?disconnect_reason, "sent Disconnecting message to controller");
+        }
+    }
+
+    outcome
 }
 
 /// Compute SHA-256 hex hash of the local CA certificate file.
