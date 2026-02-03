@@ -701,6 +701,35 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours` and `ca_bundle_hash`
 - `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new bundle PEM
 - `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or PKI address change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
+- `CheckVersions(CheckVersionsPayload)` variant in `ControllerMessage` — requests installed version detection from agents
+- `VersionCheckResults(VersionCheckResultsPayload)` variant in `AgentMessage` — agent response with detected versions or errors
+- `ReportHostInfoPayload` includes `agent_version: String` — agent binary version (from `CARGO_PKG_VERSION`)
+
+### Agent version tracking
+
+Agents report their binary version via the `agent_version` field in `ReportHostInfoPayload`. The controller stores this in the `agents.agent_version` column and enforces a minimum version check:
+
+- **Minimum version**: Hardcoded `MIN_AGENT_VERSION` constant in `crates/ui/web-api/src/routes/agent_ws.rs` (currently `"0.0.1"`)
+- **Enforcement**: On `ReportHostInfo`, if the agent's version is below the minimum (semver comparison), the controller sends an `Error { code: "agent_version_too_old" }` message and closes the connection
+- **API exposure**: The `agent_version` field is included in `AgentResponse` (REST API)
+
+### Version check wire protocol
+
+The controller can request installed version detection from agents:
+
+1. **Controller → Agent**: `CheckVersions(CheckVersionsPayload)` containing a list of `VersionCheckAssignment` items
+2. **Agent processes**: For each assignment, the agent dispatches to the appropriate `LocalProvider` based on `provider_type`
+3. **Agent → Controller**: `VersionCheckResults(VersionCheckResultsPayload)` containing results with optional `installed_version` or `error`
+4. **Controller stores**: Updates `host_software_items.installed_version` and `installed_version_detected_at` for successful results
+
+**VersionCheckAssignment fields:**
+- `software_item_id`: UUID of the software item
+- `name`: Display name for logging
+- `provider_type`: Provider discriminator (`github_releases`, `docker_registry`, `proxmox_helper_scripts`)
+- `package_identifier`: Provider-specific identifier
+- `config`: Provider configuration as JSON
+
+**LocalProvider stubs**: Each provider crate implements a `LocalProvider` struct with `detect_installed_version()` returning `Ok(None)` (stub) and `execute_update()` returning an error. The agent dispatches via a `match` on `provider_type` in `crates/core/agent/src/version_check.rs`.
 
 ### Agent host info collection
 

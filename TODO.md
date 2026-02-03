@@ -115,7 +115,7 @@ Essential infrastructure needed before feature development.
 - [ ] Design message types beyond ping/pong
   - [x] Agent registration message
   - [ ] Software inventory report message
-  - [ ] Version check request/response
+  - [x] Version check request/response
   - [ ] Update command message
   - [ ] Status update message
   - [x] Error reporting message

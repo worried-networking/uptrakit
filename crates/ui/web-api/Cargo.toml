@@ -59,6 +59,7 @@ spki = { workspace = true }
 x509-cert = { workspace = true }
 const-oid = { workspace = true }
 aws-lc-rs = { workspace = true }
+semver = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

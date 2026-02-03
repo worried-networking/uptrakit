@@ -469,6 +469,7 @@ mod tests {
             friendly_name: "Production Server 1".to_string(),
             ip_address: Some("192.168.1.10".to_string()),
             status: AgentStatus::Approved,
+            agent_version: "0.0.1".to_string(),
             last_seen_at: Some("2025-01-15T10:30:00Z".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-15T10:30:00Z".to_string(),
@@ -481,6 +482,7 @@ mod tests {
         assert_eq!(deserialized.friendly_name, "Production Server 1");
         assert_eq!(deserialized.ip_address.as_deref(), Some("192.168.1.10"));
         assert_eq!(deserialized.status, AgentStatus::Approved);
+        assert_eq!(deserialized.agent_version, "0.0.1");
         assert_eq!(
             deserialized.last_seen_at.as_deref(),
             Some("2025-01-15T10:30:00Z")
@@ -497,6 +499,7 @@ mod tests {
             friendly_name: "Staging Server".to_string(),
             ip_address: None,
             status: AgentStatus::Pending,
+            agent_version: "unknown".to_string(),
             last_seen_at: None,
             created_at: "2025-02-01T00:00:00Z".to_string(),
             updated_at: "2025-02-01T00:00:00Z".to_string(),
@@ -507,6 +510,7 @@ mod tests {
         assert_eq!(deserialized.id, "agent-002");
         assert!(deserialized.ip_address.is_none());
         assert_eq!(deserialized.status, AgentStatus::Pending);
+        assert_eq!(deserialized.agent_version, "unknown");
         assert!(deserialized.last_seen_at.is_none());
     }
 

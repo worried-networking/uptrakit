@@ -19,6 +19,7 @@ pub enum AgentMessage {
     RequestCertificate(RequestCertificatePayload),
     RenewCertificate(RenewCertificatePayload),
     ReportHostInfo(ReportHostInfoPayload),
+    VersionCheckResults(VersionCheckResultsPayload),
 }
 
 /// Messages sent from the controller to the agent.
@@ -34,6 +35,7 @@ pub enum ControllerMessage {
     AgentSettings(AgentSettingsPayload),
     CaBundleUpdated(CaBundleUpdatedPayload),
     RequestCertRenewal(RequestCertRenewalPayload),
+    CheckVersions(CheckVersionsPayload),
 }
 
 /// Payload for ping messages.
@@ -102,6 +104,8 @@ pub struct RenewCertificatePayload {
 pub struct ReportHostInfoPayload {
     /// Host machine information.
     pub host_info: HostInfo,
+    /// Agent binary version (e.g., "0.0.1").
+    pub agent_version: String,
 }
 
 /// Payload for enrollment confirmation.
@@ -181,6 +185,48 @@ pub struct CaBundleUpdatedPayload {
 pub struct RequestCertRenewalPayload {
     /// Human-readable reason for the renewal request.
     pub reason: String,
+}
+
+/// Payload for requesting version checks from the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckVersionsPayload {
+    /// List of software items to check.
+    pub assignments: Vec<VersionCheckAssignment>,
+}
+
+/// A single software item to check for installed version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionCheckAssignment {
+    /// Software item ID.
+    pub software_item_id: String,
+    /// Human-readable name for logging.
+    pub name: String,
+    /// Provider type (e.g., "github_releases", "docker_registry").
+    pub provider_type: String,
+    /// Package identifier for the provider.
+    pub package_identifier: String,
+    /// Provider-specific configuration.
+    pub config: serde_json::Value,
+}
+
+/// Payload for version check results from the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionCheckResultsPayload {
+    /// Results for each checked software item.
+    pub results: Vec<VersionCheckResult>,
+}
+
+/// Result of a single version check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionCheckResult {
+    /// Software item ID.
+    pub software_item_id: String,
+    /// Detected installed version, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// Error message if detection failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[cfg(test)]
@@ -463,9 +509,11 @@ mod tests {
                 os_version: Some("Ubuntu 24.04 LTS".to_string()),
                 architecture: Some("x86_64".to_string()),
             },
+            agent_version: "0.0.1".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"report_host_info"#));
+        assert!(json.contains(r#""agent_version":"0.0.1"#));
         let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -491,5 +539,62 @@ mod tests {
             result.is_err(),
             "EnrollPayload requires client_id, csr_pem, and host_info"
         );
+    }
+
+    #[test]
+    fn check_versions_serialization_roundtrip() {
+        let msg = ControllerMessage::CheckVersions(CheckVersionsPayload {
+            assignments: vec![VersionCheckAssignment {
+                software_item_id: "item-1".to_string(),
+                name: "Test Software".to_string(),
+                provider_type: "github_releases".to_string(),
+                package_identifier: "owner/repo".to_string(),
+                config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+            }],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"check_versions"#));
+        assert!(json.contains(r#""software_item_id":"item-1"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn version_check_results_serialization_roundtrip() {
+        let msg = AgentMessage::VersionCheckResults(VersionCheckResultsPayload {
+            results: vec![
+                VersionCheckResult {
+                    software_item_id: "item-1".to_string(),
+                    installed_version: Some("1.2.3".to_string()),
+                    error: None,
+                },
+                VersionCheckResult {
+                    software_item_id: "item-2".to_string(),
+                    installed_version: None,
+                    error: Some("detection failed".to_string()),
+                },
+            ],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"version_check_results"#));
+        assert!(json.contains(r#""installed_version":"1.2.3"#));
+        // installed_version should be omitted when None
+        assert!(!json.contains(r#""installed_version":null"#));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn version_check_assignment_serialization() {
+        let assignment = VersionCheckAssignment {
+            software_item_id: "uuid-123".to_string(),
+            name: "Docker Image".to_string(),
+            provider_type: "docker_registry".to_string(),
+            package_identifier: "nginx:latest".to_string(),
+            config: serde_json::json!({}),
+        };
+        let json = serde_json::to_string(&assignment).unwrap();
+        let deserialized: VersionCheckAssignment = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, assignment);
     }
 }

@@ -17,3 +17,6 @@ thiserror = { workspace = true }
 rootcause = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

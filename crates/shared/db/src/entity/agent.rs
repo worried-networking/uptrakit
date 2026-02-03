@@ -13,6 +13,7 @@ pub struct Model {
     pub status: String,
     #[sea_orm(unique)]
     pub enrollment_secret_hash: String,
+    pub agent_version: String,
     pub last_seen_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

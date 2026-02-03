@@ -4736,6 +4736,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-internal-wire",
+ "uptrakit-provider-core",
+ "uptrakit-provider-docker-registry",
+ "uptrakit-provider-github",
+ "uptrakit-provider-proxmox-helper-scripts",
  "url",
  "uuid",
  "webpki-roots 1.0.5",
@@ -4861,6 +4865,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "time",
+ "tokio",
  "tracing",
  "uptrakit-provider-core",
 ]
@@ -4876,6 +4881,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "time",
+ "tokio",
  "tracing",
  "uptrakit-provider-core",
 ]
@@ -4883,6 +4889,11 @@ dependencies = [
 [[package]]
 name = "uptrakit-provider-proxmox-helper-scripts"
 version = "0.0.1"
+dependencies = [
+ "rootcause",
+ "tokio",
+ "uptrakit-provider-core",
+]
 
 [[package]]
 name = "uptrakit-shared-db"
@@ -4920,6 +4931,7 @@ dependencies = [
  "rootcause",
  "rustls",
  "sea-orm",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

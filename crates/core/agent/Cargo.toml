@@ -26,6 +26,10 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }
+uptrakit-provider-core = { path = "../../providers/core" }
+uptrakit-provider-github = { path = "../../providers/github" }
+uptrakit-provider-docker-registry = { path = "../../providers/docker-registry" }
+uptrakit-provider-proxmox-helper-scripts = { path = "../../providers/proxmox-helper-scripts" }
 rcgen = { workspace = true }
 x509-parser = { workspace = true } # required for rcgen's x509-parser verify feature unification
 reqwest = { workspace = true }

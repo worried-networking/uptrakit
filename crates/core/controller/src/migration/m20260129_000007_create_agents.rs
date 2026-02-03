@@ -26,6 +26,12 @@ impl MigrationTrait for Migration {
                             .default("pending"),
                     )
                     .col(string_uniq(Agents::EnrollmentSecretHash))
+                    .col(
+                        ColumnDef::new(Agents::AgentVersion)
+                            .string()
+                            .not_null()
+                            .default("unknown"),
+                    )
                     .col(timestamp_null(Agents::LastSeenAt))
                     .col(timestamp(Agents::CreatedAt))
                     .col(timestamp(Agents::UpdatedAt))
@@ -105,6 +111,7 @@ enum Agents {
     IpAddress,
     Status,
     EnrollmentSecretHash,
+    AgentVersion,
     LastSeenAt,
     CreatedAt,
     UpdatedAt,

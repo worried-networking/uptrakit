@@ -37,6 +37,7 @@ pub struct AgentResponse {
     pub friendly_name: String,
     pub ip_address: Option<String>,
     pub status: AgentStatus,
+    pub agent_version: String,
     pub last_seen_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,

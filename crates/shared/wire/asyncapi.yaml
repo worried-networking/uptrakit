@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Agent-Controller Protocol
-  version: 0.0.5
+  version: 0.0.6
   description: |
     WebSocket protocol for communication between Uptrakit agents and the controller.
 
@@ -103,6 +103,10 @@ channels:
         $ref: "#/components/messages/caBundleUpdated"
       requestCertRenewal:
         $ref: "#/components/messages/requestCertRenewal"
+      checkVersions:
+        $ref: "#/components/messages/checkVersions"
+      versionCheckResults:
+        $ref: "#/components/messages/versionCheckResults"
 
 operations:
   sendPing:
@@ -281,6 +285,30 @@ operations:
       their certificates. The agent should respond by sending a
       `RenewCertificate` message. Includes a human-readable reason.
 
+  receiveCheckVersions:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/checkVersions"
+    summary: Agent receives a version check request
+    description: |
+      The controller sends this message to request the agent to check
+      installed versions for a list of software items. The agent should
+      respond with a `VersionCheckResults` message containing the results.
+
+  sendVersionCheckResults:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/versionCheckResults"
+    summary: Agent sends version check results
+    description: |
+      The agent sends this message in response to a `CheckVersions` request.
+      Contains the detected installed versions (or errors) for each software
+      item requested.
+
 components:
   securitySchemes:
     mtls:
@@ -412,6 +440,22 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/requestCertRenewalPayload"
+
+    checkVersions:
+      name: check_versions
+      title: Check Versions Message
+      summary: Controller requests version checks for software items
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/checkVersionsPayload"
+
+    versionCheckResults:
+      name: version_check_results
+      title: Version Check Results Message
+      summary: Agent reports version check results
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/versionCheckResultsPayload"
 
   schemas:
     pingPayload:
@@ -677,6 +721,7 @@ components:
       required:
         - type
         - host_info
+        - agent_version
       properties:
         type:
           type: string
@@ -685,6 +730,12 @@ components:
         host_info:
           $ref: "#/components/schemas/hostInfo"
           description: Host machine information
+        agent_version:
+          type: string
+          description: Agent binary version (semver format)
+          examples:
+            - "0.0.1"
+            - "1.2.3"
 
     renewCertificatePayload:
       type: object
@@ -770,3 +821,94 @@ components:
             "CA rotation after backend URL change").
           examples:
             - CA rotation after backend URL change
+
+    checkVersionsPayload:
+      type: object
+      required:
+        - type
+        - assignments
+      properties:
+        type:
+          type: string
+          const: check_versions
+          description: Message type discriminator
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/versionCheckAssignment"
+          description: List of software items to check
+
+    versionCheckAssignment:
+      type: object
+      required:
+        - software_item_id
+        - name
+        - provider_type
+        - package_identifier
+        - config
+      properties:
+        software_item_id:
+          type: string
+          format: uuid
+          description: Software item UUID
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        name:
+          type: string
+          description: Human-readable name for logging
+          examples:
+            - Prometheus
+        provider_type:
+          type: string
+          description: Provider type identifier
+          examples:
+            - github_releases
+            - docker_registry
+            - proxmox_helper_scripts
+        package_identifier:
+          type: string
+          description: Package identifier for the provider
+          examples:
+            - prometheus/prometheus
+            - nginx:latest
+        config:
+          type: object
+          description: Provider-specific configuration
+
+    versionCheckResultsPayload:
+      type: object
+      required:
+        - type
+        - results
+      properties:
+        type:
+          type: string
+          const: version_check_results
+          description: Message type discriminator
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/versionCheckResult"
+          description: Results for each checked software item
+
+    versionCheckResult:
+      type: object
+      required:
+        - software_item_id
+      properties:
+        software_item_id:
+          type: string
+          format: uuid
+          description: Software item UUID
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        installed_version:
+          type: string
+          description: Detected installed version, if any
+          examples:
+            - "2.53.0"
+        error:
+          type: string
+          description: Error message if detection failed
+          examples:
+            - "unsupported provider type"

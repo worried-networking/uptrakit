@@ -14,6 +14,9 @@ use uptrakit_internal_wire::{
     EnrolledPayload, ErrorPayload, PingPayload, PongPayload, RejectedPayload, now_millis,
 };
 
+/// Minimum agent version required for connection.
+const MIN_AGENT_VERSION: &str = "0.0.1";
+
 use crate::AppState;
 use crate::extract::{AgentIdentity, ClientIp};
 use crate::routes::agents::{
@@ -288,6 +291,55 @@ async fn handle_authenticated(
                                 }
                             }
                             AgentMessage::ReportHostInfo(payload) => {
+                                // Check agent version
+                                let agent_ver = match semver::Version::parse(&payload.agent_version) {
+                                    Ok(v) => v,
+                                    Err(_) => {
+                                        tracing::warn!(
+                                            %agent_id,
+                                            version = %payload.agent_version,
+                                            "agent sent invalid version string"
+                                        );
+                                        // Treat invalid version as too old
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: "agent_version_too_old".to_string(),
+                                            message: format!(
+                                                "invalid agent version '{}', minimum required: {MIN_AGENT_VERSION}",
+                                                payload.agent_version
+                                            ),
+                                        });
+                                        if let Some(json) = serialize_msg(&err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
+                                        let _ = close_with_reason(&mut sink, "agent version too old").await;
+                                        break;
+                                    }
+                                };
+
+                                let min_ver = semver::Version::parse(MIN_AGENT_VERSION)
+                                    .expect("MIN_AGENT_VERSION must be valid semver");
+
+                                if agent_ver < min_ver {
+                                    tracing::warn!(
+                                        %agent_id,
+                                        version = %payload.agent_version,
+                                        min_version = MIN_AGENT_VERSION,
+                                        "agent version too old"
+                                    );
+                                    let err = ControllerMessage::Error(ErrorPayload {
+                                        code: "agent_version_too_old".to_string(),
+                                        message: format!(
+                                            "agent version {} is too old, minimum required: {MIN_AGENT_VERSION}",
+                                            payload.agent_version
+                                        ),
+                                    });
+                                    if let Some(json) = serialize_msg(&err) {
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                    }
+                                    let _ = close_with_reason(&mut sink, "agent version too old").await;
+                                    break;
+                                }
+
                                 // Look up agent hostname from DB for host linking
                                 let agent_model = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
                                     .one(&state.db)
@@ -296,6 +348,15 @@ async fn handle_authenticated(
                                     Ok(Some(a)) => a,
                                     _ => continue,
                                 };
+
+                                // Update agent_version in database
+                                let mut active: uptrakit_shared_db::entity::agent::ActiveModel = agent_model.clone().into();
+                                active.agent_version = Set(payload.agent_version.clone());
+                                active.updated_at = Set(time::OffsetDateTime::now_utc());
+                                if let Err(e) = active.update(&state.db).await {
+                                    tracing::error!(error = %e, "failed to update agent_version");
+                                }
+
                                 if let Err(e) = find_or_create_host_and_link(
                                     &state.db,
                                     agent_model.tenant_id,
@@ -362,6 +423,97 @@ async fn handle_authenticated(
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         break;
+                                    }
+                                }
+                            }
+                            AgentMessage::VersionCheckResults(payload) => {
+                                tracing::debug!(%agent_id, count = payload.results.len(), "received VersionCheckResults");
+
+                                // Look up hosts linked to this agent
+                                let host_ids: Vec<uuid::Uuid> = match uptrakit_shared_db::entity::prelude::AgentHost::find()
+                                    .filter(uptrakit_shared_db::entity::agent_host::Column::AgentId.eq(agent_id))
+                                    .all(&state.db)
+                                    .await
+                                {
+                                    Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "failed to look up agent hosts");
+                                        continue;
+                                    }
+                                };
+
+                                if host_ids.is_empty() {
+                                    tracing::debug!(%agent_id, "no hosts linked to agent, skipping version updates");
+                                    continue;
+                                }
+
+                                let now = time::OffsetDateTime::now_utc();
+
+                                for result in &payload.results {
+                                    // Skip results with errors
+                                    if result.error.is_some() {
+                                        tracing::debug!(
+                                            software_item_id = %result.software_item_id,
+                                            error = ?result.error,
+                                            "skipping version result with error"
+                                        );
+                                        continue;
+                                    }
+
+                                    let Some(ref installed_version) = result.installed_version else {
+                                        continue;
+                                    };
+
+                                    // Parse software_item_id as UUID
+                                    let software_item_id = match uuid::Uuid::parse_str(&result.software_item_id) {
+                                        Ok(id) => id,
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                software_item_id = %result.software_item_id,
+                                                "invalid software_item_id UUID"
+                                            );
+                                            continue;
+                                        }
+                                    };
+
+                                    // Update host_software_items for each linked host
+                                    for &host_id in &host_ids {
+                                        // Check if record exists
+                                        match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
+                                            .one(&state.db)
+                                            .await
+                                        {
+                                            Ok(Some(existing)) => {
+                                                // Update existing record
+                                                let mut active: uptrakit_shared_db::entity::host_software_item::ActiveModel = existing.into();
+                                                active.installed_version = Set(Some(installed_version.clone()));
+                                                active.installed_version_detected_at = Set(Some(now));
+                                                if let Err(e) = active.update(&state.db).await {
+                                                    tracing::warn!(
+                                                        error = %e,
+                                                        host_id = %host_id,
+                                                        software_item_id = %software_item_id,
+                                                        "failed to update host_software_item"
+                                                    );
+                                                }
+                                            }
+                                            Ok(None) => {
+                                                // No record exists - skip (don't create unlinked records)
+                                                tracing::debug!(
+                                                    host_id = %host_id,
+                                                    software_item_id = %software_item_id,
+                                                    "no host_software_item record found, skipping"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    host_id = %host_id,
+                                                    software_item_id = %software_item_id,
+                                                    "failed to look up host_software_item"
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -726,6 +878,9 @@ async fn run_enrolled_loop(
                                 if let Some(json) = serialize_msg(&err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
+                            }
+                            AgentMessage::VersionCheckResults(_) => {
+                                // Version checks not supported during enrollment
                             }
                         }
                     }

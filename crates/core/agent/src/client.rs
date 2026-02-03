@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
     AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, HostInfo,
     PingPayload, RenewCertificatePayload, ReportHostInfoPayload, RequestCertificatePayload,
-    now_millis,
+    VersionCheckResult, VersionCheckResultsPayload, now_millis,
 };
 
 use crate::error::{Error, Result};
@@ -466,13 +466,19 @@ pub async fn run_authenticated_loop(
 
     // Send host info immediately after connecting
     let host_info = crate::host_info::collect_host_info();
-    let report_msg = AgentMessage::ReportHostInfo(ReportHostInfoPayload { host_info });
+    let report_msg = AgentMessage::ReportHostInfo(ReportHostInfoPayload {
+        host_info,
+        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+    });
     let report_json = serde_json::to_string(&report_msg).context_to::<Error>()?;
     ws_stream
         .send(Message::Text(report_json.into()))
         .await
         .context_to::<Error>()?;
-    tracing::debug!("sent ReportHostInfo");
+    tracing::debug!(
+        "sent ReportHostInfo with agent_version={}",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let mut shutdown = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
@@ -637,6 +643,37 @@ pub async fn run_authenticated_loop(
                                     break LoopOutcome::Disconnected;
                                 }
                                 tracing::debug!("sent RenewCertificate in response to RequestCertRenewal");
+                            }
+                            ControllerMessage::CheckVersions(payload) => {
+                                tracing::info!(count = payload.assignments.len(), "received CheckVersions request");
+                                let mut results = Vec::with_capacity(payload.assignments.len());
+                                for assignment in &payload.assignments {
+                                    tracing::debug!(
+                                        software_item_id = %assignment.software_item_id,
+                                        name = %assignment.name,
+                                        provider_type = %assignment.provider_type,
+                                        "checking version"
+                                    );
+                                    let (installed_version, error) = crate::version_check::check_version(
+                                        &assignment.provider_type,
+                                        &assignment.package_identifier,
+                                        &assignment.config,
+                                    ).await;
+                                    results.push(VersionCheckResult {
+                                        software_item_id: assignment.software_item_id.clone(),
+                                        installed_version,
+                                        error,
+                                    });
+                                }
+                                let response = AgentMessage::VersionCheckResults(VersionCheckResultsPayload {
+                                    results,
+                                });
+                                let response_json = serde_json::to_string(&response).context_to::<Error>()?;
+                                if let Err(e) = ws_stream.send(Message::Text(response_json.into())).await {
+                                    tracing::error!(error = %e, "failed to send VersionCheckResults");
+                                    break LoopOutcome::Disconnected;
+                                }
+                                tracing::debug!("sent VersionCheckResults");
                             }
                             _ => {
                                 tracing::debug!("ignoring unrecognized message in authenticated loop");
