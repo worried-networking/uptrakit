@@ -5,8 +5,8 @@ Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environ
 ## Component Diagram
 
 ```text
-┌──────────────┐         HTTPS/WSS (Rustls)         ┌──────────────────────┐
-│              │◄───────────────────────────────────── │  Agent (host A)      │
+┌──────────────┐         HTTPS/WSS (Rustls)           ┌──────────────────────┐
+│              │◄──────────────────────────────────── │  Agent (host A)      │
 │              │         outbound-only mTLS           │  local providers     │
 │              │                                      │  sudo allowlists     │
 │  Controller  │◄──────────────────────────────────── └──────────────────────┘
