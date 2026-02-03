@@ -11,7 +11,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     AgentMessage, AgentSettingsPayload, ApprovedPayload, CertificatePayload, ControllerMessage,
-    EnrolledPayload, ErrorPayload, PingPayload, PongPayload, RejectedPayload, now_millis,
+    EnrolledPayload, ErrorPayload, ExecuteUpdatePayload, PingPayload, PongPayload, RejectedPayload,
+    UpdateFinalStatus, UpdateProviderType, now_millis,
+};
+use uptrakit_shared_db::entity::{
+    agent_host, host_software_item, provider_config, software_item, update_history,
 };
 
 /// Minimum agent version required for connection.
@@ -252,6 +256,11 @@ async fn handle_authenticated(
     };
     if sink.send(Message::Text(json.into())).await.is_err() {
         return;
+    }
+
+    // Deliver pending updates for hosts linked to this agent
+    if let Err(e) = deliver_pending_updates(&state, agent_id, &mut sink).await {
+        tracing::error!(error = %e, %agent_id, "failed to deliver pending updates on reconnect");
     }
 
     let mut push_rx = state.agent_connections.register(agent_id).await;
@@ -513,6 +522,98 @@ async fn handle_authenticated(
                                                     "failed to look up host_software_item"
                                                 );
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                            AgentMessage::UpdateStarted(payload) => {
+                                tracing::info!(
+                                    update_id = %payload.update_history_id,
+                                    from_version = ?payload.from_version,
+                                    "update started"
+                                );
+                                // Update status to InProgress and from_version
+                                if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
+                                    && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
+                                        .one(&state.db)
+                                        .await
+                                {
+                                    let mut active: update_history::ActiveModel = record.into();
+                                    active.status = Set(update_history::UpdateStatus::InProgress);
+                                    active.started_at = Set(time::OffsetDateTime::now_utc());
+                                    if payload.from_version.is_some() {
+                                        active.from_version = Set(payload.from_version);
+                                    }
+                                    if let Err(e) = active.update(&state.db).await {
+                                        tracing::warn!(error = %e, "failed to update update_history status");
+                                    }
+                                }
+                            }
+                            AgentMessage::UpdateOutput(payload) => {
+                                tracing::trace!(
+                                    update_id = %payload.update_history_id,
+                                    stream = ?payload.stream,
+                                    "update output"
+                                );
+                                // Append output to update_history.output
+                                if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
+                                    && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
+                                        .one(&state.db)
+                                        .await
+                                {
+                                    let mut active: update_history::ActiveModel = record.clone().into();
+                                    let new_output = format!("{}{}\n", record.output, payload.output);
+                                    active.output = Set(new_output);
+                                    if let Err(e) = active.update(&state.db).await {
+                                        tracing::warn!(error = %e, "failed to append update output");
+                                    }
+                                }
+                            }
+                            AgentMessage::UpdateResult(payload) => {
+                                tracing::info!(
+                                    update_id = %payload.update_history_id,
+                                    status = ?payload.status,
+                                    error = ?payload.error,
+                                    "update result"
+                                );
+                                if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
+                                    && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
+                                        .one(&state.db)
+                                        .await
+                                {
+                                    let mut active: update_history::ActiveModel = record.clone().into();
+                                    active.status = Set(match payload.status {
+                                        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+                                        UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
+                                    });
+                                    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
+                                    // Append final output
+                                    let final_output = if payload.output.is_empty() {
+                                        record.output.clone()
+                                    } else {
+                                        format!("{}{}", record.output, payload.output)
+                                    };
+                                    active.output = Set(final_output);
+                                    if payload.from_version.is_some() {
+                                        active.from_version = Set(payload.from_version);
+                                    }
+                                    if let Err(e) = active.update(&state.db).await {
+                                        tracing::warn!(error = %e, "failed to update update_history result");
+                                    }
+
+                                    // On success, update host_software_item.installed_version
+                                    if payload.status == UpdateFinalStatus::Completed
+                                        && let Some(ref to_version) = payload.to_version
+                                        && let Ok(Some(link)) = uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((record.host_id, record.software_item_id))
+                                            .one(&state.db)
+                                            .await
+                                    {
+                                        let mut link_active: host_software_item::ActiveModel = link.into();
+                                        link_active.installed_version = Set(Some(to_version.clone()));
+                                        link_active.installed_version_detected_at = Set(Some(time::OffsetDateTime::now_utc()));
+                                        link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
+                                        if let Err(e) = link_active.update(&state.db).await {
+                                            tracing::warn!(error = %e, "failed to update host_software_item installed_version");
                                         }
                                     }
                                 }
@@ -882,6 +983,18 @@ async fn run_enrolled_loop(
                             AgentMessage::VersionCheckResults(_) => {
                                 // Version checks not supported during enrollment
                             }
+                            // Update messages are only valid for authenticated connections
+                            AgentMessage::UpdateStarted(_)
+                            | AgentMessage::UpdateOutput(_)
+                            | AgentMessage::UpdateResult(_) => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "bad_request".to_string(),
+                                    message: "update messages not available during enrollment".to_string(),
+                                });
+                                if let Some(json) = serialize_msg(&err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
+                            }
                         }
                     }
                     Message::Close(_) => break,
@@ -927,4 +1040,145 @@ async fn close_with_reason(
         reason: reason.into(),
     })))
     .await
+}
+
+/// Deliver pending updates for hosts linked to this agent.
+///
+/// On agent reconnect, we check for any `update_history` records with `status = Pending`
+/// for hosts linked to this agent and send them to the agent.
+async fn deliver_pending_updates(
+    state: &Arc<AppState>,
+    agent_id: uuid::Uuid,
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+) -> Result<(), String> {
+    // 1. Find host_ids linked to this agent
+    let host_links = agent_host::Entity::find()
+        .filter(agent_host::Column::AgentId.eq(agent_id))
+        .all(&state.db)
+        .await
+        .map_err(|e| format!("failed to find agent hosts: {e}"))?;
+
+    if host_links.is_empty() {
+        return Ok(());
+    }
+
+    let host_ids: Vec<uuid::Uuid> = host_links.iter().map(|l| l.host_id).collect();
+
+    // 2. Query pending update_history records for those hosts
+    let pending_updates = update_history::Entity::find()
+        .filter(update_history::Column::HostId.is_in(host_ids))
+        .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
+        .all(&state.db)
+        .await
+        .map_err(|e| format!("failed to find pending updates: {e}"))?;
+
+    if pending_updates.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        %agent_id,
+        count = pending_updates.len(),
+        "delivering pending updates on reconnect"
+    );
+
+    // 3. Build ExecuteUpdatePayload for each and send
+    for update_record in pending_updates {
+        // Load software item
+        let item = match software_item::Entity::find_by_id(update_record.software_item_id)
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    software_item_id = %update_record.software_item_id,
+                    "software item not found or deactivated, skipping pending update"
+                );
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load software item for pending update");
+                continue;
+            }
+        };
+
+        // Load provider config
+        let provider_cfg = match provider_config::Entity::find_by_id(item.provider_config_id)
+            .filter(provider_config::Column::DeactivatedAt.is_null())
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    provider_config_id = %item.provider_config_id,
+                    "provider config not found or deactivated, skipping pending update"
+                );
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load provider config for pending update");
+                continue;
+            }
+        };
+
+        // Convert provider type
+        let provider_type = match provider_cfg.provider_type.as_str() {
+            "github_releases" => UpdateProviderType::GithubReleases,
+            "proxmox_helper_scripts" => UpdateProviderType::ProxmoxHelperScripts,
+            "docker_registry" => UpdateProviderType::DockerRegistry,
+            other => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    provider_type = other,
+                    "unknown provider type, skipping pending update"
+                );
+                continue;
+            }
+        };
+
+        // Merge hooks and config
+        let (pre_update_commands, post_update_commands) =
+            crate::update_hooks::merge_hooks(&provider_cfg.config, item.config_override.as_ref());
+        let merged_config =
+            crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
+
+        // Build payload
+        let execute_payload = ExecuteUpdatePayload {
+            update_history_id: update_record.id.to_string(),
+            software_item_id: item.id.to_string(),
+            software_item_name: item.name.clone(),
+            package_identifier: item.package_identifier.clone(),
+            to_version: update_record.to_version.clone(),
+            provider_type,
+            provider_config: merged_config,
+            pre_update_commands,
+            post_update_commands,
+            release_info: None, // Not stored in update_history
+            timeout_seconds: 300,
+        };
+
+        // Send to agent
+        let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
+        let Some(json) = serialize_msg(&msg) else {
+            continue;
+        };
+
+        if sink.send(Message::Text(json.into())).await.is_err() {
+            return Err("websocket send failed".to_string());
+        }
+
+        tracing::info!(
+            update_id = %update_record.id,
+            %agent_id,
+            software = %item.name,
+            "delivered pending update on reconnect"
+        );
+    }
+
+    Ok(())
 }

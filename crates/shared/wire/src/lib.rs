@@ -20,6 +20,9 @@ pub enum AgentMessage {
     RenewCertificate(RenewCertificatePayload),
     ReportHostInfo(ReportHostInfoPayload),
     VersionCheckResults(VersionCheckResultsPayload),
+    UpdateStarted(UpdateStartedPayload),
+    UpdateOutput(UpdateOutputPayload),
+    UpdateResult(UpdateResultPayload),
 }
 
 /// Messages sent from the controller to the agent.
@@ -36,6 +39,7 @@ pub enum ControllerMessage {
     CaBundleUpdated(CaBundleUpdatedPayload),
     RequestCertRenewal(RequestCertRenewalPayload),
     CheckVersions(CheckVersionsPayload),
+    ExecuteUpdate(Box<ExecuteUpdatePayload>),
 }
 
 /// Payload for ping messages.
@@ -225,6 +229,112 @@ pub struct VersionCheckResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
     /// Error message if detection failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+// --- Update execution messages ---
+
+/// Provider type for update execution (matches ProviderType in provider-core).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateProviderType {
+    GithubReleases,
+    ProxmoxHelperScripts,
+    DockerRegistry,
+}
+
+/// Output stream source for UpdateOutput messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputStreamType {
+    #[default]
+    Stdout,
+    Stderr,
+    PreHook,
+    PostHook,
+    System,
+}
+
+/// Final status of an update execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateFinalStatus {
+    Completed,
+    Failed,
+}
+
+/// Default timeout for update execution in seconds.
+fn default_update_timeout() -> u32 {
+    300
+}
+
+/// Simplified release info sent to agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseInfo {
+    pub tag: String,
+    pub release_url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<ReleaseAssetInfo>,
+}
+
+/// Information about a release asset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseAssetInfo {
+    pub name: String,
+    pub download_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+/// Controller -> Agent: Trigger an update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecuteUpdatePayload {
+    pub update_history_id: String,
+    pub software_item_id: String,
+    pub software_item_name: String,
+    pub package_identifier: String,
+    pub to_version: String,
+    pub provider_type: UpdateProviderType,
+    /// Merged provider config (base + override).
+    pub provider_config: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_update_commands: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub post_update_commands: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_info: Option<ReleaseInfo>,
+    #[serde(default = "default_update_timeout")]
+    pub timeout_seconds: u32,
+}
+
+/// Agent -> Controller: Update is starting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateStartedPayload {
+    pub update_history_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_version: Option<String>,
+}
+
+/// Agent -> Controller: Streaming output line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateOutputPayload {
+    pub update_history_id: String,
+    pub output: String,
+    #[serde(default)]
+    pub stream: OutputStreamType,
+}
+
+/// Agent -> Controller: Final result of update execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateResultPayload {
+    pub update_history_id: String,
+    pub status: UpdateFinalStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_version: Option<String>,
+    pub output: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -596,5 +706,258 @@ mod tests {
         let json = serde_json::to_string(&assignment).unwrap();
         let deserialized: VersionCheckAssignment = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, assignment);
+    }
+
+    // --- Update message tests ---
+
+    #[test]
+    fn execute_update_serialization_roundtrip() {
+        let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            update_history_id: "01936a1e-7e8c-7f00-8000-000000000001".to_string(),
+            software_item_id: "01936a1e-7e8c-7f00-8000-000000000002".to_string(),
+            software_item_name: "Node.js".to_string(),
+            package_identifier: "nodejs".to_string(),
+            to_version: "20.10.0".to_string(),
+            provider_type: UpdateProviderType::GithubReleases,
+            provider_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+            pre_update_commands: vec!["systemctl stop myapp".to_string()],
+            post_update_commands: vec!["systemctl start myapp".to_string()],
+            release_info: Some(ReleaseInfo {
+                tag: "v20.10.0".to_string(),
+                release_url: "https://github.com/nodejs/node/releases/tag/v20.10.0".to_string(),
+                assets: vec![ReleaseAssetInfo {
+                    name: "node-v20.10.0-linux-x64.tar.gz".to_string(),
+                    download_url: "https://github.com/nodejs/node/releases/download/v20.10.0/node-v20.10.0-linux-x64.tar.gz".to_string(),
+                    size: Some(25_000_000),
+                }],
+            }),
+            timeout_seconds: 600,
+        }));
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"execute_update"#));
+        assert!(json.contains(r#""provider_type":"github_releases"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn execute_update_minimal_serialization() {
+        let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            update_history_id: "id-1".to_string(),
+            software_item_id: "id-2".to_string(),
+            software_item_name: "Redis".to_string(),
+            package_identifier: "redis-server".to_string(),
+            to_version: "7.2.0".to_string(),
+            provider_type: UpdateProviderType::ProxmoxHelperScripts,
+            provider_config: serde_json::json!({}),
+            pre_update_commands: vec![],
+            post_update_commands: vec![],
+            release_info: None,
+            timeout_seconds: 300,
+        }));
+        let json = serde_json::to_string(&msg).unwrap();
+        // Empty vectors should be omitted
+        assert!(!json.contains("pre_update_commands"));
+        assert!(!json.contains("post_update_commands"));
+        assert!(!json.contains("release_info"));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn execute_update_backward_compat_default_timeout() {
+        let json = r#"{
+            "type": "execute_update",
+            "update_history_id": "id-1",
+            "software_item_id": "id-2",
+            "software_item_name": "Test",
+            "package_identifier": "test",
+            "to_version": "1.0.0",
+            "provider_type": "github_releases",
+            "provider_config": {}
+        }"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        if let ControllerMessage::ExecuteUpdate(payload) = msg {
+            assert_eq!(payload.timeout_seconds, 300);
+            assert!(payload.pre_update_commands.is_empty());
+            assert!(payload.post_update_commands.is_empty());
+        } else {
+            panic!("Expected ExecuteUpdate");
+        }
+    }
+
+    #[test]
+    fn update_started_serialization_roundtrip() {
+        let msg = AgentMessage::UpdateStarted(UpdateStartedPayload {
+            update_history_id: "id-1".to_string(),
+            from_version: Some("1.0.0".to_string()),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"update_started"#));
+        assert!(json.contains(r#""from_version":"1.0.0"#));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn update_started_omits_none_from_version() {
+        let msg = AgentMessage::UpdateStarted(UpdateStartedPayload {
+            update_history_id: "id-1".to_string(),
+            from_version: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("from_version"));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn update_output_serialization_roundtrip() {
+        let msg = AgentMessage::UpdateOutput(UpdateOutputPayload {
+            update_history_id: "id-1".to_string(),
+            output: "Downloading package...".to_string(),
+            stream: OutputStreamType::Stdout,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"update_output"#));
+        assert!(json.contains(r#""stream":"stdout"#));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn update_output_all_stream_types() {
+        for (stream, expected) in [
+            (OutputStreamType::Stdout, "stdout"),
+            (OutputStreamType::Stderr, "stderr"),
+            (OutputStreamType::PreHook, "pre_hook"),
+            (OutputStreamType::PostHook, "post_hook"),
+            (OutputStreamType::System, "system"),
+        ] {
+            let msg = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                update_history_id: "id-1".to_string(),
+                output: "test".to_string(),
+                stream,
+            });
+            let json = serde_json::to_string(&msg).unwrap();
+            assert!(json.contains(&format!(r#""stream":"{expected}""#)));
+        }
+    }
+
+    #[test]
+    fn update_output_default_stream() {
+        let json = r#"{"type":"update_output","update_history_id":"id-1","output":"test"}"#;
+        let msg: AgentMessage = serde_json::from_str(json).unwrap();
+        if let AgentMessage::UpdateOutput(payload) = msg {
+            assert_eq!(payload.stream, OutputStreamType::Stdout);
+        } else {
+            panic!("Expected UpdateOutput");
+        }
+    }
+
+    #[test]
+    fn update_result_completed_serialization_roundtrip() {
+        let msg = AgentMessage::UpdateResult(UpdateResultPayload {
+            update_history_id: "id-1".to_string(),
+            status: UpdateFinalStatus::Completed,
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+            output: "Update completed successfully".to_string(),
+            error: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"update_result"#));
+        assert!(json.contains(r#""status":"completed"#));
+        assert!(!json.contains("error"));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn update_result_failed_serialization_roundtrip() {
+        let msg = AgentMessage::UpdateResult(UpdateResultPayload {
+            update_history_id: "id-1".to_string(),
+            status: UpdateFinalStatus::Failed,
+            from_version: None,
+            to_version: None,
+            output: "Error output".to_string(),
+            error: Some("Package not found".to_string()),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"update_result"#));
+        assert!(json.contains(r#""status":"failed"#));
+        assert!(json.contains(r#""error":"Package not found"#));
+        let deserialized: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn update_provider_type_all_variants() {
+        for (provider, expected) in [
+            (UpdateProviderType::GithubReleases, "github_releases"),
+            (
+                UpdateProviderType::ProxmoxHelperScripts,
+                "proxmox_helper_scripts",
+            ),
+            (UpdateProviderType::DockerRegistry, "docker_registry"),
+        ] {
+            let json = serde_json::to_string(&provider).unwrap();
+            assert_eq!(json, format!(r#""{expected}""#));
+            let deserialized: UpdateProviderType = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, provider);
+        }
+    }
+
+    #[test]
+    fn release_info_serialization_roundtrip() {
+        let info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com/release".to_string(),
+            assets: vec![
+                ReleaseAssetInfo {
+                    name: "app.tar.gz".to_string(),
+                    download_url: "https://example.com/app.tar.gz".to_string(),
+                    size: Some(1024),
+                },
+                ReleaseAssetInfo {
+                    name: "app.deb".to_string(),
+                    download_url: "https://example.com/app.deb".to_string(),
+                    size: None,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: ReleaseInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn release_info_empty_assets_omitted() {
+        let info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com/release".to_string(),
+            assets: vec![],
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(!json.contains("assets"));
+        let deserialized: ReleaseInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn execute_update_backward_compat_extra_fields() {
+        let json = r#"{
+            "type": "execute_update",
+            "update_history_id": "id-1",
+            "software_item_id": "id-2",
+            "software_item_name": "Test",
+            "package_identifier": "test",
+            "to_version": "1.0.0",
+            "provider_type": "github_releases",
+            "provider_config": {},
+            "unknown_field": "ignored"
+        }"#;
+        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
+        assert!(matches!(msg, ControllerMessage::ExecuteUpdate(_)));
     }
 }

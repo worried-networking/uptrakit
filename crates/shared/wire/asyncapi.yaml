@@ -107,6 +107,14 @@ channels:
         $ref: "#/components/messages/checkVersions"
       versionCheckResults:
         $ref: "#/components/messages/versionCheckResults"
+      executeUpdate:
+        $ref: "#/components/messages/executeUpdate"
+      updateStarted:
+        $ref: "#/components/messages/updateStarted"
+      updateOutput:
+        $ref: "#/components/messages/updateOutput"
+      updateResult:
+        $ref: "#/components/messages/updateResult"
 
 operations:
   sendPing:
@@ -309,6 +317,57 @@ operations:
       Contains the detected installed versions (or errors) for each software
       item requested.
 
+  receiveExecuteUpdate:
+    action: receive
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/executeUpdate"
+    summary: Agent receives a software update command
+    description: |
+      The controller pushes this message to trigger a software update on the agent.
+      The message includes the target version, provider configuration, and optional
+      pre/post-update commands. The agent should acknowledge with `UpdateStarted`,
+      stream progress via `UpdateOutput`, and report the final result with `UpdateResult`.
+      Updates may be queued and delivered on reconnect if the agent was offline.
+
+  sendUpdateStarted:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/updateStarted"
+    summary: Agent reports that an update is starting
+    description: |
+      Sent immediately after receiving `ExecuteUpdate` to acknowledge the update
+      command and report the current installed version (from_version). The controller
+      updates the update_history record to `in_progress` status.
+
+  sendUpdateOutput:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/updateOutput"
+    summary: Agent streams update output to the controller
+    description: |
+      Sent during update execution to stream stdout/stderr output, pre/post-hook
+      output, or system messages. The controller appends this to the update_history
+      output field for logging and debugging purposes.
+
+  sendUpdateResult:
+    action: send
+    channel:
+      $ref: "#/channels/agentConnection"
+    messages:
+      - $ref: "#/channels/agentConnection/messages/updateResult"
+    summary: Agent reports the final update result
+    description: |
+      Sent when the update execution completes (successfully or with failure).
+      Includes the final status, detected versions, accumulated output, and any
+      error message. On success, the controller updates the host_software_item
+      installed_version.
+
 components:
   securitySchemes:
     mtls:
@@ -456,6 +515,38 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/versionCheckResultsPayload"
+
+    executeUpdate:
+      name: execute_update
+      title: Execute Update Message
+      summary: Controller triggers a software update on the agent
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/executeUpdatePayload"
+
+    updateStarted:
+      name: update_started
+      title: Update Started Message
+      summary: Agent acknowledges that an update is starting
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/updateStartedPayload"
+
+    updateOutput:
+      name: update_output
+      title: Update Output Message
+      summary: Agent streams update output to the controller
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/updateOutputPayload"
+
+    updateResult:
+      name: update_result
+      title: Update Result Message
+      summary: Agent reports the final update result
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/updateResultPayload"
 
   schemas:
     pingPayload:
@@ -912,3 +1003,230 @@ components:
           description: Error message if detection failed
           examples:
             - "unsupported provider type"
+
+    updateProviderType:
+      type: string
+      enum:
+        - github_releases
+        - proxmox_helper_scripts
+        - docker_registry
+      description: Provider type for update execution
+
+    outputStreamType:
+      type: string
+      enum:
+        - stdout
+        - stderr
+        - pre_hook
+        - post_hook
+        - system
+      default: stdout
+      description: Output stream source for update output messages
+
+    updateFinalStatus:
+      type: string
+      enum:
+        - completed
+        - failed
+      description: Final status of an update execution
+
+    releaseAssetInfo:
+      type: object
+      required:
+        - name
+        - download_url
+      properties:
+        name:
+          type: string
+          description: Asset filename
+          examples:
+            - node-v20.0.0-linux-x64.tar.gz
+        download_url:
+          type: string
+          format: uri
+          description: Direct download URL for the asset
+          examples:
+            - https://github.com/nodejs/node/releases/download/v20.0.0/node-v20.0.0-linux-x64.tar.gz
+        size:
+          type: integer
+          format: int64
+          description: Optional asset size in bytes
+
+    releaseInfo:
+      type: object
+      required:
+        - tag
+        - release_url
+      properties:
+        tag:
+          type: string
+          description: Release tag (version)
+          examples:
+            - v20.0.0
+        release_url:
+          type: string
+          format: uri
+          description: URL to the release page
+          examples:
+            - https://github.com/nodejs/node/releases/tag/v20.0.0
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/releaseAssetInfo"
+          description: Optional list of release assets
+          default: []
+
+    executeUpdatePayload:
+      type: object
+      required:
+        - type
+        - update_history_id
+        - software_item_id
+        - software_item_name
+        - package_identifier
+        - to_version
+        - provider_type
+        - provider_config
+      properties:
+        type:
+          type: string
+          const: execute_update
+          description: Message type discriminator
+        update_history_id:
+          type: string
+          format: uuid
+          description: UUID of the update_history record for tracking
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        software_item_id:
+          type: string
+          format: uuid
+          description: UUID of the software item being updated
+        software_item_name:
+          type: string
+          description: Display name of the software item
+          examples:
+            - Node.js
+        package_identifier:
+          type: string
+          description: Provider-specific package identifier
+          examples:
+            - nodejs/node
+        to_version:
+          type: string
+          description: Target version to update to
+          examples:
+            - v20.0.0
+        provider_type:
+          $ref: "#/components/schemas/updateProviderType"
+        provider_config:
+          type: object
+          description: Merged provider configuration (base + override)
+        pre_update_commands:
+          type: array
+          items:
+            type: string
+          description: Commands to run before the update
+          default: []
+          examples:
+            - ["systemctl stop app"]
+        post_update_commands:
+          type: array
+          items:
+            type: string
+          description: Commands to run after the update
+          default: []
+          examples:
+            - ["systemctl start app"]
+        release_info:
+          $ref: "#/components/schemas/releaseInfo"
+          description: Optional release information (for providers that need it)
+        timeout_seconds:
+          type: integer
+          format: int32
+          description: Maximum execution time in seconds
+          default: 300
+          examples:
+            - 300
+
+    updateStartedPayload:
+      type: object
+      required:
+        - type
+        - update_history_id
+      properties:
+        type:
+          type: string
+          const: update_started
+          description: Message type discriminator
+        update_history_id:
+          type: string
+          format: uuid
+          description: UUID of the update_history record
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        from_version:
+          type: string
+          description: Currently installed version (detected by agent)
+          examples:
+            - v18.0.0
+
+    updateOutputPayload:
+      type: object
+      required:
+        - type
+        - update_history_id
+        - output
+      properties:
+        type:
+          type: string
+          const: update_output
+          description: Message type discriminator
+        update_history_id:
+          type: string
+          format: uuid
+          description: UUID of the update_history record
+        output:
+          type: string
+          description: Output line from the update process
+          examples:
+            - "Downloading v20.0.0..."
+        stream:
+          $ref: "#/components/schemas/outputStreamType"
+          description: Source of the output
+
+    updateResultPayload:
+      type: object
+      required:
+        - type
+        - update_history_id
+        - status
+        - output
+      properties:
+        type:
+          type: string
+          const: update_result
+          description: Message type discriminator
+        update_history_id:
+          type: string
+          format: uuid
+          description: UUID of the update_history record
+        status:
+          $ref: "#/components/schemas/updateFinalStatus"
+          description: Final status of the update
+        from_version:
+          type: string
+          description: Version before the update
+          examples:
+            - v18.0.0
+        to_version:
+          type: string
+          description: Version after the update (if detected)
+          examples:
+            - v20.0.0
+        output:
+          type: string
+          description: Complete accumulated output from the update
+        error:
+          type: string
+          description: Error message (if status is failed)

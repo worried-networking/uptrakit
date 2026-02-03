@@ -52,6 +52,19 @@ pub enum Error {
 
     #[error("client_id collision, retrying with new ID")]
     ClientIdCollision,
+
+    #[error("update execution failed: {0}")]
+    UpdateExecution(String),
+
+    #[allow(dead_code)]
+    #[error("update timeout after {0} seconds")]
+    UpdateTimeout(u32),
+
+    #[error("Pre-update hook failed: {0}")]
+    PreUpdateHookFailed(String),
+
+    #[error("Post-update hook failed: {0}")]
+    PostUpdateHookFailed(String),
 }
 
 impl Error {

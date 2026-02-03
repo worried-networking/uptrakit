@@ -13,7 +13,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
     AgentMessage, CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, HostInfo,
     PingPayload, RenewCertificatePayload, ReportHostInfoPayload, RequestCertificatePayload,
-    VersionCheckResult, VersionCheckResultsPayload, now_millis,
+    UpdateOutputPayload, UpdateResultPayload, UpdateStartedPayload, VersionCheckResult,
+    VersionCheckResultsPayload, now_millis,
 };
 
 use crate::error::{Error, Result};
@@ -674,6 +675,107 @@ pub async fn run_authenticated_loop(
                                     break LoopOutcome::Disconnected;
                                 }
                                 tracing::debug!("sent VersionCheckResults");
+                            }
+                            ControllerMessage::ExecuteUpdate(payload) => {
+                                let payload = *payload;
+                                tracing::info!(
+                                    update_id = %payload.update_history_id,
+                                    software = %payload.software_item_name,
+                                    version = %payload.to_version,
+                                    "received update request"
+                                );
+
+                                // Create a channel for output streaming
+                                let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
+
+                                // Clone what we need for the spawned task
+                                let update_history_id = payload.update_history_id.clone();
+
+                                // Spawn update execution task
+                                let mut update_handle = tokio::spawn(async move {
+                                    crate::update::execute_update(payload, output_tx).await
+                                });
+
+                                // Send UpdateStarted (we'll get started info from the result)
+                                // For now, send a placeholder started message
+                                let started_msg = AgentMessage::UpdateStarted(UpdateStartedPayload {
+                                    update_history_id: update_history_id.clone(),
+                                    from_version: None,
+                                });
+                                let started_json = serde_json::to_string(&started_msg).context_to::<Error>()?;
+                                if let Err(e) = ws_stream.send(Message::Text(started_json.into())).await {
+                                    tracing::error!(error = %e, "failed to send UpdateStarted");
+                                }
+
+                                // Stream output lines to controller
+                                loop {
+                                    tokio::select! {
+                                        Some(output_msg) = output_rx.recv() => {
+                                            let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                                                update_history_id: update_history_id.clone(),
+                                                output: output_msg.output,
+                                                stream: output_msg.stream,
+                                            });
+                                            let output_json = match serde_json::to_string(&output) {
+                                                Ok(j) => j,
+                                                Err(e) => {
+                                                    tracing::warn!(error = %e, "failed to serialize UpdateOutput");
+                                                    continue;
+                                                }
+                                            };
+                                            if let Err(e) = ws_stream.send(Message::Text(output_json.into())).await {
+                                                tracing::warn!(error = %e, "failed to send UpdateOutput");
+                                            }
+                                        }
+                                        result = &mut update_handle => {
+                                            match result {
+                                                Ok(exec_result) => {
+                                                    // Send final result
+                                                    let result_msg = AgentMessage::UpdateResult(exec_result.result);
+                                                    let result_json = match serde_json::to_string(&result_msg) {
+                                                        Ok(j) => j,
+                                                        Err(e) => {
+                                                            tracing::error!(error = %e, "failed to serialize UpdateResult");
+                                                            break;
+                                                        }
+                                                    };
+                                                    if let Err(e) = ws_stream.send(Message::Text(result_json.into())).await {
+                                                        tracing::error!(error = %e, "failed to send UpdateResult");
+                                                    }
+                                                    tracing::info!(update_id = %update_history_id, "update execution completed");
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!(error = %e, "update task panicked");
+                                                    // Send a failed result
+                                                    let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+                                                        update_history_id: update_history_id.clone(),
+                                                        status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
+                                                        from_version: None,
+                                                        to_version: None,
+                                                        output: String::new(),
+                                                        error: Some("Update task panicked".to_string()),
+                                                    });
+                                                    if let Ok(json) = serde_json::to_string(&result_msg) {
+                                                        let _ = ws_stream.send(Message::Text(json.into())).await;
+                                                    }
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // Drain any remaining output messages
+                                while let Ok(output_msg) = output_rx.try_recv() {
+                                    let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                                        update_history_id: update_history_id.clone(),
+                                        output: output_msg.output,
+                                        stream: output_msg.stream,
+                                    });
+                                    if let Ok(json) = serde_json::to_string(&output) {
+                                        let _ = ws_stream.send(Message::Text(json.into())).await;
+                                    }
+                                }
                             }
                             _ => {
                                 tracing::debug!("ignoring unrecognized message in authenticated loop");

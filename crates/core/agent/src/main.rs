@@ -3,6 +3,7 @@ mod client;
 mod error;
 mod host_info;
 mod state;
+mod update;
 mod version_check;
 
 use std::path::Path;

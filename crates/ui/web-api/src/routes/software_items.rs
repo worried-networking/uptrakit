@@ -17,14 +17,16 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, prelude::*, provider_config, software_item,
+    agent_host, host, host_software_item, prelude::*, provider_config, software_item,
+    update_history,
 };
 
 use super::provider_configs::validate_provider_config;
 
 pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
-    SoftwareItemHostSummary, SoftwareItemResponse, UpdateSoftwareItemRequest,
+    SoftwareItemHostSummary, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
+    TriggerUpdateStatus, UpdateSoftwareItemRequest,
 };
 
 // --- Helpers ---
@@ -774,6 +776,276 @@ pub async fn unassign_host(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+/// Trigger a software update for a specific host.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/{id}/hosts/{host_id}/update",
+    params(
+        ("id" = String, Path, description = "Software item UUID"),
+        ("host_id" = String, Path, description = "Host UUID")
+    ),
+    request_body = TriggerUpdateRequest,
+    responses(
+        (status = 200, description = "Update triggered", body = TriggerUpdateResponse),
+        (status = 400, description = "Invalid input or validation failed"),
+        (status = 404, description = "Software item, host, or agent not found"),
+        (status = 409, description = "Update already in progress")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn trigger_update(
+    State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path((id, host_id_str)): Path<(String, String)>,
+    Json(req): Json<TriggerUpdateRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid software item UUID").into_response(),
+    };
+
+    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host UUID").into_response(),
+    };
+
+    // 1. Verify software item exists and is active
+    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+        Some(i) => i,
+        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+    };
+
+    // 2. Verify host exists, is active, and belongs to tenant
+    let host_record = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(h)) => h,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Host not found").into_response(),
+        Err(e) => {
+            tracing::error!("Failed to lookup host: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 3. Verify host is assigned to software item
+    let _link = match HostSoftwareItem::find_by_id((host_id, item_id))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Host is not assigned to this software item",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to check host-software-item link: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 4. Find agent linked to host
+    let agent_link = match AgentHost::find()
+        .filter(agent_host::Column::HostId.eq(host_id))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, "No agent linked to this host").into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to find agent for host: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Verify agent exists and is approved
+    let agent = match Agent::find_by_id(agent_link.agent_id)
+        .filter(uptrakit_shared_db::entity::agent::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(a)) => {
+            if a.status != "approved" {
+                return (StatusCode::BAD_REQUEST, "Agent is not approved").into_response();
+            }
+            a
+        }
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, "Agent not found or deactivated").into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to lookup agent: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 5. Check for pending/in_progress updates for this (host_id, software_item_id)
+    let existing_update = UpdateHistory::find()
+        .filter(update_history::Column::HostId.eq(host_id))
+        .filter(update_history::Column::SoftwareItemId.eq(item_id))
+        .filter(update_history::Column::Status.is_in([
+            update_history::UpdateStatus::Pending,
+            update_history::UpdateStatus::InProgress,
+        ]))
+        .one(&state.db)
+        .await;
+
+    match existing_update {
+        Ok(Some(_)) => {
+            return (
+                StatusCode::CONFLICT,
+                "An update is already pending or in progress",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to check existing updates: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        Ok(None) => {}
+    }
+
+    // 6. Load provider config
+    let provider_config =
+        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
+            .await
+        {
+            Some(c) => c,
+            None => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Provider config not found",
+                )
+                    .into_response();
+            }
+        };
+
+    // 7. Create update_history record with status = pending
+    let now = OffsetDateTime::now_utc();
+    let update_history_id = crate::auth::token::generate_uuid();
+    let update_record = update_history::ActiveModel {
+        id: Set(update_history_id),
+        host_id: Set(host_id),
+        software_item_id: Set(item_id),
+        from_version: Set(None), // Will be updated when agent reports
+        to_version: Set(req.to_version.clone()),
+        status: Set(update_history::UpdateStatus::Pending),
+        output: Set(String::new()),
+        initiated_by: Set(user.user_id.to_string()),
+        started_at: Set(now),
+        completed_at: Set(None),
+        created_at: Set(now),
+    };
+
+    if let Err(e) = update_record.insert(&state.db).await {
+        tracing::error!("Failed to create update history record: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // 8. Merge hooks from provider config + config_override
+    let (pre_update_commands, post_update_commands) =
+        crate::update_hooks::merge_hooks(&provider_config.config, item.config_override.as_ref());
+
+    // 9. Merge config
+    let merged_config =
+        crate::update_hooks::merge_config(&provider_config.config, item.config_override.as_ref());
+
+    // 10. Convert provider type
+    let provider_type = match provider_config.provider_type.as_str() {
+        "github_releases" => uptrakit_internal_wire::UpdateProviderType::GithubReleases,
+        "proxmox_helper_scripts" => {
+            uptrakit_internal_wire::UpdateProviderType::ProxmoxHelperScripts
+        }
+        "docker_registry" => uptrakit_internal_wire::UpdateProviderType::DockerRegistry,
+        other => {
+            tracing::error!("Unknown provider type: {other}");
+            return (StatusCode::BAD_REQUEST, "Unknown provider type").into_response();
+        }
+    };
+
+    // 11. Build ExecuteUpdatePayload
+    let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
+        update_history_id: update_history_id.to_string(),
+        software_item_id: item_id.to_string(),
+        software_item_name: item.name.clone(),
+        package_identifier: item.package_identifier.clone(),
+        to_version: req.to_version,
+        provider_type,
+        provider_config: merged_config,
+        pre_update_commands,
+        post_update_commands,
+        release_info: req
+            .release_info
+            .map(|ri| uptrakit_internal_wire::ReleaseInfo {
+                tag: ri.tag,
+                release_url: ri.release_url,
+                assets: ri
+                    .assets
+                    .into_iter()
+                    .map(|a| uptrakit_internal_wire::ReleaseAssetInfo {
+                        name: a.name,
+                        download_url: a.download_url,
+                        size: a.size,
+                    })
+                    .collect(),
+            }),
+        timeout_seconds: 300, // Default timeout
+    };
+
+    // 12. Check if agent is connected and send
+    let agent_connected = state.agent_connections.is_connected(&agent.id).await;
+    let status = if agent_connected {
+        let msg =
+            uptrakit_internal_wire::ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
+        if state.agent_connections.send(&agent.id, msg).await {
+            tracing::info!(
+                update_id = %update_history_id,
+                agent_id = %agent.id,
+                host = %host_record.friendly_name,
+                software = %item.name,
+                "update sent to connected agent"
+            );
+            TriggerUpdateStatus::Pending
+        } else {
+            tracing::info!(
+                update_id = %update_history_id,
+                agent_id = %agent.id,
+                "agent disconnected during send, update queued"
+            );
+            TriggerUpdateStatus::Queued
+        }
+    } else {
+        tracing::info!(
+            update_id = %update_history_id,
+            agent_id = %agent.id,
+            host = %host_record.friendly_name,
+            software = %item.name,
+            "agent offline, update queued for reconnect"
+        );
+        TriggerUpdateStatus::Queued
+    };
+
+    let resp = TriggerUpdateResponse {
+        update_history_id: update_history_id.to_string(),
+        status,
+    };
+
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ pub mod routes;
 pub mod setting_key;
 pub mod settings;
 pub mod settings_store;
+pub mod update_hooks;
 
 pub use setting_key::SettingKey;
 
@@ -169,6 +170,7 @@ pub struct AppState {
         routes::software_items::delete_software_item,
         routes::software_items::assign_hosts,
         routes::software_items::unassign_host,
+        routes::software_items::trigger_update,
         routes::settings_ca::rotate_ca,
         routes::update_history::list_update_history,
         routes::update_history::get_update_history
@@ -235,6 +237,9 @@ pub struct AppState {
             routes::software_items::SoftwareItemResponse,
             routes::software_items::SoftwareItemDetailResponse,
             routes::software_items::SoftwareItemHostSummary,
+            routes::software_items::TriggerUpdateRequest,
+            routes::software_items::TriggerUpdateResponse,
+            routes::software_items::TriggerUpdateStatus,
             routes::settings_ca::RotateCaResponse,
             routes::update_history::UpdateHistoryResponse,
             routes::update_history::UpdateStatus
@@ -374,6 +379,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::software_items::delete_software_item))
         .routes(routes!(routes::software_items::assign_hosts))
         .routes(routes!(routes::software_items::unassign_host))
+        .routes(routes!(routes::software_items::trigger_update))
         .routes(routes!(routes::update_history::list_update_history))
         .routes(routes!(routes::update_history::get_update_history))
         .route_layer(axum_mw::from_fn_with_state(

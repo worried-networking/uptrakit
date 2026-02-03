@@ -116,7 +116,7 @@ Essential infrastructure needed before feature development.
   - [x] Agent registration message
   - [ ] Software inventory report message
   - [x] Version check request/response
-  - [ ] Update command message
+  - [x] Update command message (ExecuteUpdate, UpdateStarted, UpdateOutput, UpdateResult)
   - [ ] Status update message
   - [x] Error reporting message
 - [x] Implement message serialization/deserialization
@@ -200,18 +200,18 @@ Main functionality that delivers the core value proposition.
 
 ### Update Execution
 
-- [ ] Design update execution framework
-  - [ ] Pre-update hooks
-  - [ ] Update steps execution
-  - [ ] Post-update verification
+- [x] Design update execution framework
+  - [x] Pre-update hooks (from provider config + config_override)
+  - [x] Update steps execution (provider-specific via ExecuteUpdate message)
+  - [x] Post-update hooks (from provider config + config_override)
   - [ ] Rollback triggers
-- [ ] Implement update state machine
-  - [ ] Pending → In Progress → Completed/Failed
-  - [ ] State persistence
-- [ ] Add update progress reporting
-- [ ] Implement update logging
+- [x] Implement update state machine
+  - [x] Pending → In Progress → Completed/Failed
+  - [x] State persistence (update_history table)
+- [x] Add update progress reporting (UpdateOutput streaming)
+- [x] Implement update logging (output accumulated in update_history)
 - [ ] Handle update failures and retries
-- [ ] Add update timeout handling
+- [x] Add update timeout handling (configurable per-update)
 - [ ] Support updating agent and controller
 
 ### Scheduling System
@@ -267,7 +267,7 @@ Ways users interact with the system.
   - [ ] List software items endpoint
   - [ ] Get software item details endpoint
   - [ ] Trigger version check endpoint
-  - [ ] Trigger update endpoint
+  - [x] Trigger update endpoint (POST /api/v1/software-items/{id}/hosts/{host_id}/update)
   - [x] Get update history endpoint
   - [ ] Get system status endpoint
 - [x] Add API authentication

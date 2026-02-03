@@ -83,3 +83,53 @@ pub struct SoftwareItemHostSummary {
     pub last_updated_at: Option<String>,
     pub linked_at: String,
 }
+
+/// Status returned when triggering an update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerUpdateStatus {
+    /// Agent connected, update sent.
+    Pending,
+    /// Agent offline, will deliver on reconnect.
+    Queued,
+}
+
+/// Release asset information for triggering an update.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ReleaseAssetInfoRequest {
+    pub name: String,
+    pub download_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+/// Release information for triggering an update.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ReleaseInfoRequest {
+    pub tag: String,
+    pub release_url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<ReleaseAssetInfoRequest>,
+}
+
+/// Request body for triggering a software update.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TriggerUpdateRequest {
+    /// Target version to update to.
+    pub to_version: String,
+    /// Optional release information (for providers that need it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_info: Option<ReleaseInfoRequest>,
+}
+
+/// Response when triggering a software update.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TriggerUpdateResponse {
+    pub update_history_id: String,
+    pub status: TriggerUpdateStatus,
+}
