@@ -19,10 +19,14 @@ Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environ
 │              │◄──────────────────────────────────── │  Browser (Web UI)    │
 │              │                                      └──────────────────────┘
 │              │
-│              │─────── MQTT ──────────────────────── ┌──────────────────────┐
-│              │                                      │  MQTT Broker         │
-└──────────────┘                                      │  (Home Assistant)    │
-                                                      └──────────────────────┘
+└──────────────┘
+                                                      ┌──────────────────────┐
+┌──────────────┐─────── MQTT ──────────────────────── │  MQTT Broker         │
+│  MQTT Service│                                      │  (Home Assistant)    │
+│  (separate)  │─────── DB ───────────────────────┐   └──────────────────────┘
+└──────────────┘                                  │
+                                                  ▼
+                                           (shared database)
 ```
 
 All agent connections are **outbound-only** -- agents initiate connections to the controller; the controller never connects to agents.
@@ -51,7 +55,8 @@ The workspace uses `resolver = "3"` with `members = ["crates/*/*"]`.
 crates/
 ├── core/
 │   ├── agent/                     # uptrakit-agent (bin)
-│   └── controller/                # uptrakit-controller (bin)
+│   ├── controller/                # uptrakit-controller (bin)
+│   └── mqtt/                      # uptrakit-mqtt (bin) — standalone MQTT service
 ├── providers/
 │   ├── core/                      # uptrakit-provider-core (lib) — provider traits
 │   ├── docker-registry/           # uptrakit-provider-docker-registry (lib)
@@ -64,7 +69,6 @@ crates/
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/
     ├── cli/                       # uptrakit-cli (bin)
-    ├── mqtt/                      # uptrakit-mqtt (lib) — MQTT / HA integration
     └── web-api/                   # uptrakit-web-api (lib) — HTTP API + auth
 ```
 
@@ -135,7 +139,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
 | Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, PKI address: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
-| MQTT | Dedicated `mqtt_clients` table | Yes (via API); restart required for active connection | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
+| MQTT | Dedicated `mqtt_clients` table | Yes (via API); MQTT service detects changes automatically | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
 | Agent certificates | `agent_certificates.*` | Yes | `GET/PUT /api/v1/settings/agent-certificates` |
@@ -181,9 +185,9 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 25 entities in `crates/shared/db/src/entity/`:
+The data model comprises 26 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
 
@@ -248,9 +252,11 @@ The Web UI is a SvelteKit single-page application using the static adapter (no S
 
 ## MQTT / Home Assistant Integration
 
-Each tracked software item is published as a Home Assistant `update` entity via MQTT auto-discovery (`crates/ui/mqtt/`). Entity attributes include installed version, latest version, changelog URL, release link, and more.
+Each tracked software item is published as a Home Assistant `update` entity via MQTT auto-discovery. Entity attributes include installed version, latest version, changelog URL, release link, and more.
 
-The MQTT client supports four transport types: plain TCP (`mqtt://`), TLS (`mqtts://`), WebSocket (`ws://`), and secure WebSocket (`wss://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API or CLI `--mqtt-url` flag. See [AGENTS.md](AGENTS.md) section "MQTT client configuration" for schema and CLI details.
+MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that connects to the same shared database as the controller. Multiple instances can run simultaneously with automatic tenant distribution via a lease table (`mqtt_leases`). Each instance claims tenants, manages per-tenant MQTT connections, and supports hot-reload when configuration changes.
+
+The MQTT client supports four transport types: plain TCP (`mqtt://`), TLS (`mqtts://`), WebSocket (`ws://`), and secure WebSocket (`wss://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the leasing model, CLI flags, and key files.
 
 Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all paths converge on the same controller API.
 
@@ -267,7 +273,7 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **rootcause + thiserror** | rootcause provides `Report`-based error propagation with structured context. thiserror generates the error enums. Together they enforce boundary-aware error handling without boilerplate. |
 | **Rustls over OpenSSL** | Pure-Rust TLS avoids OpenSSL linking complexity and provides memory safety guarantees. aws-lc-rs backend offers FIPS-capable cryptography. |
 | **SvelteKit static adapter** | No server-side rendering needed -- the controller serves the pre-built SPA. Keeps deployment simple (single binary + static files). |
-| **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. |
+| **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. Runs as a separate binary (`uptrakit-mqtt`) with lease-based multi-instance tenant distribution. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
 | **HTTPS-only controller** | The controller listens on HTTPS by default. An optional plain HTTP listener (`--pki-http listener`) can be started for PKI-only endpoints (OCSP, CRL, CA cert) when needed by Nginx `ssl_ocsp_responder`. All agent and browser connections use TLS. |
 | **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |

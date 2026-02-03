@@ -1,0 +1,33 @@
+[package]
+name = "uptrakit-mqtt"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[[bin]]
+name = "uptrakit-mqtt"
+path = "src/main.rs"
+
+[features]
+default = ["db-sqlite"]
+db-sqlite = ["sea-orm/sqlx-sqlite"]
+db-postgres = ["sea-orm/sqlx-postgres"]
+db-mysql = ["sea-orm/sqlx-mysql"]
+
+[dependencies]
+clap = { workspace = true }
+hostname = { workspace = true }
+rootcause = { workspace = true }
+rumqttc = { version = "0.25.1", features = ["websocket"] }
+sea-orm = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-web-api-types = { path = "../../shared/web-api-types" }
+uuid = { workspace = true }

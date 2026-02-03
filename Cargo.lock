@@ -4797,7 +4797,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-internal-wire",
- "uptrakit-mqtt",
  "uptrakit-shared-db",
  "uptrakit-web-api",
  "uptrakit-web-api-types",
@@ -4821,12 +4820,19 @@ dependencies = [
 name = "uptrakit-mqtt"
 version = "0.0.1"
 dependencies = [
+ "clap",
+ "hostname",
  "rootcause",
  "rumqttc",
+ "sea-orm",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "uptrakit-shared-db",
  "uptrakit-web-api-types",
+ "uuid",
 ]
 
 [[package]]

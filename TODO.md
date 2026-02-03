@@ -333,6 +333,7 @@ Ways users interact with the system.
 
 ### MQTT/Home Assistant Integration
 
+- [x] Separate MQTT binary with multi-instance support and lease-based tenant distribution
 - [ ] Implement MQTT auto-discovery for Home Assistant
   - [ ] Device discovery messages
   - [ ] Entity discovery (sensors, binary sensors, buttons)
@@ -825,7 +826,7 @@ Items to consider for future versions but not currently prioritized:
   - [x] All route handlers updated for tenant awareness
   - [ ] Tenant management API (CRUD)
   - [ ] Multi-tenant JWT (per-tenant permissions)
-  - [ ] Tenant-aware MQTT
+  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution)
   - [ ] Tenant switching UI
   - [ ] API token scoping per tenant
 - [ ] Agent clustering

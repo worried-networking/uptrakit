@@ -8,7 +8,8 @@ Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environ
 
 Key components:
 
-- **Controller** (server): API, Web UI, scheduler, MQTT/Home Assistant integration, remote provider logic.
+- **Controller** (server): API, Web UI, scheduler, remote provider logic.
+- **MQTT Service** (standalone binary): MQTT/Home Assistant integration with lease-based multi-instance tenant distribution.
 - **Agents**: lightweight daemons on each managed host; outbound-only secure WebSocket to the controller; local version detection and update execution via sudo allowlists.
 - **Providers**: pluggable modules that define how to detect installed versions, resolve latest versions, and perform updates.
 
@@ -22,7 +23,8 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   └── controller/                 # uptrakit-controller                    (bin)  — central server
+│   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
+│   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
 │   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
@@ -35,7 +37,6 @@ uptrakit/
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — agent<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
-│       ├── mqtt/                       # uptrakit-mqtt                          (lib)  — MQTT / Home Assistant integration
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI + Tailwind CSS)
 │   ├── src/
@@ -494,21 +495,32 @@ MQTT settings are stored in a dedicated `mqtt_clients` table (one row per tenant
 
 The API accepts either a `url` field (parsed into components) or individual `transport`/`host`/`port`/`path` fields. The response always includes the computed `url`.
 
-**CLI flags (bootstrap only, not DB-managed settings):**
+### MQTT Service (standalone binary)
 
-| Flag | Purpose |
-| --- | --- |
-| `--mqtt-url` | MQTT broker URL (e.g. `mqtt://broker:1883`, `wss://broker/mqtt`) |
-| `--mqtt-client-id` | MQTT client ID (default: `uptrakit-controller`) |
-| `--mqtt-username` | MQTT username |
-| `--mqtt-password` | MQTT password |
-| `--mqtt-topic-prefix` | MQTT topic prefix (default: `uptrakit`) |
+MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that connects to the same shared database. Multiple instances can run simultaneously with automatic tenant distribution via a lease table (`mqtt_leases`).
 
-At startup, the controller reconciles CLI flags with the `mqtt_clients` DB row:
-- If `--mqtt-url` is provided and no DB row exists: creates a new row.
-- If `--mqtt-url` is provided and a DB row exists with `--force-settings-override`: updates the row.
-- If `--mqtt-url` is provided and a DB row exists without force: logs a warning, uses DB row.
-- If no `--mqtt-url` and no DB row: MQTT is disabled.
+**CLI flags (`uptrakit-mqtt`):**
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--db-url` | (required) | Database URL |
+| `--max-tenants` | `0` | Max tenants per instance (0 = unlimited) |
+| `--heartbeat-interval` | `15` | Heartbeat interval in seconds |
+| `--poll-interval` | `10` | Polling interval for new/changed tenants |
+| `--lease-timeout` | `60` | Stale lease timeout in seconds |
+
+**Leasing model:**
+- Each instance generates a unique ID: `{hostname}-{uuid_v7_first_8_chars}`
+- `mqtt_leases` table has a UNIQUE constraint on `tenant_id` — only one instance can manage a tenant
+- Instances heartbeat periodically; stale leases (heartbeat older than timeout) are reclaimed
+- On shutdown, instances release all their leases
+
+**Main loop (each poll interval):**
+1. Clean up stale leases
+2. Claim newly available tenants (enabled `mqtt_clients` without a lease)
+3. For each held tenant: compare `mqtt_clients.updated_at` with cached value → hot-reload if changed
+4. If `mqtt_clients` row deleted or `enabled = false` → stop client, release lease
+5. Heartbeat (on separate interval)
 
 **Key files:**
 
@@ -517,10 +529,14 @@ At startup, the controller reconciles CLI flags with the `mqtt_clients` DB row:
 | `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls/Ws/Wss) |
 | `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
 | `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
-| `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity |
+| `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
+| `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | CRUD store |
 | `crates/ui/web-api/src/routes/settings_mqtt.rs` | API route handlers |
-| `crates/ui/mqtt/src/lib.rs` | MQTT client with transport support |
+| `crates/core/mqtt/src/main.rs` | Entry point, signal handling, graceful shutdown |
+| `crates/core/mqtt/src/lease_manager.rs` | Lease acquisition, heartbeat, stale detection |
+| `crates/core/mqtt/src/tenant_manager.rs` | Per-tenant MQTT client lifecycle |
+| `crates/core/mqtt/src/mqtt_client.rs` | MQTT connection logic |
 
 ## Error handling
 

@@ -7,8 +7,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["mqtt", "db-sqlite"]
-mqtt = ["dep:uptrakit-mqtt"]
+default = ["db-sqlite"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web-api/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptrakit-web-api/db-postgres"]
@@ -16,7 +15,6 @@ db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web-
 
 [dependencies]
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-mqtt = { path = "../../ui/mqtt", optional = true }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-web-api = { path = "../../ui/web-api" }
