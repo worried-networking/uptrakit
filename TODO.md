@@ -35,7 +35,7 @@ Essential infrastructure needed before feature development.
   - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
   - [x] Software items table (provider config, package identifier, config override, host assignments)
   - [x] Available versions table (software item ID, version, release date, extra metadata)
-  - [ ] Update history table (software item ID, from version, to version, timestamp, status)
+  - [x] Update history table (host ID, software item ID, from/to version, status, output, initiated_by)
   - [ ] Scheduled checks table (software item ID, schedule, last run, next run)
 - [x] Implement database migrations system
 - [x] Create database access layer with connection pooling
@@ -47,7 +47,7 @@ Essential infrastructure needed before feature development.
   - [ ] Host model with serialization
   - [ ] SoftwareItem model with provider-specific fields
   - [x] Version model with comparison and ordering
-  - [ ] UpdateRecord model for tracking history
+  - [x] UpdateRecord model for tracking history
 - [x] Implement version comparison logic (semver, custom formats)
 - [ ] Create repositories/DAOs for each entity
 - [ ] Add validation logic for data models
@@ -268,7 +268,7 @@ Ways users interact with the system.
   - [ ] Get software item details endpoint
   - [ ] Trigger version check endpoint
   - [ ] Trigger update endpoint
-  - [ ] Get update history endpoint
+  - [x] Get update history endpoint
   - [ ] Get system status endpoint
 - [x] Add API authentication
 - [ ] Implement API rate limiting

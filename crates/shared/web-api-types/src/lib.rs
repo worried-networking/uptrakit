@@ -19,6 +19,7 @@ pub mod settings_mqtt;
 pub mod settings_network;
 pub mod software_items;
 pub mod system_alerts;
+pub mod update_history;
 
 #[cfg(test)]
 mod tests {
@@ -30,6 +31,7 @@ mod tests {
     use crate::provider_configs::CreateProviderConfigRequest;
     use crate::registration::RegistrationMode;
     use crate::software_items::CreateSoftwareItemRequest;
+    use crate::update_history::UpdateStatus;
     use strum::IntoEnumIterator;
 
     // ── 1. Permission enum round-trip ─────────────────────────────────────
@@ -506,5 +508,70 @@ mod tests {
         assert!(deserialized.ip_address.is_none());
         assert_eq!(deserialized.status, AgentStatus::Pending);
         assert!(deserialized.last_seen_at.is_none());
+    }
+
+    // ── 7. UpdateStatus enum round-trip ──────────────────────────────────
+
+    #[test]
+    fn update_status_serde_round_trip() {
+        let variants = [
+            UpdateStatus::Pending,
+            UpdateStatus::InProgress,
+            UpdateStatus::Completed,
+            UpdateStatus::Failed,
+        ];
+        for status in &variants {
+            let json = serde_json::to_string(status).unwrap();
+            let deserialized: UpdateStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, status);
+        }
+    }
+
+    #[test]
+    fn update_status_as_str_values() {
+        assert_eq!(UpdateStatus::Pending.as_str(), "pending");
+        assert_eq!(UpdateStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(UpdateStatus::Completed.as_str(), "completed");
+        assert_eq!(UpdateStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn update_status_from_str_valid() {
+        assert_eq!(
+            UpdateStatus::from_str("pending"),
+            Some(UpdateStatus::Pending)
+        );
+        assert_eq!(
+            UpdateStatus::from_str("in_progress"),
+            Some(UpdateStatus::InProgress)
+        );
+        assert_eq!(
+            UpdateStatus::from_str("completed"),
+            Some(UpdateStatus::Completed)
+        );
+        assert_eq!(UpdateStatus::from_str("failed"), Some(UpdateStatus::Failed));
+    }
+
+    #[test]
+    fn update_status_from_str_invalid_returns_none() {
+        assert_eq!(UpdateStatus::from_str("unknown"), None);
+        assert_eq!(UpdateStatus::from_str(""), None);
+        assert_eq!(UpdateStatus::from_str("PENDING"), None);
+    }
+
+    #[test]
+    fn update_status_as_str_round_trips_through_from_str() {
+        let variants = [
+            UpdateStatus::Pending,
+            UpdateStatus::InProgress,
+            UpdateStatus::Completed,
+            UpdateStatus::Failed,
+        ];
+        for status in &variants {
+            let s = status.as_str();
+            let parsed =
+                UpdateStatus::from_str(s).expect("from_str should succeed for as_str output");
+            assert_eq!(&parsed, status);
+        }
     }
 }

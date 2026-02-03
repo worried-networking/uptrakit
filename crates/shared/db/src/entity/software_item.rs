@@ -35,6 +35,8 @@ pub enum Relation {
         to = "super::tenant::Column::Id"
     )]
     Tenant,
+    #[sea_orm(has_many = "super::update_history::Entity")]
+    UpdateHistory,
 }
 
 impl Related<super::available_version::Entity> for Entity {
@@ -66,6 +68,12 @@ impl Related<super::host::Entity> for Entity {
                 .def()
                 .rev(),
         )
+    }
+}
+
+impl Related<super::update_history::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::UpdateHistory.def()
     }
 }
 

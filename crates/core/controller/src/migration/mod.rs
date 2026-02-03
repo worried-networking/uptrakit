@@ -20,6 +20,7 @@ mod m20260201_000014_create_provider_configs;
 mod m20260201_000015_create_software_items;
 mod m20260202_000016_create_mqtt_clients;
 mod m20260202_000017_create_mqtt_leases;
+mod m20260203_000018_create_update_history;
 
 pub struct Migrator;
 
@@ -44,6 +45,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260201_000015_create_software_items::Migration),
             Box::new(m20260202_000016_create_mqtt_clients::Migration),
             Box::new(m20260202_000017_create_mqtt_leases::Migration),
+            Box::new(m20260203_000018_create_update_history::Migration),
         ]
     }
 }

@@ -104,7 +104,8 @@ pub struct AppState {
         (name = "API Tokens", description = "Personal access token management"),
         (name = "Hosts", description = "Host machine management"),
         (name = "Provider Configs", description = "Provider configuration management"),
-        (name = "Software Items", description = "Software item tracking and host assignment")
+        (name = "Software Items", description = "Software item tracking and host assignment"),
+        (name = "Update History", description = "Software update history tracking")
     ),
     paths(
         routes::auth::register,
@@ -168,7 +169,9 @@ pub struct AppState {
         routes::software_items::delete_software_item,
         routes::software_items::assign_hosts,
         routes::software_items::unassign_host,
-        routes::settings_ca::rotate_ca
+        routes::settings_ca::rotate_ca,
+        routes::update_history::list_update_history,
+        routes::update_history::get_update_history
     ),
     components(
         schemas(
@@ -232,7 +235,9 @@ pub struct AppState {
             routes::software_items::SoftwareItemResponse,
             routes::software_items::SoftwareItemDetailResponse,
             routes::software_items::SoftwareItemHostSummary,
-            routes::settings_ca::RotateCaResponse
+            routes::settings_ca::RotateCaResponse,
+            routes::update_history::UpdateHistoryResponse,
+            routes::update_history::UpdateStatus
         )
     ),
     info(
@@ -369,6 +374,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::software_items::delete_software_item))
         .routes(routes!(routes::software_items::assign_hosts))
         .routes(routes!(routes::software_items::unassign_host))
+        .routes(routes!(routes::update_history::list_update_history))
+        .routes(routes!(routes::update_history::get_update_history))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,
