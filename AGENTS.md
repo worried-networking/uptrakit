@@ -735,7 +735,7 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `CertificatePayload` contains `cert_pem: String` and `not_after: UtcDateTime` (no `key_pem` — the private key never leaves the agent)
 - `ReportHostInfo(ReportHostInfoPayload)` variant in `AgentMessage` — sent by authenticated agents immediately after mTLS WebSocket connect
 - `RenewCertificate(RenewCertificatePayload)` variant in `AgentMessage` — agent requests certificate renewal with a fresh CSR (early or on-demand)
-- `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours` and `ca_bundle_hash`
+- `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours`, `ca_bundle_hash`, and `shutdown_timeout_seconds`
 - `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new bundle PEM
 - `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or PKI address change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
 - `CheckVersions(CheckVersionsPayload)` variant in `ControllerMessage` — requests installed version detection from agents
@@ -746,6 +746,34 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `UpdateOutput(UpdateOutputPayload)` variant in `AgentMessage` — agent streams update output (stdout, stderr, pre/post-hook, system)
 - `UpdateResult(UpdateResultPayload)` variant in `AgentMessage` — agent reports final update status with accumulated output
 - `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify agents; includes a human-readable `reason` field
+- `Disconnecting(DisconnectingPayload)` variant in `AgentMessage` — agent notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`)
+
+### Agent graceful shutdown
+
+Agents support graceful shutdown to ensure in-flight updates complete before disconnecting. The shutdown behavior is controlled by signal handlers and a configurable timeout.
+
+**Signals:**
+- **SIGINT/SIGTERM**: Triggers graceful shutdown with `LoopOutcome::Shutdown`
+- **SIGHUP**: Triggers graceful shutdown with `LoopOutcome::Restart` (exits cleanly for external restart by systemd/supervisors)
+
+**Shutdown sequence:**
+1. Signal received → set `shutting_down` flag
+2. If update in progress:
+   - Continue streaming output to controller
+   - Wait for update completion (with `shutdown_timeout_seconds` timeout)
+   - Send `UpdateResult` on completion or timeout
+3. Send `Disconnecting { reason: shutdown|restart }` to controller
+4. Close WebSocket gracefully
+5. Return appropriate `LoopOutcome`
+
+**Configuration:**
+- `shutdown_timeout_seconds` in `AgentSettingsPayload` (default: 120 seconds)
+- Controller pushes this value after authentication
+- Agent waits up to this duration for in-flight updates to complete
+
+**Wire protocol:**
+- `DisconnectReason` enum: `shutdown` (SIGINT/SIGTERM) or `restart` (SIGHUP)
+- `DisconnectingPayload { reason: DisconnectReason }` — sent before closing connection
 
 ### Agent version tracking
 

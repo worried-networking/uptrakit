@@ -248,7 +248,8 @@ Main functionality that delivers the core value proposition.
   - [x] External base URL resolution for OIDC/device auth redirects
   - [x] Agent-id-only lookup when cert serial unavailable
   - [x] Deployment guides for Traefik, Caddy, Nginx, NPM, Envoy, HAProxy
-- [ ] SIGHUP support for graceful reloading
+- [x] SIGHUP support for graceful restart (agent exits cleanly for external restart)
+- [ ] SIGHUP support for graceful reloading (controller)
   - [ ] All possible settings are reloaded
   - [ ] Agents should not be disconnected during reload (but there should be a "please reconnect" message)
 - [x] Add support for a graceful restart (via `SO_REUSEPORT`)
@@ -669,7 +670,7 @@ Ensuring robustness and maintainability.
 
 - [ ] Implement health check endpoints
 - [ ] Add readiness probes
-- [ ] Implement graceful shutdown
+- [x] Implement graceful shutdown (agent waits for in-flight updates before disconnecting)
 - [ ] Add state recovery on restart
 - [ ] Implement data integrity checks
 - [ ] Add automatic backup and restore

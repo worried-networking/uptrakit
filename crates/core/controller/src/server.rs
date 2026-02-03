@@ -47,7 +47,10 @@ pub struct ServerOptions {
 /// multiple processes to bind to the same address. This is required for HAProxy-style
 /// zero-downtime restarts where the new process starts accepting connections before
 /// the old process finishes draining.
-async fn create_listener(addr: SocketAddr, reuseport: bool) -> std::io::Result<std::net::TcpListener> {
+async fn create_listener(
+    addr: SocketAddr,
+    reuseport: bool,
+) -> std::io::Result<std::net::TcpListener> {
     let socket = if addr.is_ipv6() {
         TcpSocket::new_v6()?
     } else {

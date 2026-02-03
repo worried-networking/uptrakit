@@ -177,10 +177,7 @@ mod tests {
     fn hook_shell_parse_valid() {
         assert_eq!(HookShell::parse("bash"), Some(HookShell::Bash));
         assert_eq!(HookShell::parse("sh"), Some(HookShell::Sh));
-        assert_eq!(
-            HookShell::parse("powershell"),
-            Some(HookShell::PowerShell)
-        );
+        assert_eq!(HookShell::parse("powershell"), Some(HookShell::PowerShell));
     }
 
     #[test]

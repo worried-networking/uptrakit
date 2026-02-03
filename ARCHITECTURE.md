@@ -93,12 +93,13 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 5. Controller validates the CSR and signs the certificate. Agent receives `certificate` (cert PEM only — the private key never leaves the agent).
 6. Agent reconnects with mTLS.
 7. Normal operation: `ping`/`pong` heartbeats, status updates, version reports, update commands.
+8. On shutdown (SIGINT/SIGTERM/SIGHUP): agent waits for in-flight updates (with configurable timeout), sends `disconnecting` message, and closes gracefully.
 
 ### Message types
 
 Defined in `crates/shared/wire/`:
 
-**Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
+**Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`, `disconnecting`
 
 **Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`, `execute_update`, `server_restarting`
 
@@ -281,3 +282,4 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
 | **Reverse proxy support** | L4 passthrough and L7 TLS termination. Agent identity forwarded via structured info or PEM headers with CA CN verification. Header stripping prevents spoofing from non-proxy clients. Docker integration tests validate all 5 supported proxies (Nginx, Traefik, Caddy, HAProxy, Envoy). |
 | **Zero-downtime graceful restart** | HAProxy-style restart using `SO_REUSEPORT`. New process binds the same port, starts accepting immediately, then signals the old process (SIGUSR1). Old process stops accepting, scatters `ServerRestarting` notifications to agents over 5 seconds to avoid thundering herd, drains existing connections, then exits. Agents may not notice the restart if their connection stays open. |
+| **Agent graceful shutdown** | Agents handle SIGINT/SIGTERM/SIGHUP with graceful shutdown: wait for in-flight updates (configurable timeout), notify controller, close cleanly. SIGHUP returns exit code 0 for systemd restart. Prevents abandoned updates and data loss. |

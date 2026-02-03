@@ -18,7 +18,7 @@ use clap::Parser;
 use ipnet::IpNet;
 use rootcause::{Report, prelude::*};
 use thiserror::Error;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -857,9 +857,8 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let mut sigterm = signal(SignalKind::terminate()).context_transform(|e| {
         AppError::Config(format!("failed to set up SIGTERM handler: {e}"))
     })?;
-    let mut sigint = signal(SignalKind::interrupt()).context_transform(|e| {
-        AppError::Config(format!("failed to set up SIGINT handler: {e}"))
-    })?;
+    let mut sigint = signal(SignalKind::interrupt())
+        .context_transform(|e| AppError::Config(format!("failed to set up SIGINT handler: {e}")))?;
     let mut sigusr1 = signal(SignalKind::user_defined1()).context_transform(|e| {
         AppError::Config(format!("failed to set up SIGUSR1 handler: {e}"))
     })?;
