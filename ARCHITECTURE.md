@@ -87,10 +87,9 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 
 ### Agent lifecycle
 
-1. Agent generates a UUIDv7 `client_id` locally.
-2. Agent connects anonymously and sends an `enroll` message with `client_id`, hostname, host info, and optional enrollment token.
-3. Controller checks for client_id collisions and responds with `enrolled` (token-based auth for reconnection) or `rejected`.
-4. After approval, agent generates an ECDSA P-256 keypair + CSR (with CN=client_id) and sends `request_certificate` with `csr_pem`.
+1. Agent connects anonymously and sends an `enroll` message with hostname, host info, and optional enrollment token.
+2. Controller generates a UUIDv7 `agent_id` and responds with `enrolled` (including agent_id and enrollment secret for reconnection) or `rejected`.
+3. After approval, agent generates an ECDSA P-256 keypair + CSR (with CN=agent_id) and sends `request_certificate` with `csr_pem`.
 5. Controller validates the CSR and signs the certificate. Agent receives `certificate` (cert PEM only — the private key never leaves the agent).
 6. Agent reconnects with mTLS.
 7. Normal operation: `ping`/`pong` heartbeats, status updates, version reports, update commands.
@@ -163,7 +162,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 
 ### Agent authentication
 
-- **Enrollment**: Agent generates ECDSA P-256 keypair + CSR locally, enrolls with one-time token. After approval, a fresh keypair + CSR is used for certificate issuance. The private key never leaves the agent.
+- **Enrollment**: Agent enrolls with one-time token (controller assigns UUIDv7 agent_id). After approval, agent generates ECDSA P-256 keypair + CSR locally for certificate issuance. The private key never leaves the agent.
 - **Normal operation**: mTLS on every WebSocket connection; CRL checked per connection.
 - **Reverse proxy**: When behind a trusted proxy, agent identity is extracted from forwarded headers (`X-Forwarded-Tls-Client-Cert-Info` or `X-Forwarded-Tls-Client-Cert`). Issuer CN is verified against known CA certificates. See [docs/reverse-proxy/](docs/reverse-proxy/) for deployment guides.
 

@@ -56,9 +56,7 @@ Uptrakit operates an internal PKI for mTLS agent authentication. The controller 
 
 ### CSR-based certificate issuance
 
-Agent certificates are issued via a CSR (Certificate Signing Request) flow. The agent generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its client_id (a UUIDv7). The controller validates the CSR signature, verifies the CN matches the authenticated agent identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals.
-
-During enrollment, the controller also performs collision detection: if the agent-generated client_id already exists as an active agent, enrollment is rejected, and the agent retries with a new UUIDv7.
+Agent certificates are issued via a CSR (Certificate Signing Request) flow. The controller generates a UUIDv7 `agent_id` during enrollment. After approval, the agent generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its agent_id. The controller validates the CSR signature, verifies the CN matches the authenticated agent identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals.
 
 CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
 
