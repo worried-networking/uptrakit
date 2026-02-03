@@ -214,7 +214,6 @@ async fn do_enrollment(
 
         for attempt in 0..MAX_COLLISION_RETRIES {
             let client_id = uuid::Uuid::now_v7().to_string();
-            let (key_pem, csr_pem) = client::generate_keypair_and_csr(&client_id)?;
 
             tracing::info!(client_id = %client_id, "enrolling via WebSocket (attempt {})", attempt + 1);
             let mut ws = client::connect_ws(host, port, tls_connector, None).await?;
@@ -222,7 +221,6 @@ async fn do_enrollment(
             let enrolled = match client::send_enroll(
                 &mut ws,
                 &client_id,
-                &csr_pem,
                 &system_hostname,
                 &friendly_name,
                 args.enrollment_token.as_deref(),
@@ -245,9 +243,6 @@ async fn do_enrollment(
                 status = %enrolled.status,
                 "enrollment response received"
             );
-
-            // Save key to disk now (cert comes later)
-            state::save_agent_key(data_dir, &key_pem)?;
 
             // Persist agent state
             let agent_state = state::AgentState {
