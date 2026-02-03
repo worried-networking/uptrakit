@@ -275,7 +275,6 @@ pub async fn connect_ws(
 pub async fn send_enroll(
     ws: &mut WsStream,
     client_id: &str,
-    csr_pem: &str,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
@@ -283,7 +282,6 @@ pub async fn send_enroll(
 ) -> Result<EnrolledPayload> {
     let msg = AgentMessage::Enroll(EnrollPayload {
         client_id: client_id.to_string(),
-        csr_pem: csr_pem.to_string(),
         hostname: hostname.to_string(),
         friendly_name: friendly_name.to_string(),
         enrollment_token: enrollment_token.map(|s| s.to_string()),

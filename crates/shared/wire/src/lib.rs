@@ -84,8 +84,6 @@ pub struct HostInfo {
 pub struct EnrollPayload {
     /// Agent-generated UUIDv7 client identifier.
     pub client_id: String,
-    /// PEM-encoded Certificate Signing Request with CN=client_id.
-    pub csr_pem: String,
     pub hostname: String,
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -419,9 +417,6 @@ mod tests {
     fn enroll_serialization_roundtrip() {
         let msg = AgentMessage::Enroll(EnrollPayload {
             client_id: "01936a1e-7e8c-7f00-8000-000000000001".to_string(),
-            csr_pem:
-                "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
-                    .to_string(),
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some("tok-123".to_string()),
@@ -437,16 +432,12 @@ mod tests {
         assert_eq!(deserialized, msg);
         assert!(json.contains(r#""machine_id":"abc123"#));
         assert!(json.contains(r#""client_id":"01936a1e"#));
-        assert!(json.contains(r#""csr_pem":"#));
     }
 
     #[test]
     fn enroll_without_token_serialization_roundtrip() {
         let msg = AgentMessage::Enroll(EnrollPayload {
             client_id: "01936a1e-7e8c-7f00-8000-000000000002".to_string(),
-            csr_pem:
-                "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
-                    .to_string(),
             hostname: "node-2".to_string(),
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
@@ -696,13 +687,13 @@ mod tests {
 
     #[test]
     fn enroll_backward_compat_without_required_fields() {
-        // Older agents may not send client_id/csr_pem/host_info — this should fail
+        // Older agents may not send client_id/host_info — this should fail
         // deserialization since these are required. This test documents the breaking change.
         let json = r#"{"type":"enroll","hostname":"node-old","friendly_name":"Old Node"}"#;
         let result: std::result::Result<AgentMessage, _> = serde_json::from_str(json);
         assert!(
             result.is_err(),
-            "EnrollPayload requires client_id, csr_pem, and host_info"
+            "EnrollPayload requires client_id and host_info"
         );
     }
 

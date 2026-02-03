@@ -87,10 +87,10 @@ Agent-controller communication uses WebSocket over TLS with JSON-serialized mess
 
 ### Agent lifecycle
 
-1. Agent generates a UUIDv7 `client_id` and ECDSA P-256 keypair locally, creates a PKCS#10 CSR with CN=client_id.
-2. Agent connects anonymously and sends an `enroll` message with `client_id`, `csr_pem`, hostname, and optional enrollment token.
-3. Controller validates the CSR, checks for client_id collisions, and responds with `enrolled` (token-based auth for next step) or `rejected`.
-4. After approval, agent generates a fresh keypair + CSR and sends `request_certificate` with the new `csr_pem`.
+1. Agent generates a UUIDv7 `client_id` locally.
+2. Agent connects anonymously and sends an `enroll` message with `client_id`, hostname, host info, and optional enrollment token.
+3. Controller checks for client_id collisions and responds with `enrolled` (token-based auth for reconnection) or `rejected`.
+4. After approval, agent generates an ECDSA P-256 keypair + CSR (with CN=client_id) and sends `request_certificate` with `csr_pem`.
 5. Controller validates the CSR and signs the certificate. Agent receives `certificate` (cert PEM only — the private key never leaves the agent).
 6. Agent reconnects with mTLS.
 7. Normal operation: `ping`/`pong` heartbeats, status updates, version reports, update commands.
