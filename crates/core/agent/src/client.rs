@@ -468,7 +468,8 @@ pub async fn run_authenticated_loop(
     ca_pem: Option<&[u8]>,
     tls_connector: TlsConnector,
     cert_not_after_ts: Option<i64>,
-    data_dir: &std::path::Path,
+    config_dir: &std::path::Path,
+    state_dir: &std::path::Path,
 ) -> Result<LoopOutcome> {
     use std::pin::Pin;
     use std::time::Duration;
@@ -573,7 +574,7 @@ pub async fn run_authenticated_loop(
             _ = &mut renewal_sleep => {
                 tracing::info!("renewal window reached, requesting certificate renewal");
                 // Extract client_id from the current cert CN
-                let client_id_str = extract_agent_id_from_state(data_dir);
+                let client_id_str = extract_agent_id_from_state(state_dir);
                 let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)?;
                 pending_renewal_key = Some(key_pem);
                 let msg = ServiceMessage::RenewCertificate(RenewCertificatePayload {
@@ -634,10 +635,7 @@ pub async fn run_authenticated_loop(
                                     cert_pem: payload.cert_pem,
                                     key_pem,
                                 };
-                                cert_state.save(data_dir)?;
-                                let not_after_ms = payload.not_after.unix_timestamp() * 1000
-                                    + i64::from(payload.not_after.millisecond());
-                                crate::state::save_cert_not_after_ts(data_dir, not_after_ms)?;
+                                cert_state.save(state_dir)?;
                                 tracing::info!("renewed certificate saved, reconnecting");
                                 break LoopOutcome::Reconnect;
                             }
@@ -658,7 +656,7 @@ pub async fn run_authenticated_loop(
 
                                 // Check if CA bundle is stale
                                 if !settings.ca_bundle_hash.is_empty() {
-                                    let local_hash = compute_local_ca_hash(data_dir);
+                                    let local_hash = compute_local_ca_hash(config_dir);
                                     if local_hash != settings.ca_bundle_hash {
                                         tracing::info!("CA bundle hash mismatch, fetching updated bundle");
                                         let ca_fetch_url = pki_addr.unwrap_or(base_url);
@@ -668,7 +666,7 @@ pub async fn run_authenticated_loop(
                                         };
                                         match fetch_ca_certificate(ca_fetch_url, tls_mode).await {
                                             Ok(pem) => {
-                                                if let Err(e) = crate::state::save_ca_cert(data_dir, &pem) {
+                                                if let Err(e) = crate::state::save_ca_cert(config_dir, &pem) {
                                                     tracing::warn!("failed to save updated CA: {e}");
                                                 } else {
                                                     tracing::info!("updated CA bundle saved to disk");
@@ -681,7 +679,7 @@ pub async fn run_authenticated_loop(
                             }
                             ControllerMessage::CaBundleUpdated(payload) => {
                                 tracing::info!("received CA bundle update from controller");
-                                if let Err(e) = crate::state::save_ca_cert(data_dir, payload.ca_bundle_pem.as_bytes()) {
+                                if let Err(e) = crate::state::save_ca_cert(config_dir, payload.ca_bundle_pem.as_bytes()) {
                                     tracing::warn!("failed to save updated CA bundle: {e}");
                                 } else {
                                     tracing::info!("updated CA bundle saved to disk");
@@ -689,7 +687,7 @@ pub async fn run_authenticated_loop(
                             }
                             ControllerMessage::RequestCertRenewal(payload) => {
                                 tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
-                                let client_id_str = extract_agent_id_from_state(data_dir);
+                                let client_id_str = extract_agent_id_from_state(state_dir);
                                 let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str) {
                                     Ok(pair) => pair,
                                     Err(e) => {

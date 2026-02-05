@@ -18,6 +18,7 @@ uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-web-api = { path = "../../ui/web-api" }
+uptrakit-directories = { path = "../../shared/directories" }
 tokio = { workspace = true }
 axum = { workspace = true }
 axum-server = { workspace = true }

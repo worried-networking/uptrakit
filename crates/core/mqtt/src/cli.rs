@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use uptrakit_directories::{AppDirs, AppKind};
 
 /// Uptrakit MQTT Service — WebSocket-connected MQTT client service.
 ///
@@ -14,10 +15,17 @@ pub struct Args {
     #[arg(long, env = "UPTRAKIT_CONTROLLER_URL")]
     pub controller_url: String,
 
-    /// Data directory for service identity (service_id, keypair, certificate).
-    /// Created if it doesn't exist.
-    #[arg(long, env = "UPTRAKIT_DATA_DIR")]
-    pub data_dir: PathBuf,
+    /// Config directory for persistent configuration (controller's CA cert).
+    /// Supports `~` for home directory expansion.
+    /// Default: platform-specific (e.g., ~/.config/mqtt on Linux).
+    #[arg(long, env = "UPTRAKIT_CONFIG_DIR")]
+    pub config_dir: Option<PathBuf>,
+
+    /// State directory for runtime state (service_id, keypair, certificate).
+    /// Supports `~` for home directory expansion.
+    /// Default: platform-specific (e.g., ~/.local/state/mqtt on Linux).
+    #[arg(long, env = "UPTRAKIT_STATE_DIR")]
+    pub state_dir: Option<PathBuf>,
 
     /// Maximum number of tenants this instance will manage.
     /// 0 means unlimited.
@@ -45,6 +53,19 @@ pub struct Args {
 }
 
 impl Args {
+    /// Resolve application directories using platform-specific defaults.
+    ///
+    /// Returns `AppDirs` with separate config and state directories.
+    /// CLI overrides take precedence over platform defaults.
+    pub fn resolve_dirs(&self) -> Result<AppDirs, String> {
+        AppDirs::resolve(
+            AppKind::Mqtt,
+            self.config_dir.as_deref(),
+            self.state_dir.as_deref(),
+        )
+        .map_err(|e| e.to_string())
+    }
+
     /// Get the friendly name, falling back to hostname.
     pub fn friendly_name_or_hostname(&self) -> String {
         self.friendly_name.clone().unwrap_or_else(|| {
@@ -63,16 +84,11 @@ mod tests {
 
     #[test]
     fn defaults_parse() {
-        let args = Args::try_parse_from([
-            "uptrakit-mqtt",
-            "--controller-url",
-            "wss://localhost:8443",
-            "--data-dir",
-            "/var/lib/uptrakit-mqtt",
-        ])
-        .unwrap();
+        let args = Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"])
+            .unwrap();
         assert_eq!(args.controller_url, "wss://localhost:8443");
-        assert_eq!(args.data_dir.to_str().unwrap(), "/var/lib/uptrakit-mqtt");
+        assert!(args.config_dir.is_none());
+        assert!(args.state_dir.is_none());
         assert_eq!(args.max_tenants, 0);
         assert_eq!(args.heartbeat_interval, 15);
         assert!(args.enrollment_token.is_none());
@@ -86,8 +102,10 @@ mod tests {
             "uptrakit-mqtt",
             "--controller-url",
             "wss://controller.example.com:9443",
-            "--data-dir",
-            "/opt/mqtt-service",
+            "--config-dir",
+            "/opt/mqtt-config",
+            "--state-dir",
+            "/opt/mqtt-state",
             "--max-tenants",
             "5",
             "--heartbeat-interval",
@@ -100,7 +118,8 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(args.controller_url, "wss://controller.example.com:9443");
-        assert_eq!(args.data_dir.to_str().unwrap(), "/opt/mqtt-service");
+        assert_eq!(args.config_dir.as_ref().unwrap().to_str().unwrap(), "/opt/mqtt-config");
+        assert_eq!(args.state_dir.as_ref().unwrap().to_str().unwrap(), "/opt/mqtt-state");
         assert_eq!(args.max_tenants, 5);
         assert_eq!(args.heartbeat_interval, 30);
         assert_eq!(args.enrollment_token.as_deref(), Some("secret-token-123"));
@@ -113,16 +132,35 @@ mod tests {
 
     #[test]
     fn controller_url_required() {
-        let result =
-            Args::try_parse_from(["uptrakit-mqtt", "--data-dir", "/var/lib/uptrakit-mqtt"]);
+        let result = Args::try_parse_from(["uptrakit-mqtt"]);
         assert!(result.is_err());
     }
 
     #[test]
-    fn data_dir_required() {
-        let result =
-            Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"]);
-        assert!(result.is_err());
+    fn resolve_dirs_with_defaults() {
+        let args = Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"])
+            .expect("should parse defaults");
+        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        // Should return platform-specific paths
+        assert!(!dirs.config_dir().as_os_str().is_empty());
+        assert!(!dirs.state_dir().as_os_str().is_empty());
+    }
+
+    #[test]
+    fn resolve_dirs_with_overrides() {
+        let args = Args::try_parse_from([
+            "uptrakit-mqtt",
+            "--controller-url",
+            "wss://localhost:8443",
+            "--config-dir",
+            "/custom/config",
+            "--state-dir",
+            "/custom/state",
+        ])
+        .expect("should parse");
+        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        assert_eq!(dirs.config_dir().to_str().unwrap(), "/custom/config");
+        assert_eq!(dirs.state_dir().to_str().unwrap(), "/custom/state");
     }
 
     #[test]
@@ -131,8 +169,6 @@ mod tests {
             "uptrakit-mqtt",
             "--controller-url",
             "wss://localhost:8443",
-            "--data-dir",
-            "/tmp",
             "--friendly-name",
             "My Node",
         ])
@@ -146,8 +182,6 @@ mod tests {
             "uptrakit-mqtt",
             "--controller-url",
             "wss://localhost:8443",
-            "--data-dir",
-            "/tmp",
         ])
         .unwrap();
         // Should return the system hostname, which we can't predict in tests,

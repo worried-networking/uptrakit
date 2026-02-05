@@ -63,16 +63,19 @@ async fn main() -> std::process::ExitCode {
 }
 
 async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
-    // Resolve data directory
-    let data_dir = args
-        .resolve_data_dir()
+    // Resolve application directories (config and state)
+    let app_dirs = args
+        .resolve_dirs()
         .map_err(|s| report!(AppError::Config(s)))?;
-    std::fs::create_dir_all(&data_dir)
-        .context_transform(|e| AppError::Config(format!("failed to create data directory: {e}")))?;
-    tracing::info!("data directory: {}", data_dir.display());
+    app_dirs
+        .ensure_dirs()
+        .map_err(|e| report!(AppError::Config(format!("failed to create directories: {e}"))))?;
+    tracing::info!("config directory: {}", app_dirs.config_dir().display());
+    tracing::info!("state directory: {}", app_dirs.state_dir().display());
 
-    // Initialize database
-    let db_config = db::DbConfig::from_args(args.db_url, &data_dir).context(AppError::Database)?;
+    // Initialize database (state directory for SQLite DB)
+    let db_config =
+        db::DbConfig::from_args(args.db_url, app_dirs.state_dir()).context(AppError::Database)?;
     tracing::info!(
         "connecting to database: {}",
         db::sanitize_url(&db_config.url)
@@ -483,8 +486,8 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         None
     };
 
-    // Initialize PKI
-    let pki_path = pki::pki_dir(&data_dir).context(AppError::Pki)?;
+    // Initialize PKI (config directory for CA and TLS certificates)
+    let pki_path = pki::pki_dir(app_dirs.config_dir()).context(AppError::Pki)?;
 
     // Load CA state
     let ca_state = if let (Some(ca_cert_path), Some(ca_key_path)) = (&args.ca_cert, &args.ca_key) {
@@ -620,9 +623,10 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     // Create agent certificate signer (reads from watch receiver)
     let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(ca_rx.clone()));
 
-    // Initialize JWT signing key
-    let jwt_manager = uptrakit_web_api::auth::jwt::JwtManager::load_or_generate(&data_dir)
-        .context(AppError::Config("JWT initialization failed".into()))?;
+    // Initialize JWT signing key (state directory)
+    let jwt_manager =
+        uptrakit_web_api::auth::jwt::JwtManager::load_or_generate(app_dirs.state_dir())
+            .context(AppError::Config("JWT initialization failed".into()))?;
     tracing::info!("JWT signing key initialized");
 
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());

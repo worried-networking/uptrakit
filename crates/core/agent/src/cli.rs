@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use uptrakit_directories::{AppDirs, AppKind};
 
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-agent")]
@@ -20,10 +21,17 @@ pub struct Args {
     #[arg(long)]
     pub ca_cert: Option<PathBuf>,
 
-    /// Data directory for persistent state (CA cert, agent.json).
+    /// Config directory for persistent configuration (controller's CA cert).
     /// Supports `~` for home directory expansion.
-    #[arg(long, default_value = "~/.uptrakit-agent")]
-    pub data_dir: String,
+    /// Default: platform-specific (e.g., ~/.config/agent on Linux).
+    #[arg(long)]
+    pub config_dir: Option<PathBuf>,
+
+    /// State directory for runtime state (agent.json, private keys, certificate).
+    /// Supports `~` for home directory expansion.
+    /// Default: platform-specific (e.g., ~/.local/state/agent on Linux).
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
 
     /// Friendly name for this agent (defaults to system hostname)
     #[arg(long)]
@@ -47,17 +55,17 @@ pub struct Args {
 }
 
 impl Args {
-    /// Resolve `data_dir` by expanding `~` to the user's home directory.
-    pub fn resolve_data_dir(&self) -> Result<PathBuf, String> {
-        let path = if self.data_dir.starts_with("~/") {
-            let home = home_dir().ok_or("could not determine home directory")?;
-            home.join(&self.data_dir[2..])
-        } else if self.data_dir == "~" {
-            home_dir().ok_or("could not determine home directory")?
-        } else {
-            PathBuf::from(&self.data_dir)
-        };
-        Ok(path)
+    /// Resolve application directories using platform-specific defaults.
+    ///
+    /// Returns `AppDirs` with separate config and state directories.
+    /// CLI overrides take precedence over platform defaults.
+    pub fn resolve_dirs(&self) -> Result<AppDirs, String> {
+        AppDirs::resolve(
+            AppKind::Agent,
+            self.config_dir.as_deref(),
+            self.state_dir.as_deref(),
+        )
+        .map_err(|e| e.to_string())
     }
 
     /// Parse `--url` into `(host, port)`.
@@ -74,10 +82,6 @@ impl Args {
         let port = parsed.port().unwrap_or(443);
         Ok((host, port))
     }
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 /// Validate `--pki-addr`: must be http:// or https://, must have a host,
@@ -112,9 +116,39 @@ mod tests {
                 .expect("should parse defaults");
         assert!(!args.tofu);
         assert!(args.ca_cert.is_none());
+        assert!(args.config_dir.is_none());
+        assert!(args.state_dir.is_none());
         assert!(args.friendly_name.is_none());
         assert!(args.enrollment_token.is_none());
         assert!(!args.force_enroll);
+    }
+
+    #[test]
+    fn resolve_dirs_with_defaults() {
+        let args =
+            Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
+                .expect("should parse defaults");
+        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        // Should return platform-specific paths
+        assert!(!dirs.config_dir().as_os_str().is_empty());
+        assert!(!dirs.state_dir().as_os_str().is_empty());
+    }
+
+    #[test]
+    fn resolve_dirs_with_overrides() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent",
+            "--url",
+            "https://controller.local:8443",
+            "--config-dir",
+            "/custom/config",
+            "--state-dir",
+            "/custom/state",
+        ])
+        .expect("should parse");
+        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        assert_eq!(dirs.config_dir().to_str().unwrap(), "/custom/config");
+        assert_eq!(dirs.state_dir().to_str().unwrap(), "/custom/state");
     }
 
     #[test]

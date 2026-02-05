@@ -125,6 +125,11 @@ allow = [
     # Allows unrestricted use, modification, and redistribution of data with attribution.
     # Used by: webpki-roots (Mozilla CA certificate bundle data)
     "CDLA-Permissive-2.0",
+    # MPL-2.0: Mozilla Public License 2.0 — weak copyleft license.
+    # Compatible with MIT/Apache-2.0: allows combining with proprietary code, copyleft
+    # applies only to MPL-licensed files. OSI approved, FSF Free/Libre.
+    # Used by: option-ext (transitive via directories crate for cross-platform paths)
+    "MPL-2.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the

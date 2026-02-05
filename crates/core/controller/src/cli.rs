@@ -3,15 +3,23 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use ipnet::IpNet;
+use uptrakit_directories::{AppDirs, AppKind};
 
 /// Uptrakit Controller — central server for the Uptrakit update tracking toolkit.
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-controller")]
 pub struct Args {
-    /// Data directory (CA keys, certs, future DB).
+    /// Config directory for persistent configuration (CA certificates, TLS certs).
     /// Supports `~` for home directory expansion.
-    #[arg(long, default_value = "~/.uptrakit-controller")]
-    pub data_dir: String,
+    /// Default: platform-specific (e.g., ~/.config/controller on Linux).
+    #[arg(long)]
+    pub config_dir: Option<PathBuf>,
+
+    /// State directory for runtime state (SQLite DB, JWT signing key).
+    /// Supports `~` for home directory expansion.
+    /// Default: platform-specific (e.g., ~/.local/state/controller on Linux).
+    #[arg(long)]
+    pub state_dir: Option<PathBuf>,
 
     /// Database URL. If not provided, defaults to SQLite in data directory.
     /// Supported schemes depend on enabled features:
@@ -211,22 +219,18 @@ fn parse_proxy(s: &str) -> Result<IpNet, String> {
 }
 
 impl Args {
-    /// Resolve `data_dir` by expanding `~` to the user's home directory.
-    pub fn resolve_data_dir(&self) -> Result<PathBuf, String> {
-        let path = if self.data_dir.starts_with("~/") {
-            let home = home_dir().ok_or("could not determine home directory")?;
-            home.join(&self.data_dir[2..])
-        } else if self.data_dir == "~" {
-            home_dir().ok_or("could not determine home directory")?
-        } else {
-            PathBuf::from(&self.data_dir)
-        };
-        Ok(path)
+    /// Resolve application directories using platform-specific defaults.
+    ///
+    /// Returns `AppDirs` with separate config and state directories.
+    /// CLI overrides take precedence over platform defaults.
+    pub fn resolve_dirs(&self) -> Result<AppDirs, String> {
+        AppDirs::resolve(
+            AppKind::Controller,
+            self.config_dir.as_deref(),
+            self.state_dir.as_deref(),
+        )
+        .map_err(|e| e.to_string())
     }
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -280,11 +284,38 @@ mod tests {
     fn defaults_have_no_addresses() {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(args.config_dir.is_none());
+        assert!(args.state_dir.is_none());
         assert!(args.https_addr.is_none());
         assert!(args.real_ip_header.is_none());
         assert!(args.trusted_proxies.is_empty());
         assert!(args.sans.is_empty());
         assert!(!args.force_settings_override);
+    }
+
+    #[test]
+    fn resolve_dirs_with_defaults() {
+        let args =
+            super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        // Should return platform-specific paths
+        assert!(!dirs.config_dir().as_os_str().is_empty());
+        assert!(!dirs.state_dir().as_os_str().is_empty());
+    }
+
+    #[test]
+    fn resolve_dirs_with_overrides() {
+        let args = super::Args::try_parse_from([
+            "uptrakit-controller",
+            "--config-dir",
+            "/custom/config",
+            "--state-dir",
+            "/custom/state",
+        ])
+        .expect("should parse");
+        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        assert_eq!(dirs.config_dir().to_str().unwrap(), "/custom/config");
+        assert_eq!(dirs.state_dir().to_str().unwrap(), "/custom/state");
     }
 
     #[test]

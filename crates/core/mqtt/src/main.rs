@@ -56,8 +56,20 @@ async fn run(args: cli::Args) -> Result<()> {
     let instance_id = generate_instance_id();
     tracing::info!(%instance_id, "starting uptrakit-mqtt service");
 
-    // Load or create identity
-    let mut identity = Identity::new(&args.data_dir);
+    // Resolve application directories
+    let app_dirs = args
+        .resolve_dirs()
+        .map_err(|e| report!(AppError::Config(e)))?;
+    app_dirs.ensure_dirs().map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to create directories: {e}"
+        )))
+    })?;
+    tracing::info!("config directory: {}", app_dirs.config_dir().display());
+    tracing::info!("state directory: {}", app_dirs.state_dir().display());
+
+    // Load or create identity (config for CA cert, state for service identity)
+    let mut identity = Identity::new(app_dirs.config_dir(), app_dirs.state_dir());
     identity
         .load()
         .await

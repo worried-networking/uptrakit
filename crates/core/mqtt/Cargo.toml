@@ -36,6 +36,7 @@ rustls-pemfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
+uptrakit-directories = { path = "../../shared/directories" }
 uuid = { workspace = true }
 webpki-roots = { workspace = true }
 

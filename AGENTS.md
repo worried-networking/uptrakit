@@ -34,6 +34,7 @@ uptrakit/
 │   ├── shared/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
+│   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared service identity state
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
@@ -206,6 +207,55 @@ These are non-negotiable design constraints. Do not violate them.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
 12. **Do not add any `allow()`** without explicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`), `run_authenticated_loop` in the agent (gained `pki_addr` parameter), and `create_mqtt_client`/`update_mqtt_client` in `mqtt_client_store` (many connection parameters).
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
+
+## Directory management
+
+All binaries (controller, agent, MQTT service) use the `uptrakit-directories` crate for cross-platform directory resolution. The crate uses the `directories` crate (`ProjectDirs`) to follow platform conventions:
+
+| Platform | Config directory | State directory |
+| --- | --- | --- |
+| Linux | `~/.config/{app}/` (XDG) | `~/.local/state/{app}/` (XDG) |
+| macOS | `~/Library/Application Support/io.uptrakit.{app}/` | `~/Library/Application Support/io.uptrakit.{app}/` |
+| Windows | `{FOLDERID_RoamingAppData}\uptrakit\{app}\` | `{FOLDERID_LocalAppData}\uptrakit\{app}\` |
+
+Where `{app}` is one of: `controller`, `agent`, `mqtt`.
+
+### Config vs state separation
+
+| Directory | Contents | Characteristics |
+| --- | --- | --- |
+| **Config** | Rarely-changing, persistent configuration | CA certificates, user-provided TLS certs |
+| **State** | Runtime state that may change frequently | SQLite DB, JWT keys, service identity, private keys, issued certificates |
+
+**Controller:**
+- Config: PKI files (CA certificate/key, server TLS certificate/key)
+- State: SQLite database, JWT signing key
+
+**Agent/MQTT Service:**
+- Config: Controller's CA certificate
+- State: Service ID, private key, issued certificate
+
+### CLI directory flags
+
+All binaries support `--config-dir` and `--state-dir` CLI flags (and corresponding `UPTRAKIT_CONFIG_DIR` / `UPTRAKIT_STATE_DIR` environment variables) to override the platform defaults. Both support `~` expansion for home directory paths.
+
+### Secure permissions
+
+All created files and directories use secure permissions:
+- **Directories**: 0o700 (owner read/write/execute only)
+- **Files**: 0o600 (owner read/write only)
+
+The `uptrakit-directories` crate provides helper functions:
+- `create_secure_dir(path)` — creates directory with 0o700 permissions
+- `write_secure_file(path, data)` — writes file with 0o600 permissions
+- `AppDirs::resolve(app_kind, config_override, state_override)` — resolves directories for an application
+- `AppDirs::ensure_dirs()` — creates both directories with secure permissions
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/directories/src/lib.rs` | Cross-platform directory resolution and secure file/directory operations |
 
 ## CLI output formatting
 
@@ -540,7 +590,8 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 | Flag | Env var | Default | Description |
 | --- | --- | --- | --- |
 | `--controller-url` | `UPTRAKIT_CONTROLLER_URL` | (required) | Controller WebSocket URL (e.g., `wss://controller:8443`) |
-| `--data-dir` | `UPTRAKIT_DATA_DIR` | (required) | Directory for service identity (service_id, keypair, certificate) |
+| `--config-dir` | `UPTRAKIT_CONFIG_DIR` | platform-specific | Config directory for CA certificate |
+| `--state-dir` | `UPTRAKIT_STATE_DIR` | platform-specific | State directory for service identity (service_id, keypair, certificate) |
 | `--max-tenants` | | `0` | Max tenants per instance (0 = unlimited) |
 | `--heartbeat-interval` | | `15` | Heartbeat interval in seconds |
 | `--enrollment-token` | `UPTRAKIT_ENROLLMENT_TOKEN` | | Enrollment token for auto-approval |
@@ -548,9 +599,9 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 | `--insecure` | | `false` | Skip TLS verification (DANGEROUS, only for initial CA trust) |
 
 **Connection lifecycle (same TOFU pattern as agents):**
-1. **CA fetch (TOFU)**: Fetch CA certificate from `GET /api/v1/pki/ca.crt` (using system roots or `--insecure`), save to `ca.pem` in data dir
-2. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`, hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret
-3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate
+1. **CA fetch (TOFU)**: Fetch CA certificate from `GET /api/v1/pki/ca.crt` (using system roots or `--insecure`), save to `ca.crt` in config dir
+2. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`, hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret (saved to state dir)
+3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate (saved to state dir)
 4. **Authenticated operation**: Reconnect with mTLS, send `Register`, receive `TenantAssignments`, run MQTT clients
 
 **Instance identification:**

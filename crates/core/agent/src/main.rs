@@ -12,6 +12,7 @@ use std::time::Duration;
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
+use uptrakit_directories::AppDirs;
 use uptrakit_internal_wire::now_millis;
 
 use cli::Args;
@@ -49,24 +50,31 @@ async fn run(args: &Args) -> error::Result<()> {
     // Install the default crypto provider for rustls
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    // Resolve data directory, create if needed
-    let data_dir = args
-        .resolve_data_dir()
+    // Resolve application directories, create if needed
+    let app_dirs = args
+        .resolve_dirs()
         .map_err(|s| report!(Error::Enrollment(s)))?;
-    std::fs::create_dir_all(&data_dir).context_to::<Error>()?;
-    tracing::info!("data directory: {}", data_dir.display());
+    app_dirs
+        .ensure_dirs()
+        .map_err(|e| report!(Error::Enrollment(format!("failed to create directories: {e}"))))?;
+    tracing::info!("config directory: {}", app_dirs.config_dir().display());
+    tracing::info!("state directory: {}", app_dirs.state_dir().display());
+
+    // Shortcuts for config (CA cert) and state (agent data) directories
+    let config_dir = app_dirs.config_dir();
+    let state_dir = app_dirs.state_dir();
 
     // --force-enroll: delete all existing state (keep CA cert for TOFU)
     if args.force_enroll {
         tracing::info!("--force-enroll: clearing existing state");
-        state::AgentCertState::delete(&data_dir)?;
-        state::AgentState::delete(&data_dir)?;
-        state::delete_cert_not_after_ts(&data_dir)?;
-        state::delete_agent_key(&data_dir)?;
+        state::AgentCertState::delete(state_dir)?;
+        state::AgentState::delete(state_dir)?;
+        state::delete_agent_key(state_dir)?;
     }
 
     // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust
-    let ca_pem: Option<Vec<u8>> = if let Some(cached) = state::load_ca_cert(&data_dir)? {
+    // CA cert is stored in config directory
+    let ca_pem: Option<Vec<u8>> = if let Some(cached) = state::load_ca_cert(config_dir)? {
         tracing::info!("loaded CA certificate from disk");
         if args.tofu {
             tracing::warn!("--tofu ignored: CA already cached");
@@ -76,19 +84,19 @@ async fn run(args: &Args) -> error::Result<()> {
         tracing::info!("loading CA certificate from {}", ca_path.display());
         let pem = std::fs::read(ca_path)
             .map_err(|e| report!(Error::CaCertFile(format!("{}: {e}", ca_path.display()))))?;
-        state::save_ca_cert(&data_dir, &pem)?;
+        state::save_ca_cert(config_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
     } else if let Some(pki) = pki_addr {
         tracing::info!("fetching CA certificate from --pki-addr {pki}");
         let pem = client::fetch_ca_certificate(pki, client::TlsMode::SystemTrust).await?;
-        state::save_ca_cert(&data_dir, &pem)?;
+        state::save_ca_cert(config_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
     } else if args.tofu {
         tracing::info!("TOFU: fetching CA (accepting any server certificate)");
         let pem = client::fetch_ca_certificate(base_url, client::TlsMode::TrustOnFirstUse).await?;
-        state::save_ca_cert(&data_dir, &pem)?;
+        state::save_ca_cert(config_dir, &pem)?;
         tracing::info!("CA certificate saved to disk");
         Some(pem)
     } else {
@@ -96,16 +104,15 @@ async fn run(args: &Args) -> error::Result<()> {
         None
     };
 
-    // Check for existing certificate
-    if let Some(_existing_cert) = state::AgentCertState::load(&data_dir)? {
-        let cert_not_after_ts = state::load_cert_not_after_ts(&data_dir)?;
+    // Check for existing certificate (stored in state directory)
+    if let Some(existing_cert) = state::AgentCertState::load(state_dir)? {
+        let cert_not_after_ts = existing_cert.cert_not_after_ms();
         let cert_expired = cert_not_after_ts.is_some_and(|ts| now_millis() >= ts);
 
         if cert_expired {
             tracing::warn!("certificate expired, falling back to fresh enrollment");
-            state::AgentCertState::delete(&data_dir)?;
-            state::delete_cert_not_after_ts(&data_dir)?;
-            state::AgentState::delete(&data_dir)?;
+            state::AgentCertState::delete(state_dir)?;
+            state::AgentState::delete(state_dir)?;
             // Fall through to enrollment below
         } else {
             tracing::info!("loaded existing agent certificate from disk");
@@ -114,7 +121,7 @@ async fn run(args: &Args) -> error::Result<()> {
                 port,
                 base_url,
                 pki_addr,
-                &data_dir,
+                &app_dirs,
                 ca_pem.as_deref(),
             )
             .await
@@ -123,9 +130,8 @@ async fn run(args: &Args) -> error::Result<()> {
                 Err(mut e) => {
                     if e.current_context_mut().is_cert_expired() {
                         tracing::warn!("certificate expired, falling back to enrollment");
-                        state::AgentCertState::delete(&data_dir)?;
-                        state::delete_cert_not_after_ts(&data_dir)?;
-                        state::AgentState::delete(&data_dir)?;
+                        state::AgentCertState::delete(state_dir)?;
+                        state::AgentState::delete(state_dir)?;
                         // Fall through to enrollment below
                     } else {
                         return Err(e);
@@ -142,7 +148,7 @@ async fn run(args: &Args) -> error::Result<()> {
         None => client::build_system_trust_tls_connector()?,
     };
     loop {
-        match do_enrollment(args, &host, port, &data_dir, &tls_connector).await {
+        match do_enrollment(args, &host, port, state_dir, &tls_connector).await {
             Ok(()) => break,
             Err(mut e) => {
                 if e.current_context_mut().is_receive_closed() {
@@ -161,7 +167,7 @@ async fn run(args: &Args) -> error::Result<()> {
         port,
         base_url,
         pki_addr,
-        &data_dir,
+        &app_dirs,
         ca_pem.as_deref(),
     )
     .await
@@ -195,7 +201,7 @@ async fn do_enrollment(
             not_after = %cert.not_after,
             "received client certificate"
         );
-        save_cert_from_payload(data_dir, &cert.cert_pem, &cert.not_after)?;
+        save_cert_from_payload(data_dir, &cert.cert_pem)?;
         Ok(())
     } else {
         // Fresh enrollment — controller generates agent_id
@@ -248,18 +254,14 @@ async fn do_enrollment(
             not_after = %cert.not_after,
             "received client certificate"
         );
-        save_cert_from_payload(data_dir, &cert.cert_pem, &cert.not_after)?;
+        save_cert_from_payload(data_dir, &cert.cert_pem)?;
         Ok(())
     }
 }
 
-/// Save certificate PEM and not_after timestamp to disk.
+/// Save certificate PEM to disk.
 /// The key is already saved separately.
-fn save_cert_from_payload(
-    data_dir: &Path,
-    cert_pem: &str,
-    not_after: &time::UtcDateTime,
-) -> error::Result<()> {
+fn save_cert_from_payload(data_dir: &Path, cert_pem: &str) -> error::Result<()> {
     // Load the key that was saved earlier
     let key_pem = state::load_agent_key(data_dir)?
         .ok_or_else(|| report!(Error::Enrollment("no agent key found on disk".to_string())))?;
@@ -269,8 +271,6 @@ fn save_cert_from_payload(
         key_pem,
     };
     cert_state.save(data_dir)?;
-    let not_after_ms = not_after.unix_timestamp() * 1000 + i64::from(not_after.millisecond());
-    state::save_cert_not_after_ts(data_dir, not_after_ms)?;
     tracing::info!("agent certificate saved to disk");
     Ok(())
 }
@@ -281,13 +281,16 @@ async fn run_authenticated_with_reconnect(
     port: u16,
     base_url: &str,
     pki_addr: Option<&str>,
-    data_dir: &Path,
+    app_dirs: &AppDirs,
     ca_pem: Option<&[u8]>,
 ) -> error::Result<()> {
+    let config_dir = app_dirs.config_dir();
+    let state_dir = app_dirs.state_dir();
+
     loop {
-        let cert_state =
-            state::AgentCertState::load(data_dir)?.ok_or_else(|| report!(Error::NoCertificates))?;
-        let cert_not_after_ts = state::load_cert_not_after_ts(data_dir)?;
+        let cert_state = state::AgentCertState::load(state_dir)?
+            .ok_or_else(|| report!(Error::NoCertificates))?;
+        let cert_not_after_ts = cert_state.cert_not_after_ms();
 
         let mtls_connector = match ca_pem {
             Some(pem) => client::build_tls_connector_with_client_cert(
@@ -309,7 +312,8 @@ async fn run_authenticated_with_reconnect(
             ca_pem,
             mtls_connector,
             cert_not_after_ts,
-            data_dir,
+            config_dir,
+            state_dir,
         )
         .await?
         {

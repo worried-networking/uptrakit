@@ -105,6 +105,19 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 - CA private keys are stored on the controller filesystem only.
 - No secrets appear in log output, error messages, or API responses.
 
+## Filesystem Security
+
+All sensitive files and directories are created with secure permissions:
+
+| Type | Permission | Octal | Description |
+| --- | --- | --- | --- |
+| Directories | Owner rwx only | 0o700 | Config and state directories |
+| Files | Owner rw only | 0o600 | Private keys, certificates, database, configuration |
+
+The `uptrakit-directories` crate provides helper functions (`create_secure_dir`, `write_secure_file`) that enforce these permissions on Unix systems. This applies to:
+- Controller: PKI directories, database files, JWT key files
+- Agent/MQTT Service: State directories, private keys, certificates, CA certificate
+
 ## Dependency Security
 
 - **[cargo-deny](https://github.com/EmbarkStudios/cargo-deny)**: Runs in CI to check for known vulnerabilities (RustSec advisory database), license compliance, and dependency issues.
