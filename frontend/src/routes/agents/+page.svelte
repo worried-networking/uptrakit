@@ -116,9 +116,9 @@
 	}
 
 	const confirmLabels = {
-		approve: { title: 'Approve Agent', verb: 'approve', btnClass: 'variant-filled-success' },
-		reject: { title: 'Reject Agent', verb: 'reject', btnClass: 'variant-filled-error' },
-		delete: { title: 'Delete Agent', verb: 'permanently delete', btnClass: 'variant-filled-error' }
+		approve: { title: 'Approve Agent', verb: 'approve', btnClass: 'preset-filled-success-500' },
+		reject: { title: 'Reject Agent', verb: 'reject', btnClass: 'preset-filled-error-500' },
+		delete: { title: 'Delete Agent', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
 	} as const;
 </script>
 
@@ -128,15 +128,13 @@
 	<h1 class="h1 mb-6">Agents</h1>
 
 	{#if error}
-		<aside class="alert variant-filled-error mb-4">
-			<div class="alert-message">
-				<p>{error}</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+			<p>{error}</p>
 		</aside>
 	{/if}
 
-	<div class="table-container">
-		<table class="table table-hover">
+	<div class="table-wrap">
+		<table class="table">
 			<thead>
 				<tr>
 					<th>Name</th>
@@ -155,18 +153,18 @@
 						<td>{agent.ip_address ?? '—'}</td>
 						<td>
 							{#if agent.status === 'pending'}
-								<span class="badge variant-filled-warning">Pending</span>
+								<span class="badge preset-filled-warning-500">Pending</span>
 							{:else if agent.status === 'approved'}
-								<span class="badge variant-filled-success">Approved</span>
+								<span class="badge preset-filled-success-500">Approved</span>
 							{:else}
-								<span class="badge variant-filled-error">Rejected</span>
+								<span class="badge preset-filled-error-500">Rejected</span>
 							{/if}
 						</td>
 						<td>{formatDate(agent.last_seen_at)}</td>
 						<td>
 							<div class="actions-menu">
 								<button
-									class="btn btn-sm variant-soft"
+									class="btn btn-sm preset-tonal"
 									onclick={(e) => {
 										e.stopPropagation();
 										toggleMenu(agent.id, e.currentTarget);
@@ -193,12 +191,12 @@
 				class="card fixed z-50 w-40 overflow-hidden p-0 shadow-xl"
 				style="top: {menuPos.top}px; left: {menuPos.left}px;"
 			>
-				<nav class="list-nav">
-					<ul>
+				<nav>
+					<ul class="space-y-0.5 p-1">
 						{#if agent.status === 'pending'}
 							<li>
 								<button
-									class="w-full text-left"
+									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 									onclick={() => openMergeDialog(agent)}
 								>
 									Merge Into&hellip;
@@ -206,7 +204,7 @@
 							</li>
 							<li>
 								<button
-									class="w-full text-left text-success-500"
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 									onclick={() => requestConfirm(agent.id, 'approve', agent.friendly_name)}
 								>
 									Approve
@@ -214,7 +212,7 @@
 							</li>
 							<li>
 								<button
-									class="w-full text-left text-error-500"
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 									onclick={() => requestConfirm(agent.id, 'reject', agent.friendly_name)}
 								>
 									Reject
@@ -223,7 +221,7 @@
 						{:else}
 							<li>
 								<button
-									class="w-full text-left text-error-500"
+									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 									onclick={() => requestConfirm(agent.id, 'delete', agent.friendly_name)}
 								>
 									Delete
@@ -240,7 +238,7 @@
 		{@const labels = confirmLabels[confirmAction.action]}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 			onkeydown={(e) => { if (e.key === 'Escape') cancelConfirm(); }}
 		>
 			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
@@ -250,7 +248,7 @@
 					<strong>{confirmAction.name}</strong>?
 				</p>
 				<div class="flex justify-end gap-2">
-					<button class="btn variant-ghost-surface" onclick={cancelConfirm}>Cancel</button>
+					<button class="btn preset-tonal-surface" onclick={cancelConfirm}>Cancel</button>
 					<button class="btn {labels.btnClass}" onclick={executeConfirmed}>
 						{labels.title}
 					</button>
@@ -262,7 +260,7 @@
 	{#if mergeSource}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 			onkeydown={(e) => { if (e.key === 'Escape') cancelMerge(); }}
 		>
 			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
@@ -281,9 +279,9 @@
 					</select>
 				</label>
 				<div class="flex justify-end gap-2">
-					<button class="btn variant-ghost-surface" onclick={cancelMerge}>Cancel</button>
+					<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
 					<button
-						class="btn variant-filled-primary"
+						class="btn preset-filled-primary-500"
 						disabled={!mergeTargetId}
 						onclick={executeMerge}
 					>

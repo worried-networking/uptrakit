@@ -41,14 +41,13 @@ uptrakit/
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
-├── frontend/                           # SvelteKit SPA (Skeleton UI + Tailwind CSS)
+├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
 │   │   ├── lib/                        # Shared modules: api client, auth store, types
 │   │   └── routes/                     # SvelteKit file-based routes
 │   ├── package.json                    # npm scripts: build, check
 │   ├── svelte.config.js                # SvelteKit config (static adapter)
-│   ├── tailwind.config.ts              # Tailwind + Skeleton theme
-│   └── vite.config.ts                  # Vite config (dev proxy → controller)
+│   └── vite.config.ts                  # Vite + Tailwind CSS v4 config (dev proxy → controller)
 ├── .github/
 │   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend check + build
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates

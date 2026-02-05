@@ -111,15 +111,13 @@
 	<h1 class="h1 mb-6">Hosts</h1>
 
 	{#if error}
-		<aside class="alert variant-filled-error mb-4">
-			<div class="alert-message">
-				<p>{error}</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+			<p>{error}</p>
 		</aside>
 	{/if}
 
-	<div class="table-container">
-		<table class="table table-hover">
+	<div class="table-wrap">
+		<table class="table">
 			<thead>
 				<tr>
 					<th>Name</th>
@@ -148,7 +146,7 @@
 							<td>
 								<div class="actions-menu">
 									<button
-										class="btn btn-sm variant-soft"
+										class="btn btn-sm preset-tonal"
 										onclick={(e) => {
 											e.stopPropagation();
 											toggleMenu(host.id, e.currentTarget);
@@ -176,11 +174,11 @@
 				class="card fixed z-50 w-40 overflow-hidden p-0 shadow-xl"
 				style="top: {menuPos.top}px; left: {menuPos.left}px;"
 			>
-				<nav class="list-nav">
-					<ul>
+				<nav>
+					<ul class="space-y-0.5 p-1">
 						<li>
 							<button
-								class="w-full text-left"
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 								onclick={() => openEditDialog(host)}
 							>
 								Edit Name
@@ -188,7 +186,7 @@
 						</li>
 						<li>
 							<button
-								class="w-full text-left text-error-500"
+								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 								onclick={() => requestConfirm(host.id, 'deactivate', host.friendly_name)}
 							>
 								Deactivate
@@ -203,7 +201,7 @@
 	{#if confirmAction}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 			onkeydown={(e) => { if (e.key === 'Escape') cancelConfirm(); }}
 		>
 			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
@@ -213,8 +211,8 @@
 					<strong>{confirmAction.name}</strong>?
 				</p>
 				<div class="flex justify-end gap-2">
-					<button class="btn variant-ghost-surface" onclick={cancelConfirm}>Cancel</button>
-					<button class="btn variant-filled-error" onclick={executeConfirmed}>
+					<button class="btn preset-tonal-surface" onclick={cancelConfirm}>Cancel</button>
+					<button class="btn preset-filled-error-500" onclick={executeConfirmed}>
 						Deactivate
 					</button>
 				</div>
@@ -225,7 +223,7 @@
 	{#if editHost}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 			onkeydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
 		>
 			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
@@ -235,8 +233,8 @@
 					<input class="input" type="text" bind:value={editHost.friendlyName} />
 				</label>
 				<div class="flex justify-end gap-2">
-					<button class="btn variant-ghost-surface" onclick={cancelEdit}>Cancel</button>
-					<button class="btn variant-filled-primary" onclick={executeEdit}>
+					<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
+					<button class="btn preset-filled-primary-500" onclick={executeEdit}>
 						Save
 					</button>
 				</div>

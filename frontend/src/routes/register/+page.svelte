@@ -38,10 +38,8 @@
 	<h2 class="h2 mb-6 text-center">Register</h2>
 
 	{#if error}
-		<aside class="alert variant-filled-error mb-4">
-			<div class="alert-message">
-				<p>{error}</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+			<p>{error}</p>
 		</aside>
 	{/if}
 
@@ -108,7 +106,7 @@
 			</label>
 		{/if}
 
-		<button type="submit" class="btn variant-filled-primary w-full">Register</button>
+		<button type="submit" class="btn preset-filled-primary-500 w-full">Register</button>
 	</form>
 
 	<p class="mt-4 text-center">

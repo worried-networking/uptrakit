@@ -123,17 +123,17 @@
 <div class="card mx-auto mt-8 max-w-md p-8">
 	{#if linkRequired}
 		<h2 class="h2 mb-6 text-center">Link Your Account</h2>
-		<p class="mb-4 text-center text-sm text-surface-600-300-token">
+		<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
 			An account with email <strong>{linkEmail}</strong> already exists. Verify your identity to link it.
 		</p>
 	{:else if authMethods?.setup_required}
 		<h2 class="h2 mb-6 text-center">Welcome to Uptrakit</h2>
 		{#if authMethods.oidc_providers.length > 0}
-			<p class="mb-4 text-center text-sm text-surface-600-300-token">
+			<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
 				Sign in with your identity provider to set up your account.
 			</p>
 		{:else if authMethods.password}
-			<p class="mb-4 text-center text-sm text-surface-600-300-token">
+			<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
 				Register your first account to get started.
 			</p>
 		{/if}
@@ -142,10 +142,8 @@
 	{/if}
 
 	{#if error}
-		<aside class="alert variant-filled-error mb-4">
-			<div class="alert-message">
-				<p>{error}</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+			<p>{error}</p>
 		</aside>
 	{/if}
 
@@ -155,7 +153,7 @@
 			<!-- OIDC-to-OIDC linking: offer login with the other provider -->
 			<button
 				type="button"
-				class="btn variant-filled-secondary w-full mb-4"
+				class="btn preset-filled-secondary-500 mb-4 w-full"
 				disabled={oidcLoading}
 				onclick={() => onLinkWithOidc(linkProviderId)}
 			>
@@ -163,7 +161,7 @@
 			</button>
 			<div class="my-4 flex items-center gap-4">
 				<hr class="flex-1" />
-				<span class="text-sm text-surface-600-300-token">or</span>
+				<span class="text-sm text-surface-600 dark:text-surface-400">or</span>
 				<hr class="flex-1" />
 			</div>
 		{/if}
@@ -181,7 +179,7 @@
 					placeholder="Enter your password to verify"
 				/>
 			</label>
-			<button type="submit" class="btn variant-filled-primary w-full">Link Account</button>
+			<button type="submit" class="btn preset-filled-primary-500 w-full">Link Account</button>
 		</form>
 	{:else}
 		<!-- Normal Login UI -->
@@ -190,7 +188,7 @@
 			{#each authMethods.oidc_providers as provider}
 				<button
 					type="button"
-					class="btn variant-filled-secondary w-full mb-3 flex items-center justify-center gap-2"
+					class="btn preset-filled-secondary-500 mb-3 flex w-full items-center justify-center gap-2"
 					disabled={oidcLoading}
 					onclick={() => onOidcLogin(provider.id)}
 				>
@@ -205,7 +203,7 @@
 			{#if authMethods.oidc_providers.length > 0 && authMethods.password}
 				<div class="my-4 flex items-center gap-4">
 					<hr class="flex-1" />
-					<span class="text-sm text-surface-600-300-token">or</span>
+					<span class="text-sm text-surface-600 dark:text-surface-400">or</span>
 					<hr class="flex-1" />
 				</div>
 			{/if}
@@ -235,11 +233,11 @@
 						/>
 					</label>
 
-					<button type="submit" class="btn variant-filled-primary w-full">Login</button>
+					<button type="submit" class="btn preset-filled-primary-500 w-full">Login</button>
 				</form>
 
 				{#if authMethods?.setup_required && !authMethods.oidc_providers.length}
-				<a href="/register" class="btn variant-filled-primary w-full mt-4">Register</a>
+				<a href="/register" class="btn preset-filled-primary-500 mt-4 w-full">Register</a>
 			{:else}
 				<p class="mt-4 text-center">
 					Don't have an account? <a href="/register" class="anchor">Register</a>
@@ -247,7 +245,7 @@
 			{/if}
 			{/if}
 		{:else}
-			<p class="text-center text-surface-600-300-token">Loading...</p>
+			<p class="text-center text-surface-600 dark:text-surface-400">Loading...</p>
 		{/if}
 	{/if}
 </div>

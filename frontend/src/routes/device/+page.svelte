@@ -29,49 +29,43 @@
 	<h2 class="h2 mb-6 text-center">Authorize Device</h2>
 
 	{#if $loading}
-		<p class="text-center text-surface-600-300-token">Loading...</p>
+		<p class="text-center text-surface-600 dark:text-surface-400">Loading...</p>
 	{:else if success}
-		<aside class="alert variant-filled-success mb-4">
-			<div class="alert-message">
-				<p>CLI session approved! You can close this tab.</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+			<p>CLI session approved! You can close this tab.</p>
 		</aside>
 	{:else if !code}
-		<aside class="alert variant-filled-warning mb-4">
-			<div class="alert-message">
-				<p>No device code provided. Please use the link shown in your CLI.</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-warning-500">
+			<p>No device code provided. Please use the link shown in your CLI.</p>
 		</aside>
 	{:else if !isLoggedIn}
-		<p class="mb-4 text-center text-surface-600-300-token">
+		<p class="mb-4 text-center text-surface-600 dark:text-surface-400">
 			You need to log in before you can authorize a device.
 		</p>
 		<a
 			href="/login?redirect=/device?code={encodeURIComponent(code)}"
-			class="btn variant-filled-primary w-full"
+			class="btn preset-filled-primary-500 w-full"
 		>
 			Log in
 		</a>
 	{:else}
 		{#if error}
-			<aside class="alert variant-filled-error mb-4">
-				<div class="alert-message">
-					<p>{error}</p>
-				</div>
+			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+				<p>{error}</p>
 			</aside>
 		{/if}
 
-		<p class="mb-4 text-center text-surface-600-300-token">
+		<p class="mb-4 text-center text-surface-600 dark:text-surface-400">
 			Your CLI is requesting access. Confirm the code below matches what is shown in your terminal.
 		</p>
 
-		<div class="mb-6 rounded-lg bg-surface-200-700-token p-4 text-center">
+		<div class="mb-6 rounded-lg bg-surface-200 p-4 text-center dark:bg-surface-700">
 			<span class="font-mono text-3xl font-bold tracking-widest">{code}</span>
 		</div>
 
 		<button
 			type="button"
-			class="btn variant-filled-primary w-full"
+			class="btn preset-filled-primary-500 w-full"
 			disabled={approving}
 			onclick={onApprove}
 		>

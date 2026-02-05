@@ -2,13 +2,12 @@
 	import type { Snippet } from 'svelte';
 	import type { SystemAlert } from '$lib/types';
 	import { onMount } from 'svelte';
-	import { AppShell, AppBar } from '@skeletonlabs/skeleton';
 	import { page } from '$app/stores';
 	import { user, loading, initialize, handleLogout } from '$lib/auth';
 	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
 	import { getSystemAlerts } from '$lib/api';
 	import { Permission } from '$lib/types';
-	import '../app.postcss';
+	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -72,87 +71,91 @@
 		<p class="text-lg">Loading...</p>
 	</div>
 {:else}
-	<AppShell slotSidebarLeft={showSidebar ? 'w-60 bg-surface-50-900-token border-r border-surface-300-600-token' : 'w-0'}>
-		{#snippet header()}
-			<AppBar class="border-b border-surface-300-600-token shadow-sm py-1">
-				{#snippet lead()}
-					<a href="/" class="text-xl font-bold">Uptrakit</a>
-				{/snippet}
-				{#snippet trail()}
-					{#if $user}
-						<span class="mr-2">{$user.email}</span>
-					{/if}
-					<button
-						class="btn-icon variant-ghost-surface"
-						title={$themeMode === 'light' ? 'Light mode' : $themeMode === 'dark' ? 'Dark mode' : 'System mode'}
-						onclick={cycleTheme}
-					>
-						{#if $themeMode === 'light'}
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
-								<path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.78 7.78a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM14.95 12.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM7.17 5.17a.75.75 0 0 1 0 1.06L6.11 7.29a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/>
-							</svg>
-						{:else if $themeMode === 'dark'}
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
-								<path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z" clip-rule="evenodd"/>
-							</svg>
-						{:else}
-							<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
-								<path fill-rule="evenodd" d="M2 4.25A2.25 2.25 0 0 1 4.25 2h11.5A2.25 2.25 0 0 1 18 4.25v8.5A2.25 2.25 0 0 1 15.75 15h-3.105a3.501 3.501 0 0 0 1.1 1.677A.75.75 0 0 1 13.26 18H6.74a.75.75 0 0 1-.484-1.323A3.501 3.501 0 0 0 7.355 15H4.25A2.25 2.25 0 0 1 2 12.75v-8.5Zm1.5 0a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-.75.75H4.25a.75.75 0 0 1-.75-.75v-7.5Z" clip-rule="evenodd"/>
-							</svg>
-						{/if}
-					</button>
-					{#if $user}
-						<button class="btn variant-ghost-surface" onclick={handleLogout}>
-							Logout
-						</button>
+	<div class="flex h-full flex-col">
+		<!-- Header -->
+		<header class="flex items-center justify-between border-b border-surface-200 px-4 py-1 shadow-xs dark:border-surface-700">
+			<a href="/" class="text-xl font-bold">Uptrakit</a>
+			<div class="flex items-center gap-2">
+				{#if $user}
+					<span class="mr-2">{$user.email}</span>
+				{/if}
+				<button
+					class="btn-icon preset-tonal-surface"
+					title={$themeMode === 'light' ? 'Light mode' : $themeMode === 'dark' ? 'Dark mode' : 'System mode'}
+					onclick={cycleTheme}
+				>
+					{#if $themeMode === 'light'}
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+							<path d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.78 7.78a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM14.95 12.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM7.17 5.17a.75.75 0 0 1 0 1.06L6.11 7.29a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/>
+						</svg>
+					{:else if $themeMode === 'dark'}
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+							<path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z" clip-rule="evenodd"/>
+						</svg>
 					{:else}
-						<a href="/login" class="btn variant-ghost-surface">Login</a>
-						<a href="/register" class="btn variant-ghost-surface">Register</a>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
+							<path fill-rule="evenodd" d="M2 4.25A2.25 2.25 0 0 1 4.25 2h11.5A2.25 2.25 0 0 1 18 4.25v8.5A2.25 2.25 0 0 1 15.75 15h-3.105a3.501 3.501 0 0 0 1.1 1.677A.75.75 0 0 1 13.26 18H6.74a.75.75 0 0 1-.484-1.323A3.501 3.501 0 0 0 7.355 15H4.25A2.25 2.25 0 0 1 2 12.75v-8.5Zm1.5 0a.75.75 0 0 1 .75-.75h11.5a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-.75.75H4.25a.75.75 0 0 1-.75-.75v-7.5Z" clip-rule="evenodd"/>
+						</svg>
 					{/if}
-				{/snippet}
-			</AppBar>
-		{/snippet}
-
-		{#snippet sidebarLeft()}
-			{#if showSidebar}
-				<nav class="list-nav p-4">
-					<ul>
-						{#each navItems as item}
-							<li>
-								<a
-									href={item.href}
-									class={$page.url.pathname === item.href ? 'bg-primary-active-token' : ''}
-								>
-									{item.label}
-								</a>
-							</li>
-						{/each}
-					</ul>
-				</nav>
-			{/if}
-		{/snippet}
-
-		{#if visibleAlerts.length > 0}
-			<div class="px-4 pt-2 space-y-2">
-				{#each visibleAlerts as alert (alert.id)}
-					<aside class="alert {alert.severity === 'warning' ? 'variant-filled-warning' : 'variant-filled-surface'}">
-						<div class="alert-message">
-							<h3 class="h4">{alert.title}</h3>
-							<p>{alert.message}</p>
-						</div>
-						<div class="alert-actions">
-							{#if alert.action === 'renew_server_certificate'}
-								<a href="/settings/global" class="btn btn-sm variant-filled">Go to Global Settings</a>
-							{/if}
-							<button class="btn btn-sm variant-soft" onclick={() => dismissAlert(alert.id)}>Dismiss</button>
-						</div>
-					</aside>
-				{/each}
+				</button>
+				{#if $user}
+					<button class="btn preset-tonal-surface" onclick={handleLogout}>
+						Logout
+					</button>
+				{:else}
+					<a href="/login" class="btn preset-tonal-surface">Login</a>
+					<a href="/register" class="btn preset-tonal-surface">Register</a>
+				{/if}
 			</div>
-		{/if}
+		</header>
 
-		<div class="container mx-auto max-w-2xl p-4">
-			{@render children()}
+		<!-- Body -->
+		<div class="flex min-h-0 flex-1">
+			<!-- Sidebar -->
+			{#if showSidebar}
+				<aside class="w-60 border-r border-surface-200 bg-surface-50 p-4 dark:border-surface-700 dark:bg-surface-900">
+					<nav>
+						<ul class="space-y-1">
+							{#each navItems as item}
+								<li>
+									<a
+										href={item.href}
+										class="block rounded-md px-3 py-2 text-sm font-medium {$page.url.pathname === item.href ? 'preset-tonal-primary' : 'hover:bg-surface-200 dark:hover:bg-surface-800'}"
+									>
+										{item.label}
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</nav>
+				</aside>
+			{/if}
+
+			<!-- Main content -->
+			<main class="flex-1 overflow-auto">
+				{#if visibleAlerts.length > 0}
+					<div class="space-y-2 px-4 pt-2">
+						{#each visibleAlerts as alert (alert.id)}
+							<aside class="flex items-center justify-between rounded-lg p-4 {alert.severity === 'warning' ? 'preset-filled-warning-500' : 'preset-filled-surface-400-600'}">
+								<div>
+									<h3 class="font-bold">{alert.title}</h3>
+									<p>{alert.message}</p>
+								</div>
+								<div class="flex gap-2">
+									{#if alert.action === 'renew_server_certificate'}
+										<a href="/settings/global" class="btn btn-sm preset-filled">Go to Global Settings</a>
+									{/if}
+									<button class="btn btn-sm preset-tonal" onclick={() => dismissAlert(alert.id)}>Dismiss</button>
+								</div>
+							</aside>
+						{/each}
+					</div>
+				{/if}
+
+				<div class="container mx-auto max-w-2xl p-4">
+					{@render children()}
+				</div>
+			</main>
 		</div>
-	</AppShell>
+	</div>
 {/if}

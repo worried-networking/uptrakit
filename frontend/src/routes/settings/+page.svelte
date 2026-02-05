@@ -465,21 +465,15 @@
 	<h1 class="h1 mb-6">Settings</h1>
 
 	{#if successMessage}
-		<aside class="alert variant-filled-success mb-4">
-			<div class="alert-message">
-				<p>{successMessage}</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+			<p>{successMessage}</p>
 		</aside>
 	{/if}
 
 	{#if errorMessage}
-		<aside class="alert variant-filled-error mb-4">
-			<div class="alert-message">
-				<p>{errorMessage}</p>
-			</div>
-			<div class="alert-actions">
-				<button class="btn btn-sm variant-filled" onclick={clearError}>Dismiss</button>
-			</div>
+		<aside class="mb-4 flex items-center justify-between rounded-lg p-4 preset-filled-error-500">
+			<p>{errorMessage}</p>
+			<button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
 		</aside>
 	{/if}
 
@@ -509,11 +503,11 @@
 						placeholder="Enter a new registration token"
 						bind:value={regToken}
 					/>
-					<small class="text-surface-600-300-token">Set a new token for invite-only registration. Leave blank to keep the current token.</small>
+					<small class="text-surface-600 dark:text-surface-400">Set a new token for invite-only registration. Leave blank to keep the current token.</small>
 				</label>
 			{/if}
 
-			<button class="btn variant-filled-primary" onclick={saveRegistration}>
+			<button class="btn preset-filled-primary-500" onclick={saveRegistration}>
 				Save
 			</button>
 		</div>
@@ -521,53 +515,53 @@
 		<!-- Section 2: Authentication -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Authentication</h2>
-			<label class="flex items-center gap-3 mb-4">
+			<label class="mb-4 flex items-center gap-3">
 				<input class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
 				<span>Enable password authentication</span>
 			</label>
-			<button class="btn variant-filled-primary" onclick={saveAuthentication}>
+			<button class="btn preset-filled-primary-500" onclick={saveAuthentication}>
 				Save
 			</button>
 		</div>
 
 		<!-- Section 3: MQTT Client -->
 		<div class="card mb-6 p-6">
-			<div class="flex items-center justify-between mb-4">
+			<div class="mb-4 flex items-center justify-between">
 				<h2 class="h3">MQTT Client</h2>
 				{#if mqttConfigured}
-					<span class="badge variant-filled-success">Configured</span>
+					<span class="badge preset-filled-success-500">Configured</span>
 				{:else}
-					<span class="badge variant-soft">Not configured</span>
+					<span class="badge preset-tonal">Not configured</span>
 				{/if}
 			</div>
-			<p class="text-surface-600-300-token mb-4">
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
 				Configure MQTT broker connection for Home Assistant integration.
 				Use a URL like <code>mqtt://broker:1883</code> or <code>mqtts://broker:8883</code>.
 				All MQTT changes require a restart to take effect.
 			</p>
 
-			<label class="flex items-center gap-3 mb-4">
+			<label class="mb-4 flex items-center gap-3">
 				<input class="checkbox" type="checkbox" bind:checked={mqttEnabled} />
 				<span>Enabled</span>
 			</label>
 
 			<label class="label mb-4">
-				<span>Broker URL <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+				<span>Broker URL <span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span></span>
 				<input class="input" type="text" placeholder="e.g. mqtt://broker:1883" bind:value={mqttUrl} />
 			</label>
 
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+			<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<label class="label">
-					<span>Client ID <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<span>Client ID <span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span></span>
 					<input class="input" type="text" bind:value={mqttClientId} />
 				</label>
 				<label class="label">
-					<span>Topic Prefix <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+					<span>Topic Prefix <span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span></span>
 					<input class="input" type="text" bind:value={mqttTopicPrefix} />
 				</label>
 			</div>
 
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+			<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<label class="label">
 					<span>Username</span>
 					<input class="input" type="text" placeholder="(optional)" bind:value={mqttUsername} />
@@ -576,7 +570,7 @@
 					<span>
 						Password
 						{#if mqttHasPassword}
-							<span class="badge variant-filled-success text-xs ml-2">Password set</span>
+							<span class="badge preset-filled-success-500 ml-2 text-xs">Password set</span>
 						{/if}
 					</span>
 					<input
@@ -589,11 +583,11 @@
 			</div>
 
 			<div class="flex gap-2">
-				<button class="btn variant-filled-primary" onclick={saveMqttClient}>
+				<button class="btn preset-filled-primary-500" onclick={saveMqttClient}>
 					Save
 				</button>
 				{#if mqttConfigured}
-					<button class="btn variant-filled-error" onclick={() => { mqttDeleteConfirm = true; }}>
+					<button class="btn preset-filled-error-500" onclick={() => { mqttDeleteConfirm = true; }}>
 						Delete
 					</button>
 				{/if}
@@ -604,17 +598,17 @@
 		{#if mqttDeleteConfirm}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 				onkeydown={(e) => { if (e.key === 'Escape') { mqttDeleteConfirm = false; } }}
 			>
 				<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
 					<h3 class="h3">Delete MQTT Client</h3>
 					<p>Are you sure you want to remove the MQTT client configuration?</p>
 					<div class="flex justify-end gap-2">
-						<button class="btn variant-ghost-surface" onclick={() => { mqttDeleteConfirm = false; }}>
+						<button class="btn preset-tonal-surface" onclick={() => { mqttDeleteConfirm = false; }}>
 							Cancel
 						</button>
-						<button class="btn variant-filled-error" onclick={handleDeleteMqtt}>
+						<button class="btn preset-filled-error-500" onclick={handleDeleteMqtt}>
 							Delete
 						</button>
 					</div>
@@ -624,18 +618,18 @@
 
 		<!-- Section 5: OIDC Providers -->
 		<div class="card mb-6 p-6">
-			<div class="flex items-center justify-between mb-4">
+			<div class="mb-4 flex items-center justify-between">
 				<h2 class="h3">OIDC Providers</h2>
-				<button class="btn variant-filled-primary" onclick={openCreateOidc}>
+				<button class="btn preset-filled-primary-500" onclick={openCreateOidc}>
 					Add Provider
 				</button>
 			</div>
 
 			{#if oidcProviders.length === 0}
-				<p class="text-center text-surface-600-300-token py-4">No OIDC providers configured.</p>
+				<p class="py-4 text-center text-surface-600 dark:text-surface-400">No OIDC providers configured.</p>
 			{:else}
-				<div class="table-container">
-					<table class="table table-hover">
+				<div class="table-wrap">
+					<table class="table">
 						<thead>
 							<tr>
 								<th>Name</th>
@@ -651,36 +645,36 @@
 									<td>{provider.slug}</td>
 									<td>
 										{#if provider.is_active}
-											<span class="badge variant-filled-success">Active</span>
+											<span class="badge preset-filled-success-500">Active</span>
 										{:else}
-											<span class="badge variant-soft">Inactive</span>
+											<span class="badge preset-tonal">Inactive</span>
 										{/if}
 									</td>
 									<td>
 										<div class="flex gap-1">
 											<button
-												class="btn btn-sm variant-soft"
+												class="btn btn-sm preset-tonal"
 												onclick={() => openEditOidc(provider)}
 											>
 												Edit
 											</button>
 											{#if provider.is_active}
 												<button
-													class="btn btn-sm variant-soft-warning"
+													class="btn btn-sm preset-tonal-warning"
 													onclick={() => toggleOidcActive(provider)}
 												>
 													Deactivate
 												</button>
 											{:else}
 												<button
-													class="btn btn-sm variant-soft-success"
+													class="btn btn-sm preset-tonal-success"
 													onclick={() => toggleOidcActive(provider)}
 												>
 													Activate
 												</button>
 											{/if}
 											<button
-												class="btn btn-sm variant-soft-error"
+												class="btn btn-sm preset-tonal-error"
 												onclick={() => requestDeleteOidc(provider)}
 											>
 												Delete
@@ -698,11 +692,11 @@
 		<!-- Section 4: Agent Certificates -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Agent Certificates</h2>
-			<p class="text-surface-600-300-token mb-4">
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
 				Configure the lifetime and renewal window for agent mTLS certificates.
 				Agents will request a new certificate when the remaining validity falls below the renewal window.
 			</p>
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-4">
+			<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<label class="label">
 					<span>Certificate Lifetime (days)</span>
 					<input
@@ -722,7 +716,7 @@
 					/>
 				</label>
 			</div>
-			<button class="btn variant-filled-primary" onclick={saveCertificates}>
+			<button class="btn preset-filled-primary-500" onclick={saveCertificates}>
 				Save
 			</button>
 		</div>
@@ -730,30 +724,28 @@
 		<!-- Section 5: Enrollment Token -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Enrollment Token</h2>
-			<div class="flex items-center gap-3 mb-4">
+			<div class="mb-4 flex items-center gap-3">
 				<span>Status:</span>
 				{#if enrollmentConfigured}
-					<span class="badge variant-filled-success">Configured</span>
+					<span class="badge preset-filled-success-500">Configured</span>
 				{:else}
-					<span class="badge variant-soft">Not configured</span>
+					<span class="badge preset-tonal">Not configured</span>
 				{/if}
 			</div>
 
 			{#if generatedToken}
-				<aside class="alert variant-filled-success mb-4">
-					<div class="alert-message">
-						<p class="font-bold">Copy it now — it will not be shown again</p>
-						<code class="break-all">{generatedToken}</code>
-					</div>
+				<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+					<p class="font-bold">Copy it now — it will not be shown again</p>
+					<code class="break-all">{generatedToken}</code>
 				</aside>
 			{/if}
 
 			<div class="flex gap-2">
-				<button class="btn variant-filled-primary" onclick={handleGenerateToken}>
+				<button class="btn preset-filled-primary-500" onclick={handleGenerateToken}>
 					{enrollmentConfigured ? 'Regenerate' : 'Generate'}
 				</button>
 				{#if enrollmentConfigured}
-					<button class="btn variant-filled-error" onclick={handleRevokeToken}>
+					<button class="btn preset-filled-error-500" onclick={handleRevokeToken}>
 						Revoke
 					</button>
 				{/if}
@@ -765,10 +757,10 @@
 	{#if showOidcModal}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 			onkeydown={(e) => { if (e.key === 'Escape') closeOidcModal(); }}
 		>
-			<div class="card w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-4 p-6 shadow-xl">
+			<div class="card w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl">
 				<h3 class="h3">{editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'}</h3>
 
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -834,8 +826,8 @@
 				</label>
 
 				<div class="flex justify-end gap-2">
-					<button class="btn variant-ghost-surface" onclick={closeOidcModal}>Cancel</button>
-					<button class="btn variant-filled-primary" onclick={saveOidcProvider}>
+					<button class="btn preset-tonal-surface" onclick={closeOidcModal}>Cancel</button>
+					<button class="btn preset-filled-primary-500" onclick={saveOidcProvider}>
 						{editingProvider ? 'Update' : 'Create'}
 					</button>
 				</div>
@@ -847,7 +839,7 @@
 	{#if deleteConfirm}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-backdrop-token p-4"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
 			onkeydown={(e) => { if (e.key === 'Escape') { deleteConfirm = null; } }}
 		>
 			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
@@ -857,10 +849,10 @@
 					<strong>{deleteConfirm.name}</strong>?
 				</p>
 				<div class="flex justify-end gap-2">
-					<button class="btn variant-ghost-surface" onclick={() => { deleteConfirm = null; }}>
+					<button class="btn preset-tonal-surface" onclick={() => { deleteConfirm = null; }}>
 						Cancel
 					</button>
-					<button class="btn variant-filled-error" onclick={executeDeleteOidc}>
+					<button class="btn preset-filled-error-500" onclick={executeDeleteOidc}>
 						Delete
 					</button>
 				</div>

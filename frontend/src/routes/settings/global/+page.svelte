@@ -131,21 +131,15 @@
 	<h1 class="h1 mb-6">Global Settings</h1>
 
 	{#if successMessage}
-		<aside class="alert variant-filled-success mb-4">
-			<div class="alert-message">
-				<p>{successMessage}</p>
-			</div>
+		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+			<p>{successMessage}</p>
 		</aside>
 	{/if}
 
 	{#if errorMessage}
-		<aside class="alert variant-filled-error mb-4">
-			<div class="alert-message">
-				<p>{errorMessage}</p>
-			</div>
-			<div class="alert-actions">
-				<button class="btn btn-sm variant-filled" onclick={clearError}>Dismiss</button>
-			</div>
+		<aside class="mb-4 flex items-center justify-between rounded-lg p-4 preset-filled-error-500">
+			<p>{errorMessage}</p>
+			<button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
 		</aside>
 	{/if}
 
@@ -157,7 +151,7 @@
 		<!-- Section 1: Network Settings -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Network Settings</h2>
-			<p class="text-surface-600-300-token mb-4">
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
 				Configure reverse proxy trust, client IP detection, and listen addresses.
 				Changes to listen addresses require a restart to take effect.
 			</p>
@@ -194,11 +188,11 @@
 			</label>
 
 			<label class="label mb-4">
-				<span>HTTPS Listen Address <span class="badge variant-soft-warning text-xs ml-2">Requires restart</span></span>
+				<span>HTTPS Listen Address <span class="badge preset-tonal-warning ml-2 text-xs">Requires restart</span></span>
 				<input class="input" type="text" bind:value={httpsAddr} />
 			</label>
 
-			<button class="btn variant-filled-primary" onclick={saveNetworkSettings}>
+			<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}>
 				Save
 			</button>
 		</div>
@@ -206,23 +200,21 @@
 		<!-- Section 2: Controller TLS Certificate -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Controller TLS Certificate</h2>
-			<p class="text-surface-600-300-token mb-4">
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
 				The controller's HTTPS certificate is automatically renewed before expiration.
 				You can manually renew it here to re-issue under the current active CA.
 			</p>
 
 			{#if tlsAlerts.length > 0}
 				{#each tlsAlerts as alert (alert.id)}
-					<aside class="alert {alert.severity === 'warning' ? 'variant-filled-warning' : 'variant-filled-surface'} mb-4">
-						<div class="alert-message">
-							<p>{alert.message}</p>
-						</div>
+					<aside class="mb-4 rounded-lg p-4 {alert.severity === 'warning' ? 'preset-filled-warning-500' : 'preset-filled-surface-400-600'}">
+						<p>{alert.message}</p>
 					</aside>
 				{/each}
 			{/if}
 
 			<button
-				class="btn variant-filled-primary"
+				class="btn preset-filled-primary-500"
 				onclick={handleRenewServerCert}
 				disabled={renewingCert}
 			>
