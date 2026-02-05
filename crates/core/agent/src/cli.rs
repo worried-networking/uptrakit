@@ -59,13 +59,12 @@ impl Args {
     ///
     /// Returns `AppDirs` with separate config and state directories.
     /// CLI overrides take precedence over platform defaults.
-    pub fn resolve_dirs(&self) -> Result<AppDirs, String> {
+    pub fn resolve_dirs(&self) -> uptrakit_directories::Result<AppDirs> {
         AppDirs::resolve(
             "agent",
             self.config_dir.as_deref(),
             self.state_dir.as_deref(),
         )
-        .map_err(|e| e.to_string())
     }
 
     /// Parse `--url` into `(host, port)`.

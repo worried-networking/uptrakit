@@ -53,7 +53,7 @@ async fn run(args: &Args) -> error::Result<()> {
     // Resolve application directories, create if needed
     let app_dirs = args
         .resolve_dirs()
-        .map_err(|s| report!(Error::Enrollment(s)))?;
+        .map_err(|e| report!(Error::Enrollment(e.to_string())))?;
     app_dirs.ensure_dirs().map_err(|e| {
         report!(Error::Enrollment(format!(
             "failed to create directories: {e}"

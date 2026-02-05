@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
+use rootcause::{Report, ReportConversion, markers, report};
 use thiserror::Error;
 use tokio_tungstenite::{
     Connector,
@@ -41,9 +42,33 @@ pub enum ControllerError {
     Identity(#[from] crate::identity::IdentityError),
 }
 
+pub type Result<T> = std::result::Result<T, Report<ControllerError>>;
+
 impl From<tungstenite::Error> for ControllerError {
     fn from(e: tungstenite::Error) -> Self {
         Self::WebSocket(Box::new(e))
+    }
+}
+
+impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for ControllerError
+where
+    ControllerError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<serde_json::Error, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(ControllerError::Json)
+    }
+}
+
+impl<T> ReportConversion<tungstenite::Error, markers::Mutable, T> for ControllerError
+where
+    ControllerError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<tungstenite::Error, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(|e| ControllerError::WebSocket(Box::new(e)))
     }
 }
 
@@ -85,7 +110,7 @@ impl ControllerConnection {
         identity: &Identity,
         mode: ConnectionMode,
         insecure: bool,
-    ) -> Result<Self, ControllerError> {
+    ) -> Result<Self> {
         // Build the WebSocket URL
         let ws_url = build_ws_url(controller_url)?;
 
@@ -113,13 +138,13 @@ impl ControllerConnection {
 
         let request = request
             .body(())
-            .map_err(|e| ControllerError::Connection(e.to_string()))?;
+            .map_err(|e| report!(ControllerError::Connection(e.to_string())))?;
 
         // Connect
         let (ws_stream, _response) =
             tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
                 .await
-                .map_err(|e| ControllerError::Connection(e.to_string()))?;
+                .map_err(|e| report!(ControllerError::Connection(e.to_string())))?;
 
         let (sink, stream) = ws_stream.split();
 
@@ -127,40 +152,53 @@ impl ControllerConnection {
     }
 
     /// Send a message to the controller.
-    pub async fn send(&mut self, msg: ServiceMessage) -> Result<(), ControllerError> {
-        let json = serde_json::to_string(&msg)?;
-        self.sink.send(Message::Text(json.into())).await?;
+    pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
+        let json = serde_json::to_string(&msg).map_err(|e| report!(ControllerError::Json(e)))?;
+        self.sink
+            .send(Message::Text(json.into()))
+            .await
+            .map_err(|e| report!(ControllerError::WebSocket(Box::new(e))))?;
         Ok(())
     }
 
     /// Receive the next message from the controller.
-    pub async fn recv(&mut self) -> Result<Option<ControllerMessage>, ControllerError> {
+    pub async fn recv(&mut self) -> Result<Option<ControllerMessage>> {
         loop {
             match self.stream.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    let msg: ControllerMessage = serde_json::from_str(&text)?;
+                    let msg: ControllerMessage = serde_json::from_str(&text)
+                        .map_err(|e| report!(ControllerError::Json(e)))?;
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let msg: ControllerMessage = serde_json::from_slice(&data)?;
+                    let msg: ControllerMessage = serde_json::from_slice(&data)
+                        .map_err(|e| report!(ControllerError::Json(e)))?;
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Ping(data))) => {
-                    self.sink.send(Message::Pong(data)).await?;
+                    self.sink
+                        .send(Message::Pong(data))
+                        .await
+                        .map_err(|e| report!(ControllerError::WebSocket(Box::new(e))))?;
                     continue;
                 }
                 Some(Ok(Message::Pong(_))) => continue,
                 Some(Ok(Message::Close(_))) => return Ok(None),
                 Some(Ok(Message::Frame(_))) => continue,
-                Some(Err(e)) => return Err(e.into()),
+                Some(Err(e)) => {
+                    return Err(report!(ControllerError::WebSocket(Box::new(e))));
+                }
                 None => return Ok(None),
             }
         }
     }
 
     /// Close the connection gracefully.
-    pub async fn close(mut self) -> Result<(), ControllerError> {
-        self.sink.send(Message::Close(None)).await?;
+    pub async fn close(mut self) -> Result<()> {
+        self.sink
+            .send(Message::Close(None))
+            .await
+            .map_err(|e| report!(ControllerError::WebSocket(Box::new(e))))?;
         Ok(())
     }
 }
@@ -169,10 +207,7 @@ impl ControllerConnection {
 ///
 /// This is used for TOFU (Trust On First Use) - the first time we connect,
 /// we fetch the CA cert using system roots (or insecure mode), then pin it.
-pub async fn fetch_ca_cert(
-    controller_url: &str,
-    insecure: bool,
-) -> Result<String, ControllerError> {
+pub async fn fetch_ca_cert(controller_url: &str, insecure: bool) -> Result<String> {
     let ca_url = build_ca_url(controller_url)?;
 
     // Build TLS config for CA fetch
@@ -189,26 +224,26 @@ pub async fn fetch_ca_cert(
     // Parse URL
     let url: url::Url = ca_url
         .parse()
-        .map_err(|e: url::ParseError| ControllerError::Connection(e.to_string()))?;
+        .map_err(|e: url::ParseError| report!(ControllerError::Connection(e.to_string())))?;
 
     let host = url
         .host_str()
-        .ok_or_else(|| ControllerError::Connection("missing host".to_string()))?;
+        .ok_or_else(|| report!(ControllerError::Connection("missing host".to_string())))?;
     let port = url.port().unwrap_or(443);
 
     // Connect TCP
     let addr = format!("{}:{}", host, port);
     let stream = tokio::net::TcpStream::connect(&addr)
         .await
-        .map_err(|e| ControllerError::Connection(e.to_string()))?;
+        .map_err(|e| report!(ControllerError::Connection(e.to_string())))?;
 
     // Wrap with TLS
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
-        .map_err(|e| ControllerError::Tls(e.to_string()))?;
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
     let tls_stream = connector
         .connect(server_name, stream)
         .await
-        .map_err(|e| ControllerError::Tls(e.to_string()))?;
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
 
     // Send HTTP request
     let request = format!(
@@ -222,20 +257,22 @@ pub async fn fetch_ca_cert(
     writer
         .write_all(request.as_bytes())
         .await
-        .map_err(|e| ControllerError::Connection(e.to_string()))?;
+        .map_err(|e| report!(ControllerError::Connection(e.to_string())))?;
 
     // Read response
     let mut response = Vec::new();
     reader
         .read_to_end(&mut response)
         .await
-        .map_err(|e| ControllerError::Connection(e.to_string()))?;
+        .map_err(|e| report!(ControllerError::Connection(e.to_string())))?;
 
     // Parse response (simple HTTP/1.1 parsing)
     let response_str = String::from_utf8_lossy(&response);
-    let body_start = response_str
-        .find("\r\n\r\n")
-        .ok_or_else(|| ControllerError::Protocol("invalid HTTP response".to_string()))?;
+    let body_start = response_str.find("\r\n\r\n").ok_or_else(|| {
+        report!(ControllerError::Protocol(
+            "invalid HTTP response".to_string()
+        ))
+    })?;
 
     let body = &response_str[body_start + 4..];
     Ok(body.to_string())
@@ -243,7 +280,7 @@ pub async fn fetch_ca_cert(
 
 // --- Helper functions ---
 
-fn build_ws_url(controller_url: &str) -> Result<String, ControllerError> {
+fn build_ws_url(controller_url: &str) -> Result<String> {
     let mut url = controller_url.to_string();
 
     // Convert https:// to wss://
@@ -265,7 +302,7 @@ fn build_ws_url(controller_url: &str) -> Result<String, ControllerError> {
     Ok(url)
 }
 
-fn build_ca_url(controller_url: &str) -> Result<String, ControllerError> {
+fn build_ca_url(controller_url: &str) -> Result<String> {
     let mut url = controller_url.to_string();
 
     // Ensure https://
@@ -287,14 +324,14 @@ fn build_ca_url(controller_url: &str) -> Result<String, ControllerError> {
     Ok(url)
 }
 
-fn extract_host(url: &str) -> Result<String, ControllerError> {
+fn extract_host(url: &str) -> Result<String> {
     let url: url::Url = url
         .parse()
-        .map_err(|e: url::ParseError| ControllerError::Connection(e.to_string()))?;
+        .map_err(|e: url::ParseError| report!(ControllerError::Connection(e.to_string())))?;
 
     let host = url
         .host_str()
-        .ok_or_else(|| ControllerError::Connection("missing host".to_string()))?;
+        .ok_or_else(|| report!(ControllerError::Connection("missing host".to_string())))?;
 
     if let Some(port) = url.port() {
         Ok(format!("{}:{}", host, port))
@@ -307,7 +344,7 @@ fn build_tls_connector(
     identity: &Identity,
     mode: ConnectionMode,
     insecure: bool,
-) -> Result<Connector, ControllerError> {
+) -> Result<Connector> {
     let tls_config = if mode == ConnectionMode::Authenticated && identity.is_certified() {
         // mTLS with client certificate
         build_mtls_config(identity)?
@@ -324,7 +361,8 @@ fn build_tls_connector(
     Ok(Connector::Rustls(Arc::new(tls_config)))
 }
 
-fn build_system_roots_tls_config() -> Result<rustls::ClientConfig, ControllerError> {
+fn build_system_roots_tls_config()
+-> std::result::Result<rustls::ClientConfig, Report<ControllerError>> {
     let root_store =
         rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
@@ -335,17 +373,19 @@ fn build_system_roots_tls_config() -> Result<rustls::ClientConfig, ControllerErr
     Ok(config)
 }
 
-fn build_pinned_ca_config(ca_pem: &str) -> Result<rustls::ClientConfig, ControllerError> {
+fn build_pinned_ca_config(
+    ca_pem: &str,
+) -> std::result::Result<rustls::ClientConfig, Report<ControllerError>> {
     let mut root_store = rustls::RootCertStore::empty();
 
     let certs = rustls_pemfile::certs(&mut ca_pem.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| ControllerError::Tls(e.to_string()))?;
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
 
     for cert in certs {
         root_store
             .add(cert)
-            .map_err(|e| ControllerError::Tls(e.to_string()))?;
+            .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
     }
 
     let config = rustls::ClientConfig::builder()
@@ -355,50 +395,56 @@ fn build_pinned_ca_config(ca_pem: &str) -> Result<rustls::ClientConfig, Controll
     Ok(config)
 }
 
-fn build_mtls_config(identity: &Identity) -> Result<rustls::ClientConfig, ControllerError> {
-    let ca_pem = identity
-        .ca_cert_pem
-        .as_ref()
-        .ok_or(ControllerError::Identity(
+fn build_mtls_config(
+    identity: &Identity,
+) -> std::result::Result<rustls::ClientConfig, Report<ControllerError>> {
+    let ca_pem = identity.ca_cert_pem.as_ref().ok_or_else(|| {
+        report!(ControllerError::Identity(
             crate::identity::IdentityError::NotCertified,
-        ))?;
+        ))
+    })?;
 
     let mut root_store = rustls::RootCertStore::empty();
     let ca_certs = rustls_pemfile::certs(&mut ca_pem.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| ControllerError::Tls(e.to_string()))?;
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
 
     for cert in ca_certs {
         root_store
             .add(cert)
-            .map_err(|e| ControllerError::Tls(e.to_string()))?;
+            .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
     }
 
-    let cert_pem = identity.certificate_pem().ok_or(ControllerError::Identity(
-        crate::identity::IdentityError::NotCertified,
-    ))?;
+    let cert_pem = identity.certificate_pem().ok_or_else(|| {
+        report!(ControllerError::Identity(
+            crate::identity::IdentityError::NotCertified,
+        ))
+    })?;
 
-    let key_pem = identity.private_key_pem().ok_or(ControllerError::Identity(
-        crate::identity::IdentityError::NotCertified,
-    ))?;
+    let key_pem = identity.private_key_pem().ok_or_else(|| {
+        report!(ControllerError::Identity(
+            crate::identity::IdentityError::NotCertified,
+        ))
+    })?;
 
     let certs = rustls_pemfile::certs(&mut cert_pem.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| ControllerError::Tls(e.to_string()))?;
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
 
     let key = rustls_pemfile::private_key(&mut key_pem.as_bytes())
-        .map_err(|e| ControllerError::Tls(e.to_string()))?
-        .ok_or_else(|| ControllerError::Tls("no private key found".to_string()))?;
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?
+        .ok_or_else(|| report!(ControllerError::Tls("no private key found".to_string())))?;
 
     let config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_client_auth_cert(certs, key)
-        .map_err(|e| ControllerError::Tls(e.to_string()))?;
+        .map_err(|e| report!(ControllerError::Tls(e.to_string())))?;
 
     Ok(config)
 }
 
-fn build_insecure_tls_config() -> Result<rustls::ClientConfig, ControllerError> {
+fn build_insecure_tls_config() -> std::result::Result<rustls::ClientConfig, Report<ControllerError>>
+{
     // DANGEROUS: Accepts any certificate
     // Only use for initial CA fetch when no CA is known yet
 
@@ -413,7 +459,8 @@ fn build_insecure_tls_config() -> Result<rustls::ClientConfig, ControllerError> 
             _server_name: &rustls::pki_types::ServerName<'_>,
             _ocsp_response: &[u8],
             _now: rustls::pki_types::UnixTime,
-        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error>
+        {
             Ok(rustls::client::danger::ServerCertVerified::assertion())
         }
 
@@ -422,7 +469,8 @@ fn build_insecure_tls_config() -> Result<rustls::ClientConfig, ControllerError> 
             _message: &[u8],
             _cert: &rustls::pki_types::CertificateDer<'_>,
             _dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
             Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
         }
 
@@ -431,7 +479,8 @@ fn build_insecure_tls_config() -> Result<rustls::ClientConfig, ControllerError> 
             _message: &[u8],
             _cert: &rustls::pki_types::CertificateDer<'_>,
             _dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+        {
             Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
         }
 
@@ -466,7 +515,7 @@ mod tests {
     #[test]
     fn build_ws_url_from_https() {
         assert_eq!(
-            build_ws_url("https://controller:8443").unwrap(),
+            build_ws_url("https://controller:8443").expect("should build"),
             "wss://controller:8443/api/v1/ws/service"
         );
     }
@@ -474,7 +523,7 @@ mod tests {
     #[test]
     fn build_ws_url_from_wss() {
         assert_eq!(
-            build_ws_url("wss://controller:8443").unwrap(),
+            build_ws_url("wss://controller:8443").expect("should build"),
             "wss://controller:8443/api/v1/ws/service"
         );
     }
@@ -482,7 +531,7 @@ mod tests {
     #[test]
     fn build_ws_url_preserves_path() {
         assert_eq!(
-            build_ws_url("wss://controller:8443/api/v1/ws/service").unwrap(),
+            build_ws_url("wss://controller:8443/api/v1/ws/service").expect("should build"),
             "wss://controller:8443/api/v1/ws/service"
         );
     }
@@ -490,7 +539,7 @@ mod tests {
     #[test]
     fn build_ca_url_from_https() {
         assert_eq!(
-            build_ca_url("https://controller:8443").unwrap(),
+            build_ca_url("https://controller:8443").expect("should build"),
             "https://controller:8443/api/v1/pki/ca.crt"
         );
     }
@@ -498,7 +547,7 @@ mod tests {
     #[test]
     fn build_ca_url_from_wss() {
         assert_eq!(
-            build_ca_url("wss://controller:8443").unwrap(),
+            build_ca_url("wss://controller:8443").expect("should build"),
             "https://controller:8443/api/v1/pki/ca.crt"
         );
     }

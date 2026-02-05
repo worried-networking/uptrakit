@@ -18,6 +18,8 @@
 
 use std::process::Stdio;
 
+use rootcause::{Report, report};
+use thiserror::Error as ThisError;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -26,6 +28,33 @@ use uptrakit_internal_wire::{
 };
 
 use crate::error::Error;
+
+/// Errors that can occur during update execution.
+#[derive(Debug, ThisError)]
+pub(crate) enum UpdateError {
+    #[error("no release info provided")]
+    MissingReleaseInfo,
+
+    #[error("missing provider config field: {0}")]
+    MissingConfig(String),
+
+    #[error("command spawn failed: {0}")]
+    CommandSpawn(#[source] std::io::Error),
+
+    #[error("failed to capture {0}")]
+    CaptureFailed(String),
+
+    #[error("command exited with code {0}")]
+    CommandFailed(i32),
+
+    #[error("command execution failed: {0}")]
+    CommandWait(#[source] std::io::Error),
+
+    #[error("install command failed: {0}")]
+    InstallFailed(String),
+}
+
+pub(crate) type UpdateResult<T> = std::result::Result<T, Report<UpdateError>>;
 
 /// Default shell to use when not specified.
 const DEFAULT_SHELL: &str = "bash";
@@ -95,7 +124,7 @@ pub async fn execute_update(
                     Err(e) => {
                         let error_msg = format!("[pre-hook] Failed: {e}");
                         send_output(&output_tx, &error_msg, OutputStreamType::System).await;
-                        return Err(Error::PreUpdateHookFailed(e));
+                        return Err(Error::PreUpdateHookFailed(e.to_string()));
                     }
                 }
             }
@@ -117,7 +146,7 @@ pub async fn execute_update(
                 accumulated_output.push_str(&output);
             }
             Err(e) => {
-                return Err(Error::UpdateExecution(e));
+                return Err(Error::UpdateExecution(e.to_string()));
             }
         }
 
@@ -153,7 +182,7 @@ pub async fn execute_update(
                     Err(e) => {
                         let error_msg = format!("[post-hook] Failed: {e}");
                         send_output(&output_tx, &error_msg, OutputStreamType::System).await;
-                        return Err(Error::PostUpdateHookFailed(e));
+                        return Err(Error::PostUpdateHookFailed(e.to_string()));
                     }
                 }
             }
@@ -227,7 +256,7 @@ async fn detect_current_version(_payload: &ExecuteUpdatePayload) -> Option<Strin
 async fn execute_provider_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<String, String> {
+) -> UpdateResult<String> {
     match payload.provider_type {
         ProviderType::GithubReleases => execute_github_releases_update(payload, output_tx).await,
         ProviderType::ProxmoxHelperScripts => {
@@ -241,12 +270,12 @@ async fn execute_provider_update(
 async fn execute_github_releases_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<String, String> {
+) -> UpdateResult<String> {
     let mut output = String::new();
 
     // Extract release info
     let Some(release_info) = &payload.release_info else {
-        return Err("No release info provided for GitHub Releases update".to_string());
+        return Err(report!(UpdateError::MissingReleaseInfo));
     };
 
     send_output(
@@ -284,7 +313,7 @@ async fn execute_github_releases_update(
                     output.push_str(&cmd_output);
                 }
                 Err(e) => {
-                    return Err(format!("Install command failed: {e}"));
+                    return Err(report!(UpdateError::InstallFailed(e.to_string())));
                 }
             }
         }
@@ -306,7 +335,7 @@ async fn execute_github_releases_update(
 async fn execute_proxmox_helper_scripts_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<String, String> {
+) -> UpdateResult<String> {
     let mut output = String::new();
 
     // Get the script URL from provider config
@@ -314,7 +343,7 @@ async fn execute_proxmox_helper_scripts_update(
         .provider_config
         .get("script_url")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "No script_url in provider config".to_string())?;
+        .ok_or_else(|| report!(UpdateError::MissingConfig("script_url".to_string())))?;
 
     send_output(
         output_tx,
@@ -331,7 +360,7 @@ async fn execute_proxmox_helper_scripts_update(
             output.push_str(&cmd_output);
         }
         Err(e) => {
-            return Err(format!("Update script failed: {e}"));
+            return Err(report!(UpdateError::InstallFailed(e.to_string())));
         }
     }
 
@@ -342,7 +371,7 @@ async fn execute_proxmox_helper_scripts_update(
 async fn execute_docker_registry_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<String, String> {
+) -> UpdateResult<String> {
     let mut output = String::new();
 
     let image = &payload.package_identifier;
@@ -363,7 +392,7 @@ async fn execute_docker_registry_update(
             output.push_str(&cmd_output);
         }
         Err(e) => {
-            return Err(format!("Docker pull failed: {e}"));
+            return Err(report!(UpdateError::InstallFailed(e.to_string())));
         }
     }
 
@@ -388,7 +417,7 @@ async fn execute_docker_registry_update(
                 output.push_str(&cmd_output);
             }
             Err(e) => {
-                return Err(format!("Restart command failed: {e}"));
+                return Err(report!(UpdateError::InstallFailed(e.to_string())));
             }
         }
     }
@@ -428,7 +457,7 @@ async fn run_command_with_shell(
     shell: &str,
     stream_type: OutputStreamType,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<(String, i32), String> {
+) -> UpdateResult<(String, i32)> {
     let wrapped_cmd = wrap_command_for_shell(cmd, shell);
     let (shell_exec, shell_arg) = get_shell_args(shell);
 
@@ -438,16 +467,16 @@ async fn run_command_with_shell(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn command: {e}"))?;
+        .map_err(|e| report!(UpdateError::CommandSpawn(e)))?;
 
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "Failed to capture stdout".to_string())?;
+        .ok_or_else(|| report!(UpdateError::CaptureFailed("stdout".to_string())))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| "Failed to capture stderr".to_string())?;
+        .ok_or_else(|| report!(UpdateError::CaptureFailed("stderr".to_string())))?;
 
     let mut accumulated = String::new();
 
@@ -497,12 +526,12 @@ async fn run_command_with_shell(
     let status = child
         .wait()
         .await
-        .map_err(|e| format!("Failed to wait for command: {e}"))?;
+        .map_err(|e| report!(UpdateError::CommandWait(e)))?;
 
     let exit_code = status.code().unwrap_or(-1);
 
     if !status.success() {
-        return Err(format!("Command exited with code {exit_code}"));
+        return Err(report!(UpdateError::CommandFailed(exit_code)));
     }
 
     Ok((accumulated, exit_code))
@@ -513,7 +542,7 @@ async fn run_command(
     cmd: &str,
     stream_type: OutputStreamType,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
-) -> Result<String, String> {
+) -> UpdateResult<String> {
     let (output, _) = run_command_with_shell(cmd, DEFAULT_SHELL, stream_type, output_tx).await?;
     Ok(output)
 }
@@ -611,7 +640,7 @@ mod tests {
         let result = run_command("echo 'hello world'", OutputStreamType::Stdout, &tx).await;
 
         assert!(result.is_ok());
-        let output = result.unwrap();
+        let output = result.expect("should succeed");
         assert!(output.contains("hello world"));
 
         // Drain the channel
@@ -627,7 +656,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("exited with code 1"));
+        assert!(
+            matches!(err.current_context(), UpdateError::CommandFailed(1)),
+            "Expected CommandFailed(1), got: {err}"
+        );
 
         // Drain the channel
         rx.close();
@@ -713,7 +745,7 @@ mod tests {
             run_command_with_shell("echo 'test'", "bash", OutputStreamType::Stdout, &tx).await;
 
         assert!(result.is_ok());
-        let (output, exit_code) = result.unwrap();
+        let (output, exit_code) = result.expect("should succeed");
         assert!(output.contains("test"));
         assert_eq!(exit_code, 0);
 
@@ -730,7 +762,10 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("exited with code 42"));
+        assert!(
+            matches!(err.current_context(), UpdateError::CommandFailed(42)),
+            "Expected CommandFailed(42), got: {err}"
+        );
 
         // Drain the channel
         rx.close();

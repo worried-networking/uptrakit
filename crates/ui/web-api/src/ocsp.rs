@@ -1,6 +1,8 @@
 use der::asn1::{BitString, OctetString};
 use der::{Decode, Encode};
+use rootcause::{Report, report};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
+use thiserror::Error;
 use time::OffsetDateTime;
 use x509_cert::ext::pkix::CrlReason;
 use x509_ocsp::{
@@ -9,6 +11,42 @@ use x509_ocsp::{
 };
 
 use crate::ca_snapshot::CaSnapshotData;
+
+/// Errors that can occur during OCSP response construction.
+#[derive(Debug, Error)]
+enum OcspError {
+    #[error("PEM parse error")]
+    PemParse,
+
+    #[error("X.509 parse error")]
+    X509Parse,
+
+    #[error("failed to compute key hash")]
+    KeyHash,
+
+    #[error("ASN.1 construction error: {0}")]
+    Construction(String),
+
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+
+    #[error("DER encoding error: {0}")]
+    DerEncode(String),
+
+    #[error("key parse error: {0}")]
+    KeyParse(String),
+
+    #[error("signing error: {0}")]
+    Signing(String),
+
+    #[error("base64 decode error: {0}")]
+    Base64Decode(String),
+
+    #[error("empty PEM data")]
+    EmptyPemData,
+}
+
+type OcspResult<T> = std::result::Result<T, Report<OcspError>>;
 
 /// SHA-1 OID (`1.3.14.3.2.26`) — used by Nginx/OpenSSL in OCSP requests.
 const SHA1_OID: const_oid::ObjectIdentifier =
@@ -135,20 +173,23 @@ fn build_error_response(status: OcspResponseStatus) -> Vec<u8> {
 /// Build the responder ID from the CA public key bytes.
 ///
 /// Per RFC 6960 Section 2.3, `ResponderID::ByKey` MUST use SHA-1.
-fn build_responder_id(pub_key_bytes: &[u8]) -> Result<ResponderId, Box<dyn std::error::Error>> {
+fn build_responder_id(pub_key_bytes: &[u8]) -> OcspResult<ResponderId> {
     let key_hash =
-        compute_key_hash(pub_key_bytes, &SHA1_OID).ok_or("failed to compute SHA-1 key hash")?;
+        compute_key_hash(pub_key_bytes, &SHA1_OID).ok_or_else(|| report!(OcspError::KeyHash))?;
     let responder_id = ResponderId::ByKey(
-        OctetString::new(key_hash).map_err(|e| format!("OctetString error: {e}"))?,
+        OctetString::new(key_hash)
+            .map_err(|e| report!(OcspError::Construction(format!("OctetString error: {e}"))))?,
     );
     Ok(responder_id)
 }
 
 /// Extract the raw public key bytes (BIT STRING content) from a PEM-encoded certificate.
-fn extract_ca_public_key_bytes(ca_cert_pem: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let (_, pem_block) =
-        x509_parser::pem::parse_x509_pem(ca_cert_pem.as_bytes()).map_err(|_| "PEM parse error")?;
-    let cert = pem_block.parse_x509().map_err(|_| "X.509 parse error")?;
+fn extract_ca_public_key_bytes(ca_cert_pem: &str) -> OcspResult<Vec<u8>> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(ca_cert_pem.as_bytes())
+        .map_err(|_| report!(OcspError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(OcspError::X509Parse))?;
     Ok(cert
         .tbs_certificate
         .subject_pki
@@ -207,7 +248,7 @@ async fn lookup_cert_status(
     db: &DatabaseConnection,
     serial_hex: &str,
     ca_snapshot: &CaSnapshotData,
-) -> Result<CertStatus, Box<dyn std::error::Error>> {
+) -> OcspResult<CertStatus> {
     use uptrakit_shared_db::entity::service_certificate;
 
     // Search by serial number across both active and previous CA fingerprints
@@ -229,7 +270,7 @@ async fn lookup_cert_status(
         .filter(condition)
         .one(db)
         .await
-        .map_err(|e| format!("DB error: {e}"))?;
+        .map_err(|e| report!(OcspError::Database(e)))?;
 
     let Some(cert) = cert else {
         return Ok(CertStatus::unknown());
@@ -268,11 +309,11 @@ async fn lookup_cert_status(
 fn sign_response(
     response_data: &ResponseData,
     ca_snapshot: &CaSnapshotData,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+) -> OcspResult<Vec<u8>> {
     // Encode the response data to DER for signing
     let tbs_der = response_data
         .to_der()
-        .map_err(|e| format!("DER encode error: {e}"))?;
+        .map_err(|e| report!(OcspError::DerEncode(e.to_string())))?;
 
     // Parse the CA private key
     let key_pem = &ca_snapshot.active_key_pem;
@@ -283,14 +324,14 @@ fn sign_response(
         &aws_lc_rs::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
         &key_der,
     )
-    .map_err(|e| format!("Key parse error: {e}"))?;
+    .map_err(|e| report!(OcspError::KeyParse(e.to_string())))?;
 
     let signature_bytes = signing_key
         .sign(&aws_lc_rs::rand::SystemRandom::new(), &tbs_der)
-        .map_err(|e| format!("Signing error: {e}"))?;
+        .map_err(|e| report!(OcspError::Signing(e.to_string())))?;
 
-    let signature =
-        BitString::from_bytes(signature_bytes.as_ref()).map_err(|e| format!("BitString: {e}"))?;
+    let signature = BitString::from_bytes(signature_bytes.as_ref())
+        .map_err(|e| report!(OcspError::Construction(e.to_string())))?;
 
     // Algorithm identifier for ECDSA with SHA-256
     let algorithm = spki::AlgorithmIdentifierOwned {
@@ -308,15 +349,15 @@ fn sign_response(
 
     // Wrap in OcspResponse
     let response = OcspResponse::successful(basic_response)
-        .map_err(|e| format!("OcspResponse construction error: {e}"))?;
+        .map_err(|e| report!(OcspError::Construction(e.to_string())))?;
 
     response
         .to_der()
-        .map_err(|e| format!("OcspResponse DER encode error: {e}").into())
+        .map_err(|e| report!(OcspError::DerEncode(e.to_string())))
 }
 
 /// Extract a PKCS#8 DER private key from PEM.
-fn pem_to_der_key(pem: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn pem_to_der_key(pem: &str) -> OcspResult<Vec<u8>> {
     let mut der_data = Vec::new();
     let mut in_block = false;
 
@@ -333,13 +374,13 @@ fn pem_to_der_key(pem: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
             der_data.extend_from_slice(
                 &base64::engine::general_purpose::STANDARD
                     .decode(line.trim())
-                    .map_err(|e| format!("Base64 decode error: {e}"))?,
+                    .map_err(|e| report!(OcspError::Base64Decode(e.to_string())))?,
             );
         }
     }
 
     if der_data.is_empty() {
-        return Err("empty PEM data".into());
+        return Err(report!(OcspError::EmptyPemData));
     }
 
     Ok(der_data)

@@ -16,6 +16,8 @@ pub enum CertSignerError {
     Signing(String),
 }
 
+pub type Result<T> = std::result::Result<T, Report<CertSignerError>>;
+
 #[derive(Debug)]
 pub struct SignedCertBundle {
     pub cert_pem: String,
@@ -29,7 +31,7 @@ pub trait AgentCertSigner: Send + Sync + 'static {
         csr_pem: &str,
         agent_id: &uuid::Uuid,
         lifetime: time::Duration,
-    ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>>;
+    ) -> Result<SignedCertBundle>;
 
     /// Return the SHA-256 hex fingerprint of the active CA cert.
     fn active_ca_fingerprint(&self) -> String;

@@ -16,11 +16,9 @@ use uptrakit_internal_wire::{
 };
 
 use crate::controller_client::{ConnectionMode, ControllerConnection};
-use crate::error::AppError;
+use crate::error::{AppError, Result};
 use crate::identity::Identity;
 use crate::tenant_manager::TenantManager;
-
-type Result<T> = std::result::Result<T, rootcause::Report<AppError>>;
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -57,34 +55,22 @@ async fn run(args: cli::Args) -> Result<()> {
     tracing::info!(%instance_id, "starting uptrakit-mqtt service");
 
     // Resolve application directories
-    let app_dirs = args
-        .resolve_dirs()
-        .map_err(|e| report!(AppError::Config(e)))?;
-    app_dirs.ensure_dirs().map_err(|e| {
-        report!(AppError::Config(format!(
-            "failed to create directories: {e}"
-        )))
-    })?;
+    let app_dirs = args.resolve_dirs().context_to()?;
+    app_dirs.ensure_dirs().context_to()?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 
     // Load or create identity (config for CA cert, state for service identity)
     let mut identity = Identity::new(app_dirs.config_dir(), app_dirs.state_dir());
-    identity
-        .load()
-        .await
-        .map_err(|e| report!(AppError::Identity(e)))?;
+    identity.load().await.context_to()?;
 
     // Phase 1: Ensure we have a CA certificate (TOFU)
     if identity.ca_cert_pem.is_none() {
         tracing::info!("fetching CA certificate from controller (TOFU)");
         let ca_pem = controller_client::fetch_ca_cert(&args.controller_url, args.insecure)
             .await
-            .map_err(|e| report!(AppError::Connection(e)))?;
-        identity
-            .save_ca_cert(&ca_pem)
-            .await
-            .map_err(|e| report!(AppError::Identity(e)))?;
+            .context_to()?;
+        identity.save_ca_cert(&ca_pem).await.context_to()?;
         tracing::info!("CA certificate saved");
     }
 
@@ -108,10 +94,7 @@ async fn run(args: cli::Args) -> Result<()> {
 /// Enroll with the controller (anonymous connection).
 async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
     // Ensure we have a keypair for the CSR
-    identity
-        .ensure_keypair()
-        .await
-        .map_err(|e| report!(AppError::Identity(e)))?;
+    identity.ensure_keypair().await.context_to()?;
 
     let mut conn = ControllerConnection::connect(
         &args.controller_url,
@@ -120,7 +103,7 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
         args.insecure,
     )
     .await
-    .map_err(|e| report!(AppError::Connection(e)))?;
+    .context_to()?;
 
     // Send enrollment request
     let hostname = hostname::get()
@@ -135,15 +118,11 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
         host_info: None,
     }))
     .await
-    .map_err(|e| report!(AppError::Connection(e)))?;
+    .context_to()?;
 
     // Wait for enrollment response
     loop {
-        match conn
-            .recv()
-            .await
-            .map_err(|e| report!(AppError::Connection(e)))?
-        {
+        match conn.recv().await.context_to()? {
             Some(ControllerMessage::Enrolled(payload)) => {
                 let service_id = uuid::Uuid::parse_str(&payload.service_id)
                     .map_err(|_| report!(AppError::Protocol("invalid service_id".into())))?;
@@ -151,7 +130,7 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
                 identity
                     .save_enrollment(service_id, &payload.enrollment_secret)
                     .await
-                    .map_err(|e| report!(AppError::Identity(e)))?;
+                    .context_to()?;
 
                 tracing::info!(%service_id, status = %payload.status, "enrolled successfully");
 
@@ -190,9 +169,7 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
         }
     }
 
-    conn.close()
-        .await
-        .map_err(|e| report!(AppError::Connection(e)))?;
+    conn.close().await.context_to()?;
     Ok(())
 }
 
@@ -205,35 +182,29 @@ async fn request_certificate(identity: &mut Identity, args: &cli::Args) -> Resul
         args.insecure,
     )
     .await
-    .map_err(|e| report!(AppError::Connection(e)))?;
+    .context_to()?;
 
     // Generate and send CSR
     let service_id = identity
         .service_id
         .ok_or_else(|| report!(AppError::Identity(identity::IdentityError::NotEnrolled)))?;
 
-    let csr_pem = identity
-        .generate_csr(service_id)
-        .map_err(|e| report!(AppError::Identity(e)))?;
+    let csr_pem = identity.generate_csr(service_id).context_to()?;
 
     conn.send(ServiceMessage::RequestCertificate(
         RequestCertificatePayload { csr_pem },
     ))
     .await
-    .map_err(|e| report!(AppError::Connection(e)))?;
+    .context_to()?;
 
     // Wait for certificate
     loop {
-        match conn
-            .recv()
-            .await
-            .map_err(|e| report!(AppError::Connection(e)))?
-        {
+        match conn.recv().await.context_to()? {
             Some(ControllerMessage::Certificate(payload)) => {
                 identity
                     .save_certificate(&payload.cert_pem)
                     .await
-                    .map_err(|e| report!(AppError::Identity(e)))?;
+                    .context_to()?;
                 tracing::info!("certificate received and saved");
                 break;
             }
@@ -257,9 +228,7 @@ async fn request_certificate(identity: &mut Identity, args: &cli::Args) -> Resul
         }
     }
 
-    conn.close()
-        .await
-        .map_err(|e| report!(AppError::Connection(e)))?;
+    conn.close().await.context_to()?;
     Ok(())
 }
 
@@ -272,7 +241,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
         false, // Never use insecure mode for authenticated connections
     )
     .await
-    .map_err(|e| report!(AppError::Connection(e)))?;
+    .context_to()?;
 
     // Register with controller
     conn.send(ServiceMessage::Register(MqttRegisterPayload {
@@ -281,7 +250,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
         active_tenants: vec![], // Empty on fresh start
     }))
     .await
-    .map_err(|e| report!(AppError::Connection(e)))?;
+    .context_to()?;
 
     let mut tenant_mgr = TenantManager::new();
     let heartbeat_interval = Duration::from_secs(args.heartbeat_interval);
@@ -293,7 +262,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
     loop {
         tokio::select! {
             msg = conn.recv() => {
-                match msg.map_err(|e| report!(AppError::Connection(e)))? {
+                match msg.context_to()? {
                     Some(ControllerMessage::Registered(payload)) => {
                         tracing::info!(instance_id = %payload.instance_id, "registered with controller");
                     }

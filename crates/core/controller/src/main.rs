@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use ipnet::IpNet;
-use rootcause::{Report, prelude::*};
+use rootcause::prelude::*;
 use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
@@ -44,6 +44,8 @@ enum AppError {
     Server,
 }
 
+type Result<T> = std::result::Result<T, rootcause::Report<AppError>>;
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
@@ -62,11 +64,13 @@ async fn main() -> std::process::ExitCode {
     }
 }
 
-async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
+async fn run(args: cli::Args) -> Result<()> {
     // Resolve application directories (config and state)
-    let app_dirs = args
-        .resolve_dirs()
-        .map_err(|s| report!(AppError::Config(s)))?;
+    let app_dirs = args.resolve_dirs().map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to resolve directories: {e}"
+        )))
+    })?;
     app_dirs.ensure_dirs().map_err(|e| {
         report!(AppError::Config(format!(
             "failed to create directories: {e}"
@@ -1024,7 +1028,7 @@ async fn reconcile_setting_vec<T>(
     default_value: Vec<T>,
     force: bool,
     convert: reconcile::JsonConvert<Vec<T>>,
-) -> Result<Vec<T>, Report<AppError>>
+) -> Result<Vec<T>>
 where
     T: PartialEq + Clone + fmt::Display + 'static,
 {
@@ -1094,7 +1098,7 @@ async fn reconcile_socket_addr(
     cli_value: Option<SocketAddr>,
     default_value: SocketAddr,
     force: bool,
-) -> Result<SocketAddr, Report<AppError>> {
+) -> Result<SocketAddr> {
     reconcile::reconcile_setting(
         db,
         tenant_id,
@@ -1117,7 +1121,7 @@ async fn reconcile_socket_addr(
 /// If `--static-dir` is given, validates that it contains `index.html`.
 /// Otherwise, auto-detects by probing `frontend/build` and `frontend`
 /// relative to the current working directory.
-fn resolve_static_dir(explicit: Option<PathBuf>) -> Result<Option<PathBuf>, Report<AppError>> {
+fn resolve_static_dir(explicit: Option<PathBuf>) -> Result<Option<PathBuf>> {
     if let Some(dir) = explicit {
         let index = dir.join("index.html");
         if !index.is_file() {

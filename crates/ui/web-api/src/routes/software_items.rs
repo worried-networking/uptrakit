@@ -177,7 +177,7 @@ fn validate_config_override(
         return Err("config_override must be a JSON object".to_string());
     }
 
-    ProviderRegistry::validate_config_str(provider_type, &merged)
+    ProviderRegistry::validate_config_str(provider_type, &merged).map_err(|e| e.to_string())
 }
 
 // --- Endpoints ---

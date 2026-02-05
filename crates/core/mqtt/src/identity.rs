@@ -9,6 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rootcause::{Report, ReportConversion, markers, report};
 use thiserror::Error;
 use tokio::fs;
 use uuid::Uuid;
@@ -30,6 +31,19 @@ pub enum IdentityError {
 
     #[error("identity not certified (no certificate)")]
     NotCertified,
+}
+
+pub type Result<T> = std::result::Result<T, Report<IdentityError>>;
+
+impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for IdentityError
+where
+    IdentityError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<std::io::Error, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(IdentityError::Io)
+    }
 }
 
 /// File names for state directory (runtime state).
@@ -78,15 +92,21 @@ impl Identity {
     }
 
     /// Load existing identity from disk (if any).
-    pub async fn load(&mut self) -> Result<(), IdentityError> {
+    pub async fn load(&mut self) -> Result<()> {
         // Create directories if they don't exist
-        fs::create_dir_all(&self.config_dir).await?;
-        fs::create_dir_all(&self.state_dir).await?;
+        fs::create_dir_all(&self.config_dir)
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
+        fs::create_dir_all(&self.state_dir)
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
 
         // Try to load service_id (from state directory)
         let service_id_path = self.state_dir.join(SERVICE_ID_FILE);
         if service_id_path.exists() {
-            let content = fs::read_to_string(&service_id_path).await?;
+            let content = fs::read_to_string(&service_id_path)
+                .await
+                .map_err(|e| report!(IdentityError::Io(e)))?;
             if let Ok(id) = Uuid::parse_str(content.trim()) {
                 self.service_id = Some(id);
             }
@@ -95,31 +115,39 @@ impl Identity {
         // Try to load enrollment secret (from state directory)
         let secret_path = self.state_dir.join(ENROLLMENT_SECRET_FILE);
         if secret_path.exists() {
-            let content = fs::read_to_string(&secret_path).await?;
+            let content = fs::read_to_string(&secret_path)
+                .await
+                .map_err(|e| report!(IdentityError::Io(e)))?;
             self.enrollment_secret = Some(content.trim().to_string());
         }
 
         // Try to load private key (from state directory)
         let key_path = self.state_dir.join(PRIVATE_KEY_FILE);
         if key_path.exists() {
-            let key_pem = fs::read_to_string(&key_path).await?;
+            let key_pem = fs::read_to_string(&key_path)
+                .await
+                .map_err(|e| report!(IdentityError::Io(e)))?;
             self.keypair = Some(
                 rcgen::KeyPair::from_pem(&key_pem)
-                    .map_err(|e| IdentityError::KeypairGeneration(e.to_string()))?,
+                    .map_err(|e| report!(IdentityError::KeypairGeneration(e.to_string())))?,
             );
         }
 
         // Try to load certificate (from state directory)
         let cert_path = self.state_dir.join(CERTIFICATE_FILE);
         if cert_path.exists() {
-            let cert_pem = fs::read_to_string(&cert_path).await?;
+            let cert_pem = fs::read_to_string(&cert_path)
+                .await
+                .map_err(|e| report!(IdentityError::Io(e)))?;
             self.certificate_pem = Some(cert_pem);
         }
 
         // Try to load CA certificate (from config directory)
         let ca_path = self.config_dir.join(CA_CERT_FILE);
         if ca_path.exists() {
-            let ca_pem = fs::read_to_string(&ca_path).await?;
+            let ca_pem = fs::read_to_string(&ca_path)
+                .await
+                .map_err(|e| report!(IdentityError::Io(e)))?;
             self.ca_cert_pem = Some(ca_pem);
         }
 
@@ -147,35 +175,36 @@ impl Identity {
     }
 
     /// Generate a new keypair if not already present.
-    pub async fn ensure_keypair(&mut self) -> Result<(), IdentityError> {
+    pub async fn ensure_keypair(&mut self) -> Result<()> {
         if self.keypair.is_some() {
             return Ok(());
         }
 
         // Generate new ECDSA P-256 keypair
         let keypair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-            .map_err(|e| IdentityError::KeypairGeneration(e.to_string()))?;
+            .map_err(|e| report!(IdentityError::KeypairGeneration(e.to_string())))?;
 
         // Save to disk (state directory)
         let key_pem = keypair.serialize_pem();
         let key_path = self.state_dir.join(PRIVATE_KEY_FILE);
-        fs::write(&key_path, &key_pem).await?;
+        fs::write(&key_path, &key_pem)
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
 
         self.keypair = Some(keypair);
         Ok(())
     }
 
     /// Generate a CSR for the given service_id (CN).
-    pub fn generate_csr(&self, service_id: Uuid) -> Result<String, IdentityError> {
-        let keypair = self
-            .keypair
-            .as_ref()
-            .ok_or(IdentityError::KeypairGeneration(
+    pub fn generate_csr(&self, service_id: Uuid) -> Result<String> {
+        let keypair = self.keypair.as_ref().ok_or_else(|| {
+            report!(IdentityError::KeypairGeneration(
                 "no keypair available".to_string(),
-            ))?;
+            ))
+        })?;
 
         let mut params = rcgen::CertificateParams::new(vec![])
-            .map_err(|e| IdentityError::CsrGeneration(e.to_string()))?;
+            .map_err(|e| report!(IdentityError::CsrGeneration(e.to_string())))?;
         params.distinguished_name = rcgen::DistinguishedName::new();
         params
             .distinguished_name
@@ -183,10 +212,10 @@ impl Identity {
 
         let csr = params
             .serialize_request(keypair)
-            .map_err(|e| IdentityError::CsrGeneration(e.to_string()))?;
+            .map_err(|e| report!(IdentityError::CsrGeneration(e.to_string())))?;
 
         csr.pem()
-            .map_err(|e| IdentityError::CsrGeneration(e.to_string()))
+            .map_err(|e| report!(IdentityError::CsrGeneration(e.to_string())))
     }
 
     /// Save enrollment result (service_id and enrollment_secret).
@@ -194,14 +223,18 @@ impl Identity {
         &mut self,
         service_id: Uuid,
         enrollment_secret: &str,
-    ) -> Result<(), IdentityError> {
+    ) -> Result<()> {
         // Save service_id (state directory)
         let id_path = self.state_dir.join(SERVICE_ID_FILE);
-        fs::write(&id_path, service_id.to_string()).await?;
+        fs::write(&id_path, service_id.to_string())
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
 
         // Save enrollment secret (state directory)
         let secret_path = self.state_dir.join(ENROLLMENT_SECRET_FILE);
-        fs::write(&secret_path, enrollment_secret).await?;
+        fs::write(&secret_path, enrollment_secret)
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
 
         self.service_id = Some(service_id);
         self.enrollment_secret = Some(enrollment_secret.to_string());
@@ -209,10 +242,12 @@ impl Identity {
     }
 
     /// Save the issued certificate.
-    pub async fn save_certificate(&mut self, cert_pem: &str) -> Result<(), IdentityError> {
+    pub async fn save_certificate(&mut self, cert_pem: &str) -> Result<()> {
         // Save to state directory
         let cert_path = self.state_dir.join(CERTIFICATE_FILE);
-        fs::write(&cert_path, cert_pem).await?;
+        fs::write(&cert_path, cert_pem)
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
         self.certificate_pem = Some(cert_pem.to_string());
 
         // Clear enrollment secret (no longer needed once we have a cert)
@@ -226,10 +261,12 @@ impl Identity {
     }
 
     /// Save the CA certificate bundle.
-    pub async fn save_ca_cert(&mut self, ca_pem: &str) -> Result<(), IdentityError> {
+    pub async fn save_ca_cert(&mut self, ca_pem: &str) -> Result<()> {
         // Save to config directory
         let ca_path = self.config_dir.join(CA_CERT_FILE);
-        fs::write(&ca_path, ca_pem).await?;
+        fs::write(&ca_path, ca_pem)
+            .await
+            .map_err(|e| report!(IdentityError::Io(e)))?;
         self.ca_cert_pem = Some(ca_pem.to_string());
         Ok(())
     }
@@ -252,10 +289,10 @@ mod tests {
 
     #[tokio::test]
     async fn fresh_identity_is_fresh() {
-        let config_dir = TempDir::new().unwrap();
-        let state_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().expect("temp dir");
+        let state_dir = TempDir::new().expect("temp dir");
         let mut identity = Identity::new(config_dir.path(), state_dir.path());
-        identity.load().await.unwrap();
+        identity.load().await.expect("should load");
 
         assert!(identity.is_fresh());
         assert!(!identity.is_enrolled_only());
@@ -264,32 +301,32 @@ mod tests {
 
     #[tokio::test]
     async fn keypair_generation_persists() {
-        let config_dir = TempDir::new().unwrap();
-        let state_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().expect("temp dir");
+        let state_dir = TempDir::new().expect("temp dir");
         let mut identity = Identity::new(config_dir.path(), state_dir.path());
-        identity.load().await.unwrap();
+        identity.load().await.expect("should load");
 
-        identity.ensure_keypair().await.unwrap();
+        identity.ensure_keypair().await.expect("should generate");
         assert!(identity.keypair.is_some());
 
         // Reload and check persistence
         let mut identity2 = Identity::new(config_dir.path(), state_dir.path());
-        identity2.load().await.unwrap();
+        identity2.load().await.expect("should load");
         assert!(identity2.keypair.is_some());
     }
 
     #[tokio::test]
     async fn enrollment_persists() {
-        let config_dir = TempDir::new().unwrap();
-        let state_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().expect("temp dir");
+        let state_dir = TempDir::new().expect("temp dir");
         let mut identity = Identity::new(config_dir.path(), state_dir.path());
-        identity.load().await.unwrap();
+        identity.load().await.expect("should load");
 
         let service_id = Uuid::now_v7();
         identity
             .save_enrollment(service_id, "secret123")
             .await
-            .unwrap();
+            .expect("should save");
 
         assert_eq!(identity.service_id, Some(service_id));
         assert_eq!(identity.enrollment_secret(), Some("secret123"));
@@ -297,49 +334,51 @@ mod tests {
 
         // Reload and check persistence
         let mut identity2 = Identity::new(config_dir.path(), state_dir.path());
-        identity2.load().await.unwrap();
+        identity2.load().await.expect("should load");
         assert_eq!(identity2.service_id, Some(service_id));
         assert_eq!(identity2.enrollment_secret(), Some("secret123"));
     }
 
     #[tokio::test]
     async fn certificate_save_clears_enrollment_secret() {
-        let config_dir = TempDir::new().unwrap();
-        let state_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().expect("temp dir");
+        let state_dir = TempDir::new().expect("temp dir");
         let mut identity = Identity::new(config_dir.path(), state_dir.path());
-        identity.load().await.unwrap();
+        identity.load().await.expect("should load");
 
         let service_id = Uuid::now_v7();
         identity
             .save_enrollment(service_id, "secret123")
             .await
-            .unwrap();
+            .expect("should save");
 
         identity
             .save_certificate("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n")
             .await
-            .unwrap();
+            .expect("should save");
 
         assert!(identity.enrollment_secret().is_none());
         assert!(identity.is_certified());
 
         // Reload and check
         let mut identity2 = Identity::new(config_dir.path(), state_dir.path());
-        identity2.load().await.unwrap();
+        identity2.load().await.expect("should load");
         assert!(identity2.enrollment_secret().is_none());
         assert!(identity2.is_certified());
     }
 
     #[tokio::test]
     async fn csr_generation() {
-        let config_dir = TempDir::new().unwrap();
-        let state_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().expect("temp dir");
+        let state_dir = TempDir::new().expect("temp dir");
         let mut identity = Identity::new(config_dir.path(), state_dir.path());
-        identity.load().await.unwrap();
-        identity.ensure_keypair().await.unwrap();
+        identity.load().await.expect("should load");
+        identity.ensure_keypair().await.expect("should generate");
 
         let service_id = Uuid::now_v7();
-        let csr = identity.generate_csr(service_id).unwrap();
+        let csr = identity
+            .generate_csr(service_id)
+            .expect("should generate CSR");
 
         assert!(csr.contains("BEGIN CERTIFICATE REQUEST"));
         assert!(csr.contains("END CERTIFICATE REQUEST"));
@@ -347,12 +386,15 @@ mod tests {
 
     #[tokio::test]
     async fn ca_cert_saved_to_config_dir() {
-        let config_dir = TempDir::new().unwrap();
-        let state_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().expect("temp dir");
+        let state_dir = TempDir::new().expect("temp dir");
         let mut identity = Identity::new(config_dir.path(), state_dir.path());
-        identity.load().await.unwrap();
+        identity.load().await.expect("should load");
 
-        identity.save_ca_cert("test-ca-cert").await.unwrap();
+        identity
+            .save_ca_cert("test-ca-cert")
+            .await
+            .expect("should save");
 
         // Verify it's in config_dir
         assert!(config_dir.path().join("ca.crt").exists());

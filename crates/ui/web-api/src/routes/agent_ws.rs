@@ -12,9 +12,22 @@ use uptrakit_shared_db::entity::{
     host_software_item, provider_config, service_host as agent_host, software_item, update_history,
 };
 
+use rootcause::{Report, prelude::*};
+use thiserror::Error;
+
 use super::service_ws::{close_with_reason, serialize_msg};
 use crate::AppState;
 use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
+
+#[derive(Debug, Error)]
+enum AgentWsError {
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("websocket send failed")]
+    WebSocketSend,
+}
+
+type AgentWsResult<T> = std::result::Result<T, Report<AgentWsError>>;
 
 /// Minimum agent version required for connection.
 const MIN_AGENT_VERSION: &str = "0.0.1";
@@ -667,13 +680,13 @@ async fn deliver_pending_updates(
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-) -> Result<(), String> {
+) -> AgentWsResult<()> {
     // 1. Find host_ids linked to this agent
     let host_links = agent_host::Entity::find()
         .filter(agent_host::Column::ServiceId.eq(agent_id))
         .all(&state.db)
         .await
-        .map_err(|e| format!("failed to find agent hosts: {e}"))?;
+        .map_err(|e| report!(AgentWsError::Database(e)))?;
 
     if host_links.is_empty() {
         return Ok(());
@@ -687,7 +700,7 @@ async fn deliver_pending_updates(
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
         .all(&state.db)
         .await
-        .map_err(|e| format!("failed to find pending updates: {e}"))?;
+        .map_err(|e| report!(AgentWsError::Database(e)))?;
 
     if pending_updates.is_empty() {
         return Ok(());
@@ -789,7 +802,7 @@ async fn deliver_pending_updates(
         };
 
         if sink.send(Message::Text(json.into())).await.is_err() {
-            return Err("websocket send failed".to_string());
+            return Err(report!(AgentWsError::WebSocketSend));
         }
 
         tracing::info!(

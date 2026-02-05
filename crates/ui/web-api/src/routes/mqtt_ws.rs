@@ -12,9 +12,36 @@ use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
 };
 
+use rootcause::{Report, prelude::*};
+use thiserror::Error;
+
 use super::service_ws::{close_with_reason, serialize_msg};
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
+
+// ---------------------------------------------------------------------------
+// Error types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+pub(crate) enum MqttWsError {
+    #[error("{0}")]
+    Enrollment(String),
+    #[error("{0}")]
+    Certificate(String),
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("PEM parse error")]
+    PemParse,
+    #[error("X.509 parse error")]
+    X509Parse,
+    #[error("invalid timestamp: {0}")]
+    Timestamp(String),
+    #[error("certificate not found")]
+    CertNotFound,
+}
+
+type MqttWsResult<T> = std::result::Result<T, Report<MqttWsError>>;
 
 // ---------------------------------------------------------------------------
 // Authenticated MQTT handler (called from service_ws after shared auth)
@@ -285,7 +312,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                                     Err(e) => {
                                         let err = ControllerMessage::Error(ErrorPayload {
                                             code: "certificate_error".to_string(),
-                                            message: e,
+                                            message: e.to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
@@ -471,7 +498,7 @@ pub(crate) async fn handle_mqtt_enrolled(
                             Err(e) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "certificate_error".to_string(),
-                                    message: e,
+                                    message: e.to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
@@ -534,9 +561,11 @@ pub(crate) async fn do_mqtt_service_enroll(
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
-) -> Result<MqttServiceEnrollResult, String> {
+) -> MqttWsResult<MqttServiceEnrollResult> {
     if hostname.trim().is_empty() {
-        return Err("hostname must not be empty".to_string());
+        return Err(report!(MqttWsError::Enrollment(
+            "hostname must not be empty".into()
+        )));
     }
 
     let service_id = uuid::Uuid::now_v7();
@@ -551,16 +580,36 @@ pub(crate) async fn do_mqtt_service_enroll(
         {
             Ok(Some(v)) => match v.as_str() {
                 Some(hash) => hash.to_string(),
-                None => return Err("no MQTT enrollment token configured".to_string()),
+                None => {
+                    return Err(report!(MqttWsError::Enrollment(
+                        "no MQTT enrollment token configured".into()
+                    )));
+                }
             },
-            Ok(None) => return Err("no MQTT enrollment token configured".to_string()),
-            Err(e) => return Err(format!("database error: {e:?}")),
+            Ok(None) => {
+                return Err(report!(MqttWsError::Enrollment(
+                    "no MQTT enrollment token configured".into()
+                )));
+            }
+            Err(e) => {
+                return Err(report!(MqttWsError::Enrollment(format!(
+                    "database error: {e:?}"
+                ))));
+            }
         };
 
         match crate::auth::password::verify_password(token, &token_hash) {
             Ok(true) => mqtt_service::ServiceStatus::Approved,
-            Ok(false) => return Err("invalid enrollment token".to_string()),
-            Err(e) => return Err(format!("token verification error: {e}")),
+            Ok(false) => {
+                return Err(report!(MqttWsError::Enrollment(
+                    "invalid enrollment token".into()
+                )));
+            }
+            Err(e) => {
+                return Err(report!(MqttWsError::Enrollment(format!(
+                    "token verification error: {e}"
+                ))));
+            }
         }
     } else {
         mqtt_service::ServiceStatus::Pending
@@ -568,8 +617,11 @@ pub(crate) async fn do_mqtt_service_enroll(
 
     let _ = settings;
 
-    let enrollment_secret = crate::auth::token::generate_secure_token()
-        .map_err(|e| format!("failed to generate token: {e}"))?;
+    let enrollment_secret = crate::auth::token::generate_secure_token().map_err(|e| {
+        report!(MqttWsError::Enrollment(format!(
+            "failed to generate token: {e}"
+        )))
+    })?;
     let secret_hash = crate::auth::token::hash_token(&enrollment_secret);
 
     let now = time::OffsetDateTime::now_utc();
@@ -593,7 +645,7 @@ pub(crate) async fn do_mqtt_service_enroll(
     let service = service
         .insert(db)
         .await
-        .map_err(|e| format!("database error: {e}"))?;
+        .map_err(|e| report!(MqttWsError::Database(e)))?;
 
     Ok(MqttServiceEnrollResult {
         service,
@@ -613,7 +665,7 @@ async fn do_sign_mqtt_service_csr(
     db: &sea_orm::DatabaseConnection,
     service: mqtt_service::Model,
     csr_pem: &str,
-) -> Result<crate::cert_signer::SignedCertBundle, String> {
+) -> MqttWsResult<crate::cert_signer::SignedCertBundle> {
     let validity_days = settings.agent_cert_lifetime_days().await;
     let validity = time::Duration::days(validity_days as i64);
 
@@ -621,11 +673,9 @@ async fn do_sign_mqtt_service_csr(
 
     let bundle = cert_signer
         .sign_agent_csr(csr_pem, &service.id, validity)
-        .map_err(|e| format!("failed to sign CSR: {e}"))?;
+        .map_err(|e| report!(MqttWsError::Certificate(format!("failed to sign CSR: {e}"))))?;
 
-    record_mqtt_service_certificate(db, service.id, &bundle.cert_pem, &ca_fp)
-        .await
-        .map_err(|e| format!("failed to record certificate: {e}"))?;
+    record_mqtt_service_certificate(db, service.id, &bundle.cert_pem, &ca_fp).await?;
 
     let mut active: mqtt_service::ActiveModel = service.into();
     active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
@@ -641,17 +691,19 @@ async fn record_mqtt_service_certificate(
     mqtt_service_id: uuid::Uuid,
     cert_pem: &str,
     ca_fingerprint: &str,
-) -> Result<(), String> {
-    let (_, pem_block) =
-        x509_parser::pem::parse_x509_pem(cert_pem.as_bytes()).map_err(|_| "failed to parse PEM")?;
-    let cert = pem_block.parse_x509().map_err(|_| "failed to parse X509")?;
+) -> MqttWsResult<()> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+        .map_err(|_| report!(MqttWsError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(MqttWsError::X509Parse))?;
 
     let serial = cert.raw_serial_as_string();
     let validity = cert.validity();
     let not_before = time::OffsetDateTime::from_unix_timestamp(validity.not_before.timestamp())
-        .map_err(|e| format!("invalid not_before timestamp: {e}"))?;
+        .map_err(|e| report!(MqttWsError::Timestamp(format!("not_before: {e}"))))?;
     let not_after = time::OffsetDateTime::from_unix_timestamp(validity.not_after.timestamp())
-        .map_err(|e| format!("invalid not_after timestamp: {e}"))?;
+        .map_err(|e| report!(MqttWsError::Timestamp(format!("not_after: {e}"))))?;
 
     let record = mqtt_service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fingerprint.to_string()),
@@ -668,7 +720,7 @@ async fn record_mqtt_service_certificate(
     record
         .insert(db)
         .await
-        .map_err(|e| format!("database error: {e}"))?;
+        .map_err(|e| report!(MqttWsError::Database(e)))?;
 
     Ok(())
 }
@@ -679,14 +731,14 @@ async fn revoke_mqtt_service_certificate(
     serial: &str,
     ca_fingerprint: &str,
     reason: mqtt_service_certificate::RevocationReason,
-) -> Result<(), String> {
+) -> MqttWsResult<()> {
     let cert = mqtt_service_certificate::Entity::find()
         .filter(mqtt_service_certificate::Column::SerialNumber.eq(serial))
         .filter(mqtt_service_certificate::Column::CaFingerprint.eq(ca_fingerprint))
         .one(db)
         .await
-        .map_err(|e| format!("database error: {e}"))?
-        .ok_or_else(|| "certificate not found".to_string())?;
+        .map_err(|e| report!(MqttWsError::Database(e)))?
+        .ok_or_else(|| report!(MqttWsError::CertNotFound))?;
 
     let mut active: mqtt_service_certificate::ActiveModel = cert.into();
     active.revoked_at = Set(Some(time::OffsetDateTime::now_utc()));
@@ -694,7 +746,7 @@ async fn revoke_mqtt_service_certificate(
     active
         .update(db)
         .await
-        .map_err(|e| format!("database error: {e}"))?;
+        .map_err(|e| report!(MqttWsError::Database(e)))?;
 
     Ok(())
 }

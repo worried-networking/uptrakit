@@ -19,6 +19,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
+use rootcause::{Report, report};
 use thiserror::Error;
 
 /// Errors that can occur during directory operations.
@@ -52,7 +53,7 @@ pub enum DirectoryError {
     NoHomeDir,
 }
 
-pub type Result<T> = std::result::Result<T, DirectoryError>;
+pub type Result<T> = std::result::Result<T, Report<DirectoryError>>;
 
 /// Resolved directory paths for an Uptrakit application.
 ///
@@ -85,8 +86,8 @@ impl AppDirs {
         config_override: Option<&Path>,
         state_override: Option<&Path>,
     ) -> Result<Self> {
-        let proj_dirs =
-            ProjectDirs::from("io", "uptrakit", app_name).ok_or(DirectoryError::NoProjectDirs)?;
+        let proj_dirs = ProjectDirs::from("io", "uptrakit", app_name)
+            .ok_or_else(|| report!(DirectoryError::NoProjectDirs))?;
 
         let config = match config_override {
             Some(path) => expand_tilde(path)?,
@@ -147,10 +148,10 @@ impl AppDirs {
 pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     let s = path.to_string_lossy();
     if let Some(stripped) = s.strip_prefix("~/") {
-        let home = home_dir().ok_or(DirectoryError::NoHomeDir)?;
+        let home = home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))?;
         Ok(home.join(stripped))
     } else if s == "~" {
-        home_dir().ok_or(DirectoryError::NoHomeDir)
+        home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))
     } else {
         Ok(path.to_path_buf())
     }
@@ -169,9 +170,11 @@ pub fn create_secure_dir(path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    fs::create_dir_all(path).map_err(|e| DirectoryError::CreateDir {
-        path: path.to_path_buf(),
-        source: e,
+    fs::create_dir_all(path).map_err(|e| {
+        report!(DirectoryError::CreateDir {
+            path: path.to_path_buf(),
+            source: e,
+        })
     })?;
 
     set_dir_permissions(path)?;
@@ -186,9 +189,11 @@ pub fn write_secure_file(path: &Path, data: &[u8]) -> Result<()> {
         create_secure_dir(parent)?;
     }
 
-    fs::write(path, data).map_err(|e| DirectoryError::WriteFile {
-        path: path.to_path_buf(),
-        source: e,
+    fs::write(path, data).map_err(|e| {
+        report!(DirectoryError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })
     })?;
 
     set_file_permissions(path)?;
@@ -206,10 +211,10 @@ pub fn set_dir_permissions(path: &Path) -> Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| {
-            DirectoryError::SetPermissions {
+            report!(DirectoryError::SetPermissions {
                 path: path.to_path_buf(),
                 source: e,
-            }
+            })
         })?;
     }
     #[cfg(not(unix))]
@@ -225,10 +230,10 @@ pub fn set_file_permissions(path: &Path) -> Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| {
-            DirectoryError::SetPermissions {
+            report!(DirectoryError::SetPermissions {
                 path: path.to_path_buf(),
                 source: e,
-            }
+            })
         })?;
     }
     #[cfg(not(unix))]
@@ -246,7 +251,7 @@ mod tests {
 
     #[test]
     fn resolve_with_defaults() {
-        let dirs = AppDirs::resolve("controller", None, None).unwrap();
+        let dirs = AppDirs::resolve("controller", None, None).expect("should resolve");
         // Just verify it returns something
         assert!(!dirs.config_dir().as_os_str().is_empty());
         assert!(!dirs.state_dir().as_os_str().is_empty());
@@ -254,11 +259,12 @@ mod tests {
 
     #[test]
     fn resolve_with_overrides() {
-        let temp = TempDir::new().unwrap();
+        let temp = TempDir::new().expect("temp dir");
         let config_path = temp.path().join("config");
         let state_path = temp.path().join("state");
 
-        let dirs = AppDirs::resolve("agent", Some(&config_path), Some(&state_path)).unwrap();
+        let dirs = AppDirs::resolve("agent", Some(&config_path), Some(&state_path))
+            .expect("should resolve");
 
         assert_eq!(dirs.config_dir(), config_path);
         assert_eq!(dirs.state_dir(), state_path);
@@ -266,13 +272,13 @@ mod tests {
 
     #[test]
     fn expand_tilde_home() {
-        let expanded = expand_tilde(Path::new("~")).unwrap();
+        let expanded = expand_tilde(Path::new("~")).expect("should expand");
         assert!(!expanded.to_string_lossy().contains('~'));
     }
 
     #[test]
     fn expand_tilde_with_subpath() {
-        let expanded = expand_tilde(Path::new("~/foo/bar")).unwrap();
+        let expanded = expand_tilde(Path::new("~/foo/bar")).expect("should expand");
         assert!(expanded.to_string_lossy().ends_with("foo/bar"));
         assert!(!expanded.to_string_lossy().contains('~'));
     }
@@ -280,54 +286,54 @@ mod tests {
     #[test]
     fn expand_tilde_no_change_for_absolute() {
         let path = Path::new("/absolute/path");
-        let expanded = expand_tilde(path).unwrap();
+        let expanded = expand_tilde(path).expect("should expand");
         assert_eq!(expanded, path);
     }
 
     #[test]
     fn create_secure_dir_permissions() {
-        let temp = TempDir::new().unwrap();
+        let temp = TempDir::new().expect("temp dir");
         let dir = temp.path().join("secure_dir");
 
-        create_secure_dir(&dir).unwrap();
+        create_secure_dir(&dir).expect("should create");
 
         assert!(dir.is_dir());
-        let metadata = fs::metadata(&dir).unwrap();
+        let metadata = fs::metadata(&dir).expect("metadata");
         let mode = metadata.permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
     }
 
     #[test]
     fn write_secure_file_permissions() {
-        let temp = TempDir::new().unwrap();
+        let temp = TempDir::new().expect("temp dir");
         let file = temp.path().join("secure_file");
 
-        write_secure_file(&file, b"secret data").unwrap();
+        write_secure_file(&file, b"secret data").expect("should write");
 
         assert!(file.is_file());
-        let metadata = fs::metadata(&file).unwrap();
+        let metadata = fs::metadata(&file).expect("metadata");
         let mode = metadata.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
     }
 
     #[test]
     fn write_secure_file_creates_parent_dirs() {
-        let temp = TempDir::new().unwrap();
+        let temp = TempDir::new().expect("temp dir");
         let file = temp.path().join("a/b/c/file");
 
-        write_secure_file(&file, b"data").unwrap();
+        write_secure_file(&file, b"data").expect("should write");
 
         assert!(file.is_file());
     }
 
     #[test]
     fn ensure_dirs_creates_both() {
-        let temp = TempDir::new().unwrap();
+        let temp = TempDir::new().expect("temp dir");
         let config = temp.path().join("config");
         let state = temp.path().join("state");
 
-        let dirs = AppDirs::resolve("mqtt", Some(&config), Some(&state)).unwrap();
-        dirs.ensure_dirs().unwrap();
+        let dirs = AppDirs::resolve("mqtt", Some(&config), Some(&state)).expect("should resolve");
+        dirs.ensure_dirs().expect("should ensure");
 
         assert!(config.is_dir());
         assert!(state.is_dir());
@@ -335,8 +341,9 @@ mod tests {
 
     #[test]
     fn config_and_state_paths() {
-        let temp = TempDir::new().unwrap();
-        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path())).unwrap();
+        let temp = TempDir::new().expect("temp dir");
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path()))
+            .expect("should resolve");
 
         assert_eq!(dirs.config_path("ca.crt"), temp.path().join("ca.crt"));
         assert_eq!(dirs.state_path("db.sqlite"), temp.path().join("db.sqlite"));

@@ -4,10 +4,31 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use http::StatusCode;
 
+use rootcause::prelude::*;
+use thiserror::Error;
+
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::pki_utils::{self, SanCollection};
+
+#[derive(Debug, Error)]
+enum TlsConfigError {
+    #[error("cert PEM parse: {0}")]
+    CertParse(String),
+    #[error("key PEM parse: {0}")]
+    KeyParse(String),
+    #[error("CA PEM parse: {0}")]
+    CaParse(String),
+    #[error("root store: {0}")]
+    RootStore(String),
+    #[error("verifier: {0}")]
+    Verifier(String),
+    #[error("server config: {0}")]
+    ServerConfig(String),
+}
+
+type TlsConfigResult<T> = std::result::Result<T, rootcause::Report<TlsConfigError>>;
 
 pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
 
@@ -116,35 +137,35 @@ fn build_server_tls_config(
     cert_pem: &str,
     key_pem: &str,
     ca_bundle_pem: &str,
-) -> Result<rustls::ServerConfig, String> {
+) -> TlsConfigResult<rustls::ServerConfig> {
     use rustls::RootCertStore;
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::{CertificateDer, PrivateKeyDer};
     use rustls::server::WebPkiClientVerifier;
 
     let certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("cert PEM parse: {e}"))?;
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| report!(TlsConfigError::CertParse(e.to_string())))?;
     let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
-        .map_err(|e| format!("key PEM parse: {e}"))?;
+        .map_err(|e| report!(TlsConfigError::KeyParse(e.to_string())))?;
     let ca_certs: Vec<_> = CertificateDer::pem_slice_iter(ca_bundle_pem.as_bytes())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("CA PEM parse: {e}"))?;
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| report!(TlsConfigError::CaParse(e.to_string())))?;
 
     let mut root_store = RootCertStore::empty();
     for ca_cert in ca_certs {
         root_store
             .add(ca_cert)
-            .map_err(|e| format!("root store: {e}"))?;
+            .map_err(|e| report!(TlsConfigError::RootStore(e.to_string())))?;
     }
 
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
         .allow_unauthenticated()
         .build()
-        .map_err(|e| format!("verifier: {e}"))?;
+        .map_err(|e| report!(TlsConfigError::Verifier(e.to_string())))?;
 
     rustls::ServerConfig::builder()
         .with_client_cert_verifier(verifier)
         .with_single_cert(certs, key)
-        .map_err(|e| format!("server config: {e}"))
+        .map_err(|e| report!(TlsConfigError::ServerConfig(e.to_string())))
 }

@@ -73,7 +73,7 @@ pub async fn create_provider_config(
     }
 
     if let Err(e) = ProviderRegistry::validate_config_str(&req.provider_type, &req.config) {
-        return (StatusCode::BAD_REQUEST, e).into_response();
+        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
     }
 
     let now = OffsetDateTime::now_utc();
@@ -219,7 +219,7 @@ pub async fn update_provider_config(
         ProviderRegistry::restore_secrets_str(&provider_type, new_config, &existing.config);
 
         if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
-            return (StatusCode::BAD_REQUEST, e).into_response();
+            return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
         }
     }
 

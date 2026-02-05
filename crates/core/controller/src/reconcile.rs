@@ -12,6 +12,8 @@ use uptrakit_web_api::settings_store::{RawSettings, upsert_setting};
 #[error("settings reconciliation failed")]
 pub struct ReconcileError;
 
+pub type Result<T> = std::result::Result<T, Report<ReconcileError>>;
+
 /// JSON conversion pair used by [`reconcile_setting`].
 pub struct JsonConvert<T> {
     pub to_json: fn(&T) -> serde_json::Value,
@@ -40,7 +42,7 @@ pub async fn reconcile_setting<T>(
     default_value: T,
     force: bool,
     convert: JsonConvert<T>,
-) -> Result<T, Report<ReconcileError>>
+) -> Result<T>
 where
     T: PartialEq + Clone + fmt::Display,
 {

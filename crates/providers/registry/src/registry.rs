@@ -139,16 +139,18 @@ impl ProviderRegistry {
     ///
     /// # Returns
     ///
-    /// `Ok(())` if configuration is valid, or an error string describing the validation failure.
-    pub fn validate_config_str(
-        provider_type: &str,
-        config: &serde_json::Value,
-    ) -> std::result::Result<(), String> {
-        let pt: ProviderType =
-            serde_json::from_value(serde_json::Value::String(provider_type.to_string()))
-                .map_err(|_| format!("unknown provider_type: {provider_type}"))?;
+    /// `Ok(())` if configuration is valid, or a `RegistryError` describing the validation failure.
+    pub fn validate_config_str(provider_type: &str, config: &serde_json::Value) -> Result<()> {
+        let pt: ProviderType = serde_json::from_value(serde_json::Value::String(
+            provider_type.to_string(),
+        ))
+        .map_err(|_| {
+            report!(RegistryError::UnknownProviderType(
+                provider_type.to_string()
+            ))
+        })?;
 
-        Self::validate_config(pt, config).map_err(|e| e.to_string())
+        Self::validate_config(pt, config)
     }
 
     /// Mask secrets in provider configuration JSON for API responses.
@@ -293,7 +295,8 @@ mod tests {
         let config = serde_json::json!({});
         let result = ProviderRegistry::validate_config_str("unknown", &config);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown provider_type"));
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("unknown provider type"));
     }
 
     #[tokio::test]

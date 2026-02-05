@@ -14,8 +14,25 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_shared_db::entity::service as service_entity;
 
+use rootcause::{Report, prelude::*};
+use thiserror::Error;
+
 use crate::AppState;
 use crate::extract::{ClientIp, ServiceIdentity};
+
+// ---------------------------------------------------------------------------
+// Error types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+enum ServiceWsError {
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("invalid enrollment secret")]
+    InvalidSecret,
+}
+
+type ServiceWsResult<T> = std::result::Result<T, Report<ServiceWsError>>;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -102,7 +119,8 @@ pub async fn service_ws(
                 );
                 ConnectionType::Enrolled(service.id)
             }
-            Err(msg) => {
+            Err(e) => {
+                let msg = e.to_string();
                 tracing::warn!("bearer auth failed: {msg}");
                 return (axum::http::StatusCode::UNAUTHORIZED, msg).into_response();
             }
@@ -130,7 +148,7 @@ pub async fn service_ws(
 async fn lookup_by_secret(
     db: &sea_orm::DatabaseConnection,
     secret: &str,
-) -> Result<service_entity::Model, String> {
+) -> ServiceWsResult<service_entity::Model> {
     // Agent-style: deterministic hash lookup.
     let secret_hash = crate::auth::token::hash_token(secret);
     if let Ok(Some(service)) = uptrakit_shared_db::entity::prelude::Service::find()
@@ -148,7 +166,7 @@ async fn lookup_by_secret(
         .filter(service_entity::Column::DeactivatedAt.is_null())
         .all(db)
         .await
-        .map_err(|e| format!("database error: {e}"))?;
+        .map_err(|e| report!(ServiceWsError::Database(e)))?;
 
     for svc in mqtt_services {
         if let Ok(true) =
@@ -158,7 +176,7 @@ async fn lookup_by_secret(
         }
     }
 
-    Err("invalid enrollment secret".to_string())
+    Err(report!(ServiceWsError::InvalidSecret))
 }
 
 // ---------------------------------------------------------------------------
@@ -685,7 +703,7 @@ async fn enroll_mqtt(
         Err(e) => {
             let err = ControllerMessage::Error(ErrorPayload {
                 code: "enrollment_failed".to_string(),
-                message: e,
+                message: e.to_string(),
             });
             if let Some(json) = serialize_msg(&err) {
                 let _ = sink.send(Message::Text(json.into())).await;

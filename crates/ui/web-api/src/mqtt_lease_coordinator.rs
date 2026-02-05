@@ -26,6 +26,8 @@ pub enum LeaseCoordinatorError {
     TenantNotFound(Uuid),
 }
 
+pub type Result<T> = std::result::Result<T, rootcause::Report<LeaseCoordinatorError>>;
+
 /// Centralized coordinator for MQTT tenant leases.
 ///
 /// Manages the assignment of tenants to MQTT service instances, updates the
@@ -50,7 +52,7 @@ impl MqttLeaseCoordinator {
         service_id: Uuid,
         instance_id: &str,
         requested_count: u32,
-    ) -> Result<Vec<MqttTenantConfig>, Report<LeaseCoordinatorError>> {
+    ) -> Result<Vec<MqttTenantConfig>> {
         // Check available capacity for this service
         let available = self
             .connections
@@ -143,11 +145,7 @@ impl MqttLeaseCoordinator {
     /// Release specific tenants from a service.
     ///
     /// Called when a service sends ReleaseTenants message or disconnects.
-    pub async fn release_tenants(
-        &self,
-        service_id: &Uuid,
-        tenant_ids: &[Uuid],
-    ) -> Result<(), Report<LeaseCoordinatorError>> {
+    pub async fn release_tenants(&self, service_id: &Uuid, tenant_ids: &[Uuid]) -> Result<()> {
         // Delete leases from database
         mqtt_lease::Entity::delete_many()
             .filter(mqtt_lease::Column::TenantId.is_in(tenant_ids.to_vec()))
@@ -168,10 +166,7 @@ impl MqttLeaseCoordinator {
     /// Release all tenants held by a service (on disconnect).
     ///
     /// Returns the tenant IDs that were released.
-    pub async fn release_all_for_service(
-        &self,
-        service_id: &Uuid,
-    ) -> Result<HashSet<Uuid>, Report<LeaseCoordinatorError>> {
+    pub async fn release_all_for_service(&self, service_id: &Uuid) -> Result<HashSet<Uuid>> {
         // Get tenants from registry
         let tenants = self
             .connections
@@ -202,7 +197,7 @@ impl MqttLeaseCoordinator {
         &self,
         service_id: &Uuid,
         active_tenant_ids: &[Uuid],
-    ) -> Result<(), Report<LeaseCoordinatorError>> {
+    ) -> Result<()> {
         // Update connection registry heartbeat
         self.connections.record_heartbeat(service_id).await;
 
@@ -230,10 +225,7 @@ impl MqttLeaseCoordinator {
     /// Push a config update to the service holding a specific tenant.
     ///
     /// Called when MQTT settings are updated via REST API.
-    pub async fn push_tenant_config_update(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<bool, Report<LeaseCoordinatorError>> {
+    pub async fn push_tenant_config_update(&self, tenant_id: Uuid) -> Result<bool> {
         // Find the service holding this tenant
         let service_id = match self.connections.get_instance_for_tenant(&tenant_id).await {
             Some(id) => id,
@@ -261,11 +253,7 @@ impl MqttLeaseCoordinator {
     /// Revoke a tenant (disabled or deleted) from the holding service.
     ///
     /// Called when MQTT settings are disabled/deleted via REST API.
-    pub async fn revoke_tenant(
-        &self,
-        tenant_id: Uuid,
-        reason: &str,
-    ) -> Result<bool, Report<LeaseCoordinatorError>> {
+    pub async fn revoke_tenant(&self, tenant_id: Uuid, reason: &str) -> Result<bool> {
         // Find the service holding this tenant
         let service_id = match self.connections.get_instance_for_tenant(&tenant_id).await {
             Some(id) => id,
@@ -308,10 +296,7 @@ impl MqttLeaseCoordinator {
     /// Clean up stale leases (no heartbeat within timeout).
     ///
     /// Called periodically by a background task.
-    pub async fn cleanup_stale_leases(
-        &self,
-        timeout: Duration,
-    ) -> Result<usize, Report<LeaseCoordinatorError>> {
+    pub async fn cleanup_stale_leases(&self, timeout: Duration) -> Result<usize> {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(timeout.as_secs() as i64);
 
         let deleted = mqtt_lease::Entity::delete_many()
@@ -328,10 +313,7 @@ impl MqttLeaseCoordinator {
     /// Get tenant configs for a set of tenant IDs.
     ///
     /// Used during reconnection to rebuild state.
-    pub async fn get_tenant_configs(
-        &self,
-        tenant_ids: &[Uuid],
-    ) -> Result<Vec<MqttTenantConfig>, Report<LeaseCoordinatorError>> {
+    pub async fn get_tenant_configs(&self, tenant_ids: &[Uuid]) -> Result<Vec<MqttTenantConfig>> {
         if tenant_ids.is_empty() {
             return Ok(vec![]);
         }
@@ -357,7 +339,7 @@ impl MqttLeaseCoordinator {
         service_id: Uuid,
         instance_id: &str,
         claimed_tenant_ids: &[Uuid],
-    ) -> Result<Vec<MqttTenantConfig>, Report<LeaseCoordinatorError>> {
+    ) -> Result<Vec<MqttTenantConfig>> {
         if claimed_tenant_ids.is_empty() {
             return Ok(vec![]);
         }

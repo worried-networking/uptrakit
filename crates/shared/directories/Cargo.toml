@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 directories = "6"
+rootcause.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

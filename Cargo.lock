@@ -4900,6 +4900,7 @@ name = "uptrakit-directories"
 version = "0.0.1"
 dependencies = [
  "directories",
+ "rootcause",
  "tempfile",
  "thiserror 2.0.18",
 ]
