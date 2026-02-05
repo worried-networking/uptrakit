@@ -46,17 +46,18 @@ No custom cryptographic implementations are used.
 
 ## Certificate Lifecycle
 
-Uptrakit operates an internal PKI for mTLS agent authentication. The controller acts as the Certificate Authority.
+Uptrakit operates an internal PKI for mTLS authentication of agents and MQTT services. The controller acts as the Certificate Authority.
 
 | Asset | Default lifetime | Renewal window |
 | --- | --- | --- |
 | CA certificate | 5 years | 6 months before expiry (automatic rotation) |
 | Server HTTPS certificate | 90 days | 30 days before expiry (automatic renewal) |
 | Agent client certificate | 365 days (configurable) | Configurable via `renewal_window_hours` |
+| MQTT service client certificate | 365 days (configurable) | Configurable via `renewal_window_hours` |
 
 ### CSR-based certificate issuance
 
-Agent certificates are issued via a CSR (Certificate Signing Request) flow. The controller generates a UUIDv7 `agent_id` during enrollment. After approval, the agent generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its agent_id. The controller validates the CSR signature, verifies the CN matches the authenticated agent identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals.
+Agent and MQTT service certificates are issued via a CSR (Certificate Signing Request) flow. The controller generates a UUIDv7 ID (`agent_id` or `service_id`) during enrollment. After approval, the agent/service generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its ID. The controller validates the CSR signature, verifies the CN matches the authenticated identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent/service.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals. MQTT services follow the same TOFU CA pinning, enrollment, and certificate issuance flow as agents but connect to a separate WebSocket endpoint (`/api/v1/ws/mqtt`) and use separate enrollment tokens.
 
 CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
 
@@ -77,9 +78,10 @@ For the full operational flow (rotation steps, bundle distribution, `CaSnapshot`
 | JWT access tokens | API requests | Short-lived; carry resolved permissions (not roles) |
 | Device authorization | CLI login | Short-lived user code + browser approval; results in API token |
 | API tokens | Programmatic access | Long-lived bearer tokens; revocable |
-| mTLS client certificates | Agent connections | Issued during enrollment; validated on every WebSocket connection |
+| mTLS client certificates | Agent and MQTT service connections | Issued during enrollment; validated on every WebSocket connection |
 | Forwarded client certificates | Agent connections via reverse proxy | Trusted proxy forwards cert info/PEM headers; issuer CN verified against known CAs |
 | Enrollment tokens | Agent registration | One-time tokens with expiry for initial agent enrollment |
+| MQTT enrollment tokens | MQTT service registration | Separate tokens from agent enrollment; one-time with optional expiry and use limits |
 
 Authorization is permission-based (typed `Permission` enum), not role-string-based. See [AGENTS.md](AGENTS.md) section "Permissions model" for the full RBAC design.
 
@@ -99,7 +101,7 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 - Passwords are hashed with Argon2id before storage; plaintext is never persisted.
 - Session tokens are SHA-256 hashed in the database.
 - JWT signing keys are held in memory only.
-- Agent private keys are generated and stored locally on each agent; they never leave the host.
+- Agent and MQTT service private keys are generated and stored locally on each agent/service; they never leave the host.
 - CA private keys are stored on the controller filesystem only.
 - No secrets appear in log output, error messages, or API responses.
 

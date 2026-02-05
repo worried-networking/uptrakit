@@ -253,6 +253,8 @@ mod tests {
             ),
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
+            mqtt_service_connections:
+                crate::mqtt_service_connections::MqttServiceConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             jwt: Arc::new(JwtManager::from_secret(b"test-secret-for-middleware-tests")),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),

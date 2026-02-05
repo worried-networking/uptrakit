@@ -4,6 +4,8 @@ pub mod cert_signer;
 pub mod extract;
 pub mod middleware;
 pub mod mqtt_client_store;
+pub mod mqtt_lease_coordinator;
+pub mod mqtt_service_connections;
 pub mod ocsp;
 pub mod pki_utils;
 pub mod routes;
@@ -31,6 +33,7 @@ use agent_connections::AgentConnectionRegistry;
 use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
 use auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
+use mqtt_service_connections::MqttServiceConnectionRegistry;
 use settings::Settings;
 
 /// Cloneable snapshot of CA state. Re-exported for use by consumers.
@@ -70,6 +73,8 @@ pub struct AppState {
     pub cert_signer: Arc<dyn cert_signer::AgentCertSigner>,
     /// Registry of connected agents for push notifications.
     pub agent_connections: AgentConnectionRegistry,
+    /// Registry of connected MQTT services for push notifications.
+    pub mqtt_service_connections: MqttServiceConnectionRegistry,
     /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
     pub revocation_notify: Arc<tokio::sync::Notify>,
     /// Database-backed store for pending OIDC authorization flows.
@@ -106,7 +111,9 @@ pub struct AppState {
         (name = "Hosts", description = "Host machine management"),
         (name = "Provider Configs", description = "Provider configuration management"),
         (name = "Software Items", description = "Software item tracking and host assignment"),
-        (name = "Update History", description = "Software update history tracking")
+        (name = "Update History", description = "Software update history tracking"),
+        (name = "MQTT Services", description = "MQTT service enrollment and management"),
+        (name = "MQTT Enrollment Tokens", description = "MQTT service enrollment token management")
     ),
     paths(
         routes::auth::register,
@@ -173,7 +180,14 @@ pub struct AppState {
         routes::software_items::trigger_update,
         routes::settings_ca::rotate_ca,
         routes::update_history::list_update_history,
-        routes::update_history::get_update_history
+        routes::update_history::get_update_history,
+        routes::mqtt_services::list_mqtt_services,
+        routes::mqtt_services::approve_mqtt_service,
+        routes::mqtt_services::reject_mqtt_service,
+        routes::mqtt_services::deactivate_mqtt_service,
+        routes::mqtt_enrollment_tokens::create_mqtt_enrollment_token,
+        routes::mqtt_enrollment_tokens::list_mqtt_enrollment_tokens,
+        routes::mqtt_enrollment_tokens::revoke_mqtt_enrollment_token
     ),
     components(
         schemas(
@@ -242,7 +256,12 @@ pub struct AppState {
             routes::software_items::TriggerUpdateStatus,
             routes::settings_ca::RotateCaResponse,
             routes::update_history::UpdateHistoryResponse,
-            routes::update_history::UpdateStatus
+            routes::update_history::UpdateStatus,
+            routes::mqtt_services::MqttServiceResponse,
+            routes::mqtt_services::MqttServiceStatus,
+            routes::mqtt_enrollment_tokens::MqttEnrollmentTokenResponse,
+            routes::mqtt_enrollment_tokens::MqttEnrollmentTokenListResponse,
+            routes::mqtt_enrollment_tokens::CreateMqttEnrollmentTokenRequest
         )
     ),
     info(
@@ -382,6 +401,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::software_items::trigger_update))
         .routes(routes!(routes::update_history::list_update_history))
         .routes(routes!(routes::update_history::get_update_history))
+        .routes(routes!(routes::mqtt_services::list_mqtt_services))
+        .routes(routes!(routes::mqtt_services::approve_mqtt_service))
+        .routes(routes!(routes::mqtt_services::reject_mqtt_service))
+        .routes(routes!(routes::mqtt_services::deactivate_mqtt_service))
+        .routes(routes!(
+            routes::mqtt_enrollment_tokens::create_mqtt_enrollment_token,
+            routes::mqtt_enrollment_tokens::list_mqtt_enrollment_tokens
+        ))
+        .routes(routes!(
+            routes::mqtt_enrollment_tokens::revoke_mqtt_enrollment_token
+        ))
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
             middleware::require_auth::require_auth,
@@ -405,6 +435,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     let mut router = api_router
         .route("/api/v1/ws/agent", get(routes::agent_ws::agent_ws))
+        .route("/api/v1/ws/mqtt", get(routes::mqtt_ws::mqtt_ws))
         .route("/healthz", get(routes::health::healthz))
         .route("/api/v1/pki/ca.crt", get(routes::ca::ca_cert))
         .route("/api/v1/pki/ca.crl", get(routes::ca::ca_crl))
@@ -561,6 +592,8 @@ mod tests {
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
+            mqtt_service_connections:
+                crate::mqtt_service_connections::MqttServiceConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),

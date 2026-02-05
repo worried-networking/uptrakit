@@ -1,16 +1,23 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
-/// Uptrakit MQTT Service — standalone MQTT client with lease-based tenant distribution.
+/// Uptrakit MQTT Service — WebSocket-connected MQTT client service.
+///
+/// Connects to the controller via mTLS WebSocket for tenant configuration
+/// and lease coordination.
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-mqtt")]
 pub struct Args {
-    /// Database URL.
-    /// Supported schemes depend on enabled features:
-    ///   SQLite (default): sqlite://path/to/db.sqlite
-    ///   PostgreSQL: postgresql://user:pass@host:5432/dbname
-    ///   MySQL: mysql://user:pass@host:3306/dbname
-    #[arg(long)]
-    pub db_url: String,
+    /// Controller WebSocket URL (e.g., wss://controller:8443).
+    /// Used for both enrollment and runtime communication.
+    #[arg(long, env = "UPTRAKIT_CONTROLLER_URL")]
+    pub controller_url: String,
+
+    /// Data directory for service identity (service_id, keypair, certificate).
+    /// Created if it doesn't exist.
+    #[arg(long, env = "UPTRAKIT_DATA_DIR")]
+    pub data_dir: PathBuf,
 
     /// Maximum number of tenants this instance will manage.
     /// 0 means unlimited.
@@ -21,14 +28,31 @@ pub struct Args {
     #[arg(long, default_value = "15")]
     pub heartbeat_interval: u64,
 
-    /// Polling interval for new/changed tenants in seconds.
-    #[arg(long, default_value = "10")]
-    pub poll_interval: u64,
+    /// Enrollment token for auto-approval.
+    /// If provided and valid, the service is approved immediately.
+    #[arg(long, env = "UPTRAKIT_ENROLLMENT_TOKEN")]
+    pub enrollment_token: Option<String>,
 
-    /// Stale lease timeout in seconds.
-    /// Leases with heartbeat_at older than this are considered abandoned.
-    #[arg(long, default_value = "60")]
-    pub lease_timeout: u64,
+    /// Friendly name for this service instance.
+    /// Defaults to hostname if not specified.
+    #[arg(long)]
+    pub friendly_name: Option<String>,
+
+    /// Skip TLS certificate verification (DANGEROUS).
+    /// Only use for initial CA trust establishment or testing.
+    #[arg(long, default_value = "false")]
+    pub insecure: bool,
+}
+
+impl Args {
+    /// Get the friendly name, falling back to hostname.
+    pub fn friendly_name_or_hostname(&self) -> String {
+        self.friendly_name.clone().unwrap_or_else(|| {
+            hostname::get()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "unknown".to_string())
+        })
+    }
 }
 
 #[cfg(test)]
@@ -39,45 +63,95 @@ mod tests {
 
     #[test]
     fn defaults_parse() {
-        let args = Args::try_parse_from(["uptrakit-mqtt", "--db-url", "sqlite::memory:"]).unwrap();
+        let args = Args::try_parse_from([
+            "uptrakit-mqtt",
+            "--controller-url",
+            "wss://localhost:8443",
+            "--data-dir",
+            "/var/lib/uptrakit-mqtt",
+        ])
+        .unwrap();
+        assert_eq!(args.controller_url, "wss://localhost:8443");
+        assert_eq!(args.data_dir.to_str().unwrap(), "/var/lib/uptrakit-mqtt");
         assert_eq!(args.max_tenants, 0);
         assert_eq!(args.heartbeat_interval, 15);
-        assert_eq!(args.poll_interval, 10);
-        assert_eq!(args.lease_timeout, 60);
+        assert!(args.enrollment_token.is_none());
+        assert!(args.friendly_name.is_none());
+        assert!(!args.insecure);
     }
 
     #[test]
     fn custom_values_parsed() {
         let args = Args::try_parse_from([
             "uptrakit-mqtt",
-            "--db-url",
-            "postgresql://user:pass@host:5432/db",
+            "--controller-url",
+            "wss://controller.example.com:9443",
+            "--data-dir",
+            "/opt/mqtt-service",
             "--max-tenants",
             "5",
             "--heartbeat-interval",
             "30",
-            "--poll-interval",
-            "20",
-            "--lease-timeout",
-            "120",
+            "--enrollment-token",
+            "secret-token-123",
+            "--friendly-name",
+            "Production MQTT Node 1",
+            "--insecure",
         ])
         .unwrap();
-        assert_eq!(args.db_url, "postgresql://user:pass@host:5432/db");
+        assert_eq!(args.controller_url, "wss://controller.example.com:9443");
+        assert_eq!(args.data_dir.to_str().unwrap(), "/opt/mqtt-service");
         assert_eq!(args.max_tenants, 5);
         assert_eq!(args.heartbeat_interval, 30);
-        assert_eq!(args.poll_interval, 20);
-        assert_eq!(args.lease_timeout, 120);
+        assert_eq!(args.enrollment_token.as_deref(), Some("secret-token-123"));
+        assert_eq!(
+            args.friendly_name.as_deref(),
+            Some("Production MQTT Node 1")
+        );
+        assert!(args.insecure);
     }
 
     #[test]
-    fn max_tenants_zero_default() {
-        let args = Args::try_parse_from(["uptrakit-mqtt", "--db-url", "sqlite::memory:"]).unwrap();
-        assert_eq!(args.max_tenants, 0);
-    }
-
-    #[test]
-    fn db_url_required() {
-        let result = Args::try_parse_from(["uptrakit-mqtt"]);
+    fn controller_url_required() {
+        let result =
+            Args::try_parse_from(["uptrakit-mqtt", "--data-dir", "/var/lib/uptrakit-mqtt"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn data_dir_required() {
+        let result =
+            Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn friendly_name_or_hostname_returns_provided() {
+        let args = Args::try_parse_from([
+            "uptrakit-mqtt",
+            "--controller-url",
+            "wss://localhost:8443",
+            "--data-dir",
+            "/tmp",
+            "--friendly-name",
+            "My Node",
+        ])
+        .unwrap();
+        assert_eq!(args.friendly_name_or_hostname(), "My Node");
+    }
+
+    #[test]
+    fn friendly_name_or_hostname_falls_back_to_hostname() {
+        let args = Args::try_parse_from([
+            "uptrakit-mqtt",
+            "--controller-url",
+            "wss://localhost:8443",
+            "--data-dir",
+            "/tmp",
+        ])
+        .unwrap();
+        // Should return the system hostname, which we can't predict in tests,
+        // but it should not be empty
+        assert!(!args.friendly_name_or_hostname().is_empty());
     }
 }

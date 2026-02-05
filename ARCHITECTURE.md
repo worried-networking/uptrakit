@@ -19,14 +19,14 @@ Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environ
 │              │◄──────────────────────────────────── │  Browser (Web UI)    │
 │              │                                      └──────────────────────┘
 │              │
-└──────────────┘
-                                                      ┌──────────────────────┐
-┌──────────────┐─────── MQTT ──────────────────────── │  MQTT Broker         │
-│  MQTT Service│                                      │  (Home Assistant)    │
-│  (separate)  │─────── DB ───────────────────────┐   └──────────────────────┘
-└──────────────┘                                  │
-                                                  ▼
-                                           (shared database)
+│              │         WSS (mTLS)                   ┌──────────────────────┐
+│              │◄──────────────────────────────────── │  MQTT Service        │
+│              │         /api/v1/ws/mqtt               │  Instance 1          │──── MQTT ──── Broker
+│              │                                      └──────────────────────┘
+│              │         WSS (mTLS)                   ┌──────────────────────┐
+│              │◄──────────────────────────────────── │  MQTT Service        │
+│              │         /api/v1/ws/mqtt               │  Instance 2          │──── MQTT ──── Broker
+└──────────────┘                                      └──────────────────────┘
 ```
 
 All agent connections are **outbound-only** -- agents initiate connections to the controller; the controller never connects to agents.
@@ -77,7 +77,7 @@ For the full annotated tree with every file, see [AGENTS.md](AGENTS.md) section 
 
 ## Wire Protocol
 
-Agent-controller communication uses WebSocket over TLS with JSON-serialized messages. The protocol defines three connection types:
+Agent-controller and MQTT service-controller communication uses WebSocket over TLS with JSON-serialized messages. Both agents and MQTT services follow the same enrollment and authentication pattern. The protocol defines three connection types:
 
 | Connection type | Authentication | Purpose |
 | --- | --- | --- |
@@ -103,11 +103,15 @@ Defined in `crates/shared/wire/`:
 
 **Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`, `execute_update`, `server_restarting`
 
+**MQTT Service → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `register`, `heartbeat`, `release_tenants`, `disconnecting`
+
+**Controller → MQTT Service:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `mqtt_service_settings`, `ca_bundle_updated`, `request_cert_renewal`, `registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `server_restarting`
+
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
 ## PKI & mTLS
 
-The controller operates an internal Certificate Authority for mutual TLS authentication with agents.
+The controller operates an internal Certificate Authority for mutual TLS authentication with agents and MQTT services.
 
 - **CA rotation**: Automatic when the managed CA enters a 6-month expiry window. Can also be triggered on demand via `POST /api/v1/settings/rotate-ca`. Produces a dual-CA trust bundle for seamless transition.
 - **CRL partitioning**: Each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint`). Combined PEM CRLs are served at `GET /api/v1/pki/ca.crl`.
@@ -140,7 +144,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
 | Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, PKI address: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
-| MQTT | Dedicated `mqtt_clients` table | Yes (via API); MQTT service detects changes automatically | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
+| MQTT | Dedicated `mqtt_clients` table | Yes (via API); controller pushes changes to connected MQTT service instances | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
 | Agent certificates | `agent_certificates.*` | Yes | `GET/PUT /api/v1/settings/agent-certificates` |
@@ -186,9 +190,9 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 27 entities in `crates/shared/db/src/entity/`:
+The data model comprises 30 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
+`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_enrollment_token`, `mqtt_lease`, `mqtt_service`, `mqtt_service_certificate`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
 
@@ -265,9 +269,25 @@ The Web UI is a SvelteKit single-page application using the static adapter (no S
 
 Each tracked software item is published as a Home Assistant `update` entity via MQTT auto-discovery. Entity attributes include installed version, latest version, changelog URL, release link, and more.
 
-MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that connects to the same shared database as the controller. Multiple instances can run simultaneously with automatic tenant distribution via a lease table (`mqtt_leases`). Each instance claims tenants, manages per-tenant MQTT connections, and supports hot-reload when configuration changes.
+MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that communicates with the controller via WebSocket with mTLS authentication -- the same enrollment and certificate model used by agents. The MQTT service has no direct database access; the controller manages all state (leases, tenant configs) and pushes configuration changes to connected instances.
 
-The MQTT client supports four transport types: plain TCP (`mqtt://`), TLS (`mqtts://`), WebSocket (`ws://`), and secure WebSocket (`wss://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the leasing model, CLI flags, and key files.
+### MQTT service lifecycle
+
+1. **Enrollment**: MQTT service connects anonymously to `/api/v1/ws/mqtt`, sends `enroll` with hostname and optional enrollment token. Controller generates a UUIDv7 service_id and responds with `enrolled`. If a valid MQTT enrollment token is provided, the service is auto-approved; otherwise manual approval is required via the REST API.
+2. **Certificate issuance**: After approval, the service generates an ECDSA P-256 keypair + CSR (CN=service_id) and sends `request_certificate`. Controller signs and returns the certificate.
+3. **Authenticated operation**: Service reconnects with mTLS, sends `register` with instance_id, max_tenants, and active_tenants (for reconnect reconciliation). Controller responds with tenant assignments.
+4. **Runtime**: Controller pushes `tenant_config_updated` and `tenant_revoked` messages when MQTT settings change via the REST API. Service sends periodic heartbeats to keep leases alive.
+
+### Lease management
+
+Multiple MQTT service instances can run simultaneously. The controller manages centralized lease coordination:
+- Instances register with a `max_tenants` capacity (0 = unlimited)
+- Unclaimed tenants are assigned on registration
+- Leases are tracked in the `mqtt_leases` table (controller-managed, not directly accessed by MQTT services)
+- On instance disconnect, its leases are released (no automatic redistribution)
+- Stale leases are cleaned up periodically (no heartbeat within timeout)
+
+The MQTT client supports four transport types: plain TCP (`mqtt://`), TLS (`mqtts://`), WebSocket (`ws://`), and secure WebSocket (`wss://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the full connection lifecycle, CLI flags, and key files.
 
 Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all paths converge on the same controller API.
 
@@ -284,7 +304,7 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **rootcause + thiserror** | rootcause provides `Report`-based error propagation with structured context. thiserror generates the error enums. Together they enforce boundary-aware error handling without boilerplate. |
 | **Rustls over OpenSSL** | Pure-Rust TLS avoids OpenSSL linking complexity and provides memory safety guarantees. aws-lc-rs backend offers FIPS-capable cryptography. |
 | **SvelteKit static adapter** | No server-side rendering needed -- the controller serves the pre-built SPA. Keeps deployment simple (single binary + static files). |
-| **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. Runs as a separate binary (`uptrakit-mqtt`) with lease-based multi-instance tenant distribution. |
+| **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. Runs as a separate binary (`uptrakit-mqtt`) that connects to the controller via WebSocket/mTLS (same enrollment model as agents). No direct database access -- the controller pushes tenant configs and manages leases centrally. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
 | **HTTPS-only controller** | The controller listens on HTTPS by default. An optional plain HTTP listener (`--pki-http listener`) can be started for PKI-only endpoints (OCSP, CRL, CA cert) when needed by Nginx `ssl_ocsp_responder`. All agent and browser connections use TLS. |
 | **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |

@@ -9,7 +9,17 @@ pub use super::available_version::{Entity as AvailableVersion, Model as Availabl
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::mqtt_client::{Entity as MqttClient, Model as MqttClientModel};
+pub use super::mqtt_enrollment_token::{
+    Entity as MqttEnrollmentToken, Model as MqttEnrollmentTokenModel,
+};
 pub use super::mqtt_lease::{Entity as MqttLease, Model as MqttLeaseModel};
+pub use super::mqtt_service::{
+    Entity as MqttService, Model as MqttServiceModel, MqttServiceStatus,
+};
+pub use super::mqtt_service_certificate::{
+    Entity as MqttServiceCertificate, Model as MqttServiceCertificateModel,
+    MqttServiceCertificateRevocationReason,
+};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::pending_account_link::{
     Entity as PendingAccountLink, Model as PendingAccountLinkModel,

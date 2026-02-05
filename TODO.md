@@ -340,6 +340,17 @@ Ways users interact with the system.
 ### MQTT/Home Assistant Integration
 
 - [x] Separate MQTT binary with multi-instance support and lease-based tenant distribution
+- [x] MQTT service communicates with controller via WebSocket/mTLS (no direct DB access)
+  - [x] Wire protocol messages (`MqttServiceMessage`, `MqttControllerMessage`)
+  - [x] MQTT service enrollment flow (TOFU CA pinning, anonymous enrollment, certificate issuance)
+  - [x] Controller WebSocket endpoint (`/api/v1/ws/mqtt`) with 3-state handler
+  - [x] Controller-side lease coordinator (centralized tenant assignment)
+  - [x] MQTT service connection registry (track connected instances)
+  - [x] Push-based tenant config (controller pushes config changes to instances)
+  - [x] Separate MQTT enrollment tokens (not interchangeable with agent tokens)
+  - [x] REST API for MQTT service management (list, approve, reject, deactivate)
+  - [x] REST API for MQTT enrollment tokens (create, list, delete)
+  - [x] Database entities (`mqtt_service`, `mqtt_service_certificate`, `mqtt_enrollment_token`)
 - [ ] Implement MQTT auto-discovery for Home Assistant
   - [ ] Device discovery messages
   - [ ] Entity discovery (sensors, binary sensors, buttons)
@@ -832,7 +843,7 @@ Items to consider for future versions but not currently prioritized:
   - [x] All route handlers updated for tenant awareness
   - [ ] Tenant management API (CRUD)
   - [ ] Multi-tenant JWT (per-tenant permissions)
-  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution)
+  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via controller WebSocket)
   - [ ] Tenant switching UI
   - [ ] API token scoping per tenant
 - [ ] Agent clustering
