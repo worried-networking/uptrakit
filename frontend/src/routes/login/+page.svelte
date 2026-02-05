@@ -236,13 +236,9 @@
 					<button type="submit" class="btn preset-filled-primary-500 w-full">Login</button>
 				</form>
 
-				{#if authMethods?.setup_required && !authMethods.oidc_providers.length}
-				<a href="/register" class="btn preset-filled-primary-500 mt-4 w-full">Register</a>
-			{:else}
 				<p class="mt-4 text-center">
 					Don't have an account? <a href="/register" class="anchor">Register</a>
 				</p>
-			{/if}
 			{/if}
 		{:else}
 			<p class="text-center text-surface-600 dark:text-surface-400">Loading...</p>
