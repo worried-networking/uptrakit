@@ -1,0 +1,22 @@
+[package]
+name = "uptrakit-enrollment"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+rcgen = { workspace = true }
+rootcause = { workspace = true }
+serde = { workspace = true }
+time = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+x509-parser = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

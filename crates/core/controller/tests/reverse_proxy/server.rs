@@ -17,7 +17,7 @@ use uptrakit_web_api::auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTo
 use uptrakit_web_api::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api::ca_snapshot::CaSnapshotData;
 use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
-use uptrakit_web_api::extract::AgentIdentity;
+use uptrakit_web_api::extract::ServiceIdentity;
 use uptrakit_web_api::middleware;
 use uptrakit_web_api::settings::Settings;
 
@@ -169,9 +169,8 @@ async fn build_state(
         db: db.clone(),
         settings,
         cert_signer: Arc::new(NoopCertSigner),
-        agent_connections: uptrakit_web_api::agent_connections::AgentConnectionRegistry::new(),
-        mqtt_service_connections:
-            uptrakit_web_api::mqtt_service_connections::MqttServiceConnectionRegistry::new(),
+        service_connections: uptrakit_web_api::service_connections::ServiceConnectionRegistry::new(
+        ),
         revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
         oidc_flow_store: OidcFlowStore::new(db.clone()),
         account_link_store: AccountLinkStore::new(db.clone()),
@@ -202,9 +201,9 @@ fn build_router(state: Arc<AppState>) -> Router {
 }
 
 async fn identity_handler(req: Request) -> Json<IdentityResponse> {
-    let identity = req.extensions().get::<AgentIdentity>().cloned();
+    let identity = req.extensions().get::<ServiceIdentity>().cloned();
     Json(IdentityResponse {
-        agent_id: identity.as_ref().map(|id| id.agent_id.to_string()),
+        agent_id: identity.as_ref().map(|id| id.service_id.to_string()),
         cert_serial: identity
             .as_ref()
             .map(|id| id.cert_serial.clone())

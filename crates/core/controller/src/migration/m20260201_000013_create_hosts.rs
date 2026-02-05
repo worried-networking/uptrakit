@@ -2,6 +2,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
 use super::m20260129_000001_initial::Tenants;
+use super::m20260129_000007_create_agents::Services;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -74,31 +75,31 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create agent_hosts junction table
+        // Create service_hosts junction table
         manager
             .create_table(
                 Table::create()
-                    .table(AgentHosts::Table)
+                    .table(ServiceHosts::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(AgentHosts::AgentId).uuid().not_null())
-                    .col(ColumnDef::new(AgentHosts::HostId).uuid().not_null())
-                    .col(timestamp(AgentHosts::LinkedAt))
+                    .col(ColumnDef::new(ServiceHosts::ServiceId).uuid().not_null())
+                    .col(ColumnDef::new(ServiceHosts::HostId).uuid().not_null())
+                    .col(timestamp(ServiceHosts::LinkedAt))
                     .primary_key(
                         Index::create()
-                            .col(AgentHosts::AgentId)
-                            .col(AgentHosts::HostId),
+                            .col(ServiceHosts::ServiceId)
+                            .col(ServiceHosts::HostId),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_agent_hosts_agent")
-                            .from(AgentHosts::Table, AgentHosts::AgentId)
-                            .to(Agents::Table, Agents::Id)
+                            .name("fk_service_hosts_service")
+                            .from(ServiceHosts::Table, ServiceHosts::ServiceId)
+                            .to(Services::Table, Services::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_agent_hosts_host")
-                            .from(AgentHosts::Table, AgentHosts::HostId)
+                            .name("fk_service_hosts_host")
+                            .from(ServiceHosts::Table, ServiceHosts::HostId)
                             .to(Hosts::Table, Hosts::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -111,7 +112,7 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(AgentHosts::Table).to_owned())
+            .drop_table(Table::drop().table(ServiceHosts::Table).to_owned())
             .await?;
         manager
             .drop_table(Table::drop().table(Hosts::Table).to_owned())
@@ -139,15 +140,9 @@ enum Hosts {
 }
 
 #[derive(DeriveIden)]
-enum AgentHosts {
+enum ServiceHosts {
     Table,
-    AgentId,
+    ServiceId,
     HostId,
     LinkedAt,
-}
-
-#[derive(DeriveIden)]
-enum Agents {
-    Table,
-    Id,
 }

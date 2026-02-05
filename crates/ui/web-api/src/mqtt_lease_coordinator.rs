@@ -8,13 +8,12 @@ use sea_orm::{
 };
 use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_internal_wire::{
-    MqttControllerMessage, MqttTenantConfig, MqttTenantConfigUpdatedPayload,
-    MqttTenantRevokedPayload,
+    ControllerMessage, MqttTenantConfig, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
 };
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
 
-use crate::mqtt_service_connections::MqttServiceConnectionRegistry;
+use crate::service_connections::ServiceConnectionRegistry;
 
 /// Error type for lease coordinator operations.
 #[derive(Debug, thiserror::Error)]
@@ -34,11 +33,11 @@ pub enum LeaseCoordinatorError {
 #[derive(Clone)]
 pub struct MqttLeaseCoordinator {
     db: DatabaseConnection,
-    connections: MqttServiceConnectionRegistry,
+    connections: ServiceConnectionRegistry,
 }
 
 impl MqttLeaseCoordinator {
-    pub fn new(db: DatabaseConnection, connections: MqttServiceConnectionRegistry) -> Self {
+    pub fn new(db: DatabaseConnection, connections: ServiceConnectionRegistry) -> Self {
         Self { db, connections }
     }
 
@@ -174,7 +173,11 @@ impl MqttLeaseCoordinator {
         service_id: &Uuid,
     ) -> Result<HashSet<Uuid>, Report<LeaseCoordinatorError>> {
         // Get tenants from registry
-        let tenants = self.connections.unregister(service_id).await;
+        let tenants = self
+            .connections
+            .unregister(service_id)
+            .await
+            .unwrap_or_default();
 
         if !tenants.is_empty() {
             // Delete leases from database
@@ -248,7 +251,7 @@ impl MqttLeaseCoordinator {
             .ok_or_else(|| report!(LeaseCoordinatorError::TenantNotFound(tenant_id)))?;
 
         let config = model_to_config(&client);
-        let msg = MqttControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
+        let msg = ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
             tenant: config,
         });
 
@@ -294,7 +297,7 @@ impl MqttLeaseCoordinator {
             .await;
 
         // Push revocation message
-        let msg = MqttControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
+        let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
             tenant_id: tenant_id.to_string(),
             reason: reason.to_string(),
         });

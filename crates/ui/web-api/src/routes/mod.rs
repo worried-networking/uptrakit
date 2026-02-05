@@ -1,19 +1,22 @@
-pub mod agent_ws;
-pub mod agents;
+#[allow(dead_code)]
+pub(crate) mod agents;
 pub mod api_tokens;
 pub mod auth;
 pub mod ca;
 pub mod device_auth;
 pub mod health;
 pub mod hosts;
-pub mod mqtt_enrollment_tokens;
-pub mod mqtt_services;
-pub mod mqtt_ws;
+#[allow(dead_code)]
+pub(crate) mod mqtt_enrollment_tokens;
+#[allow(dead_code)]
+pub(crate) mod mqtt_services;
 pub mod ocsp;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod provider_configs;
 pub mod server_cert;
+pub mod service_ws;
+pub mod services;
 pub mod settings;
 pub mod settings_agent_certs;
 pub mod settings_auth;
@@ -23,3 +26,9 @@ pub mod settings_network;
 pub mod software_items;
 pub mod system_alerts;
 pub mod update_history;
+
+// Internal implementation modules for service-type-specific WebSocket handling.
+// These are used by `service_ws` and are not intended to be referenced directly
+// from the router.
+pub(crate) mod agent_ws;
+pub(crate) mod mqtt_ws;

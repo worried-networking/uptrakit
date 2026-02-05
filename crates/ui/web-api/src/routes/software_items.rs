@@ -17,7 +17,7 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{
-    agent_host, host, host_software_item, prelude::*, provider_config, software_item,
+    host, host_software_item, prelude::*, provider_config, service, service_host, software_item,
     update_history,
 };
 
@@ -858,8 +858,8 @@ pub async fn trigger_update(
     };
 
     // 4. Find agent linked to host
-    let agent_link = match AgentHost::find()
-        .filter(agent_host::Column::HostId.eq(host_id))
+    let agent_link = match ServiceHost::find()
+        .filter(service_host::Column::HostId.eq(host_id))
         .one(&state.db)
         .await
     {
@@ -874,13 +874,13 @@ pub async fn trigger_update(
     };
 
     // Verify agent exists and is approved
-    let agent = match Agent::find_by_id(agent_link.agent_id)
-        .filter(uptrakit_shared_db::entity::agent::Column::DeactivatedAt.is_null())
+    let agent = match Service::find_by_id(agent_link.service_id)
+        .filter(service::Column::DeactivatedAt.is_null())
         .one(&state.db)
         .await
     {
         Ok(Some(a)) => {
-            if a.status != "approved" {
+            if a.status != service::ServiceStatus::Approved {
                 return (StatusCode::BAD_REQUEST, "Agent is not approved").into_response();
             }
             a
@@ -1016,11 +1016,11 @@ pub async fn trigger_update(
     };
 
     // 12. Check if agent is connected and send
-    let agent_connected = state.agent_connections.is_connected(&agent.id).await;
+    let agent_connected = state.service_connections.is_connected(&agent.id).await;
     let status = if agent_connected {
         let msg =
             uptrakit_internal_wire::ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
-        if state.agent_connections.send(&agent.id, msg).await {
+        if state.service_connections.send(&agent.id, msg).await {
             tracing::info!(
                 update_id = %update_history_id,
                 agent_id = %agent.id,

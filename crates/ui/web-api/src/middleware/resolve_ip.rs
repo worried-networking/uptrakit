@@ -200,9 +200,7 @@ mod tests {
             default_tenant_id: uuid::Uuid::nil(),
             settings,
             cert_signer: Arc::new(NoopCertSigner),
-            agent_connections: crate::agent_connections::AgentConnectionRegistry::new(),
-            mqtt_service_connections:
-                crate::mqtt_service_connections::MqttServiceConnectionRegistry::new(),
+            service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),

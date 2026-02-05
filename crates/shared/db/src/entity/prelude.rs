@@ -1,25 +1,10 @@
-pub use super::agent::{Entity as Agent, Model as AgentModel};
-pub use super::agent_certificate::{
-    Entity as AgentCertificate, Model as AgentCertificateModel, RevocationReason,
-};
-pub use super::agent_host::{Entity as AgentHost, Model as AgentHostModel};
 pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::auth_method::AuthMethod;
 pub use super::available_version::{Entity as AvailableVersion, Model as AvailableVersionModel};
 pub use super::host::{Entity as Host, Model as HostModel};
 pub use super::host_software_item::{Entity as HostSoftwareItem, Model as HostSoftwareItemModel};
 pub use super::mqtt_client::{Entity as MqttClient, Model as MqttClientModel};
-pub use super::mqtt_enrollment_token::{
-    Entity as MqttEnrollmentToken, Model as MqttEnrollmentTokenModel,
-};
 pub use super::mqtt_lease::{Entity as MqttLease, Model as MqttLeaseModel};
-pub use super::mqtt_service::{
-    Entity as MqttService, Model as MqttServiceModel, MqttServiceStatus,
-};
-pub use super::mqtt_service_certificate::{
-    Entity as MqttServiceCertificate, Model as MqttServiceCertificateModel,
-    MqttServiceCertificateRevocationReason,
-};
 pub use super::oidc_provider::{Entity as OidcProvider, Model as OidcProviderModel, RoleMapping};
 pub use super::pending_account_link::{
     Entity as PendingAccountLink, Model as PendingAccountLinkModel,
@@ -35,6 +20,11 @@ pub use super::permission::{Entity as Permission, Model as PermissionModel};
 pub use super::provider_config::{Entity as ProviderConfig, Model as ProviderConfigModel};
 pub use super::role::{Entity as Role, Model as RoleModel};
 pub use super::role_permission::{Entity as RolePermission, Model as RolePermissionModel};
+pub use super::service::{Entity as Service, Model as ServiceModel, ServiceStatus, ServiceType};
+pub use super::service_certificate::{
+    Entity as ServiceCertificate, Model as ServiceCertificateModel, RevocationReason,
+};
+pub use super::service_host::{Entity as ServiceHost, Model as ServiceHostModel};
 pub use super::session::{Entity as Session, Model as SessionModel};
 pub use super::setting::{Entity as Setting, Model as SettingModel};
 pub use super::software_item::{Entity as SoftwareItem, Model as SoftwareItemModel};

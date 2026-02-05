@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
-use crate::routes::agents::AgentStatus;
+use crate::routes::services::ServiceStatus;
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -13,7 +13,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_shared_db::entity::{agent, agent_host, host, prelude::*};
+use uptrakit_shared_db::entity::{
+    host,
+    prelude::{Host, Service as Agent, ServiceHost as AgentHost},
+    service as agent, service_host as agent_host,
+};
 
 pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
@@ -284,15 +288,21 @@ async fn load_host_agents(
 
     let mut summaries = Vec::with_capacity(links.len());
     for link in links {
-        if let Ok(Some(a)) = Agent::find_by_id(link.agent_id)
+        if let Ok(Some(a)) = Agent::find_by_id(link.service_id)
             .filter(agent::Column::DeactivatedAt.is_null())
             .one(db)
             .await
         {
+            let status = match a.status {
+                agent::ServiceStatus::Pending => ServiceStatus::Pending,
+                agent::ServiceStatus::Approved => ServiceStatus::Approved,
+                agent::ServiceStatus::Rejected => ServiceStatus::Rejected,
+                agent::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
+            };
             summaries.push(HostAgentSummary {
                 id: a.id.to_string(),
                 friendly_name: a.friendly_name,
-                status: AgentStatus::from_str(&a.status).unwrap_or(AgentStatus::Pending),
+                status,
             });
         }
     }

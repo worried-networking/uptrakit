@@ -21,11 +21,11 @@ Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environ
 │              │
 │              │         WSS (mTLS)                   ┌──────────────────────┐
 │              │◄──────────────────────────────────── │  MQTT Service        │
-│              │         /api/v1/ws/mqtt               │  Instance 1          │──── MQTT ──── Broker
+│              │         /api/v1/ws/service             │  Instance 1          │──── MQTT ──── Broker
 │              │                                      └──────────────────────┘
 │              │         WSS (mTLS)                   ┌──────────────────────┐
 │              │◄──────────────────────────────────── │  MQTT Service        │
-│              │         /api/v1/ws/mqtt               │  Instance 2          │──── MQTT ──── Broker
+│              │         /api/v1/ws/service             │  Instance 2          │──── MQTT ──── Broker
 └──────────────┘                                      └──────────────────────┘
 ```
 
@@ -66,6 +66,7 @@ crates/
 ├── shared/
 │   ├── core/                      # uptrakit-core (lib) — shared domain models
 │   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities & migrations
+│   ├── enrollment/                # uptrakit-enrollment (lib) — shared service identity
 │   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/
@@ -77,7 +78,7 @@ For the full annotated tree with every file, see [AGENTS.md](AGENTS.md) section 
 
 ## Wire Protocol
 
-Agent-controller and MQTT service-controller communication uses WebSocket over TLS with JSON-serialized messages. Both agents and MQTT services follow the same enrollment and authentication pattern. The protocol defines three connection types:
+Agent-controller and MQTT service-controller communication uses WebSocket over TLS with JSON-serialized messages. Both agents and MQTT services are modelled as a unified **service** entity and share a single `ServiceMessage`/`ControllerMessage` wire enum, with variant subsets distinguished by service type. The protocol defines three connection types:
 
 | Connection type | Authentication | Purpose |
 | --- | --- | --- |
@@ -99,13 +100,19 @@ Agent-controller and MQTT service-controller communication uses WebSocket over T
 
 Defined in `crates/shared/wire/`:
 
-**Agent → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`, `disconnecting`
+**Service → Controller (shared):** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `disconnecting`
 
-**Controller → Agent:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `agent_settings`, `ca_bundle_updated`, `request_cert_renewal`, `check_versions`, `execute_update`, `server_restarting`
+**Service → Controller (agent-specific):** `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
-**MQTT Service → Controller:** `ping`, `enroll`, `request_certificate`, `renew_certificate`, `register`, `heartbeat`, `release_tenants`, `disconnecting`
+**Service → Controller (MQTT-specific):** `register`, `heartbeat`, `release_tenants`
 
-**Controller → MQTT Service:** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `mqtt_service_settings`, `ca_bundle_updated`, `request_cert_renewal`, `registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `server_restarting`
+**Controller → Service (shared):** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `service_settings`, `ca_bundle_updated`, `request_cert_renewal`, `server_restarting`
+
+**Controller → Service (agent-specific):** `check_versions`, `execute_update`
+
+**Controller → Service (MQTT-specific):** `registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`
+
+The previous `AgentMessage` and `MqttServiceMessage` enums have been unified into `ServiceMessage`; likewise `ControllerMessage` and `MqttControllerMessage` are now a single `ControllerMessage` enum. The former `agent_settings` and `mqtt_service_settings` variants are unified as `service_settings`.
 
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
@@ -147,7 +154,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | MQTT | Dedicated `mqtt_clients` table | Yes (via API); controller pushes changes to connected MQTT service instances | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
-| Agent certificates | `agent_certificates.*` | Yes | `GET/PUT /api/v1/settings/agent-certificates` |
+| Service certificates | `service_certificates.*` | Yes | `GET/PUT /api/v1/settings/service-certificates` |
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` (OIDC bootstrap flags write directly to the `oidc_providers` table).
 
@@ -190,11 +197,11 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 30 entities in `crates/shared/db/src/entity/`:
+The data model comprises 27 entities in `crates/shared/db/src/entity/`:
 
-`agent`, `agent_certificate`, `agent_host`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_enrollment_token`, `mqtt_lease`, `mqtt_service`, `mqtt_service_certificate`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
+`api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
-The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `agent_host` junction table models the many-to-many relationship between agents and hosts, enabling automatic host matching across agent re-enrollments and hostname changes.
+The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `service_host` junction table models the many-to-many relationship between services and hosts, enabling automatic host matching across service re-enrollments and hostname changes.
 
 The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
 
@@ -206,7 +213,7 @@ The `update_history` entity tracks individual software update operations. Each r
 
 ### Multi-tenancy
 
-The database supports multi-tenancy via a `tenants` table and `tenant_id` foreign keys on scoped tables (`agents`, `hosts`, `provider_configs`, `software_items`, `oidc_providers`, `user_roles`, `settings`, `mqtt_clients`). A seeded default tenant is used in single-tenant mode. Global tables (`users`, `roles`, `permissions`, `sessions`, `api_tokens`, `pending_*`, junction tables) remain unscoped. The `TenantContext` Axum extractor resolves the active tenant from the `X-Tenant-Id` header or falls back to the default tenant. See [AGENTS.md](AGENTS.md) section "Multi-tenancy" for details.
+The database supports multi-tenancy via a `tenants` table and `tenant_id` foreign keys on scoped tables (`services`, `hosts`, `provider_configs`, `software_items`, `oidc_providers`, `user_roles`, `settings`, `mqtt_clients`). A seeded default tenant is used in single-tenant mode. Global tables (`users`, `roles`, `permissions`, `sessions`, `api_tokens`, `pending_*`) remain unscoped. The `service_certificates` and `service_hosts` tables are scoped indirectly through the `services` table. The `TenantContext` Axum extractor resolves the active tenant from the `X-Tenant-Id` header or falls back to the default tenant. See [AGENTS.md](AGENTS.md) section "Multi-tenancy" for details.
 
 ### Migrations
 
@@ -273,7 +280,7 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 
 ### MQTT service lifecycle
 
-1. **Enrollment**: MQTT service connects anonymously to `/api/v1/ws/mqtt`, sends `enroll` with hostname and optional enrollment token. Controller generates a UUIDv7 service_id and responds with `enrolled`. If a valid MQTT enrollment token is provided, the service is auto-approved; otherwise manual approval is required via the REST API.
+1. **Enrollment**: MQTT service connects anonymously to `/api/v1/ws/service`, sends `enroll` with hostname and optional enrollment token. Controller generates a UUIDv7 service_id and responds with `enrolled`. If a valid MQTT enrollment token is provided, the service is auto-approved; otherwise manual approval is required via the REST API. All messages use the unified `ServiceMessage`/`ControllerMessage` wire enums.
 2. **Certificate issuance**: After approval, the service generates an ECDSA P-256 keypair + CSR (CN=service_id) and sends `request_certificate`. Controller signs and returns the certificate.
 3. **Authenticated operation**: Service reconnects with mTLS, sends `register` with instance_id, max_tenants, and active_tenants (for reconnect reconciliation). Controller responds with tenant assignments.
 4. **Runtime**: Controller pushes `tenant_config_updated` and `tenant_revoked` messages when MQTT settings change via the REST API. Service sends periodic heartbeats to keep leases alive.

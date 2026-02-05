@@ -15,7 +15,7 @@ use tokio_tungstenite::{
     Connector,
     tungstenite::{self, Message},
 };
-use uptrakit_internal_wire::{MqttControllerMessage, MqttServiceMessage};
+use uptrakit_internal_wire::{ControllerMessage, ServiceMessage};
 
 use crate::identity::Identity;
 
@@ -127,22 +127,22 @@ impl ControllerConnection {
     }
 
     /// Send a message to the controller.
-    pub async fn send(&mut self, msg: MqttServiceMessage) -> Result<(), ControllerError> {
+    pub async fn send(&mut self, msg: ServiceMessage) -> Result<(), ControllerError> {
         let json = serde_json::to_string(&msg)?;
         self.sink.send(Message::Text(json.into())).await?;
         Ok(())
     }
 
     /// Receive the next message from the controller.
-    pub async fn recv(&mut self) -> Result<Option<MqttControllerMessage>, ControllerError> {
+    pub async fn recv(&mut self) -> Result<Option<ControllerMessage>, ControllerError> {
         loop {
             match self.stream.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    let msg: MqttControllerMessage = serde_json::from_str(&text)?;
+                    let msg: ControllerMessage = serde_json::from_str(&text)?;
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let msg: MqttControllerMessage = serde_json::from_slice(&data)?;
+                    let msg: ControllerMessage = serde_json::from_slice(&data)?;
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Ping(data))) => {
@@ -254,11 +254,11 @@ fn build_ws_url(controller_url: &str) -> Result<String, ControllerError> {
     }
 
     // Append WebSocket path if not present
-    if !url.contains("/api/v1/ws/mqtt") {
+    if !url.contains("/api/v1/ws/service") {
         if url.ends_with('/') {
-            url.push_str("api/v1/ws/mqtt");
+            url.push_str("api/v1/ws/service");
         } else {
-            url.push_str("/api/v1/ws/mqtt");
+            url.push_str("/api/v1/ws/service");
         }
     }
 
@@ -467,7 +467,7 @@ mod tests {
     fn build_ws_url_from_https() {
         assert_eq!(
             build_ws_url("https://controller:8443").unwrap(),
-            "wss://controller:8443/api/v1/ws/mqtt"
+            "wss://controller:8443/api/v1/ws/service"
         );
     }
 
@@ -475,15 +475,15 @@ mod tests {
     fn build_ws_url_from_wss() {
         assert_eq!(
             build_ws_url("wss://controller:8443").unwrap(),
-            "wss://controller:8443/api/v1/ws/mqtt"
+            "wss://controller:8443/api/v1/ws/service"
         );
     }
 
     #[test]
     fn build_ws_url_preserves_path() {
         assert_eq!(
-            build_ws_url("wss://controller:8443/api/v1/ws/mqtt").unwrap(),
-            "wss://controller:8443/api/v1/ws/mqtt"
+            build_ws_url("wss://controller:8443/api/v1/ws/service").unwrap(),
+            "wss://controller:8443/api/v1/ws/service"
         );
     }
 

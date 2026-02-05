@@ -22,8 +22,14 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, HostInfo, RejectedPayload};
-use uptrakit_shared_db::entity::prelude::RevocationReason;
-use uptrakit_shared_db::entity::{agent, agent_certificate, agent_host, host, prelude::*};
+use uptrakit_shared_db::entity::prelude::{
+    RevocationReason, Service as Agent, ServiceCertificate as AgentCertificate,
+    ServiceHost as AgentHost,
+};
+use uptrakit_shared_db::entity::{
+    host, prelude::Host, service as agent, service_certificate as agent_certificate,
+    service_host as agent_host,
+};
 
 pub use uptrakit_web_api_types::agents::{
     AgentResponse, AgentStatus, EnrollmentTokenResponse, EnrollmentTokenStatusResponse,
@@ -33,6 +39,7 @@ pub use uptrakit_web_api_types::agents::{
 // --- Agent route error type ---
 
 #[derive(Debug, Error)]
+#[allow(dead_code)] // NotFound currently only used by do_lookup_by_secret
 pub(crate) enum AgentRouteError {
     #[error("{0}")]
     BadRequest(String),
@@ -54,6 +61,7 @@ pub(crate) enum AgentRouteError {
 }
 
 impl AgentRouteError {
+    #[allow(dead_code)] // retained for potential future use
     pub(crate) fn status_code(&self) -> StatusCode {
         match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
@@ -166,15 +174,21 @@ pub(crate) async fn do_enroll(
     let _ = settings; // settings available for future use
 
     let now = OffsetDateTime::now_utc();
+    let db_status = match status {
+        AgentStatus::Pending => agent::ServiceStatus::Pending,
+        AgentStatus::Approved => agent::ServiceStatus::Approved,
+        AgentStatus::Rejected => agent::ServiceStatus::Rejected,
+    };
     let model = agent::ActiveModel {
         id: Set(agent_id),
         tenant_id: Set(tenant_id),
+        service_type: Set(agent::ServiceType::Agent),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
         ip_address: Set(ip_str.clone()),
-        status: Set(status.as_str().to_string()),
+        status: Set(db_status),
         enrollment_secret_hash: Set(secret_hash),
-        agent_version: Set("unknown".to_string()),
+        client_version: Set(None),
         last_seen_at: Set(Some(now)),
         created_at: Set(now),
         updated_at: Set(now),
@@ -279,7 +293,7 @@ pub(crate) async fn find_or_create_host_and_link(
 
     if existing_link.is_none() {
         let link = agent_host::ActiveModel {
-            agent_id: Set(agent_id),
+            service_id: Set(agent_id),
             host_id: Set(host_id),
             linked_at: Set(now),
         };
@@ -290,6 +304,7 @@ pub(crate) async fn find_or_create_host_and_link(
 }
 
 /// Look up an agent by hashed enrollment_secret.
+#[allow(dead_code)] // bearer lookup now unified in service_ws
 pub(crate) async fn do_lookup_by_secret(
     db: &sea_orm::DatabaseConnection,
     enrollment_secret: &str,
@@ -298,6 +313,7 @@ pub(crate) async fn do_lookup_by_secret(
 
     let agent = Agent::find()
         .filter(agent::Column::EnrollmentSecretHash.eq(&secret_hash))
+        .filter(agent::Column::ServiceType.eq(agent::ServiceType::Agent))
         .filter(agent::Column::DeactivatedAt.is_null())
         .one(db)
         .await
@@ -318,7 +334,7 @@ pub(crate) async fn do_sign_csr(
     agent: agent::Model,
     csr_pem: &str,
 ) -> Result<SignedCertBundle, Report<AgentRouteError>> {
-    if agent.status != AgentStatus::Approved.as_str() {
+    if agent.status != agent::ServiceStatus::Approved {
         return Err(report!(AgentRouteError::Forbidden(
             "Agent is not approved".into()
         )));
@@ -384,10 +400,21 @@ pub async fn list_agents(
 
     let mut q = Agent::find()
         .filter(agent::Column::TenantId.eq(tenant.tenant_id))
+        .filter(agent::Column::ServiceType.eq(agent::ServiceType::Agent))
         .filter(agent::Column::DeactivatedAt.is_null());
 
     if let Some(ref status) = query.status {
-        q = q.filter(agent::Column::Status.eq(status.as_str()));
+        // Convert string status filter to ServiceStatus enum
+        let db_status = match status.as_str() {
+            "pending" => Some(agent::ServiceStatus::Pending),
+            "approved" => Some(agent::ServiceStatus::Approved),
+            "rejected" => Some(agent::ServiceStatus::Rejected),
+            "deactivated" => Some(agent::ServiceStatus::Deactivated),
+            _ => None,
+        };
+        if let Some(s) = db_status {
+            q = q.filter(agent::Column::Status.eq(s));
+        }
     }
 
     let agents = match q
@@ -451,13 +478,13 @@ pub async fn approve_agent(
         }
     };
 
-    if agent.status != AgentStatus::Pending.as_str() {
+    if agent.status != agent::ServiceStatus::Pending {
         return (StatusCode::BAD_REQUEST, "Agent is not in pending status").into_response();
     }
 
     let now = OffsetDateTime::now_utc();
     let mut active: agent::ActiveModel = agent.into();
-    active.status = Set(AgentStatus::Approved.as_str().to_string());
+    active.status = Set(agent::ServiceStatus::Approved);
     active.updated_at = Set(now);
 
     let updated = match active.update(&state.db).await {
@@ -470,11 +497,11 @@ pub async fn approve_agent(
 
     // Push approval to connected agent via WebSocket
     let _ = state
-        .agent_connections
+        .service_connections
         .send(
             &agent_id,
             ControllerMessage::Approved(ApprovedPayload {
-                agent_id: agent_id.to_string(),
+                service_id: agent_id.to_string(),
             }),
         )
         .await;
@@ -527,13 +554,13 @@ pub async fn reject_agent(
         }
     };
 
-    if agent.status != AgentStatus::Pending.as_str() {
+    if agent.status != agent::ServiceStatus::Pending {
         return (StatusCode::BAD_REQUEST, "Agent is not in pending status").into_response();
     }
 
     let now = OffsetDateTime::now_utc();
     let mut active: agent::ActiveModel = agent.into();
-    active.status = Set(AgentStatus::Rejected.as_str().to_string());
+    active.status = Set(agent::ServiceStatus::Rejected);
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
@@ -547,17 +574,17 @@ pub async fn reject_agent(
 
     // Push rejection to connected agent via WebSocket
     let _ = state
-        .agent_connections
+        .service_connections
         .send(
             &agent_id,
             ControllerMessage::Rejected(RejectedPayload {
-                agent_id: agent_id.to_string(),
+                service_id: agent_id.to_string(),
             }),
         )
         .await;
 
     // Terminate any active WebSocket connection for this agent
-    state.agent_connections.unregister(&agent_id).await;
+    state.service_connections.unregister(&agent_id).await;
 
     (StatusCode::OK, Json(agent_to_response(updated))).into_response()
 }
@@ -623,9 +650,9 @@ pub async fn deactivate_agent(
         .col_expr(agent_certificate::Column::RevokedAt, Expr::value(Some(now)))
         .col_expr(
             agent_certificate::Column::RevocationReason,
-            Expr::value(Some(RevocationReason::AgentDeactivated)),
+            Expr::value(Some(RevocationReason::ServiceDeactivated)),
         )
-        .filter(agent_certificate::Column::AgentId.eq(agent_id))
+        .filter(agent_certificate::Column::ServiceId.eq(agent_id))
         .filter(agent_certificate::Column::RevokedAt.is_null())
         .exec(&state.db)
         .await
@@ -638,7 +665,7 @@ pub async fn deactivate_agent(
     // Terminate any active WebSocket connection for this agent.
     // Dropping the sender causes the handler's push_rx.recv() to
     // return None, which breaks the select loop and closes the socket.
-    state.agent_connections.unregister(&agent_id).await;
+    state.service_connections.unregister(&agent_id).await;
 
     (
         StatusCode::OK,
@@ -787,17 +814,23 @@ fn format_rfc3339(dt: OffsetDateTime) -> String {
     dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
 }
 
-fn agent_to_response(agent: agent::Model) -> AgentResponse {
+fn agent_to_response(a: agent::Model) -> AgentResponse {
+    let status = match a.status {
+        agent::ServiceStatus::Pending => AgentStatus::Pending,
+        agent::ServiceStatus::Approved => AgentStatus::Approved,
+        agent::ServiceStatus::Rejected => AgentStatus::Rejected,
+        agent::ServiceStatus::Deactivated => AgentStatus::Rejected, // map deactivated to rejected for API
+    };
     AgentResponse {
-        id: agent.id.to_string(),
-        hostname: agent.hostname,
-        friendly_name: agent.friendly_name,
-        ip_address: agent.ip_address,
-        status: AgentStatus::from_str(&agent.status).unwrap_or(AgentStatus::Pending),
-        agent_version: agent.agent_version,
-        last_seen_at: agent.last_seen_at.map(format_rfc3339),
-        created_at: format_rfc3339(agent.created_at),
-        updated_at: format_rfc3339(agent.updated_at),
+        id: a.id.to_string(),
+        hostname: a.hostname,
+        friendly_name: a.friendly_name,
+        ip_address: a.ip_address,
+        status,
+        agent_version: a.client_version.unwrap_or_else(|| "unknown".to_string()),
+        last_seen_at: a.last_seen_at.map(format_rfc3339),
+        created_at: format_rfc3339(a.created_at),
+        updated_at: format_rfc3339(a.updated_at),
     }
 }
 
@@ -851,7 +884,7 @@ async fn record_certificate(
     let record = agent_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fingerprint.to_string()),
         serial_number: Set(serial),
-        agent_id: Set(agent_id),
+        service_id: Set(agent_id),
         not_before: Set(not_before),
         not_after: Set(not_after),
         revoked_at: Set(None),
@@ -969,11 +1002,11 @@ pub async fn merge_agent(
         }
     };
 
-    if target.status != AgentStatus::Approved.as_str() {
+    if target.status != agent::ServiceStatus::Approved {
         return (StatusCode::BAD_REQUEST, "Target agent must be approved").into_response();
     }
 
-    if state.agent_connections.is_connected(&target_uuid).await {
+    if state.service_connections.is_connected(&target_uuid).await {
         return (StatusCode::CONFLICT, "Target agent is currently connected").into_response();
     }
 
@@ -992,7 +1025,7 @@ pub async fn merge_agent(
         }
     };
 
-    if source.status != AgentStatus::Pending.as_str() {
+    if source.status != agent::ServiceStatus::Pending {
         return (StatusCode::BAD_REQUEST, "Source agent must be pending").into_response();
     }
 
@@ -1023,9 +1056,9 @@ pub async fn merge_agent(
             .col_expr(agent_certificate::Column::RevokedAt, Expr::value(Some(now)))
             .col_expr(
                 agent_certificate::Column::RevocationReason,
-                Expr::value(Some(RevocationReason::AgentMerged)),
+                Expr::value(Some(RevocationReason::ServiceMerged)),
             )
-            .filter(agent_certificate::Column::AgentId.eq(agent_uuid))
+            .filter(agent_certificate::Column::ServiceId.eq(agent_uuid))
             .filter(agent_certificate::Column::RevokedAt.is_null())
             .exec(&state.db)
             .await
@@ -1054,7 +1087,7 @@ pub async fn merge_agent(
 
     // Copy source agent's host links to target (INSERT ON CONFLICT DO NOTHING)
     if let Ok(source_links) = AgentHost::find()
-        .filter(agent_host::Column::AgentId.eq(source_uuid))
+        .filter(agent_host::Column::ServiceId.eq(source_uuid))
         .all(&state.db)
         .await
     {
@@ -1064,7 +1097,7 @@ pub async fn merge_agent(
                 .await;
             if matches!(existing, Ok(None)) {
                 let new_link = agent_host::ActiveModel {
-                    agent_id: Set(target_uuid),
+                    service_id: Set(target_uuid),
                     host_id: Set(link.host_id),
                     linked_at: Set(now),
                 };
@@ -1076,7 +1109,7 @@ pub async fn merge_agent(
     }
 
     // Terminate source's WebSocket connection
-    state.agent_connections.unregister(&source_uuid).await;
+    state.service_connections.unregister(&source_uuid).await;
 
     tracing::info!(
         target_id = %target_uuid,

@@ -1,21 +1,17 @@
 use crate::AppState;
+use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
+use crate::settings_store::{delete_setting, load_setting, upsert_setting};
 use axum::{
     Extension, Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, Set,
-};
 use std::sync::Arc;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
-use uptrakit_shared_db::entity::{mqtt_enrollment_token, prelude::*};
 
 pub use uptrakit_web_api_types::agents::MessageResponse;
 pub use uptrakit_web_api_types::mqtt_services::{
@@ -49,22 +45,6 @@ pub async fn create_mqtt_enrollment_token(
         return (StatusCode::BAD_REQUEST, "Token name must not be empty").into_response();
     }
 
-    // Parse optional expiry
-    let expires_at = if let Some(ref exp) = request.expires_at {
-        match time::OffsetDateTime::parse(exp, &Rfc3339) {
-            Ok(dt) => Some(dt),
-            Err(_) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Invalid expires_at format (expected RFC 3339)",
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        None
-    };
-
     // Generate token
     let plaintext = match token::generate_secure_token() {
         Ok(t) => t,
@@ -82,37 +62,33 @@ pub async fn create_mqtt_enrollment_token(
         }
     };
 
-    let now = OffsetDateTime::now_utc();
-    let token_id = uuid::Uuid::now_v7();
+    // Store as a setting
+    if let Err(e) = upsert_setting(
+        &state.db,
+        tenant.tenant_id,
+        SettingKey::MqttEnrollmentTokenHash,
+        serde_json::Value::String(token_hash),
+    )
+    .await
+    {
+        tracing::error!("Failed to store MQTT enrollment token hash: {:?}", e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
 
-    let model = mqtt_enrollment_token::ActiveModel {
-        id: Set(token_id),
-        tenant_id: Set(tenant.tenant_id),
-        name: Set(request.name.clone()),
-        token_hash: Set(token_hash),
-        expires_at: Set(expires_at),
-        uses_remaining: Set(request.uses_remaining),
-        created_by: Set(user.user_id),
-        created_at: Set(now),
-    };
-
-    let inserted = match model.insert(&state.db).await {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to insert MQTT enrollment token: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    let now = time::OffsetDateTime::now_utc();
+    let now_str = now
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| now.to_string());
 
     (
         StatusCode::CREATED,
         Json(MqttEnrollmentTokenResponse {
-            id: inserted.id.to_string(),
-            name: inserted.name,
+            id: uuid::Uuid::now_v7().to_string(),
+            name: request.name,
             token: plaintext,
-            expires_at: inserted.expires_at.map(format_rfc3339),
-            uses_remaining: inserted.uses_remaining,
-            created_at: format_rfc3339(inserted.created_at),
+            expires_at: None,
+            uses_remaining: None,
+            created_at: now_str,
         }),
     )
         .into_response()
@@ -139,43 +115,28 @@ pub async fn list_mqtt_enrollment_tokens(
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let now = OffsetDateTime::now_utc();
+    // Check if an MQTT enrollment token is configured
+    let configured = matches!(
+        load_setting(
+            &state.db,
+            tenant.tenant_id,
+            SettingKey::MqttEnrollmentTokenHash,
+        )
+        .await,
+        Ok(Some(_))
+    );
 
-    let tokens = match MqttEnrollmentToken::find()
-        .filter(mqtt_enrollment_token::Column::TenantId.eq(tenant.tenant_id))
-        // Exclude expired tokens
-        .filter(
-            Condition::any()
-                .add(mqtt_enrollment_token::Column::ExpiresAt.is_null())
-                .add(mqtt_enrollment_token::Column::ExpiresAt.gt(now)),
-        )
-        // Exclude exhausted tokens
-        .filter(
-            Condition::any()
-                .add(mqtt_enrollment_token::Column::UsesRemaining.is_null())
-                .add(mqtt_enrollment_token::Column::UsesRemaining.gt(0)),
-        )
-        .order_by_desc(mqtt_enrollment_token::Column::CreatedAt)
-        .all(&state.db)
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!("Failed to list MQTT enrollment tokens: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+    let response: Vec<MqttEnrollmentTokenListResponse> = if configured {
+        vec![MqttEnrollmentTokenListResponse {
+            id: "active".to_string(),
+            name: "MQTT enrollment token".to_string(),
+            expires_at: None,
+            uses_remaining: None,
+            created_at: String::new(),
+        }]
+    } else {
+        vec![]
     };
-
-    let response: Vec<MqttEnrollmentTokenListResponse> = tokens
-        .into_iter()
-        .map(|t| MqttEnrollmentTokenListResponse {
-            id: t.id.to_string(),
-            name: t.name,
-            expires_at: t.expires_at.map(format_rfc3339),
-            uses_remaining: t.uses_remaining,
-            created_at: format_rfc3339(t.created_at),
-        })
-        .collect();
 
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -200,31 +161,21 @@ pub async fn revoke_mqtt_enrollment_token(
     State(state): State<Arc<AppState>>,
     tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
-    Path(id): Path<String>,
+    Path(_id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let token_id = match uuid::Uuid::parse_str(&id) {
-        Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid token ID").into_response(),
-    };
-
-    let result = match MqttEnrollmentToken::delete_by_id(token_id)
-        .filter(mqtt_enrollment_token::Column::TenantId.eq(tenant.tenant_id))
-        .exec(&state.db)
-        .await
+    if let Err(e) = delete_setting(
+        &state.db,
+        tenant.tenant_id,
+        SettingKey::MqttEnrollmentTokenHash,
+    )
+    .await
     {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("Failed to delete MQTT enrollment token: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
-
-    if result.rows_affected == 0 {
-        return (StatusCode::NOT_FOUND, "Token not found").into_response();
+        tracing::error!("Failed to delete MQTT enrollment token: {:?}", e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
     (
@@ -234,10 +185,4 @@ pub async fn revoke_mqtt_enrollment_token(
         }),
     )
         .into_response()
-}
-
-// --- Helper functions ---
-
-fn format_rfc3339(dt: OffsetDateTime) -> String {
-    dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
 }

@@ -12,6 +12,7 @@ pub mod permissions;
 pub mod provider_configs;
 pub mod registration;
 pub mod server_cert;
+pub mod services;
 pub mod settings;
 pub mod settings_agent_certs;
 pub mod settings_auth;

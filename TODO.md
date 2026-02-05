@@ -98,7 +98,7 @@ Essential infrastructure needed before feature development.
   - [x] Dual-CA validation (active + previous CA in trust bundle)
   - [x] CA bundle update endpoint (`GET /api/v1/pki/ca.crt` returns full bundle)
   - [x] Agent CA update workflow (via `CaBundleUpdated` wire message + hash-based staleness check)
-  - [x] Rotation state tracking in database (`ca_fingerprint` column on `agent_certificates`)
+  - [x] Rotation state tracking in database (`ca_fingerprint` column on `agent_certificates` and `service_certificates`)
   - [x] Automatic rotation when managed CA enters 6-month expiry window
   - [x] Background rotation task (24h check interval)
   - [x] Partitioned CRL generation (each CA signs its own CRL)
@@ -341,16 +341,16 @@ Ways users interact with the system.
 
 - [x] Separate MQTT binary with multi-instance support and lease-based tenant distribution
 - [x] MQTT service communicates with controller via WebSocket/mTLS (no direct DB access)
-  - [x] Wire protocol messages (`MqttServiceMessage`, `MqttControllerMessage`)
+  - [x] Wire protocol messages (`ServiceMessage`, `ControllerMessage` — unified for all service types)
   - [x] MQTT service enrollment flow (TOFU CA pinning, anonymous enrollment, certificate issuance)
-  - [x] Controller WebSocket endpoint (`/api/v1/ws/mqtt`) with 3-state handler
+  - [x] Controller WebSocket endpoint (`/api/v1/ws/service`) with 3-state handler
   - [x] Controller-side lease coordinator (centralized tenant assignment)
-  - [x] MQTT service connection registry (track connected instances)
+  - [x] Unified ServiceConnectionRegistry (track connected service instances)
   - [x] Push-based tenant config (controller pushes config changes to instances)
-  - [x] Separate MQTT enrollment tokens (not interchangeable with agent tokens)
-  - [x] REST API for MQTT service management (list, approve, reject, deactivate)
-  - [x] REST API for MQTT enrollment tokens (create, list, delete)
-  - [x] Database entities (`mqtt_service`, `mqtt_service_certificate`, `mqtt_enrollment_token`)
+  - [x] Settings-based MQTT enrollment tokens (managed via unified services API)
+  - [x] Unified REST API for service management (`/api/v1/services` — list, approve, reject, deactivate)
+  - [x] Unified REST API for service enrollment tokens (`/api/v1/services/enrollment-tokens` — create, list, delete)
+  - [x] Unified database entity (`services` table with `service_type` column, `service_certificates`)
 - [ ] Implement MQTT auto-discovery for Home Assistant
   - [ ] Device discovery messages
   - [ ] Entity discovery (sensors, binary sensors, buttons)
@@ -837,13 +837,13 @@ Items to consider for future versions but not currently prioritized:
 
 - [x] Multi-tenant support (database infrastructure, single-tenant mode)
   - [x] Tenants table with default tenant seeding
-  - [x] `tenant_id` FK on all scoped tables (agents, hosts, provider_configs, software_items, oidc_providers, user_roles, settings)
+  - [x] `tenant_id` FK on all scoped tables (agents, services, hosts, provider_configs, software_items, oidc_providers, user_roles, settings)
   - [x] TenantContext extractor (X-Tenant-Id header with default tenant fallback)
   - [x] Global vs tenant-scoped settings (SettingKey::is_global())
   - [x] All route handlers updated for tenant awareness
   - [ ] Tenant management API (CRUD)
   - [ ] Multi-tenant JWT (per-tenant permissions)
-  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via controller WebSocket)
+  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via unified `/api/v1/ws/service` WebSocket endpoint)
   - [ ] Tenant switching UI
   - [ ] API token scoping per tenant
 - [ ] Agent clustering

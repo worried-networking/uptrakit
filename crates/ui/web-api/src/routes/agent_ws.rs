@@ -1,270 +1,47 @@
 use std::sync::Arc;
 
-use axum::Extension;
-use axum::extract::State;
-use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use axum::http::HeaderMap;
-use axum::response::IntoResponse;
+use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    AgentMessage, AgentSettingsPayload, ApprovedPayload, CertificatePayload, ControllerMessage,
-    EnrolledPayload, ErrorPayload, ExecuteUpdatePayload, PingPayload, PongPayload, ProviderType,
-    RejectedPayload, UpdateFinalStatus, now_millis,
+    CertificatePayload, ControllerMessage, ErrorPayload, ExecuteUpdatePayload, PingPayload,
+    PongPayload, ProviderType, ServiceMessage, UpdateFinalStatus, now_millis,
 };
 use uptrakit_shared_db::entity::{
-    agent_host, host_software_item, provider_config, software_item, update_history,
+    host_software_item, provider_config, service_host as agent_host, software_item, update_history,
 };
+
+use super::service_ws::{close_with_reason, serialize_msg};
+use crate::AppState;
+use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
 
 /// Minimum agent version required for connection.
 const MIN_AGENT_VERSION: &str = "0.0.1";
 
-use crate::AppState;
-use crate::extract::{AgentIdentity, ClientIp};
-use crate::routes::agents::{
-    AgentStatus, do_enroll, do_lookup_by_secret, do_sign_csr, find_or_create_host_and_link,
-    revoke_certificate,
-};
+// ---------------------------------------------------------------------------
+// Authenticated agent handler (called from service_ws after shared auth)
+// ---------------------------------------------------------------------------
 
-/// Serialize a [`ControllerMessage`] to JSON, logging on failure.
-fn serialize_msg(msg: &ControllerMessage) -> Option<String> {
-    match serde_json::to_string(msg) {
-        Ok(json) => Some(json),
-        Err(e) => {
-            tracing::error!(error = %e, "failed to serialize controller message");
-            None
-        }
-    }
-}
-
-/// Connection type determined at WebSocket upgrade time.
-enum ConnectionType {
-    /// mTLS client cert present → authenticated agent
-    Authenticated {
-        agent_id: uuid::Uuid,
-        cert_serial: String,
-    },
-    /// Authorization: Bearer <secret> → reconnecting enrolled agent
-    Enrolled(uuid::Uuid),
-    /// No auth → expects Enroll message
-    Anonymous,
-}
-
-pub async fn agent_ws(
-    State(state): State<Arc<AppState>>,
-    identity: Option<Extension<AgentIdentity>>,
-    client_ip: Option<Extension<ClientIp>>,
-    headers: HeaderMap,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    // Determine connection type at upgrade time
-    let conn_type = if let Some(Extension(ref id)) = identity {
-        tracing::info!(agent_id = %id.agent_id, "authenticated agent WS upgrade (mTLS)");
-        ConnectionType::Authenticated {
-            agent_id: id.agent_id,
-            cert_serial: id.cert_serial.clone(),
-        }
-    } else if let Some(secret) = extract_bearer(&headers) {
-        match do_lookup_by_secret(&state.db, &secret).await {
-            Ok(agent) => {
-                tracing::info!(agent_id = %agent.id, "enrolled agent WS upgrade (bearer)");
-                ConnectionType::Enrolled(agent.id)
-            }
-            Err(e) => {
-                let ctx = e.current_context();
-                let status = ctx.status_code();
-                let msg = ctx.to_string();
-                tracing::warn!(status = %status, "bearer auth failed: {msg}");
-                return (status, msg).into_response();
-            }
-        }
-    } else {
-        tracing::info!("anonymous WS upgrade");
-        ConnectionType::Anonymous
-    };
-
-    let ip = client_ip.map(|Extension(ClientIp(ip))| ip);
-
-    ws.on_upgrade(move |socket| handle_connection(socket, state, conn_type, ip))
-}
-
-fn extract_bearer(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.to_string())
-}
-
-async fn handle_connection(
-    socket: WebSocket,
-    state: Arc<AppState>,
-    conn_type: ConnectionType,
-    client_ip: Option<std::net::IpAddr>,
-) {
-    match conn_type {
-        ConnectionType::Authenticated {
-            agent_id,
-            cert_serial,
-        } => {
-            handle_authenticated(socket, state, agent_id, cert_serial).await;
-        }
-        ConnectionType::Enrolled(agent_id) => {
-            handle_enrolled(socket, state, agent_id).await;
-        }
-        ConnectionType::Anonymous => {
-            handle_anonymous(socket, state, client_ip).await;
-        }
-    }
-}
-
-/// Authenticated path: mTLS agent, Ping/Pong keepalive loop.
-async fn handle_authenticated(
-    socket: WebSocket,
-    state: Arc<AppState>,
+/// Service-type-specific handler for an authenticated agent connection.
+///
+/// Called by [`super::service_ws`] after certificate validation, service status
+/// check, and sending `ServiceSettings`. Owns the agent-specific message loop
+/// (ReportHostInfo, VersionCheckResults, Update*, RenewCertificate).
+pub(crate) async fn handle_agent_authenticated(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
     agent_id: uuid::Uuid,
     cert_serial: String,
+    cert_ca_fingerprint: String,
 ) {
-    tracing::debug!(%agent_id, "authenticated agent connected");
-
-    let (mut sink, mut stream) = socket.split();
-
-    // 1. Certificate validation check
-    // If cert_serial is empty (proxy-forwarded without serial), use agent-id-only
-    // lookup: find any non-revoked cert for this agent.
-    let cert_record = if cert_serial.is_empty() {
-        match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
-            .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
-            .filter(uptrakit_shared_db::entity::agent_certificate::Column::RevokedAt.is_null())
-            .order_by_desc(uptrakit_shared_db::entity::agent_certificate::Column::CreatedAt)
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(record)) => {
-                tracing::warn!(
-                    %agent_id,
-                    "agent connected via proxy without cert serial, using agent-id-only lookup"
-                );
-                record
-            }
-            Ok(None) => {
-                tracing::warn!(
-                    %agent_id,
-                    "rejected connection: no non-revoked certificate found for agent"
-                );
-                let _ = close_with_reason(&mut sink, "no valid certificate").await;
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, "internal error").await;
-                return;
-            }
-        }
-    } else {
-        // Standard lookup: query by (agent_id, serial)
-        match uptrakit_shared_db::entity::prelude::AgentCertificate::find()
-            .filter(
-                uptrakit_shared_db::entity::agent_certificate::Column::SerialNumber
-                    .eq(cert_serial.clone()),
-            )
-            .filter(uptrakit_shared_db::entity::agent_certificate::Column::AgentId.eq(agent_id))
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(record)) => {
-                if record.revoked_at.is_some() {
-                    tracing::warn!(
-                        %agent_id,
-                        serial_number = %cert_serial,
-                        "rejected connection: certificate is revoked"
-                    );
-                    let _ = close_with_reason(&mut sink, "certificate revoked").await;
-                    return;
-                }
-                record
-            }
-            Ok(None) => {
-                tracing::warn!(
-                    %agent_id,
-                    serial_number = %cert_serial,
-                    "rejected connection: certificate not recognized"
-                );
-                let _ = close_with_reason(&mut sink, "certificate not recognized").await;
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, "internal error").await;
-                return;
-            }
-        }
-    };
-
-    // 2. Agent status check
-    match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
-        .one(&state.db)
-        .await
-    {
-        Ok(Some(agent)) => {
-            if agent.deactivated_at.is_some() {
-                tracing::warn!(%agent_id, "deactivated agent connected with valid certificate");
-                let _ = close_with_reason(&mut sink, "agent deactivated").await;
-                return;
-            }
-
-            if agent.status != AgentStatus::Approved.as_str() {
-                tracing::warn!(%agent_id, "rejected connection: agent not approved");
-                let _ = close_with_reason(&mut sink, "agent not approved").await;
-                return;
-            }
-        }
-        Ok(None) => {
-            tracing::warn!(%agent_id, "rejected connection: agent not found");
-            let _ = close_with_reason(&mut sink, "agent not found").await;
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "agent status check failed");
-            let _ = close_with_reason(&mut sink, "internal error").await;
-            return;
-        }
-    }
-
-    // Save CA fingerprint before moving cert_record
-    let cert_ca_fingerprint = cert_record.ca_fingerprint.clone();
-
-    // Record certificate usage
-    let mut active: uptrakit_shared_db::entity::agent_certificate::ActiveModel = cert_record.into();
-    active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
-    if let Err(e) = active.update(&state.db).await {
-        tracing::error!(error = %e, "failed to update certificate last_seen_at");
-    }
-
-    // Send AgentSettings on connect
-    let renewal_window_hours = state.settings.renewal_window_hours().await;
-    let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    let settings_msg = ControllerMessage::AgentSettings(AgentSettingsPayload {
-        renewal_window_hours,
-        ca_bundle_hash,
-        shutdown_timeout_seconds: 120, // hardcoded for now
-    });
-    let Some(json) = serialize_msg(&settings_msg) else {
-        return;
-    };
-    if sink.send(Message::Text(json.into())).await.is_err() {
-        return;
-    }
-
-    // Deliver pending updates for hosts linked to this agent
-    if let Err(e) = deliver_pending_updates(&state, agent_id, &mut sink).await {
+    // Deliver pending updates for hosts linked to this agent.
+    if let Err(e) = deliver_pending_updates(state, agent_id, sink).await {
         tracing::error!(error = %e, %agent_id, "failed to deliver pending updates on reconnect");
     }
 
-    let mut push_rx = state.agent_connections.register(agent_id).await;
+    let mut push_rx = state.service_connections.register_agent(agent_id).await;
 
     loop {
         tokio::select! {
@@ -279,7 +56,7 @@ async fn handle_authenticated(
                 };
                 match msg {
                     Message::Text(text) => {
-                        let agent_msg: AgentMessage = match serde_json::from_str(&text) {
+                        let agent_msg: ServiceMessage = match serde_json::from_str(&text) {
                             Ok(m) => m,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
@@ -288,7 +65,7 @@ async fn handle_authenticated(
                         };
 
                         match agent_msg {
-                            AgentMessage::Ping(PingPayload { agent_ts }) => {
+                            ServiceMessage::Ping(PingPayload { agent_ts }) => {
                                 let controller_ts = now_millis();
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong");
                                 let response = ControllerMessage::Pong(PongPayload {
@@ -300,7 +77,7 @@ async fn handle_authenticated(
                                     break;
                                 }
                             }
-                            AgentMessage::ReportHostInfo(payload) => {
+                            ServiceMessage::ReportHostInfo(payload) => {
                                 // Check agent version
                                 let agent_ver = match semver::Version::parse(&payload.agent_version) {
                                     Ok(v) => v,
@@ -310,7 +87,6 @@ async fn handle_authenticated(
                                             version = %payload.agent_version,
                                             "agent sent invalid version string"
                                         );
-                                        // Treat invalid version as too old
                                         let err = ControllerMessage::Error(ErrorPayload {
                                             code: "agent_version_too_old".to_string(),
                                             message: format!(
@@ -321,7 +97,7 @@ async fn handle_authenticated(
                                         if let Some(json) = serialize_msg(&err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
-                                        let _ = close_with_reason(&mut sink, "agent version too old").await;
+                                        let _ = close_with_reason(sink, "agent version too old").await;
                                         break;
                                     }
                                 };
@@ -346,12 +122,12 @@ async fn handle_authenticated(
                                     if let Some(json) = serialize_msg(&err) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
-                                    let _ = close_with_reason(&mut sink, "agent version too old").await;
+                                    let _ = close_with_reason(sink, "agent version too old").await;
                                     break;
                                 }
 
                                 // Look up agent hostname from DB for host linking
-                                let agent_model = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+                                let agent_model = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
                                     .one(&state.db)
                                     .await
                                 {
@@ -359,12 +135,12 @@ async fn handle_authenticated(
                                     _ => continue,
                                 };
 
-                                // Update agent_version in database
-                                let mut active: uptrakit_shared_db::entity::agent::ActiveModel = agent_model.clone().into();
-                                active.agent_version = Set(payload.agent_version.clone());
+                                // Update client_version in database
+                                let mut active: uptrakit_shared_db::entity::service::ActiveModel = agent_model.clone().into();
+                                active.client_version = Set(Some(payload.agent_version.clone()));
                                 active.updated_at = Set(time::OffsetDateTime::now_utc());
                                 if let Err(e) = active.update(&state.db).await {
-                                    tracing::error!(error = %e, "failed to update agent_version");
+                                    tracing::error!(error = %e, "failed to update client_version");
                                 }
 
                                 if let Err(e) = find_or_create_host_and_link(
@@ -378,13 +154,13 @@ async fn handle_authenticated(
                                     tracing::warn!(error = %e, "failed to link host on ReportHostInfo");
                                 }
                             }
-                            AgentMessage::RenewCertificate(payload) => {
+                            ServiceMessage::RenewCertificate(payload) => {
                                 // Re-fetch agent from DB, verify still approved
-                                let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+                                let agent = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
                                     .one(&state.db)
                                     .await
                                 {
-                                    Ok(Some(a)) if a.status == AgentStatus::Approved.as_str() && a.deactivated_at.is_none() => a,
+                                    Ok(Some(a)) if a.status == uptrakit_shared_db::entity::service::ServiceStatus::Approved && a.deactivated_at.is_none() => a,
                                     _ => {
                                         let err = ControllerMessage::Error(ErrorPayload {
                                             code: "forbidden".to_string(),
@@ -421,7 +197,7 @@ async fn handle_authenticated(
 
                                         state.revocation_notify.notify_one();
                                         tracing::info!(%agent_id, old_serial = %cert_serial, "certificate renewed, old cert revoked");
-                                        let _ = close_with_reason(&mut sink, "certificate rotated").await;
+                                        let _ = close_with_reason(sink, "certificate rotated").await;
                                         break;
                                     }
                                     Err(e) => {
@@ -436,12 +212,12 @@ async fn handle_authenticated(
                                     }
                                 }
                             }
-                            AgentMessage::VersionCheckResults(payload) => {
+                            ServiceMessage::VersionCheckResults(payload) => {
                                 tracing::debug!(%agent_id, count = payload.results.len(), "received VersionCheckResults");
 
                                 // Look up hosts linked to this agent
-                                let host_ids: Vec<uuid::Uuid> = match uptrakit_shared_db::entity::prelude::AgentHost::find()
-                                    .filter(uptrakit_shared_db::entity::agent_host::Column::AgentId.eq(agent_id))
+                                let host_ids: Vec<uuid::Uuid> = match uptrakit_shared_db::entity::prelude::ServiceHost::find()
+                                    .filter(uptrakit_shared_db::entity::service_host::Column::ServiceId.eq(agent_id))
                                     .all(&state.db)
                                     .await
                                 {
@@ -460,7 +236,6 @@ async fn handle_authenticated(
                                 let now = time::OffsetDateTime::now_utc();
 
                                 for result in &payload.results {
-                                    // Skip results with errors
                                     if result.error.is_some() {
                                         tracing::debug!(
                                             software_item_id = %result.software_item_id,
@@ -474,7 +249,6 @@ async fn handle_authenticated(
                                         continue;
                                     };
 
-                                    // Parse software_item_id as UUID
                                     let software_item_id = match uuid::Uuid::parse_str(&result.software_item_id) {
                                         Ok(id) => id,
                                         Err(_) => {
@@ -486,15 +260,12 @@ async fn handle_authenticated(
                                         }
                                     };
 
-                                    // Update host_software_items for each linked host
                                     for &host_id in &host_ids {
-                                        // Check if record exists
                                         match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
                                             .one(&state.db)
                                             .await
                                         {
                                             Ok(Some(existing)) => {
-                                                // Update existing record
                                                 let mut active: uptrakit_shared_db::entity::host_software_item::ActiveModel = existing.into();
                                                 active.installed_version = Set(Some(installed_version.clone()));
                                                 active.installed_version_detected_at = Set(Some(now));
@@ -508,7 +279,6 @@ async fn handle_authenticated(
                                                 }
                                             }
                                             Ok(None) => {
-                                                // No record exists - skip (don't create unlinked records)
                                                 tracing::debug!(
                                                     host_id = %host_id,
                                                     software_item_id = %software_item_id,
@@ -527,13 +297,12 @@ async fn handle_authenticated(
                                     }
                                 }
                             }
-                            AgentMessage::UpdateStarted(payload) => {
+                            ServiceMessage::UpdateStarted(payload) => {
                                 tracing::info!(
                                     update_id = %payload.update_history_id,
                                     from_version = ?payload.from_version,
                                     "update started"
                                 );
-                                // Update status to InProgress and from_version
                                 if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
                                     && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
                                         .one(&state.db)
@@ -550,13 +319,12 @@ async fn handle_authenticated(
                                     }
                                 }
                             }
-                            AgentMessage::UpdateOutput(payload) => {
+                            ServiceMessage::UpdateOutput(payload) => {
                                 tracing::trace!(
                                     update_id = %payload.update_history_id,
                                     stream = ?payload.stream,
                                     "update output"
                                 );
-                                // Append output to update_history.output
                                 if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
                                     && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
                                         .one(&state.db)
@@ -570,7 +338,7 @@ async fn handle_authenticated(
                                     }
                                 }
                             }
-                            AgentMessage::UpdateResult(payload) => {
+                            ServiceMessage::UpdateResult(payload) => {
                                 tracing::info!(
                                     update_id = %payload.update_history_id,
                                     status = ?payload.status,
@@ -588,7 +356,6 @@ async fn handle_authenticated(
                                         UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
                                     });
                                     active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                    // Append final output
                                     let final_output = if payload.output.is_empty() {
                                         record.output.clone()
                                     } else {
@@ -602,7 +369,6 @@ async fn handle_authenticated(
                                         tracing::warn!(error = %e, "failed to update update_history result");
                                     }
 
-                                    // On success, update host_software_item.installed_version
                                     if payload.status == UpdateFinalStatus::Completed
                                         && let Some(ref to_version) = payload.to_version
                                         && let Ok(Some(link)) = uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((record.host_id, record.software_item_id))
@@ -619,7 +385,7 @@ async fn handle_authenticated(
                                     }
                                 }
                             }
-                            AgentMessage::Disconnecting(payload) => {
+                            ServiceMessage::Disconnecting(payload) => {
                                 tracing::info!(
                                     %agent_id,
                                     reason = ?payload.reason,
@@ -656,201 +422,36 @@ async fn handle_authenticated(
         }
     }
 
-    state.agent_connections.unregister(&agent_id).await;
+    state.service_connections.unregister(&agent_id).await;
     tracing::debug!(%agent_id, "authenticated agent disconnected");
 }
 
-/// Enrolled path: agent reconnecting with Bearer secret, waiting for approval.
-async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, agent_id: uuid::Uuid) {
-    tracing::debug!(%agent_id, "enrolled agent connected (bearer)");
-    let mut push_rx = state.agent_connections.register(agent_id).await;
+// ---------------------------------------------------------------------------
+// Enrolled agent handler (called from service_ws after shared enrolled setup)
+// ---------------------------------------------------------------------------
 
-    // Check current status — if already approved/rejected, push immediately
-    let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
-        .one(&state.db)
-        .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            tracing::warn!(%agent_id, "agent not found in DB");
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "DB lookup failed");
-            return;
-        }
-    };
-
-    let status = AgentStatus::from_str(&agent.status);
-
-    let (mut sink, mut stream) = socket.split();
-
-    // If already approved/rejected, push immediately
-    match status {
-        Some(AgentStatus::Approved) => {
-            let msg = ControllerMessage::Approved(ApprovedPayload {
-                agent_id: agent_id.to_string(),
-            });
-            let Some(json) = serialize_msg(&msg) else {
-                state.agent_connections.unregister(&agent_id).await;
-                return;
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                state.agent_connections.unregister(&agent_id).await;
-                return;
-            }
-        }
-        Some(AgentStatus::Rejected) => {
-            let msg = ControllerMessage::Rejected(RejectedPayload {
-                agent_id: agent_id.to_string(),
-            });
-            if let Some(json) = serialize_msg(&msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-            state.agent_connections.unregister(&agent_id).await;
-            return;
-        }
-        _ => {
-            // Pending — wait for push
-        }
-    }
-
-    // Enter enrolled loop
-    run_enrolled_loop(&mut sink, &mut stream, &mut push_rx, &state, agent_id).await;
-
-    state.agent_connections.unregister(&agent_id).await;
-    tracing::debug!(%agent_id, "enrolled agent disconnected");
-}
-
-/// Anonymous path: expects Enroll message, then promotes in-place.
-async fn handle_anonymous(
-    socket: WebSocket,
-    state: Arc<AppState>,
-    client_ip: Option<std::net::IpAddr>,
+/// Service-type-specific enrolled handler for an agent connection.
+///
+/// Called by [`super::service_ws`] for enrolled agents. Registers in the
+/// connection registry and runs the enrolled loop.
+pub(crate) async fn handle_agent_enrolled(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    agent_id: uuid::Uuid,
 ) {
-    tracing::debug!("anonymous agent connected");
-
-    let (mut sink, mut stream) = socket.split();
-
-    // Wait for first message — must be Enroll
-    let agent_id = loop {
-        let msg = match stream.next().await {
-            Some(Ok(m)) => m,
-            Some(Err(e)) => {
-                tracing::debug!(error = %e, "websocket receive error");
-                return;
-            }
-            None => return,
-        };
-
-        match msg {
-            Message::Text(text) => {
-                let agent_msg: AgentMessage = match serde_json::from_str(&text) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        let err = ControllerMessage::Error(ErrorPayload {
-                            code: "bad_request".to_string(),
-                            message: format!("invalid message: {e}"),
-                        });
-                        if let Some(json) = serialize_msg(&err) {
-                            let _ = sink.send(Message::Text(json.into())).await;
-                        }
-                        return;
-                    }
-                };
-
-                match agent_msg {
-                    AgentMessage::Enroll(payload) => {
-                        let result = do_enroll(
-                            &state.db,
-                            &state.settings,
-                            state.default_tenant_id,
-                            &payload.hostname,
-                            &payload.friendly_name,
-                            payload.enrollment_token.as_deref(),
-                            client_ip,
-                            Some(&payload.host_info),
-                        )
-                        .await;
-
-                        match result {
-                            Ok(enroll_result) => {
-                                let agent_id = enroll_result.agent.id;
-                                let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
-                                    agent_id: agent_id.to_string(),
-                                    enrollment_secret: enroll_result.enrollment_secret,
-                                    status: enroll_result.status.as_str().to_string(),
-                                });
-                                let Some(json) = serialize_msg(&enrolled_msg) else {
-                                    return;
-                                };
-                                if sink.send(Message::Text(json.into())).await.is_err() {
-                                    return;
-                                }
-
-                                tracing::info!(
-                                    %agent_id,
-                                    status = enroll_result.status.as_str(),
-                                    "agent enrolled via WS"
-                                );
-
-                                // If auto-approved (valid enrollment token), push Approved
-                                if enroll_result.status == AgentStatus::Approved {
-                                    let approved_msg =
-                                        ControllerMessage::Approved(ApprovedPayload {
-                                            agent_id: agent_id.to_string(),
-                                        });
-                                    let Some(json) = serialize_msg(&approved_msg) else {
-                                        return;
-                                    };
-                                    if sink.send(Message::Text(json.into())).await.is_err() {
-                                        return;
-                                    }
-                                }
-
-                                break agent_id;
-                            }
-                            Err(e) => {
-                                let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "enrollment_failed".to_string(),
-                                    message: e.current_context().to_string(),
-                                });
-                                if let Some(json) = serialize_msg(&err) {
-                                    let _ = sink.send(Message::Text(json.into())).await;
-                                }
-                                return;
-                            }
-                        }
-                    }
-                    _ => {
-                        let err = ControllerMessage::Error(ErrorPayload {
-                            code: "bad_request".to_string(),
-                            message: "expected enroll message".to_string(),
-                        });
-                        if let Some(json) = serialize_msg(&err) {
-                            let _ = sink.send(Message::Text(json.into())).await;
-                        }
-                        return;
-                    }
-                }
-            }
-            Message::Close(_) => return,
-            _ => {}
-        }
-    };
-
-    // Connection promoted: register in connection registry
-    let mut push_rx = state.agent_connections.register(agent_id).await;
-
-    // Enter enrolled loop
-    run_enrolled_loop(&mut sink, &mut stream, &mut push_rx, &state, agent_id).await;
-
-    state.agent_connections.unregister(&agent_id).await;
-    tracing::debug!(%agent_id, "anonymous->enrolled agent disconnected");
+    let mut push_rx = state.service_connections.register_agent(agent_id).await;
+    run_agent_enrolled_loop(sink, stream, &mut push_rx, state, agent_id).await;
+    state.service_connections.unregister(&agent_id).await;
 }
 
-/// Shared enrolled loop: handles Ping, RequestCertificate, and push messages.
-async fn run_enrolled_loop(
+// ---------------------------------------------------------------------------
+// Shared agent enrolled loop
+// ---------------------------------------------------------------------------
+
+/// Shared enrolled loop for agents: handles Ping, RequestCertificate, and
+/// push messages (Approved / Rejected).
+pub(crate) async fn run_agent_enrolled_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     push_rx: &mut mpsc::Receiver<ControllerMessage>,
@@ -859,11 +460,11 @@ async fn run_enrolled_loop(
 ) {
     let mut approved = false;
 
-    // Check current status to set initial approved flag
-    if let Ok(Some(agent)) = uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+    // Check current status to set initial approved flag.
+    if let Ok(Some(agent)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
         .one(&state.db)
         .await
-        && agent.status == AgentStatus::Approved.as_str()
+        && agent.status == uptrakit_shared_db::entity::service::ServiceStatus::Approved
     {
         approved = true;
     }
@@ -882,7 +483,7 @@ async fn run_enrolled_loop(
 
                 match msg {
                     Message::Text(text) => {
-                        let agent_msg: AgentMessage = match serde_json::from_str(&text) {
+                        let agent_msg: ServiceMessage = match serde_json::from_str(&text) {
                             Ok(m) => m,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
@@ -891,7 +492,7 @@ async fn run_enrolled_loop(
                         };
 
                         match agent_msg {
-                            AgentMessage::Ping(PingPayload { agent_ts }) => {
+                            ServiceMessage::Ping(PingPayload { agent_ts }) => {
                                 let controller_ts = now_millis();
                                 let response = ControllerMessage::Pong(PongPayload {
                                     agent_ts,
@@ -903,7 +504,7 @@ async fn run_enrolled_loop(
                                 }
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
                             }
-                            AgentMessage::RequestCertificate(payload) => {
+                            ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {
                                     let err = ControllerMessage::Error(ErrorPayload {
                                         code: "not_approved".to_string(),
@@ -916,7 +517,7 @@ async fn run_enrolled_loop(
                                 }
 
                                 // Re-fetch agent from DB
-                                let agent = match uptrakit_shared_db::entity::prelude::Agent::find_by_id(agent_id)
+                                let agent = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
                                     .one(&state.db)
                                     .await
                                 {
@@ -963,10 +564,10 @@ async fn run_enrolled_loop(
                                     }
                                 }
                             }
-                            AgentMessage::ReportHostInfo(_) => {
+                            ServiceMessage::ReportHostInfo(_) => {
                                 // Host linking happens at enrollment; ignore during enrolled loop
                             }
-                            AgentMessage::Enroll(_) => {
+                            ServiceMessage::Enroll(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),
                                     message: "already enrolled".to_string(),
@@ -975,7 +576,7 @@ async fn run_enrolled_loop(
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
-                            AgentMessage::RenewCertificate(_) => {
+                            ServiceMessage::RenewCertificate(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),
                                     message: "not available during enrollment".to_string(),
@@ -984,13 +585,12 @@ async fn run_enrolled_loop(
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
-                            AgentMessage::VersionCheckResults(_) => {
+                            ServiceMessage::VersionCheckResults(_) => {
                                 // Version checks not supported during enrollment
                             }
-                            // Update messages are only valid for authenticated connections
-                            AgentMessage::UpdateStarted(_)
-                            | AgentMessage::UpdateOutput(_)
-                            | AgentMessage::UpdateResult(_) => {
+                            ServiceMessage::UpdateStarted(_)
+                            | ServiceMessage::UpdateOutput(_)
+                            | ServiceMessage::UpdateResult(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),
                                     message: "update messages not available during enrollment".to_string(),
@@ -999,13 +599,25 @@ async fn run_enrolled_loop(
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
-                            AgentMessage::Disconnecting(payload) => {
+                            ServiceMessage::Disconnecting(payload) => {
                                 tracing::info!(
                                     %agent_id,
                                     reason = ?payload.reason,
                                     "agent disconnecting gracefully during enrollment"
                                 );
                                 break;
+                            }
+                            // MQTT-specific variants are not valid on an agent connection
+                            ServiceMessage::Register(_)
+                            | ServiceMessage::Heartbeat(_)
+                            | ServiceMessage::ReleaseTenants(_) => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: "bad_request".to_string(),
+                                    message: "message type not supported on agent connections".to_string(),
+                                });
+                                if let Some(json) = serialize_msg(&err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
                             }
                         }
                     }
@@ -1043,21 +655,14 @@ async fn run_enrolled_loop(
     }
 }
 
-async fn close_with_reason(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    reason: &str,
-) -> Result<(), axum::Error> {
-    sink.send(Message::Close(Some(CloseFrame {
-        code: axum::extract::ws::close_code::POLICY,
-        reason: reason.into(),
-    })))
-    .await
-}
+// ---------------------------------------------------------------------------
+// Pending updates delivery (agent-specific)
+// ---------------------------------------------------------------------------
 
 /// Deliver pending updates for hosts linked to this agent.
 ///
-/// On agent reconnect, we check for any `update_history` records with `status = Pending`
-/// for hosts linked to this agent and send them to the agent.
+/// On agent reconnect, we check for any `update_history` records with
+/// `status = Pending` for hosts linked to this agent and send them.
 async fn deliver_pending_updates(
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
@@ -1065,7 +670,7 @@ async fn deliver_pending_updates(
 ) -> Result<(), String> {
     // 1. Find host_ids linked to this agent
     let host_links = agent_host::Entity::find()
-        .filter(agent_host::Column::AgentId.eq(agent_id))
+        .filter(agent_host::Column::ServiceId.eq(agent_id))
         .all(&state.db)
         .await
         .map_err(|e| format!("failed to find agent hosts: {e}"))?;
@@ -1096,7 +701,6 @@ async fn deliver_pending_updates(
 
     // 3. Build ExecuteUpdatePayload for each and send
     for update_record in pending_updates {
-        // Load software item
         let item = match software_item::Entity::find_by_id(update_record.software_item_id)
             .filter(software_item::Column::DeactivatedAt.is_null())
             .one(&state.db)
@@ -1117,7 +721,6 @@ async fn deliver_pending_updates(
             }
         };
 
-        // Load provider config
         let provider_cfg = match provider_config::Entity::find_by_id(item.provider_config_id)
             .filter(provider_config::Column::DeactivatedAt.is_null())
             .one(&state.db)
@@ -1138,7 +741,6 @@ async fn deliver_pending_updates(
             }
         };
 
-        // Convert provider type
         let provider_type: ProviderType = match serde_json::from_value(serde_json::Value::String(
             provider_cfg.provider_type.clone(),
         )) {
@@ -1153,13 +755,11 @@ async fn deliver_pending_updates(
             }
         };
 
-        // Resolve hooks and merge config
         let resolved_hooks =
             crate::update_hooks::resolve_hooks(&provider_cfg.config, item.config_override.as_ref());
         let merged_config =
             crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
 
-        // Determine shell type
         let shell = if !resolved_hooks.pre_update_commands.is_empty() {
             Some(resolved_hooks.pre_update_shell.as_str().to_string())
         } else if !resolved_hooks.post_update_commands.is_empty() {
@@ -1168,7 +768,6 @@ async fn deliver_pending_updates(
             None
         };
 
-        // Build payload
         let execute_payload = ExecuteUpdatePayload {
             update_history_id: update_record.id.to_string(),
             software_item_id: item.id.to_string(),
@@ -1179,12 +778,11 @@ async fn deliver_pending_updates(
             provider_config: merged_config,
             pre_update_commands: resolved_hooks.pre_update_commands,
             post_update_commands: resolved_hooks.post_update_commands,
-            release_info: None, // Not stored in update_history
+            release_info: None,
             timeout_seconds: 300,
             shell,
         };
 
-        // Send to agent
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
         let Some(json) = serialize_msg(&msg) else {
             continue;

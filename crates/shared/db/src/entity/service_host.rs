@@ -2,10 +2,10 @@ use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "agent_hosts")]
+#[sea_orm(table_name = "service_hosts")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub agent_id: Uuid,
+    pub service_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub host_id: Uuid,
     pub linked_at: OffsetDateTime,
@@ -14,11 +14,11 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::agent::Entity",
-        from = "Column::AgentId",
-        to = "super::agent::Column::Id"
+        belongs_to = "super::service::Entity",
+        from = "Column::ServiceId",
+        to = "super::service::Column::Id"
     )]
-    Agent,
+    Service,
     #[sea_orm(
         belongs_to = "super::host::Entity",
         from = "Column::HostId",
@@ -27,9 +27,9 @@ pub enum Relation {
     Host,
 }
 
-impl Related<super::agent::Entity> for Entity {
+impl Related<super::service::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Agent.def()
+        Relation::Service.def()
     }
 }
 

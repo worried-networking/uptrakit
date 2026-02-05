@@ -633,17 +633,15 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let device_flow_store =
         uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
 
-    let agent_connections = uptrakit_web_api::agent_connections::AgentConnectionRegistry::new();
-    let mqtt_service_connections =
-        uptrakit_web_api::mqtt_service_connections::MqttServiceConnectionRegistry::new();
+    let service_connections =
+        uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
 
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
         db: db_conn,
         settings,
         cert_signer,
-        agent_connections: agent_connections.clone(),
-        mqtt_service_connections: mqtt_service_connections.clone(),
+        service_connections: service_connections.clone(),
         revocation_notify,
         oidc_flow_store: oidc_flow_store.clone(),
         account_link_store: account_link_store.clone(),
@@ -683,7 +681,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         let pki_for_task = pki_path.clone();
         let ca_tx_for_task = ca_tx;
         let crl_mgr_for_task = Arc::clone(&crl_manager);
-        let conns_for_task = agent_connections.clone();
+        let conns_for_task = service_connections.clone();
         let settings_for_rotation = app_state.settings.clone();
         let trigger = Arc::clone(&ca_rotation_trigger);
         let token = ca_rotation_token;
@@ -942,14 +940,14 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     server_handle.graceful_shutdown(Some(shutdown_timeout));
 
     // 2. Scatter ServerRestarting notifications over 5 seconds to avoid thundering herd
-    let connected_count = agent_connections.connection_count().await;
+    let connected_count = service_connections.connection_count().await;
     if connected_count > 0 {
         tracing::info!(
             connected_agents = connected_count,
             "sending server restarting notifications"
         );
         let scatter_duration = Duration::from_secs(5);
-        agent_connections
+        service_connections
             .broadcast_server_restarting_scattered(
                 uptrakit_internal_wire::ServerRestartingPayload {
                     reason: "controller restarting".to_string(),

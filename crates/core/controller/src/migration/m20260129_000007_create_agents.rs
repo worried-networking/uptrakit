@@ -12,34 +12,35 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Agents::Table)
+                    .table(Services::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(Agents::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(Agents::TenantId).uuid().not_null())
-                    .col(string(Agents::Hostname))
-                    .col(string(Agents::FriendlyName))
-                    .col(string_null(Agents::IpAddress))
+                    .col(ColumnDef::new(Services::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Services::TenantId).uuid().not_null())
                     .col(
-                        ColumnDef::new(Agents::Status)
+                        ColumnDef::new(Services::ServiceType)
+                            .string()
+                            .not_null()
+                            .default("agent"),
+                    )
+                    .col(string(Services::Hostname))
+                    .col(string(Services::FriendlyName))
+                    .col(string_null(Services::IpAddress))
+                    .col(
+                        ColumnDef::new(Services::Status)
                             .string()
                             .not_null()
                             .default("pending"),
                     )
-                    .col(string_uniq(Agents::EnrollmentSecretHash))
-                    .col(
-                        ColumnDef::new(Agents::AgentVersion)
-                            .string()
-                            .not_null()
-                            .default("unknown"),
-                    )
-                    .col(timestamp_null(Agents::LastSeenAt))
-                    .col(timestamp(Agents::CreatedAt))
-                    .col(timestamp(Agents::UpdatedAt))
-                    .col(timestamp_null(Agents::DeactivatedAt))
+                    .col(string_uniq(Services::EnrollmentSecretHash))
+                    .col(string_null(Services::ClientVersion))
+                    .col(timestamp_null(Services::LastSeenAt))
+                    .col(timestamp(Services::CreatedAt))
+                    .col(timestamp(Services::UpdatedAt))
+                    .col(timestamp_null(Services::DeactivatedAt))
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_agents_tenant")
-                            .from(Agents::Table, Agents::TenantId)
+                            .name("fk_services_tenant")
+                            .from(Services::Table, Services::TenantId)
                             .to(Tenants::Table, Tenants::Id)
                             .on_delete(ForeignKeyAction::Restrict),
                     )
@@ -51,9 +52,32 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_agents_tenant_id")
-                    .table(Agents::Table)
-                    .col(Agents::TenantId)
+                    .name("idx_services_tenant_id")
+                    .table(Services::Table)
+                    .col(Services::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on service_type for type-filtered queries
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_services_service_type")
+                    .table(Services::Table)
+                    .col(Services::ServiceType)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Composite index on (tenant_id, service_type)
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_services_tenant_id_service_type")
+                    .table(Services::Table)
+                    .col(Services::TenantId)
+                    .col(Services::ServiceType)
                     .to_owned(),
             )
             .await?;
@@ -62,9 +86,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_agents_enrollment_secret_hash")
-                    .table(Agents::Table)
-                    .col(Agents::EnrollmentSecretHash)
+                    .name("idx_services_enrollment_secret_hash")
+                    .table(Services::Table)
+                    .col(Services::EnrollmentSecretHash)
                     .to_owned(),
             )
             .await?;
@@ -73,9 +97,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_agents_status")
-                    .table(Agents::Table)
-                    .col(Agents::Status)
+                    .name("idx_services_status")
+                    .table(Services::Table)
+                    .col(Services::Status)
                     .to_owned(),
             )
             .await?;
@@ -84,9 +108,9 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_agents_deactivated_at")
-                    .table(Agents::Table)
-                    .col(Agents::DeactivatedAt)
+                    .name("idx_services_deactivated_at")
+                    .table(Services::Table)
+                    .col(Services::DeactivatedAt)
                     .to_owned(),
             )
             .await?;
@@ -96,22 +120,23 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Agents::Table).to_owned())
+            .drop_table(Table::drop().table(Services::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum Agents {
+pub enum Services {
     Table,
     Id,
     TenantId,
+    ServiceType,
     Hostname,
     FriendlyName,
     IpAddress,
     Status,
     EnrollmentSecretHash,
-    AgentVersion,
+    ClientVersion,
     LastSeenAt,
     CreatedAt,
     UpdatedAt,

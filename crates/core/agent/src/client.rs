@@ -11,9 +11,9 @@ use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
-    AgentMessage, CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload,
-    EnrollPayload, EnrolledPayload, HostInfo, PingPayload, RenewCertificatePayload,
-    ReportHostInfoPayload, RequestCertificatePayload, UpdateOutputPayload, UpdateResultPayload,
+    CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, EnrollPayload,
+    EnrolledPayload, HostInfo, PingPayload, RenewCertificatePayload, ReportHostInfoPayload,
+    RequestCertificatePayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
     UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload, now_millis,
 };
 
@@ -229,7 +229,7 @@ pub async fn connect_ws(
     tls_connector: &TlsConnector,
     auth_header: Option<&str>,
 ) -> Result<WsStream> {
-    let ws_url = format!("wss://{host}:{port}/api/v1/ws/agent");
+    let ws_url = format!("wss://{host}:{port}/api/v1/ws/service");
     tracing::info!(url = %ws_url, "connecting to controller");
 
     let tcp_stream = tokio::net::TcpStream::connect((host, port))
@@ -276,11 +276,12 @@ pub async fn send_enroll(
     enrollment_token: Option<&str>,
     host_info: HostInfo,
 ) -> Result<EnrolledPayload> {
-    let msg = AgentMessage::Enroll(EnrollPayload {
+    let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: hostname.to_string(),
         friendly_name: friendly_name.to_string(),
         enrollment_token: enrollment_token.map(|s| s.to_string()),
-        host_info,
+        service_type: "agent".to_string(),
+        host_info: Some(host_info),
     });
     let json = serde_json::to_string(&msg).context_to::<Error>()?;
     ws.send(Message::Text(json.into()))
@@ -349,11 +350,11 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
 
                 match controller_msg {
                     ControllerMessage::Approved(payload) => {
-                        tracing::info!(agent_id = %payload.agent_id, "enrollment approved");
+                        tracing::info!(service_id = %payload.service_id, "enrollment approved");
                         return Ok(());
                     }
                     ControllerMessage::Rejected(payload) => {
-                        tracing::error!(agent_id = %payload.agent_id, "enrollment rejected");
+                        tracing::error!(service_id = %payload.service_id, "enrollment rejected");
                         return Err(report!(Error::EnrollmentRejected));
                     }
                     ControllerMessage::Pong(_) => {
@@ -387,7 +388,7 @@ pub async fn request_certificate_ws(
     ws: &mut WsStream,
     csr_pem: &str,
 ) -> Result<CertificatePayload> {
-    let msg = AgentMessage::RequestCertificate(RequestCertificatePayload {
+    let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
         csr_pem: csr_pem.to_string(),
     });
     let json = serde_json::to_string(&msg).context_to::<Error>()?;
@@ -479,7 +480,7 @@ pub async fn run_authenticated_loop(
 
     // Send host info immediately after connecting
     let host_info = crate::host_info::collect_host_info();
-    let report_msg = AgentMessage::ReportHostInfo(ReportHostInfoPayload {
+    let report_msg = ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
         host_info,
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
     });
@@ -542,7 +543,7 @@ pub async fn run_authenticated_loop(
 
                 match event {
                     UpdateEvent::Output(output_msg) => {
-                        let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                        let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
                             update_history_id,
                             output: output_msg.output,
                             stream: output_msg.stream,
@@ -560,7 +561,7 @@ pub async fn run_authenticated_loop(
 
             _ = ping_interval.tick() => {
                 let agent_ts = now_millis();
-                let ping = AgentMessage::Ping(PingPayload { agent_ts });
+                let ping = ServiceMessage::Ping(PingPayload { agent_ts });
                 let ping_json = serde_json::to_string(&ping).context_to::<Error>()?;
 
                 tracing::trace!(agent_ts, "sending ping");
@@ -575,7 +576,7 @@ pub async fn run_authenticated_loop(
                 let client_id_str = extract_agent_id_from_state(data_dir);
                 let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)?;
                 pending_renewal_key = Some(key_pem);
-                let msg = AgentMessage::RenewCertificate(RenewCertificatePayload {
+                let msg = ServiceMessage::RenewCertificate(RenewCertificatePayload {
                     csr_pem,
                 });
                 let json = serde_json::to_string(&msg).context_to::<Error>()?;
@@ -640,13 +641,13 @@ pub async fn run_authenticated_loop(
                                 tracing::info!("renewed certificate saved, reconnecting");
                                 break LoopOutcome::Reconnect;
                             }
-                            ControllerMessage::AgentSettings(settings) => {
+                            ControllerMessage::ServiceSettings(settings) => {
                                 tracing::trace!(
                                     renewal_window_hours = settings.renewal_window_hours,
-                                    shutdown_timeout = settings.shutdown_timeout_seconds,
-                                    "received agent settings"
+                                    shutdown_timeout = ?settings.shutdown_timeout_seconds,
+                                    "received service settings"
                                 );
-                                shutdown_timeout_seconds = settings.shutdown_timeout_seconds;
+                                shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
                                 renewal_sleep.as_mut().reset(
                                     tokio::time::Instant::now()
                                         + compute_renewal_delay(
@@ -698,7 +699,7 @@ pub async fn run_authenticated_loop(
                                 };
                                 pending_renewal_key = Some(key_pem);
                                 let renew_msg = serde_json::to_string(
-                                    &AgentMessage::RenewCertificate(RenewCertificatePayload {
+                                    &ServiceMessage::RenewCertificate(RenewCertificatePayload {
                                         csr_pem,
                                     }),
                                 )
@@ -730,7 +731,7 @@ pub async fn run_authenticated_loop(
                                         error,
                                     });
                                 }
-                                let response = AgentMessage::VersionCheckResults(VersionCheckResultsPayload {
+                                let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
                                     results,
                                 });
                                 let response_json = serde_json::to_string(&response).context_to::<Error>()?;
@@ -755,7 +756,7 @@ pub async fn run_authenticated_loop(
                                         update_id = %payload.update_history_id,
                                         "rejecting update: another update is already in progress"
                                     );
-                                    let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+                                    let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
                                         update_history_id: payload.update_history_id,
                                         status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                                         from_version: None,
@@ -781,7 +782,7 @@ pub async fn run_authenticated_loop(
                                 });
 
                                 // Send UpdateStarted
-                                let started_msg = AgentMessage::UpdateStarted(UpdateStartedPayload {
+                                let started_msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
                                     update_history_id: update_history_id.clone(),
                                     from_version: None,
                                 });
@@ -880,7 +881,7 @@ async fn send_update_result(
 ) {
     match result {
         Ok(exec_result) => {
-            let result_msg = AgentMessage::UpdateResult(exec_result.result);
+            let result_msg = ServiceMessage::UpdateResult(exec_result.result);
             if let Ok(json) = serde_json::to_string(&result_msg) {
                 let _ = ws_stream.send(Message::Text(json.into())).await;
             }
@@ -888,7 +889,7 @@ async fn send_update_result(
         }
         Err(e) => {
             tracing::error!(error = %e, "update task panicked");
-            let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+            let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id: update_history_id.to_string(),
                 status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                 from_version: None,
@@ -932,7 +933,7 @@ async fn handle_graceful_shutdown(
                 biased;
 
                 Some(output_msg) = update.output_rx.recv() => {
-                    let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+                    let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
                         update_history_id: update.update_history_id.clone(),
                         output: output_msg.output,
                         stream: output_msg.stream,
@@ -951,7 +952,7 @@ async fn handle_graceful_shutdown(
                         "shutdown timeout reached, abandoning in-flight update"
                     );
                     // Send a timeout failure result
-                    let result_msg = AgentMessage::UpdateResult(UpdateResultPayload {
+                    let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
                         update_history_id: update.update_history_id.clone(),
                         status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                         from_version: None,
@@ -969,7 +970,7 @@ async fn handle_graceful_shutdown(
 
         // Drain any remaining output messages
         while let Ok(output_msg) = update.output_rx.try_recv() {
-            let output = AgentMessage::UpdateOutput(UpdateOutputPayload {
+            let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
                 update_history_id: update.update_history_id.clone(),
                 output: output_msg.output,
                 stream: output_msg.stream,
@@ -981,8 +982,9 @@ async fn handle_graceful_shutdown(
     }
 
     // Send Disconnecting message to controller
-    let disconnecting_msg = AgentMessage::Disconnecting(DisconnectingPayload {
+    let disconnecting_msg = ServiceMessage::Disconnecting(DisconnectingPayload {
         reason: disconnect_reason,
+        active_tenants: vec![],
     });
     if let Ok(json) = serde_json::to_string(&disconnecting_msg) {
         if let Err(e) = ws_stream.send(Message::Text(json.into())).await {

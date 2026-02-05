@@ -12,8 +12,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_internal_wire::{MqttApprovedPayload, MqttControllerMessage, MqttRejectedPayload};
-use uptrakit_shared_db::entity::{mqtt_service, prelude::*};
+use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
+use uptrakit_shared_db::entity::{prelude::Service as MqttService, service as mqtt_service};
 
 pub use uptrakit_web_api_types::agents::MessageResponse;
 pub use uptrakit_web_api_types::mqtt_services::{
@@ -47,10 +47,20 @@ pub async fn list_mqtt_services(
 
     let mut q = MqttService::find()
         .filter(mqtt_service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(mqtt_service::Column::ServiceType.eq(mqtt_service::ServiceType::Mqtt))
         .filter(mqtt_service::Column::DeactivatedAt.is_null());
 
     if let Some(ref status) = query.status {
-        q = q.filter(mqtt_service::Column::Status.eq(status.as_str()));
+        let db_status = match status.as_str() {
+            "pending" => Some(mqtt_service::ServiceStatus::Pending),
+            "approved" => Some(mqtt_service::ServiceStatus::Approved),
+            "rejected" => Some(mqtt_service::ServiceStatus::Rejected),
+            "deactivated" => Some(mqtt_service::ServiceStatus::Deactivated),
+            _ => None,
+        };
+        if let Some(s) = db_status {
+            q = q.filter(mqtt_service::Column::Status.eq(s));
+        }
     }
 
     let services = match q
@@ -115,7 +125,7 @@ pub async fn approve_mqtt_service(
         }
     };
 
-    if service.status != mqtt_service::MqttServiceStatus::Pending {
+    if service.status != mqtt_service::ServiceStatus::Pending {
         return (
             StatusCode::BAD_REQUEST,
             "MQTT service is not in pending status",
@@ -125,7 +135,7 @@ pub async fn approve_mqtt_service(
 
     let now = OffsetDateTime::now_utc();
     let mut active: mqtt_service::ActiveModel = service.into();
-    active.status = Set(mqtt_service::MqttServiceStatus::Approved);
+    active.status = Set(mqtt_service::ServiceStatus::Approved);
     active.updated_at = Set(now);
 
     let updated = match active.update(&state.db).await {
@@ -138,10 +148,10 @@ pub async fn approve_mqtt_service(
 
     // Push approval to connected MQTT service via WebSocket
     let _ = state
-        .mqtt_service_connections
+        .service_connections
         .send(
             &service_id,
-            MqttControllerMessage::Approved(MqttApprovedPayload {
+            ControllerMessage::Approved(ApprovedPayload {
                 service_id: service_id.to_string(),
             }),
         )
@@ -195,7 +205,7 @@ pub async fn reject_mqtt_service(
         }
     };
 
-    if service.status != mqtt_service::MqttServiceStatus::Pending {
+    if service.status != mqtt_service::ServiceStatus::Pending {
         return (
             StatusCode::BAD_REQUEST,
             "MQTT service is not in pending status",
@@ -205,7 +215,7 @@ pub async fn reject_mqtt_service(
 
     let now = OffsetDateTime::now_utc();
     let mut active: mqtt_service::ActiveModel = service.into();
-    active.status = Set(mqtt_service::MqttServiceStatus::Rejected);
+    active.status = Set(mqtt_service::ServiceStatus::Rejected);
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
@@ -219,10 +229,10 @@ pub async fn reject_mqtt_service(
 
     // Push rejection to connected MQTT service via WebSocket
     let _ = state
-        .mqtt_service_connections
+        .service_connections
         .send(
             &service_id,
-            MqttControllerMessage::Rejected(MqttRejectedPayload {
+            ControllerMessage::Rejected(RejectedPayload {
                 service_id: service_id.to_string(),
             }),
         )
@@ -278,7 +288,7 @@ pub async fn deactivate_mqtt_service(
 
     let now = OffsetDateTime::now_utc();
     let mut active: mqtt_service::ActiveModel = service.into();
-    active.status = Set(mqtt_service::MqttServiceStatus::Deactivated);
+    active.status = Set(mqtt_service::ServiceStatus::Deactivated);
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
@@ -288,7 +298,7 @@ pub async fn deactivate_mqtt_service(
     }
 
     // Disconnect the service (sends None via channel, closing the WebSocket)
-    state.mqtt_service_connections.unregister(&service_id).await;
+    state.service_connections.unregister(&service_id).await;
 
     (
         StatusCode::OK,
@@ -311,10 +321,10 @@ fn service_to_response(service: mqtt_service::Model) -> MqttServiceResponse {
         hostname: service.hostname,
         friendly_name: service.friendly_name,
         status: match service.status {
-            mqtt_service::MqttServiceStatus::Pending => MqttServiceStatus::Pending,
-            mqtt_service::MqttServiceStatus::Approved => MqttServiceStatus::Approved,
-            mqtt_service::MqttServiceStatus::Rejected => MqttServiceStatus::Rejected,
-            mqtt_service::MqttServiceStatus::Deactivated => MqttServiceStatus::Deactivated,
+            mqtt_service::ServiceStatus::Pending => MqttServiceStatus::Pending,
+            mqtt_service::ServiceStatus::Approved => MqttServiceStatus::Approved,
+            mqtt_service::ServiceStatus::Rejected => MqttServiceStatus::Rejected,
+            mqtt_service::ServiceStatus::Deactivated => MqttServiceStatus::Deactivated,
         },
         last_seen_at: service.last_seen_at.map(format_rfc3339),
         created_at: format_rfc3339(service.created_at),

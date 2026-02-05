@@ -57,7 +57,7 @@ Uptrakit operates an internal PKI for mTLS authentication of agents and MQTT ser
 
 ### CSR-based certificate issuance
 
-Agent and MQTT service certificates are issued via a CSR (Certificate Signing Request) flow. The controller generates a UUIDv7 ID (`agent_id` or `service_id`) during enrollment. After approval, the agent/service generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its ID. The controller validates the CSR signature, verifies the CN matches the authenticated identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent/service.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals. MQTT services follow the same TOFU CA pinning, enrollment, and certificate issuance flow as agents but connect to a separate WebSocket endpoint (`/api/v1/ws/mqtt`) and use separate enrollment tokens.
+Agent and MQTT service certificates are issued via a CSR (Certificate Signing Request) flow. The controller generates a UUIDv7 `service_id` during enrollment. After approval, the agent/service generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its `service_id`. The controller validates the CSR signature, verifies the CN matches the authenticated identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent/service.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals. MQTT services follow the same TOFU CA pinning, enrollment, and certificate issuance flow as agents, connecting to the same WebSocket endpoint (`/api/v1/ws/service`). MQTT enrollment tokens are settings-based (stored under a separate key: `mqtt_enrollment.token_hash`) and managed through the unified services REST API (`/api/v1/services/enrollment-token?type=mqtt`).
 
 CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
 
@@ -80,8 +80,8 @@ For the full operational flow (rotation steps, bundle distribution, `CaSnapshot`
 | API tokens | Programmatic access | Long-lived bearer tokens; revocable |
 | mTLS client certificates | Agent and MQTT service connections | Issued during enrollment; validated on every WebSocket connection |
 | Forwarded client certificates | Agent connections via reverse proxy | Trusted proxy forwards cert info/PEM headers; issuer CN verified against known CAs |
-| Enrollment tokens | Agent registration | One-time tokens with expiry for initial agent enrollment |
-| MQTT enrollment tokens | MQTT service registration | Separate tokens from agent enrollment; one-time with optional expiry and use limits |
+| Enrollment tokens | Agent registration | Settings-based one-time tokens with expiry for initial agent enrollment |
+| MQTT enrollment tokens | MQTT service registration | Settings-based tokens (separate key: `mqtt_enrollment.token_hash`) managed through the unified services API; one-time with optional expiry and use limits |
 
 Authorization is permission-based (typed `Permission` enum), not role-string-based. See [AGENTS.md](AGENTS.md) section "Permissions model" for the full RBAC design.
 

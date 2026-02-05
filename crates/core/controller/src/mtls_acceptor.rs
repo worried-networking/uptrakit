@@ -11,13 +11,13 @@ use tower::Service;
 use axum_server::accept::Accept;
 use axum_server::tls_rustls::RustlsAcceptor;
 
-use uptrakit_web_api::extract::AgentIdentity;
+use uptrakit_web_api::extract::ServiceIdentity;
 
 /// Pinned, boxed future returned by the inner TLS acceptor.
 type BoxedAcceptFuture<I, S> = Pin<Box<dyn Future<Output = io::Result<(TlsStream<I>, S)>> + Send>>;
 
 /// Custom acceptor wrapping `RustlsAcceptor`.
-/// After TLS handshake, extracts peer cert CN as `AgentIdentity`.
+/// After TLS handshake, extracts peer cert CN as `ServiceIdentity`.
 #[derive(Clone)]
 pub struct MtlsAcceptor {
     inner: RustlsAcceptor,
@@ -62,7 +62,7 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.inner.as_mut().poll(cx) {
             Poll::Ready(Ok((tls_stream, service))) => {
-                let agent_identity = extract_agent_identity(&tls_stream);
+                let agent_identity = extract_service_identity(&tls_stream);
                 Poll::Ready(Ok((
                     tls_stream,
                     MtlsService {
@@ -77,11 +77,11 @@ where
     }
 }
 
-/// Service wrapper that injects `AgentIdentity` into request extensions.
+/// Service wrapper that injects `ServiceIdentity` into request extensions.
 #[derive(Clone)]
 pub struct MtlsService<S> {
     inner: S,
-    agent_identity: Option<AgentIdentity>,
+    agent_identity: Option<ServiceIdentity>,
 }
 
 impl<S, B> Service<Request<B>> for MtlsService<S>
@@ -104,13 +104,13 @@ where
     }
 }
 
-/// Extract agent UUID from peer certificate CN.
-fn extract_agent_identity<I>(stream: &TlsStream<I>) -> Option<AgentIdentity>
+/// Extract service UUID from peer certificate CN.
+fn extract_service_identity<I>(stream: &TlsStream<I>) -> Option<ServiceIdentity>
 where
     I: AsyncRead + AsyncWrite + Unpin,
 {
     let (_, conn) = stream.get_ref();
     let certs = conn.peer_certificates()?;
     let leaf = certs.first()?;
-    uptrakit_web_api::extract::agent_identity_from_der(leaf.as_ref())
+    uptrakit_web_api::extract::service_identity_from_der(leaf.as_ref())
 }

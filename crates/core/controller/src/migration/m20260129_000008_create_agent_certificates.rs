@@ -1,6 +1,8 @@
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
+use super::m20260129_000007_create_agents::Services;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -10,35 +12,39 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(AgentCertificates::Table)
+                    .table(ServiceCertificates::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(AgentCertificates::CaFingerprint)
+                        ColumnDef::new(ServiceCertificates::CaFingerprint)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(AgentCertificates::SerialNumber)
+                        ColumnDef::new(ServiceCertificates::SerialNumber)
                             .string()
                             .not_null(),
                     )
                     .primary_key(
                         Index::create()
-                            .col(AgentCertificates::CaFingerprint)
-                            .col(AgentCertificates::SerialNumber),
+                            .col(ServiceCertificates::CaFingerprint)
+                            .col(ServiceCertificates::SerialNumber),
                     )
-                    .col(ColumnDef::new(AgentCertificates::AgentId).uuid().not_null())
-                    .col(timestamp(AgentCertificates::NotBefore))
-                    .col(timestamp(AgentCertificates::NotAfter))
-                    .col(timestamp_null(AgentCertificates::RevokedAt))
-                    .col(string_null(AgentCertificates::RevocationReason))
-                    .col(timestamp(AgentCertificates::CreatedAt))
-                    .col(timestamp_null(AgentCertificates::LastSeenAt))
+                    .col(
+                        ColumnDef::new(ServiceCertificates::ServiceId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(timestamp(ServiceCertificates::NotBefore))
+                    .col(timestamp(ServiceCertificates::NotAfter))
+                    .col(timestamp_null(ServiceCertificates::RevokedAt))
+                    .col(string_null(ServiceCertificates::RevocationReason))
+                    .col(timestamp(ServiceCertificates::CreatedAt))
+                    .col(timestamp_null(ServiceCertificates::LastSeenAt))
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk_agent_certificates_agent_id")
-                            .from(AgentCertificates::Table, AgentCertificates::AgentId)
-                            .to(Agents::Table, Agents::Id),
+                            .name("fk_service_certificates_service_id")
+                            .from(ServiceCertificates::Table, ServiceCertificates::ServiceId)
+                            .to(Services::Table, Services::Id),
                     )
                     .to_owned(),
             )
@@ -47,10 +53,10 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_agent_certificates_agent_id_revoked_at")
-                    .table(AgentCertificates::Table)
-                    .col(AgentCertificates::AgentId)
-                    .col(AgentCertificates::RevokedAt)
+                    .name("idx_service_certificates_service_id_revoked_at")
+                    .table(ServiceCertificates::Table)
+                    .col(ServiceCertificates::ServiceId)
+                    .col(ServiceCertificates::RevokedAt)
                     .to_owned(),
             )
             .await?;
@@ -60,16 +66,16 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(AgentCertificates::Table).to_owned())
+            .drop_table(Table::drop().table(ServiceCertificates::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum AgentCertificates {
+enum ServiceCertificates {
     Table,
     CaFingerprint,
-    AgentId,
+    ServiceId,
     SerialNumber,
     NotBefore,
     NotAfter,
@@ -77,10 +83,4 @@ enum AgentCertificates {
     RevocationReason,
     CreatedAt,
     LastSeenAt,
-}
-
-#[derive(DeriveIden)]
-enum Agents {
-    Table,
-    Id,
 }

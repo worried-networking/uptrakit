@@ -4766,6 +4766,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-enrollment"
+version = "0.0.1"
+dependencies = [
+ "rcgen",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+ "x509-parser",
+]
+
+[[package]]
 name = "uptrakit-internal-wire"
 version = "0.0.1"
 dependencies = [

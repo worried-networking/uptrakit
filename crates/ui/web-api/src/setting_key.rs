@@ -18,6 +18,7 @@ pub enum SettingKey {
     ExtraSans,
     HttpsAddr,
     EnrollmentTokenHash,
+    MqttEnrollmentTokenHash,
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
     PkiAddr,
@@ -38,6 +39,7 @@ impl SettingKey {
             Self::ExtraSans => "network.extra_sans",
             Self::HttpsAddr => "network.https_addr",
             Self::EnrollmentTokenHash => "agent_enrollment.token_hash",
+            Self::MqttEnrollmentTokenHash => "mqtt_enrollment.token_hash",
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
             Self::PkiAddr => "network.pki_addr",
@@ -58,6 +60,7 @@ impl SettingKey {
             "network.extra_sans" => Some(Self::ExtraSans),
             "network.https_addr" => Some(Self::HttpsAddr),
             "agent_enrollment.token_hash" => Some(Self::EnrollmentTokenHash),
+            "mqtt_enrollment.token_hash" => Some(Self::MqttEnrollmentTokenHash),
             "network.forwarded_client_cert_info_header" => {
                 Some(Self::ForwardedClientCertInfoHeader)
             }
@@ -131,5 +134,6 @@ mod tests {
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());
         assert!(!SettingKey::EnrollmentTokenHash.is_global());
+        assert!(!SettingKey::MqttEnrollmentTokenHash.is_global());
     }
 }

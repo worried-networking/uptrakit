@@ -1,38 +1,38 @@
 asyncapi: 3.0.0
 info:
-  title: Uptrakit Agent-Controller Protocol
+  title: Uptrakit Service-Controller Protocol
   version: 0.0.7
   description: |
-    WebSocket protocol for communication between Uptrakit agents and the controller.
+    WebSocket protocol for communication between Uptrakit services (agents, MQTT bridges, etc.) and the controller.
 
-    ## Agent Lifecycle
+    ## Service Lifecycle
 
-    1. `HTTP GET /api/v1/pki/ca.crt` — TOFU CA pinning (only HTTP endpoint used by agents)
-    2. `WSS /api/v1/ws/agent` (no auth) — agent sends `Enroll` message with hostname and host_info
-    3. Controller generates UUIDv7 `agent_id` and responds with `Enrolled` message
-    4. Agent persists `agent_id` + `enrollment_secret`
+    1. `HTTP GET /api/v1/pki/ca.crt` — TOFU CA pinning (only HTTP endpoint used by services)
+    2. `WSS /api/v1/ws/service` (no auth) — service sends `Enroll` message with hostname, host_info, and service_type
+    3. Controller generates UUIDv7 `service_id` and responds with `Enrolled` message
+    4. Service persists `service_id` + `enrollment_secret`
        (connection promoted in-place — controller now tracks this session)
     5. Waits for `Approved` push — no polling, no reconnect needed
-    6. Agent generates an ECDSA P-256 keypair + CSR, sends `RequestCertificate` with `csr_pem`
-    7. Receives `Certificate` response (cert PEM only — private key never leaves the agent)
+    6. Service generates an ECDSA P-256 keypair + CSR, sends `RequestCertificate` with `csr_pem`
+    7. Receives `Certificate` response (cert PEM only — private key never leaves the service)
     8. Disconnects enrollment WebSocket
-    9. `WSS /api/v1/ws/agent` (mTLS) — normal Ping/Pong keepalive operation
+    9. `WSS /api/v1/ws/service` (mTLS) — normal Ping/Pong keepalive operation
 
     ## CSR-Based Certificate Issuance
 
-    The agent always generates its own ECDSA P-256 keypair locally. The private key
-    never leaves the agent. A fresh keypair is generated for each CSR (enrollment
+    The service always generates its own ECDSA P-256 keypair locally. The private key
+    never leaves the service. A fresh keypair is generated for each CSR (enrollment
     and renewals). The controller validates the CSR signature, verifies the CN
-    matches the agent identity, and signs the certificate with controller-controlled
+    matches the service identity, and signs the certificate with controller-controlled
     parameters (DN, EKU, validity period).
 
-    ## Reconnection (agent restarts before getting certificate)
+    ## Reconnection (service restarts before getting certificate)
 
-    1. `WSS /api/v1/ws/agent` + `Authorization: Bearer <enrollment_secret>`
-    2. Controller validates header during upgrade, identifies agent
+    1. `WSS /api/v1/ws/service` + `Authorization: Bearer <enrollment_secret>`
+    2. Controller validates header during upgrade, identifies service
     3. If already approved → sends `Approved` immediately
     4. If pending → waits for admin action, pushes when decided
-    5. Agent generates new keypair + CSR, sends `RequestCertificate` with `csr_pem`
+    5. Service generates new keypair + CSR, sends `RequestCertificate` with `csr_pem`
     6. Receives `Certificate` (cert PEM only)
     7. Disconnect, reconnect with mTLS
 
@@ -41,32 +41,32 @@ info:
     | Auth present | Connection type | Behavior |
     |---|---|---|
     | None | Anonymous | Expects `Enroll` message |
-    | `Authorization: Bearer <secret>` | Enrolled (reconnecting) | Controller looks up agent by secret, resumes |
+    | `Authorization: Bearer <secret>` | Enrolled (reconnecting) | Controller looks up service by secret, resumes |
     | mTLS client cert | Authenticated | Normal Ping/Pong operation |
 
     ## Authentication
 
-    The controller supports mutual TLS (mTLS) for authenticated agent connections.
-    After enrollment approval, agents request a short-lived client certificate
-    signed by the internal CA. The certificate CN contains the agent UUID.
+    The controller supports mutual TLS (mTLS) for authenticated service connections.
+    After enrollment approval, services request a short-lived client certificate
+    signed by the internal CA. The certificate CN contains the service UUID.
 
-    For reconnection during enrollment (before certificate issuance), agents
+    For reconnection during enrollment (before certificate issuance), services
     present the `enrollment_secret` via an `Authorization: Bearer` header
     during the WebSocket upgrade handshake.
 
 servers:
   controller:
     host: "{host}:{port}"
-    pathname: /api/v1/ws/agent
+    pathname: /api/v1/ws/service
     protocol: wss
-    description: Controller WebSocket endpoint for agent connections
+    description: Controller WebSocket endpoint for service connections
     security:
       - $ref: "#/components/securitySchemes/mtls"
       - $ref: "#/components/securitySchemes/bearerToken"
 
 channels:
-  agentConnection:
-    address: /api/v1/ws/agent
+  serviceConnection:
+    address: /api/v1/ws/service
     messages:
       ping:
         $ref: "#/components/messages/ping"
@@ -90,8 +90,8 @@ channels:
         $ref: "#/components/messages/reportHostInfo"
       renewCertificate:
         $ref: "#/components/messages/renewCertificate"
-      agentSettings:
-        $ref: "#/components/messages/agentSettings"
+      serviceSettings:
+        $ref: "#/components/messages/serviceSettings"
       caBundleUpdated:
         $ref: "#/components/messages/caBundleUpdated"
       requestCertRenewal:
@@ -117,120 +117,120 @@ operations:
   sendPing:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/ping"
-    summary: Agent sends a ping to the controller
+      - $ref: "#/channels/serviceConnection/messages/ping"
+    summary: Service sends a ping to the controller
     description: |
-      The agent sends a ping message containing its current timestamp.
+      The service sends a ping message containing its current timestamp.
       The controller will respond with a pong message.
 
   receivePong:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/pong"
-    summary: Agent receives a pong from the controller
+      - $ref: "#/channels/serviceConnection/messages/pong"
+    summary: Service receives a pong from the controller
     description: |
       The controller responds to a ping with a pong message containing
-      both the original agent timestamp and the controller's timestamp.
-      This allows the agent to calculate round-trip time.
+      both the original service timestamp and the controller's timestamp.
+      This allows the service to calculate round-trip time.
 
   sendEnroll:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/enroll"
-    summary: Agent sends an enrollment request
+      - $ref: "#/channels/serviceConnection/messages/enroll"
+    summary: Service sends an enrollment request
     description: |
-      An anonymous agent sends its hostname, friendly name, host info, and optional
-      enrollment token. The controller generates a UUIDv7 `agent_id`, creates an
-      agent record, and responds with an `Enrolled` message containing the agent_id
-      and enrollment_secret. The actual keypair generation and CSR are deferred
-      until after approval.
+      An anonymous service sends its hostname, friendly name, host info (optional),
+      service_type, and optional enrollment token. The controller generates a UUIDv7
+      `service_id`, creates a service record, and responds with an `Enrolled` message
+      containing the service_id and enrollment_secret. The actual keypair generation
+      and CSR are deferred until after approval.
 
   receiveEnrolled:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/enrolled"
-    summary: Agent receives enrollment confirmation
+      - $ref: "#/channels/serviceConnection/messages/enrolled"
+    summary: Service receives enrollment confirmation
     description: |
       After a successful `Enroll`, the controller responds with the assigned
-      agent_id, an enrollment_secret for reconnection, and the initial status
+      service_id, an enrollment_secret for reconnection, and the initial status
       (pending or approved if a valid enrollment token was provided).
 
   receiveApproved:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/approved"
-    summary: Agent receives approval notification
+      - $ref: "#/channels/serviceConnection/messages/approved"
+    summary: Service receives approval notification
     description: |
-      The controller pushes this message when an admin approves the agent,
-      or immediately upon connection if the agent is already approved.
-      No polling is required — the agent waits on the WebSocket for this push.
+      The controller pushes this message when an admin approves the service,
+      or immediately upon connection if the service is already approved.
+      No polling is required — the service waits on the WebSocket for this push.
 
   receiveRejected:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/rejected"
-    summary: Agent receives rejection notification
+      - $ref: "#/channels/serviceConnection/messages/rejected"
+    summary: Service receives rejection notification
     description: |
-      The controller pushes this message when an admin rejects the agent.
-      The agent should disconnect and exit upon receiving this message.
+      The controller pushes this message when an admin rejects the service.
+      The service should disconnect and exit upon receiving this message.
 
   sendRequestCertificate:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/requestCertificate"
-    summary: Agent requests a client certificate
+      - $ref: "#/channels/serviceConnection/messages/requestCertificate"
+    summary: Service requests a client certificate
     description: |
-      After receiving `Approved`, the agent generates a new ECDSA P-256 keypair,
-      creates a CSR with CN=agent_id, and sends this message with the `csr_pem`.
+      After receiving `Approved`, the service generates a new ECDSA P-256 keypair,
+      creates a CSR with CN=service_id, and sends this message with the `csr_pem`.
       The controller validates the CSR, signs the certificate, and responds with
-      a `Certificate` message (cert PEM only — the private key stays on the agent).
+      a `Certificate` message (cert PEM only — the private key stays on the service).
 
   receiveCertificate:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/certificate"
-    summary: Agent receives issued certificate
+      - $ref: "#/channels/serviceConnection/messages/certificate"
+    summary: Service receives issued certificate
     description: |
       The controller responds to `RequestCertificate` or `RenewCertificate`
       with the signed client certificate PEM and certificate lifetime.
-      The private key is not included — the agent already holds it locally.
-      The agent should persist the certificate and reconnect using mTLS.
+      The private key is not included — the service already holds it locally.
+      The service should persist the certificate and reconnect using mTLS.
 
   sendReportHostInfo:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/reportHostInfo"
+      - $ref: "#/channels/serviceConnection/messages/reportHostInfo"
     summary: Agent reports host machine information
     description: |
-      Authenticated agents send this message immediately after connecting via mTLS.
-      The controller uses the machine_id to find or create a Host entity and link
-      it to the agent. This enables host tracking across agent re-enrollments.
+      Authenticated agent services send this message immediately after connecting
+      via mTLS. The controller uses the machine_id to find or create a Host entity
+      and link it to the service. This enables host tracking across re-enrollments.
 
   receiveError:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/error"
-    summary: Agent receives an error from the controller
+      - $ref: "#/channels/serviceConnection/messages/error"
+    summary: Service receives an error from the controller
     description: |
       The controller sends an error message when a request cannot be
       fulfilled (e.g., invalid enrollment token, certificate request
@@ -239,63 +239,63 @@ operations:
   sendRenewCertificate:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/renewCertificate"
-    summary: Agent requests certificate renewal
+      - $ref: "#/channels/serviceConnection/messages/renewCertificate"
+    summary: Service requests certificate renewal
     description: |
-      Authenticated agents generate a new ECDSA P-256 keypair, create a CSR
-      with CN=agent_id, and send this message with the `csr_pem` to request
+      Authenticated services generate a new ECDSA P-256 keypair, create a CSR
+      with CN=service_id, and send this message with the `csr_pem` to request
       a new client certificate before the current one expires. Also sent in
       response to a `RequestCertRenewal` push from the controller (e.g., after
       CA rotation). The controller validates the CSR and responds with a
       `Certificate` message (cert PEM only).
 
-  receiveAgentSettings:
+  receiveServiceSettings:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/agentSettings"
-    summary: Agent receives settings from the controller
+      - $ref: "#/channels/serviceConnection/messages/serviceSettings"
+    summary: Service receives settings from the controller
     description: |
-      The controller sends agent-specific settings after authentication.
-      Currently includes the ping interval that the agent should use
-      for heartbeat messages.
+      The controller sends service-specific settings after authentication.
+      Currently includes the renewal window and shutdown timeout that the
+      service should use.
 
   receiveCaBundleUpdated:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/caBundleUpdated"
-    summary: Agent receives an updated CA bundle
+      - $ref: "#/channels/serviceConnection/messages/caBundleUpdated"
+    summary: Service receives an updated CA bundle
     description: |
       The controller pushes this message when the CA certificate bundle
-      changes (e.g., after CA rotation). The agent should update its
+      changes (e.g., after CA rotation). The service should update its
       trust store with the new bundle PEM and prepare for certificate
       renewal.
 
   receiveRequestCertRenewal:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/requestCertRenewal"
-    summary: Agent receives a certificate renewal request
+      - $ref: "#/channels/serviceConnection/messages/requestCertRenewal"
+    summary: Service receives a certificate renewal request
     description: |
       The controller pushes this message after CA rotation or backend
-      URL changes to prompt all connected agents to immediately renew
-      their certificates. The agent should respond by sending a
+      URL changes to prompt all connected services to immediately renew
+      their certificates. The service should respond by sending a
       `RenewCertificate` message. Includes a human-readable reason.
 
   receiveCheckVersions:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/checkVersions"
-    summary: Agent receives a version check request
+      - $ref: "#/channels/serviceConnection/messages/checkVersions"
+    summary: Agent receives a version check request (agent-only)
     description: |
       The controller sends this message to request the agent to check
       installed versions for a list of software items. The agent should
@@ -304,9 +304,9 @@ operations:
   sendVersionCheckResults:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/versionCheckResults"
+      - $ref: "#/channels/serviceConnection/messages/versionCheckResults"
     summary: Agent sends version check results
     description: |
       The agent sends this message in response to a `CheckVersions` request.
@@ -316,10 +316,10 @@ operations:
   receiveExecuteUpdate:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/executeUpdate"
-    summary: Agent receives a software update command
+      - $ref: "#/channels/serviceConnection/messages/executeUpdate"
+    summary: Agent receives a software update command (agent-only)
     description: |
       The controller pushes this message to trigger a software update on the agent.
       The message includes the target version, provider configuration, and optional
@@ -330,9 +330,9 @@ operations:
   sendUpdateStarted:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/updateStarted"
+      - $ref: "#/channels/serviceConnection/messages/updateStarted"
     summary: Agent reports that an update is starting
     description: |
       Sent immediately after receiving `ExecuteUpdate` to acknowledge the update
@@ -342,9 +342,9 @@ operations:
   sendUpdateOutput:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/updateOutput"
+      - $ref: "#/channels/serviceConnection/messages/updateOutput"
     summary: Agent streams update output to the controller
     description: |
       Sent during update execution to stream stdout/stderr output, pre/post-hook
@@ -354,9 +354,9 @@ operations:
   sendUpdateResult:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/updateResult"
+      - $ref: "#/channels/serviceConnection/messages/updateResult"
     summary: Agent reports the final update result
     description: |
       Sent when the update execution completes (successfully or with failure).
@@ -367,27 +367,27 @@ operations:
   receiveServerRestarting:
     action: receive
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/serverRestarting"
-    summary: Agent receives server restarting notification
+      - $ref: "#/channels/serviceConnection/messages/serverRestarting"
+    summary: Service receives server restarting notification
     description: |
       The controller pushes this message during graceful shutdown to notify
-      connected agents that the server is restarting. The agent should expect
+      connected services that the server is restarting. The service should expect
       the connection to close shortly and reconnect automatically. During a
-      zero-downtime restart, agents may not even notice the restart if a new
+      zero-downtime restart, services may not even notice the restart if a new
       controller process is already accepting connections.
 
   sendDisconnecting:
     action: send
     channel:
-      $ref: "#/channels/agentConnection"
+      $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/agentConnection/messages/disconnecting"
-    summary: Agent notifies controller before disconnecting
+      - $ref: "#/channels/serviceConnection/messages/disconnecting"
+    summary: Service notifies controller before disconnecting
     description: |
-      Sent by the agent before closing the WebSocket connection during graceful
-      shutdown. The message includes a reason indicating whether the agent is
+      Sent by the service before closing the WebSocket connection during graceful
+      shutdown. The message includes a reason indicating whether the service is
       shutting down (SIGTERM/SIGINT) or preparing for a restart (SIGHUP).
       This allows the controller to distinguish between intentional disconnects
       and unexpected connection losses.
@@ -398,8 +398,8 @@ components:
       type: X509
       description: |
         Mutual TLS client certificate authentication.
-        Agents present a client certificate signed by the internal CA
-        with CN set to the agent UUID. Used for authenticated connections
+        Services present a client certificate signed by the internal CA
+        with CN set to the service UUID. Used for authenticated connections
         after certificate issuance.
 
     bearerToken:
@@ -415,7 +415,7 @@ components:
     ping:
       name: ping
       title: Ping Message
-      summary: Heartbeat message sent by the agent
+      summary: Heartbeat message sent by the service
       contentType: application/json
       payload:
         $ref: "#/components/schemas/pingPayload"
@@ -431,7 +431,7 @@ components:
     enroll:
       name: enroll
       title: Enroll Message
-      summary: Agent enrollment request
+      summary: Service enrollment request
       contentType: application/json
       payload:
         $ref: "#/components/schemas/enrollPayload"
@@ -463,7 +463,7 @@ components:
     requestCertificate:
       name: request_certificate
       title: Request Certificate Message
-      summary: Agent requests a client certificate
+      summary: Service requests a client certificate
       contentType: application/json
       payload:
         $ref: "#/components/schemas/requestCertificatePayload"
@@ -487,7 +487,7 @@ components:
     reportHostInfo:
       name: report_host_info
       title: Report Host Info Message
-      summary: Agent reports host machine information to the controller
+      summary: Agent reports host machine information to the controller (agent-only)
       contentType: application/json
       payload:
         $ref: "#/components/schemas/reportHostInfoPayload"
@@ -495,18 +495,18 @@ components:
     renewCertificate:
       name: renew_certificate
       title: Renew Certificate Message
-      summary: Agent requests certificate renewal
+      summary: Service requests certificate renewal
       contentType: application/json
       payload:
         $ref: "#/components/schemas/renewCertificatePayload"
 
-    agentSettings:
-      name: agent_settings
-      title: Agent Settings Message
-      summary: Agent-specific settings pushed by controller
+    serviceSettings:
+      name: service_settings
+      title: Service Settings Message
+      summary: Service-specific settings pushed by controller
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/agentSettingsPayload"
+        $ref: "#/components/schemas/serviceSettingsPayload"
 
     caBundleUpdated:
       name: ca_bundle_updated
@@ -519,7 +519,7 @@ components:
     requestCertRenewal:
       name: request_cert_renewal
       title: Request Cert Renewal Message
-      summary: Controller requests that the agent renew its certificate
+      summary: Controller requests that the service renew its certificate
       contentType: application/json
       payload:
         $ref: "#/components/schemas/requestCertRenewalPayload"
@@ -543,7 +543,7 @@ components:
     executeUpdate:
       name: execute_update
       title: Execute Update Message
-      summary: Controller triggers a software update on the agent
+      summary: Controller triggers a software update on the agent (agent-only)
       contentType: application/json
       payload:
         $ref: "#/components/schemas/executeUpdatePayload"
@@ -575,7 +575,7 @@ components:
     serverRestarting:
       name: server_restarting
       title: Server Restarting Message
-      summary: Controller notifies agent that the server is restarting
+      summary: Controller notifies service that the server is restarting
       contentType: application/json
       payload:
         $ref: "#/components/schemas/serverRestartingPayload"
@@ -583,7 +583,7 @@ components:
     disconnecting:
       name: disconnecting
       title: Disconnecting Message
-      summary: Agent notification before disconnecting
+      summary: Service notification before disconnecting
       contentType: application/json
       payload:
         $ref: "#/components/schemas/disconnectingPayload"
@@ -602,7 +602,7 @@ components:
         agent_ts:
           type: integer
           format: int64
-          description: Unix epoch timestamp in milliseconds when the agent sent the ping
+          description: Unix epoch timestamp in milliseconds when the service sent the ping
           examples:
             - 1706400000000
 
@@ -620,7 +620,7 @@ components:
         agent_ts:
           type: integer
           format: int64
-          description: Original timestamp from the agent's ping message
+          description: Original timestamp from the service's ping message
           examples:
             - 1706400000000
         controller_ts:
@@ -636,7 +636,6 @@ components:
         - type
         - hostname
         - friendly_name
-        - host_info
       properties:
         type:
           type: string
@@ -644,14 +643,20 @@ components:
           description: Message type discriminator
         hostname:
           type: string
-          description: System hostname of the agent
+          description: System hostname of the service
           examples:
             - node-1.example.com
         friendly_name:
           type: string
-          description: Human-readable name for the agent
+          description: Human-readable name for the service
           examples:
             - Production Node 1
+        service_type:
+          type: string
+          description: "Service type: 'agent' or 'mqtt'. Defaults to 'agent' if omitted"
+          examples:
+            - agent
+            - mqtt
         enrollment_token:
           type: string
           description: Optional pre-shared enrollment token for auto-approval
@@ -659,13 +664,13 @@ components:
             - tok-abc123
         host_info:
           $ref: "#/components/schemas/hostInfo"
-          description: Host machine information for automatic host matching
+          description: Host machine information for automatic host matching (agent services only, optional for MQTT services)
 
     enrolledPayload:
       type: object
       required:
         - type
-        - agent_id
+        - service_id
         - enrollment_secret
         - status
       properties:
@@ -673,10 +678,10 @@ components:
           type: string
           const: enrolled
           description: Message type discriminator
-        agent_id:
+        service_id:
           type: string
           format: uuid
-          description: Assigned agent UUID
+          description: Assigned service UUID
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
         enrollment_secret:
@@ -689,7 +694,7 @@ components:
           enum:
             - pending
             - approved
-          description: Initial agent status (approved if valid enrollment token provided)
+          description: Initial service status (approved if valid enrollment token provided)
           examples:
             - pending
 
@@ -697,16 +702,16 @@ components:
       type: object
       required:
         - type
-        - agent_id
+        - service_id
       properties:
         type:
           type: string
           const: approved
           description: Message type discriminator
-        agent_id:
+        service_id:
           type: string
           format: uuid
-          description: The approved agent's UUID
+          description: The approved service's UUID
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
 
@@ -714,16 +719,16 @@ components:
       type: object
       required:
         - type
-        - agent_id
+        - service_id
       properties:
         type:
           type: string
           const: rejected
           description: Message type discriminator
-        agent_id:
+        service_id:
           type: string
           format: uuid
-          description: The rejected agent's UUID
+          description: The rejected service's UUID
           examples:
             - 550e8400-e29b-41d4-a716-446655440000
 
@@ -740,10 +745,10 @@ components:
         csr_pem:
           type: string
           description: |
-            PEM-encoded PKCS#10 Certificate Signing Request. The agent generates
-            a fresh ECDSA P-256 keypair and creates a CSR with CN=agent_id.
+            PEM-encoded PKCS#10 Certificate Signing Request. The service generates
+            a fresh ECDSA P-256 keypair and creates a CSR with CN=service_id.
             The controller validates the CSR signature, verifies CN matches the
-            authenticated agent identity, and signs the certificate.
+            authenticated service identity, and signs the certificate.
           examples:
             - "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n"
 
@@ -762,7 +767,7 @@ components:
           type: string
           description: |
             PEM-encoded client certificate signed by the internal CA.
-            The private key is not included — the agent already holds it
+            The private key is not included — the service already holds it
             locally from the CSR generation step.
         not_after:
           type: integer
@@ -861,14 +866,14 @@ components:
           type: string
           description: |
             PEM-encoded PKCS#10 Certificate Signing Request for renewal.
-            The agent generates a fresh ECDSA P-256 keypair and creates a CSR
-            with CN=agent_id. The controller validates the CSR signature,
-            verifies CN matches the mTLS-authenticated agent identity, and
+            The service generates a fresh ECDSA P-256 keypair and creates a CSR
+            with CN=service_id. The controller validates the CSR signature,
+            verifies CN matches the mTLS-authenticated service identity, and
             signs a new certificate with the CSR's public key.
           examples:
             - "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n"
 
-    agentSettingsPayload:
+    serviceSettingsPayload:
       type: object
       required:
         - type
@@ -876,22 +881,22 @@ components:
       properties:
         type:
           type: string
-          const: agent_settings
+          const: service_settings
           description: Message type discriminator
         renewal_window_hours:
           type: integer
           format: int32
           description: |
-            Number of hours before certificate expiry when the agent
+            Number of hours before certificate expiry when the service
             should initiate certificate renewal.
           examples:
             - 6
         ca_bundle_hash:
           type: string
           description: |
-            SHA-256 hash of the current CA bundle PEM. The agent compares
+            SHA-256 hash of the current CA bundle PEM. The service compares
             this against its local CA bundle to detect staleness. If missing
-            or empty, the agent skips the check (backwards compatibility).
+            or empty, the service skips the check (backwards compatibility).
           default: ""
           examples:
             - abc123def456
@@ -899,11 +904,11 @@ components:
           type: integer
           format: int32
           description: |
-            Maximum time in seconds to wait for in-flight updates to complete
-            during graceful shutdown. When the agent receives SIGTERM, SIGINT,
-            or SIGHUP, it waits up to this duration for any running update to
-            finish before disconnecting. If the timeout is reached, the agent
-            sends a failed UpdateResult and proceeds with shutdown.
+            Maximum time in seconds to wait for in-flight operations to complete
+            during graceful shutdown. When the service receives SIGTERM, SIGINT,
+            or SIGHUP, it waits up to this duration for any running operation to
+            finish before disconnecting. Optional — if not provided, the service
+            uses its own default.
           default: 120
           examples:
             - 120
@@ -959,7 +964,7 @@ components:
           type: string
           description: |
             Human-readable reason for the restart (e.g., "controller restarting",
-            "upgrade in progress"). The agent should expect the connection to
+            "upgrade in progress"). The service should expect the connection to
             close shortly and reconnect automatically.
           examples:
             - controller restarting
@@ -1314,7 +1319,7 @@ components:
         - shutdown
         - restart
       description: |
-        Reason for agent disconnection.
+        Reason for service disconnection.
         - `shutdown`: SIGTERM/SIGINT received — clean exit
         - `restart`: SIGHUP received — will reconnect after external restart
 
@@ -1332,4 +1337,9 @@ components:
           $ref: "#/components/schemas/disconnectReason"
           description: |
             Reason for the disconnection. Allows the controller to distinguish
-            between an agent shutting down vs one that will restart and reconnect.
+            between a service shutting down vs one that will restart and reconnect.
+        active_tenants:
+          type: array
+          items:
+            type: string
+          description: List of active tenant IDs (MQTT services only, for graceful handoff)

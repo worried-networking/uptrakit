@@ -222,14 +222,14 @@ async fn do_enrollment(
         .await?;
 
         tracing::info!(
-            agent_id = %enrolled.agent_id,
+            service_id = %enrolled.service_id,
             status = %enrolled.status,
             "enrollment response received"
         );
 
-        // Persist agent state using agent_id from controller response
+        // Persist agent state using service_id from controller response
         let agent_state = state::AgentState {
-            agent_id: enrolled.agent_id.clone(),
+            agent_id: enrolled.service_id.clone(),
             enrollment_secret: enrolled.enrollment_secret,
         };
         agent_state.save(data_dir)?;

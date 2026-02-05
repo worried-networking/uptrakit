@@ -208,24 +208,24 @@ async fn lookup_cert_status(
     serial_hex: &str,
     ca_snapshot: &CaSnapshotData,
 ) -> Result<CertStatus, Box<dyn std::error::Error>> {
-    use uptrakit_shared_db::entity::agent_certificate;
+    use uptrakit_shared_db::entity::service_certificate;
 
     // Search by serial number across both active and previous CA fingerprints
     let mut condition = Condition::any().add(
         Condition::all()
-            .add(agent_certificate::Column::SerialNumber.eq(serial_hex))
-            .add(agent_certificate::Column::CaFingerprint.eq(&ca_snapshot.active_fingerprint)),
+            .add(service_certificate::Column::SerialNumber.eq(serial_hex))
+            .add(service_certificate::Column::CaFingerprint.eq(&ca_snapshot.active_fingerprint)),
     );
 
     if let Some(prev_fp) = &ca_snapshot.previous_fingerprint {
         condition = condition.add(
             Condition::all()
-                .add(agent_certificate::Column::SerialNumber.eq(serial_hex))
-                .add(agent_certificate::Column::CaFingerprint.eq(prev_fp)),
+                .add(service_certificate::Column::SerialNumber.eq(serial_hex))
+                .add(service_certificate::Column::CaFingerprint.eq(prev_fp)),
         );
     }
 
-    let cert = agent_certificate::Entity::find()
+    let cert = service_certificate::Entity::find()
         .filter(condition)
         .one(db)
         .await
@@ -246,11 +246,11 @@ async fn lookup_cert_status(
 
         // Map our revocation reasons to CRL reasons
         let reason = cert.revocation_reason.as_ref().map(|r| match r {
-            agent_certificate::RevocationReason::CertificateRenewed => CrlReason::Superseded,
-            agent_certificate::RevocationReason::AgentDeactivated => {
+            service_certificate::RevocationReason::CertificateRenewed => CrlReason::Superseded,
+            service_certificate::RevocationReason::ServiceDeactivated => {
                 CrlReason::CessationOfOperation
             }
-            agent_certificate::RevocationReason::AgentMerged => CrlReason::Superseded,
+            service_certificate::RevocationReason::ServiceMerged => CrlReason::Superseded,
         });
 
         let revoked_info = x509_ocsp::RevokedInfo {

@@ -38,13 +38,13 @@ impl Related<super::tenant::Entity> for Entity {
     }
 }
 
-impl Related<super::agent::Entity> for Entity {
+impl Related<super::service::Entity> for Entity {
     fn to() -> RelationDef {
-        super::agent_host::Relation::Agent.def()
+        super::service_host::Relation::Service.def()
     }
 
     fn via() -> Option<RelationDef> {
-        Some(super::agent_host::Relation::Host.def().rev())
+        Some(super::service_host::Relation::Host.def().rev())
     }
 }
 

@@ -6,7 +6,7 @@ use axum::response::Response;
 use http::HeaderMap;
 
 use crate::AppState;
-use crate::extract::{AgentIdentity, ExternalBaseUrl, ProxyIp};
+use crate::extract::{ExternalBaseUrl, ProxyIp, ServiceIdentity};
 
 /// Middleware that handles reverse proxy forwarded headers:
 ///
@@ -29,7 +29,7 @@ pub async fn resolve_proxy_headers(
 ) -> Response {
     let network = state.settings.network().await;
     let from_trusted_proxy = req.extensions().get::<ProxyIp>().is_some();
-    let has_mtls_identity = req.extensions().get::<AgentIdentity>().is_some();
+    let has_mtls_identity = req.extensions().get::<ServiceIdentity>().is_some();
 
     // --- Part A: Client certificate identity ---
     if !has_mtls_identity {
@@ -85,7 +85,7 @@ fn try_info_header(
     headers: &HeaderMap,
     header_name: Option<&str>,
     state: &AppState,
-) -> Option<AgentIdentity> {
+) -> Option<ServiceIdentity> {
     let header_name = header_name?;
     let raw = headers.get(header_name)?.to_str().ok()?;
     // Traefik uses form-URL-encoding (+ = space); urlencoding only handles
@@ -130,7 +130,7 @@ fn try_info_header(
             }
         }
 
-        let identity = crate::extract::agent_identity_from_info(&subject_decoded, serial);
+        let identity = crate::extract::service_identity_from_info(&subject_decoded, serial);
         return identity;
     }
 
@@ -138,12 +138,12 @@ fn try_info_header(
 }
 
 /// Parse a Cert field value (URL-encoded PEM or base64-DER).
-fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<AgentIdentity> {
+fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<ServiceIdentity> {
     let cert_decoded = urlencoding::decode(cert_field).ok()?;
 
     // Try PEM first (Envoy sends URL-encoded PEM)
     if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(cert_decoded.as_bytes()) {
-        let identity = crate::extract::agent_identity_from_der(&pem_block.contents)?;
+        let identity = crate::extract::service_identity_from_der(&pem_block.contents)?;
         let (_, cert) = x509_parser::parse_x509_certificate(&pem_block.contents).ok()?;
         let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
         if !verify_issuer_cn_str(issuer_cn, state) {
@@ -162,7 +162,7 @@ fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<AgentIdent
         cert_decoded.as_bytes(),
     )
     .ok()?;
-    let identity = crate::extract::agent_identity_from_der(&der)?;
+    let identity = crate::extract::service_identity_from_der(&der)?;
     let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;
     let issuer_cn = cert.issuer().iter_common_name().next()?.as_str().ok()?;
     if !verify_issuer_cn_str(issuer_cn, state) {
@@ -183,7 +183,7 @@ fn try_pem_header(
     headers: &HeaderMap,
     header_name: Option<&str>,
     state: &AppState,
-) -> Option<AgentIdentity> {
+) -> Option<ServiceIdentity> {
     let header_name = header_name?;
     let raw = headers.get(header_name)?.to_str().ok()?;
     let decoded = urlencoding::decode(raw).ok()?;
@@ -200,7 +200,7 @@ fn try_pem_header(
         .ok()?
     };
 
-    let identity = crate::extract::agent_identity_from_der(&der)?;
+    let identity = crate::extract::service_identity_from_der(&der)?;
 
     // Verify issuer CN from the parsed cert
     let (_, cert) = x509_parser::parse_x509_certificate(&der).ok()?;

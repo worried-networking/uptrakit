@@ -35,7 +35,8 @@ uptrakit/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — agent<->controller wire protocol
+│   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared service identity state
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
@@ -123,9 +124,9 @@ The controller manages a self-signed internal CA for mTLS agent authentication.
 1. Background task checks every 24 hours whether the active CA enters the 6-month rotation window. Can also be triggered on demand via `POST /api/v1/settings/rotate-ca`.
 2. On rotation: current CA files move to `ca-previous.{crt,key}`, a new CA is generated as `ca.{crt,key}`.
 3. Both CAs form a trust bundle (`bundle_pem`). The controller trusts client certs signed by either CA.
-4. CRLs are partitioned: each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint` column in `agent_certificates`).
+4. CRLs are partitioned: each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint` column in `service_certificates`).
 5. Connected agents receive a `CaBundleUpdated` WebSocket message with the new bundle PEM, followed by `RequestCertRenewal` to trigger immediate cert renewal.
-6. Agents that were offline detect staleness via `ca_bundle_hash` in `AgentSettings` and fetch the updated bundle over HTTPS.
+6. Agents that were offline detect staleness via `ca_bundle_hash` in `ServiceSettings` and fetch the updated bundle over HTTPS.
 7. New agent certs are always signed by the active CA.
 
 ### PKI address and AIA/CDP extensions
@@ -193,7 +194,7 @@ Runtime CA state is shared across async tasks via a `tokio::sync::watch` channel
 These are non-negotiable design constraints. Do not violate them.
 
 1. **Updates are never automatic.** The scheduler triggers version *checks* only. Update execution requires explicit user action (via UI, CLI, or MQTT/Home Assistant).
-2. **Agents initiate outbound-only connections.** Agents connect to the controller via secure WebSocket (`/api/v1/ws/agent`). They never listen on any port or accept inbound connections.
+2. **Agents initiate outbound-only connections.** Agents connect to the controller via secure WebSocket (`/api/v1/ws/service`). They never listen on any port or accept inbound connections.
 3. **Agents run unprivileged.** They run as a dedicated user (e.g. `uptrakit`). Only specific update commands are granted `NOPASSWD` sudo access.
 4. **Provider split.** Remote (upstream version resolution) logic runs on the controller. Local (installed version detection + update execution) logic runs on the agent. Keep this boundary clear.
 5. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are treated as untrusted input.
@@ -203,7 +204,7 @@ These are non-negotiable design constraints. Do not violate them.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
-12. **Do not add any `allow()`** without excpicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`), `run_authenticated_loop` in the agent (gained `pki_addr` parameter), and `create_mqtt_client`/`update_mqtt_client` in `mqtt_client_store` (many connection parameters).
+12. **Do not add any `allow()`** without explicit approval from the user. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`), `run_authenticated_loop` in the agent (gained `pki_addr` parameter), and `create_mqtt_client`/`update_mqtt_client` in `mqtt_client_store` (many connection parameters).
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
 ## CLI output formatting
@@ -323,7 +324,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 
 | Table | Unique constraint change |
 | --- | --- |
-| `agents` | — (index on `tenant_id`) |
+| `services` | — (index on `tenant_id`) |
 | `hosts` | `machine_id` unique → `(tenant_id, machine_id)` |
 | `provider_configs` | — (index on `tenant_id`) |
 | `software_items` | `(provider_config_id, package_identifier)` → `(tenant_id, provider_config_id, package_identifier)` |
@@ -334,7 +335,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 
 ### Tables NOT changed (remain global)
 
-`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `agent_certificates`, `pending_*` tables, `agent_hosts`, `host_software_items`, `available_versions`.
+`users`, `roles`, `permissions`, `role_permissions`, `sessions`, `api_tokens`, `pending_*` tables, `host_software_items`, `available_versions`. Note: `service_certificates` and `service_hosts` are tenant-scoped through the `services` table FK.
 
 ### TenantContext extractor
 
@@ -547,8 +548,8 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 | `--insecure` | | `false` | Skip TLS verification (DANGEROUS, only for initial CA trust) |
 
 **Connection lifecycle (same TOFU pattern as agents):**
-1. **CA fetch (TOFU)**: Fetch CA certificate from `GET /api/v1/pki/ca.crt` (using system roots or `--insecure`), save to `ca.crt` in data dir
-2. **Enrollment**: Connect to `/api/v1/ws/mqtt` anonymously, send `Enroll` with hostname/friendly_name/enrollment_token, receive `Enrolled` with service_id and enrollment_secret
+1. **CA fetch (TOFU)**: Fetch CA certificate from `GET /api/v1/pki/ca.crt` (using system roots or `--insecure`), save to `ca.pem` in data dir
+2. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`, hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret
 3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate
 4. **Authenticated operation**: Reconnect with mTLS, send `Register`, receive `TenantAssignments`, run MQTT clients
 
@@ -567,29 +568,28 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 
 **Wire protocol:**
 
-The MQTT service uses a dedicated wire protocol (`MqttServiceMessage` / `MqttControllerMessage`) defined in `crates/shared/wire/src/lib.rs`. It reuses several payloads from the agent protocol (e.g., `PingPayload`, `CertificatePayload`, `CaBundleUpdatedPayload`, `RequestCertRenewalPayload`, `ServerRestartingPayload`) and adds MQTT-specific messages for enrollment, registration, tenant management, and heartbeats.
+Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `ControllerMessage`) defined in `crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHostInfo`, `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`, `Heartbeat`, `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`). `ControllerMessage` is fully shared. The `service_ws.rs` module is the single public WebSocket entry point; `agent_ws.rs` and `mqtt_ws.rs` are `pub(crate)` internal implementation modules.
 
 **Enrollment and approval:**
 
-MQTT services have a separate enrollment flow from agents:
-- Separate `mqtt_services` table (similar structure to `agents`)
-- Separate `mqtt_enrollment_tokens` table (tokens are NOT interchangeable with agent tokens)
-- Separate `mqtt_service_certificates` table
-- Approval via REST API: `POST /api/v1/mqtt-services/{id}/approve` (permission: `ManageSettings`)
+MQTT services use the unified service entity:
+- Single `services` table with `service_type` column (`Agent`/`Mqtt`)
+- Single `service_certificates` table for all service types
+- MQTT enrollment tokens are settings-based (key `mqtt_enrollment.token_hash` via `SettingKey::MqttEnrollmentTokenHash`), separate from agent enrollment tokens
+- Approval via unified REST API: `POST /api/v1/services/{id}/approve` (permission: `ManageAgents`)
 - If a valid enrollment token is provided, the service is auto-approved
 
-**REST API endpoints:**
+**REST API endpoints (unified services API):**
 
 | Method | Path | Permission | Description |
 | --- | --- | --- | --- |
-| GET | `/api/v1/mqtt-services` | ManageSettings | List MQTT services |
-| GET | `/api/v1/mqtt-services/{id}` | ManageSettings | Get single MQTT service |
-| POST | `/api/v1/mqtt-services/{id}/approve` | ManageSettings | Approve a pending service |
-| POST | `/api/v1/mqtt-services/{id}/reject` | ManageSettings | Reject a pending service |
-| DELETE | `/api/v1/mqtt-services/{id}` | ManageSettings | Deactivate a service |
-| POST | `/api/v1/mqtt-enrollment-tokens` | ManageSettings | Create enrollment token |
-| GET | `/api/v1/mqtt-enrollment-tokens` | ManageSettings | List enrollment tokens |
-| DELETE | `/api/v1/mqtt-enrollment-tokens/{id}` | ManageSettings | Revoke enrollment token |
+| GET | `/api/v1/services?type=mqtt&status=...` | ViewAgents | List MQTT services |
+| POST | `/api/v1/services/{id}/approve` | ManageAgents | Approve a pending service |
+| POST | `/api/v1/services/{id}/reject` | ManageAgents | Reject a pending service |
+| DELETE | `/api/v1/services/{id}` | ManageAgents | Deactivate a service |
+| POST | `/api/v1/services/enrollment-token?type=mqtt` | ManageAgents | Create MQTT enrollment token |
+| DELETE | `/api/v1/services/enrollment-token?type=mqtt` | ManageAgents | Revoke MQTT enrollment token |
+| GET | `/api/v1/services/enrollment-token/status?type=mqtt` | ManageAgents | Check MQTT enrollment token status |
 
 **Key files:**
 
@@ -598,23 +598,22 @@ MQTT services have a separate enrollment flow from agents:
 | `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls) |
 | `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
 | `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
-| `crates/shared/wire/src/lib.rs` | MQTT service wire protocol messages |
+| `crates/shared/wire/src/lib.rs` | Unified wire protocol messages (`ServiceMessage` / `ControllerMessage`) |
+| `crates/shared/db/src/entity/service.rs` | SeaORM entity for service identity (agents and MQTT) |
+| `crates/shared/db/src/entity/service_certificate.rs` | SeaORM entity for service certificates |
 | `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
 | `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
-| `crates/shared/db/src/entity/mqtt_service.rs` | SeaORM entity for MQTT service identity |
-| `crates/shared/db/src/entity/mqtt_service_certificate.rs` | SeaORM entity for service certificates |
-| `crates/shared/db/src/entity/mqtt_enrollment_token.rs` | SeaORM entity for enrollment tokens |
+| `crates/shared/enrollment/` | `uptrakit-enrollment` crate for shared service identity state |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
-| `crates/ui/web-api/src/mqtt_service_connections.rs` | Connection registry for connected MQTT services |
+| `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services |
 | `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
 | `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
-| `crates/ui/web-api/src/routes/mqtt_ws.rs` | WebSocket handler for MQTT service connections |
-| `crates/ui/web-api/src/routes/mqtt_services.rs` | MQTT service management REST endpoints |
-| `crates/ui/web-api/src/routes/mqtt_enrollment_tokens.rs` | Enrollment token REST endpoints |
+| `crates/ui/web-api/src/routes/service_ws.rs` | Unified WebSocket entry point (`/api/v1/ws/service`) |
+| `crates/ui/web-api/src/routes/mqtt_ws.rs` | Internal MQTT WebSocket handler (`pub(crate)`) |
+| `crates/ui/web-api/src/routes/services.rs` | Unified service management REST endpoints |
 | `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
 | `crates/core/mqtt/src/cli.rs` | CLI argument definitions |
 | `crates/core/mqtt/src/controller_client.rs` | WebSocket client for controller communication |
-| `crates/core/mqtt/src/identity.rs` | Service identity management (keypair, cert, service_id) |
 | `crates/core/mqtt/src/tenant_manager.rs` | Per-tenant MQTT client lifecycle (push-based) |
 | `crates/core/mqtt/src/mqtt_client.rs` | MQTT broker connection logic |
 | `crates/core/mqtt/src/error.rs` | Application error types |
@@ -768,29 +767,32 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 ### Database tables
 
 - **`hosts`**: `id` (UUID PK), `machine_id` (unique), `hostname`, `friendly_name`, `os_type?`, `os_version?`, `architecture?`, `ip_address?`, `last_seen_at?`, `created_at`, `updated_at`, `deactivated_at?`
-- **`agent_hosts`**: junction table with composite PK `(agent_id, host_id)` and `linked_at` timestamp. FKs cascade on delete.
+- **`service_hosts`**: junction table with composite PK `(service_id, host_id)` and `linked_at` timestamp. FKs cascade on delete.
 
 ### Wire protocol additions
 
 - `HostInfo` struct: `machine_id`, `os_type?`, `os_version?`, `architecture?`
-- `EnrollPayload` includes required `host_info: HostInfo` field. The `agent_id` is generated by the controller.
+- `EnrollPayload` includes `service_type: String` (`"agent"` or `"mqtt"`) and `host_info: Option<HostInfo>` (required for agents, absent for MQTT). The `service_id` is generated by the controller.
 - `RequestCertificatePayload` includes `csr_pem: String` — a fresh CSR for certificate issuance after approval
 - `RenewCertificatePayload` includes `csr_pem: String` — a fresh CSR for certificate renewal
 - `CertificatePayload` contains `cert_pem: String` and `not_after: UtcDateTime` (no `key_pem` — the private key never leaves the agent)
-- `ReportHostInfo(ReportHostInfoPayload)` variant in `AgentMessage` — sent by authenticated agents immediately after mTLS WebSocket connect
-- `RenewCertificate(RenewCertificatePayload)` variant in `AgentMessage` — agent requests certificate renewal with a fresh CSR (early or on-demand)
-- `AgentSettings(AgentSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours`, `ca_bundle_hash`, and `shutdown_timeout_seconds`
+- `ReportHostInfo(ReportHostInfoPayload)` variant in `ServiceMessage` (agent-specific) — sent by authenticated agents immediately after mTLS WebSocket connect
+- `RenewCertificate(RenewCertificatePayload)` variant in `ServiceMessage` — service requests certificate renewal with a fresh CSR (early or on-demand)
+- `ServiceSettings(ServiceSettingsPayload)` variant in `ControllerMessage` — pushed after authentication with `renewal_window_hours`, `ca_bundle_hash`, and `shutdown_timeout_seconds` (`Option<u32>`)
 - `CaBundleUpdated(CaBundleUpdatedPayload)` variant in `ControllerMessage` — pushed after CA rotation with the new bundle PEM
-- `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or PKI address change to prompt agents to renew certificates immediately; includes a human-readable `reason` field
+- `RequestCertRenewal(RequestCertRenewalPayload)` variant in `ControllerMessage` — pushed after CA rotation or PKI address change to prompt services to renew certificates immediately; includes a human-readable `reason` field
 - `CheckVersions(CheckVersionsPayload)` variant in `ControllerMessage` — requests installed version detection from agents
-- `VersionCheckResults(VersionCheckResultsPayload)` variant in `AgentMessage` — agent response with detected versions or errors
+- `VersionCheckResults(VersionCheckResultsPayload)` variant in `ServiceMessage` (agent-specific) — agent response with detected versions or errors
 - `ReportHostInfoPayload` includes `agent_version: String` — agent binary version (from `CARGO_PKG_VERSION`)
 - `ExecuteUpdate(ExecuteUpdatePayload)` variant in `ControllerMessage` — triggers a software update on the agent (boxed to avoid large enum variant)
-- `UpdateStarted(UpdateStartedPayload)` variant in `AgentMessage` — agent acknowledges update start with detected from_version
-- `UpdateOutput(UpdateOutputPayload)` variant in `AgentMessage` — agent streams update output (stdout, stderr, pre/post-hook, system)
-- `UpdateResult(UpdateResultPayload)` variant in `AgentMessage` — agent reports final update status with accumulated output
-- `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify agents; includes a human-readable `reason` field
-- `Disconnecting(DisconnectingPayload)` variant in `AgentMessage` — agent notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`)
+- `UpdateStarted(UpdateStartedPayload)` variant in `ServiceMessage` (agent-specific) — agent acknowledges update start with detected from_version
+- `UpdateOutput(UpdateOutputPayload)` variant in `ServiceMessage` (agent-specific) — agent streams update output (stdout, stderr, pre/post-hook, system)
+- `UpdateResult(UpdateResultPayload)` variant in `ServiceMessage` (agent-specific) — agent reports final update status with accumulated output
+- `Register(RegisterPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service registers with the controller
+- `Heartbeat(HeartbeatPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service periodic heartbeat with active tenant IDs
+- `ReleaseTenants(ReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases tenant leases
+- `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify services; includes a human-readable `reason` field
+- `Disconnecting(DisconnectingPayload)` variant in `ServiceMessage` — service notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`; optional `active_tenants: Vec<String>` for MQTT)
 
 ### Agent graceful shutdown
 
@@ -811,7 +813,7 @@ Agents support graceful shutdown to ensure in-flight updates complete before dis
 5. Return appropriate `LoopOutcome`
 
 **Configuration:**
-- `shutdown_timeout_seconds` in `AgentSettingsPayload` (default: 120 seconds)
+- `shutdown_timeout_seconds` in `ServiceSettingsPayload` (default: 120 seconds, `Option<u32>`)
 - Controller pushes this value after authentication
 - Agent waits up to this duration for in-flight updates to complete
 
@@ -821,11 +823,11 @@ Agents support graceful shutdown to ensure in-flight updates complete before dis
 
 ### Agent version tracking
 
-Agents report their binary version via the `agent_version` field in `ReportHostInfoPayload`. The controller stores this in the `agents.agent_version` column and enforces a minimum version check:
+Agents report their binary version via the `agent_version` field in `ReportHostInfoPayload`. The controller stores this in the `services.client_version` column and enforces a minimum version check:
 
-- **Minimum version**: Hardcoded `MIN_AGENT_VERSION` constant in `crates/ui/web-api/src/routes/agent_ws.rs` (currently `"0.0.1"`)
+- **Minimum version**: Hardcoded `MIN_AGENT_VERSION` constant in `crates/ui/web-api/src/routes/agent_ws.rs` (currently `"0.0.1"`; note: `agent_ws.rs` is now a `pub(crate)` internal module)
 - **Enforcement**: On `ReportHostInfo`, if the agent's version is below the minimum (semver comparison), the controller sends an `Error { code: "agent_version_too_old" }` message and closes the connection
-- **API exposure**: The `agent_version` field is included in `AgentResponse` (REST API)
+- **API exposure**: The `client_version` field is included in `ServiceResponse` (REST API)
 
 ### Version check wire protocol
 
@@ -855,11 +857,11 @@ The controller can request installed version detection from agents:
 
 ### Controller host logic
 
-`find_or_create_host_and_link()` in `routes/agents.rs`:
+`find_or_create_host_and_link()` in the agent WebSocket handler area:
 - Skips if `machine_id == "unknown"`
 - Finds host by `machine_id` → updates mutable fields (hostname, IP, OS info, `last_seen_at`)
 - Or creates new host with `friendly_name` defaulting to hostname
-- Upserts `agent_host` link (insert if not exists)
+- Upserts `service_host` link (insert if not exists)
 - Called during enrollment and on `ReportHostInfo` messages
 - Non-fatal on failure
 
@@ -1134,7 +1136,7 @@ cargo nextest run --all-features
 
 ### Reverse proxy integration tests
 
-Docker-based integration tests in `crates/core/controller/tests/reverse_proxy/` validate that the controller's middleware correctly extracts `AgentIdentity` from forwarded headers when behind real reverse proxies. Each test uses `testcontainers` to spin up a Docker container.
+Docker-based integration tests in `crates/core/controller/tests/reverse_proxy/` validate that the controller's middleware correctly extracts `ServiceIdentity` (unified identity extractor, replacing the former `AgentIdentity` and `MqttServiceIdentity`) from forwarded headers when behind real reverse proxies. Each test uses `testcontainers` to spin up a Docker container.
 
 ```text
 crates/core/controller/tests/

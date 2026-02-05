@@ -1,4 +1,4 @@
-use crate::agents::AgentStatus;
+use crate::services::ServiceStatus;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -23,7 +23,7 @@ pub struct HostResponse {
 pub struct HostAgentSummary {
     pub id: String,
     pub friendly_name: String,
-    pub status: AgentStatus,
+    pub status: ServiceStatus,
 }
 
 #[derive(Serialize, Deserialize)]

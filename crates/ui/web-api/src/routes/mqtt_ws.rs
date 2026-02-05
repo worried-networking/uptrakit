@@ -1,272 +1,40 @@
 use std::sync::Arc;
 
-use axum::Extension;
-use axum::extract::State;
-use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use axum::http::HeaderMap;
-use axum::response::IntoResponse;
+use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
-    CertificatePayload, ErrorPayload, MqttApprovedPayload, MqttControllerMessage,
-    MqttEnrolledPayload, MqttRegisteredPayload, MqttRejectedPayload, MqttServiceMessage,
-    MqttServiceSettingsPayload, MqttTenantAssignmentsPayload, PingPayload, PongPayload, now_millis,
+    ApprovedPayload, CertificatePayload, ControllerMessage, ErrorPayload, MqttRegisteredPayload,
+    MqttTenantAssignmentsPayload, PingPayload, PongPayload, RejectedPayload, ServiceMessage,
+    now_millis,
 };
-use uptrakit_shared_db::entity::{mqtt_service, mqtt_service_certificate};
+use uptrakit_shared_db::entity::{
+    service as mqtt_service, service_certificate as mqtt_service_certificate,
+};
 
+use super::service_ws::{close_with_reason, serialize_msg};
 use crate::AppState;
-use crate::extract::{ClientIp, MqttServiceIdentity};
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 
-/// Serialize a [`MqttControllerMessage`] to JSON, logging on failure.
-fn serialize_msg(msg: &MqttControllerMessage) -> Option<String> {
-    match serde_json::to_string(msg) {
-        Ok(json) => Some(json),
-        Err(e) => {
-            tracing::error!(error = %e, "failed to serialize mqtt controller message");
-            None
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// Authenticated MQTT handler (called from service_ws after shared auth)
+// ---------------------------------------------------------------------------
 
-/// Connection type determined at WebSocket upgrade time.
-enum ConnectionType {
-    /// mTLS client cert present → authenticated MQTT service
-    Authenticated {
-        service_id: uuid::Uuid,
-        cert_serial: String,
-    },
-    /// Authorization: Bearer <secret> → reconnecting enrolled service
-    Enrolled(uuid::Uuid),
-    /// No auth → expects Enroll message
-    Anonymous,
-}
-
-pub async fn mqtt_ws(
-    State(state): State<Arc<AppState>>,
-    identity: Option<Extension<MqttServiceIdentity>>,
-    client_ip: Option<Extension<ClientIp>>,
-    headers: HeaderMap,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    // Determine connection type at upgrade time
-    let conn_type = if let Some(Extension(ref id)) = identity {
-        tracing::info!(service_id = %id.service_id, "authenticated MQTT service WS upgrade (mTLS)");
-        ConnectionType::Authenticated {
-            service_id: id.service_id,
-            cert_serial: id.cert_serial.clone(),
-        }
-    } else if let Some(secret) = extract_bearer(&headers) {
-        match do_lookup_by_secret(&state.db, &secret).await {
-            Ok(service) => {
-                tracing::info!(service_id = %service.id, "enrolled MQTT service WS upgrade (bearer)");
-                ConnectionType::Enrolled(service.id)
-            }
-            Err(msg) => {
-                tracing::warn!("bearer auth failed: {msg}");
-                return (axum::http::StatusCode::UNAUTHORIZED, msg).into_response();
-            }
-        }
-    } else {
-        tracing::info!("anonymous MQTT service WS upgrade");
-        ConnectionType::Anonymous
-    };
-
-    let ip = client_ip.map(|Extension(ClientIp(ip))| ip);
-
-    ws.on_upgrade(move |socket| handle_connection(socket, state, conn_type, ip))
-}
-
-fn extract_bearer(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(axum::http::header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.to_string())
-}
-
-/// Look up MQTT service by enrollment secret.
-async fn do_lookup_by_secret(
-    db: &sea_orm::DatabaseConnection,
-    secret: &str,
-) -> Result<mqtt_service::Model, String> {
-    use uptrakit_shared_db::entity::prelude::MqttService;
-
-    // Find all non-deactivated MQTT services
-    let services = MqttService::find()
-        .filter(mqtt_service::Column::DeactivatedAt.is_null())
-        .all(db)
-        .await
-        .map_err(|e| format!("database error: {e}"))?;
-
-    // Verify secret against each service's hash
-    for service in services {
-        if let Ok(true) =
-            crate::auth::password::verify_password(secret, &service.enrollment_secret_hash)
-        {
-            return Ok(service);
-        }
-    }
-
-    Err("invalid enrollment secret".to_string())
-}
-
-async fn handle_connection(
-    socket: WebSocket,
-    state: Arc<AppState>,
-    conn_type: ConnectionType,
-    client_ip: Option<std::net::IpAddr>,
-) {
-    match conn_type {
-        ConnectionType::Authenticated {
-            service_id,
-            cert_serial,
-        } => {
-            handle_authenticated(socket, state, service_id, cert_serial).await;
-        }
-        ConnectionType::Enrolled(service_id) => {
-            handle_enrolled(socket, state, service_id).await;
-        }
-        ConnectionType::Anonymous => {
-            handle_anonymous(socket, state, client_ip).await;
-        }
-    }
-}
-
-/// Authenticated path: mTLS MQTT service, operational loop.
-async fn handle_authenticated(
-    socket: WebSocket,
-    state: Arc<AppState>,
+/// Service-type-specific handler for an authenticated MQTT connection.
+///
+/// Called by [`super::service_ws`] after certificate validation, service status
+/// check, and sending `ServiceSettings`. Waits for a `Register` message, then
+/// enters the MQTT-specific operational loop (Heartbeat, ReleaseTenants,
+/// RenewCertificate).
+pub(crate) async fn handle_mqtt_authenticated(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
     service_id: uuid::Uuid,
     cert_serial: String,
+    cert_ca_fingerprint: String,
 ) {
-    tracing::debug!(%service_id, "authenticated MQTT service connected");
-
-    let (mut sink, mut stream) = socket.split();
-
-    // 1. Certificate validation check
-    let cert_record = if cert_serial.is_empty() {
-        match mqtt_service_certificate::Entity::find()
-            .filter(mqtt_service_certificate::Column::MqttServiceId.eq(service_id))
-            .filter(mqtt_service_certificate::Column::RevokedAt.is_null())
-            .order_by_desc(mqtt_service_certificate::Column::CreatedAt)
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(record)) => {
-                tracing::warn!(
-                    %service_id,
-                    "MQTT service connected via proxy without cert serial, using service-id-only lookup"
-                );
-                record
-            }
-            Ok(None) => {
-                tracing::warn!(
-                    %service_id,
-                    "rejected connection: no non-revoked certificate found for MQTT service"
-                );
-                let _ = close_with_reason(&mut sink, "no valid certificate").await;
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, "internal error").await;
-                return;
-            }
-        }
-    } else {
-        match mqtt_service_certificate::Entity::find()
-            .filter(mqtt_service_certificate::Column::SerialNumber.eq(cert_serial.clone()))
-            .filter(mqtt_service_certificate::Column::MqttServiceId.eq(service_id))
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(record)) => {
-                if record.revoked_at.is_some() {
-                    tracing::warn!(
-                        %service_id,
-                        serial_number = %cert_serial,
-                        "rejected connection: certificate is revoked"
-                    );
-                    let _ = close_with_reason(&mut sink, "certificate revoked").await;
-                    return;
-                }
-                record
-            }
-            Ok(None) => {
-                tracing::warn!(
-                    %service_id,
-                    serial_number = %cert_serial,
-                    "rejected connection: certificate not recognized"
-                );
-                let _ = close_with_reason(&mut sink, "certificate not recognized").await;
-                return;
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, "internal error").await;
-                return;
-            }
-        }
-    };
-
-    // 2. Service status check
-    match mqtt_service::Entity::find_by_id(service_id)
-        .one(&state.db)
-        .await
-    {
-        Ok(Some(service)) => {
-            if service.deactivated_at.is_some() {
-                tracing::warn!(%service_id, "deactivated MQTT service connected with valid certificate");
-                let _ = close_with_reason(&mut sink, "service deactivated").await;
-                return;
-            }
-
-            if service.status != mqtt_service::MqttServiceStatus::Approved {
-                tracing::warn!(%service_id, "rejected connection: MQTT service not approved");
-                let _ = close_with_reason(&mut sink, "service not approved").await;
-                return;
-            }
-        }
-        Ok(None) => {
-            tracing::warn!(%service_id, "rejected connection: MQTT service not found");
-            let _ = close_with_reason(&mut sink, "service not found").await;
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "MQTT service status check failed");
-            let _ = close_with_reason(&mut sink, "internal error").await;
-            return;
-        }
-    }
-
-    // Save CA fingerprint before moving cert_record
-    let cert_ca_fingerprint = cert_record.ca_fingerprint.clone();
-
-    // Record certificate usage
-    let mut active: mqtt_service_certificate::ActiveModel = cert_record.into();
-    active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
-    if let Err(e) = active.update(&state.db).await {
-        tracing::error!(error = %e, "failed to update certificate last_seen_at");
-    }
-
-    // Send MqttServiceSettings on connect
-    let renewal_window_hours = state.settings.renewal_window_hours().await;
-    let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    let settings_msg = MqttControllerMessage::MqttServiceSettings(MqttServiceSettingsPayload {
-        renewal_window_hours,
-        ca_bundle_hash,
-    });
-    let Some(json) = serialize_msg(&settings_msg) else {
-        return;
-    };
-    if sink.send(Message::Text(json.into())).await.is_err() {
-        return;
-    }
-
-    // Wait for Register message before entering operational loop
+    // Wait for Register message before entering operational loop.
     let (instance_id, max_tenants, active_tenants) = loop {
         let msg = match stream.next().await {
             Some(Ok(m)) => m,
@@ -279,7 +47,7 @@ async fn handle_authenticated(
 
         match msg {
             Message::Text(text) => {
-                let service_msg: MqttServiceMessage = match serde_json::from_str(&text) {
+                let service_msg: ServiceMessage = match serde_json::from_str(&text) {
                     Ok(m) => m,
                     Err(e) => {
                         tracing::debug!(error = %e, "deserialize error");
@@ -288,16 +56,16 @@ async fn handle_authenticated(
                 };
 
                 match service_msg {
-                    MqttServiceMessage::Register(payload) => {
+                    ServiceMessage::Register(payload) => {
                         break (
                             payload.instance_id,
                             payload.max_tenants,
                             payload.active_tenants,
                         );
                     }
-                    MqttServiceMessage::Ping(PingPayload { agent_ts }) => {
+                    ServiceMessage::Ping(PingPayload { agent_ts }) => {
                         let controller_ts = now_millis();
-                        let response = MqttControllerMessage::Pong(PongPayload {
+                        let response = ControllerMessage::Pong(PongPayload {
                             agent_ts,
                             controller_ts,
                         });
@@ -309,7 +77,7 @@ async fn handle_authenticated(
                         }
                     }
                     _ => {
-                        let err = MqttControllerMessage::Error(ErrorPayload {
+                        let err = ControllerMessage::Error(ErrorPayload {
                             code: "bad_request".to_string(),
                             message: "expected register message".to_string(),
                         });
@@ -325,30 +93,30 @@ async fn handle_authenticated(
         }
     };
 
-    // Register in connection registry
+    // Register in connection registry.
     let mut push_rx = state
-        .mqtt_service_connections
-        .register(service_id, instance_id.clone(), max_tenants)
+        .service_connections
+        .register_mqtt(service_id, instance_id.clone(), max_tenants)
         .await;
 
-    // Send Registered acknowledgment
-    let registered_msg = MqttControllerMessage::Registered(MqttRegisteredPayload {
+    // Send Registered acknowledgment.
+    let registered_msg = ControllerMessage::Registered(MqttRegisteredPayload {
         instance_id: instance_id.clone(),
     });
     let Some(json) = serialize_msg(&registered_msg) else {
-        state.mqtt_service_connections.unregister(&service_id).await;
+        state.service_connections.unregister(&service_id).await;
         return;
     };
     if sink.send(Message::Text(json.into())).await.is_err() {
-        state.mqtt_service_connections.unregister(&service_id).await;
+        state.service_connections.unregister(&service_id).await;
         return;
     }
 
-    // Create lease coordinator
+    // Create lease coordinator.
     let lease_coordinator =
-        MqttLeaseCoordinator::new(state.db.clone(), state.mqtt_service_connections.clone());
+        MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
 
-    // Reconcile tenants if reconnecting with active tenants
+    // Reconcile tenants if reconnecting with active tenants.
     let tenant_configs = if !active_tenants.is_empty() {
         let tenant_ids: Vec<uuid::Uuid> = active_tenants
             .iter()
@@ -366,8 +134,6 @@ async fn handle_authenticated(
             }
         }
     } else {
-        // Fresh start - assign available tenants
-        // For now, claim up to max_tenants (or unlimited if max_tenants = 0)
         let requested = if max_tenants == 0 { 100 } else { max_tenants };
         match lease_coordinator
             .assign_available_tenants(service_id, &instance_id, requested)
@@ -381,25 +147,24 @@ async fn handle_authenticated(
         }
     };
 
-    // Send initial tenant assignments
+    // Send initial tenant assignments.
     if !tenant_configs.is_empty() {
-        let assignments_msg =
-            MqttControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
-                tenants: tenant_configs,
-            });
+        let assignments_msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
+            tenants: tenant_configs,
+        });
         let Some(json) = serialize_msg(&assignments_msg) else {
-            state.mqtt_service_connections.unregister(&service_id).await;
+            state.service_connections.unregister(&service_id).await;
             return;
         };
         if sink.send(Message::Text(json.into())).await.is_err() {
-            state.mqtt_service_connections.unregister(&service_id).await;
+            state.service_connections.unregister(&service_id).await;
             return;
         }
     }
 
     tracing::info!(%service_id, instance_id = %instance_id, "MQTT service registered");
 
-    // Enter operational loop
+    // Enter operational loop.
     loop {
         tokio::select! {
             msg = stream.next() => {
@@ -413,7 +178,7 @@ async fn handle_authenticated(
                 };
                 match msg {
                     Message::Text(text) => {
-                        let service_msg: MqttServiceMessage = match serde_json::from_str(&text) {
+                        let service_msg: ServiceMessage = match serde_json::from_str(&text) {
                             Ok(m) => m,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
@@ -422,10 +187,10 @@ async fn handle_authenticated(
                         };
 
                         match service_msg {
-                            MqttServiceMessage::Ping(PingPayload { agent_ts }) => {
+                            ServiceMessage::Ping(PingPayload { agent_ts }) => {
                                 let controller_ts = now_millis();
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong");
-                                let response = MqttControllerMessage::Pong(PongPayload {
+                                let response = ControllerMessage::Pong(PongPayload {
                                     agent_ts,
                                     controller_ts,
                                 });
@@ -434,7 +199,7 @@ async fn handle_authenticated(
                                     break;
                                 }
                             }
-                            MqttServiceMessage::Heartbeat(payload) => {
+                            ServiceMessage::Heartbeat(payload) => {
                                 let tenant_ids: Vec<uuid::Uuid> = payload
                                     .active_tenants
                                     .iter()
@@ -448,7 +213,7 @@ async fn handle_authenticated(
                                     tracing::warn!(error = %e, "failed to record heartbeat");
                                 }
                             }
-                            MqttServiceMessage::ReleaseTenants(payload) => {
+                            ServiceMessage::ReleaseTenants(payload) => {
                                 let tenant_ids: Vec<uuid::Uuid> = payload
                                     .tenant_ids
                                     .iter()
@@ -468,15 +233,15 @@ async fn handle_authenticated(
                                     "MQTT service released tenants"
                                 );
                             }
-                            MqttServiceMessage::RenewCertificate(payload) => {
+                            ServiceMessage::RenewCertificate(payload) => {
                                 // Re-fetch service from DB, verify still approved
                                 let service = match mqtt_service::Entity::find_by_id(service_id)
                                     .one(&state.db)
                                     .await
                                 {
-                                    Ok(Some(s)) if s.status == mqtt_service::MqttServiceStatus::Approved && s.deactivated_at.is_none() => s,
+                                    Ok(Some(s)) if s.status == mqtt_service::ServiceStatus::Approved && s.deactivated_at.is_none() => s,
                                     _ => {
-                                        let err = MqttControllerMessage::Error(ErrorPayload {
+                                        let err = ControllerMessage::Error(ErrorPayload {
                                             code: "forbidden".to_string(),
                                             message: "service is not approved".to_string(),
                                         });
@@ -487,7 +252,6 @@ async fn handle_authenticated(
                                     }
                                 };
 
-                                // Sign new certificate from service's CSR
                                 match do_sign_mqtt_service_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
@@ -496,7 +260,7 @@ async fn handle_authenticated(
                                     &payload.csr_pem,
                                 ).await {
                                     Ok(bundle) => {
-                                        let cert_msg = MqttControllerMessage::Certificate(CertificatePayload {
+                                        let cert_msg = ControllerMessage::Certificate(CertificatePayload {
                                             cert_pem: bundle.cert_pem,
                                             not_after: bundle.not_after,
                                         });
@@ -504,23 +268,22 @@ async fn handle_authenticated(
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
 
-                                        // Revoke old cert
                                         if let Err(e) = revoke_mqtt_service_certificate(
                                             &state.db,
                                             &cert_serial,
                                             &cert_ca_fingerprint,
-                                            mqtt_service_certificate::MqttServiceCertificateRevocationReason::CertificateRenewed,
+                                            mqtt_service_certificate::RevocationReason::CertificateRenewed,
                                         ).await {
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
                                         state.revocation_notify.notify_one();
                                         tracing::info!(%service_id, old_serial = %cert_serial, "MQTT service certificate renewed, old cert revoked");
-                                        let _ = close_with_reason(&mut sink, "certificate rotated").await;
+                                        let _ = close_with_reason(sink, "certificate rotated").await;
                                         break;
                                     }
                                     Err(e) => {
-                                        let err = MqttControllerMessage::Error(ErrorPayload {
+                                        let err = ControllerMessage::Error(ErrorPayload {
                                             code: "certificate_error".to_string(),
                                             message: e,
                                         });
@@ -531,7 +294,7 @@ async fn handle_authenticated(
                                     }
                                 }
                             }
-                            MqttServiceMessage::Disconnecting(payload) => {
+                            ServiceMessage::Disconnecting(payload) => {
                                 tracing::info!(
                                     %service_id,
                                     reason = ?payload.reason,
@@ -540,7 +303,7 @@ async fn handle_authenticated(
                                 break;
                             }
                             _ => {
-                                let err = MqttControllerMessage::Error(ErrorPayload {
+                                let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),
                                     message: "unexpected message for authenticated connection".to_string(),
                                 });
@@ -568,71 +331,23 @@ async fn handle_authenticated(
         }
     }
 
-    // Release all leases on disconnect
+    // Release all leases on disconnect.
     if let Err(e) = lease_coordinator.release_all_for_service(&service_id).await {
         tracing::error!(error = %e, "failed to release leases on disconnect");
     }
 
-    state.mqtt_service_connections.unregister(&service_id).await;
+    state.service_connections.unregister(&service_id).await;
     tracing::debug!(%service_id, "authenticated MQTT service disconnected");
 }
 
-/// Enrolled path: service reconnecting with Bearer secret, waiting for approval.
-async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uuid::Uuid) {
-    tracing::debug!(%service_id, "enrolled MQTT service connected (bearer)");
+// ---------------------------------------------------------------------------
+// Enrolled MQTT handler
+// ---------------------------------------------------------------------------
 
-    // Check current status
-    let service = match mqtt_service::Entity::find_by_id(service_id)
-        .one(&state.db)
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            tracing::warn!(%service_id, "MQTT service not found in DB");
-            return;
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "DB lookup failed");
-            return;
-        }
-    };
-
-    let (mut sink, mut stream) = socket.split();
-
-    // If already approved/rejected, push immediately
-    match service.status {
-        mqtt_service::MqttServiceStatus::Approved => {
-            let msg = MqttControllerMessage::Approved(MqttApprovedPayload {
-                service_id: service_id.to_string(),
-            });
-            let Some(json) = serialize_msg(&msg) else {
-                return;
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                return;
-            }
-        }
-        mqtt_service::MqttServiceStatus::Rejected => {
-            let msg = MqttControllerMessage::Rejected(MqttRejectedPayload {
-                service_id: service_id.to_string(),
-            });
-            if let Some(json) = serialize_msg(&msg) {
-                let _ = sink.send(Message::Text(json.into())).await;
-            }
-            return;
-        }
-        _ => {
-            // Pending — wait for approval via polling
-        }
-    }
-
-    let approved = service.status == mqtt_service::MqttServiceStatus::Approved;
-    run_enrolled_loop(&mut sink, &mut stream, &state, service_id, approved).await;
-    tracing::debug!(%service_id, "enrolled MQTT service disconnected");
-}
-
-/// Shared enrolled loop: handles Ping, RequestCertificate, and polls for approval.
-async fn run_enrolled_loop(
+/// Service-type-specific enrolled handler for an MQTT connection.
+///
+/// Handles Ping, RequestCertificate, and polls for approval changes.
+pub(crate) async fn handle_mqtt_enrolled(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
@@ -651,7 +366,7 @@ async fn run_enrolled_loop(
 
         match msg {
             Message::Text(text) => {
-                let service_msg: MqttServiceMessage = match serde_json::from_str(&text) {
+                let service_msg: ServiceMessage = match serde_json::from_str(&text) {
                     Ok(m) => m,
                     Err(e) => {
                         tracing::debug!(error = %e, "deserialize error");
@@ -660,9 +375,9 @@ async fn run_enrolled_loop(
                 };
 
                 match service_msg {
-                    MqttServiceMessage::Ping(PingPayload { agent_ts }) => {
+                    ServiceMessage::Ping(PingPayload { agent_ts }) => {
                         let controller_ts = now_millis();
-                        let response = MqttControllerMessage::Pong(PongPayload {
+                        let response = ControllerMessage::Pong(PongPayload {
                             agent_ts,
                             controller_ts,
                         });
@@ -674,28 +389,26 @@ async fn run_enrolled_loop(
                         }
                         tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
 
-                        // Poll database for status change (simplified)
+                        // Poll database for status change (simplified).
                         if !approved
                             && let Ok(Some(s)) = mqtt_service::Entity::find_by_id(service_id)
                                 .one(&state.db)
                                 .await
                         {
                             match s.status {
-                                mqtt_service::MqttServiceStatus::Approved => {
+                                mqtt_service::ServiceStatus::Approved => {
                                     approved = true;
-                                    let msg =
-                                        MqttControllerMessage::Approved(MqttApprovedPayload {
-                                            service_id: service_id.to_string(),
-                                        });
+                                    let msg = ControllerMessage::Approved(ApprovedPayload {
+                                        service_id: service_id.to_string(),
+                                    });
                                     if let Some(json) = serialize_msg(&msg) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
                                 }
-                                mqtt_service::MqttServiceStatus::Rejected => {
-                                    let msg =
-                                        MqttControllerMessage::Rejected(MqttRejectedPayload {
-                                            service_id: service_id.to_string(),
-                                        });
+                                mqtt_service::ServiceStatus::Rejected => {
+                                    let msg = ControllerMessage::Rejected(RejectedPayload {
+                                        service_id: service_id.to_string(),
+                                    });
                                     if let Some(json) = serialize_msg(&msg) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
@@ -705,9 +418,9 @@ async fn run_enrolled_loop(
                             }
                         }
                     }
-                    MqttServiceMessage::RequestCertificate(payload) => {
+                    ServiceMessage::RequestCertificate(payload) => {
                         if !approved {
-                            let err = MqttControllerMessage::Error(ErrorPayload {
+                            let err = ControllerMessage::Error(ErrorPayload {
                                 code: "not_approved".to_string(),
                                 message: "service is not yet approved".to_string(),
                             });
@@ -717,14 +430,14 @@ async fn run_enrolled_loop(
                             continue;
                         }
 
-                        // Re-fetch service from DB
+                        // Re-fetch service from DB.
                         let service = match mqtt_service::Entity::find_by_id(service_id)
                             .one(&state.db)
                             .await
                         {
                             Ok(Some(s)) => s,
                             _ => {
-                                let err = MqttControllerMessage::Error(ErrorPayload {
+                                let err = ControllerMessage::Error(ErrorPayload {
                                     code: "internal_error".to_string(),
                                     message: "service not found".to_string(),
                                 });
@@ -745,11 +458,10 @@ async fn run_enrolled_loop(
                         .await
                         {
                             Ok(bundle) => {
-                                let cert_msg =
-                                    MqttControllerMessage::Certificate(CertificatePayload {
-                                        cert_pem: bundle.cert_pem,
-                                        not_after: bundle.not_after,
-                                    });
+                                let cert_msg = ControllerMessage::Certificate(CertificatePayload {
+                                    cert_pem: bundle.cert_pem,
+                                    not_after: bundle.not_after,
+                                });
                                 if let Some(json) = serialize_msg(&cert_msg) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
@@ -757,7 +469,7 @@ async fn run_enrolled_loop(
                                 break; // close connection after certificate issuance
                             }
                             Err(e) => {
-                                let err = MqttControllerMessage::Error(ErrorPayload {
+                                let err = ControllerMessage::Error(ErrorPayload {
                                     code: "certificate_error".to_string(),
                                     message: e,
                                 });
@@ -768,8 +480,8 @@ async fn run_enrolled_loop(
                             }
                         }
                     }
-                    MqttServiceMessage::Enroll(_) => {
-                        let err = MqttControllerMessage::Error(ErrorPayload {
+                    ServiceMessage::Enroll(_) => {
+                        let err = ControllerMessage::Error(ErrorPayload {
                             code: "bad_request".to_string(),
                             message: "already enrolled".to_string(),
                         });
@@ -777,7 +489,7 @@ async fn run_enrolled_loop(
                             let _ = sink.send(Message::Text(json.into())).await;
                         }
                     }
-                    MqttServiceMessage::Disconnecting(payload) => {
+                    ServiceMessage::Disconnecting(payload) => {
                         tracing::info!(
                             %service_id,
                             reason = ?payload.reason,
@@ -786,7 +498,7 @@ async fn run_enrolled_loop(
                         break;
                     }
                     _ => {
-                        let err = MqttControllerMessage::Error(ErrorPayload {
+                        let err = ControllerMessage::Error(ErrorPayload {
                             code: "bad_request".to_string(),
                             message: "not available during enrollment".to_string(),
                         });
@@ -800,230 +512,78 @@ async fn run_enrolled_loop(
             _ => {}
         }
     }
+
+    tracing::debug!(%service_id, "enrolled MQTT service disconnected");
 }
 
-/// Anonymous path: expects Enroll message, then promotes in-place.
-async fn handle_anonymous(
-    socket: WebSocket,
-    state: Arc<AppState>,
-    _client_ip: Option<std::net::IpAddr>,
-) {
-    tracing::debug!("anonymous MQTT service connected");
+// ---------------------------------------------------------------------------
+// MQTT enrollment helper (exposed for service_ws)
+// ---------------------------------------------------------------------------
 
-    let (mut sink, mut stream) = socket.split();
-
-    // Wait for first message — must be Enroll
-    let (service_id, initial_status) = loop {
-        let msg = match stream.next().await {
-            Some(Ok(m)) => m,
-            Some(Err(e)) => {
-                tracing::debug!(error = %e, "websocket receive error");
-                return;
-            }
-            None => return,
-        };
-
-        match msg {
-            Message::Text(text) => {
-                let service_msg: MqttServiceMessage = match serde_json::from_str(&text) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        let err = MqttControllerMessage::Error(ErrorPayload {
-                            code: "bad_request".to_string(),
-                            message: format!("invalid message: {e}"),
-                        });
-                        if let Some(json) = serialize_msg(&err) {
-                            let _ = sink.send(Message::Text(json.into())).await;
-                        }
-                        return;
-                    }
-                };
-
-                match service_msg {
-                    MqttServiceMessage::Enroll(payload) => {
-                        let result = do_mqtt_service_enroll(
-                            &state.db,
-                            &state.settings,
-                            state.default_tenant_id,
-                            &payload.hostname,
-                            &payload.friendly_name,
-                            payload.enrollment_token.as_deref(),
-                        )
-                        .await;
-
-                        match result {
-                            Ok(enroll_result) => {
-                                let service_id = enroll_result.service.id;
-                                let enrolled_msg =
-                                    MqttControllerMessage::Enrolled(MqttEnrolledPayload {
-                                        service_id: service_id.to_string(),
-                                        enrollment_secret: enroll_result.enrollment_secret,
-                                        status: format!("{:?}", enroll_result.status)
-                                            .to_lowercase(),
-                                    });
-                                let Some(json) = serialize_msg(&enrolled_msg) else {
-                                    return;
-                                };
-                                if sink.send(Message::Text(json.into())).await.is_err() {
-                                    return;
-                                }
-
-                                tracing::info!(
-                                    %service_id,
-                                    status = ?enroll_result.status,
-                                    "MQTT service enrolled via WS"
-                                );
-
-                                // If auto-approved (valid enrollment token), push Approved
-                                if enroll_result.status == mqtt_service::MqttServiceStatus::Approved
-                                {
-                                    let approved_msg =
-                                        MqttControllerMessage::Approved(MqttApprovedPayload {
-                                            service_id: service_id.to_string(),
-                                        });
-                                    let Some(json) = serialize_msg(&approved_msg) else {
-                                        return;
-                                    };
-                                    if sink.send(Message::Text(json.into())).await.is_err() {
-                                        return;
-                                    }
-                                }
-
-                                break (service_id, enroll_result.status);
-                            }
-                            Err(e) => {
-                                let err = MqttControllerMessage::Error(ErrorPayload {
-                                    code: "enrollment_failed".to_string(),
-                                    message: e,
-                                });
-                                if let Some(json) = serialize_msg(&err) {
-                                    let _ = sink.send(Message::Text(json.into())).await;
-                                }
-                                return;
-                            }
-                        }
-                    }
-                    _ => {
-                        let err = MqttControllerMessage::Error(ErrorPayload {
-                            code: "bad_request".to_string(),
-                            message: "expected enroll message".to_string(),
-                        });
-                        if let Some(json) = serialize_msg(&err) {
-                            let _ = sink.send(Message::Text(json.into())).await;
-                        }
-                        return;
-                    }
-                }
-            }
-            Message::Close(_) => return,
-            _ => {}
-        }
-    };
-
-    // Now in enrolled state - continue with enrolled loop
-    let approved = initial_status == mqtt_service::MqttServiceStatus::Approved;
-    run_enrolled_loop(&mut sink, &mut stream, &state, service_id, approved).await;
-    tracing::debug!(%service_id, "anonymous->enrolled MQTT service disconnected");
-}
-
-async fn close_with_reason(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    reason: &str,
-) -> Result<(), axum::Error> {
-    sink.send(Message::Close(Some(CloseFrame {
-        code: axum::extract::ws::close_code::POLICY,
-        reason: reason.into(),
-    })))
-    .await
-}
-
-// --- Helper functions ---
-
-struct MqttServiceEnrollResult {
-    service: mqtt_service::Model,
-    enrollment_secret: String,
-    status: mqtt_service::MqttServiceStatus,
+pub(crate) struct MqttServiceEnrollResult {
+    pub service: mqtt_service::Model,
+    pub enrollment_secret: String,
+    pub status: mqtt_service::ServiceStatus,
 }
 
 /// Enroll a new MQTT service.
-async fn do_mqtt_service_enroll(
+pub(crate) async fn do_mqtt_service_enroll(
     db: &sea_orm::DatabaseConnection,
-    _settings: &crate::settings::Settings,
+    settings: &crate::settings::Settings,
     tenant_id: uuid::Uuid,
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
 ) -> Result<MqttServiceEnrollResult, String> {
-    use uptrakit_shared_db::entity::{mqtt_enrollment_token, prelude::MqttEnrollmentToken};
-
     if hostname.trim().is_empty() {
         return Err("hostname must not be empty".to_string());
     }
 
-    // Generate service_id server-side (single source of truth)
     let service_id = uuid::Uuid::now_v7();
 
-    // Determine status based on enrollment token
     let status = if let Some(token) = enrollment_token {
-        // Look up valid enrollment tokens for this tenant
-        let tokens = MqttEnrollmentToken::find()
-            .filter(mqtt_enrollment_token::Column::TenantId.eq(tenant_id))
-            .all(db)
-            .await
-            .map_err(|e| format!("database error: {e}"))?;
+        let token_hash = match crate::settings_store::load_setting(
+            db,
+            tenant_id,
+            crate::SettingKey::MqttEnrollmentTokenHash,
+        )
+        .await
+        {
+            Ok(Some(v)) => match v.as_str() {
+                Some(hash) => hash.to_string(),
+                None => return Err("no MQTT enrollment token configured".to_string()),
+            },
+            Ok(None) => return Err("no MQTT enrollment token configured".to_string()),
+            Err(e) => return Err(format!("database error: {e:?}")),
+        };
 
-        let mut matched_token = None;
-        for t in tokens {
-            // Check expiry
-            if let Some(expires) = t.expires_at
-                && expires < time::OffsetDateTime::now_utc()
-            {
-                continue;
-            }
-            // Check uses remaining
-            if let Some(remaining) = t.uses_remaining
-                && remaining <= 0
-            {
-                continue;
-            }
-            // Verify token
-            if let Ok(true) = crate::auth::password::verify_password(token, &t.token_hash) {
-                matched_token = Some(t);
-                break;
-            }
-        }
-
-        if let Some(t) = matched_token {
-            // Decrement uses_remaining if set
-            if t.uses_remaining.is_some() {
-                let mut active: mqtt_enrollment_token::ActiveModel = t.into();
-                active.uses_remaining = Set(active.uses_remaining.unwrap().map(|r| r - 1));
-                let _ = active.update(db).await;
-            }
-            mqtt_service::MqttServiceStatus::Approved
-        } else {
-            return Err("invalid enrollment token".to_string());
+        match crate::auth::password::verify_password(token, &token_hash) {
+            Ok(true) => mqtt_service::ServiceStatus::Approved,
+            Ok(false) => return Err("invalid enrollment token".to_string()),
+            Err(e) => return Err(format!("token verification error: {e}")),
         }
     } else {
-        mqtt_service::MqttServiceStatus::Pending
+        mqtt_service::ServiceStatus::Pending
     };
 
-    // Generate enrollment secret
+    let _ = settings;
+
     let enrollment_secret = crate::auth::token::generate_secure_token()
         .map_err(|e| format!("failed to generate token: {e}"))?;
-    let secret_hash = crate::auth::password::hash_password(&enrollment_secret)
-        .map_err(|e| format!("failed to hash token: {e}"))?;
+    let secret_hash = crate::auth::token::hash_token(&enrollment_secret);
 
     let now = time::OffsetDateTime::now_utc();
 
-    // Create service record
     let service = mqtt_service::ActiveModel {
         id: Set(service_id),
         tenant_id: Set(tenant_id),
+        service_type: Set(mqtt_service::ServiceType::Mqtt),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
+        ip_address: Set(None),
         status: Set(status),
         enrollment_secret_hash: Set(secret_hash),
+        client_version: Set(None),
         last_seen_at: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
@@ -1042,6 +602,10 @@ async fn do_mqtt_service_enroll(
     })
 }
 
+// ---------------------------------------------------------------------------
+// MQTT certificate helpers
+// ---------------------------------------------------------------------------
+
 /// Sign a CSR for an MQTT service.
 async fn do_sign_mqtt_service_csr(
     cert_signer: &dyn crate::cert_signer::AgentCertSigner,
@@ -1059,12 +623,10 @@ async fn do_sign_mqtt_service_csr(
         .sign_agent_csr(csr_pem, &service.id, validity)
         .map_err(|e| format!("failed to sign CSR: {e}"))?;
 
-    // Record certificate in database (parse cert to get serial, not_before, not_after)
     record_mqtt_service_certificate(db, service.id, &bundle.cert_pem, &ca_fp)
         .await
         .map_err(|e| format!("failed to record certificate: {e}"))?;
 
-    // Update service last_seen_at
     let mut active: mqtt_service::ActiveModel = service.into();
     active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
     active.updated_at = Set(time::OffsetDateTime::now_utc());
@@ -1073,14 +635,13 @@ async fn do_sign_mqtt_service_csr(
     Ok(bundle)
 }
 
-/// Record a certificate in the mqtt_service_certificates table.
+/// Record a certificate in the service_certificates table.
 async fn record_mqtt_service_certificate(
     db: &sea_orm::DatabaseConnection,
     mqtt_service_id: uuid::Uuid,
     cert_pem: &str,
     ca_fingerprint: &str,
 ) -> Result<(), String> {
-    // Parse certificate to extract metadata
     let (_, pem_block) =
         x509_parser::pem::parse_x509_pem(cert_pem.as_bytes()).map_err(|_| "failed to parse PEM")?;
     let cert = pem_block.parse_x509().map_err(|_| "failed to parse X509")?;
@@ -1095,7 +656,7 @@ async fn record_mqtt_service_certificate(
     let record = mqtt_service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fingerprint.to_string()),
         serial_number: Set(serial),
-        mqtt_service_id: Set(mqtt_service_id),
+        service_id: Set(mqtt_service_id),
         not_before: Set(not_before),
         not_after: Set(not_after),
         revoked_at: Set(None),
@@ -1117,7 +678,7 @@ async fn revoke_mqtt_service_certificate(
     db: &sea_orm::DatabaseConnection,
     serial: &str,
     ca_fingerprint: &str,
-    reason: mqtt_service_certificate::MqttServiceCertificateRevocationReason,
+    reason: mqtt_service_certificate::RevocationReason,
 ) -> Result<(), String> {
     let cert = mqtt_service_certificate::Entity::find()
         .filter(mqtt_service_certificate::Column::SerialNumber.eq(serial))

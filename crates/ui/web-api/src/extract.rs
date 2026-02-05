@@ -11,20 +11,11 @@ pub struct ClientIp(pub IpAddr);
 #[derive(Debug, Clone, Copy)]
 pub struct ProxyIp(pub IpAddr);
 
-/// The verified agent identity from a client TLS certificate.
+/// The verified service identity from a client TLS certificate.
 /// Injected by the mTLS acceptor when the peer presents a valid cert
 /// signed by the internal CA, with a parseable UUID as CN.
 #[derive(Debug, Clone)]
-pub struct AgentIdentity {
-    pub agent_id: uuid::Uuid,
-    pub cert_serial: String,
-}
-
-/// The verified MQTT service identity from a client TLS certificate.
-/// Injected by the mTLS acceptor when the peer presents a valid cert
-/// signed by the internal CA, with a parseable UUID as CN.
-#[derive(Debug, Clone)]
-pub struct MqttServiceIdentity {
+pub struct ServiceIdentity {
     pub service_id: uuid::Uuid,
     pub cert_serial: String,
 }
@@ -35,31 +26,34 @@ pub struct MqttServiceIdentity {
 #[derive(Debug, Clone)]
 pub struct ExternalBaseUrl(pub String);
 
-/// Parse [`AgentIdentity`] from DER-encoded X.509 certificate bytes.
-pub fn agent_identity_from_der(der: &[u8]) -> Option<AgentIdentity> {
+/// Parse [`ServiceIdentity`] from DER-encoded X.509 certificate bytes.
+pub fn service_identity_from_der(der: &[u8]) -> Option<ServiceIdentity> {
     let (_, cert) = x509_parser::parse_x509_certificate(der).ok()?;
     let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
-    let agent_id = uuid::Uuid::parse_str(cn).ok()?;
+    let service_id = uuid::Uuid::parse_str(cn).ok()?;
     let cert_serial = cert.raw_serial_as_string();
-    Some(AgentIdentity {
-        agent_id,
+    Some(ServiceIdentity {
+        service_id,
         cert_serial,
     })
 }
 
-/// Parse [`AgentIdentity`] from structured info header fields.
+/// Parse [`ServiceIdentity`] from structured info header fields.
 ///
-/// Returns `AgentIdentity` with `cert_serial = ""` if `serial` is absent,
-/// signalling agent-id-only lookup.
-pub fn agent_identity_from_info(subject_dn: &str, serial: Option<&str>) -> Option<AgentIdentity> {
+/// Returns `ServiceIdentity` with `cert_serial = ""` if `serial` is absent,
+/// signalling service-id-only lookup.
+pub fn service_identity_from_info(
+    subject_dn: &str,
+    serial: Option<&str>,
+) -> Option<ServiceIdentity> {
     let cn = extract_cn_from_dn(subject_dn)?;
-    let agent_id = uuid::Uuid::parse_str(cn).ok()?;
+    let service_id = uuid::Uuid::parse_str(cn).ok()?;
     let cert_serial = match serial {
         Some(s) => normalize_serial(s),
         None => String::new(),
     };
-    Some(AgentIdentity {
-        agent_id,
+    Some(ServiceIdentity {
+        service_id,
         cert_serial,
     })
 }
@@ -205,13 +199,13 @@ mod tests {
 
     #[test]
     fn identity_from_info_with_serial() {
-        let id = agent_identity_from_info(
+        let id = service_identity_from_info(
             "CN=550e8400-e29b-41d4-a716-446655440000,O=Uptrakit",
             Some("01ABCDEF"),
         )
         .expect("should parse");
         assert_eq!(
-            id.agent_id,
+            id.service_id,
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
         );
         assert_eq!(id.cert_serial, "01:ab:cd:ef");
@@ -219,10 +213,10 @@ mod tests {
 
     #[test]
     fn identity_from_info_without_serial() {
-        let id = agent_identity_from_info("CN=550e8400-e29b-41d4-a716-446655440000", None)
+        let id = service_identity_from_info("CN=550e8400-e29b-41d4-a716-446655440000", None)
             .expect("should parse");
         assert_eq!(
-            id.agent_id,
+            id.service_id,
             uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
         );
         assert_eq!(id.cert_serial, "");
@@ -230,24 +224,24 @@ mod tests {
 
     #[test]
     fn identity_from_info_non_uuid_cn() {
-        assert!(agent_identity_from_info("CN=not-a-uuid,O=Org", Some("01")).is_none());
+        assert!(service_identity_from_info("CN=not-a-uuid,O=Org", Some("01")).is_none());
     }
 
     #[test]
     fn identity_from_der_valid_cert() {
         // Generate a test certificate with a UUID CN
-        let agent_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let service_id = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let key_pair =
             rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
         let mut params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         params.distinguished_name = rcgen::DistinguishedName::new();
         params
             .distinguished_name
-            .push(rcgen::DnType::CommonName, agent_id.to_string());
+            .push(rcgen::DnType::CommonName, service_id.to_string());
         let cert = params.self_signed(&key_pair).expect("self-sign");
 
-        let identity = agent_identity_from_der(cert.der()).expect("should parse DER cert");
-        assert_eq!(identity.agent_id, agent_id);
+        let identity = service_identity_from_der(cert.der()).expect("should parse DER cert");
+        assert_eq!(identity.service_id, service_id);
         assert!(!identity.cert_serial.is_empty());
     }
 
@@ -262,6 +256,6 @@ mod tests {
             .push(rcgen::DnType::CommonName, "not-a-uuid");
         let cert = params.self_signed(&key_pair).expect("self-sign");
 
-        assert!(agent_identity_from_der(cert.der()).is_none());
+        assert!(service_identity_from_der(cert.der()).is_none());
     }
 }

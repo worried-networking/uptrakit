@@ -109,7 +109,7 @@ Requires `ManageSettings` permission. See the proxy-specific guides for which fi
    - `X-Forwarded-Proto`
    - `X-Forwarded-Host`
 
-4. **mTLS takes precedence:** If the mTLS acceptor already extracted an `AgentIdentity` (direct TLS connection), all proxy cert headers are ignored.
+4. **mTLS takes precedence:** If the mTLS acceptor already extracted a `ServiceIdentity` (direct TLS connection), all proxy cert headers are ignored.
 
 ## Exporting the CA Certificate
 

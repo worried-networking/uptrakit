@@ -11,8 +11,8 @@ use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uptrakit_internal_wire::{
-    MqttControllerMessage, MqttEnrollPayload, MqttHeartbeatPayload, MqttRegisterPayload,
-    MqttServiceMessage, RequestCertificatePayload,
+    ControllerMessage, EnrollPayload, MqttHeartbeatPayload, MqttRegisterPayload,
+    RequestCertificatePayload, ServiceMessage,
 };
 
 use crate::controller_client::{ConnectionMode, ControllerConnection};
@@ -115,10 +115,12 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
         .map(|h| h.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    conn.send(MqttServiceMessage::Enroll(MqttEnrollPayload {
+    conn.send(ServiceMessage::Enroll(EnrollPayload {
         hostname,
         friendly_name: args.friendly_name_or_hostname(),
         enrollment_token: args.enrollment_token.clone(),
+        service_type: "mqtt".to_string(),
+        host_info: None,
     }))
     .await
     .map_err(|e| report!(AppError::Connection(e)))?;
@@ -130,7 +132,7 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
             .await
             .map_err(|e| report!(AppError::Connection(e)))?
         {
-            Some(MqttControllerMessage::Enrolled(payload)) => {
+            Some(ControllerMessage::Enrolled(payload)) => {
                 let service_id = uuid::Uuid::parse_str(&payload.service_id)
                     .map_err(|_| report!(AppError::Protocol("invalid service_id".into())))?;
 
@@ -149,17 +151,17 @@ async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
                     tracing::info!("waiting for approval from controller...");
                 }
             }
-            Some(MqttControllerMessage::Approved(payload)) => {
+            Some(ControllerMessage::Approved(payload)) => {
                 tracing::info!(service_id = %payload.service_id, "approved by controller");
                 break;
             }
-            Some(MqttControllerMessage::Rejected(payload)) => {
+            Some(ControllerMessage::Rejected(payload)) => {
                 return Err(report!(AppError::Protocol(format!(
                     "enrollment rejected: service_id={}",
                     payload.service_id
                 ))));
             }
-            Some(MqttControllerMessage::Error(payload)) => {
+            Some(ControllerMessage::Error(payload)) => {
                 return Err(report!(AppError::Protocol(format!(
                     "enrollment error: {} - {}",
                     payload.code, payload.message
@@ -202,7 +204,7 @@ async fn request_certificate(identity: &mut Identity, args: &cli::Args) -> Resul
         .generate_csr(service_id)
         .map_err(|e| report!(AppError::Identity(e)))?;
 
-    conn.send(MqttServiceMessage::RequestCertificate(
+    conn.send(ServiceMessage::RequestCertificate(
         RequestCertificatePayload { csr_pem },
     ))
     .await
@@ -215,7 +217,7 @@ async fn request_certificate(identity: &mut Identity, args: &cli::Args) -> Resul
             .await
             .map_err(|e| report!(AppError::Connection(e)))?
         {
-            Some(MqttControllerMessage::Certificate(payload)) => {
+            Some(ControllerMessage::Certificate(payload)) => {
                 identity
                     .save_certificate(&payload.cert_pem)
                     .await
@@ -223,7 +225,7 @@ async fn request_certificate(identity: &mut Identity, args: &cli::Args) -> Resul
                 tracing::info!("certificate received and saved");
                 break;
             }
-            Some(MqttControllerMessage::Error(payload)) => {
+            Some(ControllerMessage::Error(payload)) => {
                 return Err(report!(AppError::Protocol(format!(
                     "certificate request error: {} - {}",
                     payload.code, payload.message
@@ -261,7 +263,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
     .map_err(|e| report!(AppError::Connection(e)))?;
 
     // Register with controller
-    conn.send(MqttServiceMessage::Register(MqttRegisterPayload {
+    conn.send(ServiceMessage::Register(MqttRegisterPayload {
         instance_id: instance_id.to_string(),
         max_tenants: args.max_tenants,
         active_tenants: vec![], // Empty on fresh start
@@ -280,31 +282,31 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
         tokio::select! {
             msg = conn.recv() => {
                 match msg.map_err(|e| report!(AppError::Connection(e)))? {
-                    Some(MqttControllerMessage::Registered(payload)) => {
+                    Some(ControllerMessage::Registered(payload)) => {
                         tracing::info!(instance_id = %payload.instance_id, "registered with controller");
                     }
-                    Some(MqttControllerMessage::TenantAssignments(payload)) => {
+                    Some(ControllerMessage::TenantAssignments(payload)) => {
                         tracing::info!(count = payload.tenants.len(), "received tenant assignments");
                         tenant_mgr.apply_assignments(payload.tenants).await;
                     }
-                    Some(MqttControllerMessage::TenantConfigUpdated(payload)) => {
+                    Some(ControllerMessage::TenantConfigUpdated(payload)) => {
                         tracing::info!(tenant_id = %payload.tenant.tenant_id, "tenant config updated");
                         tenant_mgr.reload_tenant(payload.tenant).await;
                     }
-                    Some(MqttControllerMessage::TenantRevoked(payload)) => {
+                    Some(ControllerMessage::TenantRevoked(payload)) => {
                         tracing::info!(tenant_id = %payload.tenant_id, reason = %payload.reason, "tenant revoked");
                         tenant_mgr.stop_tenant(&payload.tenant_id).await;
                     }
-                    Some(MqttControllerMessage::CaBundleUpdated(payload)) => {
+                    Some(ControllerMessage::CaBundleUpdated(payload)) => {
                         tracing::info!("CA bundle updated");
                         // In a full implementation, would update identity.ca_cert_pem
                         let _ = payload;
                     }
-                    Some(MqttControllerMessage::RequestCertRenewal(_)) => {
+                    Some(ControllerMessage::RequestCertRenewal(_)) => {
                         tracing::info!("certificate renewal requested");
                         // In a full implementation, would trigger certificate renewal
                     }
-                    Some(MqttControllerMessage::ServerRestarting(payload)) => {
+                    Some(ControllerMessage::ServerRestarting(payload)) => {
                         tracing::info!(reason = %payload.reason, "server restarting, preparing for reconnect");
                     }
                     Some(msg) => {
@@ -318,7 +320,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
             }
             _ = heartbeat_ticker.tick() => {
                 let active = tenant_mgr.active_tenant_ids();
-                if let Err(e) = conn.send(MqttServiceMessage::Heartbeat(MqttHeartbeatPayload {
+                if let Err(e) = conn.send(ServiceMessage::Heartbeat(MqttHeartbeatPayload {
                     active_tenants: active,
                 })).await {
                     tracing::error!(error = ?e, "heartbeat failed");

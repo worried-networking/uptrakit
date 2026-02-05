@@ -8,7 +8,7 @@ use rustls::pki_types::CertificateRevocationListDer;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use tokio::sync::{Notify, RwLock};
-use uptrakit_shared_db::entity::{agent_certificate, prelude::*};
+use uptrakit_shared_db::entity::{prelude::*, service_certificate};
 
 use crate::pki::{self, CaSnapshot};
 
@@ -235,10 +235,10 @@ async fn query_revoked_certs_for_ca(
     let now = OffsetDateTime::now_utc();
     let grace = time::Duration::hours(24);
 
-    let revoked_certs = AgentCertificate::find()
-        .filter(agent_certificate::Column::CaFingerprint.eq(ca_fingerprint))
-        .filter(agent_certificate::Column::RevokedAt.is_not_null())
-        .filter(agent_certificate::Column::NotAfter.gt(now - grace))
+    let revoked_certs = ServiceCertificate::find()
+        .filter(service_certificate::Column::CaFingerprint.eq(ca_fingerprint))
+        .filter(service_certificate::Column::RevokedAt.is_not_null())
+        .filter(service_certificate::Column::NotAfter.gt(now - grace))
         .all(db)
         .await
         .context_to::<pki::PkiError>()?;
@@ -301,8 +301,8 @@ fn parse_serial_string(s: &str) -> Option<Vec<u8>> {
 fn map_reason(reason: RevocationReason) -> rcgen::RevocationReason {
     match reason {
         RevocationReason::CertificateRenewed => rcgen::RevocationReason::Superseded,
-        RevocationReason::AgentDeactivated => rcgen::RevocationReason::CessationOfOperation,
-        RevocationReason::AgentMerged => rcgen::RevocationReason::CessationOfOperation,
+        RevocationReason::ServiceDeactivated => rcgen::RevocationReason::CessationOfOperation,
+        RevocationReason::ServiceMerged => rcgen::RevocationReason::CessationOfOperation,
     }
 }
 
@@ -337,11 +337,11 @@ mod tests {
             rcgen::RevocationReason::Superseded as u8
         );
         assert_eq!(
-            map_reason(RevocationReason::AgentDeactivated) as u8,
+            map_reason(RevocationReason::ServiceDeactivated) as u8,
             rcgen::RevocationReason::CessationOfOperation as u8
         );
         assert_eq!(
-            map_reason(RevocationReason::AgentMerged) as u8,
+            map_reason(RevocationReason::ServiceMerged) as u8,
             rcgen::RevocationReason::CessationOfOperation as u8
         );
     }
