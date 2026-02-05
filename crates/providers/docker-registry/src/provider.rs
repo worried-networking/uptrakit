@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use regex::Regex;
 use rootcause::report;
 
-use uptrakit_provider_core::{RemoteProvider, UpstreamRelease, Version};
+use uptrakit_provider_core::{Provider, UpstreamRelease, Version};
 
 use crate::config::{DockerRegistryConfig, TrackingMode};
 use crate::error::{DockerRegistryError, Result};
@@ -78,7 +78,7 @@ impl DockerRegistryProvider {
 }
 
 #[async_trait]
-impl RemoteProvider for DockerRegistryProvider {
+impl Provider for DockerRegistryProvider {
     async fn fetch_releases(&self) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         match self.config.tracking_mode {
             TrackingMode::SemverTags => {

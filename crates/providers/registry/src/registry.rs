@@ -1,6 +1,6 @@
 use rootcause::report;
 
-use uptrakit_provider_core::{LocalProvider, ProviderType, RemoteProvider};
+use uptrakit_provider_core::{Provider, ProviderType};
 use uptrakit_provider_docker_registry::{
     DockerRegistryConfig, DockerRegistryLocalProvider, DockerRegistryProvider,
 };
@@ -29,12 +29,12 @@ impl ProviderRegistry {
     ///
     /// # Returns
     ///
-    /// A boxed `LocalProvider` trait object on success, or a `RegistryError` on failure.
+    /// A boxed `Provider` trait object on success, or a `RegistryError` on failure.
     pub fn create_local_provider(
         provider_type: ProviderType,
         package_identifier: &str,
         config: &serde_json::Value,
-    ) -> Result<Box<dyn LocalProvider>> {
+    ) -> Result<Box<dyn Provider>> {
         match provider_type {
             ProviderType::GithubReleases => {
                 let github_config: GitHubConfig = serde_json::from_value(config.clone())
@@ -64,11 +64,11 @@ impl ProviderRegistry {
     ///
     /// # Returns
     ///
-    /// A boxed `RemoteProvider` trait object on success, or a `RegistryError` on failure.
+    /// A boxed `Provider` trait object on success, or a `RegistryError` on failure.
     pub fn create_remote_provider(
         provider_type: ProviderType,
         config: &serde_json::Value,
-    ) -> Result<Box<dyn RemoteProvider>> {
+    ) -> Result<Box<dyn Provider>> {
         match provider_type {
             ProviderType::GithubReleases => {
                 let github_config: GitHubConfig = serde_json::from_value(config.clone())

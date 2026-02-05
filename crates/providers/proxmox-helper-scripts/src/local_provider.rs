@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use rootcause::report;
-use uptrakit_provider_core::{LocalProvider, ProviderError, Result, UpstreamRelease, Version};
+use uptrakit_provider_core::{
+    Provider, ProviderCapability, ProviderError, Result, UpstreamRelease, Version,
+};
 
 /// Local provider for Proxmox Helper Scripts.
 ///
@@ -18,7 +20,11 @@ impl ProxmoxHelperScriptsLocalProvider {
 }
 
 #[async_trait]
-impl LocalProvider for ProxmoxHelperScriptsLocalProvider {
+impl Provider for ProxmoxHelperScriptsLocalProvider {
+    fn capabilities(&self) -> &'static [ProviderCapability] {
+        &[ProviderCapability::DiscoverLocalSoftware]
+    }
+
     async fn detect_installed_version(&self) -> Result<Option<Version>> {
         // Stub: version detection not yet implemented
         Ok(None)

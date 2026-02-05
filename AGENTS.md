@@ -896,7 +896,7 @@ The controller can request installed version detection from agents:
 - `package_identifier`: Provider-specific identifier
 - `config`: Provider configuration as JSON
 
-**LocalProvider stubs**: Each provider crate implements a `LocalProvider` struct with `detect_installed_version()` returning `Ok(None)` (stub) and `execute_update()` returning an error. The agent dispatches via a `match` on `provider_type` in `crates/core/agent/src/version_check.rs`.
+**Local Provider stubs**: Each provider crate implements a local `Provider` struct with `detect_installed_version()` returning `Ok(None)` (stub) and `execute_update()` returning an error. The agent dispatches via a `match` on `provider_type` in `crates/core/agent/src/version_check.rs`.
 
 ### Agent host info collection
 
@@ -1233,15 +1233,15 @@ Provider crates:
 
 | Crate | Path | Purpose |
 | --- | --- | --- |
-| `uptrakit-provider-core` | `crates/providers/core/` | Shared provider traits (`LocalProvider`, `RemoteProvider`) and abstractions |
+| `uptrakit-provider-core` | `crates/providers/core/` | Shared provider trait (`Provider`) and abstractions |
 | `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: controller tracks container image tags via semver filtering or digest change detection |
 | `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: controller fetches release metadata; agent installs from artifacts |
 | `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE Helper-Scripts: agent auto-discovers and manages helper-script-installed apps |
 
 The **Provider Registry** crate centralizes all provider operations:
-- `ProviderRegistry::create_local_provider()` — creates `LocalProvider` instances from `ProviderType` and config
-- `ProviderRegistry::create_remote_provider()` — creates `RemoteProvider` instances from `ProviderType` and config
+- `ProviderRegistry::create_local_provider()` — creates local `Provider` instances from `ProviderType` and config
+- `ProviderRegistry::create_remote_provider()` — creates remote `Provider` instances from `ProviderType` and config
 - `ProviderRegistry::validate_config()` — validates provider configuration JSON
 - `ProviderRegistry::mask_secrets()` / `restore_secrets()` — handles secret masking for API responses
 
@@ -1251,7 +1251,7 @@ The update step can always be overridden by a custom shell script, regardless of
 
 ### Software discovery
 
-The `LocalProvider` trait includes an optional `discover_software()` method that allows providers to enumerate software they can manage on the local system. The method returns a `Vec<DiscoveredSoftware>`, where each entry contains:
+The `Provider` trait includes an optional `discover_software()` method that allows providers to enumerate software they can manage on the local system. Providers that support this capability declare `ProviderCapability::DiscoverLocalSoftware` in their `capabilities()` method. The method returns a `Vec<DiscoveredSoftware>`, where each entry contains:
 
 | Field | Type | Description |
 | --- | --- | --- |

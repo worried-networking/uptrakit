@@ -4,7 +4,7 @@ use rootcause::report;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use uptrakit_provider_core::{ReleaseAsset, RemoteProvider, UpstreamRelease, Version};
+use uptrakit_provider_core::{Provider, ReleaseAsset, UpstreamRelease, Version};
 
 use crate::api_types::{GitHubApiError, GitHubRelease};
 use crate::config::GitHubConfig;
@@ -173,7 +173,7 @@ impl GitHubProvider {
 }
 
 #[async_trait]
-impl RemoteProvider for GitHubProvider {
+impl Provider for GitHubProvider {
     async fn fetch_releases(&self) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         let url = self.releases_url();
         tracing::debug!(url = %url, "fetching GitHub releases");

@@ -4,6 +4,14 @@ use time::OffsetDateTime;
 
 use crate::version::Version;
 
+/// Capabilities that a provider may support.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderCapability {
+    /// Provider can discover locally installed software.
+    DiscoverLocalSoftware,
+}
+
 /// A piece of software discovered on the local system by a provider.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DiscoveredSoftware {
@@ -34,6 +42,17 @@ impl fmt::Display for ProviderType {
             Self::GithubReleases => write!(f, "github_releases"),
             Self::ProxmoxHelperScripts => write!(f, "proxmox_helper_scripts"),
             Self::DockerRegistry => write!(f, "docker_registry"),
+        }
+    }
+}
+
+impl ProviderType {
+    /// Returns the capabilities supported by this provider type.
+    pub fn capabilities(&self) -> &'static [ProviderCapability] {
+        match self {
+            Self::GithubReleases => &[],
+            Self::DockerRegistry => &[],
+            Self::ProxmoxHelperScripts => &[ProviderCapability::DiscoverLocalSoftware],
         }
     }
 }
@@ -234,5 +253,41 @@ mod tests {
             extra: None,
         };
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn provider_capability_serialization_roundtrip() {
+        let cap = ProviderCapability::DiscoverLocalSoftware;
+        let json = serde_json::to_string(&cap).expect("serialize");
+        assert_eq!(json, r#""discover_local_software""#);
+
+        let deserialized: ProviderCapability = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, cap);
+    }
+
+    #[test]
+    fn provider_capability_is_copy() {
+        let cap = ProviderCapability::DiscoverLocalSoftware;
+        let cap2 = cap; // Copy, not move
+        assert_eq!(cap, cap2);
+    }
+
+    #[test]
+    fn provider_type_capabilities_github() {
+        let caps = ProviderType::GithubReleases.capabilities();
+        assert!(caps.is_empty());
+    }
+
+    #[test]
+    fn provider_type_capabilities_docker_registry() {
+        let caps = ProviderType::DockerRegistry.capabilities();
+        assert!(caps.is_empty());
+    }
+
+    #[test]
+    fn provider_type_capabilities_proxmox_helper_scripts() {
+        let caps = ProviderType::ProxmoxHelperScripts.capabilities();
+        assert_eq!(caps.len(), 1);
+        assert!(caps.contains(&ProviderCapability::DiscoverLocalSoftware));
     }
 }

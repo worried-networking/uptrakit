@@ -235,14 +235,14 @@ Providers define how software items are tracked and updated. Each provider split
 
 | Provider | Path | Description |
 | --- | --- | --- |
-| Provider Core | `crates/providers/core/` | Shared traits and abstractions (`LocalProvider`, `RemoteProvider`) |
+| Provider Core | `crates/providers/core/` | Shared `Provider` trait and `ProviderCapability` enum |
 | Provider Registry | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | GitHub Releases | `crates/providers/github/` | Tracks GitHub release metadata; agent installs from artifacts |
 | Docker Registry | `crates/providers/docker-registry/` | Tracks container image tags from OCI/Docker registries |
 | Proxmox Helper-Scripts | `crates/providers/proxmox-helper-scripts/` | Auto-discovers and manages PVE helper-script-installed apps |
 
 The **Provider Registry** crate (`uptrakit-provider-registry`) centralizes all provider-related operations:
-- Creating `LocalProvider` and `RemoteProvider` instances from `ProviderType` and config JSON
+- Creating local and remote `Provider` instances from `ProviderType` and config JSON
 - Validating provider configuration before storage
 - Masking and restoring secrets in config JSON for API responses
 

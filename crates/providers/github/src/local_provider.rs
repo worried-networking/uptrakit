@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use rootcause::report;
-use uptrakit_provider_core::{LocalProvider, ProviderError, Result, UpstreamRelease, Version};
+use uptrakit_provider_core::{Provider, ProviderError, Result, UpstreamRelease, Version};
 
 use crate::config::GitHubConfig;
 
@@ -25,7 +25,7 @@ impl GitHubLocalProvider {
 }
 
 #[async_trait]
-impl LocalProvider for GitHubLocalProvider {
+impl Provider for GitHubLocalProvider {
     async fn detect_installed_version(&self) -> Result<Option<Version>> {
         // Stub: version detection not yet implemented
         Ok(None)
