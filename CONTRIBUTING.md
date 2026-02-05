@@ -196,7 +196,7 @@ Guidelines:
 
 - Keep boundaries crisp:
   - **Controller**: orchestration, scheduling, remote provider logic, API/UI
-  - **MQTT Service**: standalone binary for MQTT/Home Assistant integration (lease-based multi-instance)
+  - **MQTT Service**: standalone binary for MQTT/Home Assistant integration; connects to controller via WebSocket/mTLS (same enrollment model as agents), no direct DB access
   - **Agent**: local inspection + update execution, outbound-only WS connection
   - **Providers**: small, composable units with clear responsibilities
 - Authorization uses a typed `Permission` enum, not raw role-name strings:

@@ -170,6 +170,8 @@ async fn build_state(
         settings,
         cert_signer: Arc::new(NoopCertSigner),
         agent_connections: uptrakit_web_api::agent_connections::AgentConnectionRegistry::new(),
+        mqtt_service_connections:
+            uptrakit_web_api::mqtt_service_connections::MqttServiceConnectionRegistry::new(),
         revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
         oidc_flow_store: OidcFlowStore::new(db.clone()),
         account_link_store: AccountLinkStore::new(db.clone()),

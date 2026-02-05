@@ -20,6 +20,15 @@ pub struct AgentIdentity {
     pub cert_serial: String,
 }
 
+/// The verified MQTT service identity from a client TLS certificate.
+/// Injected by the mTLS acceptor when the peer presents a valid cert
+/// signed by the internal CA, with a parseable UUID as CN.
+#[derive(Debug, Clone)]
+pub struct MqttServiceIdentity {
+    pub service_id: uuid::Uuid,
+    pub cert_serial: String,
+}
+
 /// The external base URL resolved from proxy headers or the Host header.
 /// Used for constructing redirect URLs (OIDC callbacks, device auth, etc.)
 /// when the controller is behind a reverse proxy.

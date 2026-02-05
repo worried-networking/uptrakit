@@ -12,22 +12,32 @@ name = "uptrakit-mqtt"
 path = "src/main.rs"
 
 [features]
-default = ["db-sqlite"]
-db-sqlite = ["sea-orm/sqlx-sqlite"]
-db-postgres = ["sea-orm/sqlx-postgres"]
-db-mysql = ["sea-orm/sqlx-mysql"]
+default = []
 
 [dependencies]
 clap = { workspace = true }
+futures-util = { workspace = true }
 hostname = { workspace = true }
+rcgen = { workspace = true }
 rootcause = { workspace = true }
+# Required for rcgen CSR verification - ensure verify feature is enabled
+x509-parser = { workspace = true }
 rumqttc = { version = "0.25.1", features = ["websocket"] }
-sea-orm = { workspace = true }
+rustls = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots", "__rustls-tls"] }
 tracing = { workspace = true }
+url = "2"
+rustls-pemfile = { workspace = true }
 tracing-subscriber = { workspace = true }
-uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 uuid = { workspace = true }
+webpki-roots = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

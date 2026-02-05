@@ -535,30 +535,64 @@ The API accepts either a `url` field (parsed into components) or individual `tra
 
 ### MQTT Service (standalone binary)
 
-MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that connects to the same shared database. Multiple instances can run simultaneously with automatic tenant distribution via a lease table (`mqtt_leases`).
+MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that connects to the controller via mTLS WebSocket. The controller pushes tenant assignments and configuration updates; the MQTT service no longer has direct database access. Multiple instances can run simultaneously with centralized lease coordination managed by the controller.
 
 **CLI flags (`uptrakit-mqtt`):**
 
-| Flag | Default | Description |
-| --- | --- | --- |
-| `--db-url` | (required) | Database URL |
-| `--max-tenants` | `0` | Max tenants per instance (0 = unlimited) |
-| `--heartbeat-interval` | `15` | Heartbeat interval in seconds |
-| `--poll-interval` | `10` | Polling interval for new/changed tenants |
-| `--lease-timeout` | `60` | Stale lease timeout in seconds |
+| Flag | Env var | Default | Description |
+| --- | --- | --- | --- |
+| `--controller-url` | `UPTRAKIT_CONTROLLER_URL` | (required) | Controller WebSocket URL (e.g., `wss://controller:8443`) |
+| `--data-dir` | `UPTRAKIT_DATA_DIR` | (required) | Directory for service identity (service_id, keypair, certificate) |
+| `--max-tenants` | | `0` | Max tenants per instance (0 = unlimited) |
+| `--heartbeat-interval` | | `15` | Heartbeat interval in seconds |
+| `--enrollment-token` | `UPTRAKIT_ENROLLMENT_TOKEN` | | Enrollment token for auto-approval |
+| `--friendly-name` | | hostname | Human-readable display name |
+| `--insecure` | | `false` | Skip TLS verification (DANGEROUS, only for initial CA trust) |
 
-**Leasing model:**
+**Connection lifecycle (same TOFU pattern as agents):**
+1. **CA fetch (TOFU)**: Fetch CA certificate from `GET /api/v1/pki/ca.crt` (using system roots or `--insecure`), save to `ca.crt` in data dir
+2. **Enrollment**: Connect to `/api/v1/ws/mqtt` anonymously, send `Enroll` with hostname/friendly_name/enrollment_token, receive `Enrolled` with service_id and enrollment_secret
+3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate
+4. **Authenticated operation**: Reconnect with mTLS, send `Register`, receive `TenantAssignments`, run MQTT clients
+
+**Instance identification:**
 - Each instance generates a unique ID: `{hostname}-{uuid_v7_first_8_chars}`
-- `mqtt_leases` table has a UNIQUE constraint on `tenant_id` — only one instance can manage a tenant
-- Instances heartbeat periodically; stale leases (heartbeat older than timeout) are reclaimed
-- On shutdown, instances release all their leases
+- The controller manages leases centrally via the `mqtt_leases` table
 
-**Main loop (each poll interval):**
-1. Clean up stale leases
-2. Claim newly available tenants (enabled `mqtt_clients` without a lease)
-3. For each held tenant: compare `mqtt_clients.updated_at` with cached value → hot-reload if changed
-4. If `mqtt_clients` row deleted or `enabled = false` → stop client, release lease
-5. Heartbeat (on separate interval)
+**Main loop (event-driven, not polling):**
+1. Receive `TenantAssignments` → start/update MQTT clients
+2. Receive `TenantConfigUpdated` → hot-reload tenant configuration
+3. Receive `TenantRevoked` → stop tenant MQTT client
+4. Receive `CaBundleUpdated` → update local CA certificate
+5. Receive `RequestCertRenewal` → trigger certificate renewal
+6. Receive `ServerRestarting` → prepare for reconnect
+7. Send `Heartbeat` periodically with active tenant IDs
+
+**Wire protocol:**
+
+The MQTT service uses a dedicated wire protocol (`MqttServiceMessage` / `MqttControllerMessage`) defined in `crates/shared/wire/src/lib.rs`. It reuses several payloads from the agent protocol (e.g., `PingPayload`, `CertificatePayload`, `CaBundleUpdatedPayload`, `RequestCertRenewalPayload`, `ServerRestartingPayload`) and adds MQTT-specific messages for enrollment, registration, tenant management, and heartbeats.
+
+**Enrollment and approval:**
+
+MQTT services have a separate enrollment flow from agents:
+- Separate `mqtt_services` table (similar structure to `agents`)
+- Separate `mqtt_enrollment_tokens` table (tokens are NOT interchangeable with agent tokens)
+- Separate `mqtt_service_certificates` table
+- Approval via REST API: `POST /api/v1/mqtt-services/{id}/approve` (permission: `ManageSettings`)
+- If a valid enrollment token is provided, the service is auto-approved
+
+**REST API endpoints:**
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| GET | `/api/v1/mqtt-services` | ManageSettings | List MQTT services |
+| GET | `/api/v1/mqtt-services/{id}` | ManageSettings | Get single MQTT service |
+| POST | `/api/v1/mqtt-services/{id}/approve` | ManageSettings | Approve a pending service |
+| POST | `/api/v1/mqtt-services/{id}/reject` | ManageSettings | Reject a pending service |
+| DELETE | `/api/v1/mqtt-services/{id}` | ManageSettings | Deactivate a service |
+| POST | `/api/v1/mqtt-enrollment-tokens` | ManageSettings | Create enrollment token |
+| GET | `/api/v1/mqtt-enrollment-tokens` | ManageSettings | List enrollment tokens |
+| DELETE | `/api/v1/mqtt-enrollment-tokens/{id}` | ManageSettings | Revoke enrollment token |
 
 **Key files:**
 
@@ -567,14 +601,26 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 | `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls/Ws/Wss) |
 | `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
 | `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
+| `crates/shared/wire/src/lib.rs` | MQTT service wire protocol messages |
 | `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
-| `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases |
-| `crates/ui/web-api/src/mqtt_client_store.rs` | CRUD store |
-| `crates/ui/web-api/src/routes/settings_mqtt.rs` | API route handlers |
-| `crates/core/mqtt/src/main.rs` | Entry point, signal handling, graceful shutdown |
-| `crates/core/mqtt/src/lease_manager.rs` | Lease acquisition, heartbeat, stale detection |
-| `crates/core/mqtt/src/tenant_manager.rs` | Per-tenant MQTT client lifecycle |
-| `crates/core/mqtt/src/mqtt_client.rs` | MQTT connection logic |
+| `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
+| `crates/shared/db/src/entity/mqtt_service.rs` | SeaORM entity for MQTT service identity |
+| `crates/shared/db/src/entity/mqtt_service_certificate.rs` | SeaORM entity for service certificates |
+| `crates/shared/db/src/entity/mqtt_enrollment_token.rs` | SeaORM entity for enrollment tokens |
+| `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
+| `crates/ui/web-api/src/mqtt_service_connections.rs` | Connection registry for connected MQTT services |
+| `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
+| `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
+| `crates/ui/web-api/src/routes/mqtt_ws.rs` | WebSocket handler for MQTT service connections |
+| `crates/ui/web-api/src/routes/mqtt_services.rs` | MQTT service management REST endpoints |
+| `crates/ui/web-api/src/routes/mqtt_enrollment_tokens.rs` | Enrollment token REST endpoints |
+| `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
+| `crates/core/mqtt/src/cli.rs` | CLI argument definitions |
+| `crates/core/mqtt/src/controller_client.rs` | WebSocket client for controller communication |
+| `crates/core/mqtt/src/identity.rs` | Service identity management (keypair, cert, service_id) |
+| `crates/core/mqtt/src/tenant_manager.rs` | Per-tenant MQTT client lifecycle (push-based) |
+| `crates/core/mqtt/src/mqtt_client.rs` | MQTT broker connection logic |
+| `crates/core/mqtt/src/error.rs` | Application error types |
 
 ## Error handling
 

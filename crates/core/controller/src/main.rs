@@ -634,6 +634,8 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
 
     let agent_connections = uptrakit_web_api::agent_connections::AgentConnectionRegistry::new();
+    let mqtt_service_connections =
+        uptrakit_web_api::mqtt_service_connections::MqttServiceConnectionRegistry::new();
 
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
@@ -641,6 +643,7 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
         settings,
         cert_signer,
         agent_connections: agent_connections.clone(),
+        mqtt_service_connections: mqtt_service_connections.clone(),
         revocation_notify,
         oidc_flow_store: oidc_flow_store.clone(),
         account_link_store: account_link_store.clone(),

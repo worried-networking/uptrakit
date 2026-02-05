@@ -372,6 +372,211 @@ pub struct DisconnectingPayload {
     pub reason: DisconnectReason,
 }
 
+// =============================================================================
+// MQTT Service Protocol
+// =============================================================================
+
+/// Messages sent from the MQTT service to the controller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MqttServiceMessage {
+    /// Keepalive ping (reuses PingPayload).
+    Ping(PingPayload),
+    /// Initial enrollment (anonymous connection).
+    Enroll(MqttEnrollPayload),
+    /// Request a certificate after approval (enrolled connection).
+    RequestCertificate(RequestCertificatePayload),
+    /// Renew certificate (authenticated connection).
+    RenewCertificate(RenewCertificatePayload),
+    /// Register instance after mTLS authentication.
+    Register(MqttRegisterPayload),
+    /// Periodic heartbeat with active tenant list.
+    Heartbeat(MqttHeartbeatPayload),
+    /// Explicitly release specific tenants.
+    ReleaseTenants(MqttReleaseTenantsPayload),
+    /// Graceful shutdown notification.
+    Disconnecting(MqttDisconnectingPayload),
+}
+
+/// Messages sent from the controller to the MQTT service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MqttControllerMessage {
+    /// Keepalive pong (reuses PongPayload).
+    Pong(PongPayload),
+    /// Enrollment confirmation (uses service_id instead of agent_id).
+    Enrolled(MqttEnrolledPayload),
+    /// Approval notification.
+    Approved(MqttApprovedPayload),
+    /// Rejection notification.
+    Rejected(MqttRejectedPayload),
+    /// Issued certificate (reuses CertificatePayload).
+    Certificate(CertificatePayload),
+    /// Error response (reuses ErrorPayload).
+    Error(ErrorPayload),
+    /// Runtime settings pushed on authenticated connect.
+    MqttServiceSettings(MqttServiceSettingsPayload),
+    /// Registration acknowledgment.
+    Registered(MqttRegisteredPayload),
+    /// Initial or incremental tenant assignments.
+    TenantAssignments(MqttTenantAssignmentsPayload),
+    /// Single tenant config updated (hot-reload trigger).
+    TenantConfigUpdated(MqttTenantConfigUpdatedPayload),
+    /// Tenant disabled or deleted.
+    TenantRevoked(MqttTenantRevokedPayload),
+    /// CA bundle updated (reuses CaBundleUpdatedPayload).
+    CaBundleUpdated(CaBundleUpdatedPayload),
+    /// Prompt certificate renewal (reuses RequestCertRenewalPayload).
+    RequestCertRenewal(RequestCertRenewalPayload),
+    /// Server restarting (reuses ServerRestartingPayload).
+    ServerRestarting(ServerRestartingPayload),
+}
+
+// --- MQTT Service Payloads ---
+
+/// Payload for MQTT service enrollment request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttEnrollPayload {
+    /// Instance hostname.
+    pub hostname: String,
+    /// Human-readable display name.
+    pub friendly_name: String,
+    /// Optional enrollment token for auto-approval.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrollment_token: Option<String>,
+}
+
+/// Payload for MQTT service enrollment confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttEnrolledPayload {
+    /// Controller-generated service ID.
+    pub service_id: String,
+    /// One-time enrollment secret for reconnection.
+    pub enrollment_secret: String,
+    /// Current status ("pending" or "approved").
+    pub status: String,
+}
+
+/// Payload for MQTT service approval notification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttApprovedPayload {
+    pub service_id: String,
+}
+
+/// Payload for MQTT service rejection notification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttRejectedPayload {
+    pub service_id: String,
+}
+
+/// Payload for MQTT service instance registration (sent after mTLS connect).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttRegisterPayload {
+    /// Unique instance identifier (e.g., hostname-uuid prefix).
+    pub instance_id: String,
+    /// Maximum tenants this instance will handle (0 = unlimited).
+    #[serde(default)]
+    pub max_tenants: u32,
+    /// Currently active tenant IDs (for reconnect reconciliation).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_tenants: Vec<String>,
+}
+
+/// Payload for registration acknowledgment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttRegisteredPayload {
+    /// Echo back the instance ID for confirmation.
+    pub instance_id: String,
+}
+
+/// Payload for MQTT service heartbeat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttHeartbeatPayload {
+    /// List of tenant IDs currently being served.
+    pub active_tenants: Vec<String>,
+}
+
+/// Payload for explicitly releasing tenants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttReleaseTenantsPayload {
+    /// Tenant IDs to release.
+    pub tenant_ids: Vec<String>,
+}
+
+/// Payload for MQTT service disconnection notification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttDisconnectingPayload {
+    /// Reason for disconnection.
+    pub reason: DisconnectReason,
+    /// Tenants that were active (will be released by controller).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_tenants: Vec<String>,
+}
+
+/// Payload for MQTT service runtime settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttServiceSettingsPayload {
+    /// Hours before cert expiry to start renewal.
+    pub renewal_window_hours: u16,
+    /// Current CA bundle hash for staleness detection.
+    #[serde(default)]
+    pub ca_bundle_hash: String,
+}
+
+/// Payload for tenant assignments (initial or incremental).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttTenantAssignmentsPayload {
+    /// List of tenant configurations to start serving.
+    pub tenants: Vec<MqttTenantConfig>,
+}
+
+/// Configuration for a single tenant's MQTT client.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttTenantConfig {
+    /// Tenant UUID.
+    pub tenant_id: String,
+    /// Whether MQTT is enabled for this tenant.
+    pub enabled: bool,
+    /// Transport protocol (tcp, tls, ws, wss).
+    pub transport: String,
+    /// Broker hostname.
+    pub host: String,
+    /// Broker port.
+    pub port: u16,
+    /// WebSocket path (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// MQTT client ID.
+    pub client_id: String,
+    /// Username (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    /// Password (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// Topic prefix.
+    pub topic_prefix: String,
+    /// Last update timestamp (for change detection).
+    #[serde(with = "utc_datetime_millis")]
+    pub updated_at: UtcDateTime,
+}
+
+/// Payload for single tenant config update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttTenantConfigUpdatedPayload {
+    /// Updated tenant configuration.
+    pub tenant: MqttTenantConfig,
+}
+
+/// Payload for tenant revocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttTenantRevokedPayload {
+    /// Tenant UUID being revoked.
+    pub tenant_id: String,
+    /// Reason for revocation.
+    pub reason: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1078,5 +1283,343 @@ mod tests {
             let deserialized: DisconnectReason = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, reason);
         }
+    }
+
+    // --- MQTT Service Protocol tests ---
+
+    #[test]
+    fn mqtt_enroll_serialization_roundtrip() {
+        let msg = MqttServiceMessage::Enroll(MqttEnrollPayload {
+            hostname: "mqtt-service-1".to_string(),
+            friendly_name: "MQTT Service Node 1".to_string(),
+            enrollment_token: Some("tok-456".to_string()),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"enroll"#));
+        assert!(json.contains(r#""hostname":"mqtt-service-1"#));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_enroll_without_token() {
+        let msg = MqttServiceMessage::Enroll(MqttEnrollPayload {
+            hostname: "mqtt-service-2".to_string(),
+            friendly_name: "MQTT Service Node 2".to_string(),
+            enrollment_token: None,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("enrollment_token"));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_enrolled_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Enrolled(MqttEnrolledPayload {
+            service_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            enrollment_secret: "secret-xyz".to_string(),
+            status: "pending".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"enrolled"#));
+        assert!(json.contains(r#""service_id":"550e8400-e29b-41d4-a716-446655440000"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_register_serialization_roundtrip() {
+        let msg = MqttServiceMessage::Register(MqttRegisterPayload {
+            instance_id: "mqtt-node1-01936a1e".to_string(),
+            max_tenants: 10,
+            active_tenants: vec!["tenant-1".to_string(), "tenant-2".to_string()],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"register"#));
+        assert!(json.contains(r#""instance_id":"mqtt-node1-01936a1e"#));
+        assert!(json.contains(r#""max_tenants":10"#));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_register_empty_active_tenants() {
+        let msg = MqttServiceMessage::Register(MqttRegisterPayload {
+            instance_id: "mqtt-node2-01936a1e".to_string(),
+            max_tenants: 0,
+            active_tenants: vec![],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("active_tenants"));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_registered_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Registered(MqttRegisteredPayload {
+            instance_id: "mqtt-node1-01936a1e".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"registered","instance_id":"mqtt-node1-01936a1e"}"#
+        );
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_heartbeat_serialization_roundtrip() {
+        let msg = MqttServiceMessage::Heartbeat(MqttHeartbeatPayload {
+            active_tenants: vec!["tenant-1".to_string(), "tenant-2".to_string()],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"heartbeat"#));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_release_tenants_serialization_roundtrip() {
+        let msg = MqttServiceMessage::ReleaseTenants(MqttReleaseTenantsPayload {
+            tenant_ids: vec!["tenant-1".to_string()],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"release_tenants"#));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_disconnecting_serialization_roundtrip() {
+        let msg = MqttServiceMessage::Disconnecting(MqttDisconnectingPayload {
+            reason: DisconnectReason::Shutdown,
+            active_tenants: vec!["tenant-1".to_string()],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"disconnecting"#));
+        assert!(json.contains(r#""reason":"shutdown"#));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_disconnecting_empty_tenants() {
+        let msg = MqttServiceMessage::Disconnecting(MqttDisconnectingPayload {
+            reason: DisconnectReason::Restart,
+            active_tenants: vec![],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("active_tenants"));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_service_settings_serialization_roundtrip() {
+        let msg = MqttControllerMessage::MqttServiceSettings(MqttServiceSettingsPayload {
+            renewal_window_hours: 6,
+            ca_bundle_hash: "abc123def".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"mqtt_service_settings"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_tenant_assignments_serialization_roundtrip() {
+        let msg = MqttControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
+            tenants: vec![MqttTenantConfig {
+                tenant_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+                enabled: true,
+                transport: "tls".to_string(),
+                host: "broker.example.com".to_string(),
+                port: 8883,
+                path: None,
+                client_id: "uptrakit".to_string(),
+                username: Some("user".to_string()),
+                password: Some("pass".to_string()),
+                topic_prefix: "home/uptrakit".to_string(),
+                updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
+            }],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tenant_assignments"#));
+        assert!(json.contains(r#""transport":"tls"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_tenant_config_omits_none_fields() {
+        let config = MqttTenantConfig {
+            tenant_id: "tenant-1".to_string(),
+            enabled: true,
+            transport: "tcp".to_string(),
+            host: "localhost".to_string(),
+            port: 1883,
+            path: None,
+            client_id: "uptrakit".to_string(),
+            username: None,
+            password: None,
+            topic_prefix: "uptrakit".to_string(),
+            updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("path"));
+        assert!(!json.contains("username"));
+        assert!(!json.contains("password"));
+        let deserialized: MqttTenantConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, config);
+    }
+
+    #[test]
+    fn mqtt_tenant_config_updated_serialization_roundtrip() {
+        let msg = MqttControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
+            tenant: MqttTenantConfig {
+                tenant_id: "tenant-1".to_string(),
+                enabled: true,
+                transport: "ws".to_string(),
+                host: "broker.local".to_string(),
+                port: 80,
+                path: Some("/mqtt".to_string()),
+                client_id: "uptrakit".to_string(),
+                username: None,
+                password: None,
+                topic_prefix: "uptrakit".to_string(),
+                updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
+            },
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tenant_config_updated"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_tenant_revoked_serialization_roundtrip() {
+        let msg = MqttControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
+            tenant_id: "tenant-1".to_string(),
+            reason: "tenant disabled".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"tenant_revoked"#));
+        assert!(json.contains(r#""reason":"tenant disabled"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_approved_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Approved(MqttApprovedPayload {
+            service_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"approved","service_id":"550e8400-e29b-41d4-a716-446655440000"}"#
+        );
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_rejected_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Rejected(MqttRejectedPayload {
+            service_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"rejected","service_id":"550e8400-e29b-41d4-a716-446655440000"}"#
+        );
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_service_ping_serialization_roundtrip() {
+        let msg = MqttServiceMessage::Ping(PingPayload {
+            agent_ts: 1706400000000,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"ping","agent_ts":1706400000000}"#);
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_controller_pong_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Pong(PongPayload {
+            agent_ts: 1706400000000,
+            controller_ts: 1706400000050,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"pong"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_service_request_certificate_serialization_roundtrip() {
+        let msg = MqttServiceMessage::RequestCertificate(RequestCertificatePayload {
+            csr_pem:
+                "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
+                    .to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"request_certificate"#));
+        let deserialized: MqttServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_controller_certificate_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Certificate(CertificatePayload {
+            cert_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".to_string(),
+            not_after: UtcDateTime::from_unix_timestamp(1_706_400_000).unwrap(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"certificate"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_controller_error_serialization_roundtrip() {
+        let msg = MqttControllerMessage::Error(ErrorPayload {
+            code: "not_approved".to_string(),
+            message: "MQTT service is not yet approved".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"error"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_controller_ca_bundle_updated_serialization_roundtrip() {
+        let msg = MqttControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
+            ca_bundle_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
+                .to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"ca_bundle_updated"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_controller_server_restarting_serialization_roundtrip() {
+        let msg = MqttControllerMessage::ServerRestarting(ServerRestartingPayload {
+            reason: "controller upgrade".to_string(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"server_restarting"#));
+        let deserialized: MqttControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
     }
 }

@@ -334,7 +334,7 @@ dependencies = [
  "sha1",
  "sync_wrapper",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.28.0",
  "tower",
  "tower-layer",
  "tower-service",
@@ -2302,7 +2302,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "chrono",
  "getrandom 0.2.17",
  "http",
@@ -4389,6 +4389,22 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
+dependencies = [
+ "futures-util",
+ "log",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tungstenite 0.26.2",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "tokio-tungstenite"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
@@ -4744,7 +4760,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.28.0",
  "tracing",
  "tracing-subscriber",
  "uptrakit-internal-wire",
@@ -4838,18 +4854,28 @@ name = "uptrakit-mqtt"
 version = "0.0.1"
 dependencies = [
  "clap",
+ "futures-util",
  "hostname",
+ "rcgen",
  "rootcause",
  "rumqttc",
- "sea-orm",
+ "rustls",
+ "rustls-pemfile",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "tracing-subscriber",
- "uptrakit-shared-db",
+ "uptrakit-internal-wire",
  "uptrakit-web-api-types",
+ "url",
  "uuid",
+ "webpki-roots 0.26.11",
+ "x509-parser",
 ]
 
 [[package]]
