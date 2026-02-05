@@ -54,25 +54,6 @@ pub enum DirectoryError {
 
 pub type Result<T> = std::result::Result<T, DirectoryError>;
 
-/// Application identifier for directory resolution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppKind {
-    Controller,
-    Agent,
-    Mqtt,
-}
-
-impl AppKind {
-    /// Application name used in directory paths.
-    pub const fn app_name(&self) -> &'static str {
-        match self {
-            Self::Controller => "controller",
-            Self::Agent => "agent",
-            Self::Mqtt => "mqtt",
-        }
-    }
-}
-
 /// Resolved directory paths for an Uptrakit application.
 ///
 /// Config directory is for persistent configuration that rarely changes:
@@ -100,12 +81,12 @@ impl AppDirs {
     /// * `config_override` - Optional override for the config directory
     /// * `state_override` - Optional override for the state directory
     pub fn resolve(
-        app: AppKind,
+        app_name: &str,
         config_override: Option<&Path>,
         state_override: Option<&Path>,
     ) -> Result<Self> {
-        let proj_dirs = ProjectDirs::from("io", "uptrakit", app.app_name())
-            .ok_or(DirectoryError::NoProjectDirs)?;
+        let proj_dirs =
+            ProjectDirs::from("io", "uptrakit", app_name).ok_or(DirectoryError::NoProjectDirs)?;
 
         let config = match config_override {
             Some(path) => expand_tilde(path)?,
@@ -265,7 +246,7 @@ mod tests {
 
     #[test]
     fn resolve_with_defaults() {
-        let dirs = AppDirs::resolve(AppKind::Controller, None, None).unwrap();
+        let dirs = AppDirs::resolve("controller", None, None).unwrap();
         // Just verify it returns something
         assert!(!dirs.config_dir().as_os_str().is_empty());
         assert!(!dirs.state_dir().as_os_str().is_empty());
@@ -277,8 +258,7 @@ mod tests {
         let config_path = temp.path().join("config");
         let state_path = temp.path().join("state");
 
-        let dirs =
-            AppDirs::resolve(AppKind::Agent, Some(&config_path), Some(&state_path)).unwrap();
+        let dirs = AppDirs::resolve("agent", Some(&config_path), Some(&state_path)).unwrap();
 
         assert_eq!(dirs.config_dir(), config_path);
         assert_eq!(dirs.state_dir(), state_path);
@@ -346,7 +326,7 @@ mod tests {
         let config = temp.path().join("config");
         let state = temp.path().join("state");
 
-        let dirs = AppDirs::resolve(AppKind::Mqtt, Some(&config), Some(&state)).unwrap();
+        let dirs = AppDirs::resolve("mqtt", Some(&config), Some(&state)).unwrap();
         dirs.ensure_dirs().unwrap();
 
         assert!(config.is_dir());
@@ -356,17 +336,9 @@ mod tests {
     #[test]
     fn config_and_state_paths() {
         let temp = TempDir::new().unwrap();
-        let dirs =
-            AppDirs::resolve(AppKind::Controller, Some(temp.path()), Some(temp.path())).unwrap();
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path())).unwrap();
 
         assert_eq!(dirs.config_path("ca.crt"), temp.path().join("ca.crt"));
         assert_eq!(dirs.state_path("db.sqlite"), temp.path().join("db.sqlite"));
-    }
-
-    #[test]
-    fn app_kind_names() {
-        assert_eq!(AppKind::Controller.app_name(), "controller");
-        assert_eq!(AppKind::Agent.app_name(), "agent");
-        assert_eq!(AppKind::Mqtt.app_name(), "mqtt");
     }
 }

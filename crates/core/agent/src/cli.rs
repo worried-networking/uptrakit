@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use uptrakit_directories::{AppDirs, AppKind};
+use uptrakit_directories::AppDirs;
 
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-agent")]
@@ -61,7 +61,7 @@ impl Args {
     /// CLI overrides take precedence over platform defaults.
     pub fn resolve_dirs(&self) -> Result<AppDirs, String> {
         AppDirs::resolve(
-            AppKind::Agent,
+            "agent",
             self.config_dir.as_deref(),
             self.state_dir.as_deref(),
         )

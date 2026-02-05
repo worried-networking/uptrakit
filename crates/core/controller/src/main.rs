@@ -67,9 +67,11 @@ async fn run(args: cli::Args) -> Result<(), Report<AppError>> {
     let app_dirs = args
         .resolve_dirs()
         .map_err(|s| report!(AppError::Config(s)))?;
-    app_dirs
-        .ensure_dirs()
-        .map_err(|e| report!(AppError::Config(format!("failed to create directories: {e}"))))?;
+    app_dirs.ensure_dirs().map_err(|e| {
+        report!(AppError::Config(format!(
+            "failed to create directories: {e}"
+        )))
+    })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 

@@ -54,9 +54,11 @@ async fn run(args: &Args) -> error::Result<()> {
     let app_dirs = args
         .resolve_dirs()
         .map_err(|s| report!(Error::Enrollment(s)))?;
-    app_dirs
-        .ensure_dirs()
-        .map_err(|e| report!(Error::Enrollment(format!("failed to create directories: {e}"))))?;
+    app_dirs.ensure_dirs().map_err(|e| {
+        report!(Error::Enrollment(format!(
+            "failed to create directories: {e}"
+        )))
+    })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 

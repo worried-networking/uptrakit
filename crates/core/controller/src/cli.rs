@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use ipnet::IpNet;
-use uptrakit_directories::{AppDirs, AppKind};
+use uptrakit_directories::AppDirs;
 
 /// Uptrakit Controller — central server for the Uptrakit update tracking toolkit.
 #[derive(Parser, Debug)]
@@ -225,7 +225,7 @@ impl Args {
     /// CLI overrides take precedence over platform defaults.
     pub fn resolve_dirs(&self) -> Result<AppDirs, String> {
         AppDirs::resolve(
-            AppKind::Controller,
+            "controller",
             self.config_dir.as_deref(),
             self.state_dir.as_deref(),
         )
