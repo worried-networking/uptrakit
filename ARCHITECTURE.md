@@ -287,7 +287,7 @@ Multiple MQTT service instances can run simultaneously. The controller manages c
 - On instance disconnect, its leases are released (no automatic redistribution)
 - Stale leases are cleaned up periodically (no heartbeat within timeout)
 
-The MQTT client supports four transport types: plain TCP (`mqtt://`), TLS (`mqtts://`), WebSocket (`ws://`), and secure WebSocket (`wss://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the full connection lifecycle, CLI flags, and key files.
+The MQTT client supports two transport types: plain TCP (`mqtt://`) and TLS (`mqtts://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the full connection lifecycle, CLI flags, and key files.
 
 Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all paths converge on the same controller API.
 

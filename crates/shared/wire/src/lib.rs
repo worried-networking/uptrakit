@@ -537,15 +537,12 @@ pub struct MqttTenantConfig {
     pub tenant_id: String,
     /// Whether MQTT is enabled for this tenant.
     pub enabled: bool,
-    /// Transport protocol (tcp, tls, ws, wss).
+    /// Transport protocol (tcp, tls).
     pub transport: String,
     /// Broker hostname.
     pub host: String,
     /// Broker port.
     pub port: u16,
-    /// WebSocket path (optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
     /// MQTT client ID.
     pub client_id: String,
     /// Username (optional).
@@ -1438,7 +1435,6 @@ mod tests {
                 transport: "tls".to_string(),
                 host: "broker.example.com".to_string(),
                 port: 8883,
-                path: None,
                 client_id: "uptrakit".to_string(),
                 username: Some("user".to_string()),
                 password: Some("pass".to_string()),
@@ -1461,7 +1457,6 @@ mod tests {
             transport: "tcp".to_string(),
             host: "localhost".to_string(),
             port: 1883,
-            path: None,
             client_id: "uptrakit".to_string(),
             username: None,
             password: None,
@@ -1469,7 +1464,6 @@ mod tests {
             updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
         };
         let json = serde_json::to_string(&config).unwrap();
-        assert!(!json.contains("path"));
         assert!(!json.contains("username"));
         assert!(!json.contains("password"));
         let deserialized: MqttTenantConfig = serde_json::from_str(&json).unwrap();
@@ -1482,10 +1476,9 @@ mod tests {
             tenant: MqttTenantConfig {
                 tenant_id: "tenant-1".to_string(),
                 enabled: true,
-                transport: "ws".to_string(),
+                transport: "tcp".to_string(),
                 host: "broker.local".to_string(),
-                port: 80,
-                path: Some("/mqtt".to_string()),
+                port: 1883,
                 client_id: "uptrakit".to_string(),
                 username: None,
                 password: None,

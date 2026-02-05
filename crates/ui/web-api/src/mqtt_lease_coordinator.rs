@@ -473,7 +473,6 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         transport: client.transport.clone(),
         host: client.host.clone(),
         port: client.port as u16,
-        path: client.path.clone(),
         client_id: client.client_id.clone(),
         username: client.username.clone(),
         password: client.password.clone(),

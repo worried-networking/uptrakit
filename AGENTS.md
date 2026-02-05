@@ -511,10 +511,9 @@ MQTT settings are stored in a dedicated `mqtt_clients` table (one row per tenant
 | `id` | UUID PK | `Uuid::now_v7()` | |
 | `tenant_id` | UUID FK → tenants | | UNIQUE (single client per tenant) |
 | `enabled` | bool | `true` | |
-| `transport` | text | `tcp` | `tcp`, `tls`, `ws`, `wss` |
+| `transport` | text | `tcp` | `tcp`, `tls` |
 | `host` | text | | Broker hostname |
 | `port` | integer | 1883 | |
-| `path` | text? | | WebSocket path (e.g. `/mqtt`) |
 | `client_id` | text | `uptrakit-controller` | |
 | `username` | text? | | |
 | `password` | text? | | |
@@ -528,10 +527,8 @@ MQTT settings are stored in a dedicated `mqtt_clients` table (one row per tenant
 | --- | --- | --- |
 | `mqtt://broker:1883` | tcp | 1883 |
 | `mqtts://broker:8883` | tls | 8883 |
-| `ws://broker:80/mqtt` | ws | 80 |
-| `wss://broker:443/mqtt` | wss | 443 |
 
-The API accepts either a `url` field (parsed into components) or individual `transport`/`host`/`port`/`path` fields. The response always includes the computed `url`.
+The API accepts either a `url` field (parsed into components) or individual `transport`/`host`/`port` fields. The response always includes the computed `url`.
 
 ### MQTT Service (standalone binary)
 
@@ -598,7 +595,7 @@ MQTT services have a separate enrollment flow from agents:
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls/Ws/Wss) |
+| `crates/shared/web-api-types/src/mqtt_transport.rs` | `MqttTransport` enum (Tcp/Tls) |
 | `crates/shared/web-api-types/src/mqtt_url.rs` | `MqttUrl` parsing and formatting |
 | `crates/shared/web-api-types/src/settings_mqtt.rs` | API request/response types |
 | `crates/shared/wire/src/lib.rs` | MQTT service wire protocol messages |

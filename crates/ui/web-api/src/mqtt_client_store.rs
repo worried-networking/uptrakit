@@ -51,7 +51,6 @@ pub async fn create_mqtt_client(
     transport: &str,
     host: &str,
     port: u16,
-    path: Option<&str>,
     client_id: &str,
     username: Option<&str>,
     password: Option<&str>,
@@ -71,7 +70,6 @@ pub async fn create_mqtt_client(
         transport: Set(transport.to_string()),
         host: Set(host.to_string()),
         port: Set(i32::from(port)),
-        path: Set(path.map(String::from)),
         client_id: Set(client_id.to_string()),
         username: Set(username.map(String::from)),
         password: Set(password.map(String::from)),
@@ -93,7 +91,6 @@ pub async fn update_mqtt_client(
     transport: Option<&str>,
     host: Option<&str>,
     port: Option<u16>,
-    path: Option<Option<&str>>,
     client_id: Option<&str>,
     username: Option<Option<&str>>,
     password: Option<Option<&str>>,
@@ -112,9 +109,6 @@ pub async fn update_mqtt_client(
     }
     if let Some(v) = port {
         model.port = Set(i32::from(v));
-    }
-    if let Some(v) = path {
-        model.path = Set(v.map(String::from));
     }
     if let Some(v) = client_id {
         model.client_id = Set(v.to_string());

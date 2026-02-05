@@ -132,7 +132,6 @@ fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
         transport,
         host: config.host.clone(),
         port,
-        path: config.path.clone(),
         client_id: config.client_id.clone(),
         username: config.username.clone(),
         password: config.password.clone(),
@@ -147,7 +146,6 @@ fn compute_config_hash(config: &MqttTenantConfig) -> u64 {
     config.transport.hash(&mut hasher);
     config.host.hash(&mut hasher);
     config.port.hash(&mut hasher);
-    config.path.hash(&mut hasher);
     config.client_id.hash(&mut hasher);
     config.username.hash(&mut hasher);
     config.password.hash(&mut hasher);
@@ -168,7 +166,6 @@ mod tests {
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
             port: 8883,
-            path: Some("/mqtt".to_string()),
             client_id: "my-client".to_string(),
             username: Some("user".to_string()),
             password: Some("pass".to_string()),
@@ -181,7 +178,6 @@ mod tests {
         assert_eq!(mqtt_config.transport, MqttTransport::Tls);
         assert_eq!(mqtt_config.host, "broker.example.com");
         assert_eq!(mqtt_config.port, 8883);
-        assert_eq!(mqtt_config.path.as_deref(), Some("/mqtt"));
         assert_eq!(mqtt_config.client_id, "my-client");
         assert_eq!(mqtt_config.username.as_deref(), Some("user"));
         assert_eq!(mqtt_config.password.as_deref(), Some("pass"));
@@ -196,7 +192,6 @@ mod tests {
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
             port: 0,
-            path: None,
             client_id: "client".to_string(),
             username: None,
             password: None,
@@ -216,7 +211,6 @@ mod tests {
             transport: "tls".to_string(),
             host: "broker1.example.com".to_string(),
             port: 8883,
-            path: None,
             client_id: "client".to_string(),
             username: None,
             password: None,
@@ -230,7 +224,6 @@ mod tests {
             transport: "tls".to_string(),
             host: "broker2.example.com".to_string(), // Different host
             port: 8883,
-            path: None,
             client_id: "client".to_string(),
             username: None,
             password: None,
@@ -249,7 +242,6 @@ mod tests {
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
             port: 8883,
-            path: None,
             client_id: "client".to_string(),
             username: None,
             password: None,
@@ -263,7 +255,6 @@ mod tests {
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
             port: 8883,
-            path: None,
             client_id: "client".to_string(),
             username: None,
             password: None,

@@ -5,12 +5,14 @@ use crate::mqtt_transport::MqttTransport;
 pub enum MqttUrlError {
     /// The string is not a valid URL.
     InvalidUrl(String),
-    /// The URL scheme is not recognised (expected mqtt, mqtts, ws, wss).
+    /// The URL scheme is not recognised (expected mqtt, mqtts).
     UnsupportedScheme(String),
     /// The URL has no host component.
     MissingHost,
     /// The port number is out of range.
     InvalidPort,
+    /// The URL contains a path, which is not supported for MQTT.
+    PathNotSupported,
 }
 
 impl std::fmt::Display for MqttUrlError {
@@ -18,13 +20,11 @@ impl std::fmt::Display for MqttUrlError {
         match self {
             Self::InvalidUrl(e) => write!(f, "invalid URL: {e}"),
             Self::UnsupportedScheme(s) => {
-                write!(
-                    f,
-                    "unsupported URL scheme: {s} (expected mqtt, mqtts, ws, wss)"
-                )
+                write!(f, "unsupported URL scheme: {s} (expected mqtt, mqtts)")
             }
             Self::MissingHost => f.write_str("URL must contain a host"),
             Self::InvalidPort => f.write_str("invalid port number"),
+            Self::PathNotSupported => f.write_str("URL path is not supported for MQTT"),
         }
     }
 }
@@ -35,15 +35,13 @@ pub struct MqttUrl {
     pub transport: MqttTransport,
     pub host: String,
     pub port: u16,
-    pub path: Option<String>,
 }
 
 impl MqttUrl {
     /// Parse an MQTT URL string.
     ///
-    /// Accepted schemes: `mqtt://`, `mqtts://`, `ws://`, `wss://`.
+    /// Accepted schemes: `mqtt://`, `mqtts://`.
     /// If the port is omitted, the default port for the transport is used.
-    /// A path component is preserved for WebSocket transports (e.g. `/mqtt`).
     pub fn parse(url: &str) -> Result<Self, MqttUrlError> {
         // Split scheme manually because url::Url doesn't know mqtt/mqtts schemes
         let (scheme, rest) = url
@@ -67,6 +65,10 @@ impl MqttUrl {
             }
             None => (rest, None),
         };
+
+        if path.is_some() {
+            return Err(MqttUrlError::PathNotSupported);
+        }
 
         if authority.is_empty() {
             return Err(MqttUrlError::MissingHost);
@@ -109,31 +111,27 @@ impl MqttUrl {
             transport,
             host: host.to_string(),
             port,
-            path,
         })
     }
 
     /// Format back into a URL string.
     pub fn to_url_string(&self) -> String {
         let scheme = self.transport.url_scheme();
-        let path = self.path.as_deref().unwrap_or("");
-
         // Omit port if it matches the transport default
         if self.port == self.transport.default_port() {
-            format!("{scheme}://{}{path}", self.host)
+            format!("{scheme}://{}", self.host)
         } else {
-            format!("{scheme}://{}:{}{path}", self.host, self.port)
+            format!("{scheme}://{}:{}", self.host, self.port)
         }
     }
 }
 
 /// Build a URL string from individual components (stored in the DB).
-pub fn build_url(transport: MqttTransport, host: &str, port: u16, path: Option<&str>) -> String {
+pub fn build_url(transport: MqttTransport, host: &str, port: u16) -> String {
     let url = MqttUrl {
         transport,
         host: host.to_string(),
         port,
-        path: path.map(String::from),
     };
     url.to_url_string()
 }
@@ -148,7 +146,6 @@ mod tests {
         assert_eq!(url.transport, MqttTransport::Tcp);
         assert_eq!(url.host, "broker.local");
         assert_eq!(url.port, 1883);
-        assert_eq!(url.path, None);
     }
 
     #[test]
@@ -157,7 +154,6 @@ mod tests {
         assert_eq!(url.transport, MqttTransport::Tcp);
         assert_eq!(url.host, "broker.local");
         assert_eq!(url.port, 9883);
-        assert_eq!(url.path, None);
     }
 
     #[test]
@@ -166,43 +162,6 @@ mod tests {
         assert_eq!(url.transport, MqttTransport::Tls);
         assert_eq!(url.host, "secure.broker");
         assert_eq!(url.port, 8883);
-        assert_eq!(url.path, None);
-    }
-
-    #[test]
-    fn parse_ws_with_path() {
-        let url = MqttUrl::parse("ws://broker.local:80/mqtt").unwrap();
-        assert_eq!(url.transport, MqttTransport::Ws);
-        assert_eq!(url.host, "broker.local");
-        assert_eq!(url.port, 80);
-        assert_eq!(url.path.as_deref(), Some("/mqtt"));
-    }
-
-    #[test]
-    fn parse_ws_default_port_with_path() {
-        let url = MqttUrl::parse("ws://broker.local/mqtt").unwrap();
-        assert_eq!(url.transport, MqttTransport::Ws);
-        assert_eq!(url.host, "broker.local");
-        assert_eq!(url.port, 80);
-        assert_eq!(url.path.as_deref(), Some("/mqtt"));
-    }
-
-    #[test]
-    fn parse_wss_with_path() {
-        let url = MqttUrl::parse("wss://secure.broker:443/mqtt").unwrap();
-        assert_eq!(url.transport, MqttTransport::Wss);
-        assert_eq!(url.host, "secure.broker");
-        assert_eq!(url.port, 443);
-        assert_eq!(url.path.as_deref(), Some("/mqtt"));
-    }
-
-    #[test]
-    fn parse_wss_custom_port() {
-        let url = MqttUrl::parse("wss://secure.broker:9443/ws").unwrap();
-        assert_eq!(url.transport, MqttTransport::Wss);
-        assert_eq!(url.host, "secure.broker");
-        assert_eq!(url.port, 9443);
-        assert_eq!(url.path.as_deref(), Some("/ws"));
     }
 
     #[test]
@@ -210,7 +169,12 @@ mod tests {
         let url = MqttUrl::parse("mqtt://broker.local/").unwrap();
         assert_eq!(url.transport, MqttTransport::Tcp);
         assert_eq!(url.host, "broker.local");
-        assert_eq!(url.path, None);
+    }
+
+    #[test]
+    fn parse_path_rejected() {
+        let err = MqttUrl::parse("mqtt://broker.local/mqtt").unwrap_err();
+        assert_eq!(err, MqttUrlError::PathNotSupported);
     }
 
     #[test]
@@ -224,6 +188,18 @@ mod tests {
     fn parse_error_unsupported_scheme() {
         let err = MqttUrl::parse("http://broker.local").unwrap_err();
         assert_eq!(err, MqttUrlError::UnsupportedScheme("http".to_string()));
+    }
+
+    #[test]
+    fn parse_error_ws_scheme() {
+        let err = MqttUrl::parse("ws://broker.local").unwrap_err();
+        assert_eq!(err, MqttUrlError::UnsupportedScheme("ws".to_string()));
+    }
+
+    #[test]
+    fn parse_error_wss_scheme() {
+        let err = MqttUrl::parse("wss://broker.local").unwrap_err();
+        assert_eq!(err, MqttUrlError::UnsupportedScheme("wss".to_string()));
     }
 
     #[test]
@@ -250,7 +226,6 @@ mod tests {
             transport: MqttTransport::Tcp,
             host: "broker.local".to_string(),
             port: 1883,
-            path: None,
         };
         assert_eq!(url.to_url_string(), "mqtt://broker.local");
     }
@@ -261,20 +236,8 @@ mod tests {
             transport: MqttTransport::Tcp,
             host: "broker.local".to_string(),
             port: 9883,
-            path: None,
         };
         assert_eq!(url.to_url_string(), "mqtt://broker.local:9883");
-    }
-
-    #[test]
-    fn to_url_string_with_path() {
-        let url = MqttUrl {
-            transport: MqttTransport::Ws,
-            host: "broker.local".to_string(),
-            port: 80,
-            path: Some("/mqtt".to_string()),
-        };
-        assert_eq!(url.to_url_string(), "ws://broker.local/mqtt");
     }
 
     #[test]
@@ -284,8 +247,6 @@ mod tests {
         let cases = [
             ("mqtt://broker:1883", "mqtt://broker"),
             ("mqtts://broker:8883", "mqtts://broker"),
-            ("ws://broker:80/mqtt", "ws://broker/mqtt"),
-            ("wss://broker:443/mqtt", "wss://broker/mqtt"),
         ];
         for (input, expected) in cases {
             let parsed = MqttUrl::parse(input).unwrap();
@@ -295,12 +256,7 @@ mod tests {
 
     #[test]
     fn round_trip_custom_ports() {
-        let urls = [
-            "mqtt://broker:9883",
-            "mqtts://broker:9443",
-            "ws://broker:8080/mqtt",
-            "wss://broker:8443/ws",
-        ];
+        let urls = ["mqtt://broker:9883", "mqtts://broker:9443"];
         for input in urls {
             let parsed = MqttUrl::parse(input).unwrap();
             assert_eq!(parsed.to_url_string(), input);
@@ -310,15 +266,11 @@ mod tests {
     #[test]
     fn build_url_helper() {
         assert_eq!(
-            build_url(MqttTransport::Tcp, "broker", 1883, None),
+            build_url(MqttTransport::Tcp, "broker", 1883),
             "mqtt://broker"
         );
         assert_eq!(
-            build_url(MqttTransport::Wss, "broker", 443, Some("/mqtt")),
-            "wss://broker/mqtt"
-        );
-        assert_eq!(
-            build_url(MqttTransport::Tls, "broker", 9443, None),
+            build_url(MqttTransport::Tls, "broker", 9443),
             "mqtts://broker:9443"
         );
     }

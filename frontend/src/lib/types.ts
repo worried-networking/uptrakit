@@ -169,7 +169,7 @@ export interface UpdateNetworkSettings {
 	https_addr?: string;
 }
 
-export type MqttTransport = 'tcp' | 'tls' | 'ws' | 'wss';
+export type MqttTransport = 'tcp' | 'tls';
 
 export interface MqttClientResponse {
 	id: string;
@@ -177,7 +177,6 @@ export interface MqttClientResponse {
 	transport: MqttTransport;
 	host: string;
 	port: number;
-	path: string | null;
 	url: string;
 	client_id: string;
 	username: string | null;
@@ -190,7 +189,6 @@ export interface CreateMqttClient {
 	transport?: MqttTransport;
 	host?: string;
 	port?: number;
-	path?: string;
 	enabled?: boolean;
 	client_id?: string;
 	username?: string;
@@ -203,7 +201,6 @@ export interface UpdateMqttClient {
 	transport?: MqttTransport;
 	host?: string;
 	port?: number;
-	path?: string | null;
 	enabled?: boolean;
 	client_id?: string;
 	username?: string | null;

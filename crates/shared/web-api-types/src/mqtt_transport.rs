@@ -8,8 +8,6 @@ pub enum MqttTransport {
     #[default]
     Tcp,
     Tls,
-    Ws,
-    Wss,
 }
 
 impl MqttTransport {
@@ -18,8 +16,6 @@ impl MqttTransport {
         match self {
             Self::Tcp => "tcp",
             Self::Tls => "tls",
-            Self::Ws => "ws",
-            Self::Wss => "wss",
         }
     }
 
@@ -28,8 +24,6 @@ impl MqttTransport {
         match s {
             "tcp" => Some(Self::Tcp),
             "tls" => Some(Self::Tls),
-            "ws" => Some(Self::Ws),
-            "wss" => Some(Self::Wss),
             _ => None,
         }
     }
@@ -39,8 +33,6 @@ impl MqttTransport {
         match self {
             Self::Tcp => 1883,
             Self::Tls => 8883,
-            Self::Ws => 80,
-            Self::Wss => 443,
         }
     }
 
@@ -49,8 +41,6 @@ impl MqttTransport {
         match self {
             Self::Tcp => "mqtt",
             Self::Tls => "mqtts",
-            Self::Ws => "ws",
-            Self::Wss => "wss",
         }
     }
 
@@ -59,20 +49,13 @@ impl MqttTransport {
         match scheme {
             "mqtt" => Some(Self::Tcp),
             "mqtts" => Some(Self::Tls),
-            "ws" => Some(Self::Ws),
-            "wss" => Some(Self::Wss),
             _ => None,
         }
     }
 
     /// Whether this transport uses TLS.
     pub const fn requires_tls(self) -> bool {
-        matches!(self, Self::Tls | Self::Wss)
-    }
-
-    /// Whether this transport uses WebSocket framing.
-    pub const fn is_websocket(self) -> bool {
-        matches!(self, Self::Ws | Self::Wss)
+        matches!(self, Self::Tls)
     }
 }
 
@@ -88,12 +71,7 @@ mod tests {
 
     #[test]
     fn round_trip_all_variants() {
-        for transport in [
-            MqttTransport::Tcp,
-            MqttTransport::Tls,
-            MqttTransport::Ws,
-            MqttTransport::Wss,
-        ] {
+        for transport in [MqttTransport::Tcp, MqttTransport::Tls] {
             let s = transport.as_str();
             let parsed = MqttTransport::parse(s);
             assert_eq!(parsed, Some(transport), "round-trip failed for {s}");
@@ -102,12 +80,7 @@ mod tests {
 
     #[test]
     fn serde_round_trip() {
-        for transport in [
-            MqttTransport::Tcp,
-            MqttTransport::Tls,
-            MqttTransport::Ws,
-            MqttTransport::Wss,
-        ] {
+        for transport in [MqttTransport::Tcp, MqttTransport::Tls] {
             let json = serde_json::to_string(&transport).unwrap();
             let deserialized: MqttTransport = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, transport);
@@ -118,18 +91,11 @@ mod tests {
     fn default_ports() {
         assert_eq!(MqttTransport::Tcp.default_port(), 1883);
         assert_eq!(MqttTransport::Tls.default_port(), 8883);
-        assert_eq!(MqttTransport::Ws.default_port(), 80);
-        assert_eq!(MqttTransport::Wss.default_port(), 443);
     }
 
     #[test]
     fn url_scheme_round_trip() {
-        for transport in [
-            MqttTransport::Tcp,
-            MqttTransport::Tls,
-            MqttTransport::Ws,
-            MqttTransport::Wss,
-        ] {
+        for transport in [MqttTransport::Tcp, MqttTransport::Tls] {
             let scheme = transport.url_scheme();
             let parsed = MqttTransport::from_url_scheme(scheme);
             assert_eq!(
@@ -141,16 +107,9 @@ mod tests {
     }
 
     #[test]
-    fn tls_and_websocket_flags() {
+    fn tls_flags() {
         assert!(!MqttTransport::Tcp.requires_tls());
         assert!(MqttTransport::Tls.requires_tls());
-        assert!(!MqttTransport::Ws.requires_tls());
-        assert!(MqttTransport::Wss.requires_tls());
-
-        assert!(!MqttTransport::Tcp.is_websocket());
-        assert!(!MqttTransport::Tls.is_websocket());
-        assert!(MqttTransport::Ws.is_websocket());
-        assert!(MqttTransport::Wss.is_websocket());
     }
 
     #[test]
@@ -168,12 +127,7 @@ mod tests {
 
     #[test]
     fn display_matches_as_str() {
-        for transport in [
-            MqttTransport::Tcp,
-            MqttTransport::Tls,
-            MqttTransport::Ws,
-            MqttTransport::Wss,
-        ] {
+        for transport in [MqttTransport::Tcp, MqttTransport::Tls] {
             assert_eq!(format!("{transport}"), transport.as_str());
         }
     }

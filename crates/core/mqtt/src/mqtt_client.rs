@@ -14,8 +14,6 @@ pub struct MqttConfig {
     pub host: String,
     /// Broker port.
     pub port: u16,
-    /// WebSocket path (e.g. "/mqtt"), used for ws/wss transports.
-    pub path: Option<String>,
     /// MQTT client ID.
     pub client_id: String,
     /// Optional username for authentication.
@@ -32,7 +30,6 @@ impl fmt::Debug for MqttConfig {
             .field("transport", &self.transport)
             .field("host", &self.host)
             .field("port", &self.port)
-            .field("path", &self.path)
             .field("client_id", &self.client_id)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
@@ -117,16 +114,7 @@ fn status_topic(prefix: &str) -> String {
 }
 
 fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
-    // For WebSocket transports, the host field carries the full URL
-    let host = match config.transport {
-        MqttTransport::Ws => build_ws_url("ws", &config.host, config.port, config.path.as_deref()),
-        MqttTransport::Wss => {
-            build_ws_url("wss", &config.host, config.port, config.path.as_deref())
-        }
-        _ => config.host.clone(),
-    };
-
-    let mut opts = MqttOptions::new(&config.client_id, &host, config.port);
+    let mut opts = MqttOptions::new(&config.client_id, &config.host, config.port);
     opts.set_keep_alive(Duration::from_secs(30));
     opts.set_clean_session(true);
 
@@ -152,26 +140,9 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
             };
             opts.set_transport(Transport::Tls(tls_config));
         }
-        MqttTransport::Ws => {
-            opts.set_transport(Transport::Ws);
-        }
-        MqttTransport::Wss => {
-            let tls_config = rumqttc::TlsConfiguration::Simple {
-                ca: Vec::new(),
-                alpn: None,
-                client_auth: None,
-            };
-            opts.set_transport(Transport::Wss(tls_config));
-        }
     }
 
     opts
-}
-
-/// Build a WebSocket URL from components.
-fn build_ws_url(scheme: &str, host: &str, port: u16, path: Option<&str>) -> String {
-    let path = path.unwrap_or("/mqtt");
-    format!("{scheme}://{host}:{port}{path}")
 }
 
 async fn run_event_loop(mut event_loop: EventLoop, client: AsyncClient, topic: String) {
@@ -204,7 +175,6 @@ mod tests {
             transport: MqttTransport::Tcp,
             host: "localhost".into(),
             port: 1883,
-            path: None,
             client_id: "test".into(),
             username: None,
             password: None,
@@ -269,32 +239,14 @@ mod tests {
     }
 
     #[test]
-    fn debug_includes_transport_and_path() {
+    fn debug_includes_transport() {
         let config = MqttConfig {
-            transport: MqttTransport::Wss,
-            path: Some("/mqtt".into()),
+            transport: MqttTransport::Tls,
             ..tcp_config()
         };
 
         let debug_str = format!("{config:?}");
-        assert!(debug_str.contains("Wss"));
-        assert!(debug_str.contains("/mqtt"));
-    }
-
-    #[test]
-    fn build_ws_url_with_path() {
-        assert_eq!(
-            build_ws_url("ws", "broker", 80, Some("/mqtt")),
-            "ws://broker:80/mqtt"
-        );
-    }
-
-    #[test]
-    fn build_ws_url_default_path() {
-        assert_eq!(
-            build_ws_url("wss", "broker", 443, None),
-            "wss://broker:443/mqtt"
-        );
+        assert!(debug_str.contains("Tls"));
     }
 
     #[test]
@@ -305,28 +257,6 @@ mod tests {
             ..tcp_config()
         };
         // Just verify it doesn't panic
-        let _opts = build_mqtt_options(&config);
-    }
-
-    #[test]
-    fn ws_transport_sets_ws() {
-        let config = MqttConfig {
-            transport: MqttTransport::Ws,
-            port: 80,
-            path: Some("/mqtt".into()),
-            ..tcp_config()
-        };
-        let _opts = build_mqtt_options(&config);
-    }
-
-    #[test]
-    fn wss_transport_sets_wss() {
-        let config = MqttConfig {
-            transport: MqttTransport::Wss,
-            port: 443,
-            path: Some("/mqtt".into()),
-            ..tcp_config()
-        };
         let _opts = build_mqtt_options(&config);
     }
 }

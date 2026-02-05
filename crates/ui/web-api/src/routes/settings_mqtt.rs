@@ -21,12 +21,7 @@ pub use uptrakit_web_api_types::settings_mqtt::{
 fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
     let transport = MqttTransport::parse(&model.transport).unwrap_or_default();
     let port = u16::try_from(model.port).unwrap_or(transport.default_port());
-    let url = uptrakit_web_api_types::mqtt_url::build_url(
-        transport,
-        &model.host,
-        port,
-        model.path.as_deref(),
-    );
+    let url = uptrakit_web_api_types::mqtt_url::build_url(transport, &model.host, port);
 
     MqttClientResponse {
         id: model.id.to_string(),
@@ -34,7 +29,6 @@ fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
         transport,
         host: model.host.clone(),
         port,
-        path: model.path.clone(),
         url,
         client_id: model.client_id.clone(),
         username: model.username.clone(),
@@ -104,9 +98,9 @@ pub async fn create_mqtt_settings(
     let tenant_id = tenant.tenant_id;
 
     // Resolve connection parameters from URL or individual fields
-    let (transport, host, port, path) = if let Some(ref url_str) = req.url {
+    let (transport, host, port) = if let Some(ref url_str) = req.url {
         match MqttUrl::parse(url_str) {
-            Ok(parsed) => (parsed.transport, parsed.host, parsed.port, parsed.path),
+            Ok(parsed) => (parsed.transport, parsed.host, parsed.port),
             Err(e) => {
                 return (StatusCode::BAD_REQUEST, format!("invalid url: {e}")).into_response();
             }
@@ -121,7 +115,7 @@ pub async fn create_mqtt_settings(
         };
         let transport = req.transport.unwrap_or_default();
         let port = req.port.unwrap_or(transport.default_port());
-        (transport, host, port, req.path.clone())
+        (transport, host, port)
     };
 
     let enabled = req.enabled.unwrap_or(true);
@@ -142,7 +136,6 @@ pub async fn create_mqtt_settings(
         transport.as_str(),
         &host,
         port,
-        path.as_deref(),
         client_id,
         req.username.as_deref(),
         req.password.as_deref(),
@@ -201,20 +194,15 @@ pub async fn update_mqtt_settings(
     };
 
     // Resolve URL-based overrides
-    let (url_transport, url_host, url_port, url_path) = if let Some(ref url_str) = req.url {
+    let (url_transport, url_host, url_port) = if let Some(ref url_str) = req.url {
         match MqttUrl::parse(url_str) {
-            Ok(parsed) => (
-                Some(parsed.transport),
-                Some(parsed.host),
-                Some(parsed.port),
-                Some(parsed.path),
-            ),
+            Ok(parsed) => (Some(parsed.transport), Some(parsed.host), Some(parsed.port)),
             Err(e) => {
                 return (StatusCode::BAD_REQUEST, format!("invalid url: {e}")).into_response();
             }
         }
     } else {
-        (None, None, None, None)
+        (None, None, None)
     };
 
     let transport = url_transport
@@ -222,25 +210,6 @@ pub async fn update_mqtt_settings(
         .map(|t| t.as_str().to_string());
     let host = url_host.or(req.host.clone());
     let port = url_port.or(req.port);
-
-    // Path: from URL parsing, from req.path JSON value, or unchanged
-    let path: Option<Option<&str>> = if let Some(ref p) = url_path {
-        Some(p.as_deref())
-    } else if let Some(ref path_val) = req.path {
-        if path_val.is_null() {
-            Some(None)
-        } else if let Some(s) = path_val.as_str() {
-            if s.is_empty() {
-                Some(None)
-            } else {
-                Some(Some(s))
-            }
-        } else {
-            return (StatusCode::BAD_REQUEST, "path must be a string or null").into_response();
-        }
-    } else {
-        None
-    };
 
     // Username: JSON value can be string or null
     let username: Option<Option<&str>> = if let Some(ref username_val) = req.username {
@@ -283,7 +252,6 @@ pub async fn update_mqtt_settings(
         transport.as_deref(),
         host.as_deref(),
         port,
-        path,
         req.client_id.as_deref(),
         username,
         password,

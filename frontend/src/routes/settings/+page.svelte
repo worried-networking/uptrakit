@@ -542,8 +542,7 @@
 			</div>
 			<p class="text-surface-600-300-token mb-4">
 				Configure MQTT broker connection for Home Assistant integration.
-				Use a URL like <code>mqtt://broker:1883</code>, <code>mqtts://broker:8883</code>,
-				<code>ws://broker:80/mqtt</code>, or <code>wss://broker:443/mqtt</code>.
+				Use a URL like <code>mqtt://broker:1883</code> or <code>mqtts://broker:8883</code>.
 				All MQTT changes require a restart to take effect.
 			</p>
 

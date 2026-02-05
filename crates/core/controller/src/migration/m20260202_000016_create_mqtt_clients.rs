@@ -25,7 +25,6 @@ impl MigrationTrait for Migration {
                     .col(string(MqttClients::Transport).default("tcp"))
                     .col(string(MqttClients::Host))
                     .col(integer(MqttClients::Port).default(1883))
-                    .col(string_null(MqttClients::Path))
                     .col(string(MqttClients::ClientId).default("uptrakit-controller"))
                     .col(string_null(MqttClients::Username))
                     .col(string_null(MqttClients::Password))
@@ -74,7 +73,6 @@ enum MqttClients {
     Transport,
     Host,
     Port,
-    Path,
     ClientId,
     Username,
     Password,

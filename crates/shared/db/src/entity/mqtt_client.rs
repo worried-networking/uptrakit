@@ -11,7 +11,6 @@ pub struct Model {
     pub transport: String,
     pub host: String,
     pub port: i32,
-    pub path: Option<String>,
     pub client_id: String,
     pub username: Option<String>,
     pub password: Option<String>,
