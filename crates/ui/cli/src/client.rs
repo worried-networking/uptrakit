@@ -10,7 +10,7 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn new(base_url: &str, token: Option<&str>) -> Result<Self> {
         let http = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
+            .tls_danger_accept_invalid_certs(true)
             .build()
             .context_to()?;
 

@@ -190,9 +190,7 @@ fn write_envoy_config(tmp: &TempDir, pki: &TestPki, backend_port: u16) {
 fn build_client(agent_pki: Option<&TestPki>, ca_pki: &TestPki) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
-    let mut builder = reqwest::Client::builder()
-        .add_root_certificate(ca_cert)
-        .danger_accept_invalid_certs(false);
+    let mut builder = reqwest::Client::builder().tls_certs_merge([ca_cert]);
 
     if let Some(pki) = agent_pki {
         let mut id_pem = pki.agent_cert_pem.as_bytes().to_vec();

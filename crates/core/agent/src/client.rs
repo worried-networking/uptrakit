@@ -91,14 +91,12 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Resu
                 // reqwest defaults to system/built-in roots — nothing to configure
             }
             TlsMode::TrustOnFirstUse => {
-                builder = builder.danger_accept_invalid_certs(true);
+                builder = builder.tls_danger_accept_invalid_certs(true);
             }
             TlsMode::PinnedCa(ca_pem) => {
                 let cert = reqwest::Certificate::from_pem(ca_pem)
                     .map_err(|e| report!(Error::FetchCa(format!("invalid CA PEM: {e}"))))?;
-                builder = builder
-                    .tls_built_in_root_certs(false)
-                    .add_root_certificate(cert);
+                builder = builder.tls_certs_only([cert]);
             }
         }
     }

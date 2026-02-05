@@ -33,7 +33,7 @@ rcgen = { workspace = true }
 x509-parser = { workspace = true } # required for rcgen's x509-parser verify feature unification
 reqwest = { workspace = true }
 uuid = { workspace = true }
-webpki-roots = "1"
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

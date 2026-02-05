@@ -291,6 +291,13 @@ skip = [
 
     # webpki-roots: 0.26.x via sqlx-core, 1.x via reqwest/hyper-rustls
     { crate = "webpki-roots@0.26.11", reason = "pulled by sqlx-core; newer 1.x used by reqwest, hyper-rustls" },
+
+    # reqwest: 0.12.x via openidconnect/oauth2, 0.13.x used directly by uptrakit
+    { crate = "reqwest@0.12.28", reason = "pulled by openidconnect/oauth2; newer 0.13.x used by uptrakit crates" },
+
+    # windows-sys 0.45.x via jni → rustls-platform-verifier → reqwest 0.13 (platform-specific, macOS/Linux only)
+    # Note: 0.45.x/0.48.x windows-* crate duplicates exist but are platform-specific
+    # and only flagged on Windows targets, so no skip entries needed for them.
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

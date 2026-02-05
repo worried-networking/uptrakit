@@ -148,9 +148,7 @@ fn build_client(
 ) -> reqwest::Client {
     let ca_cert = reqwest::Certificate::from_pem(ca_pki.ca_cert_pem.as_bytes()).expect("CA cert");
 
-    let mut builder = reqwest::Client::builder()
-        .add_root_certificate(ca_cert)
-        .danger_accept_invalid_certs(false);
+    let mut builder = reqwest::Client::builder().tls_certs_merge([ca_cert]);
 
     if let (Some(cert), Some(key)) = (cert_pem, key_pem) {
         let mut id_pem = cert.as_bytes().to_vec();
