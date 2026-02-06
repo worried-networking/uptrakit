@@ -79,7 +79,7 @@ pub async fn execute_update(
     payload: ExecuteUpdatePayload,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateExecutionResult {
-    let update_history_id = payload.update_history_id.clone();
+    let update_history_id = payload.update_history_id;
     let shell = payload.shell.as_deref().unwrap_or(DEFAULT_SHELL);
 
     // Detect current version (from_version)
@@ -568,8 +568,8 @@ mod tests {
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
-            update_history_id: "test-id".to_string(),
-            software_item_id: "item-id".to_string(),
+            update_history_id: uuid::Uuid::nil(),
+            software_item_id: uuid::Uuid::nil(),
             software_item_name: "Test App".to_string(),
             package_identifier: "test-app".to_string(),
             to_version: "2.0.0".to_string(),
@@ -678,7 +678,7 @@ mod tests {
         let result = execute_update(payload, tx).await;
 
         // Should complete (though the actual update may fail due to missing release_info)
-        assert_eq!(result.result.update_history_id, "test-id");
+        assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
         // Drain the channel and check for pre-hook output
         rx.close();
@@ -724,7 +724,7 @@ mod tests {
         let result = execute_update(payload, tx).await;
 
         // Should complete (though the actual update may fail)
-        assert_eq!(result.result.update_history_id, "test-id");
+        assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
         // Drain the channel and check for sh output
         rx.close();

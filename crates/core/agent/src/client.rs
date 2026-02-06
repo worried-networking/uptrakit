@@ -42,7 +42,7 @@ fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> s
 
 /// State for an in-flight update execution.
 struct InFlightUpdate {
-    update_history_id: String,
+    update_history_id: uuid::Uuid,
     handle: tokio::task::JoinHandle<crate::update::UpdateExecutionResult>,
     output_rx: tokio::sync::mpsc::Receiver<crate::update::UpdateOutputMessage>,
 }
@@ -149,7 +149,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                     tracing::error!("received update event but no in-flight update exists");
                     continue;
                 };
-                let update_history_id = update.update_history_id.clone();
+                let update_history_id = update.update_history_id;
 
                 match event {
                     UpdateEvent::Output(output_msg) => {
@@ -163,7 +163,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                         }
                     }
                     UpdateEvent::Completed(result) => {
-                        send_update_result(&mut ws_stream, &update_history_id, result).await;
+                        send_update_result(&mut ws_stream, update_history_id, result).await;
                         in_flight_update = None;
                     }
                 }
@@ -329,7 +329,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         &assignment.config,
                                     ).await;
                                     results.push(VersionCheckResult {
-                                        software_item_id: assignment.software_item_id.clone(),
+                                        software_item_id: assignment.software_item_id,
                                         installed_version,
                                         error,
                                     });
@@ -376,8 +376,8 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 // Create a channel for output streaming
                                 let (output_tx, output_rx) = tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
 
-                                // Clone what we need for the spawned task
-                                let update_history_id = payload.update_history_id.clone();
+                                // Copy what we need for the spawned task
+                                let update_history_id = payload.update_history_id;
 
                                 // Spawn update execution task
                                 let handle = tokio::spawn(async move {
@@ -386,7 +386,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
                                 // Send UpdateStarted
                                 let started_msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
-                                    update_history_id: update_history_id.clone(),
+                                    update_history_id,
                                     from_version: None,
                                 });
                                 let started_json = serde_json::to_string(&started_msg).context_to::<Error>()?;
@@ -479,7 +479,7 @@ enum UpdateEvent {
 /// Send the final update result to the controller.
 async fn send_update_result(
     ws_stream: &mut WsStream,
-    update_history_id: &str,
+    update_history_id: uuid::Uuid,
     result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
 ) {
     use tokio_tungstenite::tungstenite::Message;
@@ -495,7 +495,7 @@ async fn send_update_result(
         Err(e) => {
             tracing::error!(error = %e, "update task panicked");
             let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
-                update_history_id: update_history_id.to_string(),
+                update_history_id,
                 status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                 from_version: None,
                 to_version: None,
@@ -540,7 +540,7 @@ async fn handle_graceful_shutdown(
 
                 Some(output_msg) = update.output_rx.recv() => {
                     let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
-                        update_history_id: update.update_history_id.clone(),
+                        update_history_id: update.update_history_id,
                         output: output_msg.output,
                         stream: output_msg.stream,
                     });
@@ -549,7 +549,7 @@ async fn handle_graceful_shutdown(
                     }
                 }
                 result = &mut update.handle => {
-                    send_update_result(ws_stream, &update.update_history_id, result).await;
+                    send_update_result(ws_stream, update.update_history_id, result).await;
                     break;
                 }
                 _ = tokio::time::sleep_until(deadline) => {
@@ -559,7 +559,7 @@ async fn handle_graceful_shutdown(
                     );
                     // Send a timeout failure result
                     let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
-                        update_history_id: update.update_history_id.clone(),
+                        update_history_id: update.update_history_id,
                         status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                         from_version: None,
                         to_version: None,
@@ -577,7 +577,7 @@ async fn handle_graceful_shutdown(
         // Drain any remaining output messages
         while let Ok(output_msg) = update.output_rx.try_recv() {
             let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
-                update_history_id: update.update_history_id.clone(),
+                update_history_id: update.update_history_id,
                 output: output_msg.output,
                 stream: output_msg.stream,
             });

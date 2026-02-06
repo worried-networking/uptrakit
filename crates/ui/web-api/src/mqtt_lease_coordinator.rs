@@ -300,7 +300,7 @@ impl MqttLeaseCoordinator {
 
         // Push revocation message
         let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            mqtt_client_id: mqtt_client_id.to_string(),
+            mqtt_client_id,
             reason: reason.to_string(),
         });
 
@@ -470,8 +470,8 @@ impl MqttLeaseCoordinator {
 /// Convert mqtt_client model to MqttTenantConfig wire type.
 fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
     MqttTenantConfig {
-        mqtt_client_id: client.id.to_string(),
-        tenant_id: client.tenant_id.to_string(),
+        mqtt_client_id: client.id,
+        tenant_id: client.tenant_id,
         enabled: client.enabled,
         transport: client.transport.clone(),
         host: client.host.clone(),

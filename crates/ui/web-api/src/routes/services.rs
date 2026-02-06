@@ -233,9 +233,7 @@ pub async fn approve_service(
         .service_connections
         .send(
             &service_id,
-            ControllerMessage::Approved(ApprovedPayload {
-                service_id: service_id.to_string(),
-            }),
+            ControllerMessage::Approved(ApprovedPayload { service_id }),
         )
         .await;
 
@@ -310,9 +308,7 @@ pub async fn reject_service(
         .service_connections
         .send(
             &service_id,
-            ControllerMessage::Rejected(RejectedPayload {
-                service_id: service_id.to_string(),
-            }),
+            ControllerMessage::Rejected(RejectedPayload { service_id }),
         )
         .await;
 

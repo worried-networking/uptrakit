@@ -4817,6 +4817,7 @@ dependencies = [
  "uptrakit-provider-core",
  "uptrakit-provider-registry",
  "uptrakit-shared-macros",
+ "uuid",
 ]
 
 [[package]]
@@ -4937,6 +4938,7 @@ dependencies = [
  "serde_json",
  "time",
  "uptrakit-provider-core",
+ "uuid",
 ]
 
 [[package]]

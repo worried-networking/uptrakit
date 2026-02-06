@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
+use uuid::Uuid;
 
 // Re-export ProviderType from provider-core for use in wire protocol messages.
 pub use uptrakit_provider_core::ProviderType;
@@ -135,7 +136,7 @@ pub struct ReportHostInfoPayload {
 /// Payload for enrollment confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrolledPayload {
-    pub service_id: String,
+    pub service_id: Uuid,
     pub enrollment_secret: String,
     pub status: String,
 }
@@ -143,13 +144,13 @@ pub struct EnrolledPayload {
 /// Payload for approval notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovedPayload {
-    pub service_id: String,
+    pub service_id: Uuid,
 }
 
 /// Payload for rejection notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RejectedPayload {
-    pub service_id: String,
+    pub service_id: Uuid,
 }
 
 /// Payload for issued certificate.
@@ -240,7 +241,7 @@ pub struct CheckVersionsPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionCheckAssignment {
     /// Software item ID.
-    pub software_item_id: String,
+    pub software_item_id: Uuid,
     /// Human-readable name for logging.
     pub name: String,
     /// Provider type.
@@ -262,7 +263,7 @@ pub struct VersionCheckResultsPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionCheckResult {
     /// Software item ID.
-    pub software_item_id: String,
+    pub software_item_id: Uuid,
     /// Detected installed version, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
@@ -319,8 +320,8 @@ pub struct ReleaseAssetInfo {
 /// Controller -> Agent: Trigger an update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecuteUpdatePayload {
-    pub update_history_id: String,
-    pub software_item_id: String,
+    pub update_history_id: Uuid,
+    pub software_item_id: Uuid,
     pub software_item_name: String,
     pub package_identifier: String,
     pub to_version: String,
@@ -344,7 +345,7 @@ pub struct ExecuteUpdatePayload {
 /// Agent -> Controller: Update is starting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateStartedPayload {
-    pub update_history_id: String,
+    pub update_history_id: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_version: Option<String>,
 }
@@ -352,7 +353,7 @@ pub struct UpdateStartedPayload {
 /// Agent -> Controller: Streaming output line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateOutputPayload {
-    pub update_history_id: String,
+    pub update_history_id: Uuid,
     pub output: String,
     #[serde(default)]
     pub stream: OutputStreamType,
@@ -361,7 +362,7 @@ pub struct UpdateOutputPayload {
 /// Agent -> Controller: Final result of update execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateResultPayload {
-    pub update_history_id: String,
+    pub update_history_id: Uuid,
     pub status: UpdateFinalStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_version: Option<String>,
@@ -393,7 +394,7 @@ pub struct DisconnectingPayload {
     pub reason: DisconnectReason,
     /// MQTT client IDs that were active at disconnection time (MQTT services only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub active_mqtt_clients: Vec<String>,
+    pub active_mqtt_clients: Vec<Uuid>,
 }
 
 // =============================================================================
@@ -410,7 +411,7 @@ pub struct MqttRegisterPayload {
     pub max_tenants: u32,
     /// Currently active MQTT client IDs (for reconnect reconciliation).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub active_mqtt_clients: Vec<String>,
+    pub active_mqtt_clients: Vec<Uuid>,
 }
 
 /// Payload for registration acknowledgment.
@@ -424,7 +425,7 @@ pub struct MqttRegisteredPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttReleaseTenantsPayload {
     /// MQTT client IDs to release.
-    pub mqtt_client_ids: Vec<String>,
+    pub mqtt_client_ids: Vec<Uuid>,
 }
 
 /// Payload for tenant assignments (initial or incremental).
@@ -438,9 +439,9 @@ pub struct MqttTenantAssignmentsPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttTenantConfig {
     /// MQTT client UUID (primary identifier from mqtt_clients table).
-    pub mqtt_client_id: String,
+    pub mqtt_client_id: Uuid,
     /// Tenant UUID (kept for context).
-    pub tenant_id: String,
+    pub tenant_id: Uuid,
     /// Whether MQTT is enabled for this tenant.
     pub enabled: bool,
     /// Transport protocol (tcp, tls).
@@ -475,7 +476,7 @@ pub struct MqttTenantConfigUpdatedPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttTenantRevokedPayload {
     /// MQTT client UUID being revoked.
-    pub mqtt_client_id: String,
+    pub mqtt_client_id: Uuid,
     /// Reason for revocation.
     pub reason: String,
 }
@@ -484,6 +485,18 @@ pub struct MqttTenantRevokedPayload {
 mod tests {
     use super::*;
 
+    const TEST_UUID_1: Uuid = Uuid::from_bytes([
+        0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00,
+        0x00,
+    ]);
+    const TEST_UUID_2: Uuid = Uuid::from_bytes([
+        0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00,
+        0x01,
+    ]);
+    const TEST_UUID_3: Uuid = Uuid::from_bytes([
+        0x66, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4, 0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00,
+        0x01,
+    ]);
     // =========================================================================
     // ServiceMessage tests
     // =========================================================================
@@ -613,12 +626,12 @@ mod tests {
         let msg = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
             results: vec![
                 VersionCheckResult {
-                    software_item_id: "item-1".to_string(),
+                    software_item_id: TEST_UUID_1,
                     installed_version: Some("1.2.3".to_string()),
                     error: None,
                 },
                 VersionCheckResult {
-                    software_item_id: "item-2".to_string(),
+                    software_item_id: TEST_UUID_2,
                     installed_version: None,
                     error: Some("detection failed".to_string()),
                 },
@@ -636,7 +649,7 @@ mod tests {
     #[test]
     fn update_started_serialization_roundtrip() {
         let msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
-            update_history_id: "id-1".to_string(),
+            update_history_id: TEST_UUID_1,
             from_version: Some("1.0.0".to_string()),
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -649,7 +662,7 @@ mod tests {
     #[test]
     fn update_started_omits_none_from_version() {
         let msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
-            update_history_id: "id-1".to_string(),
+            update_history_id: TEST_UUID_1,
             from_version: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -661,7 +674,7 @@ mod tests {
     #[test]
     fn update_output_serialization_roundtrip() {
         let msg = ServiceMessage::UpdateOutput(UpdateOutputPayload {
-            update_history_id: "id-1".to_string(),
+            update_history_id: TEST_UUID_1,
             output: "Downloading package...".to_string(),
             stream: OutputStreamType::Stdout,
         });
@@ -682,7 +695,7 @@ mod tests {
             (OutputStreamType::System, "system"),
         ] {
             let msg = ServiceMessage::UpdateOutput(UpdateOutputPayload {
-                update_history_id: "id-1".to_string(),
+                update_history_id: TEST_UUID_1,
                 output: "test".to_string(),
                 stream,
             });
@@ -693,7 +706,7 @@ mod tests {
 
     #[test]
     fn update_output_default_stream() {
-        let json = r#"{"type":"update_output","update_history_id":"id-1","output":"test"}"#;
+        let json = r#"{"type":"update_output","update_history_id":"550e8400-e29b-41d4-a716-446655440000","output":"test"}"#;
         let msg: ServiceMessage = serde_json::from_str(json).unwrap();
         if let ServiceMessage::UpdateOutput(payload) = msg {
             assert_eq!(payload.stream, OutputStreamType::Stdout);
@@ -705,7 +718,7 @@ mod tests {
     #[test]
     fn update_result_completed_serialization_roundtrip() {
         let msg = ServiceMessage::UpdateResult(UpdateResultPayload {
-            update_history_id: "id-1".to_string(),
+            update_history_id: TEST_UUID_1,
             status: UpdateFinalStatus::Completed,
             from_version: Some("1.0.0".to_string()),
             to_version: Some("2.0.0".to_string()),
@@ -723,7 +736,7 @@ mod tests {
     #[test]
     fn update_result_failed_serialization_roundtrip() {
         let msg = ServiceMessage::UpdateResult(UpdateResultPayload {
-            update_history_id: "id-1".to_string(),
+            update_history_id: TEST_UUID_1,
             status: UpdateFinalStatus::Failed,
             from_version: None,
             to_version: None,
@@ -766,11 +779,11 @@ mod tests {
     fn disconnecting_with_active_mqtt_clients() {
         let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
             reason: DisconnectReason::Shutdown,
-            active_mqtt_clients: vec!["client-1".to_string()],
+            active_mqtt_clients: vec![TEST_UUID_1],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""reason":"shutdown"#));
-        assert!(json.contains(r#""active_mqtt_clients":["client-1"]"#));
+        assert!(json.contains(r#""active_mqtt_clients":["550e8400-e29b-41d4-a716-446655440000"]"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -792,7 +805,7 @@ mod tests {
         let msg = ServiceMessage::Register(MqttRegisterPayload {
             instance_id: "mqtt-node1-01936a1e".to_string(),
             max_tenants: 10,
-            active_mqtt_clients: vec!["client-1".to_string(), "client-2".to_string()],
+            active_mqtt_clients: vec![TEST_UUID_1, TEST_UUID_2],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"register"#));
@@ -818,7 +831,7 @@ mod tests {
     #[test]
     fn release_tenants_serialization_roundtrip() {
         let msg = ServiceMessage::ReleaseTenants(MqttReleaseTenantsPayload {
-            mqtt_client_ids: vec!["client-1".to_string()],
+            mqtt_client_ids: vec![TEST_UUID_1],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"release_tenants"#));
@@ -849,7 +862,7 @@ mod tests {
     #[test]
     fn enrolled_serialization_roundtrip() {
         let msg = ControllerMessage::Enrolled(EnrolledPayload {
-            service_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            service_id: TEST_UUID_1,
             enrollment_secret: "secret-abc".to_string(),
             status: "pending".to_string(),
         });
@@ -865,7 +878,7 @@ mod tests {
     #[test]
     fn approved_serialization_roundtrip() {
         let msg = ControllerMessage::Approved(ApprovedPayload {
-            service_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            service_id: TEST_UUID_1,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
@@ -879,7 +892,7 @@ mod tests {
     #[test]
     fn rejected_serialization_roundtrip() {
         let msg = ControllerMessage::Rejected(RejectedPayload {
-            service_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            service_id: TEST_UUID_1,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
@@ -1038,7 +1051,7 @@ mod tests {
     fn check_versions_serialization_roundtrip() {
         let msg = ControllerMessage::CheckVersions(CheckVersionsPayload {
             assignments: vec![VersionCheckAssignment {
-                software_item_id: "item-1".to_string(),
+                software_item_id: TEST_UUID_1,
                 name: "Test Software".to_string(),
                 provider_type: ProviderType::GithubReleases,
                 package_identifier: "owner/repo".to_string(),
@@ -1047,7 +1060,7 @@ mod tests {
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"check_versions"#));
-        assert!(json.contains(r#""software_item_id":"item-1"#));
+        assert!(json.contains(r#""software_item_id":"550e8400-e29b-41d4-a716-446655440000"#));
         assert!(json.contains(r#""provider_type":"github_releases"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -1056,8 +1069,8 @@ mod tests {
     #[test]
     fn execute_update_serialization_roundtrip() {
         let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
-            update_history_id: "01936a1e-7e8c-7f00-8000-000000000001".to_string(),
-            software_item_id: "01936a1e-7e8c-7f00-8000-000000000002".to_string(),
+            update_history_id: Uuid::parse_str("01936a1e-7e8c-7f00-8000-000000000001").unwrap(),
+            software_item_id: Uuid::parse_str("01936a1e-7e8c-7f00-8000-000000000002").unwrap(),
             software_item_name: "Node.js".to_string(),
             package_identifier: "nodejs".to_string(),
             to_version: "20.10.0".to_string(),
@@ -1088,8 +1101,8 @@ mod tests {
     #[test]
     fn execute_update_minimal_serialization() {
         let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
-            update_history_id: "id-1".to_string(),
-            software_item_id: "id-2".to_string(),
+            update_history_id: TEST_UUID_1,
+            software_item_id: TEST_UUID_2,
             software_item_name: "Redis".to_string(),
             package_identifier: "redis-server".to_string(),
             to_version: "7.2.0".to_string(),
@@ -1115,8 +1128,8 @@ mod tests {
     fn execute_update_backward_compat_default_timeout() {
         let json = r#"{
             "type": "execute_update",
-            "update_history_id": "id-1",
-            "software_item_id": "id-2",
+            "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
+            "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
             "package_identifier": "test",
             "to_version": "1.0.0",
@@ -1138,8 +1151,8 @@ mod tests {
     fn execute_update_with_shell_field() {
         let json = r#"{
             "type": "execute_update",
-            "update_history_id": "id-1",
-            "software_item_id": "id-2",
+            "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
+            "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
             "package_identifier": "test",
             "to_version": "1.0.0",
@@ -1159,8 +1172,8 @@ mod tests {
     fn execute_update_backward_compat_extra_fields() {
         let json = r#"{
             "type": "execute_update",
-            "update_history_id": "id-1",
-            "software_item_id": "id-2",
+            "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
+            "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
             "package_identifier": "test",
             "to_version": "1.0.0",
@@ -1190,8 +1203,8 @@ mod tests {
     fn tenant_assignments_serialization_roundtrip() {
         let msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
             tenants: vec![MqttTenantConfig {
-                mqtt_client_id: "660e8400-e29b-41d4-a716-446655440001".to_string(),
-                tenant_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+                mqtt_client_id: TEST_UUID_3,
+                tenant_id: TEST_UUID_1,
                 enabled: true,
                 transport: "tls".to_string(),
                 host: "broker.example.com".to_string(),
@@ -1214,8 +1227,8 @@ mod tests {
     fn tenant_config_updated_serialization_roundtrip() {
         let msg = ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
             tenant: MqttTenantConfig {
-                mqtt_client_id: "client-1".to_string(),
-                tenant_id: "tenant-1".to_string(),
+                mqtt_client_id: TEST_UUID_1,
+                tenant_id: TEST_UUID_2,
                 enabled: true,
                 transport: "tcp".to_string(),
                 host: "broker.local".to_string(),
@@ -1236,7 +1249,7 @@ mod tests {
     #[test]
     fn tenant_revoked_serialization_roundtrip() {
         let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            mqtt_client_id: "client-1".to_string(),
+            mqtt_client_id: TEST_UUID_1,
             reason: "mqtt client disabled".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -1300,7 +1313,7 @@ mod tests {
     #[test]
     fn version_check_assignment_serialization() {
         let assignment = VersionCheckAssignment {
-            software_item_id: "uuid-123".to_string(),
+            software_item_id: TEST_UUID_1,
             name: "Docker Image".to_string(),
             provider_type: ProviderType::DockerRegistry,
             package_identifier: "nginx:latest".to_string(),
@@ -1365,8 +1378,8 @@ mod tests {
     #[test]
     fn mqtt_tenant_config_omits_none_fields() {
         let config = MqttTenantConfig {
-            mqtt_client_id: "client-1".to_string(),
-            tenant_id: "tenant-1".to_string(),
+            mqtt_client_id: TEST_UUID_1,
+            tenant_id: TEST_UUID_2,
             enabled: true,
             transport: "tcp".to_string(),
             host: "localhost".to_string(),

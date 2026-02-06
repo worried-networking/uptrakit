@@ -148,13 +148,8 @@ pub(crate) async fn handle_mqtt_authenticated(
 
     // Reconcile MQTT clients if reconnecting with active clients.
     let tenant_configs = if !active_mqtt_clients.is_empty() {
-        let mqtt_client_ids: Vec<uuid::Uuid> = active_mqtt_clients
-            .iter()
-            .filter_map(|s| uuid::Uuid::parse_str(s).ok())
-            .collect();
-
         match lease_coordinator
-            .reconcile_mqtt_clients(service_id, &instance_id, &mqtt_client_ids)
+            .reconcile_mqtt_clients(service_id, &instance_id, &active_mqtt_clients)
             .await
         {
             Ok(configs) => configs,
@@ -238,14 +233,8 @@ pub(crate) async fn handle_mqtt_authenticated(
                                 }
                             }
                             ServiceMessage::ReleaseTenants(payload) => {
-                                let mqtt_client_ids: Vec<uuid::Uuid> = payload
-                                    .mqtt_client_ids
-                                    .iter()
-                                    .filter_map(|s| uuid::Uuid::parse_str(s).ok())
-                                    .collect();
-
                                 if let Err(e) = lease_coordinator
-                                    .release_mqtt_clients(&service_id, &mqtt_client_ids)
+                                    .release_mqtt_clients(&service_id, &payload.mqtt_client_ids)
                                     .await
                                 {
                                     tracing::warn!(error = %e, "failed to release mqtt clients");
@@ -253,7 +242,7 @@ pub(crate) async fn handle_mqtt_authenticated(
 
                                 tracing::info!(
                                     %service_id,
-                                    count = mqtt_client_ids.len(),
+                                    count = payload.mqtt_client_ids.len(),
                                     "MQTT service released mqtt clients"
                                 );
                             }
@@ -422,17 +411,15 @@ pub(crate) async fn handle_mqtt_enrolled(
                             match s.status {
                                 mqtt_service::ServiceStatus::Approved => {
                                     approved = true;
-                                    let msg = ControllerMessage::Approved(ApprovedPayload {
-                                        service_id: service_id.to_string(),
-                                    });
+                                    let msg =
+                                        ControllerMessage::Approved(ApprovedPayload { service_id });
                                     if let Some(json) = serialize_msg(&msg) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
                                 }
                                 mqtt_service::ServiceStatus::Rejected => {
-                                    let msg = ControllerMessage::Rejected(RejectedPayload {
-                                        service_id: service_id.to_string(),
-                                    });
+                                    let msg =
+                                        ControllerMessage::Rejected(RejectedPayload { service_id });
                                     if let Some(json) = serialize_msg(&msg) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }

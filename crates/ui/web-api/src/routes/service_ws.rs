@@ -414,9 +414,7 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uu
     // If already approved/rejected, push immediately.
     match service.status {
         service_entity::ServiceStatus::Approved => {
-            let msg = ControllerMessage::Approved(ApprovedPayload {
-                service_id: service_id.to_string(),
-            });
+            let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
             let Some(json) = serialize_msg(&msg) else {
                 return;
             };
@@ -425,9 +423,7 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uu
             }
         }
         service_entity::ServiceStatus::Rejected => {
-            let msg = ControllerMessage::Rejected(RejectedPayload {
-                service_id: service_id.to_string(),
-            });
+            let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
             if let Some(json) = serialize_msg(&msg) {
                 let _ = sink.send(Message::Text(json.into())).await;
             }
@@ -609,7 +605,7 @@ async fn enroll_agent(
         Ok(enroll_result) => {
             let service_id = enroll_result.agent.id;
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
-                service_id: service_id.to_string(),
+                service_id,
                 enrollment_secret: enroll_result.enrollment_secret,
                 status: enroll_result.status.as_str().to_string(),
             });
@@ -626,9 +622,7 @@ async fn enroll_agent(
 
             let approved = enroll_result.status == AgentStatus::Approved;
             if approved {
-                let approved_msg = ControllerMessage::Approved(ApprovedPayload {
-                    service_id: service_id.to_string(),
-                });
+                let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
                 let json = serialize_msg(&approved_msg)?;
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     return None;
@@ -675,7 +669,7 @@ async fn enroll_mqtt(
         Ok(enroll_result) => {
             let service_id = enroll_result.service.id;
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
-                service_id: service_id.to_string(),
+                service_id,
                 enrollment_secret: enroll_result.enrollment_secret,
                 status: format!("{:?}", enroll_result.status).to_lowercase(),
             });
@@ -692,9 +686,7 @@ async fn enroll_mqtt(
 
             let approved = enroll_result.status == service_entity::ServiceStatus::Approved;
             if approved {
-                let approved_msg = ControllerMessage::Approved(ApprovedPayload {
-                    service_id: service_id.to_string(),
-                });
+                let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
                 let json = serialize_msg(&approved_msg)?;
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     return None;

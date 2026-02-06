@@ -315,14 +315,8 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         "enrollment response received"
     );
 
-    let service_id = uuid::Uuid::parse_str(&enrolled.service_id).map_err(|e| {
-        report!(EnrollmentError::Enrollment(format!(
-            "invalid service_id: {e}"
-        )))
-    })?;
-
     identity
-        .save_enrollment(service_id, &enrolled.enrollment_secret)
+        .save_enrollment(enrolled.service_id, &enrolled.enrollment_secret)
         .await?;
     tracing::info!("enrollment state persisted");
 

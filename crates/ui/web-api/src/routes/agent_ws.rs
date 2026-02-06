@@ -265,16 +265,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         continue;
                                     };
 
-                                    let software_item_id = match uuid::Uuid::parse_str(&result.software_item_id) {
-                                        Ok(id) => id,
-                                        Err(_) => {
-                                            tracing::warn!(
-                                                software_item_id = %result.software_item_id,
-                                                "invalid software_item_id UUID"
-                                            );
-                                            continue;
-                                        }
-                                    };
+                                    let software_item_id = result.software_item_id;
 
                                     for &host_id in &host_ids {
                                         match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
@@ -319,8 +310,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     from_version = ?payload.from_version,
                                     "update started"
                                 );
-                                if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
-                                    && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
+                                if let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(payload.update_history_id)
                                         .one(&state.db)
                                         .await
                                 {
@@ -341,8 +331,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     stream = ?payload.stream,
                                     "update output"
                                 );
-                                if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
-                                    && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
+                                if let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(payload.update_history_id)
                                         .one(&state.db)
                                         .await
                                 {
@@ -361,8 +350,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     error = ?payload.error,
                                     "update result"
                                 );
-                                if let Ok(update_id) = uuid::Uuid::parse_str(&payload.update_history_id)
-                                    && let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_id)
+                                if let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(payload.update_history_id)
                                         .one(&state.db)
                                         .await
                                 {
@@ -784,8 +772,8 @@ async fn deliver_pending_updates(
         };
 
         let execute_payload = ExecuteUpdatePayload {
-            update_history_id: update_record.id.to_string(),
-            software_item_id: item.id.to_string(),
+            update_history_id: update_record.id,
+            software_item_id: item.id,
             software_item_name: item.name.clone(),
             package_identifier: item.package_identifier.clone(),
             to_version: update_record.to_version.clone(),

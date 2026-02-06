@@ -997,8 +997,8 @@ pub async fn trigger_update(
 
     // 11. Build ExecuteUpdatePayload
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
-        update_history_id: update_history_id.to_string(),
-        software_item_id: item_id.to_string(),
+        update_history_id,
+        software_item_id: item_id,
         software_item_name: item.name.clone(),
         package_identifier: item.package_identifier.clone(),
         to_version: req.to_version,

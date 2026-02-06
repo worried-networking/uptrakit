@@ -31,7 +31,7 @@ const SERVICE_KEY_FILE: &str = "service.key";
 /// Persisted enrollment state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ServiceState {
-    service_id: String,
+    service_id: Uuid,
     enrollment_secret: String,
 }
 
@@ -127,11 +127,9 @@ impl ServiceIdentityState {
                 .context_to::<EnrollmentError>()?;
             match serde_json::from_str::<ServiceState>(&content) {
                 Ok(state) => {
-                    if let Ok(id) = Uuid::parse_str(&state.service_id) {
-                        self.service_id = Some(id);
-                        if !state.enrollment_secret.is_empty() {
-                            self.enrollment_secret = Some(state.enrollment_secret);
-                        }
+                    self.service_id = Some(state.service_id);
+                    if !state.enrollment_secret.is_empty() {
+                        self.enrollment_secret = Some(state.enrollment_secret);
                     }
                 }
                 Err(e) => {
@@ -323,7 +321,7 @@ impl ServiceIdentityState {
         enrollment_secret: &str,
     ) -> Result<()> {
         let state = ServiceState {
-            service_id: service_id.to_string(),
+            service_id,
             enrollment_secret: enrollment_secret.to_string(),
         };
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
@@ -353,7 +351,7 @@ impl ServiceIdentityState {
         // Rewrite state file without enrollment_secret.
         if let Some(sid) = self.service_id {
             let state = ServiceState {
-                service_id: sid.to_string(),
+                service_id: sid,
                 enrollment_secret: String::new(),
             };
             let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;

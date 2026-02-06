@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use uptrakit_internal_wire::MqttTenantConfig;
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;
+use uuid::Uuid;
 
 use crate::mqtt_client::{MqttConfig, MqttHandle};
 
@@ -16,7 +17,7 @@ struct ClientState {
 /// Unlike the database-polling version, this manager receives configuration
 /// updates from the controller via WebSocket messages.
 pub struct TenantManager {
-    clients: HashMap<String, ClientState>,
+    clients: HashMap<Uuid, ClientState>,
 }
 
 impl TenantManager {
@@ -53,7 +54,7 @@ impl TenantManager {
     /// Stop an MQTT client.
     ///
     /// This is called when receiving `TenantRevoked` message or when config is disabled.
-    pub async fn stop_client(&mut self, mqtt_client_id: &str) {
+    pub async fn stop_client(&mut self, mqtt_client_id: &Uuid) {
         if let Some(state) = self.clients.remove(mqtt_client_id) {
             tracing::info!(%mqtt_client_id, "shutting down MQTT client");
             state.handle.shutdown().await;
@@ -61,21 +62,21 @@ impl TenantManager {
     }
 
     /// Return list of active MQTT client IDs (used in `Disconnecting` payload).
-    pub fn active_mqtt_client_ids(&self) -> Vec<String> {
-        self.clients.keys().cloned().collect()
+    pub fn active_mqtt_client_ids(&self) -> Vec<Uuid> {
+        self.clients.keys().copied().collect()
     }
 
     /// Graceful shutdown: stop all MQTT clients.
     pub async fn shutdown_all(&mut self) {
-        let client_ids: Vec<String> = self.clients.keys().cloned().collect();
-        for client_id in client_ids {
-            self.stop_client(&client_id).await;
+        let client_ids: Vec<Uuid> = self.clients.keys().copied().collect();
+        for client_id in &client_ids {
+            self.stop_client(client_id).await;
         }
     }
 
     /// Start or update an MQTT client.
     async fn start_or_update_client(&mut self, config: MqttTenantConfig) {
-        let mqtt_client_id = config.mqtt_client_id.clone();
+        let mqtt_client_id = config.mqtt_client_id;
         let new_hash = compute_config_hash(&config);
 
         // Check if we already have this client with same config
@@ -161,8 +162,8 @@ mod tests {
     #[test]
     fn build_config_from_wire_correct() {
         let config = MqttTenantConfig {
-            mqtt_client_id: "019471a0-0000-7000-8000-000000000001".to_string(),
-            tenant_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000001").unwrap(),
+            tenant_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
             enabled: true,
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
@@ -188,8 +189,8 @@ mod tests {
     #[test]
     fn build_config_uses_default_port_when_zero() {
         let config = MqttTenantConfig {
-            mqtt_client_id: "019471a0-0000-7000-8000-000000000002".to_string(),
-            tenant_id: "test".to_string(),
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000002").unwrap(),
+            tenant_id: Uuid::nil(),
             enabled: true,
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
@@ -208,8 +209,8 @@ mod tests {
     #[test]
     fn config_hash_changes_on_different_values() {
         let config1 = MqttTenantConfig {
-            mqtt_client_id: "019471a0-0000-7000-8000-000000000003".to_string(),
-            tenant_id: "test".to_string(),
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000003").unwrap(),
+            tenant_id: Uuid::nil(),
             enabled: true,
             transport: "tls".to_string(),
             host: "broker1.example.com".to_string(),
@@ -222,8 +223,8 @@ mod tests {
         };
 
         let config2 = MqttTenantConfig {
-            mqtt_client_id: "019471a0-0000-7000-8000-000000000003".to_string(),
-            tenant_id: "test".to_string(),
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000003").unwrap(),
+            tenant_id: Uuid::nil(),
             enabled: true,
             transport: "tls".to_string(),
             host: "broker2.example.com".to_string(), // Different host
@@ -241,8 +242,8 @@ mod tests {
     #[test]
     fn config_hash_same_for_same_values() {
         let config1 = MqttTenantConfig {
-            mqtt_client_id: "019471a0-0000-7000-8000-000000000004".to_string(),
-            tenant_id: "test".to_string(),
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),
+            tenant_id: Uuid::nil(),
             enabled: true,
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
@@ -255,8 +256,8 @@ mod tests {
         };
 
         let config2 = MqttTenantConfig {
-            mqtt_client_id: "019471a0-0000-7000-8000-000000000004".to_string(),
-            tenant_id: "test".to_string(),
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),
+            tenant_id: Uuid::nil(),
             enabled: true,
             transport: "tls".to_string(),
             host: "broker.example.com".to_string(),
