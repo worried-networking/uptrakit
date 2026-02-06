@@ -65,6 +65,17 @@ pub trait Provider: Send + Sync {
             "discover_software not supported by this provider".to_string()
         )))
     }
+
+    /// Refresh the local package index from remote sources.
+    ///
+    /// This is the equivalent of `apt update` or `brew update` — it syncs the local
+    /// package database without installing or upgrading packages. Default implementation
+    /// returns an error indicating the operation is not supported.
+    async fn refresh_package_index(&self) -> Result<()> {
+        Err(report!(ProviderError::Configuration(
+            "refresh_package_index not supported by this provider".to_string()
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +95,16 @@ mod tests {
     impl Provider for DiscoveryProvider {
         fn capabilities(&self) -> &'static [ProviderCapability] {
             &[ProviderCapability::DiscoverLocalSoftware]
+        }
+    }
+
+    /// Provider with RefreshPackageIndex capability.
+    struct RefreshProvider;
+
+    #[async_trait]
+    impl Provider for RefreshProvider {
+        fn capabilities(&self) -> &'static [ProviderCapability] {
+            &[ProviderCapability::RefreshPackageIndex]
         }
     }
 
@@ -147,5 +168,28 @@ mod tests {
             discovery.capabilities()[0],
             ProviderCapability::DiscoverLocalSoftware
         );
+    }
+
+    #[tokio::test]
+    async fn default_refresh_package_index_returns_error() {
+        let provider = StubProvider;
+        let result = provider.refresh_package_index().await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stub_and_discovery_providers_lack_refresh_capability() {
+        let stub = StubProvider;
+        assert!(!stub.has_capability(ProviderCapability::RefreshPackageIndex));
+
+        let discovery = DiscoveryProvider;
+        assert!(!discovery.has_capability(ProviderCapability::RefreshPackageIndex));
+    }
+
+    #[test]
+    fn refresh_provider_has_refresh_but_not_discover() {
+        let refresh = RefreshProvider;
+        assert!(refresh.has_capability(ProviderCapability::RefreshPackageIndex));
+        assert!(!refresh.has_capability(ProviderCapability::DiscoverLocalSoftware));
     }
 }

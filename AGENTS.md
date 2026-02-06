@@ -1327,6 +1327,17 @@ The agent and web-api crates import only `uptrakit-provider-registry` — not in
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 
+### Provider capabilities
+
+The `ProviderCapability` enum defines optional features a provider may support:
+
+| Capability | Trait method | Description |
+| --- | --- | --- |
+| `DiscoverLocalSoftware` | `discover_software()` | Enumerate software the provider can manage on the local system |
+| `RefreshPackageIndex` | `refresh_package_index()` | Refresh/sync the local package database from remote sources (e.g. `apt update`) |
+
+No existing provider implements `RefreshPackageIndex` yet; it is available as a foundation for future providers (e.g. apt, homebrew).
+
 ### Software discovery
 
 The `Provider` trait includes an optional `discover_software()` method that allows providers to enumerate software they can manage on the local system. Providers that support this capability declare `ProviderCapability::DiscoverLocalSoftware` in their `capabilities()` method. The method returns a `Vec<DiscoveredSoftware>`, where each entry contains:
