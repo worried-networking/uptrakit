@@ -3,9 +3,7 @@ use crate::auth::{password, token};
 use crate::cert_signer::SignedCertBundle;
 use crate::settings_store::load_setting;
 use rootcause::{Report, ReportConversion, markers, prelude::*};
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::net::IpAddr;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -75,7 +73,9 @@ pub(crate) struct EnrollParams<'a> {
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
 ///
 /// The controller generates a UUIDv7 `agent_id` for the enrolling agent.
-pub(crate) async fn do_enroll(params: EnrollParams<'_>) -> Result<EnrollResult, Report<AgentRouteError>> {
+pub(crate) async fn do_enroll(
+    params: EnrollParams<'_>,
+) -> Result<EnrollResult, Report<AgentRouteError>> {
     let EnrollParams {
         db,
         settings,
