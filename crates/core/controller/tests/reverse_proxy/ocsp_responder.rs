@@ -137,33 +137,6 @@ impl OcspResponder {
         }
     }
 
-    /// Start a test OCSP responder on a random port (HTTPS / TLS).
-    ///
-    /// - `ca_cert_pem`: PEM-encoded CA certificate (for OCSP signing)
-    /// - `ca_key_pem`: PEM-encoded CA private key (for OCSP signing)
-    /// - `server_cert_pem`: PEM-encoded server certificate (for TLS)
-    /// - `server_key_pem`: PEM-encoded server private key (for TLS)
-    /// - `revoked_serials`: serial numbers (lowercase hex) to report as revoked
-    #[allow(dead_code)]
-    pub async fn start_https(
-        ca_cert_pem: &str,
-        ca_key_pem: &str,
-        server_cert_pem: &str,
-        server_key_pem: &str,
-        revoked_serials: Vec<String>,
-    ) -> Self {
-        let listener = TcpListener::bind("0.0.0.0:0").expect("bind HTTPS OCSP responder");
-        Self::start_https_with_listener(
-            listener,
-            ca_cert_pem,
-            ca_key_pem,
-            server_cert_pem,
-            server_key_pem,
-            revoked_serials,
-        )
-        .await
-    }
-
     /// Start a test OCSP responder on a specific port (HTTPS / TLS).
     ///
     /// Panics if the port cannot be bound.
