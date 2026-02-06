@@ -5,6 +5,66 @@ use uuid::Uuid;
 // Re-export ProviderType from provider-core for use in wire protocol messages.
 pub use uptrakit_provider_core::ProviderType;
 
+/// Enrollment status returned in the `Enrolled` message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrollmentStatus {
+    Pending,
+    Approved,
+}
+
+impl std::fmt::Display for EnrollmentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending => f.write_str("pending"),
+            Self::Approved => f.write_str("approved"),
+        }
+    }
+}
+
+/// Type of service enrolling with the controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceType {
+    Agent,
+    Mqtt,
+}
+
+impl std::fmt::Display for ServiceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Agent => f.write_str("agent"),
+            Self::Mqtt => f.write_str("mqtt"),
+        }
+    }
+}
+
+/// Shell type for hook execution in update payloads.
+///
+/// Determines which shell interpreter and fail-early settings are used.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookShell {
+    /// Bash shell with `set -euo pipefail`
+    #[default]
+    Bash,
+    /// POSIX sh with `set -eu`
+    Sh,
+    /// PowerShell with `$ErrorActionPreference = 'Stop'`
+    #[serde(rename = "powershell")]
+    PowerShell,
+}
+
+impl std::fmt::Display for HookShell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bash => f.write_str("bash"),
+            Self::Sh => f.write_str("sh"),
+            Self::PowerShell => f.write_str("powershell"),
+        }
+    }
+}
+
 /// Unix epoch timestamp in milliseconds.
 pub type Timestamp = i64;
 
@@ -102,8 +162,8 @@ pub struct EnrollPayload {
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrollment_token: Option<String>,
-    /// Identifies the type of service enrolling (e.g. "agent", "mqtt").
-    pub service_type: String,
+    /// Identifies the type of service enrolling.
+    pub service_type: ServiceType,
     /// Host machine information for automatic host matching.
     /// Set by agents, absent for MQTT services.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -138,7 +198,7 @@ pub struct ReportHostInfoPayload {
 pub struct EnrolledPayload {
     pub service_id: Uuid,
     pub enrollment_secret: String,
-    pub status: String,
+    pub status: EnrollmentStatus,
 }
 
 /// Payload for approval notification.
@@ -336,10 +396,10 @@ pub struct ExecuteUpdatePayload {
     pub release_info: Option<ReleaseInfo>,
     #[serde(default = "default_update_timeout")]
     pub timeout_seconds: u32,
-    /// Shell to use for hook execution ("bash", "sh", or future "powershell").
-    /// Default: "bash" when not specified.
+    /// Shell to use for hook execution.
+    /// Default: `HookShell::Bash` when not specified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shell: Option<String>,
+    pub shell: Option<HookShell>,
 }
 
 /// Agent -> Controller: Update is starting.
@@ -519,7 +579,7 @@ mod tests {
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
             enrollment_token: Some("tok-123".to_string()),
-            service_type: "agent".to_string(),
+            service_type: ServiceType::Agent,
             host_info: Some(HostInfo {
                 machine_id: "abc123".to_string(),
                 os_type: Some("linux".to_string()),
@@ -540,7 +600,7 @@ mod tests {
             hostname: "mqtt-service-1".to_string(),
             friendly_name: "MQTT Service Node 1".to_string(),
             enrollment_token: Some("tok-456".to_string()),
-            service_type: "mqtt".to_string(),
+            service_type: ServiceType::Mqtt,
             host_info: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -558,7 +618,7 @@ mod tests {
             hostname: "node-2".to_string(),
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
-            service_type: "agent".to_string(),
+            service_type: ServiceType::Agent,
             host_info: Some(HostInfo {
                 machine_id: "def456".to_string(),
                 os_type: None,
@@ -864,7 +924,7 @@ mod tests {
         let msg = ControllerMessage::Enrolled(EnrolledPayload {
             service_id: TEST_UUID_1,
             enrollment_secret: "secret-abc".to_string(),
-            status: "pending".to_string(),
+            status: EnrollmentStatus::Pending,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
@@ -1088,7 +1148,7 @@ mod tests {
                 }],
             }),
             timeout_seconds: 600,
-            shell: Some("bash".to_string()),
+            shell: Some(HookShell::Bash),
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"execute_update"#));
@@ -1162,7 +1222,7 @@ mod tests {
         }"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         if let ControllerMessage::ExecuteUpdate(payload) = msg {
-            assert_eq!(payload.shell, Some("sh".to_string()));
+            assert_eq!(payload.shell, Some(HookShell::Sh));
         } else {
             panic!("Expected ExecuteUpdate");
         }
@@ -1298,6 +1358,66 @@ mod tests {
     }
 
     #[test]
+    fn enrollment_status_all_variants() {
+        for (status, expected) in [
+            (EnrollmentStatus::Pending, "pending"),
+            (EnrollmentStatus::Approved, "approved"),
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            assert_eq!(json, format!(r#""{expected}""#));
+            let deserialized: EnrollmentStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, status);
+        }
+    }
+
+    #[test]
+    fn service_type_all_variants() {
+        for (svc_type, expected) in [(ServiceType::Agent, "agent"), (ServiceType::Mqtt, "mqtt")] {
+            let json = serde_json::to_string(&svc_type).unwrap();
+            assert_eq!(json, format!(r#""{expected}""#));
+            let deserialized: ServiceType = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, svc_type);
+        }
+    }
+
+    #[test]
+    fn hook_shell_all_variants() {
+        for (shell, expected) in [
+            (HookShell::Bash, "bash"),
+            (HookShell::Sh, "sh"),
+            (HookShell::PowerShell, "powershell"),
+        ] {
+            let json = serde_json::to_string(&shell).unwrap();
+            assert_eq!(json, format!(r#""{expected}""#));
+            let deserialized: HookShell = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, shell);
+        }
+    }
+
+    #[test]
+    fn hook_shell_default_is_bash() {
+        assert_eq!(HookShell::default(), HookShell::Bash);
+    }
+
+    #[test]
+    fn enrollment_status_rejects_invalid() {
+        let result: std::result::Result<EnrollmentStatus, _> = serde_json::from_str(r#""invalid""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn service_type_rejects_invalid() {
+        let result: std::result::Result<ServiceType, _> = serde_json::from_str(r#""invalid""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn hook_shell_rejects_invalid() {
+        let result: std::result::Result<HookShell, _> = serde_json::from_str(r#""zsh""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn disconnect_reason_all_variants() {
         for (reason, expected) in [
             (DisconnectReason::Shutdown, "shutdown"),
@@ -1413,7 +1533,7 @@ mod tests {
         let msg: ServiceMessage = serde_json::from_str(json).unwrap();
         if let ServiceMessage::Enroll(payload) = msg {
             assert!(payload.host_info.is_none());
-            assert_eq!(payload.service_type, "mqtt");
+            assert_eq!(payload.service_type, ServiceType::Mqtt);
         } else {
             panic!("Expected Enroll");
         }

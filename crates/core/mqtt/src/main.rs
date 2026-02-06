@@ -126,7 +126,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 hostname: &hostname,
                 friendly_name: &friendly_name,
                 enrollment_token: args.common.enrollment_token.as_deref(),
-                service_type: "mqtt",
+                service_type: uptrakit_internal_wire::ServiceType::Mqtt,
                 host_info: None, // MQTT service doesn't collect host_info
             })
             .await

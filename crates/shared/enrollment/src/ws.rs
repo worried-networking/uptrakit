@@ -14,8 +14,8 @@ use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, HostInfo,
-    RequestCertificatePayload, ServiceMessage,
+    CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, EnrollmentStatus,
+    HostInfo, RequestCertificatePayload, ServiceMessage, ServiceType,
 };
 
 use crate::error::{EnrollmentError, Result};
@@ -76,14 +76,14 @@ pub async fn send_enroll(
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
-    service_type: &str,
+    service_type: ServiceType,
     host_info: Option<HostInfo>,
 ) -> Result<EnrolledPayload> {
     let msg = ServiceMessage::Enroll(EnrollPayload {
         hostname: hostname.to_string(),
         friendly_name: friendly_name.to_string(),
         enrollment_token: enrollment_token.map(|s| s.to_string()),
-        service_type: service_type.to_string(),
+        service_type,
         host_info,
     });
     let json = serde_json::to_string(&msg).context_to::<EnrollmentError>()?;
@@ -278,7 +278,7 @@ pub struct EnrollmentParams<'a> {
     pub hostname: &'a str,
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
-    pub service_type: &'a str,
+    pub service_type: ServiceType,
     pub host_info: Option<HostInfo>,
 }
 
@@ -321,7 +321,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
     tracing::info!("enrollment state persisted");
 
     // Wait for approval (may come immediately if auto-approved via token)
-    if enrolled.status != "approved" {
+    if enrolled.status != EnrollmentStatus::Approved {
         wait_for_approval(&mut ws).await?;
     }
 

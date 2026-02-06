@@ -764,9 +764,9 @@ async fn deliver_pending_updates(
             crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
 
         let shell = if !resolved_hooks.pre_update_commands.is_empty() {
-            Some(resolved_hooks.pre_update_shell.as_str().to_string())
+            Some(wire_hook_shell(resolved_hooks.pre_update_shell))
         } else if !resolved_hooks.post_update_commands.is_empty() {
-            Some(resolved_hooks.post_update_shell.as_str().to_string())
+            Some(wire_hook_shell(resolved_hooks.post_update_shell))
         } else {
             None
         };
@@ -804,4 +804,21 @@ async fn deliver_pending_updates(
     }
 
     Ok(())
+}
+
+/// Convert a `web-api-types` `HookShell` to the wire protocol `HookShell`.
+pub(crate) fn wire_hook_shell(
+    shell: uptrakit_web_api_types::update_hooks::HookShell,
+) -> uptrakit_internal_wire::HookShell {
+    match shell {
+        uptrakit_web_api_types::update_hooks::HookShell::Bash => {
+            uptrakit_internal_wire::HookShell::Bash
+        }
+        uptrakit_web_api_types::update_hooks::HookShell::Sh => {
+            uptrakit_internal_wire::HookShell::Sh
+        }
+        uptrakit_web_api_types::update_hooks::HookShell::PowerShell => {
+            uptrakit_internal_wire::HookShell::PowerShell
+        }
+    }
 }

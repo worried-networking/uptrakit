@@ -498,9 +498,8 @@ async fn handle_anonymous(
 
                 match service_msg {
                     ServiceMessage::Enroll(payload) => {
-                        let svc_type_str = payload.service_type.as_str();
-                        match svc_type_str {
-                            "agent" => {
+                        match payload.service_type {
+                            uptrakit_internal_wire::ServiceType::Agent => {
                                 match enroll_agent(&state, &payload, client_ip, &mut sink).await {
                                     Some((id, approved)) => {
                                         break (id, service_entity::ServiceType::Agent, approved);
@@ -508,23 +507,13 @@ async fn handle_anonymous(
                                     None => return, // enrollment failed, error already sent
                                 }
                             }
-                            "mqtt" => match enroll_mqtt(&state, &payload, &mut sink).await {
-                                Some((id, approved)) => {
-                                    break (id, service_entity::ServiceType::Mqtt, approved);
+                            uptrakit_internal_wire::ServiceType::Mqtt => {
+                                match enroll_mqtt(&state, &payload, &mut sink).await {
+                                    Some((id, approved)) => {
+                                        break (id, service_entity::ServiceType::Mqtt, approved);
+                                    }
+                                    None => return,
                                 }
-                                None => return,
-                            },
-                            _ => {
-                                let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "bad_request".to_string(),
-                                    message: format!(
-                                        "unknown service_type: '{svc_type_str}', expected 'agent' or 'mqtt'"
-                                    ),
-                                });
-                                if let Some(json) = serialize_msg(&err) {
-                                    let _ = sink.send(Message::Text(json.into())).await;
-                                }
-                                return;
                             }
                         }
                     }
@@ -604,10 +593,14 @@ async fn enroll_agent(
     match result {
         Ok(enroll_result) => {
             let service_id = enroll_result.agent.id;
+            let wire_status = match enroll_result.status {
+                AgentStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
+                _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
+            };
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
                 service_id,
                 enrollment_secret: enroll_result.enrollment_secret,
-                status: enroll_result.status.as_str().to_string(),
+                status: wire_status,
             });
             let json = serialize_msg(&enrolled_msg)?;
             if sink.send(Message::Text(json.into())).await.is_err() {
@@ -616,7 +609,7 @@ async fn enroll_agent(
 
             tracing::info!(
                 %service_id,
-                status = enroll_result.status.as_str(),
+                ?wire_status,
                 "agent enrolled via WS"
             );
 
@@ -668,10 +661,16 @@ async fn enroll_mqtt(
     match result {
         Ok(enroll_result) => {
             let service_id = enroll_result.service.id;
+            let wire_status = match enroll_result.status {
+                service_entity::ServiceStatus::Approved => {
+                    uptrakit_internal_wire::EnrollmentStatus::Approved
+                }
+                _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
+            };
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
                 service_id,
                 enrollment_secret: enroll_result.enrollment_secret,
-                status: format!("{:?}", enroll_result.status).to_lowercase(),
+                status: wire_status,
             });
             let json = serialize_msg(&enrolled_msg)?;
             if sink.send(Message::Text(json.into())).await.is_err() {
@@ -680,7 +679,7 @@ async fn enroll_mqtt(
 
             tracing::info!(
                 %service_id,
-                status = ?enroll_result.status,
+                ?wire_status,
                 "MQTT service enrolled via WS"
             );
 

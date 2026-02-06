@@ -19,6 +19,7 @@ pub enum HookShell {
     /// POSIX sh with `set -eu`
     Sh,
     /// PowerShell with `$ErrorActionPreference = 'Stop'` (future Windows support)
+    #[serde(rename = "powershell")]
     PowerShell,
 }
 

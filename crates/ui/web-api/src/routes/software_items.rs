@@ -988,9 +988,13 @@ pub async fn trigger_update(
 
     // Determine shell type - use pre_update shell if available, otherwise post_update shell
     let shell = if !resolved_hooks.pre_update_commands.is_empty() {
-        Some(resolved_hooks.pre_update_shell.as_str().to_string())
+        Some(super::agent_ws::wire_hook_shell(
+            resolved_hooks.pre_update_shell,
+        ))
     } else if !resolved_hooks.post_update_commands.is_empty() {
-        Some(resolved_hooks.post_update_shell.as_str().to_string())
+        Some(super::agent_ws::wire_hook_shell(
+            resolved_hooks.post_update_shell,
+        ))
     } else {
         None
     };

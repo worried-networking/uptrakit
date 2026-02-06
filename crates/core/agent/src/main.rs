@@ -198,7 +198,7 @@ async fn do_enrollment(
             hostname: &hostname,
             friendly_name: &friendly_name,
             enrollment_token: args.common.enrollment_token.as_deref(),
-            service_type: "agent",
+            service_type: uptrakit_internal_wire::ServiceType::Agent,
             host_info: Some(host_info),
         })
         .await

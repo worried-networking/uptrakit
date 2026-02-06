@@ -787,10 +787,10 @@ components:
             - Production Node 1
         service_type:
           type: string
-          description: "Service type: 'agent' or 'mqtt'"
-          examples:
+          enum:
             - agent
             - mqtt
+          description: Type of service enrolling with the controller
         enrollment_token:
           type: string
           description: Optional pre-shared enrollment token for auto-approval
