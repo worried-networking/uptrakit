@@ -1,4 +1,4 @@
-use rootcause::report;
+use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{DockerRegistryError, Result};

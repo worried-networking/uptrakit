@@ -18,7 +18,7 @@
 
 use std::process::Stdio;
 
-use rootcause::{Report, report};
+use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;

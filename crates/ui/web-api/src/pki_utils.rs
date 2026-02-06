@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use rootcause::{Report, prelude::*};
+use rootcause::prelude::*;
 use thiserror::Error;
 
 /// Errors that can occur in shared PKI utility functions.

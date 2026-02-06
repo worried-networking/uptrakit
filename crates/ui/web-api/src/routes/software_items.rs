@@ -159,13 +159,22 @@ async fn load_item_hosts(
     summaries
 }
 
+/// Error returned when config override validation fails.
+#[derive(Debug, thiserror::Error)]
+enum ConfigOverrideError {
+    #[error("config_override must be a JSON object")]
+    NotAnObject,
+    #[error("provider validation failed: {0}")]
+    ProviderValidation(String),
+}
+
 /// Validate `config_override` by merging it with the base provider config and running
 /// provider-specific validation.
 fn validate_config_override(
     provider_type: &str,
     base_config: &serde_json::Value,
     override_config: &serde_json::Value,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), ConfigOverrideError> {
     // Merge: base first, then overlay the override values
     let mut merged = base_config.clone();
     if let (Some(base_obj), Some(over_obj)) = (merged.as_object_mut(), override_config.as_object())
@@ -174,10 +183,11 @@ fn validate_config_override(
             base_obj.insert(k.clone(), v.clone());
         }
     } else {
-        return Err("config_override must be a JSON object".to_string());
+        return Err(ConfigOverrideError::NotAnObject);
     }
 
-    ProviderRegistry::validate_config_str(provider_type, &merged).map_err(|e| e.to_string())
+    ProviderRegistry::validate_config_str(provider_type, &merged)
+        .map_err(|e| ConfigOverrideError::ProviderValidation(e.to_string()))
 }
 
 // --- Endpoints ---
@@ -1219,10 +1229,9 @@ mod tests {
 
         let result = validate_config_override("github_releases", &base, &override_val);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("config_override must be a JSON object")
-        );
+        assert!(matches!(
+            result.unwrap_err(),
+            ConfigOverrideError::NotAnObject
+        ));
     }
 }

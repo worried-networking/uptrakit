@@ -14,7 +14,7 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_shared_db::entity::service as service_entity;
 
-use rootcause::{Report, prelude::*};
+use rootcause::prelude::*;
 use thiserror::Error;
 
 use crate::AppState;

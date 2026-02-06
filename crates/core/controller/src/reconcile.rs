@@ -1,6 +1,6 @@
 use std::fmt;
 
-use rootcause::Report;
+use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 

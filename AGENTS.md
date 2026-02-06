@@ -720,12 +720,23 @@ MQTT services use the unified service entity:
 
 Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagation and [`thiserror`](https://github.com/dtolnay/thiserror) for error enum definition. Every module boundary must define its own error type following the patterns below.
 
+### Import convention
+
+Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()` and `.context_to()`), and `IteratorExt`. Import `ReportConversion` separately since it is not part of the prelude:
+
+```rust
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
+use thiserror::Error;
+```
+
 ### Pattern 1: Define an error enum with a `Result<T>` alias
 
 Each boundary (crate, module, or logical subsystem) defines its own error enum and a `Result` alias using `Report`:
 
 ```rust
-use rootcause::{Report, ReportConversion, markers};
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

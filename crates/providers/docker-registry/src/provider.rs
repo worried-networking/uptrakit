@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use regex::Regex;
-use rootcause::report;
+use rootcause::prelude::*;
 
 use uptrakit_provider_core::{Provider, UpstreamRelease, Version};
 

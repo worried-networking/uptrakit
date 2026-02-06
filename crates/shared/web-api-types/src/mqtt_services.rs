@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::str::FromStr;
+use thiserror::Error;
 
 /// Status of an MQTT service instance in the enrollment/approval workflow.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -24,16 +24,9 @@ impl MqttServiceStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("invalid MQTT service status value")]
 pub struct ParseMqttServiceStatusError;
-
-impl fmt::Display for ParseMqttServiceStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid MQTT service status value")
-    }
-}
-
-impl std::error::Error for ParseMqttServiceStatusError {}
 
 impl FromStr for MqttServiceStatus {
     type Err = ParseMqttServiceStatusError;

@@ -1,5 +1,6 @@
 use rand::Rng;
-use rootcause::{Report, prelude::*};
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -36,6 +37,17 @@ pub enum DeviceFlowError {
 }
 
 pub type Result<T> = std::result::Result<T, Report<DeviceFlowError>>;
+
+impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for DeviceFlowError
+where
+    DeviceFlowError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<sea_orm::DbErr, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(DeviceFlowError::Database)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceFlowStatus {
@@ -76,10 +88,7 @@ impl DeviceFlowStore {
             expires_at: Set(expires_at),
         };
 
-        model
-            .insert(&self.db)
-            .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
+        model.insert(&self.db).await.context_to()?;
 
         Ok((device_code, user_code))
     }
@@ -89,7 +98,7 @@ impl DeviceFlowStore {
         let flow = PendingDeviceFlow::find_by_id(device_code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?
+            .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         let now = OffsetDateTime::now_utc();
@@ -113,7 +122,7 @@ impl DeviceFlowStore {
         let flow = PendingDeviceFlow::find_by_id(device_code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?
+            .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         if let Some(last_polled) = flow.last_polled_at {
@@ -131,15 +140,12 @@ impl DeviceFlowStore {
         let flow = PendingDeviceFlow::find_by_id(device_code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?
+            .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         let mut active: pending_device_flow::ActiveModel = flow.into();
         active.last_polled_at = Set(Some(OffsetDateTime::now_utc()));
-        active
-            .update(&self.db)
-            .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
+        active.update(&self.db).await.context_to()?;
 
         Ok(())
     }
@@ -149,7 +155,7 @@ impl DeviceFlowStore {
         let flow = PendingDeviceFlow::find_by_id(device_code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?
+            .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         Ok(flow.client_name)
@@ -165,7 +171,7 @@ impl DeviceFlowStore {
             .filter(pending_device_flow::Column::UserCode.eq(&normalized))
             .one(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?
+            .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         // Check expiry
@@ -193,7 +199,7 @@ impl DeviceFlowStore {
             .filter(pending_device_flow::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
+            .context_to()?;
 
         if result.rows_affected == 0 {
             // Another instance may have approved it, or it expired
@@ -209,7 +215,7 @@ impl DeviceFlowStore {
         let flow = PendingDeviceFlow::find_by_id(device_code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?
+            .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         if flow.status != "authorized" {
@@ -227,7 +233,7 @@ impl DeviceFlowStore {
             .filter(pending_device_flow::Column::Status.eq("authorized"))
             .exec(&self.db)
             .await
-            .map_err(|e| report!(DeviceFlowError::Database(e)))?;
+            .context_to()?;
 
         if result.rows_affected == 0 {
             return Err(report!(DeviceFlowError::NotFound));

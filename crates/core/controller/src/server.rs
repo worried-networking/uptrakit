@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
-use rootcause::{Report, ReportConversion, markers, prelude::*};
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
 use thiserror::Error;
 use tokio::net::TcpSocket;
 use tower_http::services::{ServeDir, ServeFile};

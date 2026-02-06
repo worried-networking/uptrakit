@@ -1,32 +1,24 @@
 use crate::mqtt_transport::MqttTransport;
+use thiserror::Error;
 
 /// Error returned when parsing an MQTT URL fails.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum MqttUrlError {
     /// The string is not a valid URL.
+    #[error("invalid URL: {0}")]
     InvalidUrl(String),
     /// The URL scheme is not recognised (expected mqtt, mqtts).
+    #[error("unsupported URL scheme: {0} (expected mqtt, mqtts)")]
     UnsupportedScheme(String),
     /// The URL has no host component.
+    #[error("URL must contain a host")]
     MissingHost,
     /// The port number is out of range.
+    #[error("invalid port number")]
     InvalidPort,
     /// The URL contains a path, which is not supported for MQTT.
+    #[error("URL path is not supported for MQTT")]
     PathNotSupported,
-}
-
-impl std::fmt::Display for MqttUrlError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidUrl(e) => write!(f, "invalid URL: {e}"),
-            Self::UnsupportedScheme(s) => {
-                write!(f, "unsupported URL scheme: {s} (expected mqtt, mqtts)")
-            }
-            Self::MissingHost => f.write_str("URL must contain a host"),
-            Self::InvalidPort => f.write_str("invalid port number"),
-            Self::PathNotSupported => f.write_str("URL path is not supported for MQTT"),
-        }
-    }
 }
 
 /// Parsed components of an MQTT URL.

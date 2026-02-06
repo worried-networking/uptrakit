@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::str::FromStr;
+use thiserror::Error;
 
 /// Registration mode controlling how new users can sign up.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,16 +25,9 @@ impl RegistrationMode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("invalid registration mode value")]
 pub struct ParseRegistrationModeError;
-
-impl fmt::Display for ParseRegistrationModeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid registration mode value")
-    }
-}
-
-impl std::error::Error for ParseRegistrationModeError {}
 
 impl FromStr for RegistrationMode {
     type Err = ParseRegistrationModeError;

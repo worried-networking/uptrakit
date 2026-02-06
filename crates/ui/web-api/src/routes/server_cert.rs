@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
 
+use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 
@@ -11,6 +13,28 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::pki_utils::{self, SanCollection};
+
+#[derive(Debug, Error)]
+enum RenewCertError {
+    #[error("failed to parse CA key: {0}")]
+    CaKeyParse(String),
+    #[error("failed to create CA issuer: {0}")]
+    CaIssuer(String),
+    #[error("failed to collect SANs: {0}")]
+    SanCollection(String),
+    #[error("failed to generate key pair: {0}")]
+    KeyGeneration(String),
+    #[error("failed to create cert params: {0}")]
+    CertParams(String),
+    #[error("failed to sign server cert: {0}")]
+    CertSign(String),
+    #[error("failed to write server cert: {0}")]
+    CertWrite(#[from] std::io::Error),
+    #[error("TLS config error")]
+    TlsConfig(#[from] TlsConfigError),
+}
+
+type RenewCertResult<T> = std::result::Result<T, Report<RenewCertError>>;
 
 #[derive(Debug, Error)]
 enum TlsConfigError {
@@ -30,6 +54,17 @@ enum TlsConfigError {
 
 type TlsConfigResult<T> = std::result::Result<T, rootcause::Report<TlsConfigError>>;
 
+impl<T> ReportConversion<TlsConfigError, markers::Mutable, T> for RenewCertError
+where
+    RenewCertError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<TlsConfigError, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(RenewCertError::TlsConfig)
+    }
+}
+
 pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
 
 /// Renew the server TLS certificate using the current active CA.
@@ -47,40 +82,41 @@ pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
 pub async fn renew_server_certificate(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-) -> Result<Json<RenewServerCertResponse>, StatusCode> {
+) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return Err(StatusCode::FORBIDDEN);
+        return StatusCode::FORBIDDEN.into_response();
     }
 
+    match renew_server_certificate_inner(&state).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "server certificate renewal failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+async fn renew_server_certificate_inner(
+    state: &AppState,
+) -> RenewCertResult<RenewServerCertResponse> {
     let snapshot = state.ca_snapshot.borrow().clone();
 
     // Build CA issuer from the active snapshot
-    let ca_key = rcgen::KeyPair::from_pem(&snapshot.active_key_pem).map_err(|e| {
-        tracing::error!(error = %e, "failed to parse CA key");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let ca_issuer =
-        rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key).map_err(|e| {
-            tracing::error!(error = %e, "failed to create CA issuer");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let ca_key = rcgen::KeyPair::from_pem(&snapshot.active_key_pem)
+        .map_err(|e| report!(RenewCertError::CaKeyParse(e.to_string())))?;
+    let ca_issuer = rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key)
+        .map_err(|e| report!(RenewCertError::CaIssuer(e.to_string())))?;
 
     // Generate new server cert
     let extra_sans: Vec<String> = state.settings.extra_sans().await;
-    let sans: SanCollection = pki_utils::collect_sans(&extra_sans).map_err(|e| {
-        tracing::error!(error = %e, "failed to collect SANs");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let sans: SanCollection = pki_utils::collect_sans(&extra_sans)
+        .map_err(|e| report!(RenewCertError::SanCollection(e.to_string())))?;
 
-    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
-        tracing::error!(error = %e, "failed to generate key pair");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .map_err(|e| report!(RenewCertError::KeyGeneration(e.to_string())))?;
 
-    let mut params = rcgen::CertificateParams::new(sans.dns_names.clone()).map_err(|e| {
-        tracing::error!(error = %e, "failed to create cert params");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let mut params = rcgen::CertificateParams::new(sans.dns_names.clone())
+        .map_err(|e| report!(RenewCertError::CertParams(e.to_string())))?;
     for ip in &sans.ip_addrs {
         params
             .subject_alt_names
@@ -95,10 +131,9 @@ pub async fn renew_server_certificate(
     params.not_before = time::OffsetDateTime::now_utc();
     params.not_after = time::OffsetDateTime::now_utc() + time::Duration::days(90);
 
-    let cert = params.signed_by(&key_pair, &ca_issuer).map_err(|e| {
-        tracing::error!(error = %e, "failed to sign server cert");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let cert = params
+        .signed_by(&key_pair, &ca_issuer)
+        .map_err(|e| report!(RenewCertError::CertSign(e.to_string())))?;
 
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
@@ -106,30 +141,21 @@ pub async fn renew_server_certificate(
     // Write to disk
     let cert_path = state.pki_path.join("server.crt");
     let key_path = state.pki_path.join("server.key");
-    std::fs::write(&cert_path, &cert_pem).map_err(|e| {
-        tracing::error!(error = %e, "failed to write server cert");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    std::fs::write(&key_path, &key_pem).map_err(|e| {
-        tracing::error!(error = %e, "failed to write server key");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    std::fs::write(&cert_path, &cert_pem).map_err(|e| report!(RenewCertError::CertWrite(e)))?;
+    std::fs::write(&key_path, &key_pem).map_err(|e| report!(RenewCertError::CertWrite(e)))?;
 
     // Hot-reload TLS config
-    let server_config = build_server_tls_config(&cert_pem, &key_pem, &snapshot.bundle_pem)
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to build TLS config");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let server_config =
+        build_server_tls_config(&cert_pem, &key_pem, &snapshot.bundle_pem).context_to()?;
     state
         .rustls_config
         .reload_from_config(Arc::new(server_config));
 
     tracing::info!("server certificate manually renewed via API");
 
-    Ok(Json(RenewServerCertResponse {
+    Ok(RenewServerCertResponse {
         message: "Server certificate renewed successfully".to_string(),
-    }))
+    })
 }
 
 /// Minimal TLS config rebuild for hot-reload after cert renewal.

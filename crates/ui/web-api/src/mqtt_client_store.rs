@@ -1,4 +1,5 @@
-use rootcause::{Report, ReportConversion, markers, prelude::*};
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;

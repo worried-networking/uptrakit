@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::str::FromStr;
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -21,16 +21,9 @@ impl AgentStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("invalid agent status value")]
 pub struct ParseAgentStatusError;
-
-impl fmt::Display for ParseAgentStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid agent status value")
-    }
-}
-
-impl std::error::Error for ParseAgentStatusError {}
 
 impl FromStr for AgentStatus {
     type Err = ParseAgentStatusError;

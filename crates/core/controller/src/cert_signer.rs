@@ -2,7 +2,7 @@ use rcgen::{
     CertificateParams, CertificateSigningRequestParams, DnType, ExtendedKeyUsagePurpose, IsCa,
     Issuer, KeyPair,
 };
-use rootcause::{Report, prelude::*};
+use rootcause::prelude::*;
 use time::{OffsetDateTime, UtcDateTime};
 use tokio::sync::watch;
 use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};

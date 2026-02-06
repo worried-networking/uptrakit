@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use rootcause::report;
+use rootcause::prelude::*;
 
 use crate::error::{ProviderError, Result};
 use crate::types::{DiscoveredSoftware, ProviderCapability, UpstreamRelease};

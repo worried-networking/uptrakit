@@ -1,4 +1,5 @@
 use openidconnect::{Nonce, PkceCodeVerifier};
+use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
@@ -20,10 +21,32 @@ pub enum OidcStoreError {
     Database(#[from] sea_orm::DbErr),
 
     #[error("serialization error: {0}")]
-    Serialization(String),
+    Serialization(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<OidcStoreError>>;
+
+impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for OidcStoreError
+where
+    OidcStoreError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<sea_orm::DbErr, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(OidcStoreError::Database)
+    }
+}
+
+impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for OidcStoreError
+where
+    OidcStoreError: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<serde_json::Error, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(OidcStoreError::Serialization)
+    }
+}
 
 /// Pending OIDC authorization flow data returned by `take()`.
 pub struct PendingOidcFlowData {
@@ -62,10 +85,7 @@ impl OidcFlowStore {
             expires_at: Set(expires_at),
         };
 
-        model
-            .insert(&self.db)
-            .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+        model.insert(&self.db).await.context_to()?;
 
         Ok(())
     }
@@ -76,7 +96,7 @@ impl OidcFlowStore {
         let flow = match PendingOidcFlow::find_by_id(state)
             .one(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?
+            .context_to()?
         {
             Some(f) => f,
             None => return Ok(None),
@@ -88,7 +108,7 @@ impl OidcFlowStore {
             .filter(pending_oidc_flow::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+            .context_to()?;
 
         if result.rows_affected == 0 {
             return Ok(None);
@@ -156,8 +176,7 @@ impl AccountLinkStore {
         let now = OffsetDateTime::now_utc();
         let expires_at = now + time::Duration::seconds(TTL_SECONDS);
 
-        let roles_json = serde_json::to_value(&params.mapped_roles)
-            .map_err(|e| report!(OidcStoreError::Serialization(e.to_string())))?;
+        let roles_json = serde_json::to_value(&params.mapped_roles).context_to()?;
 
         let model = pending_account_link::ActiveModel {
             link_token: Set(params.token),
@@ -173,10 +192,7 @@ impl AccountLinkStore {
             expires_at: Set(expires_at),
         };
 
-        model
-            .insert(&self.db)
-            .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+        model.insert(&self.db).await.context_to()?;
 
         Ok(())
     }
@@ -187,7 +203,7 @@ impl AccountLinkStore {
         let link = match PendingAccountLink::find_by_id(token)
             .one(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?
+            .context_to()?
         {
             Some(l) => l,
             None => return Ok(None),
@@ -199,14 +215,13 @@ impl AccountLinkStore {
             .filter(pending_account_link::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+            .context_to()?;
 
         if result.rows_affected == 0 {
             return Ok(None);
         }
 
-        let mapped_roles: Vec<String> = serde_json::from_value(link.mapped_roles)
-            .map_err(|e| report!(OidcStoreError::Serialization(e.to_string())))?;
+        let mapped_roles: Vec<String> = serde_json::from_value(link.mapped_roles).context_to()?;
 
         Ok(Some(PendingAccountLinkData {
             provider_id: link.provider_id,
@@ -270,10 +285,7 @@ impl OidcTokenExchangeStore {
             expires_at: Set(expires_at),
         };
 
-        model
-            .insert(&self.db)
-            .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+        model.insert(&self.db).await.context_to()?;
 
         Ok(())
     }
@@ -284,7 +296,7 @@ impl OidcTokenExchangeStore {
         let exchange = match PendingOidcTokenExchange::find_by_id(code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?
+            .context_to()?
         {
             Some(e) => e,
             None => return Ok(None),
@@ -296,7 +308,7 @@ impl OidcTokenExchangeStore {
             .filter(pending_oidc_token_exchange::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+            .context_to()?;
 
         if result.rows_affected == 0 {
             return Ok(None);
@@ -358,8 +370,7 @@ impl OidcRegistrationStore {
         let now = OffsetDateTime::now_utc();
         let expires_at = now + time::Duration::seconds(TTL_SECONDS);
 
-        let roles_json = serde_json::to_value(&params.mapped_roles)
-            .map_err(|e| report!(OidcStoreError::Serialization(e.to_string())))?;
+        let roles_json = serde_json::to_value(&params.mapped_roles).context_to()?;
 
         let model = pending_oidc_registration::ActiveModel {
             registration_code: Set(params.registration_code),
@@ -373,10 +384,7 @@ impl OidcRegistrationStore {
             expires_at: Set(expires_at),
         };
 
-        model
-            .insert(&self.db)
-            .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+        model.insert(&self.db).await.context_to()?;
 
         Ok(())
     }
@@ -387,7 +395,7 @@ impl OidcRegistrationStore {
         let reg = match PendingOidcRegistration::find_by_id(code)
             .one(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?
+            .context_to()?
         {
             Some(r) => r,
             None => return Ok(None),
@@ -399,14 +407,13 @@ impl OidcRegistrationStore {
             .filter(pending_oidc_registration::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
-            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+            .context_to()?;
 
         if result.rows_affected == 0 {
             return Ok(None);
         }
 
-        let mapped_roles: Vec<String> = serde_json::from_value(reg.mapped_roles)
-            .map_err(|e| report!(OidcStoreError::Serialization(e.to_string())))?;
+        let mapped_roles: Vec<String> = serde_json::from_value(reg.mapped_roles).context_to()?;
 
         Ok(Some(PendingOidcRegistrationData {
             provider_id: reg.provider_id,

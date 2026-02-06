@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
-use rootcause::{Report, ReportConversion, markers, prelude::*};
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;

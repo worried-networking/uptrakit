@@ -54,13 +54,13 @@ pub async fn register(
     }
 
     // Validate registration is allowed
-    if let Err((status, msg)) = state
+    if let Err(e) = state
         .settings
         .registration()
         .await
         .validate(req.registration_token.as_deref())
     {
-        return (status, msg).into_response();
+        return e.into_response();
     }
 
     // Hash password

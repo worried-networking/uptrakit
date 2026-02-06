@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use rootcause::report;
+use rootcause::prelude::*;
 
 use crate::api_types::TokenResponse;
 use crate::config::DockerAuth;

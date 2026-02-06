@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use regex::Regex;
-use rootcause::report;
+use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 

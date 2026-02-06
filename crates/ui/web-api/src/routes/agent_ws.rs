@@ -12,7 +12,7 @@ use uptrakit_shared_db::entity::{
     host_software_item, provider_config, service_host as agent_host, software_item, update_history,
 };
 
-use rootcause::{Report, prelude::*};
+use rootcause::prelude::*;
 use thiserror::Error;
 
 use super::service_ws::{close_with_reason, serialize_msg};

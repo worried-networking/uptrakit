@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -21,16 +22,9 @@ impl UpdateStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("invalid update status value")]
 pub struct ParseUpdateStatusError;
-
-impl std::fmt::Display for ParseUpdateStatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "invalid update status value")
-    }
-}
-
-impl std::error::Error for ParseUpdateStatusError {}
 
 impl std::str::FromStr for UpdateStatus {
     type Err = ParseUpdateStatusError;

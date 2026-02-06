@@ -145,7 +145,10 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
             // Handle in-flight update events first
             Some(event) = update_poll => {
-                let update = in_flight_update.as_ref().expect("update must exist");
+                let Some(ref update) = in_flight_update else {
+                    tracing::error!("received update event but no in-flight update exists");
+                    continue;
+                };
                 let update_history_id = update.update_history_id.clone();
 
                 match event {

@@ -81,16 +81,26 @@ fn parse_service_status(s: &str) -> Option<service::ServiceStatus> {
     }
 }
 
+/// Error returned when the `type` query parameter is invalid.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid type parameter: '{0}', expected 'agent' or 'mqtt'")]
+struct InvalidServiceTypeParam(String);
+
+impl IntoResponse for InvalidServiceTypeParam {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+    }
+}
+
 /// Determine the correct `SettingKey` for the enrollment token hash based on
 /// the `type` query parameter.
-fn enrollment_setting_key(type_param: Option<&str>) -> Result<SettingKey, (StatusCode, String)> {
+fn enrollment_setting_key(
+    type_param: Option<&str>,
+) -> std::result::Result<SettingKey, InvalidServiceTypeParam> {
     match type_param {
         Some("agent") | None => Ok(SettingKey::EnrollmentTokenHash),
         Some("mqtt") => Ok(SettingKey::MqttEnrollmentTokenHash),
-        Some(other) => Err((
-            StatusCode::BAD_REQUEST,
-            format!("Invalid type parameter: '{other}', expected 'agent' or 'mqtt'"),
-        )),
+        Some(other) => Err(InvalidServiceTypeParam(other.to_string())),
     }
 }
 

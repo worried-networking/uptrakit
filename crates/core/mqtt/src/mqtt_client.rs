@@ -1,7 +1,8 @@
 use std::fmt;
 use std::time::Duration;
 
-use rootcause::{Report, ReportConversion, markers, prelude::*};
+use rootcause::ReportConversion;
+use rootcause::prelude::*;
 use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, Transport};
 use thiserror::Error;
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;

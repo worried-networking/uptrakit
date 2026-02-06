@@ -19,7 +19,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
-use rootcause::{Report, report};
+use rootcause::prelude::*;
 use thiserror::Error;
 
 /// Errors that can occur during directory operations.

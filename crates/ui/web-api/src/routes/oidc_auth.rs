@@ -718,8 +718,8 @@ pub async fn oidc_complete_registration(
 
     // 2. Validate the registration token against current settings
     let reg_settings = state.settings.registration().await;
-    if let Err((status, msg)) = reg_settings.validate(Some(&req.registration_token)) {
-        return (status, msg).into_response();
+    if let Err(e) = reg_settings.validate(Some(&req.registration_token)) {
+        return e.into_response();
     }
 
     // 3. Race condition guard: verify user still doesn't exist

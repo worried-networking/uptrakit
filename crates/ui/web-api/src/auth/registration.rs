@@ -3,12 +3,42 @@ use crate::SettingKey;
 use crate::settings_store::{
     RawSettings, RawSettingsExt, delete_setting, load_setting, upsert_setting,
 };
+use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 use rootcause::prelude::*;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
+use thiserror::Error;
 use uptrakit_shared_db::entity::prelude::*;
 use uuid::Uuid;
 
 pub use uptrakit_web_api_types::registration::RegistrationMode;
+
+/// Error returned when registration validation fails.
+#[derive(Debug, Error)]
+pub enum RegistrationValidationError {
+    #[error("registration is currently closed")]
+    Closed,
+    #[error("registration token is required")]
+    TokenRequired,
+    #[error("no registration token configured")]
+    NoTokenConfigured,
+    #[error("token verification failed")]
+    VerificationFailed,
+    #[error("invalid registration token")]
+    InvalidToken,
+}
+
+impl IntoResponse for RegistrationValidationError {
+    fn into_response(self) -> Response {
+        let status = match self {
+            Self::VerificationFailed => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Closed | Self::TokenRequired | Self::NoTokenConfigured | Self::InvalidToken => {
+                StatusCode::FORBIDDEN
+            }
+        };
+        (status, self.to_string()).into_response()
+    }
+}
 
 /// Cached registration settings held in AppState.
 #[derive(Clone, Debug)]
@@ -95,33 +125,24 @@ impl RegistrationSettings {
     pub fn validate(
         &self,
         token: Option<&str>,
-    ) -> std::result::Result<(), (http::StatusCode, &'static str)> {
+    ) -> std::result::Result<(), RegistrationValidationError> {
         match self.mode {
             RegistrationMode::Open => Ok(()),
-            RegistrationMode::Closed => Err((
-                http::StatusCode::FORBIDDEN,
-                "Registration is currently closed",
-            )),
+            RegistrationMode::Closed => Err(RegistrationValidationError::Closed),
             RegistrationMode::Invite => {
-                let token = token.ok_or((
-                    http::StatusCode::FORBIDDEN,
-                    "Registration token is required",
-                ))?;
-                let stored_hash = self.token_hash.as_deref().ok_or((
-                    http::StatusCode::FORBIDDEN,
-                    "No registration token configured",
-                ))?;
+                let token = token.ok_or(RegistrationValidationError::TokenRequired)?;
+                let stored_hash = self
+                    .token_hash
+                    .as_deref()
+                    .ok_or(RegistrationValidationError::NoTokenConfigured)?;
                 let valid = password::verify_password(token, stored_hash).map_err(|e| {
                     tracing::error!("Token verification error: {:?}", e);
-                    (
-                        http::StatusCode::INTERNAL_SERVER_ERROR,
-                        "Internal server error",
-                    )
+                    RegistrationValidationError::VerificationFailed
                 })?;
                 if valid {
                     Ok(())
                 } else {
-                    Err((http::StatusCode::FORBIDDEN, "Invalid registration token"))
+                    Err(RegistrationValidationError::InvalidToken)
                 }
             }
         }

@@ -1,6 +1,6 @@
 use der::asn1::{BitString, OctetString};
 use der::{Decode, Encode};
-use rootcause::{Report, report};
+use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror::Error;
 use time::OffsetDateTime;

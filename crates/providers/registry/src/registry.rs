@@ -1,4 +1,4 @@
-use rootcause::report;
+use rootcause::prelude::*;
 
 use uptrakit_provider_core::{Provider, ProviderType};
 use uptrakit_provider_docker_registry::{
@@ -37,8 +37,8 @@ impl ProviderRegistry {
     ) -> Result<Box<dyn Provider>> {
         match provider_type {
             ProviderType::GithubReleases => {
-                let github_config: GitHubConfig = serde_json::from_value(config.clone())
-                    .map_err(|e| report!(RegistryError::ConfigParse(e)))?;
+                let github_config: GitHubConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
                 let provider =
                     GitHubLocalProvider::new(github_config, package_identifier.to_string());
                 Ok(Box::new(provider))
@@ -71,15 +71,15 @@ impl ProviderRegistry {
     ) -> Result<Box<dyn Provider>> {
         match provider_type {
             ProviderType::GithubReleases => {
-                let github_config: GitHubConfig = serde_json::from_value(config.clone())
-                    .map_err(|e| report!(RegistryError::ConfigParse(e)))?;
+                let github_config: GitHubConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
                 let provider = GitHubProvider::new(github_config)
                     .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::DockerRegistry => {
-                let docker_config: DockerRegistryConfig = serde_json::from_value(config.clone())
-                    .map_err(|e| report!(RegistryError::ConfigParse(e)))?;
+                let docker_config: DockerRegistryConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
                 let provider = DockerRegistryProvider::new(docker_config)
                     .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
@@ -106,16 +106,16 @@ impl ProviderRegistry {
     pub fn validate_config(provider_type: ProviderType, config: &serde_json::Value) -> Result<()> {
         match provider_type {
             ProviderType::GithubReleases => {
-                let github_config: GitHubConfig = serde_json::from_value(config.clone())
-                    .map_err(|e| report!(RegistryError::ConfigParse(e)))?;
+                let github_config: GitHubConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
                 github_config
                     .validate()
                     .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;
                 Ok(())
             }
             ProviderType::DockerRegistry => {
-                let docker_config: DockerRegistryConfig = serde_json::from_value(config.clone())
-                    .map_err(|e| report!(RegistryError::ConfigParse(e)))?;
+                let docker_config: DockerRegistryConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
                 docker_config
                     .validate()
                     .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;

@@ -1,4 +1,4 @@
-use rootcause::report;
+use rootcause::prelude::*;
 
 use crate::api_types::{RegistryErrorResponse, TagListResponse};
 use crate::auth::RegistryAuth;

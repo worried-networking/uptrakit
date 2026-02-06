@@ -12,7 +12,7 @@ use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
 };
 
-use rootcause::{Report, prelude::*};
+use rootcause::prelude::*;
 use thiserror::Error;
 
 use super::service_ws::{close_with_reason, serialize_msg};

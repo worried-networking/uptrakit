@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use rootcause::report;
+use rootcause::prelude::*;
 use uptrakit_provider_core::{Provider, ProviderError, Result, UpstreamRelease, Version};
 
 use crate::config::GitHubConfig;

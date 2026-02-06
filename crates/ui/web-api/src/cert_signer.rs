@@ -1,4 +1,4 @@
-use rootcause::Report;
+use rootcause::prelude::*;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

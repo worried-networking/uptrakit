@@ -153,17 +153,21 @@ Breaking changes:
 
 ## Error handling
 
-Use the `rootcause` crate for error construction and propagation.
+Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error construction and propagation, and [`thiserror`](https://github.com/dtolnay/thiserror) for error enum definitions. For the full list of patterns and examples, see the "Error handling" section in [AGENTS.md](AGENTS.md).
 
-Reference:
+### Key rules
 
-- <https://github.com/rootcause-rs/rootcause>
+1. **Every boundary has its own error enum.** Define a `#[derive(Debug, thiserror::Error)]` enum and a `pub type Result<T> = std::result::Result<T, Report<MyError>>` alias.
+2. **Implement `ReportConversion`** for every foreign error type your boundary may encounter, then use `.context_to()?` to convert automatically.
+3. **Prefer `context_to()` over `map_err(|e| report!(...))`** when a `ReportConversion` impl exists — it preserves the full error chain.
+4. **Use `report!()` for creating reports directly** and `bail!()` for early returns.
+5. **Prefer `rootcause::prelude::*`** for imports. Import `rootcause::ReportConversion` separately (it is not in the prelude).
+6. **No `Result<T, String>` or `Result<T, (StatusCode, &str)>`** — always use typed error enums wrapped in `Report<E>`.
+7. **No `format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to preserve the original error.
+8. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.
 
-Guidelines:
+### Panicking and unwrap
 
-- Add context at boundaries (host, provider, software item, operation).
-- Avoid logging secrets or tokens.
-- Prefer structured context over stringly-typed "something failed".
 - **Never use `unwrap()`, `expect()`, or `panic!()` in production code.** These are only acceptable inside `#[cfg(test)]` modules. Preferred alternatives:
   - **Fallible parsing / serialization**: use `match` with a sensible fallback or propagate the error.
   - **`Mutex::lock()` / `RwLock::read()` / `RwLock::write()`**: use `.unwrap()` — safe because `panic = "abort"` in the release profile makes lock poisoning impossible. Do **not** use `.map_err()` to convert `PoisonError` into an application error.
