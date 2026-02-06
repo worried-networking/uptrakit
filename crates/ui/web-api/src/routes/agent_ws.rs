@@ -14,6 +14,7 @@ use uptrakit_shared_db::entity::{
 
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 use super::service_ws::{close_with_reason, serialize_msg};
 use crate::AppState;
@@ -28,6 +29,8 @@ enum AgentWsError {
 }
 
 type AgentWsResult<T> = std::result::Result<T, Report<AgentWsError>>;
+
+impl_report_conversion!(sea_orm::DbErr => AgentWsError::Database);
 
 /// Minimum agent version required for connection.
 const MIN_AGENT_VERSION: &str = "0.0.1";
@@ -685,7 +688,7 @@ async fn deliver_pending_updates(
         .filter(agent_host::Column::ServiceId.eq(agent_id))
         .all(&state.db)
         .await
-        .map_err(|e| report!(AgentWsError::Database(e)))?;
+        .context_to::<AgentWsError>()?;
 
     if host_links.is_empty() {
         return Ok(());
@@ -699,7 +702,7 @@ async fn deliver_pending_updates(
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
         .all(&state.db)
         .await
-        .map_err(|e| report!(AgentWsError::Database(e)))?;
+        .context_to::<AgentWsError>()?;
 
     if pending_updates.is_empty() {
         return Ok(());

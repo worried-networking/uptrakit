@@ -68,6 +68,7 @@ crates/
 │   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities & migrations
 │   ├── directories/               # uptrakit-directories (lib) — cross-platform directory management
 │   ├── enrollment/                # uptrakit-enrollment (lib) — shared enrollment, TLS, CA, CLI
+│   ├── macros/                    # uptrakit-shared-macros (lib) — shared declarative macros
 │   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/
@@ -309,7 +310,7 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **CSR-based certificate issuance** | Agents generate their own ECDSA P-256 keypairs and submit CSRs to the controller for signing. The private key never leaves the agent. A fresh keypair is generated for each CSR (enrollment and renewals). The controller validates CSR signatures and controls all certificate parameters (DN, EKU, validity). |
 | **Permission enum over role strings** | Typed permissions catch authorization bugs at compile time and make the permission model explicit in code. |
 | **SeaORM multi-backend** | SQLite for development simplicity; PostgreSQL/MySQL for production. Feature flags keep the binary lean. |
-| **rootcause + thiserror** | rootcause provides `Report`-based error propagation with structured context. thiserror generates the error enums. Together they enforce boundary-aware error handling without boilerplate. |
+| **rootcause + thiserror** | rootcause provides `Report`-based error propagation with structured context. thiserror generates the error enums. The `impl_report_conversion!` macro (in `uptrakit-shared-macros`) reduces `ReportConversion` trait impls to one-liners. Together they enforce boundary-aware error handling without boilerplate. |
 | **Rustls over OpenSSL** | Pure-Rust TLS avoids OpenSSL linking complexity and provides memory safety guarantees. aws-lc-rs backend offers FIPS-capable cryptography. |
 | **SvelteKit static adapter** | No server-side rendering needed -- the controller serves the pre-built SPA. Keeps deployment simple (single binary + static files). |
 | **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. Runs as a separate binary (`uptrakit-mqtt`) that connects to the controller via WebSocket/mTLS (same enrollment model as agents). No direct database access -- the controller pushes tenant configs and manages leases centrally. |

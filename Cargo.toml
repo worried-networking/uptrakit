@@ -52,6 +52,7 @@ strum = { version = "0.27", features = ["derive"] }
 regex = "1"
 semver = "1"
 async-trait = "0.1"
+uptrakit-shared-macros = { path = "crates/shared/macros" }
 
 [profile.release]
 opt-level = 3

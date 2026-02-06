@@ -5,9 +5,9 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
 
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::AppState;
 use crate::auth::permissions::Permission;
@@ -54,15 +54,9 @@ enum TlsConfigError {
 
 type TlsConfigResult<T> = std::result::Result<T, rootcause::Report<TlsConfigError>>;
 
-impl<T> ReportConversion<TlsConfigError, markers::Mutable, T> for RenewCertError
-where
-    RenewCertError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<TlsConfigError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(RenewCertError::TlsConfig)
-    }
+impl_report_conversion! {
+    TlsConfigError => RenewCertError::TlsConfig,
+    std::io::Error  => RenewCertError::CertWrite,
 }
 
 pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
@@ -141,8 +135,8 @@ async fn renew_server_certificate_inner(
     // Write to disk
     let cert_path = state.pki_path.join("server.crt");
     let key_path = state.pki_path.join("server.key");
-    std::fs::write(&cert_path, &cert_pem).map_err(|e| report!(RenewCertError::CertWrite(e)))?;
-    std::fs::write(&key_path, &key_pem).map_err(|e| report!(RenewCertError::CertWrite(e)))?;
+    std::fs::write(&cert_path, &cert_pem).context_to::<RenewCertError>()?;
+    std::fs::write(&key_path, &key_pem).context_to::<RenewCertError>()?;
 
     // Hot-reload TLS config
     let server_config =

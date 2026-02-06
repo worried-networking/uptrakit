@@ -1,4 +1,3 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
@@ -7,6 +6,7 @@ use sea_orm::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
+use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -23,16 +23,7 @@ pub enum MqttClientError {
 
 pub type Result<T> = std::result::Result<T, Report<MqttClientError>>;
 
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for MqttClientError
-where
-    MqttClientError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(MqttClientError::Database)
-    }
-}
+impl_report_conversion!(sea_orm::DbErr => MqttClientError::Database);
 
 /// Load all MQTT clients for a given tenant.
 pub async fn load_mqtt_clients(

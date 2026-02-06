@@ -1,10 +1,10 @@
 use std::fmt;
 use std::time::Duration;
 
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, Transport};
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 
 /// Configuration for connecting to an MQTT broker.
@@ -72,16 +72,7 @@ pub enum MqttError {
 
 pub type Result<T> = std::result::Result<T, Report<MqttError>>;
 
-impl<T> ReportConversion<rumqttc::ClientError, markers::Mutable, T> for MqttError
-where
-    MqttError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rumqttc::ClientError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(MqttError::Client)
-    }
-}
+impl_report_conversion!(rumqttc::ClientError => MqttError::Client);
 
 /// Connect to the MQTT broker described by `config`.
 ///

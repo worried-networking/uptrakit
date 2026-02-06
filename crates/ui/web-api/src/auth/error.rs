@@ -1,6 +1,6 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -100,58 +100,11 @@ pub enum AuthError {
 
 pub type Result<T> = std::result::Result<T, Report<AuthError>>;
 
-// ReportConversion implementations
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for AuthError
-where
-    AuthError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(AuthError::Database)
-    }
+impl_report_conversion! {
+    sea_orm::DbErr              => AuthError::Database,
+    argon2::password_hash::Error => AuthError::PasswordHash,
+    uuid::Error                 => AuthError::UuidParse,
+    time::error::ComponentRange => AuthError::TimeError,
 }
 
-impl<T> ReportConversion<argon2::password_hash::Error, markers::Mutable, T> for AuthError
-where
-    AuthError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<argon2::password_hash::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(AuthError::PasswordHash)
-    }
-}
-
-impl<T> ReportConversion<argon2::Error, markers::Mutable, T> for AuthError
-where
-    AuthError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<argon2::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|_| AuthError::Internal("argon2 error".to_string()))
-    }
-}
-
-impl<T> ReportConversion<uuid::Error, markers::Mutable, T> for AuthError
-where
-    AuthError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<uuid::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(AuthError::UuidParse)
-    }
-}
-
-impl<T> ReportConversion<time::error::ComponentRange, markers::Mutable, T> for AuthError
-where
-    AuthError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<time::error::ComponentRange, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(AuthError::TimeError)
-    }
-}
+impl_report_conversion!(argon2::Error => AuthError, |_| AuthError::Internal("argon2 error".to_string()));

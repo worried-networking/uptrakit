@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 use tokio::net::TcpSocket;
 use tower_http::services::{ServeDir, ServeFile};
+use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::mtls_acceptor::MtlsAcceptor;
 use uptrakit_web_api::AppState;
@@ -20,16 +20,7 @@ pub enum ServerError {
 
 pub type Result<T> = std::result::Result<T, Report<ServerError>>;
 
-impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for ServerError
-where
-    ServerError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<std::io::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(ServerError::Io)
-    }
-}
+impl_report_conversion!(std::io::Error => ServerError::Io);
 
 pub struct ServerOptions {
     pub https_addr: SocketAddr,

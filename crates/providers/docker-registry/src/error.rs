@@ -1,7 +1,7 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_provider_core::ProviderError;
+use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors specific to the Docker Registry provider.
 #[derive(Debug, Error)]
@@ -37,27 +37,8 @@ pub enum DockerRegistryError {
 /// Result type alias for Docker Registry provider operations.
 pub type Result<T> = std::result::Result<T, Report<DockerRegistryError>>;
 
-impl<T> ReportConversion<reqwest::Error, markers::Mutable, T> for DockerRegistryError
-where
-    DockerRegistryError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<reqwest::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| DockerRegistryError::Request(e.to_string()))
-    }
-}
-
-impl<T> ReportConversion<ProviderError, markers::Mutable, T> for DockerRegistryError
-where
-    DockerRegistryError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<ProviderError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| DockerRegistryError::Provider(e.to_string()))
-    }
-}
+impl_report_conversion!(reqwest::Error => DockerRegistryError, |e| DockerRegistryError::Request(e.to_string()));
+impl_report_conversion!(ProviderError => DockerRegistryError, |e| DockerRegistryError::Provider(e.to_string()));
 
 #[cfg(test)]
 mod tests {

@@ -158,10 +158,10 @@ Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error construct
 ### Key rules
 
 1. **Every boundary has its own error enum.** Define a `#[derive(Debug, thiserror::Error)]` enum and a `pub type Result<T> = std::result::Result<T, Report<MyError>>` alias.
-2. **Implement `ReportConversion`** for every foreign error type your boundary may encounter, then use `.context_to()?` to convert automatically.
+2. **Implement `ReportConversion`** (via `impl_report_conversion!` macro from `uptrakit-shared-macros`) for every foreign error type your boundary may encounter, then use `.context_to()?` to convert automatically.
 3. **Prefer `context_to()` over `map_err(|e| report!(...))`** when a `ReportConversion` impl exists — it preserves the full error chain.
 4. **Use `report!()` for creating reports directly** and `bail!()` for early returns.
-5. **Prefer `rootcause::prelude::*`** for imports. Import `rootcause::ReportConversion` separately (it is not in the prelude).
+5. **Prefer `rootcause::prelude::*`** for imports. Use `impl_report_conversion!` macro instead of manually importing `rootcause::ReportConversion`.
 6. **No `Result<T, String>` or `Result<T, (StatusCode, &str)>`** — always use typed error enums wrapped in `Report<E>`.
 7. **No `format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to preserve the original error.
 8. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.

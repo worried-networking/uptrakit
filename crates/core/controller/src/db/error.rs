@@ -1,6 +1,6 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -19,14 +19,4 @@ pub enum DbError {
 
 pub type Result<T> = std::result::Result<T, Report<DbError>>;
 
-// ReportConversion for SeaORM errors
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for DbError
-where
-    DbError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(DbError::SeaOrm)
-    }
-}
+impl_report_conversion!(sea_orm::DbErr => DbError::SeaOrm);

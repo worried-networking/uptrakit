@@ -1,7 +1,7 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_provider_core::ProviderError;
+use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors specific to the GitHub Releases provider.
 #[derive(Debug, Error)]
@@ -31,24 +31,5 @@ pub enum GitHubError {
 /// Result type alias for GitHub provider operations.
 pub type Result<T> = std::result::Result<T, Report<GitHubError>>;
 
-impl<T> ReportConversion<reqwest::Error, markers::Mutable, T> for GitHubError
-where
-    GitHubError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<reqwest::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| GitHubError::Request(e.to_string()))
-    }
-}
-
-impl<T> ReportConversion<ProviderError, markers::Mutable, T> for GitHubError
-where
-    GitHubError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<ProviderError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| GitHubError::Provider(e.to_string()))
-    }
-}
+impl_report_conversion!(reqwest::Error => GitHubError, |e| GitHubError::Request(e.to_string()));
+impl_report_conversion!(ProviderError => GitHubError, |e| GitHubError::Provider(e.to_string()));

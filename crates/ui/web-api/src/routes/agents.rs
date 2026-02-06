@@ -2,7 +2,6 @@ use crate::SettingKey;
 use crate::auth::{password, token};
 use crate::cert_signer::SignedCertBundle;
 use crate::settings_store::load_setting;
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::net::IpAddr;
@@ -16,6 +15,7 @@ use uptrakit_shared_db::entity::{
     host, prelude::Host, service as agent, service_certificate as agent_certificate,
     service_host as agent_host,
 };
+use uptrakit_shared_macros::impl_report_conversion;
 
 pub use uptrakit_web_api_types::agents::AgentStatus;
 
@@ -39,16 +39,7 @@ pub(crate) enum AgentRouteError {
     CertSigning,
 }
 
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for AgentRouteError
-where
-    AgentRouteError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(AgentRouteError::Database)
-    }
-}
+impl_report_conversion!(sea_orm::DbErr => AgentRouteError::Database);
 
 // --- Shared enrollment helpers (used by WS handlers) ---
 
@@ -344,26 +335,9 @@ pub(crate) enum CertRecordError {
     Database(#[from] sea_orm::DbErr),
 }
 
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for CertRecordError
-where
-    CertRecordError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(CertRecordError::Database)
-    }
-}
-
-impl<T> ReportConversion<time::error::ComponentRange, markers::Mutable, T> for CertRecordError
-where
-    CertRecordError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<time::error::ComponentRange, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(CertRecordError::Timestamp)
-    }
+impl_report_conversion! {
+    sea_orm::DbErr              => CertRecordError::Database,
+    time::error::ComponentRange => CertRecordError::Timestamp,
 }
 
 async fn record_certificate(

@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 sea-orm = { workspace = true }
 time = { workspace = true }
 rootcause = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 uptrakit-shared-db = { path = "../../shared/db" }

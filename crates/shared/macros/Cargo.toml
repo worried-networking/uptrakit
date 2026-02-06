@@ -1,0 +1,10 @@
+[package]
+name = "uptrakit-shared-macros"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+edition = "2024"
+
+[dependencies]
+rootcause.workspace = true

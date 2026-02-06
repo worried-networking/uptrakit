@@ -1,6 +1,6 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors that can occur in the provider registry.
 #[derive(Debug, Error)]
@@ -25,13 +25,4 @@ pub enum RegistryError {
 /// Result type for registry operations.
 pub type Result<T> = std::result::Result<T, Report<RegistryError>>;
 
-impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for RegistryError
-where
-    RegistryError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<serde_json::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(RegistryError::ConfigParse)
-    }
-}
+impl_report_conversion!(serde_json::Error => RegistryError::ConfigParse);

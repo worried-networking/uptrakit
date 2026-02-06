@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api::pki_utils::{self, SanCollection};
 
 /// Build the DER-encoded value for an Authority Information Access (AIA) extension.
@@ -122,63 +122,18 @@ pub enum PkiError {
 
 pub type Result<T> = std::result::Result<T, Report<PkiError>>;
 
-impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for PkiError
-where
-    PkiError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<std::io::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(PkiError::Io)
-    }
+impl_report_conversion! {
+    std::io::Error => PkiError::Io,
+    rcgen::Error => PkiError::Rcgen,
+    rustls::Error => PkiError::Rustls,
 }
 
-impl<T> ReportConversion<rcgen::Error, markers::Mutable, T> for PkiError
-where
-    PkiError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rcgen::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(PkiError::Rcgen)
-    }
-}
+impl_report_conversion!(sea_orm::DbErr => PkiError, |e| PkiError::Database(e.to_string()));
 
-impl<T> ReportConversion<rustls::Error, markers::Mutable, T> for PkiError
-where
-    PkiError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(PkiError::Rustls)
-    }
-}
-
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for PkiError
-where
-    PkiError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| PkiError::Database(e.to_string()))
-    }
-}
-
-impl<T> ReportConversion<pki_utils::PkiUtilError, markers::Mutable, T> for PkiError
-where
-    PkiError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<pki_utils::PkiUtilError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| match e {
-            pki_utils::PkiUtilError::Hostname(s) => PkiError::Hostname(s),
-            pki_utils::PkiUtilError::PemParse => PkiError::PemParse,
-        })
-    }
-}
+impl_report_conversion!(pki_utils::PkiUtilError => PkiError, |e| match e {
+    pki_utils::PkiUtilError::Hostname(s) => PkiError::Hostname(s),
+    pki_utils::PkiUtilError::PemParse => PkiError::PemParse,
+});
 
 /// Loaded CA material.
 pub struct CaBundle {

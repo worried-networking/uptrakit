@@ -4,6 +4,7 @@ use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_macros::impl_report_conversion;
 use x509_cert::ext::pkix::CrlReason;
 use x509_ocsp::{
     BasicOcspResponse, CertId, CertStatus, OcspGeneralizedTime, OcspRequest, OcspResponse,
@@ -47,6 +48,8 @@ enum OcspError {
 }
 
 type OcspResult<T> = std::result::Result<T, Report<OcspError>>;
+
+impl_report_conversion!(sea_orm::DbErr => OcspError::Database);
 
 /// SHA-1 OID (`1.3.14.3.2.26`) — used by Nginx/OpenSSL in OCSP requests.
 const SHA1_OID: const_oid::ObjectIdentifier =
@@ -270,7 +273,7 @@ async fn lookup_cert_status(
         .filter(condition)
         .one(db)
         .await
-        .map_err(|e| report!(OcspError::Database(e)))?;
+        .context_to::<OcspError>()?;
 
     let Some(cert) = cert else {
         return Ok(CertStatus::unknown());

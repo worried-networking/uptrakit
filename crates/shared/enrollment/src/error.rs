@@ -1,6 +1,6 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
 pub enum EnrollmentError {
@@ -94,81 +94,12 @@ impl EnrollmentError {
 
 // ── ReportConversion impls ───────────────────────────────────────────
 
-impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<std::io::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::Io)
-    }
-}
-
-impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<serde_json::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::Json)
-    }
-}
-
-impl<T> ReportConversion<rustls::pki_types::InvalidDnsNameError, markers::Mutable, T>
-    for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::pki_types::InvalidDnsNameError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::TlsName)
-    }
-}
-
-impl<T> ReportConversion<rustls::Error, markers::Mutable, T> for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::Rustls)
-    }
-}
-
-impl<T> ReportConversion<rustls::pki_types::pem::Error, markers::Mutable, T> for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::pki_types::pem::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::Pem)
-    }
-}
-
-impl<T> ReportConversion<tokio_tungstenite::tungstenite::Error, markers::Mutable, T>
-    for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<tokio_tungstenite::tungstenite::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::WebSocket)
-    }
-}
-
-impl<T> ReportConversion<http::uri::InvalidUri, markers::Mutable, T> for EnrollmentError
-where
-    EnrollmentError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<http::uri::InvalidUri, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(EnrollmentError::HttpUri)
-    }
+impl_report_conversion! {
+    std::io::Error                          => EnrollmentError::Io,
+    serde_json::Error                       => EnrollmentError::Json,
+    rustls::pki_types::InvalidDnsNameError  => EnrollmentError::TlsName,
+    rustls::Error                           => EnrollmentError::Rustls,
+    rustls::pki_types::pem::Error           => EnrollmentError::Pem,
+    tokio_tungstenite::tungstenite::Error   => EnrollmentError::WebSocket,
+    http::uri::InvalidUri                   => EnrollmentError::HttpUri,
 }

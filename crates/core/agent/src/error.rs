@@ -1,7 +1,7 @@
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_enrollment::EnrollmentError;
+use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -53,48 +53,9 @@ impl Error {
 
 pub type Result<T> = std::result::Result<T, Report<Error>>;
 
-// ── ReportConversion impls ───────────────────────────────────────────
-
-impl<T> ReportConversion<EnrollmentError, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<EnrollmentError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::Enrollment)
-    }
-}
-
-impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<std::io::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::Io)
-    }
-}
-
-impl<T> ReportConversion<tokio_tungstenite::tungstenite::Error, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<tokio_tungstenite::tungstenite::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::WebSocket)
-    }
-}
-
-impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<serde_json::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::Json)
-    }
+impl_report_conversion! {
+    EnrollmentError => Error::Enrollment,
+    std::io::Error => Error::Io,
+    tokio_tungstenite::tungstenite::Error => Error::WebSocket,
+    serde_json::Error => Error::Json,
 }

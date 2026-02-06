@@ -1,10 +1,10 @@
 use rand::Rng;
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{pending_device_flow, prelude::PendingDeviceFlow};
+use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 use super::token::generate_secure_token;
@@ -38,16 +38,7 @@ pub enum DeviceFlowError {
 
 pub type Result<T> = std::result::Result<T, Report<DeviceFlowError>>;
 
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for DeviceFlowError
-where
-    DeviceFlowError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(DeviceFlowError::Database)
-    }
-}
+impl_report_conversion!(sea_orm::DbErr => DeviceFlowError::Database);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceFlowStatus {

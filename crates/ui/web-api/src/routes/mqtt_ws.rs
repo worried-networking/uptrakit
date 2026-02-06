@@ -14,6 +14,7 @@ use uptrakit_shared_db::entity::{
 
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 use super::service_ws::{close_with_reason, serialize_msg};
 use crate::AppState;
@@ -42,6 +43,8 @@ pub(crate) enum MqttWsError {
 }
 
 type MqttWsResult<T> = std::result::Result<T, Report<MqttWsError>>;
+
+impl_report_conversion!(sea_orm::DbErr => MqttWsError::Database);
 
 // ---------------------------------------------------------------------------
 // Authenticated MQTT handler (called from service_ws after shared auth)
@@ -636,10 +639,7 @@ pub(crate) async fn do_mqtt_service_enroll(
         deactivated_at: Set(None),
     };
 
-    let service = service
-        .insert(db)
-        .await
-        .map_err(|e| report!(MqttWsError::Database(e)))?;
+    let service = service.insert(db).await.context_to::<MqttWsError>()?;
 
     Ok(MqttServiceEnrollResult {
         service,
@@ -711,10 +711,7 @@ async fn record_mqtt_service_certificate(
         last_seen_at: Set(None),
     };
 
-    record
-        .insert(db)
-        .await
-        .map_err(|e| report!(MqttWsError::Database(e)))?;
+    record.insert(db).await.context_to::<MqttWsError>()?;
 
     Ok(())
 }
@@ -731,16 +728,13 @@ async fn revoke_mqtt_service_certificate(
         .filter(mqtt_service_certificate::Column::CaFingerprint.eq(ca_fingerprint))
         .one(db)
         .await
-        .map_err(|e| report!(MqttWsError::Database(e)))?
+        .context_to::<MqttWsError>()?
         .ok_or_else(|| report!(MqttWsError::CertNotFound))?;
 
     let mut active: mqtt_service_certificate::ActiveModel = cert.into();
     active.revoked_at = Set(Some(time::OffsetDateTime::now_utc()));
     active.revocation_reason = Set(Some(reason));
-    active
-        .update(db)
-        .await
-        .map_err(|e| report!(MqttWsError::Database(e)))?;
+    active.update(db).await.context_to::<MqttWsError>()?;
 
     Ok(())
 }

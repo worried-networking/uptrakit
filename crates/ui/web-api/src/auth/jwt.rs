@@ -102,7 +102,7 @@ impl JwtManager {
         };
 
         jsonwebtoken::encode(&Header::default(), &claims, &self.encoding_key)
-            .map_err(|e| rootcause::report!(AuthError::JwtEncode(e.to_string())))
+            .map_err(|e| report!(AuthError::JwtEncode(e.to_string())))
     }
 
     /// Decode and validate a JWT access token.
@@ -112,7 +112,7 @@ impl JwtManager {
             &self.decoding_key,
             &Validation::default(),
         )
-        .map_err(|e| rootcause::report!(AuthError::JwtDecode(e.to_string())))?;
+        .map_err(|e| report!(AuthError::JwtDecode(e.to_string())))?;
 
         Ok(token_data.claims)
     }

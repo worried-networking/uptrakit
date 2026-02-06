@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 use tokio_tungstenite::{
@@ -15,6 +14,7 @@ use tokio_tungstenite::{
     tungstenite::{self, Message},
 };
 use uptrakit_internal_wire::{ControllerMessage, ServiceMessage};
+use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors that can occur during controller communication.
 #[derive(Debug, Error)]
@@ -37,27 +37,8 @@ impl From<tungstenite::Error> for ControllerError {
     }
 }
 
-impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for ControllerError
-where
-    ControllerError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<serde_json::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(ControllerError::Json)
-    }
-}
-
-impl<T> ReportConversion<tungstenite::Error, markers::Mutable, T> for ControllerError
-where
-    ControllerError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<tungstenite::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(|e| ControllerError::WebSocket(Box::new(e)))
-    }
-}
+impl_report_conversion!(serde_json::Error => ControllerError::Json);
+impl_report_conversion!(tungstenite::Error => ControllerError, |e| ControllerError::WebSocket(Box::new(e)));
 
 /// A connected WebSocket client to the controller.
 pub struct ControllerConnection {
@@ -113,11 +94,11 @@ impl ControllerConnection {
 
     /// Send a message to the controller.
     pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
-        let json = serde_json::to_string(&msg).map_err(|e| report!(ControllerError::Json(e)))?;
+        let json = serde_json::to_string(&msg).context_to::<ControllerError>()?;
         self.sink
             .send(Message::Text(json.into()))
             .await
-            .map_err(|e| report!(ControllerError::WebSocket(Box::new(e))))?;
+            .context_to::<ControllerError>()?;
         Ok(())
     }
 
@@ -126,27 +107,27 @@ impl ControllerConnection {
         loop {
             match self.stream.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    let msg: ControllerMessage = serde_json::from_str(&text)
-                        .map_err(|e| report!(ControllerError::Json(e)))?;
+                    let msg: ControllerMessage =
+                        serde_json::from_str(&text).context_to::<ControllerError>()?;
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let msg: ControllerMessage = serde_json::from_slice(&data)
-                        .map_err(|e| report!(ControllerError::Json(e)))?;
+                    let msg: ControllerMessage =
+                        serde_json::from_slice(&data).context_to::<ControllerError>()?;
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Ping(data))) => {
                     self.sink
                         .send(Message::Pong(data))
                         .await
-                        .map_err(|e| report!(ControllerError::WebSocket(Box::new(e))))?;
+                        .context_to::<ControllerError>()?;
                     continue;
                 }
                 Some(Ok(Message::Pong(_))) => continue,
                 Some(Ok(Message::Close(_))) => return Ok(None),
                 Some(Ok(Message::Frame(_))) => continue,
                 Some(Err(e)) => {
-                    return Err(report!(ControllerError::WebSocket(Box::new(e))));
+                    return Err(e).context_to::<ControllerError>()?;
                 }
                 None => return Ok(None),
             }

@@ -16,6 +16,7 @@ use uptrakit_shared_db::entity::service as service_entity;
 
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::AppState;
 use crate::extract::{ClientIp, ServiceIdentity};
@@ -33,6 +34,8 @@ enum ServiceWsError {
 }
 
 type ServiceWsResult<T> = std::result::Result<T, Report<ServiceWsError>>;
+
+impl_report_conversion!(sea_orm::DbErr => ServiceWsError::Database);
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -166,7 +169,7 @@ async fn lookup_by_secret(
         .filter(service_entity::Column::DeactivatedAt.is_null())
         .all(db)
         .await
-        .map_err(|e| report!(ServiceWsError::Database(e)))?;
+        .context_to::<ServiceWsError>()?;
 
     for svc in mqtt_services {
         if let Ok(true) =

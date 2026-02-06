@@ -1,5 +1,4 @@
 use openidconnect::{Nonce, PkceCodeVerifier};
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
@@ -11,6 +10,7 @@ use uptrakit_shared_db::entity::{
         PendingAccountLink, PendingOidcFlow, PendingOidcRegistration, PendingOidcTokenExchange,
     },
 };
+use uptrakit_shared_macros::impl_report_conversion;
 
 const TTL_SECONDS: i64 = 600; // 10 minutes
 const EXCHANGE_TTL_SECONDS: i64 = 60; // 60 seconds
@@ -26,26 +26,9 @@ pub enum OidcStoreError {
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<OidcStoreError>>;
 
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for OidcStoreError
-where
-    OidcStoreError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(OidcStoreError::Database)
-    }
-}
-
-impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for OidcStoreError
-where
-    OidcStoreError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<serde_json::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(OidcStoreError::Serialization)
-    }
+impl_report_conversion! {
+    sea_orm::DbErr     => OidcStoreError::Database,
+    serde_json::Error  => OidcStoreError::Serialization,
 }
 
 /// Pending OIDC authorization flow data returned by `take()`.

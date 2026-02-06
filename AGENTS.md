@@ -35,6 +35,7 @@ uptrakit/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
+│   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared enrollment, TLS, CA bootstrap, CLI
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
@@ -744,12 +745,12 @@ Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagati
 
 ### Import convention
 
-Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()` and `.context_to()`), and `IteratorExt`. Import `ReportConversion` separately since it is not part of the prelude:
+Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()` and `.context_to()`), and `IteratorExt`. When implementing `ReportConversion`, use the `impl_report_conversion!` macro from `uptrakit-shared-macros` (it handles the `ReportConversion` import internally):
 
 ```rust
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 ```
 
 ### Pattern 1: Define an error enum with a `Result<T>` alias
@@ -757,7 +758,6 @@ use thiserror::Error;
 Each boundary (crate, module, or logical subsystem) defines its own error enum and a `Result` alias using `Report`:
 
 ```rust
-use rootcause::ReportConversion;
 use rootcause::prelude::*;
 use thiserror::Error;
 
@@ -780,26 +780,25 @@ Real example: [`crates/ui/web-api/src/auth/error.rs`](crates/ui/web-api/src/auth
 
 ### Pattern 2: Implement `ReportConversion` for cross-boundary error conversion
 
-When your module calls code that returns a different error type, implement `ReportConversion` so that `.context_to()` can convert automatically:
+When your module calls code that returns a different error type, implement `ReportConversion` so that `.context_to()` can convert automatically. Use the `impl_report_conversion!` macro from `uptrakit-shared-macros`:
 
 ```rust
-impl<T> ReportConversion<sea_orm::DbErr, markers::Mutable, T> for MyError
-where
-    MyError: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<sea_orm::DbErr, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(MyError::Database)
-    }
+use uptrakit_shared_macros::impl_report_conversion;
+
+// Simple variant mapping (source error maps directly via #[from]):
+impl_report_conversion!(sea_orm::DbErr => MyError::Database);
+
+// Multiple conversions in one block:
+impl_report_conversion! {
+    sea_orm::DbErr => MyError::Database,
+    std::io::Error => MyError::Io,
 }
+
+// Closure-based for errors that don't map directly (e.g. Box wrapping):
+impl_report_conversion!(tungstenite::Error => MyError, |e| MyError::WebSocket(Box::new(e)));
 ```
 
-For errors that don't map directly via `#[from]`, use a closure:
-
-```rust
-report.context_transform(|_| MyError::Internal("unexpected failure".to_string()))
-```
+Each macro invocation expands to a full `impl<T> ReportConversion<Source, markers::Mutable, T> for Target` block with the appropriate `context_transform` call.
 
 ### Pattern 3: Use `context_to()` in function bodies
 
@@ -889,7 +888,7 @@ Do NOT use `.map_err()` to convert `PoisonError` into an application error — t
 3. **Use structured context** -- prefer typed variants (`NotFound(String)`) over generic string errors.
 4. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.
 5. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
-6. **Implement `ReportConversion`** for every foreign error type your boundary may encounter.
+6. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may encounter.
 
 ## Host entity
 

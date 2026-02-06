@@ -15,6 +15,7 @@ serde_json = { workspace = true }
 time = { workspace = true, features = ["parsing"] }
 thiserror = { workspace = true }
 rootcause = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
 semver = { workspace = true }

@@ -4816,6 +4816,7 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-provider-core",
  "uptrakit-provider-registry",
+ "uptrakit-shared-macros",
 ]
 
 [[package]]
@@ -4832,6 +4833,7 @@ dependencies = [
  "serde_yml",
  "thiserror 2.0.18",
  "tokio",
+ "uptrakit-shared-macros",
  "uptrakit-web-api-types",
 ]
 
@@ -4877,6 +4879,7 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-shared-db",
+ "uptrakit-shared-macros",
  "uptrakit-web-api",
  "uptrakit-web-api-types",
  "url",
@@ -4919,6 +4922,7 @@ dependencies = [
  "tracing",
  "uptrakit-directories",
  "uptrakit-internal-wire",
+ "uptrakit-shared-macros",
  "url",
  "uuid",
  "webpki-roots 1.0.6",
@@ -4956,6 +4960,7 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-enrollment",
  "uptrakit-internal-wire",
+ "uptrakit-shared-macros",
  "uptrakit-web-api-types",
  "url",
  "uuid",
@@ -4993,6 +4998,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-provider-core",
+ "uptrakit-shared-macros",
 ]
 
 [[package]]
@@ -5010,6 +5016,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-provider-core",
+ "uptrakit-shared-macros",
 ]
 
 [[package]]
@@ -5036,6 +5043,7 @@ dependencies = [
  "uptrakit-provider-docker-registry",
  "uptrakit-provider-github",
  "uptrakit-provider-proxmox-helper-scripts",
+ "uptrakit-shared-macros",
 ]
 
 [[package]]
@@ -5048,6 +5056,13 @@ dependencies = [
  "time",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "uptrakit-shared-macros"
+version = "0.0.1"
+dependencies = [
+ "rootcause",
 ]
 
 [[package]]
@@ -5090,6 +5105,7 @@ dependencies = [
  "uptrakit-provider-core",
  "uptrakit-provider-registry",
  "uptrakit-shared-db",
+ "uptrakit-shared-macros",
  "uptrakit-web-api-types",
  "url",
  "urlencoding",
