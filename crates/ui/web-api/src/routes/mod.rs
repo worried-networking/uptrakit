@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 pub(crate) mod agents;
 pub mod api_tokens;
 pub mod auth;
@@ -6,10 +5,6 @@ pub mod ca;
 pub mod device_auth;
 pub mod health;
 pub mod hosts;
-#[allow(dead_code)]
-pub(crate) mod mqtt_enrollment_tokens;
-#[allow(dead_code)]
-pub(crate) mod mqtt_services;
 pub mod ocsp;
 pub mod oidc_auth;
 pub mod oidc_providers;
