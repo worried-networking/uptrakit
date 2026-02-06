@@ -129,18 +129,18 @@ pub async fn create_mqtt_settings(
         return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
     }
 
-    match mqtt_client_store::create_mqtt_client(
-        &state.db,
+    match mqtt_client_store::create_mqtt_client(mqtt_client_store::CreateMqttClientParams {
+        db: &state.db,
         tenant_id,
         enabled,
-        transport.as_str(),
-        &host,
+        transport: transport.as_str(),
+        host: &host,
         port,
         client_id,
-        req.username.as_deref(),
-        req.password.as_deref(),
+        username: req.username.as_deref(),
+        password: req.password.as_deref(),
         topic_prefix,
-    )
+    })
     .await
     {
         Ok(model) => (StatusCode::CREATED, Json(model_to_response(&model))).into_response(),
@@ -245,18 +245,18 @@ pub async fn update_mqtt_settings(
         return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
     }
 
-    match mqtt_client_store::update_mqtt_client(
-        &state.db,
+    match mqtt_client_store::update_mqtt_client(mqtt_client_store::UpdateMqttClientParams {
+        db: &state.db,
         existing,
-        req.enabled,
-        transport.as_deref(),
-        host.as_deref(),
+        enabled: req.enabled,
+        transport: transport.as_deref(),
+        host: host.as_deref(),
         port,
-        req.client_id.as_deref(),
+        client_id: req.client_id.as_deref(),
         username,
         password,
-        req.topic_prefix.as_deref(),
-    )
+        topic_prefix: req.topic_prefix.as_deref(),
+    })
     .await
     {
         Ok(model) => (StatusCode::OK, Json(model_to_response(&model))).into_response(),

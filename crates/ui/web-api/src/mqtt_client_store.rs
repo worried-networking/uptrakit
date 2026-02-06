@@ -42,20 +42,34 @@ pub async fn load_mqtt_client(
         .context_to()
 }
 
+/// Parameters for [`create_mqtt_client`].
+pub struct CreateMqttClientParams<'a> {
+    pub db: &'a DatabaseConnection,
+    pub tenant_id: Uuid,
+    pub enabled: bool,
+    pub transport: &'a str,
+    pub host: &'a str,
+    pub port: u16,
+    pub client_id: &'a str,
+    pub username: Option<&'a str>,
+    pub password: Option<&'a str>,
+    pub topic_prefix: &'a str,
+}
+
 /// Create a new MQTT client for a tenant.
-#[allow(clippy::too_many_arguments)]
-pub async fn create_mqtt_client(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-    enabled: bool,
-    transport: &str,
-    host: &str,
-    port: u16,
-    client_id: &str,
-    username: Option<&str>,
-    password: Option<&str>,
-    topic_prefix: &str,
-) -> Result<mqtt_client::Model> {
+pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mqtt_client::Model> {
+    let CreateMqttClientParams {
+        db,
+        tenant_id,
+        enabled,
+        transport,
+        host,
+        port,
+        client_id,
+        username,
+        password,
+        topic_prefix,
+    } = params;
     // Check for existing
     let existing = load_mqtt_client(db, tenant_id).await?;
     if existing.is_some() {
@@ -81,21 +95,35 @@ pub async fn create_mqtt_client(
     model.insert(db).await.context_to()
 }
 
+/// Parameters for [`update_mqtt_client`].
+pub struct UpdateMqttClientParams<'a> {
+    pub db: &'a DatabaseConnection,
+    pub existing: mqtt_client::Model,
+    pub enabled: Option<bool>,
+    pub transport: Option<&'a str>,
+    pub host: Option<&'a str>,
+    pub port: Option<u16>,
+    pub client_id: Option<&'a str>,
+    pub username: Option<Option<&'a str>>,
+    pub password: Option<Option<&'a str>>,
+    pub topic_prefix: Option<&'a str>,
+}
+
 /// Update an existing MQTT client model. Pass the loaded model; only non-None
 /// fields are updated.
-#[allow(clippy::too_many_arguments)]
-pub async fn update_mqtt_client(
-    db: &DatabaseConnection,
-    existing: mqtt_client::Model,
-    enabled: Option<bool>,
-    transport: Option<&str>,
-    host: Option<&str>,
-    port: Option<u16>,
-    client_id: Option<&str>,
-    username: Option<Option<&str>>,
-    password: Option<Option<&str>>,
-    topic_prefix: Option<&str>,
-) -> Result<mqtt_client::Model> {
+pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mqtt_client::Model> {
+    let UpdateMqttClientParams {
+        db,
+        existing,
+        enabled,
+        transport,
+        host,
+        port,
+        client_id,
+        username,
+        password,
+        topic_prefix,
+    } = params;
     let mut model: mqtt_client::ActiveModel = existing.into();
 
     if let Some(v) = enabled {
