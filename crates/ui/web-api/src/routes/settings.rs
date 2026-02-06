@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::registration::RegistrationMode;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Extension, Json,
@@ -31,7 +32,7 @@ pub async fn get_registration_settings(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let reg = state.settings.registration().await;
@@ -63,16 +64,15 @@ pub async fn update_registration_settings(
     Json(req): Json<UpdateRegistrationSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     // Validate: invite mode requires a token
     if req.mode == RegistrationMode::Invite && req.token.is_none() {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             "Token is required when mode is invite",
-        )
-            .into_response();
+        );
     }
 
     if let Err(e) = state
@@ -89,7 +89,7 @@ pub async fn update_registration_settings(
         .await
     {
         tracing::error!("Failed to update registration settings: {:?}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     let reg = state.settings.registration().await;

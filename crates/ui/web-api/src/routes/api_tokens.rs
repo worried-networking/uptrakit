@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
@@ -44,7 +45,7 @@ pub async fn create_api_token(
         }
         Err(e) => {
             tracing::error!("Failed to create API token: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -85,7 +86,7 @@ pub async fn list_api_tokens(
         }
         Err(e) => {
             tracing::error!("Failed to list API tokens: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -113,7 +114,7 @@ pub async fn revoke_api_token(
     let token_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, "Invalid token ID").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "Invalid token ID");
         }
     };
 
@@ -121,6 +122,6 @@ pub async fn revoke_api_token(
 
     match service.revoke_token(token_id, auth_user.user_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(_) => (StatusCode::NOT_FOUND, "API token not found").into_response(),
+        Err(_) => error_response(StatusCode::NOT_FOUND, "API token not found"),
     }
 }

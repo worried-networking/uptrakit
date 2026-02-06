@@ -11,6 +11,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::pki_utils::{self, SanCollection};
 
@@ -78,14 +79,14 @@ pub async fn renew_server_certificate(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return StatusCode::FORBIDDEN.into_response();
+        return error_response(StatusCode::FORBIDDEN, "Forbidden");
     }
 
     match renew_server_certificate_inner(&state).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "server certificate renewal failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }

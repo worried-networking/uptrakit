@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::request::Parts;
+use uptrakit_web_api_types::error::ErrorResponse;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -17,7 +19,7 @@ pub struct TenantContext {
 }
 
 impl FromRequestParts<Arc<AppState>> for TenantContext {
-    type Rejection = (StatusCode, &'static str);
+    type Rejection = (StatusCode, Json<ErrorResponse>);
 
     async fn from_request_parts(
         parts: &mut Parts,
@@ -28,7 +30,10 @@ impl FromRequestParts<Arc<AppState>> for TenantContext {
             let header_str = header_val.to_str().map_err(|_| {
                 (
                     StatusCode::BAD_REQUEST,
-                    "X-Tenant-Id header is not valid UTF-8",
+                    Json(ErrorResponse {
+                        error: "X-Tenant-Id header is not valid UTF-8".to_string(),
+                        code: None,
+                    }),
                 )
             })?;
 
@@ -36,7 +41,10 @@ impl FromRequestParts<Arc<AppState>> for TenantContext {
                 let tenant_id = header_str.parse::<Uuid>().map_err(|_| {
                     (
                         StatusCode::BAD_REQUEST,
-                        "X-Tenant-Id header is not a valid UUID",
+                        Json(ErrorResponse {
+                            error: "X-Tenant-Id header is not a valid UUID".to_string(),
+                            code: None,
+                        }),
                     )
                 })?;
                 return Ok(TenantContext { tenant_id });

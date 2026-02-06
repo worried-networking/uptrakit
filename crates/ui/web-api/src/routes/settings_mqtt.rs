@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::mqtt_client_store;
@@ -57,7 +58,7 @@ pub async fn list_mqtt_settings(
     tenant: TenantContext,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let tenant_id = tenant.tenant_id;
@@ -68,7 +69,7 @@ pub async fn list_mqtt_settings(
         }
         Err(e) => {
             tracing::error!("Failed to load MQTT clients: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -95,7 +96,7 @@ pub async fn create_mqtt_settings(
     Json(req): Json<CreateMqttClientRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let tenant_id = tenant.tenant_id;
@@ -106,15 +107,17 @@ pub async fn create_mqtt_settings(
         match MqttUrl::parse(url_str) {
             Ok(parsed) => (parsed.transport, parsed.host, parsed.port),
             Err(e) => {
-                return (StatusCode::BAD_REQUEST, format!("invalid url: {e}")).into_response();
+                return error_response(StatusCode::BAD_REQUEST, format!("invalid url: {e}"));
             }
         }
     } else {
         let host = match req.host {
             Some(ref h) if !h.is_empty() => h.clone(),
             _ => {
-                return (StatusCode::BAD_REQUEST, "host is required (or provide url)")
-                    .into_response();
+                return error_response(
+                    StatusCode::BAD_REQUEST,
+                    "host is required (or provide url)",
+                );
             }
         };
         let transport = req.transport.unwrap_or_default();
@@ -127,10 +130,10 @@ pub async fn create_mqtt_settings(
     let topic_prefix = req.topic_prefix.as_deref().unwrap_or("uptrakit");
 
     if client_id.is_empty() {
-        return (StatusCode::BAD_REQUEST, "client_id must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "client_id must not be empty");
     }
     if topic_prefix.is_empty() {
-        return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "topic_prefix must not be empty");
     }
 
     match mqtt_client_store::create_mqtt_client(mqtt_client_store::CreateMqttClientParams {
@@ -151,14 +154,13 @@ pub async fn create_mqtt_settings(
         Ok(model) => (StatusCode::CREATED, Json(model_to_response(&model))).into_response(),
         Err(e) => {
             if let mqtt_client_store::MqttClientError::LimitReached(max) = e.current_context() {
-                return (
+                return error_response(
                     StatusCode::CONFLICT,
                     format!("MQTT client limit reached: maximum {max} per tenant"),
-                )
-                    .into_response();
+                );
             }
             tracing::error!("Failed to create MQTT client: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -180,7 +182,7 @@ pub async fn get_mqtt_limit(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let max = state.settings.mqtt_max_clients_per_tenant().await;
@@ -213,15 +215,14 @@ pub async fn update_mqtt_limit(
     Json(req): Json<UpdateMqttLimitRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if req.max_clients_per_tenant < 1 {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             "max_clients_per_tenant must be at least 1",
-        )
-            .into_response();
+        );
     }
 
     // Persist to DB
@@ -234,7 +235,7 @@ pub async fn update_mqtt_limit(
     .await
     {
         tracing::error!("Failed to persist MQTT limit: {e:?}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     state
@@ -274,23 +275,23 @@ pub async fn get_mqtt_settings(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "invalid id").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
     match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {
             (StatusCode::OK, Json(model_to_response(&model))).into_response()
         }
-        Ok(Some(_)) => StatusCode::NOT_FOUND.into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Ok(Some(_)) => error_response(StatusCode::NOT_FOUND, "Not found"),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -321,21 +322,21 @@ pub async fn update_mqtt_settings(
     Json(req): Json<UpdateMqttClientRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "invalid id").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
     let existing = match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await
     {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => model,
-        Ok(Some(_)) | Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(Some(_)) | Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -344,7 +345,7 @@ pub async fn update_mqtt_settings(
         match MqttUrl::parse(url_str) {
             Ok(parsed) => (Some(parsed.transport), Some(parsed.host), Some(parsed.port)),
             Err(e) => {
-                return (StatusCode::BAD_REQUEST, format!("invalid url: {e}")).into_response();
+                return error_response(StatusCode::BAD_REQUEST, format!("invalid url: {e}"));
             }
         }
     } else {
@@ -368,7 +369,7 @@ pub async fn update_mqtt_settings(
                 Some(Some(s))
             }
         } else {
-            return (StatusCode::BAD_REQUEST, "username must be a string or null").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "username must be a string or null");
         }
     } else {
         None
@@ -383,12 +384,12 @@ pub async fn update_mqtt_settings(
     if let Some(ref cid) = req.client_id
         && cid.is_empty()
     {
-        return (StatusCode::BAD_REQUEST, "client_id must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "client_id must not be empty");
     }
     if let Some(ref tp) = req.topic_prefix
         && tp.is_empty()
     {
-        return (StatusCode::BAD_REQUEST, "topic_prefix must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "topic_prefix must not be empty");
     }
 
     match mqtt_client_store::update_mqtt_client(mqtt_client_store::UpdateMqttClientParams {
@@ -420,7 +421,7 @@ pub async fn update_mqtt_settings(
         }
         Err(e) => {
             tracing::error!("Failed to update MQTT client: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -448,21 +449,21 @@ pub async fn delete_mqtt_settings(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "invalid id").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
     // Verify tenant ownership
     match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {}
-        Ok(Some(_)) | Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(Some(_)) | Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
 
@@ -480,10 +481,10 @@ pub async fn delete_mqtt_settings(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             if let mqtt_client_store::MqttClientError::NotFound = e.current_context() {
-                return StatusCode::NOT_FOUND.into_response();
+                return error_response(StatusCode::NOT_FOUND, "Not found");
             }
             tracing::error!("Failed to delete MQTT client: {e:?}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }

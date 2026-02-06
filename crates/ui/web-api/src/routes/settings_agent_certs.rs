@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::settings_store::upsert_setting;
 use axum::{
@@ -32,7 +33,7 @@ pub async fn get_agent_certificate_settings(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let response = AgentCertificateSettingsResponse {
@@ -62,16 +63,15 @@ pub async fn update_agent_certificate_settings(
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if let Some(days) = req.lifetime_days {
         if days < 1 {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
                 "Certificate lifetime must be at least 1 day",
-            )
-                .into_response();
+            );
         }
         if let Err(e) = upsert_setting(
             &state.db,
@@ -82,18 +82,17 @@ pub async fn update_agent_certificate_settings(
         .await
         {
             tracing::error!("Failed to save agent cert lifetime: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_agent_cert_lifetime_days(days).await;
     }
 
     if let Some(hours) = req.renewal_window_hours {
         if hours < 1 {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
                 "Renewal window must be at least 1 hour",
-            )
-                .into_response();
+            );
         }
         if let Err(e) = upsert_setting(
             &state.db,
@@ -104,7 +103,7 @@ pub async fn update_agent_certificate_settings(
         .await
         {
             tracing::error!("Failed to save renewal window: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_renewal_window_hours(hours).await;
     }

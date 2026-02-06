@@ -34,6 +34,20 @@ import type {
 
 const BASE = '/api/v1';
 
+async function extractErrorMessage(res: Response): Promise<string> {
+	const text = await res.text();
+	if (!text) return res.statusText;
+	try {
+		const parsed = JSON.parse(text);
+		if (typeof parsed === 'object' && parsed !== null && typeof parsed.error === 'string') {
+			return parsed.error;
+		}
+	} catch {
+		/* Not JSON */
+	}
+	return text;
+}
+
 function authHeaders(): Record<string, string> {
 	const token = localStorage.getItem('access_token');
 	return token ? { Authorization: `Bearer ${token}` } : {};
@@ -90,8 +104,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 			});
 
 			if (!retryRes.ok) {
-				const text = await retryRes.text();
-				throw new Error(text || retryRes.statusText);
+				const message = await extractErrorMessage(retryRes);
+				throw new Error(message);
 			}
 			if (retryRes.status === 204) return undefined as T;
 			return retryRes.json();
@@ -107,8 +121,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 	}
 
 	if (!res.ok) {
-		const text = await res.text();
-		throw new Error(text || res.statusText);
+		const message = await extractErrorMessage(res);
+		throw new Error(message);
 	}
 	if (res.status === 204) return undefined as T;
 	return res.json();
@@ -156,8 +170,8 @@ export async function oidcCompleteRegistration(
 		body: JSON.stringify({ registration_code: registrationCode, registration_token: registrationToken })
 	});
 	if (!res.ok) {
-		const text = await res.text();
-		throw new Error(text || res.statusText);
+		const message = await extractErrorMessage(res);
+		throw new Error(message);
 	}
 	return res.json();
 }
@@ -170,8 +184,8 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 		body: JSON.stringify({ code })
 	});
 	if (!res.ok) {
-		const text = await res.text();
-		throw new Error(text || res.statusText);
+		const message = await extractErrorMessage(res);
+		throw new Error(message);
 	}
 	return res.json();
 }

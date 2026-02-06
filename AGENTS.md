@@ -890,6 +890,40 @@ Do NOT use `.map_err()` to convert `PoisonError` into an application error — t
 5. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
 6. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may encounter.
 
+## API error responses
+
+All web API error responses use a consistent JSON format defined by `ErrorResponse` (`crates/shared/web-api-types/src/error.rs`):
+
+```json
+{
+  "error": "Human-readable error message",
+  "code": "optional_machine_readable_code"
+}
+```
+
+The `code` field is optional (`#[serde(skip_serializing_if = "Option::is_none")]`) and used only where a machine-readable code adds value (e.g. `"not_found"` for the 404 fallback, `"agent_version_too_old"` for version checks).
+
+### Helper functions
+
+`crates/ui/web-api/src/error_response.rs` provides two helpers:
+
+- `error_response(status, message) -> Response` — most common case, no code field
+- `error_response_with_code(status, message, code) -> Response` — includes a machine-readable code
+
+All route handlers, middleware rejections, and custom `IntoResponse` impls use these helpers instead of constructing raw tuples.
+
+### Convention
+
+- **Do**: `error_response(StatusCode::BAD_REQUEST, "Invalid input")`
+- **Do not**: `(StatusCode::BAD_REQUEST, "Invalid input").into_response()`
+- **Do not**: construct `Json(serde_json::json!({"error": "..."}))` manually
+- The 404 fallback uses `error_response_with_code` for the JSON path; the HTML path returns a plain-text "Not Found".
+- WebSocket endpoints (`service_ws.rs`) are excluded — they use protocol-level error handling, not JSON responses.
+
+### Frontend integration
+
+The frontend (`frontend/src/lib/api.ts`) uses `extractErrorMessage(res)` to parse error responses. It tries to parse JSON and extract the `error` field; falls back to the raw response text if parsing fails. The `ErrorResponse` TypeScript interface is defined in `frontend/src/lib/types.ts`.
+
 ## Host entity
 
 A `Host` represents a physical or virtual machine, decoupled from the `Agent` process identity. Hosts are identified by `machine_id` — a persistent system identifier (`/etc/machine-id` on Linux, `IOPlatformUUID` on macOS).

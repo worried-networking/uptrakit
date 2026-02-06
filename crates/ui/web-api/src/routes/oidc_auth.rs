@@ -5,6 +5,7 @@ use crate::auth::authentication::{
 use crate::auth::password;
 use crate::auth::session::SessionService;
 use crate::auth::token::{generate_secure_token, generate_uuid};
+use crate::error_response::error_response;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -112,35 +113,34 @@ pub async fn oidc_authorize(
         .or_else(|| base_url_from_headers(&headers));
     let base_url = match base_url {
         Some(url) => url,
-        None => return (StatusCode::BAD_REQUEST, "Missing Host header").into_response(),
+        None => return error_response(StatusCode::BAD_REQUEST, "Missing Host header"),
     };
 
     let redirect_url = match RedirectUrl::new(format!("{base_url}/api/v1/auth/oidc/callback")) {
         Ok(url) => url,
         Err(e) => {
             tracing::error!("Invalid OIDC redirect URL: {e}");
-            return (StatusCode::BAD_REQUEST, "Invalid redirect URL").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "Invalid redirect URL");
         }
     };
 
     let provider_uuid = match uuid::Uuid::parse_str(&provider_id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid provider ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid provider ID"),
     };
 
-    let provider = match find_active_provider(&state.db, state.default_tenant_id, provider_uuid)
-        .await
-    {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Provider not found or inactive").into_response(),
-    };
+    let provider =
+        match find_active_provider(&state.db, state.default_tenant_id, provider_uuid).await {
+            Some(p) => p,
+            None => return error_response(StatusCode::NOT_FOUND, "Provider not found or inactive"),
+        };
 
     // Build OIDC client via discovery
     let issuer_url = match IssuerUrl::new(provider.issuer_url.clone()) {
         Ok(u) => u,
         Err(e) => {
             tracing::error!("Invalid issuer URL for provider {}: {e}", provider.slug);
-            return (StatusCode::BAD_GATEWAY, "Invalid OIDC issuer URL").into_response();
+            return error_response(StatusCode::BAD_GATEWAY, "Invalid OIDC issuer URL");
         }
     };
     let http_client = reqwest::Client::default();
@@ -149,7 +149,7 @@ pub async fn oidc_authorize(
             Ok(m) => m,
             Err(e) => {
                 tracing::error!("OIDC discovery failed for provider {}: {e}", provider.slug);
-                return (StatusCode::BAD_GATEWAY, "OIDC provider discovery failed").into_response();
+                return error_response(StatusCode::BAD_GATEWAY, "OIDC provider discovery failed");
             }
         };
     let client = CoreClient::from_provider_metadata(
@@ -192,7 +192,7 @@ pub async fn oidc_authorize(
         .await
     {
         tracing::error!("Failed to store OIDC flow: {e:?}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     let response = OidcAuthorizeResponse {
@@ -607,11 +607,11 @@ pub async fn oidc_exchange(
     let pending = match state.oidc_token_exchange_store.take(&req.code).await {
         Ok(Some(p)) => p,
         Ok(None) => {
-            return (StatusCode::BAD_REQUEST, "Invalid or expired exchange code").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "Invalid or expired exchange code");
         }
         Err(e) => {
             tracing::error!("Failed to retrieve OIDC exchange: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -631,14 +631,14 @@ pub async fn oidc_exchange(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to create refresh token during OIDC exchange: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     // Get user info
     let user = match User::find_by_id(pending.user_id).one(&state.db).await {
         Ok(Some(u)) => u,
-        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
     let permissions =
@@ -656,7 +656,7 @@ pub async fn oidc_exchange(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to create access token during OIDC exchange: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -704,15 +704,14 @@ pub async fn oidc_complete_registration(
     {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
                 "Invalid or expired registration code",
-            )
-                .into_response();
+            );
         }
         Err(e) => {
             tracing::error!("Failed to retrieve pending OIDC registration: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -732,15 +731,14 @@ pub async fn oidc_complete_registration(
         Ok(Some(p)) => p,
         Ok(None) => {
             // Entry expired or was consumed by a concurrent request between get() and take()
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
                 "Invalid or expired registration code",
-            )
-                .into_response();
+            );
         }
         Err(e) => {
             tracing::error!("Failed to consume pending OIDC registration: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -753,11 +751,10 @@ pub async fn oidc_complete_registration(
         > 0;
 
     if user_exists {
-        return (
+        return error_response(
             StatusCode::CONFLICT,
             "A user with this email already exists",
-        )
-            .into_response();
+        );
     }
 
     // 5. Create user (no password, same as resolve_oidc_user NewUser path)
@@ -777,7 +774,7 @@ pub async fn oidc_complete_registration(
 
     if let Err(e) = user_model.insert(&state.db).await {
         tracing::error!("Failed to create user during OIDC registration: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // 6. Create OIDC link
@@ -790,7 +787,7 @@ pub async fn oidc_complete_registration(
     };
     if let Err(e) = link.insert(&state.db).await {
         tracing::error!("Failed to create OIDC link during registration: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // 7. Check if this is the first user (just created, so count == 1)
@@ -891,7 +888,7 @@ pub async fn oidc_complete_registration(
             tracing::error!(
                 "Failed to create refresh token during OIDC complete-registration: {e:?}"
             );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -911,13 +908,13 @@ pub async fn oidc_complete_registration(
             tracing::error!(
                 "Failed to create access token during OIDC complete-registration: {e:?}"
             );
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     let user = match User::find_by_id(user_id).one(&state.db).await {
         Ok(Some(u)) => u,
-        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
     let response = AuthResponse {
@@ -957,22 +954,22 @@ pub async fn oidc_link(
     let (parts, body) = req.into_parts();
     let bytes = match axum::body::to_bytes(body, 1024 * 16).await {
         Ok(b) => b,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid request body").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid request body"),
     };
     let link_req: OidcLinkRequest = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid JSON").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid JSON"),
     };
 
     // Retrieve pending link from database
     let pending = match state.account_link_store.take(&link_req.link_token).await {
         Ok(Some(p)) => p,
         Ok(None) => {
-            return (StatusCode::BAD_REQUEST, "Link token not found or expired").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "Link token not found or expired");
         }
         Err(e) => {
             tracing::error!("Failed to retrieve pending link: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -981,11 +978,11 @@ pub async fn oidc_link(
         // Password verification
         let user = match User::find_by_id(pending.user_id).one(&state.db).await {
             Ok(Some(u)) => u,
-            _ => return (StatusCode::UNAUTHORIZED, "User not found").into_response(),
+            _ => return error_response(StatusCode::UNAUTHORIZED, "User not found"),
         };
         let hash = match user.password_hash.as_ref() {
             Some(h) => h,
-            None => return (StatusCode::UNAUTHORIZED, "User has no password").into_response(),
+            None => return error_response(StatusCode::UNAUTHORIZED, "User has no password"),
         };
         matches!(password::verify_password(pwd, hash), Ok(true))
     } else {
@@ -1010,7 +1007,7 @@ pub async fn oidc_link(
     };
 
     if !verified {
-        return (StatusCode::UNAUTHORIZED, "Verification failed").into_response();
+        return error_response(StatusCode::UNAUTHORIZED, "Verification failed");
     }
 
     // Create the link
@@ -1024,7 +1021,7 @@ pub async fn oidc_link(
 
     if let Err(e) = link.insert(&state.db).await {
         tracing::error!("Failed to create OIDC link: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // Sync roles if we have mapped roles
@@ -1088,14 +1085,14 @@ pub async fn oidc_link(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to create refresh token: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     // Get user info for response
     let user = match User::find_by_id(pending.user_id).one(&state.db).await {
         Ok(Some(u)) => u,
-        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
     let permissions =
@@ -1113,7 +1110,7 @@ pub async fn oidc_link(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to create access token: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 

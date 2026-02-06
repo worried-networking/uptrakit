@@ -11,6 +11,8 @@ use thiserror::Error;
 use uptrakit_shared_db::entity::prelude::*;
 use uuid::Uuid;
 
+use crate::error_response::error_response;
+
 pub use uptrakit_web_api_types::registration::RegistrationMode;
 
 /// Error returned when registration validation fails.
@@ -36,7 +38,7 @@ impl IntoResponse for RegistrationValidationError {
                 StatusCode::FORBIDDEN
             }
         };
-        (status, self.to_string()).into_response()
+        error_response(status, self.to_string())
     }
 }
 

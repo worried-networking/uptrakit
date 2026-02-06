@@ -1,3 +1,8 @@
+export interface ErrorResponse {
+	error: string;
+	code?: string;
+}
+
 export enum Permission {
 	ViewSettings = 'view_settings',
 	ManageSettings = 'manage_settings',

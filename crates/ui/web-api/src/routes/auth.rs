@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
@@ -41,16 +42,15 @@ pub async fn register(
 ) -> Response {
     // Check if password auth is enabled
     if !state.settings.authentication().await.password_auth_enabled {
-        return (StatusCode::FORBIDDEN, "Password authentication is disabled").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
     }
 
     // Validate password length
     if req.password.len() < 8 {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             "Password must be at least 8 characters",
-        )
-            .into_response();
+        );
     }
 
     // Validate registration is allowed
@@ -68,7 +68,7 @@ pub async fn register(
         Ok(hash) => hash,
         Err(e) => {
             tracing::error!("Password hashing failed: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -79,7 +79,7 @@ pub async fn register(
         .await;
 
     if let Ok(Some(_)) = existing {
-        return (StatusCode::CONFLICT, "Email already exists").into_response();
+        return error_response(StatusCode::CONFLICT, "Email already exists");
     }
 
     // Check if this is the first user
@@ -87,7 +87,7 @@ pub async fn register(
         Ok(count) => count,
         Err(e) => {
             tracing::error!(error = %e, "failed to count users");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
     let is_first_user = user_count == 0;
@@ -110,7 +110,7 @@ pub async fn register(
 
     if let Err(e) = new_user.insert(&state.db).await {
         tracing::error!("Failed to create user: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // If first user, assign owner role and complete initial setup
@@ -154,7 +154,7 @@ pub async fn register(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create refresh token: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -166,7 +166,7 @@ pub async fn register(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create access token: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -202,7 +202,7 @@ pub async fn register(
 pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequest>) -> Response {
     // Check if password auth is enabled
     if !state.settings.authentication().await.password_auth_enabled {
-        return (StatusCode::FORBIDDEN, "Password authentication is disabled").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
     }
 
     // Find user by email
@@ -213,20 +213,20 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     {
         Ok(Some(user)) => user,
         _ => {
-            return (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response();
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
         }
     };
 
     // Check if user is active
     if !user.is_active {
-        return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
+        return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
     // Verify password
     let hash = match user.password_hash.as_ref() {
         Some(h) => h,
         None => {
-            return (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response();
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
         }
     };
 
@@ -234,12 +234,12 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         Ok(valid) => valid,
         Err(e) => {
             tracing::error!("Password verification error: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if !valid {
-        return (StatusCode::UNAUTHORIZED, "Invalid credentials").into_response();
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
     }
 
     // Get user permissions
@@ -261,7 +261,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create refresh token: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -273,7 +273,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to create access token: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -339,12 +339,12 @@ pub async fn me(
     let user = match User::find_by_id(auth_user.user_id).one(&state.db).await {
         Ok(Some(user)) => user,
         _ => {
-            return (StatusCode::UNAUTHORIZED, "User not found").into_response();
+            return error_response(StatusCode::UNAUTHORIZED, "User not found");
         }
     };
 
     if !user.is_active {
-        return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
+        return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
     // Get fresh user permissions from DB
@@ -391,7 +391,7 @@ pub async fn refresh(
     {
         Ok(v) => v,
         Err(_) => {
-            return (StatusCode::UNAUTHORIZED, "Invalid or expired refresh token").into_response();
+            return error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token");
         }
     };
 
@@ -399,12 +399,12 @@ pub async fn refresh(
     let user = match User::find_by_id(verified.user_id).one(&state.db).await {
         Ok(Some(user)) => user,
         _ => {
-            return (StatusCode::UNAUTHORIZED, "User not found").into_response();
+            return error_response(StatusCode::UNAUTHORIZED, "User not found");
         }
     };
 
     if !user.is_active {
-        return (StatusCode::FORBIDDEN, "User is deactivated").into_response();
+        return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
     // Get fresh permissions from DB
@@ -429,7 +429,7 @@ pub async fn refresh(
             Ok(token) => token,
             Err(e) => {
                 tracing::error!("Failed to create access token: {:?}", e);
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 

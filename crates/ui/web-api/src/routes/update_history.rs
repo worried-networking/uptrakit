@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use axum::{
@@ -112,7 +113,7 @@ pub async fn list_update_history(
     Query(query): Query<UpdateHistoryQuery>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     // Tenant scoping: get all host IDs belonging to this tenant
@@ -120,7 +121,7 @@ pub async fn list_update_history(
         Ok(ids) => ids,
         Err(e) => {
             tracing::error!("Failed to load tenant hosts: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -135,7 +136,7 @@ pub async fn list_update_history(
             Ok(id) => {
                 q = q.filter(update_history::Column::HostId.eq(id));
             }
-            Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host_id UUID").into_response(),
+            Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host_id UUID"),
         }
     }
 
@@ -145,7 +146,7 @@ pub async fn list_update_history(
                 q = q.filter(update_history::Column::SoftwareItemId.eq(id));
             }
             Err(_) => {
-                return (StatusCode::BAD_REQUEST, "Invalid software_item_id UUID").into_response();
+                return error_response(StatusCode::BAD_REQUEST, "Invalid software_item_id UUID");
             }
         }
     }
@@ -162,7 +163,7 @@ pub async fn list_update_history(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("Failed to list update history: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -197,22 +198,22 @@ pub async fn get_update_history(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let record_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let record = match UpdateHistory::find_by_id(record_id).one(&state.db).await {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, "Update history record not found").into_response();
+            return error_response(StatusCode::NOT_FOUND, "Update history record not found");
         }
         Err(e) => {
             tracing::error!("Failed to load update history record: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -224,11 +225,11 @@ pub async fn get_update_history(
     {
         Ok(Some(h)) => h,
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, "Update history record not found").into_response();
+            return error_response(StatusCode::NOT_FOUND, "Update history record not found");
         }
         Err(e) => {
             tracing::error!("Failed to verify host tenant: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 

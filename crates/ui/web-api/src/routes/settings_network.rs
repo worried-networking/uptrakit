@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::SettingKey;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::settings_store::upsert_setting;
 use axum::{
@@ -34,7 +35,7 @@ pub async fn get_network_settings(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let network = state.settings.network().await;
@@ -75,7 +76,7 @@ pub async fn update_network_settings(
     Json(req): Json<UpdateNetworkSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     // Validate and apply trusted proxies (runtime-changeable)
@@ -89,8 +90,10 @@ pub async fn update_network_settings(
                     match s.parse::<std::net::IpAddr>() {
                         Ok(ip) => parsed.push(IpNet::from(ip)),
                         Err(_) => {
-                            return (StatusCode::BAD_REQUEST, format!("invalid IP or CIDR: {s}"))
-                                .into_response();
+                            return error_response(
+                                StatusCode::BAD_REQUEST,
+                                format!("invalid IP or CIDR: {s}"),
+                            );
                         }
                     }
                 }
@@ -106,7 +109,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save trusted_proxies: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_trusted_proxies(parsed).await;
     }
@@ -122,7 +125,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save real_ip_header: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_real_ip_header(header.clone()).await;
     }
@@ -138,7 +141,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save extra_sans: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_extra_sans(sans.clone()).await;
     }
@@ -163,7 +166,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save forwarded_client_cert_info_header: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state
             .settings
@@ -191,7 +194,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save forwarded_client_cert_pem_header: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state
             .settings
@@ -212,19 +215,17 @@ pub async fn update_network_settings(
                 Ok(url) => match url.scheme() {
                     "http" | "https" => {}
                     other => {
-                        return (
+                        return error_response(
                             StatusCode::BAD_REQUEST,
                             format!("unsupported URL scheme: {other} (expected http or https)"),
-                        )
-                            .into_response();
+                        );
                     }
                 },
                 Err(e) => {
-                    return (
+                    return error_response(
                         StatusCode::BAD_REQUEST,
                         format!("invalid PKI address URL: {e}"),
-                    )
-                        .into_response();
+                    );
                 }
             }
             Some(url_str.trim_end_matches('/').to_string())
@@ -249,7 +250,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save pki_addr: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_pki_addr(value).await;
     }
@@ -259,11 +260,10 @@ pub async fn update_network_settings(
         let addr: SocketAddr = match addr_str.parse() {
             Ok(a) => a,
             Err(_) => {
-                return (
+                return error_response(
                     StatusCode::BAD_REQUEST,
                     format!("invalid HTTPS address: {addr_str}"),
-                )
-                    .into_response();
+                );
             }
         };
         if let Err(e) = upsert_setting(
@@ -275,7 +275,7 @@ pub async fn update_network_settings(
         .await
         {
             tracing::error!("Failed to save https_addr: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         state.settings.set_https_addr(addr).await;
     }

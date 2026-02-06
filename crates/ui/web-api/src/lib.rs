@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod cert_signer;
+pub mod error_response;
 pub mod extract;
 pub mod middleware;
 pub mod mqtt_client_store;
@@ -186,6 +187,7 @@ pub struct AppState {
     ),
     components(
         schemas(
+            uptrakit_web_api_types::error::ErrorResponse,
             routes::auth::RegisterRequest,
             routes::auth::LoginRequest,
             routes::auth::LogoutRequest,
@@ -295,12 +297,7 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
     let wants_json = accept.contains("application/json") || accept.contains("text/json");
 
     if wants_json {
-        (
-            StatusCode::NOT_FOUND,
-            [(header::CONTENT_TYPE, "application/json")],
-            r#"{"error":"not found"}"#,
-        )
-            .into_response()
+        error_response::error_response_with_code(StatusCode::NOT_FOUND, "Not found", "not_found")
     } else {
         (
             StatusCode::NOT_FOUND,

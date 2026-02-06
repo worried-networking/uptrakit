@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use axum::{
@@ -66,7 +67,7 @@ pub async fn create_provider(
     Json(req): Json<CreateOidcProviderRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if req.name.is_empty()
@@ -75,7 +76,7 @@ pub async fn create_provider(
         || req.client_id.is_empty()
         || req.client_secret.is_empty()
     {
-        return (StatusCode::BAD_REQUEST, "Missing required fields").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Missing required fields");
     }
 
     // Check slug uniqueness among non-deleted providers within tenant
@@ -87,7 +88,7 @@ pub async fn create_provider(
         .await;
 
     if let Ok(Some(_)) = existing {
-        return (StatusCode::CONFLICT, "Slug already exists").into_response();
+        return error_response(StatusCode::CONFLICT, "Slug already exists");
     }
 
     let now = OffsetDateTime::now_utc();
@@ -118,7 +119,7 @@ pub async fn create_provider(
             .into_response(),
         Err(e) => {
             tracing::error!("Failed to create OIDC provider: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -139,7 +140,7 @@ pub async fn list_providers(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match OidcProvider::find()
@@ -158,7 +159,7 @@ pub async fn list_providers(
         }
         Err(e) => {
             tracing::error!("Failed to list OIDC providers: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -182,19 +183,19 @@ pub async fn get_provider(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(provider) => {
             (StatusCode::OK, Json(oidc_provider_response_from(provider))).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "Provider not found").into_response(),
+        None => error_response(StatusCode::NOT_FOUND, "Provider not found"),
     }
 }
 
@@ -219,17 +220,17 @@ pub async fn update_provider(
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
     };
 
     // Check slug uniqueness if changing
@@ -244,7 +245,7 @@ pub async fn update_provider(
             .one(&state.db)
             .await;
         if let Ok(Some(_)) = existing {
-            return (StatusCode::CONFLICT, "Slug already exists").into_response();
+            return error_response(StatusCode::CONFLICT, "Slug already exists");
         }
     }
 
@@ -287,7 +288,7 @@ pub async fn update_provider(
         Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
         Err(e) => {
             tracing::error!("Failed to update OIDC provider: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -312,17 +313,17 @@ pub async fn delete_provider(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
     };
 
     // Safety: cannot soft-delete if admin is logged in via this provider
@@ -332,11 +333,10 @@ pub async fn delete_provider(
         && *session_pid == provider_id
         && provider.is_active
     {
-        return (
+        return error_response(
             StatusCode::CONFLICT,
             "Cannot delete the OIDC provider used by your current session",
-        )
-            .into_response();
+        );
     }
 
     let now = OffsetDateTime::now_utc();
@@ -349,7 +349,7 @@ pub async fn delete_provider(
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to soft-delete OIDC provider: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -374,17 +374,17 @@ pub async fn activate_provider(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
     };
 
     // Validate config completeness
@@ -392,7 +392,7 @@ pub async fn activate_provider(
         || provider.client_id.is_empty()
         || provider.client_secret.is_empty()
     {
-        return (StatusCode::CONFLICT, "Provider configuration is incomplete").into_response();
+        return error_response(StatusCode::CONFLICT, "Provider configuration is incomplete");
     }
 
     let now = OffsetDateTime::now_utc();
@@ -424,7 +424,7 @@ pub async fn activate_provider(
         Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
         Err(e) => {
             tracing::error!("Failed to activate OIDC provider: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -449,17 +449,17 @@ pub async fn deactivate_provider(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let provider = match find_non_deleted_provider(&state.db, tenant.tenant_id, provider_id).await {
         Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "Provider not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
     };
 
     // Safety: cannot deactivate if admin's session is via this provider
@@ -468,11 +468,10 @@ pub async fn deactivate_provider(
     } = &user.auth_method
         && *session_pid == provider_id
     {
-        return (
+        return error_response(
             StatusCode::CONFLICT,
             "Cannot deactivate the OIDC provider used by your current session",
-        )
-            .into_response();
+        );
     }
 
     let now = OffsetDateTime::now_utc();
@@ -484,7 +483,7 @@ pub async fn deactivate_provider(
         Ok(updated) => (StatusCode::OK, Json(oidc_provider_response_from(updated))).into_response(),
         Err(e) => {
             tracing::error!("Failed to deactivate OIDC provider: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }

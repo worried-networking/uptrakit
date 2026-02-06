@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::routes::services::ServiceStatus;
@@ -43,7 +44,7 @@ pub async fn list_hosts(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let hosts = match Host::find()
@@ -56,7 +57,7 @@ pub async fn list_hosts(
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to list hosts: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -92,12 +93,12 @@ pub async fn get_host(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ViewAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let host_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
     let host_model = match Host::find_by_id(host_id)
@@ -107,10 +108,10 @@ pub async fn get_host(
         .await
     {
         Ok(Some(h)) => h,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Host not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -143,12 +144,12 @@ pub async fn update_host(
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let host_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
     let host_model = match Host::find_by_id(host_id)
@@ -158,10 +159,10 @@ pub async fn update_host(
         .await
     {
         Ok(Some(h)) => h,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Host not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -175,7 +176,7 @@ pub async fn update_host(
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to update host: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -206,12 +207,12 @@ pub async fn deactivate_host(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let host_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
     let host_model = match Host::find_by_id(host_id)
@@ -221,10 +222,10 @@ pub async fn deactivate_host(
         .await
     {
         Ok(Some(h)) => h,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Host not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -235,7 +236,7 @@ pub async fn deactivate_host(
 
     if let Err(e) = active.update(&state.db).await {
         tracing::error!("Failed to deactivate host: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     (

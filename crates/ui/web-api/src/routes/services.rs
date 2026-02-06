@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::SettingKey;
 use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
@@ -88,7 +89,7 @@ struct InvalidServiceTypeParam(String);
 
 impl IntoResponse for InvalidServiceTypeParam {
     fn into_response(self) -> Response {
-        (StatusCode::BAD_REQUEST, self.to_string()).into_response()
+        error_response(StatusCode::BAD_REQUEST, self.to_string())
     }
 }
 
@@ -131,7 +132,7 @@ pub async fn list_services(
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     if !user.has_permission(Permission::ViewAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let mut q = Service::find()
@@ -158,7 +159,7 @@ pub async fn list_services(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to list services: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -189,12 +190,12 @@ pub async fn approve_service(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid service ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
     let svc = match Service::find_by_id(service_id)
@@ -204,15 +205,15 @@ pub async fn approve_service(
         .await
     {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Service not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if svc.status != service::ServiceStatus::Pending {
-        return (StatusCode::BAD_REQUEST, "Service is not in pending status").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
     }
 
     let now = OffsetDateTime::now_utc();
@@ -224,7 +225,7 @@ pub async fn approve_service(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to approve service: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -263,12 +264,12 @@ pub async fn reject_service(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid service ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
     let svc = match Service::find_by_id(service_id)
@@ -278,15 +279,15 @@ pub async fn reject_service(
         .await
     {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Service not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if svc.status != service::ServiceStatus::Pending {
-        return (StatusCode::BAD_REQUEST, "Service is not in pending status").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
     }
 
     let now = OffsetDateTime::now_utc();
@@ -299,7 +300,7 @@ pub async fn reject_service(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to reject service: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -341,12 +342,12 @@ pub async fn deactivate_service(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid service ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
     let svc = match Service::find_by_id(service_id)
@@ -356,10 +357,10 @@ pub async fn deactivate_service(
         .await
     {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Service not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -370,7 +371,7 @@ pub async fn deactivate_service(
 
     if let Err(e) = active.update(&state.db).await {
         tracing::error!("Failed to deactivate service: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // Revoke all non-revoked certificates for this service
@@ -433,21 +434,21 @@ pub async fn merge_service(
     Json(body): Json<MergeAgentRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let target_uuid = match uuid::Uuid::parse_str(&target_id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid target service ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid target service ID"),
     };
 
     let source_uuid = match uuid::Uuid::parse_str(&body.source_id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid source service ID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid source service ID"),
     };
 
     if target_uuid == source_uuid {
-        return (StatusCode::BAD_REQUEST, "Cannot merge service into itself").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Cannot merge service into itself");
     }
 
     // Find target service (must be approved, not deactivated, agent type)
@@ -458,31 +459,29 @@ pub async fn merge_service(
         .await
     {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Target service not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Target service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if target.service_type != service::ServiceType::Agent {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             "Merge is only supported for agent services",
-        )
-            .into_response();
+        );
     }
 
     if target.status != service::ServiceStatus::Approved {
-        return (StatusCode::BAD_REQUEST, "Target service must be approved").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Target service must be approved");
     }
 
     if state.service_connections.is_connected(&target_uuid).await {
-        return (
+        return error_response(
             StatusCode::CONFLICT,
             "Target service is currently connected",
-        )
-            .into_response();
+        );
     }
 
     // Find source service (must be pending, not deactivated, agent type)
@@ -493,23 +492,22 @@ pub async fn merge_service(
         .await
     {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Source service not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Source service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
     if source.service_type != service::ServiceType::Agent {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             "Merge is only supported for agent services",
-        )
-            .into_response();
+        );
     }
 
     if source.status != service::ServiceStatus::Pending {
-        return (StatusCode::BAD_REQUEST, "Source service must be pending").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "Source service must be pending");
     }
 
     let now = OffsetDateTime::now_utc();
@@ -529,7 +527,7 @@ pub async fn merge_service(
 
     if let Err(e) = source_active.update(&state.db).await {
         tracing::error!("Failed to deactivate source service: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // Revoke all non-revoked certificates for both services
@@ -566,7 +564,7 @@ pub async fn merge_service(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to update target service: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -626,7 +624,7 @@ pub async fn create_enrollment_token(
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let setting_key = match enrollment_setting_key(query.r#type.as_deref()) {
@@ -638,7 +636,7 @@ pub async fn create_enrollment_token(
         Ok(t) => t,
         Err(e) => {
             tracing::error!("Failed to generate enrollment token: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -646,7 +644,7 @@ pub async fn create_enrollment_token(
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to hash enrollment token: {:?}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -659,7 +657,7 @@ pub async fn create_enrollment_token(
     .await
     {
         tracing::error!("Failed to store enrollment token hash: {:?}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     (
@@ -690,7 +688,7 @@ pub async fn revoke_enrollment_token(
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let setting_key = match enrollment_setting_key(query.r#type.as_deref()) {
@@ -700,7 +698,7 @@ pub async fn revoke_enrollment_token(
 
     if let Err(e) = delete_setting(&state.db, state.default_tenant_id, setting_key).await {
         tracing::error!("Failed to delete enrollment token: {:?}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     (
@@ -733,7 +731,7 @@ pub async fn enrollment_token_status(
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
     if !user.has_permission(Permission::ManageAgents) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let setting_key = match enrollment_setting_key(query.r#type.as_deref()) {

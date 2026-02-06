@@ -10,6 +10,7 @@ use uptrakit_shared_db::entity::prelude::*;
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::routes::auth::get_user_permissions;
 
 /// Extension type to carry the authenticated user ID, auth method, and permissions through the request.
@@ -42,7 +43,7 @@ pub async fn require_auth(
     let token = match extract_bearer_token(&req) {
         Some(token) => token,
         None => {
-            return (StatusCode::UNAUTHORIZED, "Authentication required\n").into_response();
+            return error_response(StatusCode::UNAUTHORIZED, "Authentication required");
         }
     };
 
@@ -77,9 +78,11 @@ enum AuthFailure {
 impl IntoResponse for AuthFailure {
     fn into_response(self) -> Response {
         match self {
-            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg).into_response(),
-            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg).into_response(),
-            Self::InternalError => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            Self::Unauthorized(msg) => error_response(StatusCode::UNAUTHORIZED, msg),
+            Self::Forbidden(msg) => error_response(StatusCode::FORBIDDEN, msg),
+            Self::InternalError => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
         }
     }
 }

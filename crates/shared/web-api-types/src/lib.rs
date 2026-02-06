@@ -2,6 +2,7 @@ pub mod agents;
 pub mod api_tokens;
 pub mod auth;
 pub mod device_auth;
+pub mod error;
 pub mod hosts;
 pub mod mqtt_services;
 pub mod mqtt_transport;
@@ -29,6 +30,7 @@ mod tests {
     use crate::agents::{AgentResponse, AgentStatus};
     use crate::auth::{AuthResponse, UserResponse};
     use crate::device_auth::DeviceAuthPollResponse;
+    use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
     use crate::permissions::Permission;
     use crate::provider_configs::CreateProviderConfigRequest;
@@ -589,5 +591,74 @@ mod tests {
                 .expect("from_str should succeed for as_str output");
             assert_eq!(&parsed, status);
         }
+    }
+
+    // ── 8. ErrorResponse round-trip ─────────────────────────────────────
+
+    #[test]
+    fn error_response_serialization_without_code() {
+        let resp = ErrorResponse {
+            error: "Something went wrong".to_string(),
+            code: None,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        let obj = json.as_object().unwrap();
+
+        assert_eq!(obj.get("error").unwrap(), "Something went wrong");
+        assert!(
+            !obj.contains_key("code"),
+            "code should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn error_response_serialization_with_code() {
+        let resp = ErrorResponse {
+            error: "Not found".to_string(),
+            code: Some("not_found".to_string()),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        let obj = json.as_object().unwrap();
+
+        assert_eq!(obj.get("error").unwrap(), "Not found");
+        assert_eq!(obj.get("code").unwrap(), "not_found");
+    }
+
+    #[test]
+    fn error_response_round_trip_without_code() {
+        let resp = ErrorResponse {
+            error: "Bad request".to_string(),
+            code: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: ErrorResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.error, "Bad request");
+        assert!(deserialized.code.is_none());
+    }
+
+    #[test]
+    fn error_response_round_trip_with_code() {
+        let resp = ErrorResponse {
+            error: "Forbidden".to_string(),
+            code: Some("insufficient_permissions".to_string()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: ErrorResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.error, "Forbidden");
+        assert_eq!(
+            deserialized.code.as_deref(),
+            Some("insufficient_permissions")
+        );
+    }
+
+    #[test]
+    fn error_response_deserialization_without_code_field() {
+        let json = r#"{"error":"test error"}"#;
+        let resp: ErrorResponse = serde_json::from_str(json).unwrap();
+
+        assert_eq!(resp.error, "test error");
+        assert!(resp.code.is_none());
     }
 }

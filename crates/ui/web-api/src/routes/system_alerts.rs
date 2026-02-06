@@ -7,6 +7,7 @@ use http::StatusCode;
 
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 
 pub use uptrakit_web_api_types::system_alerts::{SystemAlert, SystemAlertsResponse};
@@ -27,7 +28,7 @@ pub async fn get_system_alerts(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let snapshot = state.ca_snapshot.borrow().clone();

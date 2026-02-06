@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use axum::{
@@ -212,17 +213,17 @@ pub async fn create_software_item(
     Json(req): Json<CreateSoftwareItemRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if req.name.is_empty() {
-        return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
     }
 
     let provider_config_id = match uuid::Uuid::parse_str(&req.provider_config_id) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, "Invalid provider_config_id UUID").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "Invalid provider_config_id UUID");
         }
     };
 
@@ -230,11 +231,10 @@ pub async fn create_software_item(
         match find_active_provider_config(&state.db, tenant.tenant_id, provider_config_id).await {
             Some(c) => c,
             None => {
-                return (
+                return error_response(
                     StatusCode::BAD_REQUEST,
                     "provider_config_id does not reference an active provider config",
-                )
-                    .into_response();
+                );
             }
         };
 
@@ -245,11 +245,10 @@ pub async fn create_software_item(
         && let Err(e) =
             validate_config_override(&config.provider_type, &config.config, override_val)
     {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             format!("config_override validation failed: {e}"),
-        )
-            .into_response();
+        );
     }
 
     // Check uniqueness: (provider_config_id, package_identifier) among active items
@@ -262,15 +261,14 @@ pub async fn create_software_item(
 
     match duplicate {
         Ok(Some(_)) => {
-            return (
+            return error_response(
                 StatusCode::CONFLICT,
                 "A software item with this provider_config_id and package_identifier already exists",
-            )
-                .into_response();
+            );
         }
         Err(e) => {
             tracing::error!("Failed to check for duplicate software item: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         Ok(None) => {}
     }
@@ -297,7 +295,7 @@ pub async fn create_software_item(
         }
         Err(e) => {
             tracing::error!("Failed to create software item: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -318,7 +316,7 @@ pub async fn list_software_items(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let items = match SoftwareItem::find()
@@ -331,7 +329,7 @@ pub async fn list_software_items(
         Ok(items) => items,
         Err(e) => {
             tracing::error!("Failed to list software items: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -377,17 +375,17 @@ pub async fn get_software_item(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
         Some(i) => i,
-        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     let config =
@@ -401,7 +399,7 @@ pub async fn get_software_item(
                     item.id,
                     item.provider_config_id
                 );
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
@@ -433,17 +431,17 @@ pub async fn update_software_item(
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let existing = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
         Some(i) => i,
-        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     let config =
@@ -457,7 +455,7 @@ pub async fn update_software_item(
                     existing.id,
                     existing.provider_config_id
                 );
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
@@ -479,15 +477,14 @@ pub async fn update_software_item(
 
         match duplicate {
             Ok(Some(_)) => {
-                return (
+                return error_response(
                     StatusCode::CONFLICT,
                     "A software item with this provider_config_id and package_identifier already exists",
-                )
-                    .into_response();
+                );
             }
             Err(e) => {
                 tracing::error!("Failed to check for duplicate software item: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
             Ok(None) => {}
         }
@@ -499,11 +496,10 @@ pub async fn update_software_item(
         && let Err(e) =
             validate_config_override(&config.provider_type, &config.config, override_val)
     {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             format!("config_override validation failed: {e}"),
-        )
-            .into_response();
+        );
     }
 
     let now = OffsetDateTime::now_utc();
@@ -511,7 +507,7 @@ pub async fn update_software_item(
 
     if let Some(name) = req.name {
         if name.is_empty() {
-            return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
         }
         model.name = Set(name);
     }
@@ -538,7 +534,7 @@ pub async fn update_software_item(
         }
         Err(e) => {
             tracing::error!("Failed to update software item: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -562,17 +558,17 @@ pub async fn delete_software_item(
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
         Some(i) => i,
-        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     let now = OffsetDateTime::now_utc();
@@ -585,7 +581,7 @@ pub async fn delete_software_item(
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to soft-delete software item: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -612,21 +608,21 @@ pub async fn assign_hosts(
     Json(req): Json<AssignHostsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
         Some(i) => i,
-        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     if req.host_ids.is_empty() {
-        return (StatusCode::BAD_REQUEST, "host_ids must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "host_ids must not be empty");
     }
 
     let now = OffsetDateTime::now_utc();
@@ -635,11 +631,10 @@ pub async fn assign_hosts(
         let host_id = match uuid::Uuid::parse_str(host_id_str) {
             Ok(id) => id,
             Err(_) => {
-                return (
+                return error_response(
                     StatusCode::BAD_REQUEST,
                     format!("Invalid host UUID: {host_id_str}"),
-                )
-                    .into_response();
+                );
             }
         };
 
@@ -652,15 +647,14 @@ pub async fn assign_hosts(
         match host_exists {
             Ok(Some(_)) => {}
             Ok(None) => {
-                return (
+                return error_response(
                     StatusCode::BAD_REQUEST,
                     format!("Host {host_id_str} not found or deactivated"),
-                )
-                    .into_response();
+                );
             }
             Err(e) => {
                 tracing::error!("Failed to check host {host_id_str}: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         }
 
@@ -685,12 +679,15 @@ pub async fn assign_hosts(
                 };
                 if let Err(e) = link.insert(&state.db).await {
                     tracing::error!("Failed to link host {host_id_str} to software item: {e}");
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
                 }
             }
             Err(e) => {
                 tracing::error!("Failed to check existing link for host {host_id_str}: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         }
     }
@@ -707,7 +704,7 @@ pub async fn assign_hosts(
                     item.id,
                     item.provider_config_id
                 );
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
 
@@ -739,17 +736,17 @@ pub async fn unassign_host(
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid software item UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
     };
 
     let host_id = match uuid::Uuid::parse_str(&host_id_str) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
     };
 
     // Verify the software item exists
@@ -757,7 +754,7 @@ pub async fn unassign_host(
         .await
         .is_none()
     {
-        return (StatusCode::NOT_FOUND, "Software item not found").into_response();
+        return error_response(StatusCode::NOT_FOUND, "Software item not found");
     }
 
     // Find and delete the link
@@ -767,15 +764,14 @@ pub async fn unassign_host(
     {
         Ok(Some(l)) => l,
         Ok(None) => {
-            return (
+            return error_response(
                 StatusCode::NOT_FOUND,
                 "Host is not assigned to this software item",
-            )
-                .into_response();
+            );
         }
         Err(e) => {
             tracing::error!("Failed to find host-software-item link: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -783,7 +779,7 @@ pub async fn unassign_host(
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to delete host-software-item link: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -814,23 +810,23 @@ pub async fn trigger_update(
     Json(req): Json<TriggerUpdateRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid software item UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
     };
 
     let host_id = match uuid::Uuid::parse_str(&host_id_str) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid host UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
     };
 
     // 1. Verify software item exists and is active
     let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
         Some(i) => i,
-        None => return (StatusCode::NOT_FOUND, "Software item not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     // 2. Verify host exists, is active, and belongs to tenant
@@ -841,10 +837,10 @@ pub async fn trigger_update(
         .await
     {
         Ok(Some(h)) => h,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Host not found").into_response(),
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to lookup host: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -855,15 +851,14 @@ pub async fn trigger_update(
     {
         Ok(Some(l)) => l,
         Ok(None) => {
-            return (
+            return error_response(
                 StatusCode::BAD_REQUEST,
                 "Host is not assigned to this software item",
-            )
-                .into_response();
+            );
         }
         Err(e) => {
             tracing::error!("Failed to check host-software-item link: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -875,11 +870,11 @@ pub async fn trigger_update(
     {
         Ok(Some(l)) => l,
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, "No agent linked to this host").into_response();
+            return error_response(StatusCode::NOT_FOUND, "No agent linked to this host");
         }
         Err(e) => {
             tracing::error!("Failed to find agent for host: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -891,16 +886,16 @@ pub async fn trigger_update(
     {
         Ok(Some(a)) => {
             if a.status != service::ServiceStatus::Approved {
-                return (StatusCode::BAD_REQUEST, "Agent is not approved").into_response();
+                return error_response(StatusCode::BAD_REQUEST, "Agent is not approved");
             }
             a
         }
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, "Agent not found or deactivated").into_response();
+            return error_response(StatusCode::NOT_FOUND, "Agent not found or deactivated");
         }
         Err(e) => {
             tracing::error!("Failed to lookup agent: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -917,15 +912,14 @@ pub async fn trigger_update(
 
     match existing_update {
         Ok(Some(_)) => {
-            return (
+            return error_response(
                 StatusCode::CONFLICT,
                 "An update is already pending or in progress",
-            )
-                .into_response();
+            );
         }
         Err(e) => {
             tracing::error!("Failed to check existing updates: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
         Ok(None) => {}
     }
@@ -937,11 +931,10 @@ pub async fn trigger_update(
         {
             Some(c) => c,
             None => {
-                return (
+                return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Provider config not found",
-                )
-                    .into_response();
+                );
             }
         };
 
@@ -964,7 +957,7 @@ pub async fn trigger_update(
 
     if let Err(e) = update_record.insert(&state.db).await {
         tracing::error!("Failed to create update history record: {e}");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // 8. Resolve hooks from provider config + config_override
@@ -982,7 +975,7 @@ pub async fn trigger_update(
         Ok(pt) => pt,
         Err(_) => {
             tracing::error!("Unknown provider type: {}", provider_config.provider_type);
-            return (StatusCode::BAD_REQUEST, "Unknown provider type").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
         }
     };
 

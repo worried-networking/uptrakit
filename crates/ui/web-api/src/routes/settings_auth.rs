@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
@@ -33,7 +34,7 @@ pub async fn get_authentication_settings(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let auth_settings = state.settings.authentication().await;
@@ -61,18 +62,17 @@ pub async fn update_authentication_settings(
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if let Some(password_enabled) = req.password_auth_enabled {
         if !password_enabled {
             // Safety: cannot disable password auth if current session uses password
             if user.auth_method == AuthMethod::Password {
-                return (
+                return error_response(
                     StatusCode::CONFLICT,
                     "Cannot disable password authentication while logged in with a password",
-                )
-                    .into_response();
+                );
             }
 
             // Safety: at least one auth method must remain
@@ -85,11 +85,10 @@ pub async fn update_authentication_settings(
                 .unwrap_or_default();
 
             if active_providers.is_empty() {
-                return (
+                return error_response(
                     StatusCode::CONFLICT,
                     "Cannot disable password authentication with no active OIDC providers",
-                )
-                    .into_response();
+                );
             }
         }
 
@@ -97,7 +96,7 @@ pub async fn update_authentication_settings(
         auth_settings.password_auth_enabled = password_enabled;
         if let Err(e) = auth_settings.save(&state.db, state.default_tenant_id).await {
             tracing::error!("Failed to save authentication settings: {e:?}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
 

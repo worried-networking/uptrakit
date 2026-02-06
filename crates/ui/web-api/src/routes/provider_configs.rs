@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use axum::{
@@ -57,23 +58,22 @@ pub async fn create_provider_config(
     Json(req): Json<CreateProviderConfigRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     if req.name.is_empty() {
-        return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
+        return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
     }
 
     if ProviderRegistry::parse_provider_type(&req.provider_type).is_none() {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
             format!("unknown provider_type: {}", req.provider_type),
-        )
-            .into_response();
+        );
     }
 
     if let Err(e) = ProviderRegistry::validate_config_str(&req.provider_type, &req.config) {
-        return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     let now = OffsetDateTime::now_utc();
@@ -97,7 +97,7 @@ pub async fn create_provider_config(
             .into_response(),
         Err(e) => {
             tracing::error!("Failed to create provider config: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -118,7 +118,7 @@ pub async fn list_provider_configs(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match ProviderConfig::find()
@@ -137,7 +137,7 @@ pub async fn list_provider_configs(
         }
         Err(e) => {
             tracing::error!("Failed to list provider configs: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -161,19 +161,19 @@ pub async fn get_provider_config(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(config) => {
             (StatusCode::OK, Json(provider_config_response_from(config))).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "Provider config not found").into_response(),
+        None => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     }
 }
 
@@ -198,17 +198,17 @@ pub async fn update_provider_config(
     Json(req): Json<UpdateProviderConfigRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let existing = match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(c) => c,
-        None => return (StatusCode::NOT_FOUND, "Provider config not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     };
 
     let provider_type = existing.provider_type.clone();
@@ -219,7 +219,7 @@ pub async fn update_provider_config(
         ProviderRegistry::restore_secrets_str(&provider_type, new_config, &existing.config);
 
         if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
-            return (StatusCode::BAD_REQUEST, e.to_string()).into_response();
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
         }
     }
 
@@ -228,7 +228,7 @@ pub async fn update_provider_config(
 
     if let Some(name) = req.name {
         if name.is_empty() {
-            return (StatusCode::BAD_REQUEST, "name must not be empty").into_response();
+            return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
         }
         model.name = Set(name);
     }
@@ -248,7 +248,7 @@ pub async fn update_provider_config(
         }
         Err(e) => {
             tracing::error!("Failed to update provider config: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
@@ -272,17 +272,17 @@ pub async fn delete_provider_config(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
-        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid UUID").into_response(),
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
     let config = match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(c) => c,
-        None => return (StatusCode::NOT_FOUND, "Provider config not found").into_response(),
+        None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     };
 
     let now = OffsetDateTime::now_utc();
@@ -295,7 +295,7 @@ pub async fn delete_provider_config(
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to soft-delete provider config: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }

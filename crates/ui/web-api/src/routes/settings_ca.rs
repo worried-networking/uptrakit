@@ -7,6 +7,7 @@ use http::StatusCode;
 
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 
 pub use uptrakit_web_api_types::settings_ca::RotateCaResponse;
@@ -33,22 +34,15 @@ pub async fn rotate_ca(
     Extension(user): Extension<AuthenticatedUser>,
 ) -> impl IntoResponse {
     if !user.has_permission(Permission::ManageGlobalSettings) {
-        return (
-            StatusCode::FORBIDDEN,
-            axum::Json(serde_json::json!({"error": "Insufficient permissions"})),
-        )
-            .into_response();
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let snapshot = state.ca_snapshot.borrow().clone();
     if !snapshot.managed {
-        return (
+        return error_response(
             StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({
-                "error": "CA rotation is only available for managed (internally generated) CAs"
-            })),
-        )
-            .into_response();
+            "CA rotation is only available for managed (internally generated) CAs",
+        );
     }
 
     // Signal the CA rotation background task to run immediately

@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus, MIN_POLL_INTERVAL_SECONDS};
+use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::http::HeaderMap;
 use axum::{
@@ -37,7 +38,7 @@ pub async fn device_auth_start(
         Ok(result) => result,
         Err(e) => {
             tracing::error!("Failed to create device flow: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -107,12 +108,11 @@ pub async fn device_auth_poll(
         Ok(false) => {}
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
-                return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
-                    .into_response();
+                return error_response(StatusCode::NOT_FOUND, "Device flow not found or expired");
             }
             _ => {
                 tracing::error!("Device flow rate limit check failed: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
     }
@@ -127,12 +127,11 @@ pub async fn device_auth_poll(
         Ok(s) => s,
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
-                return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
-                    .into_response();
+                return error_response(StatusCode::NOT_FOUND, "Device flow not found or expired");
             }
             _ => {
                 tracing::error!("Device flow status check failed: {e}");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         },
     };
@@ -163,12 +162,17 @@ pub async fn device_auth_poll(
                     Ok(result) => result,
                     Err(e) => match e.current_context() {
                         DeviceFlowError::NotFound => {
-                            return (StatusCode::NOT_FOUND, "Device flow not found or expired\n")
-                                .into_response();
+                            return error_response(
+                                StatusCode::NOT_FOUND,
+                                "Device flow not found or expired",
+                            );
                         }
                         _ => {
                             tracing::error!("Device flow consume failed: {e}");
-                            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                            return error_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Internal server error",
+                            );
                         }
                     },
                 };
@@ -189,7 +193,7 @@ pub async fn device_auth_poll(
                     .into_response(),
                 Err(e) => {
                     tracing::error!("Failed to create API token for device flow: {e:?}");
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
                 }
             }
         }
@@ -231,14 +235,14 @@ pub async fn device_auth_approve(
             .into_response(),
         Err(e) => match e.current_context() {
             DeviceFlowError::NotFound => {
-                (StatusCode::NOT_FOUND, "Device flow not found or expired\n").into_response()
+                error_response(StatusCode::NOT_FOUND, "Device flow not found or expired")
             }
             DeviceFlowError::AlreadyAuthorized => {
-                (StatusCode::CONFLICT, "Device flow already authorized\n").into_response()
+                error_response(StatusCode::CONFLICT, "Device flow already authorized")
             }
             _ => {
                 tracing::error!("Device flow approve failed: {e}");
-                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
             }
         },
     }
