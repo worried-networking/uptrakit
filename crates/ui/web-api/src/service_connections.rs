@@ -18,8 +18,8 @@ struct ServiceConnection {
     instance_id: Option<String>,
     /// Maximum tenants this instance is willing to handle, 0 = unlimited (MQTT only).
     max_tenants: Option<u32>,
-    /// Set of tenant IDs currently assigned to this instance (MQTT only).
-    assigned_tenants: HashSet<Uuid>,
+    /// Set of MQTT client IDs currently assigned to this instance (MQTT only).
+    assigned_mqtt_clients: HashSet<Uuid>,
     /// Timestamp of last heartbeat received (MQTT only).
     last_heartbeat: Option<Instant>,
 }
@@ -59,7 +59,7 @@ impl ServiceConnectionRegistry {
             service_type: ServiceType::Agent,
             instance_id: None,
             max_tenants: None,
-            assigned_tenants: HashSet::new(),
+            assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: None,
         };
         self.inner.write().await.insert(service_id, conn);
@@ -83,7 +83,7 @@ impl ServiceConnectionRegistry {
             service_type: ServiceType::Mqtt,
             instance_id: Some(instance_id),
             max_tenants: Some(max_tenants),
-            assigned_tenants: HashSet::new(),
+            assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: Some(Instant::now()),
         };
         self.inner.write().await.insert(service_id, conn);
@@ -92,14 +92,14 @@ impl ServiceConnectionRegistry {
 
     /// Remove a service from the registry on disconnect.
     ///
-    /// Returns the set of tenant IDs that were assigned to this service
+    /// Returns the set of MQTT client IDs that were assigned to this service
     /// (empty for agents), so the lease coordinator can release them.
     pub async fn unregister(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
         self.inner
             .write()
             .await
             .remove(service_id)
-            .map(|c| c.assigned_tenants)
+            .map(|c| c.assigned_mqtt_clients)
     }
 
     // ---------------------------------------------------------------
@@ -227,52 +227,52 @@ impl ServiceConnectionRegistry {
             .and_then(|c| c.instance_id.clone())
     }
 
-    /// Assign a tenant to an MQTT service instance.
+    /// Assign an MQTT client to an MQTT service instance.
     ///
     /// Returns `true` if the assignment was recorded, `false` if the service
     /// is not connected.
-    pub async fn assign_tenant(&self, service_id: &Uuid, tenant_id: Uuid) -> bool {
+    pub async fn assign_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: Uuid) -> bool {
         let mut guard = self.inner.write().await;
         if let Some(conn) = guard.get_mut(service_id) {
-            conn.assigned_tenants.insert(tenant_id);
+            conn.assigned_mqtt_clients.insert(mqtt_client_id);
             true
         } else {
             false
         }
     }
 
-    /// Release a tenant from an MQTT service instance.
+    /// Release an MQTT client from an MQTT service instance.
     ///
-    /// Returns `true` if the tenant was previously assigned, `false` otherwise.
-    pub async fn release_tenant(&self, service_id: &Uuid, tenant_id: &Uuid) -> bool {
+    /// Returns `true` if the MQTT client was previously assigned, `false` otherwise.
+    pub async fn release_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: &Uuid) -> bool {
         let mut guard = self.inner.write().await;
         if let Some(conn) = guard.get_mut(service_id) {
-            conn.assigned_tenants.remove(tenant_id)
+            conn.assigned_mqtt_clients.remove(mqtt_client_id)
         } else {
             false
         }
     }
 
-    /// Find which MQTT service instance holds a specific tenant.
+    /// Find which MQTT service instance holds a specific MQTT client.
     ///
-    /// Returns the `service_id` of the instance holding this tenant, if any.
-    pub async fn get_instance_for_tenant(&self, tenant_id: &Uuid) -> Option<Uuid> {
+    /// Returns the `service_id` of the instance holding this MQTT client, if any.
+    pub async fn get_instance_for_mqtt_client(&self, mqtt_client_id: &Uuid) -> Option<Uuid> {
         let guard = self.inner.read().await;
         for (service_id, conn) in guard.iter() {
-            if conn.assigned_tenants.contains(tenant_id) {
+            if conn.assigned_mqtt_clients.contains(mqtt_client_id) {
                 return Some(*service_id);
             }
         }
         None
     }
 
-    /// Get the current number of tenants assigned to a service.
-    pub async fn assigned_tenant_count(&self, service_id: &Uuid) -> usize {
+    /// Get the current number of MQTT clients assigned to a service.
+    pub async fn assigned_mqtt_client_count(&self, service_id: &Uuid) -> usize {
         self.inner
             .read()
             .await
             .get(service_id)
-            .map(|c| c.assigned_tenants.len())
+            .map(|c| c.assigned_mqtt_clients.len())
             .unwrap_or(0)
     }
 
@@ -299,7 +299,7 @@ impl ServiceConnectionRegistry {
                 if max == 0 {
                     u32::MAX
                 } else {
-                    max.saturating_sub(c.assigned_tenants.len() as u32)
+                    max.saturating_sub(c.assigned_mqtt_clients.len() as u32)
                 }
             })
         })

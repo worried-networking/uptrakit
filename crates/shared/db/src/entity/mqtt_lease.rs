@@ -7,6 +7,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub tenant_id: Uuid,
+    pub mqtt_client_id: Uuid,
     pub instance_id: String,
     pub heartbeat_at: OffsetDateTime,
     pub created_at: OffsetDateTime,
@@ -22,8 +23,8 @@ pub enum Relation {
     Tenant,
     #[sea_orm(
         belongs_to = "super::mqtt_client::Entity",
-        from = "Column::TenantId",
-        to = "super::mqtt_client::Column::TenantId"
+        from = "Column::MqttClientId",
+        to = "super::mqtt_client::Column::Id"
     )]
     MqttClient,
 }

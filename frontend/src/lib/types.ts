@@ -216,6 +216,14 @@ export interface UpdateMqttClient {
 	topic_prefix?: string;
 }
 
+export interface MqttLimitResponse {
+	max_clients_per_tenant: number;
+}
+
+export interface UpdateMqttLimitRequest {
+	max_clients_per_tenant: number;
+}
+
 export interface HostAgentSummary {
 	id: string;
 	friendly_name: string;

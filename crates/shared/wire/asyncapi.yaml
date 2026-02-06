@@ -112,6 +112,18 @@ channels:
         $ref: "#/components/messages/serverRestarting"
       disconnecting:
         $ref: "#/components/messages/disconnecting"
+      mqttRegister:
+        $ref: "#/components/messages/mqttRegister"
+      mqttRegistered:
+        $ref: "#/components/messages/mqttRegistered"
+      mqttReleaseTenants:
+        $ref: "#/components/messages/mqttReleaseTenants"
+      mqttTenantAssignments:
+        $ref: "#/components/messages/mqttTenantAssignments"
+      mqttTenantConfigUpdated:
+        $ref: "#/components/messages/mqttTenantConfigUpdated"
+      mqttTenantRevoked:
+        $ref: "#/components/messages/mqttTenantRevoked"
 
 operations:
   sendPing:
@@ -392,6 +404,79 @@ operations:
       This allows the controller to distinguish between intentional disconnects
       and unexpected connection losses.
 
+  sendMqttRegister:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttRegister"
+    summary: MQTT service registers with the controller (MQTT-only)
+    description: |
+      Sent by an authenticated MQTT service immediately after mTLS WebSocket connect.
+      Includes the instance ID, max tenants capacity, and currently active MQTT client
+      IDs (for reconnect reconciliation). The controller responds with `registered`
+      followed by `tenant_assignments`.
+
+  receiveMqttRegistered:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttRegistered"
+    summary: MQTT service receives registration acknowledgment
+    description: |
+      The controller confirms the MQTT service registration by echoing back
+      the instance ID. Followed by a `tenant_assignments` message with
+      initial MQTT client configurations to serve.
+
+  sendMqttReleaseTenants:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttReleaseTenants"
+    summary: MQTT service releases MQTT client leases (MQTT-only)
+    description: |
+      Sent by an MQTT service to explicitly release leases for specific MQTT
+      client configurations. The controller will delete the corresponding leases
+      and may reassign the released clients to other instances.
+
+  receiveMqttTenantAssignments:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttTenantAssignments"
+    summary: MQTT service receives tenant assignments (MQTT-only)
+    description: |
+      The controller pushes MQTT client configurations that the service should
+      start serving. Sent after registration and whenever new clients are
+      assigned to this instance. Each configuration is keyed by `mqtt_client_id`.
+
+  receiveMqttTenantConfigUpdated:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttTenantConfigUpdated"
+    summary: MQTT service receives a configuration update (MQTT-only)
+    description: |
+      The controller pushes this message when an MQTT client configuration is
+      modified via the REST API. The service should hot-reload the configuration
+      for the affected MQTT client (identified by `mqtt_client_id`).
+
+  receiveMqttTenantRevoked:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttTenantRevoked"
+    summary: MQTT service receives a client revocation (MQTT-only)
+    description: |
+      The controller pushes this message when an MQTT client configuration is
+      deleted or its lease is revoked. The service should stop the MQTT client
+      identified by `mqtt_client_id` and release its resources.
+
 components:
   securitySchemes:
     mtls:
@@ -587,6 +672,54 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/disconnectingPayload"
+
+    mqttRegister:
+      name: register
+      title: MQTT Register Message
+      summary: MQTT service registration request (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttRegisterPayload"
+
+    mqttRegistered:
+      name: registered
+      title: MQTT Registered Message
+      summary: MQTT service registration acknowledgment (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttRegisteredPayload"
+
+    mqttReleaseTenants:
+      name: release_tenants
+      title: MQTT Release Tenants Message
+      summary: MQTT service releases MQTT client leases (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttReleaseTenantsPayload"
+
+    mqttTenantAssignments:
+      name: tenant_assignments
+      title: MQTT Tenant Assignments Message
+      summary: Controller assigns MQTT client configurations (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttTenantAssignmentsPayload"
+
+    mqttTenantConfigUpdated:
+      name: tenant_config_updated
+      title: MQTT Tenant Config Updated Message
+      summary: Controller pushes MQTT client configuration update (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttTenantConfigUpdatedPayload"
+
+    mqttTenantRevoked:
+      name: tenant_revoked
+      title: MQTT Tenant Revoked Message
+      summary: Controller revokes an MQTT client assignment (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttTenantRevokedPayload"
 
   schemas:
     pingPayload:
@@ -1338,8 +1471,197 @@ components:
           description: |
             Reason for the disconnection. Allows the controller to distinguish
             between a service shutting down vs one that will restart and reconnect.
-        active_tenants:
+        active_mqtt_clients:
           type: array
           items:
             type: string
-          description: List of active tenant IDs (MQTT services only, for graceful handoff)
+          description: List of active MQTT client IDs (MQTT services only, for graceful handoff)
+
+    mqttRegisterPayload:
+      type: object
+      required:
+        - type
+        - instance_id
+      properties:
+        type:
+          type: string
+          const: register
+          description: Message type discriminator
+        instance_id:
+          type: string
+          description: Unique instance identifier (e.g., hostname-uuid_prefix)
+          examples:
+            - mqtt-node-1-a1b2c3d4
+        max_tenants:
+          type: integer
+          format: int32
+          description: Maximum tenants this instance will handle (0 = unlimited)
+          default: 0
+          examples:
+            - 0
+            - 10
+        active_mqtt_clients:
+          type: array
+          items:
+            type: string
+          description: |
+            Currently active MQTT client IDs (for reconnect reconciliation).
+            Omitted when empty (empty array is the default).
+          examples:
+            - ["660e8400-e29b-41d4-a716-446655440001"]
+
+    mqttRegisteredPayload:
+      type: object
+      required:
+        - type
+        - instance_id
+      properties:
+        type:
+          type: string
+          const: registered
+          description: Message type discriminator
+        instance_id:
+          type: string
+          description: Echo of the instance ID for confirmation
+          examples:
+            - mqtt-node-1-a1b2c3d4
+
+    mqttReleaseTenantsPayload:
+      type: object
+      required:
+        - type
+        - mqtt_client_ids
+      properties:
+        type:
+          type: string
+          const: release_tenants
+          description: Message type discriminator
+        mqtt_client_ids:
+          type: array
+          items:
+            type: string
+          description: MQTT client IDs to release
+          examples:
+            - ["660e8400-e29b-41d4-a716-446655440001"]
+
+    mqttTenantAssignmentsPayload:
+      type: object
+      required:
+        - type
+        - tenants
+      properties:
+        type:
+          type: string
+          const: tenant_assignments
+          description: Message type discriminator
+        tenants:
+          type: array
+          items:
+            $ref: "#/components/schemas/mqttTenantConfig"
+          description: List of MQTT client configurations to start serving
+
+    mqttTenantConfig:
+      type: object
+      required:
+        - mqtt_client_id
+        - tenant_id
+        - enabled
+        - transport
+        - host
+        - port
+        - client_id
+        - topic_prefix
+        - updated_at
+      properties:
+        mqtt_client_id:
+          type: string
+          format: uuid
+          description: MQTT client UUID (primary identifier from mqtt_clients table)
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant UUID (kept for context)
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        enabled:
+          type: boolean
+          description: Whether this MQTT client is enabled
+        transport:
+          type: string
+          enum:
+            - tcp
+            - tls
+          description: Transport protocol
+        host:
+          type: string
+          description: MQTT broker hostname
+          examples:
+            - mqtt.example.com
+        port:
+          type: integer
+          format: int32
+          description: MQTT broker port
+          examples:
+            - 1883
+            - 8883
+        client_id:
+          type: string
+          description: MQTT client ID for broker connection
+          examples:
+            - uptrakit-controller
+        username:
+          type: string
+          description: Username for broker authentication (optional)
+        password:
+          type: string
+          description: Password for broker authentication (optional)
+        topic_prefix:
+          type: string
+          description: MQTT topic prefix
+          examples:
+            - uptrakit
+        updated_at:
+          type: integer
+          format: int64
+          description: Last update timestamp in milliseconds (for change detection)
+          examples:
+            - 1706400000000
+
+    mqttTenantConfigUpdatedPayload:
+      type: object
+      required:
+        - type
+        - tenant
+      properties:
+        type:
+          type: string
+          const: tenant_config_updated
+          description: Message type discriminator
+        tenant:
+          $ref: "#/components/schemas/mqttTenantConfig"
+          description: Updated MQTT client configuration
+
+    mqttTenantRevokedPayload:
+      type: object
+      required:
+        - type
+        - mqtt_client_id
+        - reason
+      properties:
+        type:
+          type: string
+          const: tenant_revoked
+          description: Message type discriminator
+        mqtt_client_id:
+          type: string
+          format: uuid
+          description: MQTT client UUID being revoked
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
+        reason:
+          type: string
+          description: Human-readable reason for the revocation
+          examples:
+            - MQTT client configuration deleted

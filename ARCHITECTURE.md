@@ -152,7 +152,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | Category | DB key prefix | Runtime-changeable | API endpoint |
 | --- | --- | --- | --- |
 | Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, PKI address: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
-| MQTT | Dedicated `mqtt_clients` table | Yes (via API); controller pushes changes to connected MQTT service instances | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
+| MQTT | Dedicated `mqtt_clients` table (multiple per tenant) | Yes (via API); controller pushes changes to connected MQTT service instances | Collection-style: `GET/POST /api/v1/settings/mqtt`, `GET/PUT/DELETE /api/v1/settings/mqtt/{id}`, `GET/PUT /api/v1/settings/mqtt/limit` |
 | Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` (includes `require_token_for_oidc`) |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
 | Service certificates | `service_certificates.*` | Yes | `GET/PUT /api/v1/settings/service-certificates` |
@@ -290,12 +290,12 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 
 Multiple MQTT service instances can run simultaneously. The controller manages centralized lease coordination:
 - Instances register with a `max_tenants` capacity (0 = unlimited)
-- Unclaimed tenants are assigned on registration
+- Unclaimed MQTT clients are assigned on registration (one lease per MQTT client config, keyed by `mqtt_client_id`)
 - Leases are tracked in the `mqtt_leases` table (controller-managed, not directly accessed by MQTT services)
 - On instance disconnect, its leases are released (no automatic redistribution)
 - Stale leases are cleaned up periodically (no heartbeat within timeout)
 
-The MQTT client supports two transport types: plain TCP (`mqtt://`) and TLS (`mqtts://`). Connection parameters are stored in the `mqtt_clients` database table (one row per tenant) and managed via the settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the full connection lifecycle, CLI flags, and key files.
+The MQTT client supports two transport types: plain TCP (`mqtt://`) and TLS (`mqtts://`). Connection parameters are stored in the `mqtt_clients` database table (multiple rows per tenant, up to a configurable limit) and managed via the collection-style settings API. See [AGENTS.md](AGENTS.md) section "MQTT Service (standalone binary)" for the full connection lifecycle, CLI flags, and key files.
 
 Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all paths converge on the same controller API.
 

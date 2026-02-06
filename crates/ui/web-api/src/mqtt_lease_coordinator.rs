@@ -22,15 +22,15 @@ pub enum LeaseCoordinatorError {
     Database(String),
     #[error("service not connected: {0}")]
     ServiceNotConnected(Uuid),
-    #[error("tenant not found: {0}")]
-    TenantNotFound(Uuid),
+    #[error("mqtt client not found: {0}")]
+    MqttClientNotFound(Uuid),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<LeaseCoordinatorError>>;
 
-/// Centralized coordinator for MQTT tenant leases.
+/// Centralized coordinator for MQTT client leases.
 ///
-/// Manages the assignment of tenants to MQTT service instances, updates the
+/// Manages the assignment of MQTT clients to MQTT service instances, updates the
 /// `mqtt_leases` table, and pushes configuration changes to holding instances.
 #[derive(Clone)]
 pub struct MqttLeaseCoordinator {
@@ -43,10 +43,10 @@ impl MqttLeaseCoordinator {
         Self { db, connections }
     }
 
-    /// Assign unclaimed tenants to a service that has capacity.
+    /// Assign unclaimed MQTT clients to a service that has capacity.
     ///
     /// This is called when a service sends a Register message with its capacity.
-    /// Returns the list of tenant configurations assigned to the service.
+    /// Returns the list of MQTT client configurations assigned to the service.
     pub async fn assign_available_tenants(
         &self,
         service_id: Uuid,
@@ -64,7 +64,7 @@ impl MqttLeaseCoordinator {
             return Ok(vec![]);
         }
 
-        // Calculate how many tenants to assign (min of requested, available, and actual unclaimed)
+        // Calculate how many to assign (min of requested, available, and actual unclaimed)
         let max_to_assign = std::cmp::min(requested_count, available);
 
         // Start a transaction
@@ -76,7 +76,7 @@ impl MqttLeaseCoordinator {
                 "failed to start transaction".into(),
             ))?;
 
-        // Find all enabled mqtt_clients that don't have active leases
+        // Find all MQTT clients that already have active leases (by mqtt_client_id)
         let existing_leases: HashSet<Uuid> = mqtt_lease::Entity::find()
             .all(&txn)
             .await
@@ -84,10 +84,10 @@ impl MqttLeaseCoordinator {
                 "failed to query leases".into(),
             ))?
             .into_iter()
-            .map(|l| l.tenant_id)
+            .map(|l| l.mqtt_client_id)
             .collect();
 
-        // Get enabled tenants without leases
+        // Get enabled MQTT clients without leases
         let available_clients: Vec<mqtt_client::Model> = mqtt_client::Entity::find()
             .filter(mqtt_client::Column::Enabled.eq(true))
             .all(&txn)
@@ -96,7 +96,7 @@ impl MqttLeaseCoordinator {
                 "failed to query mqtt_clients".into(),
             ))?
             .into_iter()
-            .filter(|c| !existing_leases.contains(&c.tenant_id))
+            .filter(|c| !existing_leases.contains(&c.id))
             .take(max_to_assign as usize)
             .collect();
 
@@ -115,6 +115,7 @@ impl MqttLeaseCoordinator {
             let lease = mqtt_lease::ActiveModel {
                 id: ActiveValue::Set(Uuid::now_v7()),
                 tenant_id: ActiveValue::Set(client.tenant_id),
+                mqtt_client_id: ActiveValue::Set(client.id),
                 instance_id: ActiveValue::Set(instance_id.to_string()),
                 heartbeat_at: ActiveValue::Set(now),
                 created_at: ActiveValue::Set(now),
@@ -128,7 +129,7 @@ impl MqttLeaseCoordinator {
 
             // Track in connection registry
             self.connections
-                .assign_tenant(&service_id, client.tenant_id)
+                .assign_mqtt_client(&service_id, client.id)
                 .await;
 
             // Build config for the service
@@ -142,13 +143,17 @@ impl MqttLeaseCoordinator {
         Ok(assigned_configs)
     }
 
-    /// Release specific tenants from a service.
+    /// Release specific MQTT clients from a service.
     ///
     /// Called when a service sends ReleaseTenants message or disconnects.
-    pub async fn release_tenants(&self, service_id: &Uuid, tenant_ids: &[Uuid]) -> Result<()> {
+    pub async fn release_mqtt_clients(
+        &self,
+        service_id: &Uuid,
+        mqtt_client_ids: &[Uuid],
+    ) -> Result<()> {
         // Delete leases from database
         mqtt_lease::Entity::delete_many()
-            .filter(mqtt_lease::Column::TenantId.is_in(tenant_ids.to_vec()))
+            .filter(mqtt_lease::Column::MqttClientId.is_in(mqtt_client_ids.to_vec()))
             .exec(&self.db)
             .await
             .context(LeaseCoordinatorError::Database(
@@ -156,29 +161,32 @@ impl MqttLeaseCoordinator {
             ))?;
 
         // Update connection registry
-        for tenant_id in tenant_ids {
-            self.connections.release_tenant(service_id, tenant_id).await;
+        for mqtt_client_id in mqtt_client_ids {
+            self.connections
+                .release_mqtt_client(service_id, mqtt_client_id)
+                .await;
         }
 
         Ok(())
     }
 
-    /// Release all tenants held by a service (on disconnect).
+    /// Release all MQTT clients held by a service (on disconnect).
     ///
-    /// Returns the tenant IDs that were released.
+    /// Returns the MQTT client IDs that were released.
     pub async fn release_all_for_service(&self, service_id: &Uuid) -> Result<HashSet<Uuid>> {
-        // Get tenants from registry
-        let tenants = self
+        // Get mqtt_client_ids from registry
+        let mqtt_client_ids = self
             .connections
             .unregister(service_id)
             .await
             .unwrap_or_default();
 
-        if !tenants.is_empty() {
+        if !mqtt_client_ids.is_empty() {
             // Delete leases from database
             mqtt_lease::Entity::delete_many()
                 .filter(
-                    mqtt_lease::Column::TenantId.is_in(tenants.iter().copied().collect::<Vec<_>>()),
+                    mqtt_lease::Column::MqttClientId
+                        .is_in(mqtt_client_ids.iter().copied().collect::<Vec<_>>()),
                 )
                 .exec(&self.db)
                 .await
@@ -187,7 +195,7 @@ impl MqttLeaseCoordinator {
                 ))?;
         }
 
-        Ok(tenants)
+        Ok(mqtt_client_ids)
     }
 
     /// Update heartbeat for all leases held by a service.
@@ -221,25 +229,28 @@ impl MqttLeaseCoordinator {
         Ok(())
     }
 
-    /// Push a config update to the service holding a specific tenant.
+    /// Push a config update to the service holding a specific MQTT client.
     ///
     /// Called when MQTT settings are updated via REST API.
-    pub async fn push_tenant_config_update(&self, tenant_id: Uuid) -> Result<bool> {
-        // Find the service holding this tenant
-        let service_id = match self.connections.get_instance_for_tenant(&tenant_id).await {
+    pub async fn push_mqtt_client_config_update(&self, mqtt_client_id: Uuid) -> Result<bool> {
+        // Find the service holding this MQTT client
+        let service_id = match self
+            .connections
+            .get_instance_for_mqtt_client(&mqtt_client_id)
+            .await
+        {
             Some(id) => id,
-            None => return Ok(false), // No service holds this tenant
+            None => return Ok(false), // No service holds this MQTT client
         };
 
         // Load current config from database
-        let client = mqtt_client::Entity::find()
-            .filter(mqtt_client::Column::TenantId.eq(tenant_id))
+        let client = mqtt_client::Entity::find_by_id(mqtt_client_id)
             .one(&self.db)
             .await
             .context(LeaseCoordinatorError::Database(
                 "failed to query mqtt_client".into(),
             ))?
-            .ok_or_else(|| report!(LeaseCoordinatorError::TenantNotFound(tenant_id)))?;
+            .ok_or_else(|| report!(LeaseCoordinatorError::MqttClientNotFound(mqtt_client_id)))?;
 
         let config = model_to_config(&client);
         let msg = ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
@@ -249,17 +260,21 @@ impl MqttLeaseCoordinator {
         Ok(self.connections.send(&service_id, msg).await)
     }
 
-    /// Revoke a tenant (disabled or deleted) from the holding service.
+    /// Revoke an MQTT client (disabled or deleted) from the holding service.
     ///
     /// Called when MQTT settings are disabled/deleted via REST API.
-    pub async fn revoke_tenant(&self, tenant_id: Uuid, reason: &str) -> Result<bool> {
-        // Find the service holding this tenant
-        let service_id = match self.connections.get_instance_for_tenant(&tenant_id).await {
+    pub async fn revoke_mqtt_client(&self, mqtt_client_id: Uuid, reason: &str) -> Result<bool> {
+        // Find the service holding this MQTT client
+        let service_id = match self
+            .connections
+            .get_instance_for_mqtt_client(&mqtt_client_id)
+            .await
+        {
             Some(id) => id,
             None => {
-                // No service holds this tenant, just delete any orphaned lease
+                // No service holds this MQTT client, just delete any orphaned lease
                 mqtt_lease::Entity::delete_many()
-                    .filter(mqtt_lease::Column::TenantId.eq(tenant_id))
+                    .filter(mqtt_lease::Column::MqttClientId.eq(mqtt_client_id))
                     .exec(&self.db)
                     .await
                     .context(LeaseCoordinatorError::Database(
@@ -271,7 +286,7 @@ impl MqttLeaseCoordinator {
 
         // Delete lease from database
         mqtt_lease::Entity::delete_many()
-            .filter(mqtt_lease::Column::TenantId.eq(tenant_id))
+            .filter(mqtt_lease::Column::MqttClientId.eq(mqtt_client_id))
             .exec(&self.db)
             .await
             .context(LeaseCoordinatorError::Database(
@@ -280,12 +295,12 @@ impl MqttLeaseCoordinator {
 
         // Update registry
         self.connections
-            .release_tenant(&service_id, &tenant_id)
+            .release_mqtt_client(&service_id, &mqtt_client_id)
             .await;
 
         // Push revocation message
         let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            tenant_id: tenant_id.to_string(),
+            mqtt_client_id: mqtt_client_id.to_string(),
             reason: reason.to_string(),
         });
 
@@ -309,16 +324,19 @@ impl MqttLeaseCoordinator {
         Ok(deleted.rows_affected as usize)
     }
 
-    /// Get tenant configs for a set of tenant IDs.
+    /// Get MQTT client configs for a set of MQTT client IDs.
     ///
     /// Used during reconnection to rebuild state.
-    pub async fn get_tenant_configs(&self, tenant_ids: &[Uuid]) -> Result<Vec<MqttTenantConfig>> {
-        if tenant_ids.is_empty() {
+    pub async fn get_mqtt_client_configs(
+        &self,
+        mqtt_client_ids: &[Uuid],
+    ) -> Result<Vec<MqttTenantConfig>> {
+        if mqtt_client_ids.is_empty() {
             return Ok(vec![]);
         }
 
         let clients = mqtt_client::Entity::find()
-            .filter(mqtt_client::Column::TenantId.is_in(tenant_ids.to_vec()))
+            .filter(mqtt_client::Column::Id.is_in(mqtt_client_ids.to_vec()))
             .all(&self.db)
             .await
             .context(LeaseCoordinatorError::Database(
@@ -328,18 +346,18 @@ impl MqttLeaseCoordinator {
         Ok(clients.iter().map(model_to_config).collect())
     }
 
-    /// Reconcile service's claimed tenants on reconnect.
+    /// Reconcile service's claimed MQTT clients on reconnect.
     ///
     /// Called when a service reconnects and sends Register with its current
-    /// active_tenants list. Verifies that leases exist for claimed tenants,
+    /// active_mqtt_clients list. Verifies that leases exist for claimed clients,
     /// or re-creates them if they were cleaned up.
-    pub async fn reconcile_tenants(
+    pub async fn reconcile_mqtt_clients(
         &self,
         service_id: Uuid,
         instance_id: &str,
-        claimed_tenant_ids: &[Uuid],
+        claimed_mqtt_client_ids: &[Uuid],
     ) -> Result<Vec<MqttTenantConfig>> {
-        if claimed_tenant_ids.is_empty() {
+        if claimed_mqtt_client_ids.is_empty() {
             return Ok(vec![]);
         }
 
@@ -353,23 +371,23 @@ impl MqttLeaseCoordinator {
 
         let now = OffsetDateTime::now_utc();
 
-        // Check existing leases for these tenants
+        // Check existing leases for these MQTT clients
         let existing_leases: std::collections::HashMap<Uuid, mqtt_lease::Model> =
             mqtt_lease::Entity::find()
-                .filter(mqtt_lease::Column::TenantId.is_in(claimed_tenant_ids.to_vec()))
+                .filter(mqtt_lease::Column::MqttClientId.is_in(claimed_mqtt_client_ids.to_vec()))
                 .all(&txn)
                 .await
                 .context(LeaseCoordinatorError::Database(
                     "failed to query leases".into(),
                 ))?
                 .into_iter()
-                .map(|l| (l.tenant_id, l))
+                .map(|l| (l.mqtt_client_id, l))
                 .collect();
 
-        // Get mqtt_client configs for all claimed tenants
+        // Get mqtt_client configs for all claimed IDs
         let clients: std::collections::HashMap<Uuid, mqtt_client::Model> =
             mqtt_client::Entity::find()
-                .filter(mqtt_client::Column::TenantId.is_in(claimed_tenant_ids.to_vec()))
+                .filter(mqtt_client::Column::Id.is_in(claimed_mqtt_client_ids.to_vec()))
                 .filter(mqtt_client::Column::Enabled.eq(true))
                 .all(&txn)
                 .await
@@ -377,20 +395,20 @@ impl MqttLeaseCoordinator {
                     "failed to query mqtt_clients".into(),
                 ))?
                 .into_iter()
-                .map(|c| (c.tenant_id, c))
+                .map(|c| (c.id, c))
                 .collect();
 
         let mut reconciled_configs = Vec::new();
 
-        for tenant_id in claimed_tenant_ids {
-            // Skip if no enabled mqtt_client for this tenant
-            let client = match clients.get(tenant_id) {
+        for mqtt_client_id in claimed_mqtt_client_ids {
+            // Skip if no enabled mqtt_client for this ID
+            let client = match clients.get(mqtt_client_id) {
                 Some(c) => c,
                 None => continue,
             };
 
             // Check if lease exists
-            if let Some(existing) = existing_leases.get(tenant_id) {
+            if let Some(existing) = existing_leases.get(mqtt_client_id) {
                 // Lease exists - verify it's ours (same instance) or take it over
                 if existing.instance_id == instance_id {
                     // Same instance, just update heartbeat
@@ -404,7 +422,6 @@ impl MqttLeaseCoordinator {
                         ))?;
                 } else {
                     // Different instance had the lease - take it over
-                    // (This can happen if the previous instance crashed without cleanup)
                     let mut active: mqtt_lease::ActiveModel = existing.clone().into_active_model();
                     active.instance_id = ActiveValue::Set(instance_id.to_string());
                     active.heartbeat_at = ActiveValue::Set(now);
@@ -419,7 +436,8 @@ impl MqttLeaseCoordinator {
                 // No lease exists - create one
                 let lease = mqtt_lease::ActiveModel {
                     id: ActiveValue::Set(Uuid::now_v7()),
-                    tenant_id: ActiveValue::Set(*tenant_id),
+                    tenant_id: ActiveValue::Set(client.tenant_id),
+                    mqtt_client_id: ActiveValue::Set(*mqtt_client_id),
                     instance_id: ActiveValue::Set(instance_id.to_string()),
                     heartbeat_at: ActiveValue::Set(now),
                     created_at: ActiveValue::Set(now),
@@ -434,7 +452,7 @@ impl MqttLeaseCoordinator {
 
             // Track in connection registry
             self.connections
-                .assign_tenant(&service_id, *tenant_id)
+                .assign_mqtt_client(&service_id, *mqtt_client_id)
                 .await;
 
             // Add to result
@@ -452,6 +470,7 @@ impl MqttLeaseCoordinator {
 /// Convert mqtt_client model to MqttTenantConfig wire type.
 fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
     MqttTenantConfig {
+        mqtt_client_id: client.id.to_string(),
         tenant_id: client.tenant_id.to_string(),
         enabled: client.enabled,
         transport: client.transport.clone(),

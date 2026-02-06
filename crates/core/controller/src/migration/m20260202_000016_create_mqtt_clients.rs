@@ -42,14 +42,13 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Enforce single client per tenant
+        // Non-unique index for efficient lookups by tenant
         manager
             .create_index(
                 Index::create()
-                    .name("uq_mqtt_clients_tenant_id")
+                    .name("idx_mqtt_clients_tenant_id")
                     .table(MqttClients::Table)
                     .col(MqttClients::TenantId)
-                    .unique()
                     .to_owned(),
             )
             .await?;
@@ -65,7 +64,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum MqttClients {
+pub(super) enum MqttClients {
     Table,
     Id,
     TenantId,

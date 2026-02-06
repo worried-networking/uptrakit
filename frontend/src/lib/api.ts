@@ -11,6 +11,7 @@ import type {
 	LoginRequest,
 	MessageResponse,
 	MqttClientResponse,
+	MqttLimitResponse,
 	CreateMqttClient,
 	NetworkSettings,
 	OidcLinkRequest,
@@ -24,6 +25,7 @@ import type {
 	UpdateAuthenticationSettings,
 	UpdateHostRequest,
 	UpdateMqttClient,
+	UpdateMqttLimitRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdateRegistrationSettings,
@@ -272,7 +274,7 @@ export function updateNetworkSettings(data: UpdateNetworkSettings): Promise<Netw
 
 // --- MQTT Client APIs ---
 
-export function getMqttClient(): Promise<MqttClientResponse> {
+export function getMqttClients(): Promise<MqttClientResponse[]> {
 	return request('/settings/mqtt');
 }
 
@@ -280,12 +282,20 @@ export function createMqttClient(data: CreateMqttClient): Promise<MqttClientResp
 	return request('/settings/mqtt', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export function updateMqttClient(data: UpdateMqttClient): Promise<MqttClientResponse> {
-	return request('/settings/mqtt', { method: 'PUT', body: JSON.stringify(data) });
+export function updateMqttClient(id: string, data: UpdateMqttClient): Promise<MqttClientResponse> {
+	return request(`/settings/mqtt/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
-export function deleteMqttClient(): Promise<void> {
-	return request('/settings/mqtt', { method: 'DELETE' });
+export function deleteMqttClient(id: string): Promise<void> {
+	return request(`/settings/mqtt/${id}`, { method: 'DELETE' });
+}
+
+export function getMqttLimit(): Promise<MqttLimitResponse> {
+	return request('/settings/mqtt/limit');
+}
+
+export function updateMqttLimit(data: UpdateMqttLimitRequest): Promise<MqttLimitResponse> {
+	return request('/settings/mqtt/limit', { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // --- OIDC Provider APIs ---

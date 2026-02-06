@@ -1,6 +1,9 @@
 use rootcause::ReportConversion;
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
+    Set,
+};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
@@ -14,8 +17,8 @@ pub enum MqttClientError {
     #[error("mqtt client not found")]
     NotFound,
 
-    #[error("mqtt client already exists for this tenant")]
-    AlreadyExists,
+    #[error("mqtt client limit reached: maximum {0} per tenant")]
+    LimitReached(u16),
 }
 
 pub type Result<T> = std::result::Result<T, Report<MqttClientError>>;
@@ -31,14 +34,31 @@ where
     }
 }
 
-/// Load the MQTT client for a given tenant. Returns `None` if not configured.
-pub async fn load_mqtt_client(
+/// Load all MQTT clients for a given tenant.
+pub async fn load_mqtt_clients(
     db: &DatabaseConnection,
     tenant_id: Uuid,
-) -> Result<Option<mqtt_client::Model>> {
+) -> Result<Vec<mqtt_client::Model>> {
     MqttClient::find()
         .filter(mqtt_client::Column::TenantId.eq(tenant_id))
-        .one(db)
+        .all(db)
+        .await
+        .context_to()
+}
+
+/// Load a specific MQTT client by its ID.
+pub async fn load_mqtt_client_by_id(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<Option<mqtt_client::Model>> {
+    MqttClient::find_by_id(id).one(db).await.context_to()
+}
+
+/// Count the number of MQTT clients for a given tenant.
+pub async fn count_mqtt_clients(db: &DatabaseConnection, tenant_id: Uuid) -> Result<u64> {
+    MqttClient::find()
+        .filter(mqtt_client::Column::TenantId.eq(tenant_id))
+        .count(db)
         .await
         .context_to()
 }
@@ -47,6 +67,7 @@ pub async fn load_mqtt_client(
 pub struct CreateMqttClientParams<'a> {
     pub db: &'a DatabaseConnection,
     pub tenant_id: Uuid,
+    pub max_clients: u16,
     pub enabled: bool,
     pub transport: &'a str,
     pub host: &'a str,
@@ -62,6 +83,7 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
     let CreateMqttClientParams {
         db,
         tenant_id,
+        max_clients,
         enabled,
         transport,
         host,
@@ -71,10 +93,11 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         password,
         topic_prefix,
     } = params;
-    // Check for existing
-    let existing = load_mqtt_client(db, tenant_id).await?;
-    if existing.is_some() {
-        return Err(report!(MqttClientError::AlreadyExists));
+
+    // Check limit
+    let count = count_mqtt_clients(db, tenant_id).await?;
+    if count >= u64::from(max_clients) {
+        return Err(report!(MqttClientError::LimitReached(max_clients)));
     }
 
     let now = OffsetDateTime::now_utc();
@@ -156,13 +179,9 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
     model.update(db).await.context_to()
 }
 
-/// Delete the MQTT client for a given tenant.
-pub async fn delete_mqtt_client(db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
-    let result = MqttClient::delete_many()
-        .filter(mqtt_client::Column::TenantId.eq(tenant_id))
-        .exec(db)
-        .await
-        .context_to()?;
+/// Delete a specific MQTT client by ID.
+pub async fn delete_mqtt_client(db: &DatabaseConnection, id: Uuid) -> Result<()> {
+    let result = MqttClient::delete_by_id(id).exec(db).await.context_to()?;
 
     if result.rows_affected == 0 {
         return Err(report!(MqttClientError::NotFound));

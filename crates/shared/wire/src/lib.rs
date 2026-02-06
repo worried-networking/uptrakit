@@ -387,13 +387,13 @@ pub enum DisconnectReason {
 /// Service -> Controller: Notification before disconnecting.
 ///
 /// Agents send this with just a reason; MQTT services also include the list
-/// of tenants that were active at disconnection time.
+/// of MQTT client IDs that were active at disconnection time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisconnectingPayload {
     pub reason: DisconnectReason,
-    /// Tenants that were active at disconnection time (MQTT services only).
+    /// MQTT client IDs that were active at disconnection time (MQTT services only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub active_tenants: Vec<String>,
+    pub active_mqtt_clients: Vec<String>,
 }
 
 // =============================================================================
@@ -408,9 +408,9 @@ pub struct MqttRegisterPayload {
     /// Maximum tenants this instance will handle (0 = unlimited).
     #[serde(default)]
     pub max_tenants: u32,
-    /// Currently active tenant IDs (for reconnect reconciliation).
+    /// Currently active MQTT client IDs (for reconnect reconciliation).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub active_tenants: Vec<String>,
+    pub active_mqtt_clients: Vec<String>,
 }
 
 /// Payload for registration acknowledgment.
@@ -420,11 +420,11 @@ pub struct MqttRegisteredPayload {
     pub instance_id: String,
 }
 
-/// Payload for explicitly releasing tenants.
+/// Payload for explicitly releasing MQTT clients.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttReleaseTenantsPayload {
-    /// Tenant IDs to release.
-    pub tenant_ids: Vec<String>,
+    /// MQTT client IDs to release.
+    pub mqtt_client_ids: Vec<String>,
 }
 
 /// Payload for tenant assignments (initial or incremental).
@@ -434,10 +434,12 @@ pub struct MqttTenantAssignmentsPayload {
     pub tenants: Vec<MqttTenantConfig>,
 }
 
-/// Configuration for a single tenant's MQTT client.
+/// Configuration for a single MQTT client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttTenantConfig {
-    /// Tenant UUID.
+    /// MQTT client UUID (primary identifier from mqtt_clients table).
+    pub mqtt_client_id: String,
+    /// Tenant UUID (kept for context).
     pub tenant_id: String,
     /// Whether MQTT is enabled for this tenant.
     pub enabled: bool,
@@ -469,11 +471,11 @@ pub struct MqttTenantConfigUpdatedPayload {
     pub tenant: MqttTenantConfig,
 }
 
-/// Payload for tenant revocation.
+/// Payload for MQTT client revocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttTenantRevokedPayload {
-    /// Tenant UUID being revoked.
-    pub tenant_id: String,
+    /// MQTT client UUID being revoked.
+    pub mqtt_client_id: String,
     /// Reason for revocation.
     pub reason: String,
 }
@@ -740,7 +742,7 @@ mod tests {
     fn disconnecting_shutdown_serialization_roundtrip() {
         let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
             reason: DisconnectReason::Shutdown,
-            active_tenants: vec![],
+            active_mqtt_clients: vec![],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(json, r#"{"type":"disconnecting","reason":"shutdown"}"#);
@@ -752,7 +754,7 @@ mod tests {
     fn disconnecting_restart_serialization_roundtrip() {
         let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
             reason: DisconnectReason::Restart,
-            active_tenants: vec![],
+            active_mqtt_clients: vec![],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(json, r#"{"type":"disconnecting","reason":"restart"}"#);
@@ -761,26 +763,26 @@ mod tests {
     }
 
     #[test]
-    fn disconnecting_with_active_tenants() {
+    fn disconnecting_with_active_mqtt_clients() {
         let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
             reason: DisconnectReason::Shutdown,
-            active_tenants: vec!["tenant-1".to_string()],
+            active_mqtt_clients: vec!["client-1".to_string()],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""reason":"shutdown"#));
-        assert!(json.contains(r#""active_tenants":["tenant-1"]"#));
+        assert!(json.contains(r#""active_mqtt_clients":["client-1"]"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
 
     #[test]
-    fn disconnecting_empty_tenants_omitted() {
+    fn disconnecting_empty_mqtt_clients_omitted() {
         let msg = ServiceMessage::Disconnecting(DisconnectingPayload {
             reason: DisconnectReason::Restart,
-            active_tenants: vec![],
+            active_mqtt_clients: vec![],
         });
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(!json.contains("active_tenants"));
+        assert!(!json.contains("active_mqtt_clients"));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -790,7 +792,7 @@ mod tests {
         let msg = ServiceMessage::Register(MqttRegisterPayload {
             instance_id: "mqtt-node1-01936a1e".to_string(),
             max_tenants: 10,
-            active_tenants: vec!["tenant-1".to_string(), "tenant-2".to_string()],
+            active_mqtt_clients: vec!["client-1".to_string(), "client-2".to_string()],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"register"#));
@@ -801,14 +803,14 @@ mod tests {
     }
 
     #[test]
-    fn register_empty_active_tenants() {
+    fn register_empty_active_mqtt_clients() {
         let msg = ServiceMessage::Register(MqttRegisterPayload {
             instance_id: "mqtt-node2-01936a1e".to_string(),
             max_tenants: 0,
-            active_tenants: vec![],
+            active_mqtt_clients: vec![],
         });
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(!json.contains("active_tenants"));
+        assert!(!json.contains("active_mqtt_clients"));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -816,7 +818,7 @@ mod tests {
     #[test]
     fn release_tenants_serialization_roundtrip() {
         let msg = ServiceMessage::ReleaseTenants(MqttReleaseTenantsPayload {
-            tenant_ids: vec!["tenant-1".to_string()],
+            mqtt_client_ids: vec!["client-1".to_string()],
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"release_tenants"#));
@@ -1188,6 +1190,7 @@ mod tests {
     fn tenant_assignments_serialization_roundtrip() {
         let msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
             tenants: vec![MqttTenantConfig {
+                mqtt_client_id: "660e8400-e29b-41d4-a716-446655440001".to_string(),
                 tenant_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
                 enabled: true,
                 transport: "tls".to_string(),
@@ -1211,6 +1214,7 @@ mod tests {
     fn tenant_config_updated_serialization_roundtrip() {
         let msg = ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
             tenant: MqttTenantConfig {
+                mqtt_client_id: "client-1".to_string(),
                 tenant_id: "tenant-1".to_string(),
                 enabled: true,
                 transport: "tcp".to_string(),
@@ -1232,12 +1236,12 @@ mod tests {
     #[test]
     fn tenant_revoked_serialization_roundtrip() {
         let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
-            tenant_id: "tenant-1".to_string(),
-            reason: "tenant disabled".to_string(),
+            mqtt_client_id: "client-1".to_string(),
+            reason: "mqtt client disabled".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"tenant_revoked"#));
-        assert!(json.contains(r#""reason":"tenant disabled"#));
+        assert!(json.contains(r#""reason":"mqtt client disabled"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1361,6 +1365,7 @@ mod tests {
     #[test]
     fn mqtt_tenant_config_omits_none_fields() {
         let config = MqttTenantConfig {
+            mqtt_client_id: "client-1".to_string(),
             tenant_id: "tenant-1".to_string(),
             enabled: true,
             transport: "tcp".to_string(),

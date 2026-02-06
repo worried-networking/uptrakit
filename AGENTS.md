@@ -382,7 +382,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 | `oidc_providers` | `slug` unique → `(tenant_id, slug)` |
 | `user_roles` | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)` |
 | `settings` | PK `(key)` → `(tenant_id, key)` |
-| `mqtt_clients` | UNIQUE on `tenant_id` (single client per tenant) |
+| `mqtt_clients` | Non-unique index on `tenant_id` (multiple clients per tenant, limit controlled by `MqttMaxClientsPerTenant` global setting) |
 
 ### Tables NOT changed (remain global)
 
@@ -413,6 +413,7 @@ In single-tenant mode, the header is optional — all requests default to the de
 - `TrustedProxies`, `RealIpHeader`, `ExtraSans`, `HttpsAddr`
 - `ForwardedClientCertInfoHeader`, `ForwardedClientCertPemHeader`
 - `MultiTenancyEnabled`
+- `MqttMaxClientsPerTenant`
 
 The helper `resolve_tenant_for_key(key, tenant_id, default_tenant_id)` in `settings_store.rs` returns the correct tenant ID based on whether the key is global.
 
@@ -567,10 +568,13 @@ The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettin
 | --- | --- | --- |
 | `GET /api/v1/settings/network` | ManageGlobalSettings | Read network settings |
 | `PUT /api/v1/settings/network` | ManageGlobalSettings | Update network settings (includes `pki_addr`) |
-| `GET /api/v1/settings/mqtt` | ViewSettings | Read MQTT client configuration |
-| `POST /api/v1/settings/mqtt` | ManageSettings | Create MQTT client configuration |
-| `PUT /api/v1/settings/mqtt` | ManageSettings | Update MQTT client configuration |
-| `DELETE /api/v1/settings/mqtt` | ManageSettings | Delete MQTT client configuration |
+| `GET /api/v1/settings/mqtt` | ViewSettings | List all MQTT client configurations |
+| `POST /api/v1/settings/mqtt` | ManageSettings | Create MQTT client configuration (checks per-tenant limit) |
+| `GET /api/v1/settings/mqtt/limit` | ViewSettings | Get max MQTT clients per tenant limit |
+| `PUT /api/v1/settings/mqtt/limit` | ManageGlobalSettings | Update max MQTT clients per tenant limit |
+| `GET /api/v1/settings/mqtt/{id}` | ViewSettings | Get a specific MQTT client configuration |
+| `PUT /api/v1/settings/mqtt/{id}` | ManageSettings | Update MQTT client configuration |
+| `DELETE /api/v1/settings/mqtt/{id}` | ManageSettings | Delete MQTT client configuration |
 | `POST /api/v1/settings/rotate-ca` | ManageGlobalSettings | Trigger immediate CA rotation |
 | `POST /api/v1/settings/renew-server-certificate` | ManageGlobalSettings | Renew server TLS certificate |
 | `GET /api/v1/system/alerts` | ManageGlobalSettings | Get system alerts (CA/cert status) |
@@ -588,14 +592,14 @@ MQTT password is never exposed in API responses; a `has_password: bool` field in
 
 ### MQTT client configuration
 
-MQTT settings are stored in a dedicated `mqtt_clients` table (one row per tenant) rather than in the key-value `settings` table. The table stores connection components; the URL is a computed presentation field.
+MQTT settings are stored in a dedicated `mqtt_clients` table (multiple rows per tenant, up to `MqttMaxClientsPerTenant` limit) rather than in the key-value `settings` table. The table stores connection components; the URL is a computed presentation field.
 
 **Table schema (`mqtt_clients`):**
 
 | Column | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `id` | UUID PK | `Uuid::now_v7()` | |
-| `tenant_id` | UUID FK → tenants | | UNIQUE (single client per tenant) |
+| `tenant_id` | UUID FK → tenants | | Non-unique index (multiple clients per tenant) |
 | `enabled` | bool | `true` | |
 | `transport` | text | `tcp` | `tcp`, `tls` |
 | `host` | text | | Broker hostname |
@@ -606,6 +610,23 @@ MQTT settings are stored in a dedicated `mqtt_clients` table (one row per tenant
 | `topic_prefix` | text | `uptrakit` | |
 | `created_at` | timestamptz | | |
 | `updated_at` | timestamptz | | |
+
+**Table schema (`mqtt_leases`):**
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | `Uuid::now_v7()` |
+| `tenant_id` | UUID FK → tenants | |
+| `mqtt_client_id` | UUID FK → mqtt_clients (ON DELETE CASCADE) | UNIQUE (one lease per MQTT client config) |
+| `instance_id` | text | MQTT service instance identifier |
+| `acquired_at` | timestamptz | |
+| `last_heartbeat_at` | timestamptz | |
+
+**Global setting (`MqttMaxClientsPerTenant`):**
+
+| DB key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mqtt.max_clients_per_tenant` | u16 | 10 | Maximum number of MQTT client configurations per tenant |
 
 **MQTT URL scheme:**
 
@@ -656,9 +677,9 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 - The controller manages leases centrally via the `mqtt_leases` table
 
 **Main loop (event-driven, not polling):**
-1. Receive `TenantAssignments` → start/update MQTT clients
-2. Receive `TenantConfigUpdated` → hot-reload tenant configuration
-3. Receive `TenantRevoked` → stop tenant MQTT client
+1. Receive `TenantAssignments` → start/update MQTT clients (keyed by `mqtt_client_id`)
+2. Receive `TenantConfigUpdated` → hot-reload MQTT client configuration
+3. Receive `TenantRevoked` → stop MQTT client (by `mqtt_client_id`)
 4. Receive `CaBundleUpdated` → update local CA certificate
 5. Receive `RequestCertRenewal` → trigger certificate renewal
 6. Receive `ServerRestarting` → prepare for reconnect
@@ -712,7 +733,7 @@ MQTT services use the unified service entity:
 | `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
 | `crates/core/mqtt/src/cli.rs` | CLI argument definitions |
 | `crates/core/mqtt/src/controller_client.rs` | WebSocket client for controller communication |
-| `crates/core/mqtt/src/tenant_manager.rs` | Per-tenant MQTT client lifecycle (push-based) |
+| `crates/core/mqtt/src/tenant_manager.rs` | Per-MQTT-client lifecycle management (push-based, keyed by `mqtt_client_id`) |
 | `crates/core/mqtt/src/mqtt_client.rs` | MQTT broker connection logic |
 | `crates/core/mqtt/src/error.rs` | Application error types |
 
@@ -897,10 +918,10 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `UpdateStarted(UpdateStartedPayload)` variant in `ServiceMessage` (agent-specific) — agent acknowledges update start with detected from_version
 - `UpdateOutput(UpdateOutputPayload)` variant in `ServiceMessage` (agent-specific) — agent streams update output (stdout, stderr, pre/post-hook, system)
 - `UpdateResult(UpdateResultPayload)` variant in `ServiceMessage` (agent-specific) — agent reports final update status with accumulated output
-- `Register(RegisterPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service registers with the controller
-- `ReleaseTenants(ReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases tenant leases
+- `Register(MqttRegisterPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service registers with the controller (includes `active_mqtt_clients: Vec<String>`)
+- `ReleaseTenants(MqttReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases MQTT client leases (by `mqtt_client_ids`)
 - `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify services; includes a human-readable `reason` field
-- `Disconnecting(DisconnectingPayload)` variant in `ServiceMessage` — service notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`; optional `active_tenants: Vec<String>` for MQTT)
+- `Disconnecting(DisconnectingPayload)` variant in `ServiceMessage` — service notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`; optional `active_mqtt_clients: Vec<String>` for MQTT)
 
 ### Agent graceful shutdown
 

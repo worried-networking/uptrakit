@@ -14,6 +14,7 @@ use crate::settings_store::{RawSettings, RawSettingsExt};
 
 const DEFAULT_AGENT_CERT_LIFETIME_DAYS: u16 = 7;
 const DEFAULT_RENEWAL_WINDOW_HOURS: u16 = 6;
+const DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT: u16 = 10;
 
 /// Default listen addresses used when neither CLI nor DB provides a value.
 pub const DEFAULT_HTTPS_ADDR: &str = "[::]:8443";
@@ -68,6 +69,7 @@ struct Inner {
     agent_cert_lifetime_days: RwLock<u16>,
     renewal_window_hours: RwLock<u16>,
     network: RwLock<NetworkSettings>,
+    mqtt_max_clients_per_tenant: RwLock<u16>,
 }
 
 impl Settings {
@@ -93,6 +95,7 @@ impl Settings {
                 agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
                 renewal_window_hours: RwLock::new(renewal_window_hours),
                 network: RwLock::new(NetworkSettings::default()),
+                mqtt_max_clients_per_tenant: RwLock::new(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT),
             }),
         }
     }
@@ -124,6 +127,11 @@ impl Settings {
 
         let network = Self::load_network_settings(&raw);
 
+        let mqtt_max_clients_per_tenant = raw
+            .get_setting(SettingKey::MqttMaxClientsPerTenant)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
+
         let settings = Self {
             inner: Arc::new(Inner {
                 registration: RwLock::new(registration),
@@ -131,6 +139,7 @@ impl Settings {
                 agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
                 renewal_window_hours: RwLock::new(renewal_window_hours),
                 network: RwLock::new(network),
+                mqtt_max_clients_per_tenant: RwLock::new(mqtt_max_clients_per_tenant),
             }),
         };
 
@@ -348,5 +357,17 @@ impl Settings {
     /// Update the backend URL.
     pub async fn set_pki_addr(&self, url: Option<String>) {
         self.inner.network.write().await.pki_addr = url;
+    }
+
+    // --- MQTT settings ---
+
+    /// Read the maximum number of MQTT clients per tenant.
+    pub async fn mqtt_max_clients_per_tenant(&self) -> u16 {
+        *self.inner.mqtt_max_clients_per_tenant.read().await
+    }
+
+    /// Update the maximum number of MQTT clients per tenant.
+    pub async fn set_mqtt_max_clients_per_tenant(&self, max: u16) {
+        *self.inner.mqtt_max_clients_per_tenant.write().await = max;
     }
 }

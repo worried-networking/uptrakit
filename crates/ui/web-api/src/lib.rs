@@ -156,8 +156,11 @@ pub struct AppState {
         routes::device_auth::device_auth_approve,
         routes::settings_network::get_network_settings,
         routes::settings_network::update_network_settings,
-        routes::settings_mqtt::get_mqtt_settings,
+        routes::settings_mqtt::list_mqtt_settings,
         routes::settings_mqtt::create_mqtt_settings,
+        routes::settings_mqtt::get_mqtt_limit,
+        routes::settings_mqtt::update_mqtt_limit,
+        routes::settings_mqtt::get_mqtt_settings,
         routes::settings_mqtt::update_mqtt_settings,
         routes::settings_mqtt::delete_mqtt_settings,
         routes::hosts::list_hosts,
@@ -229,8 +232,10 @@ pub struct AppState {
             routes::settings_network::NetworkSettingsResponse,
             routes::settings_network::UpdateNetworkSettingsRequest,
             routes::settings_mqtt::MqttClientResponse,
+            routes::settings_mqtt::MqttLimitResponse,
             routes::settings_mqtt::CreateMqttClientRequest,
             routes::settings_mqtt::UpdateMqttClientRequest,
+            routes::settings_mqtt::UpdateMqttLimitRequest,
             uptrakit_web_api_types::mqtt_transport::MqttTransport,
             routes::hosts::HostResponse,
             routes::hosts::HostAgentSummary,
@@ -360,8 +365,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings_network::update_network_settings
         ))
         .routes(routes!(
+            routes::settings_mqtt::list_mqtt_settings,
+            routes::settings_mqtt::create_mqtt_settings
+        ))
+        .routes(routes!(
+            routes::settings_mqtt::get_mqtt_limit,
+            routes::settings_mqtt::update_mqtt_limit
+        ))
+        .routes(routes!(
             routes::settings_mqtt::get_mqtt_settings,
-            routes::settings_mqtt::create_mqtt_settings,
             routes::settings_mqtt::update_mqtt_settings,
             routes::settings_mqtt::delete_mqtt_settings
         ))

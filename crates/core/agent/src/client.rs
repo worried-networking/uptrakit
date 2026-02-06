@@ -590,7 +590,7 @@ async fn handle_graceful_shutdown(
     // Send Disconnecting message to controller
     let disconnecting_msg = ServiceMessage::Disconnecting(DisconnectingPayload {
         reason: disconnect_reason,
-        active_tenants: vec![],
+        active_mqtt_clients: vec![],
     });
     if let Ok(json) = serde_json::to_string(&disconnecting_msg) {
         if let Err(e) = ws_stream.send(Message::Text(json.into())).await {

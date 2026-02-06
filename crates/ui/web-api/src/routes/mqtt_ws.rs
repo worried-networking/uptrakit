@@ -62,7 +62,7 @@ pub(crate) async fn handle_mqtt_authenticated(
     cert_ca_fingerprint: String,
 ) {
     // Wait for Register message before entering operational loop.
-    let (instance_id, max_tenants, active_tenants) = loop {
+    let (instance_id, max_tenants, active_mqtt_clients) = loop {
         let msg = match stream.next().await {
             Some(Ok(m)) => m,
             Some(Err(e)) => {
@@ -87,7 +87,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                         break (
                             payload.instance_id,
                             payload.max_tenants,
-                            payload.active_tenants,
+                            payload.active_mqtt_clients,
                         );
                     }
                     ServiceMessage::Ping(PingPayload { agent_ts }) => {
@@ -143,20 +143,20 @@ pub(crate) async fn handle_mqtt_authenticated(
     let lease_coordinator =
         MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
 
-    // Reconcile tenants if reconnecting with active tenants.
-    let tenant_configs = if !active_tenants.is_empty() {
-        let tenant_ids: Vec<uuid::Uuid> = active_tenants
+    // Reconcile MQTT clients if reconnecting with active clients.
+    let tenant_configs = if !active_mqtt_clients.is_empty() {
+        let mqtt_client_ids: Vec<uuid::Uuid> = active_mqtt_clients
             .iter()
             .filter_map(|s| uuid::Uuid::parse_str(s).ok())
             .collect();
 
         match lease_coordinator
-            .reconcile_tenants(service_id, &instance_id, &tenant_ids)
+            .reconcile_mqtt_clients(service_id, &instance_id, &mqtt_client_ids)
             .await
         {
             Ok(configs) => configs,
             Err(e) => {
-                tracing::error!(error = %e, "failed to reconcile tenants");
+                tracing::error!(error = %e, "failed to reconcile mqtt clients");
                 vec![]
             }
         }
@@ -168,7 +168,7 @@ pub(crate) async fn handle_mqtt_authenticated(
         {
             Ok(configs) => configs,
             Err(e) => {
-                tracing::error!(error = %e, "failed to assign tenants");
+                tracing::error!(error = %e, "failed to assign mqtt clients");
                 vec![]
             }
         }
@@ -235,23 +235,23 @@ pub(crate) async fn handle_mqtt_authenticated(
                                 }
                             }
                             ServiceMessage::ReleaseTenants(payload) => {
-                                let tenant_ids: Vec<uuid::Uuid> = payload
-                                    .tenant_ids
+                                let mqtt_client_ids: Vec<uuid::Uuid> = payload
+                                    .mqtt_client_ids
                                     .iter()
                                     .filter_map(|s| uuid::Uuid::parse_str(s).ok())
                                     .collect();
 
                                 if let Err(e) = lease_coordinator
-                                    .release_tenants(&service_id, &tenant_ids)
+                                    .release_mqtt_clients(&service_id, &mqtt_client_ids)
                                     .await
                                 {
-                                    tracing::warn!(error = %e, "failed to release tenants");
+                                    tracing::warn!(error = %e, "failed to release mqtt clients");
                                 }
 
                                 tracing::info!(
                                     %service_id,
-                                    count = tenant_ids.len(),
-                                    "MQTT service released tenants"
+                                    count = mqtt_client_ids.len(),
+                                    "MQTT service released mqtt clients"
                                 );
                             }
                             ServiceMessage::RenewCertificate(payload) => {

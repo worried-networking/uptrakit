@@ -3,9 +3,10 @@ use crate::auth::permissions::Permission;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::mqtt_client_store;
+use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 use axum::{
     Extension, Json,
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -15,7 +16,8 @@ use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 use uptrakit_web_api_types::mqtt_url::MqttUrl;
 
 pub use uptrakit_web_api_types::settings_mqtt::{
-    CreateMqttClientRequest, MqttClientResponse, UpdateMqttClientRequest,
+    CreateMqttClientRequest, MqttClientResponse, MqttLimitResponse, UpdateMqttClientRequest,
+    UpdateMqttLimitRequest,
 };
 
 fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
@@ -37,20 +39,19 @@ fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
     }
 }
 
-/// Get MQTT client configuration
+/// List all MQTT client configurations
 #[utoipa::path(
     get,
     path = "/api/v1/settings/mqtt",
     responses(
-        (status = 200, description = "MQTT client configuration", body = MqttClientResponse),
-        (status = 404, description = "No MQTT client configured"),
+        (status = 200, description = "MQTT client configurations", body = Vec<MqttClientResponse>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
 )]
-pub async fn get_mqtt_settings(
+pub async fn list_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
     tenant: TenantContext,
@@ -60,11 +61,13 @@ pub async fn get_mqtt_settings(
     }
 
     let tenant_id = tenant.tenant_id;
-    match mqtt_client_store::load_mqtt_client(&state.db, tenant_id).await {
-        Ok(Some(model)) => (StatusCode::OK, Json(model_to_response(&model))).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+    match mqtt_client_store::load_mqtt_clients(&state.db, tenant_id).await {
+        Ok(models) => {
+            let responses: Vec<MqttClientResponse> = models.iter().map(model_to_response).collect();
+            (StatusCode::OK, Json(responses)).into_response()
+        }
         Err(e) => {
-            tracing::error!("Failed to load MQTT client: {e:?}");
+            tracing::error!("Failed to load MQTT clients: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -80,7 +83,7 @@ pub async fn get_mqtt_settings(
         (status = 400, description = "Invalid values"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
-        (status = 409, description = "MQTT client already exists")
+        (status = 409, description = "MQTT client limit reached")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
@@ -96,6 +99,7 @@ pub async fn create_mqtt_settings(
     }
 
     let tenant_id = tenant.tenant_id;
+    let max_clients = state.settings.mqtt_max_clients_per_tenant().await;
 
     // Resolve connection parameters from URL or individual fields
     let (transport, host, port) = if let Some(ref url_str) = req.url {
@@ -132,6 +136,7 @@ pub async fn create_mqtt_settings(
     match mqtt_client_store::create_mqtt_client(mqtt_client_store::CreateMqttClientParams {
         db: &state.db,
         tenant_id,
+        max_clients,
         enabled,
         transport: transport.as_str(),
         host: &host,
@@ -145,10 +150,10 @@ pub async fn create_mqtt_settings(
     {
         Ok(model) => (StatusCode::CREATED, Json(model_to_response(&model))).into_response(),
         Err(e) => {
-            if let mqtt_client_store::MqttClientError::AlreadyExists = e.current_context() {
+            if let mqtt_client_store::MqttClientError::LimitReached(max) = e.current_context() {
                 return (
                     StatusCode::CONFLICT,
-                    "MQTT client already exists for this tenant",
+                    format!("MQTT client limit reached: maximum {max} per tenant"),
                 )
                     .into_response();
             }
@@ -158,17 +163,152 @@ pub async fn create_mqtt_settings(
     }
 }
 
-/// Update MQTT client configuration
+/// Get MQTT client limit
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/mqtt/limit",
+    responses(
+        (status = 200, description = "MQTT client limit", body = MqttLimitResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn get_mqtt_limit(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let max = state.settings.mqtt_max_clients_per_tenant().await;
+    (
+        StatusCode::OK,
+        Json(MqttLimitResponse {
+            max_clients_per_tenant: max,
+        }),
+    )
+        .into_response()
+}
+
+/// Update MQTT client limit
 #[utoipa::path(
     put,
-    path = "/api/v1/settings/mqtt",
+    path = "/api/v1/settings/mqtt/limit",
+    request_body = UpdateMqttLimitRequest,
+    responses(
+        (status = 200, description = "MQTT client limit updated", body = MqttLimitResponse),
+        (status = 400, description = "Invalid value"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn update_mqtt_limit(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Json(req): Json<UpdateMqttLimitRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageGlobalSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    if req.max_clients_per_tenant < 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            "max_clients_per_tenant must be at least 1",
+        )
+            .into_response();
+    }
+
+    // Persist to DB
+    if let Err(e) = crate::settings_store::upsert_setting(
+        &state.db,
+        state.default_tenant_id,
+        crate::SettingKey::MqttMaxClientsPerTenant,
+        serde_json::Value::Number(serde_json::Number::from(req.max_clients_per_tenant)),
+    )
+    .await
+    {
+        tracing::error!("Failed to persist MQTT limit: {e:?}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    state
+        .settings
+        .set_mqtt_max_clients_per_tenant(req.max_clients_per_tenant)
+        .await;
+
+    (
+        StatusCode::OK,
+        Json(MqttLimitResponse {
+            max_clients_per_tenant: req.max_clients_per_tenant,
+        }),
+    )
+        .into_response()
+}
+
+/// Get a specific MQTT client configuration
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/mqtt/{id}",
+    params(
+        ("id" = String, Path, description = "MQTT client ID")
+    ),
+    responses(
+        (status = 200, description = "MQTT client configuration", body = MqttClientResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "MQTT client not found")
+    ),
+    tag = "Settings",
+    security(("bearer_token" = []))
+)]
+pub async fn get_mqtt_settings(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    tenant: TenantContext,
+    Path(id): Path<String>,
+) -> Response {
+    if !user.has_permission(Permission::ViewSettings) {
+        return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
+    }
+
+    let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "invalid id").into_response(),
+    };
+
+    match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
+        Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {
+            (StatusCode::OK, Json(model_to_response(&model))).into_response()
+        }
+        Ok(Some(_)) => StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load MQTT client: {e:?}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// Update a specific MQTT client configuration
+#[utoipa::path(
+    put,
+    path = "/api/v1/settings/mqtt/{id}",
+    params(
+        ("id" = String, Path, description = "MQTT client ID")
+    ),
     request_body = UpdateMqttClientRequest,
     responses(
         (status = 200, description = "Settings updated", body = MqttClientResponse),
         (status = 400, description = "Invalid values"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
-        (status = 404, description = "No MQTT client configured")
+        (status = 404, description = "MQTT client not found")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
@@ -177,16 +317,22 @@ pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
     tenant: TenantContext,
+    Path(id): Path<String>,
     Json(req): Json<UpdateMqttClientRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let tenant_id = tenant.tenant_id;
-    let existing = match mqtt_client_store::load_mqtt_client(&state.db, tenant_id).await {
-        Ok(Some(model)) => model,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+    let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "invalid id").into_response(),
+    };
+
+    let existing = match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await
+    {
+        Ok(Some(model)) if model.tenant_id == tenant.tenant_id => model,
+        Ok(Some(_)) | Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -259,7 +405,19 @@ pub async fn update_mqtt_settings(
     })
     .await
     {
-        Ok(model) => (StatusCode::OK, Json(model_to_response(&model))).into_response(),
+        Ok(model) => {
+            // Push config update to MQTT service if assigned
+            let lease_coordinator =
+                MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+            if let Err(e) = lease_coordinator
+                .push_mqtt_client_config_update(mqtt_client_id)
+                .await
+            {
+                tracing::warn!("Failed to push MQTT config update: {e:?}");
+            }
+
+            (StatusCode::OK, Json(model_to_response(&model))).into_response()
+        }
         Err(e) => {
             tracing::error!("Failed to update MQTT client: {e:?}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -267,15 +425,18 @@ pub async fn update_mqtt_settings(
     }
 }
 
-/// Delete MQTT client configuration
+/// Delete a specific MQTT client configuration
 #[utoipa::path(
     delete,
-    path = "/api/v1/settings/mqtt",
+    path = "/api/v1/settings/mqtt/{id}",
+    params(
+        ("id" = String, Path, description = "MQTT client ID")
+    ),
     responses(
         (status = 204, description = "MQTT client deleted"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized"),
-        (status = 404, description = "No MQTT client configured")
+        (status = 404, description = "MQTT client not found")
     ),
     tag = "Settings",
     security(("bearer_token" = []))
@@ -284,13 +445,38 @@ pub async fn delete_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
     tenant: TenantContext,
+    Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
         return (StatusCode::FORBIDDEN, "Insufficient permissions").into_response();
     }
 
-    let tenant_id = tenant.tenant_id;
-    match mqtt_client_store::delete_mqtt_client(&state.db, tenant_id).await {
+    let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "invalid id").into_response(),
+    };
+
+    // Verify tenant ownership
+    match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
+        Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {}
+        Ok(Some(_)) | Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to load MQTT client: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
+
+    // Revoke lease first
+    let lease_coordinator =
+        MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+    if let Err(e) = lease_coordinator
+        .revoke_mqtt_client(mqtt_client_id, "mqtt client deleted")
+        .await
+    {
+        tracing::warn!("Failed to revoke MQTT client lease: {e:?}");
+    }
+
+    match mqtt_client_store::delete_mqtt_client(&state.db, mqtt_client_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             if let mqtt_client_store::MqttClientError::NotFound = e.current_context() {

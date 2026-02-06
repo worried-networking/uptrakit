@@ -203,7 +203,7 @@ async fn run_authenticated(
     conn.send(ServiceMessage::Register(MqttRegisterPayload {
         instance_id: instance_id.to_string(),
         max_tenants: args.max_tenants,
-        active_tenants: vec![], // Empty on fresh start
+        active_mqtt_clients: vec![], // Empty on fresh start
     }))
     .await
     .context_to::<AppError>()?;
@@ -227,12 +227,12 @@ async fn run_authenticated(
                         tenant_mgr.apply_assignments(payload.tenants).await;
                     }
                     Some(ControllerMessage::TenantConfigUpdated(payload)) => {
-                        tracing::info!(tenant_id = %payload.tenant.tenant_id, "tenant config updated");
-                        tenant_mgr.reload_tenant(payload.tenant).await;
+                        tracing::info!(mqtt_client_id = %payload.tenant.mqtt_client_id, "mqtt client config updated");
+                        tenant_mgr.reload_client(payload.tenant).await;
                     }
                     Some(ControllerMessage::TenantRevoked(payload)) => {
-                        tracing::info!(tenant_id = %payload.tenant_id, reason = %payload.reason, "tenant revoked");
-                        tenant_mgr.stop_tenant(&payload.tenant_id).await;
+                        tracing::info!(mqtt_client_id = %payload.mqtt_client_id, reason = %payload.reason, "mqtt client revoked");
+                        tenant_mgr.stop_client(&payload.mqtt_client_id).await;
                     }
                     Some(ControllerMessage::CaBundleUpdated(payload)) => {
                         tracing::info!("CA bundle updated");
@@ -272,12 +272,12 @@ async fn run_authenticated(
         }
     }
 
-    // Graceful shutdown: notify controller with active tenant list
-    let active = tenant_mgr.active_tenant_ids();
+    // Graceful shutdown: notify controller with active MQTT client list
+    let active = tenant_mgr.active_mqtt_client_ids();
     let _ = conn
         .send(ServiceMessage::Disconnecting(DisconnectingPayload {
             reason: DisconnectReason::Shutdown,
-            active_tenants: active,
+            active_mqtt_clients: active,
         }))
         .await;
 

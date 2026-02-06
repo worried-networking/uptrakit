@@ -4,6 +4,18 @@ use crate::mqtt_transport::MqttTransport;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MqttLimitResponse {
+    pub max_clients_per_tenant: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateMqttLimitRequest {
+    pub max_clients_per_tenant: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MqttClientResponse {
     pub id: String,
     pub enabled: bool,

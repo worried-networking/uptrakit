@@ -24,6 +24,7 @@ pub enum SettingKey {
     PkiAddr,
     MultiTenancyEnabled,
     RegistrationRequireTokenForOidc,
+    MqttMaxClientsPerTenant,
 }
 
 impl SettingKey {
@@ -46,6 +47,7 @@ impl SettingKey {
             Self::PkiAddr => "network.pki_addr",
             Self::MultiTenancyEnabled => "multi_tenancy.enabled",
             Self::RegistrationRequireTokenForOidc => "registration.require_token_for_oidc",
+            Self::MqttMaxClientsPerTenant => "mqtt.max_clients_per_tenant",
         }
     }
 
@@ -70,6 +72,7 @@ impl SettingKey {
             "network.pki_addr" => Some(Self::PkiAddr),
             "multi_tenancy.enabled" => Some(Self::MultiTenancyEnabled),
             "registration.require_token_for_oidc" => Some(Self::RegistrationRequireTokenForOidc),
+            "mqtt.max_clients_per_tenant" => Some(Self::MqttMaxClientsPerTenant),
             _ => None,
         }
     }
@@ -86,6 +89,7 @@ impl SettingKey {
                 | Self::ForwardedClientCertPemHeader
                 | Self::PkiAddr
                 | Self::MultiTenancyEnabled
+                | Self::MqttMaxClientsPerTenant
         )
     }
 }
@@ -134,6 +138,7 @@ mod tests {
         assert!(SettingKey::ForwardedClientCertPemHeader.is_global());
         assert!(SettingKey::PkiAddr.is_global());
         assert!(SettingKey::MultiTenancyEnabled.is_global());
+        assert!(SettingKey::MqttMaxClientsPerTenant.is_global());
         // Per-tenant keys
         assert!(!SettingKey::RegistrationMode.is_global());
         assert!(!SettingKey::EnrollmentTokenHash.is_global());

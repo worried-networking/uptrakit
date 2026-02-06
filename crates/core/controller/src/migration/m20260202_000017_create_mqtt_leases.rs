@@ -2,6 +2,7 @@ use sea_orm_migration::prelude::*;
 use sea_orm_migration::schema::*;
 
 use super::m20260129_000001_initial::Tenants;
+use super::m20260202_000016_create_mqtt_clients::MqttClients;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -21,6 +22,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(MqttLeases::TenantId).uuid().not_null())
+                    .col(ColumnDef::new(MqttLeases::MqttClientId).uuid().not_null())
                     .col(string(MqttLeases::InstanceId))
                     .col(timestamp(MqttLeases::HeartbeatAt))
                     .col(timestamp(MqttLeases::CreatedAt))
@@ -31,17 +33,24 @@ impl MigrationTrait for Migration {
                             .to(Tenants::Table, Tenants::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_mqtt_leases_mqtt_client")
+                            .from(MqttLeases::Table, MqttLeases::MqttClientId)
+                            .to(MqttClients::Table, MqttClients::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
                     .to_owned(),
             )
             .await?;
 
-        // One lease per tenant (prevents duplicate claims)
+        // One lease per MQTT client config (prevents duplicate claims)
         manager
             .create_index(
                 Index::create()
-                    .name("uq_mqtt_leases_tenant_id")
+                    .name("uq_mqtt_leases_mqtt_client_id")
                     .table(MqttLeases::Table)
-                    .col(MqttLeases::TenantId)
+                    .col(MqttLeases::MqttClientId)
                     .unique()
                     .to_owned(),
             )
@@ -84,6 +93,7 @@ enum MqttLeases {
     Table,
     Id,
     TenantId,
+    MqttClientId,
     InstanceId,
     HeartbeatAt,
     CreatedAt,
