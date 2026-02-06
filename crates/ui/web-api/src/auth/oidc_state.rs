@@ -389,6 +389,34 @@ impl OidcRegistrationStore {
         Ok(())
     }
 
+    /// Non-destructive read: returns the pending registration if it exists and is
+    /// not expired, without removing it from the store. Use this to validate
+    /// preconditions (e.g. registration token) before consuming with [`take()`].
+    pub async fn get(&self, code: &str) -> Result<Option<PendingOidcRegistrationData>> {
+        let now = OffsetDateTime::now_utc();
+
+        let reg = match PendingOidcRegistration::find_by_id(code)
+            .filter(pending_oidc_registration::Column::ExpiresAt.gt(now))
+            .one(&self.db)
+            .await
+            .context_to()?
+        {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let mapped_roles: Vec<String> = serde_json::from_value(reg.mapped_roles).context_to()?;
+
+        Ok(Some(PendingOidcRegistrationData {
+            provider_id: reg.provider_id,
+            oidc_subject: reg.oidc_subject,
+            email: reg.email,
+            first_name: reg.first_name,
+            last_name: reg.last_name,
+            mapped_roles,
+        }))
+    }
+
     pub async fn take(&self, code: &str) -> Result<Option<PendingOidcRegistrationData>> {
         let now = OffsetDateTime::now_utc();
 
@@ -700,6 +728,125 @@ mod tests {
         let store = OidcRegistrationStore::new(db);
 
         let reg = store.take("nonexistent").await.unwrap();
+        assert!(reg.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_get_returns_data_without_consuming() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db);
+
+        let provider_id = uuid::Uuid::now_v7();
+
+        store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: "reg-get-1".to_string(),
+                provider_id,
+                oidc_subject: "subject-get".to_string(),
+                email: "get@example.com".to_string(),
+                first_name: Some("Get".to_string()),
+                last_name: Some("Test".to_string()),
+                mapped_roles: vec!["viewer".to_string()],
+            })
+            .await
+            .unwrap();
+
+        // First get returns data
+        let reg = store.get("reg-get-1").await.unwrap();
+        assert!(reg.is_some());
+        let reg = reg.unwrap();
+        assert_eq!(reg.provider_id, provider_id);
+        assert_eq!(reg.email, "get@example.com");
+
+        // Second get still returns data (not consumed)
+        let reg = store.get("reg-get-1").await.unwrap();
+        assert!(reg.is_some());
+
+        // take() still works after get()
+        let reg = store.take("reg-get-1").await.unwrap();
+        assert!(reg.is_some());
+
+        // Now it's consumed
+        let reg = store.get("reg-get-1").await.unwrap();
+        assert!(reg.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_get_nonexistent() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db);
+
+        let reg = store.get("nonexistent").await.unwrap();
+        assert!(reg.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_get_expired() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db.clone());
+
+        store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: "reg-get-expired".to_string(),
+                provider_id: uuid::Uuid::now_v7(),
+                oidc_subject: "sub".to_string(),
+                email: "e@x.com".to_string(),
+                first_name: None,
+                last_name: None,
+                mapped_roles: vec![],
+            })
+            .await
+            .unwrap();
+
+        // Backdate to make it expired
+        db.execute_unprepared(
+            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour') WHERE registration_code = 'reg-get-expired'"
+        ).await.unwrap();
+
+        let reg = store.get("reg-get-expired").await.unwrap();
+        assert!(reg.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_retry_after_failed_validation() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db);
+
+        let provider_id = uuid::Uuid::now_v7();
+
+        store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: "reg-retry-1".to_string(),
+                provider_id,
+                oidc_subject: "subject-retry".to_string(),
+                email: "retry@example.com".to_string(),
+                first_name: Some("Retry".to_string()),
+                last_name: None,
+                mapped_roles: vec![],
+            })
+            .await
+            .unwrap();
+
+        // Simulate the fixed handler flow: get() to peek, then validation fails,
+        // entry should still be available for retry
+        let reg = store.get("reg-retry-1").await.unwrap();
+        assert!(reg.is_some());
+
+        // "Validation failed" — do NOT call take(), entry stays in store
+
+        // User retries with correct token — get() still works
+        let reg = store.get("reg-retry-1").await.unwrap();
+        assert!(reg.is_some());
+
+        // "Validation passed" — now consume with take()
+        let reg = store.take("reg-retry-1").await.unwrap();
+        assert!(reg.is_some());
+        let reg = reg.unwrap();
+        assert_eq!(reg.provider_id, provider_id);
+        assert_eq!(reg.email, "retry@example.com");
+
+        // Entry is consumed — no more retries
+        let reg = store.get("reg-retry-1").await.unwrap();
         assert!(reg.is_none());
     }
 

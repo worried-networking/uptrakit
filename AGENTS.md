@@ -481,7 +481,8 @@ The `needs_token_for_oidc(is_first_user: bool) -> bool` helper on `RegistrationS
 3. User is redirected to `/login?registration_token_required=true&registration_code={code}`.
 4. Frontend shows a token input form.
 5. User submits the token to `POST /api/v1/auth/oidc/complete-registration`.
-6. Backend validates the token, creates the user, assigns roles, creates session + JWT.
+6. Backend peeks at the pending registration via `get()` (non-destructive), validates the token. If the token is invalid, the entry remains in the store so the user can retry with a correct token.
+7. On successful validation, the entry is atomically consumed via `take()`, the user is created, roles assigned, and session + JWT issued.
 
 **New endpoint:**
 
@@ -495,7 +496,7 @@ The `needs_token_for_oidc(is_first_user: bool) -> bool` helper on `RegistrationS
 | --- | --- | --- | --- |
 | `registration.require_token_for_oidc` | bool | `false` | When `true` and mode is `Invite`, require registration token for OIDC user creation |
 
-**New store:** `OidcRegistrationStore` in `crates/ui/web-api/src/auth/oidc_state.rs` — follows the same atomic-delete pattern as `AccountLinkStore`. Methods: `insert()`, `take()`, `cleanup_expired()`.
+**New store:** `OidcRegistrationStore` in `crates/ui/web-api/src/auth/oidc_state.rs` — follows the same atomic-delete pattern as `AccountLinkStore`. Methods: `insert()`, `get()` (non-destructive read for pre-validation), `take()` (atomic consume), `cleanup_expired()`.
 
 **New entity:** `pending_oidc_registration` in `crates/shared/db/src/entity/pending_oidc_registration.rs` — stores deferred OIDC registration claims (registration_code PK, provider_id, oidc_subject, email, names, mapped_roles JSON, expires_at).
 

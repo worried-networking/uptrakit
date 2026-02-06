@@ -696,13 +696,13 @@ pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcCompleteRegistrationRequest>,
 ) -> Response {
-    // 1. Take pending registration from store (validates code, single-use)
-    let pending = match state
+    // 1. Peek at pending registration (non-destructive) to validate token first
+    match state
         .oidc_registration_store
-        .take(&req.registration_code)
+        .get(&req.registration_code)
         .await
     {
-        Ok(Some(p)) => p,
+        Ok(Some(_)) => {}
         Ok(None) => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -716,13 +716,35 @@ pub async fn oidc_complete_registration(
         }
     };
 
-    // 2. Validate the registration token against current settings
+    // 2. Validate the registration token BEFORE consuming the entry —
+    //    on failure the pending registration stays in the store so the user can retry
     let reg_settings = state.settings.registration().await;
     if let Err(e) = reg_settings.validate(Some(&req.registration_token)) {
         return e.into_response();
     }
 
-    // 3. Race condition guard: verify user still doesn't exist
+    // 3. Token valid — atomically consume the pending registration
+    let pending = match state
+        .oidc_registration_store
+        .take(&req.registration_code)
+        .await
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            // Entry expired or was consumed by a concurrent request between get() and take()
+            return (
+                StatusCode::BAD_REQUEST,
+                "Invalid or expired registration code",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to consume pending OIDC registration: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 4. Race condition guard: verify user still doesn't exist
     let user_exists = User::find()
         .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&pending.email))
         .count(&state.db)
@@ -738,7 +760,7 @@ pub async fn oidc_complete_registration(
             .into_response();
     }
 
-    // 4. Create user (no password, same as resolve_oidc_user NewUser path)
+    // 5. Create user (no password, same as resolve_oidc_user NewUser path)
     let user_id = generate_uuid();
     let now = OffsetDateTime::now_utc();
     let user_model = uptrakit_shared_db::entity::user::ActiveModel {
@@ -758,7 +780,7 @@ pub async fn oidc_complete_registration(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // 5. Create OIDC link
+    // 6. Create OIDC link
     let link = user_oidc_link::ActiveModel {
         id: Set(generate_uuid()),
         user_id: Set(user_id),
@@ -771,7 +793,7 @@ pub async fn oidc_complete_registration(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    // 6. Check if this is the first user (just created, so count == 1)
+    // 7. Check if this is the first user (just created, so count == 1)
     let is_first_user = User::find()
         .count(&state.db)
         .await
@@ -811,7 +833,7 @@ pub async fn oidc_complete_registration(
         }
     }
 
-    // 7. Sync OIDC roles using stored mapped_roles
+    // 8. Sync OIDC roles using stored mapped_roles
     if !pending.mapped_roles.is_empty()
         && let Some(provider) =
             find_active_provider(&state.db, state.default_tenant_id, pending.provider_id).await
@@ -851,7 +873,7 @@ pub async fn oidc_complete_registration(
         .await;
     }
 
-    // 8. Create session + JWT (same pattern as oidc_exchange)
+    // 9. Create session + JWT (same pattern as oidc_exchange)
     let session_service = SessionService::new(state.db.clone());
     let refresh_token = match session_service
         .create_refresh_token(
