@@ -66,8 +66,7 @@ impl RegistrationSettings {
             // Read from pre-fetched map
             let mode = raw
                 .get_setting(SettingKey::RegistrationMode)
-                .and_then(|v| v.as_str())
-                .and_then(RegistrationMode::parse_str)
+                .and_then(|v| v.as_str().and_then(|s| s.parse::<RegistrationMode>().ok()))
                 .unwrap_or(RegistrationMode::Closed);
 
             let token_hash = raw

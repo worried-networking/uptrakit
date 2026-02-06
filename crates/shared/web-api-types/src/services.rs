@@ -29,14 +29,29 @@ impl ServiceStatus {
             Self::Deactivated => "deactivated",
         }
     }
+}
 
-    pub fn parse_str(s: &str) -> Option<Self> {
+#[derive(Debug)]
+pub struct ParseServiceStatusError;
+
+impl std::fmt::Display for ParseServiceStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid service status value")
+    }
+}
+
+impl std::error::Error for ParseServiceStatusError {}
+
+impl std::str::FromStr for ServiceStatus {
+    type Err = ParseServiceStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "pending" => Some(Self::Pending),
-            "approved" => Some(Self::Approved),
-            "rejected" => Some(Self::Rejected),
-            "deactivated" => Some(Self::Deactivated),
-            _ => None,
+            "pending" => Ok(Self::Pending),
+            "approved" => Ok(Self::Approved),
+            "rejected" => Ok(Self::Rejected),
+            "deactivated" => Ok(Self::Deactivated),
+            _ => Err(ParseServiceStatusError),
         }
     }
 }

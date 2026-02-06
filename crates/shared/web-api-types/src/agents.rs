@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -17,13 +19,28 @@ impl AgentStatus {
             Self::Rejected => "rejected",
         }
     }
+}
 
-    pub fn parse_str(s: &str) -> Option<Self> {
+#[derive(Debug)]
+pub struct ParseAgentStatusError;
+
+impl fmt::Display for ParseAgentStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid agent status value")
+    }
+}
+
+impl std::error::Error for ParseAgentStatusError {}
+
+impl FromStr for AgentStatus {
+    type Err = ParseAgentStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "pending" => Some(Self::Pending),
-            "approved" => Some(Self::Approved),
-            "rejected" => Some(Self::Rejected),
-            _ => None,
+            "pending" => Ok(Self::Pending),
+            "approved" => Ok(Self::Approved),
+            "rejected" => Ok(Self::Rejected),
+            _ => Err(ParseAgentStatusError),
         }
     }
 }

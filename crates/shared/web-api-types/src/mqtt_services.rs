@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// Status of an MQTT service instance in the enrollment/approval workflow.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -20,14 +22,29 @@ impl MqttServiceStatus {
             Self::Deactivated => "deactivated",
         }
     }
+}
 
-    pub fn parse_str(s: &str) -> Option<Self> {
+#[derive(Debug)]
+pub struct ParseMqttServiceStatusError;
+
+impl fmt::Display for ParseMqttServiceStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid MQTT service status value")
+    }
+}
+
+impl std::error::Error for ParseMqttServiceStatusError {}
+
+impl FromStr for MqttServiceStatus {
+    type Err = ParseMqttServiceStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "pending" => Some(Self::Pending),
-            "approved" => Some(Self::Approved),
-            "rejected" => Some(Self::Rejected),
-            "deactivated" => Some(Self::Deactivated),
-            _ => None,
+            "pending" => Ok(Self::Pending),
+            "approved" => Ok(Self::Approved),
+            "rejected" => Ok(Self::Rejected),
+            "deactivated" => Ok(Self::Deactivated),
+            _ => Err(ParseMqttServiceStatusError),
         }
     }
 }

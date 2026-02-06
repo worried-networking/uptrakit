@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// Registration mode controlling how new users can sign up.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -21,13 +23,28 @@ impl RegistrationMode {
             Self::Closed => "closed",
         }
     }
+}
 
-    pub fn parse_str(s: &str) -> Option<Self> {
+#[derive(Debug)]
+pub struct ParseRegistrationModeError;
+
+impl fmt::Display for ParseRegistrationModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid registration mode value")
+    }
+}
+
+impl std::error::Error for ParseRegistrationModeError {}
+
+impl FromStr for RegistrationMode {
+    type Err = ParseRegistrationModeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "open" => Some(Self::Open),
-            "invite" => Some(Self::Invite),
-            "closed" => Some(Self::Closed),
-            _ => None,
+            "open" => Ok(Self::Open),
+            "invite" => Ok(Self::Invite),
+            "closed" => Ok(Self::Closed),
+            _ => Err(ParseRegistrationModeError),
         }
     }
 }

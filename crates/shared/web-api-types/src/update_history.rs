@@ -19,14 +19,29 @@ impl UpdateStatus {
             Self::Failed => "failed",
         }
     }
+}
 
-    pub fn parse_str(s: &str) -> Option<Self> {
+#[derive(Debug)]
+pub struct ParseUpdateStatusError;
+
+impl std::fmt::Display for ParseUpdateStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid update status value")
+    }
+}
+
+impl std::error::Error for ParseUpdateStatusError {}
+
+impl std::str::FromStr for UpdateStatus {
+    type Err = ParseUpdateStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "pending" => Some(Self::Pending),
-            "in_progress" => Some(Self::InProgress),
-            "completed" => Some(Self::Completed),
-            "failed" => Some(Self::Failed),
-            _ => None,
+            "pending" => Ok(Self::Pending),
+            "in_progress" => Ok(Self::InProgress),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            _ => Err(ParseUpdateStatusError),
         }
     }
 }
