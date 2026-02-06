@@ -4,8 +4,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
-    pending_account_link, pending_oidc_flow, pending_oidc_token_exchange,
-    prelude::{PendingAccountLink, PendingOidcFlow, PendingOidcTokenExchange},
+    pending_account_link, pending_oidc_flow, pending_oidc_registration,
+    pending_oidc_token_exchange,
+    prelude::{
+        PendingAccountLink, PendingOidcFlow, PendingOidcRegistration, PendingOidcTokenExchange,
+    },
 };
 
 const TTL_SECONDS: i64 = 600; // 10 minutes
@@ -318,6 +321,116 @@ impl OidcTokenExchangeStore {
     }
 }
 
+/// Parameters for inserting a pending OIDC registration.
+pub struct PendingOidcRegistrationParams {
+    pub registration_code: String,
+    pub provider_id: uuid::Uuid,
+    pub oidc_subject: String,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub mapped_roles: Vec<String>,
+}
+
+/// Pending OIDC registration data returned by `take()`.
+pub struct PendingOidcRegistrationData {
+    pub provider_id: uuid::Uuid,
+    pub oidc_subject: String,
+    pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    /// Pre-mapped local role names to assign after registration.
+    pub mapped_roles: Vec<String>,
+}
+
+/// Database-backed store for pending OIDC registrations keyed by registration code.
+#[derive(Clone)]
+pub struct OidcRegistrationStore {
+    db: DatabaseConnection,
+}
+
+impl OidcRegistrationStore {
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self { db }
+    }
+
+    pub async fn insert(&self, params: PendingOidcRegistrationParams) -> Result<()> {
+        let now = OffsetDateTime::now_utc();
+        let expires_at = now + time::Duration::seconds(TTL_SECONDS);
+
+        let roles_json = serde_json::to_value(&params.mapped_roles)
+            .map_err(|e| report!(OidcStoreError::Serialization(e.to_string())))?;
+
+        let model = pending_oidc_registration::ActiveModel {
+            registration_code: Set(params.registration_code),
+            provider_id: Set(params.provider_id),
+            oidc_subject: Set(params.oidc_subject),
+            email: Set(params.email),
+            first_name: Set(params.first_name),
+            last_name: Set(params.last_name),
+            mapped_roles: Set(roles_json),
+            created_at: Set(now),
+            expires_at: Set(expires_at),
+        };
+
+        model
+            .insert(&self.db)
+            .await
+            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+
+        Ok(())
+    }
+
+    pub async fn take(&self, code: &str) -> Result<Option<PendingOidcRegistrationData>> {
+        let now = OffsetDateTime::now_utc();
+
+        let reg = match PendingOidcRegistration::find_by_id(code)
+            .one(&self.db)
+            .await
+            .map_err(|e| report!(OidcStoreError::Database(e)))?
+        {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        // Atomic delete: only delete if not expired (HA-safe)
+        let result = PendingOidcRegistration::delete_many()
+            .filter(pending_oidc_registration::Column::RegistrationCode.eq(code))
+            .filter(pending_oidc_registration::Column::ExpiresAt.gt(now))
+            .exec(&self.db)
+            .await
+            .map_err(|e| report!(OidcStoreError::Database(e)))?;
+
+        if result.rows_affected == 0 {
+            return Ok(None);
+        }
+
+        let mapped_roles: Vec<String> = serde_json::from_value(reg.mapped_roles)
+            .map_err(|e| report!(OidcStoreError::Serialization(e.to_string())))?;
+
+        Ok(Some(PendingOidcRegistrationData {
+            provider_id: reg.provider_id,
+            oidc_subject: reg.oidc_subject,
+            email: reg.email,
+            first_name: reg.first_name,
+            last_name: reg.last_name,
+            mapped_roles,
+        }))
+    }
+
+    pub async fn cleanup_expired(&self) {
+        let now = OffsetDateTime::now_utc();
+        let result = PendingOidcRegistration::delete_many()
+            .filter(pending_oidc_registration::Column::ExpiresAt.lt(now))
+            .exec(&self.db)
+            .await;
+
+        if let Err(e) = result {
+            tracing::warn!("failed to clean up expired OIDC registrations: {e}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +450,10 @@ mod tests {
         db.execute(&stmt)
             .await
             .expect("create token_exchange table");
+        let stmt = schema.create_table_from_entity(PendingOidcRegistration);
+        db.execute(&stmt)
+            .await
+            .expect("create oidc_registration table");
 
         db
     }
@@ -533,5 +650,78 @@ mod tests {
 
         let exchange = store.take("code-to-expire").await.unwrap();
         assert!(exchange.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_insert_and_take() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db);
+
+        let provider_id = uuid::Uuid::now_v7();
+
+        store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: "reg-code-1".to_string(),
+                provider_id,
+                oidc_subject: "subject-456".to_string(),
+                email: "newuser@example.com".to_string(),
+                first_name: Some("New".to_string()),
+                last_name: Some("User".to_string()),
+                mapped_roles: vec!["viewer".to_string()],
+            })
+            .await
+            .unwrap();
+
+        let reg = store.take("reg-code-1").await.unwrap();
+        assert!(reg.is_some());
+        let reg = reg.unwrap();
+        assert_eq!(reg.provider_id, provider_id);
+        assert_eq!(reg.oidc_subject, "subject-456");
+        assert_eq!(reg.email, "newuser@example.com");
+        assert_eq!(reg.first_name.as_deref(), Some("New"));
+        assert_eq!(reg.last_name.as_deref(), Some("User"));
+        assert_eq!(reg.mapped_roles, vec!["viewer".to_string()]);
+
+        // Second take should return None
+        let reg = store.take("reg-code-1").await.unwrap();
+        assert!(reg.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_take_nonexistent() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db);
+
+        let reg = store.take("nonexistent").await.unwrap();
+        assert!(reg.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_oidc_registration_cleanup() {
+        let db = test_db().await;
+        let store = OidcRegistrationStore::new(db.clone());
+
+        store
+            .insert(PendingOidcRegistrationParams {
+                registration_code: "reg-to-expire".to_string(),
+                provider_id: uuid::Uuid::now_v7(),
+                oidc_subject: "sub".to_string(),
+                email: "e@x.com".to_string(),
+                first_name: None,
+                last_name: None,
+                mapped_roles: vec![],
+            })
+            .await
+            .unwrap();
+
+        // Backdate the registration
+        db.execute_unprepared(
+            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour') WHERE registration_code = 'reg-to-expire'"
+        ).await.unwrap();
+
+        store.cleanup_expired().await;
+
+        let reg = store.take("reg-to-expire").await.unwrap();
+        assert!(reg.is_none());
     }
 }

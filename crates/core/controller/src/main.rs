@@ -640,6 +640,8 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::oidc_state::AccountLinkStore::new(db_conn.clone());
     let oidc_token_exchange_store =
         uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new(db_conn.clone());
+    let oidc_registration_store =
+        uptrakit_web_api::auth::oidc_state::OidcRegistrationStore::new(db_conn.clone());
     let device_flow_store =
         uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
 
@@ -657,6 +659,7 @@ async fn run(args: cli::Args) -> Result<()> {
         account_link_store: account_link_store.clone(),
         jwt: Arc::new(jwt_manager),
         oidc_token_exchange_store: oidc_token_exchange_store.clone(),
+        oidc_registration_store: oidc_registration_store.clone(),
         device_flow_store: device_flow_store.clone(),
         pki_path: pki_path.clone(),
         rustls_config: rustls_config.clone(),
@@ -675,6 +678,7 @@ async fn run(args: cli::Args) -> Result<()> {
                     oidc_flow_store.cleanup_expired().await;
                     account_link_store.cleanup_expired().await;
                     oidc_token_exchange_store.cleanup_expired().await;
+                    oidc_registration_store.cleanup_expired().await;
                     device_flow_store.cleanup_expired().await;
                 }
                 _ = oidc_cleanup_token.cancelled() => {

@@ -30,7 +30,9 @@ use utoipa_axum::routes;
 
 use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
-use auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
+use auth::oidc_state::{
+    AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
+};
 use service_connections::ServiceConnectionRegistry;
 use settings::Settings;
 
@@ -81,6 +83,8 @@ pub struct AppState {
     pub jwt: Arc<JwtManager>,
     /// Database-backed store for pending OIDC token exchanges.
     pub oidc_token_exchange_store: OidcTokenExchangeStore,
+    /// Database-backed store for pending OIDC registrations (token-gated).
+    pub oidc_registration_store: OidcRegistrationStore,
     /// Database-backed store for pending device authorization flows.
     pub device_flow_store: DeviceFlowStore,
     /// Path to the PKI directory (for server cert renewal).
@@ -120,6 +124,7 @@ pub struct AppState {
         routes::oidc_auth::oidc_callback,
         routes::oidc_auth::oidc_link,
         routes::oidc_auth::oidc_exchange,
+        routes::oidc_auth::oidc_complete_registration,
         routes::oidc_providers::create_provider,
         routes::oidc_providers::list_providers,
         routes::oidc_providers::get_provider,
@@ -190,6 +195,7 @@ pub struct AppState {
             routes::oidc_auth::OidcAuthorizeResponse,
             routes::oidc_auth::OidcLinkRequest,
             routes::oidc_auth::OidcExchangeRequest,
+            routes::oidc_auth::OidcCompleteRegistrationRequest,
             routes::oidc_providers::CreateOidcProviderRequest,
             routes::oidc_providers::UpdateOidcProviderRequest,
             routes::oidc_providers::OidcProviderResponse,
@@ -400,6 +406,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::oidc_auth::oidc_callback))
         .routes(routes!(routes::oidc_auth::oidc_link))
         .routes(routes!(routes::oidc_auth::oidc_exchange))
+        .routes(routes!(routes::oidc_auth::oidc_complete_registration))
         .routes(routes!(routes::device_auth::device_auth_start))
         .routes(routes!(routes::device_auth::device_auth_poll))
         .merge(auth_routes)
@@ -551,6 +558,7 @@ mod tests {
             RegistrationSettings {
                 mode: RegistrationMode::Open,
                 token_hash: None,
+                require_token_for_oidc: false,
             },
             7,
         );
@@ -570,6 +578,9 @@ mod tests {
                 b"test-secret-lib",
             )),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                db.clone(),
+            ),
+            oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
                 db.clone(),
             ),
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),

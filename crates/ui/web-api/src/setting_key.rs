@@ -23,6 +23,7 @@ pub enum SettingKey {
     ForwardedClientCertPemHeader,
     PkiAddr,
     MultiTenancyEnabled,
+    RegistrationRequireTokenForOidc,
 }
 
 impl SettingKey {
@@ -44,6 +45,7 @@ impl SettingKey {
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
             Self::PkiAddr => "network.pki_addr",
             Self::MultiTenancyEnabled => "multi_tenancy.enabled",
+            Self::RegistrationRequireTokenForOidc => "registration.require_token_for_oidc",
         }
     }
 
@@ -67,6 +69,7 @@ impl SettingKey {
             "network.forwarded_client_cert_pem_header" => Some(Self::ForwardedClientCertPemHeader),
             "network.pki_addr" => Some(Self::PkiAddr),
             "multi_tenancy.enabled" => Some(Self::MultiTenancyEnabled),
+            "registration.require_token_for_oidc" => Some(Self::RegistrationRequireTokenForOidc),
             _ => None,
         }
     }

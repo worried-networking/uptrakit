@@ -58,6 +58,13 @@ export async function handleOidcCallback(code: string) {
 	user.set(res.user);
 }
 
+export async function handleOidcCompleteRegistration(registrationCode: string, registrationToken: string) {
+	const res = await api.oidcCompleteRegistration(registrationCode, registrationToken);
+	localStorage.setItem('access_token', res.access_token);
+	localStorage.setItem('refresh_token', res.refresh_token);
+	user.set(res.user);
+}
+
 export async function handleOidcLink(linkToken: string, password?: string) {
 	const data: OidcLinkRequest = { link_token: linkToken };
 	if (password) {

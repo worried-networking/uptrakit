@@ -295,9 +295,16 @@ skip = [
     # reqwest: 0.12.x via openidconnect/oauth2, 0.13.x used directly by uptrakit
     { crate = "reqwest@0.12.28", reason = "pulled by openidconnect/oauth2; newer 0.13.x used by uptrakit crates" },
 
-    # windows-sys 0.45.x via jni → rustls-platform-verifier → reqwest 0.13 (platform-specific, macOS/Linux only)
-    # Note: 0.45.x/0.48.x windows-* crate duplicates exist but are platform-specific
-    # and only flagged on Windows targets, so no skip entries needed for them.
+    # windows-sys 0.45.x via jni → rustls-platform-verifier → reqwest 0.13
+    { crate = "windows-sys@0.45.0", reason = "pulled by jni → rustls-platform-verifier → reqwest 0.13; waiting for upstream update" },
+    { crate = "windows-targets@0.42.2", reason = "pulled by windows-sys@0.45.0 via jni → rustls-platform-verifier" },
+    { crate = "windows_aarch64_gnullvm@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+    { crate = "windows_aarch64_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+    { crate = "windows_i686_gnu@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+    { crate = "windows_i686_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+    { crate = "windows_x86_64_gnu@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+    { crate = "windows_x86_64_gnullvm@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+    { crate = "windows_x86_64_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

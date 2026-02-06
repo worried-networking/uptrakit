@@ -35,7 +35,10 @@ pub async fn get_registration_settings(
     }
 
     let reg = state.settings.registration().await;
-    let response = RegistrationSettingsResponse { mode: reg.mode };
+    let response = RegistrationSettingsResponse {
+        mode: reg.mode,
+        require_token_for_oidc: reg.require_token_for_oidc,
+    };
 
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -76,7 +79,13 @@ pub async fn update_registration_settings(
         .settings
         .registration_write()
         .await
-        .update(&state.db, state.default_tenant_id, req.mode, req.token)
+        .update(
+            &state.db,
+            state.default_tenant_id,
+            req.mode,
+            req.token,
+            req.require_token_for_oidc,
+        )
         .await
     {
         tracing::error!("Failed to update registration settings: {:?}", e);
@@ -84,7 +93,10 @@ pub async fn update_registration_settings(
     }
 
     let reg = state.settings.registration().await;
-    let response = RegistrationSettingsResponse { mode: reg.mode };
+    let response = RegistrationSettingsResponse {
+        mode: reg.mode,
+        require_token_for_oidc: reg.require_token_for_oidc,
+    };
 
     (StatusCode::OK, Json(response)).into_response()
 }

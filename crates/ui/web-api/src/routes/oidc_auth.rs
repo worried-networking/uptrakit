@@ -28,9 +28,10 @@ use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
 
 pub use super::auth::AuthResponse;
+use crate::auth::registration::RegistrationMode;
 pub use uptrakit_web_api_types::oidc_auth::{
-    AuthMethodsResponse, OidcAuthorizeResponse, OidcExchangeRequest, OidcLinkRequest,
-    OidcProviderInfo,
+    AuthMethodsResponse, OidcAuthorizeResponse, OidcCompleteRegistrationRequest,
+    OidcExchangeRequest, OidcLinkRequest, OidcProviderInfo,
 };
 
 #[derive(Deserialize)]
@@ -76,10 +77,14 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
         .map(|c| c == 0)
         .unwrap_or(false);
 
+    let reg_settings = state.settings.registration().await;
+    let registration_token_required = reg_settings.needs_token_for_oidc(setup_required);
+
     let response = AuthMethodsResponse {
         password: auth_settings.password_auth_enabled,
         oidc_providers,
         setup_required,
+        registration_token_required,
     };
 
     (StatusCode::OK, Json(response)).into_response()
@@ -338,6 +343,68 @@ pub async fn oidc_callback(
     // Get additional claims as JSON for role mapping
     let additional_claims = serde_json::to_value(claims.additional_claims()).unwrap_or_default();
 
+    // Pre-check: if registration mode is Invite and auto_create is enabled,
+    // check whether this would create a new user requiring a registration token.
+    let reg_settings = state.settings.registration().await;
+    if reg_settings.mode == RegistrationMode::Invite && provider.auto_create_users {
+        // Check if an OIDC link already exists for this subject
+        let has_link = UserOidcLink::find()
+            .filter(user_oidc_link::Column::ProviderId.eq(flow.provider_id))
+            .filter(user_oidc_link::Column::OidcSubject.eq(&sub))
+            .count(&state.db)
+            .await
+            .unwrap_or(1)
+            > 0;
+
+        if !has_link {
+            // Check if a user with this email already exists
+            let has_user = User::find()
+                .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&email))
+                .count(&state.db)
+                .await
+                .unwrap_or(1)
+                > 0;
+
+            if !has_user {
+                // This would be a brand-new user — check if token is required
+                let is_first_user = User::find()
+                    .count(&state.db)
+                    .await
+                    .map(|c| c == 0)
+                    .unwrap_or(false);
+
+                if reg_settings.needs_token_for_oidc(is_first_user) {
+                    // Store pending registration and redirect to token input form
+                    let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
+                    let code =
+                        generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+
+                    if let Err(e) = state
+                        .oidc_registration_store
+                        .insert(crate::auth::oidc_state::PendingOidcRegistrationParams {
+                            registration_code: code.clone(),
+                            provider_id: flow.provider_id,
+                            oidc_subject: sub.clone(),
+                            email: email.clone(),
+                            first_name: first_name.clone(),
+                            last_name: last_name.clone(),
+                            mapped_roles,
+                        })
+                        .await
+                    {
+                        tracing::error!("Failed to store pending OIDC registration: {e:?}");
+                        return Redirect::to("/login?error=oidc_internal_error").into_response();
+                    }
+
+                    return Redirect::to(&format!(
+                        "/login?registration_token_required=true&registration_code={code}"
+                    ))
+                    .into_response();
+                }
+            }
+        }
+    }
+
     // Resolve user
     let resolution = match resolve_oidc_user(
         &state.db,
@@ -591,6 +658,244 @@ pub async fn oidc_exchange(
             tracing::error!("Failed to create access token during OIDC exchange: {e:?}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
+    };
+
+    let response = AuthResponse {
+        access_token,
+        refresh_token,
+        expires_in: state.jwt.expires_in(),
+        token_type: "Bearer".to_string(),
+        user: super::auth::UserResponse {
+            id: user.id.to_string(),
+            email: user.email,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            permissions,
+        },
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Complete OIDC registration with a registration token (public).
+///
+/// Used when the OIDC callback determined that a new user would be created but
+/// the system requires a registration token (first user or `require_token_for_oidc` enabled).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/oidc/complete-registration",
+    request_body = OidcCompleteRegistrationRequest,
+    responses(
+        (status = 200, description = "Registration completed", body = AuthResponse),
+        (status = 400, description = "Invalid or expired registration code"),
+        (status = 403, description = "Invalid registration token")
+    ),
+    tag = "Authentication"
+)]
+pub async fn oidc_complete_registration(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OidcCompleteRegistrationRequest>,
+) -> Response {
+    // 1. Take pending registration from store (validates code, single-use)
+    let pending = match state
+        .oidc_registration_store
+        .take(&req.registration_code)
+        .await
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                "Invalid or expired registration code",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Failed to retrieve pending OIDC registration: {e:?}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 2. Validate the registration token against current settings
+    let reg_settings = state.settings.registration().await;
+    if let Err((status, msg)) = reg_settings.validate(Some(&req.registration_token)) {
+        return (status, msg).into_response();
+    }
+
+    // 3. Race condition guard: verify user still doesn't exist
+    let user_exists = User::find()
+        .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&pending.email))
+        .count(&state.db)
+        .await
+        .unwrap_or(1)
+        > 0;
+
+    if user_exists {
+        return (
+            StatusCode::CONFLICT,
+            "A user with this email already exists",
+        )
+            .into_response();
+    }
+
+    // 4. Create user (no password, same as resolve_oidc_user NewUser path)
+    let user_id = generate_uuid();
+    let now = OffsetDateTime::now_utc();
+    let user_model = uptrakit_shared_db::entity::user::ActiveModel {
+        id: Set(user_id),
+        email: Set(pending.email.clone()),
+        first_name: Set(pending.first_name.unwrap_or_default()),
+        last_name: Set(pending.last_name.unwrap_or_default()),
+        password_hash: Set(None),
+        is_active: Set(true),
+        deactivated_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    if let Err(e) = user_model.insert(&state.db).await {
+        tracing::error!("Failed to create user during OIDC registration: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // 5. Create OIDC link
+    let link = user_oidc_link::ActiveModel {
+        id: Set(generate_uuid()),
+        user_id: Set(user_id),
+        provider_id: Set(pending.provider_id),
+        oidc_subject: Set(pending.oidc_subject),
+        linked_at: Set(now),
+    };
+    if let Err(e) = link.insert(&state.db).await {
+        tracing::error!("Failed to create OIDC link during registration: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    // 6. Check if this is the first user (just created, so count == 1)
+    let is_first_user = User::find()
+        .count(&state.db)
+        .await
+        .map(|c| c == 1)
+        .unwrap_or(false);
+
+    if is_first_user {
+        // Assign owner role (no default user role was created above)
+        if let Err(e) =
+            super::auth::assign_owner_role(&state.db, state.default_tenant_id, user_id).await
+        {
+            tracing::error!(
+                "Failed to assign owner role to first OIDC user via registration: {e:?}"
+            );
+        }
+
+        // Complete initial setup (close registration, remove token)
+        if let Err(e) = state
+            .settings
+            .registration_write()
+            .await
+            .complete_initial_setup(&state.db, state.default_tenant_id)
+            .await
+        {
+            tracing::error!(
+                "Failed to complete initial setup for first OIDC user via registration: {e:?}"
+            );
+        }
+
+        tracing::info!("first user registered via OIDC complete-registration, assigned owner role");
+    } else {
+        // Assign default user role
+        if let Err(e) =
+            super::auth::assign_user_role(&state.db, state.default_tenant_id, user_id).await
+        {
+            tracing::error!("Failed to assign default role during OIDC registration: {e:?}");
+        }
+    }
+
+    // 7. Sync OIDC roles using stored mapped_roles
+    if !pending.mapped_roles.is_empty()
+        && let Some(provider) =
+            find_active_provider(&state.db, state.default_tenant_id, pending.provider_id).await
+    {
+            let mut fake_claims = serde_json::Map::new();
+            if let Some(ref path) = provider.role_claim_path {
+                let reverse_mapped: Vec<String> = pending
+                    .mapped_roles
+                    .iter()
+                    .filter_map(|local_name| {
+                        provider
+                            .role_mapping
+                            .0
+                            .iter()
+                            .find(|(_, v)| v.as_str() == local_name)
+                            .map(|(k, _)| k.clone())
+                    })
+                    .collect();
+                let first_segment = path.split('.').next().unwrap_or(path);
+                fake_claims.insert(
+                    first_segment.to_string(),
+                    serde_json::Value::Array(
+                        reverse_mapped
+                            .into_iter()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    ),
+                );
+            }
+            let _ = sync_oidc_roles(
+                &state.db,
+                state.default_tenant_id,
+                user_id,
+                &provider,
+                &serde_json::Value::Object(fake_claims),
+            )
+            .await;
+    }
+
+    // 8. Create session + JWT (same pattern as oidc_exchange)
+    let session_service = SessionService::new(state.db.clone());
+    let refresh_token = match session_service
+        .create_refresh_token(
+            user_id,
+            AuthMethod::Oidc {
+                provider_id: pending.provider_id,
+            },
+            None,
+            None,
+        )
+        .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(
+                "Failed to create refresh token during OIDC complete-registration: {e:?}"
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let permissions =
+        super::auth::get_user_permissions(&state.db, state.default_tenant_id, user_id)
+            .await
+            .unwrap_or_default();
+
+    let access_token = match state.jwt.create_access_token(
+        user_id,
+        &permissions,
+        "oidc",
+        Some(pending.provider_id),
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(
+                "Failed to create access token during OIDC complete-registration: {e:?}"
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let user = match User::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) => u,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
     let response = AuthResponse {

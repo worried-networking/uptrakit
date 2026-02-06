@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::auth::device_flow::DeviceFlowStore;
 use uptrakit_web_api::auth::jwt::JwtManager;
-use uptrakit_web_api::auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcTokenExchangeStore};
+use uptrakit_web_api::auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore};
 use uptrakit_web_api::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api::ca_snapshot::CaSnapshotData;
 use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
@@ -142,6 +142,7 @@ async fn build_state(
         RegistrationSettings {
             mode: RegistrationMode::Open,
             token_hash: None,
+            require_token_for_oidc: false,
         },
         7,
     );
@@ -176,6 +177,7 @@ async fn build_state(
         account_link_store: AccountLinkStore::new(db.clone()),
         jwt: Arc::new(JwtManager::from_secret(b"test-secret-reverse-proxy")),
         oidc_token_exchange_store: OidcTokenExchangeStore::new(db.clone()),
+        oidc_registration_store: OidcRegistrationStore::new(db.clone()),
         device_flow_store: DeviceFlowStore::new(db.clone()),
         pki_path: std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"),
         rustls_config: rustls_cfg,

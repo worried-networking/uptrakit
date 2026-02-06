@@ -22,6 +22,7 @@ mod m20260202_000016_create_mqtt_clients;
 mod m20260202_000017_create_mqtt_leases;
 mod m20260203_000018_create_update_history;
 mod m20260203_000019_create_mqtt_services;
+mod m20260205_000020_create_pending_oidc_registrations;
 
 pub struct Migrator;
 
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260202_000017_create_mqtt_leases::Migration),
             Box::new(m20260203_000018_create_update_history::Migration),
             Box::new(m20260203_000019_create_mqtt_services::Migration),
+            Box::new(m20260205_000020_create_pending_oidc_registrations::Migration),
         ]
     }
 }

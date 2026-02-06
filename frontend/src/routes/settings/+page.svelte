@@ -41,6 +41,7 @@
 	// --- Section data ---
 	let regMode: 'open' | 'invite' | 'closed' = $state('open');
 	let regToken: string = $state('');
+	let regRequireTokenForOidc: boolean = $state(false);
 
 	let passwordAuthEnabled: boolean = $state(true);
 
@@ -149,6 +150,7 @@
 
 		if (results[0].status === 'fulfilled') {
 			regMode = results[0].value.mode;
+			regRequireTokenForOidc = results[0].value.require_token_for_oidc;
 		}
 		if (results[1].status === 'fulfilled') {
 			passwordAuthEnabled = results[1].value.password_auth_enabled;
@@ -255,12 +257,16 @@
 	async function saveRegistration() {
 		clearError();
 		try {
-			const data: { mode: 'open' | 'invite' | 'closed'; token?: string } = { mode: regMode };
+			const data: { mode: 'open' | 'invite' | 'closed'; token?: string; require_token_for_oidc?: boolean } = { mode: regMode };
 			if (regMode === 'invite' && regToken) {
 				data.token = regToken;
 			}
+			if (regMode === 'invite') {
+				data.require_token_for_oidc = regRequireTokenForOidc;
+			}
 			const res = await updateRegistrationSettings(data);
 			regMode = res.mode;
+			regRequireTokenForOidc = res.require_token_for_oidc;
 			regToken = '';
 			showSuccess('Registration settings saved.');
 		} catch (e) {
@@ -505,6 +511,12 @@
 					/>
 					<small class="text-surface-600 dark:text-surface-400">Set a new token for invite-only registration. Leave blank to keep the current token.</small>
 				</label>
+
+				<label class="mb-4 flex items-center gap-3">
+					<input class="checkbox" type="checkbox" bind:checked={regRequireTokenForOidc} />
+					<span>Require registration token for OIDC users</span>
+				</label>
+				<small class="mb-4 block text-surface-600 dark:text-surface-400">When enabled, users signing in via OIDC for the first time must also provide the registration token.</small>
 			{/if}
 
 			<button class="btn preset-filled-primary-500" onclick={saveRegistration}>

@@ -312,7 +312,7 @@ The CLI uses an RFC 8628-style device authorization flow instead of password-bas
 - **Rate limiting**: 429 returned if polling faster than the 5-second interval.
 - **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.
 - **10-minute expiry**: flows auto-expire; cleanup runs every 5 minutes alongside OIDC state cleanup.
-- **Database-backed store**: all pending device flow state is persisted to the `pending_device_flows` table (shared with OIDC flow, account link, and token exchange stores). Survives controller restarts and supports HA multi-instance deployments. Only the resulting API token is persisted to the `api_tokens` table.
+- **Database-backed store**: all pending device flow state is persisted to the `pending_device_flows` table (shared with OIDC flow, account link, token exchange, and OIDC registration stores). Survives controller restarts and supports HA multi-instance deployments. Only the resulting API token is persisted to the `api_tokens` table.
 
 ## Permissions model
 
@@ -463,6 +463,40 @@ The controller supports bootstrapping an OIDC provider at startup via CLI flags.
 The client secret is never logged. The bootstrapped provider is created with `is_active=true` and `auto_create_users=true`.
 
 When the first user logs in via OIDC (bootstrapped or otherwise), they are automatically promoted to the `owner` role and initial setup is completed (registration mode set to closed).
+
+### OIDC registration token enforcement
+
+When registration mode is `Invite`, OIDC-based user creation can require a registration token:
+
+- **First user (initial setup)**: Always requires the registration token printed in controller startup logs.
+- **Subsequent users**: Requires the token only if `require_token_for_oidc` is enabled in registration settings.
+
+The `needs_token_for_oidc(is_first_user: bool) -> bool` helper on `RegistrationSettings` encapsulates this logic: returns `true` when mode is `Invite` AND (`is_first_user` OR `require_token_for_oidc`).
+
+**Deferred-action flow** (follows the `AccountLinkStore` pattern):
+
+1. OIDC callback detects a new user would be created AND `needs_token_for_oidc()` returns `true`.
+2. OIDC claims are stored in `pending_oidc_registrations` via `OidcRegistrationStore` (10-minute TTL).
+3. User is redirected to `/login?registration_token_required=true&registration_code={code}`.
+4. Frontend shows a token input form.
+5. User submits the token to `POST /api/v1/auth/oidc/complete-registration`.
+6. Backend validates the token, creates the user, assigns roles, creates session + JWT.
+
+**New endpoint:**
+
+| Endpoint | Auth | Purpose |
+| --- | --- | --- |
+| `POST /api/v1/auth/oidc/complete-registration` | Public | Complete OIDC registration with registration token |
+
+**New setting:**
+
+| DB key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `registration.require_token_for_oidc` | bool | `false` | When `true` and mode is `Invite`, require registration token for OIDC user creation |
+
+**New store:** `OidcRegistrationStore` in `crates/ui/web-api/src/auth/oidc_state.rs` — follows the same atomic-delete pattern as `AccountLinkStore`. Methods: `insert()`, `take()`, `cleanup_expired()`.
+
+**New entity:** `pending_oidc_registration` in `crates/shared/db/src/entity/pending_oidc_registration.rs` — stores deferred OIDC registration claims (registration_code PK, provider_id, oidc_subject, email, names, mapped_roles JSON, expires_at).
 
 ### Zero-downtime graceful restart
 

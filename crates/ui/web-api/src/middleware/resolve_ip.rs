@@ -188,6 +188,7 @@ mod tests {
             RegistrationSettings {
                 mode: RegistrationMode::Open,
                 token_hash: None,
+                require_token_for_oidc: false,
             },
             7,
         );
@@ -208,6 +209,9 @@ mod tests {
                 b"test-secret-resolve-ip",
             )),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                db.clone(),
+            ),
+            oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
                 db.clone(),
             ),
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),

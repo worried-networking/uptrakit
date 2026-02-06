@@ -13,6 +13,9 @@ pub use super::pending_device_flow::{
     Entity as PendingDeviceFlow, Model as PendingDeviceFlowModel,
 };
 pub use super::pending_oidc_flow::{Entity as PendingOidcFlow, Model as PendingOidcFlowModel};
+pub use super::pending_oidc_registration::{
+    Entity as PendingOidcRegistration, Model as PendingOidcRegistrationModel,
+};
 pub use super::pending_oidc_token_exchange::{
     Entity as PendingOidcTokenExchange, Model as PendingOidcTokenExchangeModel,
 };

@@ -9,6 +9,7 @@ pub mod oidc_provider;
 pub mod pending_account_link;
 pub mod pending_device_flow;
 pub mod pending_oidc_flow;
+pub mod pending_oidc_registration;
 pub mod pending_oidc_token_exchange;
 pub mod permission;
 pub mod provider_config;

@@ -15,6 +15,9 @@ pub use uptrakit_web_api_types::registration::RegistrationMode;
 pub struct RegistrationSettings {
     pub mode: RegistrationMode,
     pub token_hash: Option<String>,
+    /// When true, OIDC users also need a registration token to register
+    /// (only relevant in `Invite` mode).
+    pub require_token_for_oidc: bool,
 }
 
 impl RegistrationSettings {
@@ -56,6 +59,7 @@ impl RegistrationSettings {
             let settings = RegistrationSettings {
                 mode: RegistrationMode::Invite,
                 token_hash: Some(hash),
+                require_token_for_oidc: false,
             };
             Ok((settings, Some(plaintext)))
         } else {
@@ -69,7 +73,16 @@ impl RegistrationSettings {
                 .get_setting(SettingKey::RegistrationTokenHash)
                 .and_then(|v| v.as_str().map(String::from));
 
-            let settings = RegistrationSettings { mode, token_hash };
+            let require_token_for_oidc = raw
+                .get_setting(SettingKey::RegistrationRequireTokenForOidc)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let settings = RegistrationSettings {
+                mode,
+                token_hash,
+                require_token_for_oidc,
+            };
             Ok((settings, None))
         }
     }
@@ -131,11 +144,22 @@ impl RegistrationSettings {
         .await?;
         delete_setting(db, tenant_id, SettingKey::RegistrationTokenHash).await?;
 
+        delete_setting(db, tenant_id, SettingKey::RegistrationRequireTokenForOidc).await?;
+
         // Update in-memory state
         self.mode = RegistrationMode::Closed;
         self.token_hash = None;
+        self.require_token_for_oidc = false;
 
         Ok(())
+    }
+
+    /// Returns `true` if OIDC registration requires a token.
+    ///
+    /// - Always requires token for the first user (initial setup).
+    /// - For subsequent users, requires token only if `require_token_for_oidc` is enabled.
+    pub fn needs_token_for_oidc(&self, is_first_user: bool) -> bool {
+        self.mode == RegistrationMode::Invite && (is_first_user || self.require_token_for_oidc)
     }
 
     /// Admin action — change mode and/or set a new token.
@@ -146,6 +170,7 @@ impl RegistrationSettings {
         tenant_id: Uuid,
         mode: RegistrationMode,
         token: Option<String>,
+        require_token_for_oidc: Option<bool>,
     ) -> Result<()> {
         // Update mode in DB
         upsert_setting(
@@ -181,9 +206,30 @@ impl RegistrationSettings {
             None
         };
 
+        // Handle require_token_for_oidc
+        let require_oidc = if mode == RegistrationMode::Invite {
+            if let Some(val) = require_token_for_oidc {
+                upsert_setting(
+                    db,
+                    tenant_id,
+                    SettingKey::RegistrationRequireTokenForOidc,
+                    serde_json::Value::Bool(val),
+                )
+                .await?;
+                val
+            } else {
+                self.require_token_for_oidc
+            }
+        } else {
+            // Not invite mode: clear the flag
+            delete_setting(db, tenant_id, SettingKey::RegistrationRequireTokenForOidc).await?;
+            false
+        };
+
         // Update in-memory state
         self.mode = mode;
         self.token_hash = token_hash;
+        self.require_token_for_oidc = require_oidc;
 
         Ok(())
     }

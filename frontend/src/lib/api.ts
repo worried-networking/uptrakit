@@ -144,6 +144,22 @@ export function oidcLink(data: OidcLinkRequest): Promise<AuthResponse> {
 	return request('/auth/oidc/link', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function oidcCompleteRegistration(
+	registrationCode: string,
+	registrationToken: string
+): Promise<AuthResponse> {
+	const res = await fetch(`${BASE}/auth/oidc/complete-registration`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ registration_code: registrationCode, registration_token: registrationToken })
+	});
+	if (!res.ok) {
+		const text = await res.text();
+		throw new Error(text || res.statusText);
+	}
+	return res.json();
+}
+
 export async function oidcExchange(code: string): Promise<AuthResponse> {
 	// Direct fetch without auth headers — this is a public endpoint
 	const res = await fetch(`${BASE}/auth/oidc/exchange`, {

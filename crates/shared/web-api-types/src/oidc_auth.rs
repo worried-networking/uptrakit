@@ -15,6 +15,8 @@ pub struct AuthMethodsResponse {
     pub password: bool,
     pub oidc_providers: Vec<OidcProviderInfo>,
     pub setup_required: bool,
+    /// Whether OIDC registration requires a registration token.
+    pub registration_token_required: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -34,4 +36,11 @@ pub struct OidcLinkRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcExchangeRequest {
     pub code: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OidcCompleteRegistrationRequest {
+    pub registration_code: String,
+    pub registration_token: String,
 }

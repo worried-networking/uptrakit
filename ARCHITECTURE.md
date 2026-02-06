@@ -153,7 +153,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 | --- | --- | --- | --- |
 | Network | `network.*` | Proxies, headers, SANs, forwarded cert headers, PKI address: yes; bind addresses: restart required | `GET/PUT /api/v1/settings/network` |
 | MQTT | Dedicated `mqtt_clients` table | Yes (via API); controller pushes changes to connected MQTT service instances | `GET/POST/PUT/DELETE /api/v1/settings/mqtt` |
-| Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` |
+| Registration | `registration.*` | Yes | `GET/PUT /api/v1/settings/registration` (includes `require_token_for_oidc`) |
 | Authentication | `authentication.*` | Yes | `GET/PUT /api/v1/settings/authentication` |
 | Service certificates | `service_certificates.*` | Yes | `GET/PUT /api/v1/settings/service-certificates` |
 
@@ -166,7 +166,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 ### User authentication
 
 - **Password**: Argon2id with OWASP-recommended parameters.
-- **OIDC**: External identity providers with auto-create or account linking. Can be bootstrapped at startup via `--oidc-*` CLI flags (see [AGENTS.md](AGENTS.md) "OIDC provider bootstrap").
+- **OIDC**: External identity providers with auto-create or account linking. Can be bootstrapped at startup via `--oidc-*` CLI flags (see [AGENTS.md](AGENTS.md) "OIDC provider bootstrap"). When registration mode is `Invite`, new OIDC users may need to provide a registration token (always for the first user, optionally for subsequent users via `require_token_for_oidc` setting).
 - **Device authorization**: RFC 8628-style flow for CLI login. The CLI requests a device code, the user approves in the browser, and the CLI receives an API token. Works with any auth method (password or OIDC).
 - **Sessions**: SHA-256 hashed tokens, 7-day expiry, 30-min sliding window.
 - **JWT**: Access and refresh tokens carrying resolved permissions.
@@ -198,13 +198,13 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 27 entities in `crates/shared/db/src/entity/`:
+The data model comprises 28 entities in `crates/shared/db/src/entity/`:
 
-`api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
+`api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `service_host` junction table models the many-to-many relationship between services and hosts, enabling automatic host matching across service re-enrollments and hostname changes.
 
-The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
+The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange, OIDC registration with token). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
 
 The `provider_config` entity stores per-provider-type configuration (e.g. GitHub owner/repo, auth tokens, asset filters). Multiple configs can exist per provider type (e.g. tracking releases from several GitHub repositories). Configs are managed via CRUD API endpoints with secret masking (auth tokens are replaced with `"***"` in responses) and provider-specific validation.
 
@@ -214,7 +214,7 @@ The `update_history` entity tracks individual software update operations. Each r
 
 ### Multi-tenancy
 
-The database supports multi-tenancy via a `tenants` table and `tenant_id` foreign keys on scoped tables (`services`, `hosts`, `provider_configs`, `software_items`, `oidc_providers`, `user_roles`, `settings`, `mqtt_clients`). A seeded default tenant is used in single-tenant mode. Global tables (`users`, `roles`, `permissions`, `sessions`, `api_tokens`, `pending_*`) remain unscoped. The `service_certificates` and `service_hosts` tables are scoped indirectly through the `services` table. The `TenantContext` Axum extractor resolves the active tenant from the `X-Tenant-Id` header or falls back to the default tenant. See [AGENTS.md](AGENTS.md) section "Multi-tenancy" for details.
+The database supports multi-tenancy via a `tenants` table and `tenant_id` foreign keys on scoped tables (`services`, `hosts`, `provider_configs`, `software_items`, `oidc_providers`, `user_roles`, `settings`, `mqtt_clients`). A seeded default tenant is used in single-tenant mode. Global tables (`users`, `roles`, `permissions`, `sessions`, `api_tokens`, `pending_*` including `pending_oidc_registration`) remain unscoped. The `service_certificates` and `service_hosts` tables are scoped indirectly through the `services` table. The `TenantContext` Axum extractor resolves the active tenant from the `X-Tenant-Id` header or falls back to the default tenant. See [AGENTS.md](AGENTS.md) section "Multi-tenancy" for details.
 
 ### Migrations
 

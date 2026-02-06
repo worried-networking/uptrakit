@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { user, handleLogin, handleOidcLogin, handleOidcCallback, handleOidcLink } from '$lib/auth';
+	import { user, handleLogin, handleOidcLogin, handleOidcCallback, handleOidcLink, handleOidcCompleteRegistration } from '$lib/auth';
 	import { getAuthMethods } from '$lib/api';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -15,6 +15,9 @@
 	let linkEmail = $state('');
 	let linkProviderId = $state('');
 	let oidcLoading = $state(false);
+	let registrationTokenRequired = $state(false);
+	let registrationCode = $state('');
+	let registrationTokenInput = $state('');
 
 	$effect(() => {
 		if ($user) {
@@ -53,6 +56,13 @@
 			return;
 		}
 
+		// Handle OIDC registration token requirement
+		if (params.get('registration_token_required') === 'true') {
+			registrationTokenRequired = true;
+			registrationCode = params.get('registration_code') || '';
+			return;
+		}
+
 		// Handle account linking
 		if (params.get('link_required') === 'true') {
 			linkRequired = true;
@@ -70,7 +80,7 @@
 			})
 			.catch(() => {
 				// Fallback: assume password auth
-				authMethods = { password: true, oidc_providers: [], setup_required: false };
+				authMethods = { password: true, oidc_providers: [], setup_required: false, registration_token_required: false };
 			});
 	});
 
@@ -107,6 +117,17 @@
 		}
 	}
 
+	async function onSubmitRegistrationToken(e: SubmitEvent) {
+		e.preventDefault();
+		error = '';
+		try {
+			await handleOidcCompleteRegistration(registrationCode, registrationTokenInput);
+			goto('/');
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Registration failed';
+		}
+	}
+
 	async function onLinkWithOidc(providerId: string) {
 		error = '';
 		oidcLoading = true;
@@ -121,7 +142,32 @@
 </script>
 
 <div class="card mx-auto mt-8 max-w-md p-8">
-	{#if linkRequired}
+	{#if registrationTokenRequired}
+		<h2 class="h2 mb-6 text-center">Registration Token Required</h2>
+		<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
+			Enter the registration token from the controller startup logs to complete your account setup.
+		</p>
+
+		{#if error}
+			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+				<p>{error}</p>
+			</aside>
+		{/if}
+
+		<form onsubmit={onSubmitRegistrationToken} class="space-y-4">
+			<label class="label">
+				<span>Registration Token</span>
+				<input
+					class="input"
+					type="text"
+					bind:value={registrationTokenInput}
+					required
+					placeholder="Paste the registration token here"
+				/>
+			</label>
+			<button type="submit" class="btn preset-filled-primary-500 w-full">Complete Registration</button>
+		</form>
+	{:else if linkRequired}
 		<h2 class="h2 mb-6 text-center">Link Your Account</h2>
 		<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
 			An account with email <strong>{linkEmail}</strong> already exists. Verify your identity to link it.
@@ -132,6 +178,11 @@
 			<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
 				Sign in with your identity provider to set up your account.
 			</p>
+			{#if authMethods.registration_token_required}
+				<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
+					You'll need the registration token from the controller logs after signing in.
+				</p>
+			{/if}
 		{:else if authMethods.password}
 			<p class="mb-4 text-center text-sm text-surface-600 dark:text-surface-400">
 				Register your first account to get started.
@@ -141,7 +192,7 @@
 		<h2 class="h2 mb-6 text-center">Login</h2>
 	{/if}
 
-	{#if error}
+	{#if !registrationTokenRequired && error}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 			<p>{error}</p>
 		</aside>
@@ -181,7 +232,7 @@
 			</label>
 			<button type="submit" class="btn preset-filled-primary-500 w-full">Link Account</button>
 		</form>
-	{:else}
+	{:else if !registrationTokenRequired}
 		<!-- Normal Login UI -->
 		{#if authMethods}
 			<!-- OIDC Provider Buttons -->

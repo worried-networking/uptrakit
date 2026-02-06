@@ -67,6 +67,7 @@ export interface AuthMethodsResponse {
 	password: boolean;
 	oidc_providers: OidcProviderInfo[];
 	setup_required: boolean;
+	registration_token_required: boolean;
 }
 
 export interface OidcLinkRequest {
@@ -76,11 +77,18 @@ export interface OidcLinkRequest {
 
 export interface RegistrationSettings {
 	mode: 'open' | 'invite' | 'closed';
+	require_token_for_oidc: boolean;
 }
 
 export interface UpdateRegistrationSettings {
 	mode: 'open' | 'invite' | 'closed';
 	token?: string;
+	require_token_for_oidc?: boolean;
+}
+
+export interface OidcCompleteRegistrationRequest {
+	registration_code: string;
+	registration_token: string;
 }
 
 export interface AuthenticationSettings {
