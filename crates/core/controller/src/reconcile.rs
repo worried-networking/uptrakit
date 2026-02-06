@@ -20,6 +20,18 @@ pub struct JsonConvert<T> {
     pub from_json: fn(&serde_json::Value) -> Option<T>,
 }
 
+/// Parameters for [`reconcile_setting`].
+pub struct ReconcileParams<'a, T> {
+    pub db: &'a DatabaseConnection,
+    pub tenant_id: Uuid,
+    pub key: SettingKey,
+    pub raw: &'a RawSettings,
+    pub cli_value: Option<T>,
+    pub default_value: T,
+    pub force: bool,
+    pub convert: JsonConvert<T>,
+}
+
 /// Reconcile a single DB-managed setting with an optional CLI value.
 ///
 /// `raw` is the pre-fetched settings map from the bulk `load_all_settings()`
@@ -32,20 +44,20 @@ pub struct JsonConvert<T> {
 /// 3. DB has value + (CLI absent OR same) → use DB
 /// 4. No DB value + CLI provided → use CLI, save to DB
 /// 5. No DB value + CLI absent → use default, save to DB
-#[allow(clippy::too_many_arguments)]
-pub async fn reconcile_setting<T>(
-    db: &DatabaseConnection,
-    tenant_id: Uuid,
-    key: SettingKey,
-    raw: &RawSettings,
-    cli_value: Option<T>,
-    default_value: T,
-    force: bool,
-    convert: JsonConvert<T>,
-) -> Result<T>
+pub async fn reconcile_setting<T>(params: ReconcileParams<'_, T>) -> Result<T>
 where
     T: PartialEq + Clone + fmt::Display,
 {
+    let ReconcileParams {
+        db,
+        tenant_id,
+        key,
+        raw,
+        cli_value,
+        default_value,
+        force,
+        convert,
+    } = params;
     let db_key = key.as_str();
     let db_value = raw.get(db_key).and_then(convert.from_json);
 
@@ -146,16 +158,16 @@ mod tests {
     async fn no_db_no_cli_uses_default() {
         let (db, tenant_id) = setup_db().await;
         let raw = HashMap::new();
-        let result = reconcile_setting(
-            &db,
+        let result = reconcile_setting(ReconcileParams {
+            db: &db,
             tenant_id,
-            SettingKey::TrustedProxies,
-            &raw,
-            None,
-            "default_val".to_string(),
-            false,
-            string_convert(),
-        )
+            key: SettingKey::TrustedProxies,
+            raw: &raw,
+            cli_value: None,
+            default_value: "default_val".to_string(),
+            force: false,
+            convert: string_convert(),
+        })
         .await
         .unwrap();
         assert_eq!(result, "default_val");
@@ -171,16 +183,16 @@ mod tests {
     async fn no_db_cli_provided_uses_cli() {
         let (db, tenant_id) = setup_db().await;
         let raw = HashMap::new();
-        let result = reconcile_setting(
-            &db,
+        let result = reconcile_setting(ReconcileParams {
+            db: &db,
             tenant_id,
-            SettingKey::RealIpHeader,
-            &raw,
-            Some("cli_val".to_string()),
-            "default_val".to_string(),
-            false,
-            string_convert(),
-        )
+            key: SettingKey::RealIpHeader,
+            raw: &raw,
+            cli_value: Some("cli_val".to_string()),
+            default_value: "default_val".to_string(),
+            force: false,
+            convert: string_convert(),
+        })
         .await
         .unwrap();
         assert_eq!(result, "cli_val");
@@ -207,16 +219,16 @@ mod tests {
             SettingKey::RealIpHeader.as_str().to_string(),
             serde_json::json!("db_val"),
         )]);
-        let result = reconcile_setting(
-            &db,
+        let result = reconcile_setting(ReconcileParams {
+            db: &db,
             tenant_id,
-            SettingKey::RealIpHeader,
-            &raw,
-            None,
-            "default_val".to_string(),
-            false,
-            string_convert(),
-        )
+            key: SettingKey::RealIpHeader,
+            raw: &raw,
+            cli_value: None,
+            default_value: "default_val".to_string(),
+            force: false,
+            convert: string_convert(),
+        })
         .await
         .unwrap();
         assert_eq!(result, "db_val");
@@ -238,16 +250,16 @@ mod tests {
             SettingKey::HttpsAddr.as_str().to_string(),
             serde_json::json!("db_val"),
         )]);
-        let result = reconcile_setting(
-            &db,
+        let result = reconcile_setting(ReconcileParams {
+            db: &db,
             tenant_id,
-            SettingKey::HttpsAddr,
-            &raw,
-            Some("cli_val".to_string()),
-            "default_val".to_string(),
-            false,
-            string_convert(),
-        )
+            key: SettingKey::HttpsAddr,
+            raw: &raw,
+            cli_value: Some("cli_val".to_string()),
+            default_value: "default_val".to_string(),
+            force: false,
+            convert: string_convert(),
+        })
         .await
         .unwrap();
         assert_eq!(result, "db_val");
@@ -269,16 +281,16 @@ mod tests {
             SettingKey::PkiAddr.as_str().to_string(),
             serde_json::json!("db_val"),
         )]);
-        let result = reconcile_setting(
-            &db,
+        let result = reconcile_setting(ReconcileParams {
+            db: &db,
             tenant_id,
-            SettingKey::PkiAddr,
-            &raw,
-            Some("cli_val".to_string()),
-            "default_val".to_string(),
-            true,
-            string_convert(),
-        )
+            key: SettingKey::PkiAddr,
+            raw: &raw,
+            cli_value: Some("cli_val".to_string()),
+            default_value: "default_val".to_string(),
+            force: true,
+            convert: string_convert(),
+        })
         .await
         .unwrap();
         assert_eq!(result, "cli_val");

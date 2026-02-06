@@ -128,19 +128,19 @@ async fn run(args: cli::Args) -> Result<()> {
     let force = args.force_settings_override;
 
     // Network settings
-    let trusted_proxies = reconcile_setting_vec::<IpNet>(
-        &db_conn,
-        default_tenant_id,
-        SettingKey::TrustedProxies,
-        &raw_settings,
-        if args.trusted_proxies.is_empty() {
+    let trusted_proxies = reconcile_setting_vec::<IpNet>(reconcile::ReconcileParams {
+        db: &db_conn,
+        tenant_id: default_tenant_id,
+        key: SettingKey::TrustedProxies,
+        raw: &raw_settings,
+        cli_value: if args.trusted_proxies.is_empty() {
             None
         } else {
             Some(args.trusted_proxies)
         },
-        vec![],
+        default_value: vec![],
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| serde_json::json!(v.iter().map(|n| n.to_string()).collect::<Vec<_>>()),
             from_json: |v| {
                 v.as_array().map(|arr| {
@@ -150,37 +150,37 @@ async fn run(args: cli::Args) -> Result<()> {
                 })
             },
         },
-    )
+    })
     .await
     .context(AppError::Settings)?;
     settings.set_trusted_proxies(trusted_proxies.clone()).await;
 
-    let real_ip_header = reconcile::reconcile_setting(
-        &db_conn,
-        default_tenant_id,
-        SettingKey::RealIpHeader,
-        &raw_settings,
-        args.real_ip_header,
-        uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
+    let real_ip_header = reconcile::reconcile_setting(reconcile::ReconcileParams {
+        db: &db_conn,
+        tenant_id: default_tenant_id,
+        key: SettingKey::RealIpHeader,
+        raw: &raw_settings,
+        cli_value: args.real_ip_header,
+        default_value: uptrakit_web_api::settings::DEFAULT_REAL_IP_HEADER.to_string(),
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| serde_json::json!(v),
             from_json: |v| v.as_str().map(String::from),
         },
-    )
+    })
     .await
     .context(AppError::Settings)?;
     settings.set_real_ip_header(real_ip_header).await;
 
-    let forwarded_cert_info_header = reconcile::reconcile_setting(
-        &db_conn,
-        default_tenant_id,
-        SettingKey::ForwardedClientCertInfoHeader,
-        &raw_settings,
-        args.forwarded_client_cert_info_header,
-        String::new(), // empty = disabled
+    let forwarded_cert_info_header = reconcile::reconcile_setting(reconcile::ReconcileParams {
+        db: &db_conn,
+        tenant_id: default_tenant_id,
+        key: SettingKey::ForwardedClientCertInfoHeader,
+        raw: &raw_settings,
+        cli_value: args.forwarded_client_cert_info_header,
+        default_value: String::new(), // empty = disabled
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| {
                 if v.is_empty() {
                     serde_json::Value::Null
@@ -196,7 +196,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 }
             },
         },
-    )
+    })
     .await
     .context(AppError::Settings)?;
     let forwarded_cert_info_opt = if forwarded_cert_info_header.is_empty() {
@@ -208,15 +208,15 @@ async fn run(args: cli::Args) -> Result<()> {
         .set_forwarded_client_cert_info_header(forwarded_cert_info_opt.clone())
         .await;
 
-    let forwarded_cert_pem_header = reconcile::reconcile_setting(
-        &db_conn,
-        default_tenant_id,
-        SettingKey::ForwardedClientCertPemHeader,
-        &raw_settings,
-        args.forwarded_client_cert_pem_header,
-        String::new(), // empty = disabled
+    let forwarded_cert_pem_header = reconcile::reconcile_setting(reconcile::ReconcileParams {
+        db: &db_conn,
+        tenant_id: default_tenant_id,
+        key: SettingKey::ForwardedClientCertPemHeader,
+        raw: &raw_settings,
+        cli_value: args.forwarded_client_cert_pem_header,
+        default_value: String::new(), // empty = disabled
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| {
                 if v.is_empty() {
                     serde_json::Value::Null
@@ -232,7 +232,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 }
             },
         },
-    )
+    })
     .await
     .context(AppError::Settings)?;
     let forwarded_cert_pem_opt = if forwarded_cert_pem_header.is_empty() {
@@ -244,15 +244,15 @@ async fn run(args: cli::Args) -> Result<()> {
         .set_forwarded_client_cert_pem_header(forwarded_cert_pem_opt.clone())
         .await;
 
-    let pki_addr = reconcile::reconcile_setting(
-        &db_conn,
-        default_tenant_id,
-        SettingKey::PkiAddr,
-        &raw_settings,
-        args.pki_addr.clone(),
-        String::new(), // empty = not set
+    let pki_addr = reconcile::reconcile_setting(reconcile::ReconcileParams {
+        db: &db_conn,
+        tenant_id: default_tenant_id,
+        key: SettingKey::PkiAddr,
+        raw: &raw_settings,
+        cli_value: args.pki_addr.clone(),
+        default_value: String::new(), // empty = not set
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| {
                 if v.is_empty() {
                     serde_json::Value::Null
@@ -268,7 +268,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 }
             },
         },
-    )
+    })
     .await
     .context(AppError::Settings)?;
     let pki_addr_opt = if pki_addr.is_empty() {
@@ -287,19 +287,19 @@ async fn run(args: cli::Args) -> Result<()> {
         );
     }
 
-    let extra_sans = reconcile_setting_vec::<String>(
-        &db_conn,
-        default_tenant_id,
-        SettingKey::ExtraSans,
-        &raw_settings,
-        if args.sans.is_empty() {
+    let extra_sans = reconcile_setting_vec::<String>(reconcile::ReconcileParams {
+        db: &db_conn,
+        tenant_id: default_tenant_id,
+        key: SettingKey::ExtraSans,
+        raw: &raw_settings,
+        cli_value: if args.sans.is_empty() {
             None
         } else {
             Some(args.sans)
         },
-        vec![],
+        default_value: vec![],
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| serde_json::json!(v),
             from_json: |v| {
                 v.as_array().map(|arr| {
@@ -309,7 +309,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 })
             },
         },
-    )
+    })
     .await
     .context(AppError::Settings)?;
     settings.set_extra_sans(extra_sans.clone()).await;
@@ -1022,20 +1022,20 @@ impl<T: fmt::Display> fmt::Display for DisplayVec<'_, T> {
 }
 
 /// Reconcile a `Vec<T>` setting. Empty CLI vec is treated as "not provided".
-#[allow(clippy::too_many_arguments)]
-async fn reconcile_setting_vec<T>(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
-    key: SettingKey,
-    raw: &uptrakit_web_api::settings_store::RawSettings,
-    cli_value: Option<Vec<T>>,
-    default_value: Vec<T>,
-    force: bool,
-    convert: reconcile::JsonConvert<Vec<T>>,
-) -> Result<Vec<T>>
+async fn reconcile_setting_vec<T>(params: reconcile::ReconcileParams<'_, Vec<T>>) -> Result<Vec<T>>
 where
     T: PartialEq + Clone + fmt::Display + 'static,
 {
+    let reconcile::ReconcileParams {
+        db,
+        tenant_id,
+        key,
+        raw,
+        cli_value,
+        default_value,
+        force,
+        convert,
+    } = params;
     let db_key = key.as_str();
     let db_value = raw.get(db_key).and_then(convert.from_json);
 
@@ -1103,7 +1103,7 @@ async fn reconcile_socket_addr(
     default_value: SocketAddr,
     force: bool,
 ) -> Result<SocketAddr> {
-    reconcile::reconcile_setting(
+    reconcile::reconcile_setting(reconcile::ReconcileParams {
         db,
         tenant_id,
         key,
@@ -1111,11 +1111,11 @@ async fn reconcile_socket_addr(
         cli_value,
         default_value,
         force,
-        reconcile::JsonConvert {
+        convert: reconcile::JsonConvert {
             to_json: |v| serde_json::json!(v.to_string()),
             from_json: |v| v.as_str().and_then(|s| s.parse().ok()),
         },
-    )
+    })
     .await
     .context(AppError::Settings)
 }
