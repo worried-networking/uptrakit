@@ -74,6 +74,8 @@ cargo deny check                                                     # Validate 
 # cargo test -p uptrakit-controller reverse_proxy -- --ignored
 ```
 
+There shouldn't even be any warnings in the output of these commands.
+
 ### Frontend (SvelteKit)
 
 ```sh
