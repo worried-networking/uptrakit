@@ -105,7 +105,12 @@
 	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={(e) => {
+	if (e.key === 'Escape') {
+		if (confirmAction) cancelConfirm();
+		else if (editHost) cancelEdit();
+	}
+}} />
 
 {#if $user}
 	<h1 class="h1 mb-6">Hosts</h1>
@@ -202,9 +207,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			onclick={(e) => { if (e.target === e.currentTarget) cancelConfirm(); }}
 			onkeydown={(e) => { if (e.key === 'Escape') cancelConfirm(); }}
 		>
-			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
 				<h3 class="h3">Deactivate Host</h3>
 				<p>
 					Are you sure you want to deactivate
@@ -224,9 +230,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }}
 			onkeydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
 		>
-			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
 				<h3 class="h3">Edit Host Name</h3>
 				<label class="label">
 					<span>Friendly Name</span>

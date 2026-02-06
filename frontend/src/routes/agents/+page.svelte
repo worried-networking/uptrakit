@@ -122,7 +122,12 @@
 	} as const;
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={(e) => {
+	if (e.key === 'Escape') {
+		if (confirmAction) cancelConfirm();
+		else if (mergeSource) cancelMerge();
+	}
+}} />
 
 {#if $user}
 	<h1 class="h1 mb-6">Agents</h1>
@@ -239,9 +244,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			onclick={(e) => { if (e.target === e.currentTarget) cancelConfirm(); }}
 			onkeydown={(e) => { if (e.key === 'Escape') cancelConfirm(); }}
 		>
-			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
 				<h3 class="h3">{labels.title}</h3>
 				<p>
 					Are you sure you want to {labels.verb}
@@ -261,9 +267,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			onclick={(e) => { if (e.target === e.currentTarget) cancelMerge(); }}
 			onkeydown={(e) => { if (e.key === 'Escape') cancelMerge(); }}
 		>
-			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
 				<h3 class="h3">Merge Agent</h3>
 				<p>
 					Merge <strong>{mergeSource.name}</strong> into an existing agent.

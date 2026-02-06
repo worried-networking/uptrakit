@@ -475,6 +475,15 @@
 	}
 </script>
 
+<svelte:window onkeydown={(e) => {
+	if (e.key === 'Escape') {
+		if (showMqttModal) closeMqttModal();
+		else if (showOidcModal) closeOidcModal();
+		else if (mqttDeleteConfirm) mqttDeleteConfirm = null;
+		else if (deleteConfirm) deleteConfirm = null;
+	}
+}} />
+
 {#if $user && canManageSettings}
 	<h1 class="h1 mb-6">Settings</h1>
 
@@ -613,9 +622,10 @@
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-				onkeydown={(e) => { if (e.key === 'Escape') { mqttDeleteConfirm = null; } }}
+			onclick={(e) => { if (e.target === e.currentTarget) mqttDeleteConfirm = null; }}
+			onkeydown={(e) => { if (e.key === 'Escape') mqttDeleteConfirm = null; }}
 			>
-				<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+				<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
 					<h3 class="h3">Delete MQTT Client</h3>
 					<p>Are you sure you want to delete the MQTT client <strong>{mqttDeleteConfirm.url}</strong>?</p>
 					<div class="flex justify-end gap-2">
@@ -772,9 +782,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			onclick={(e) => { if (e.target === e.currentTarget) closeOidcModal(); }}
 			onkeydown={(e) => { if (e.key === 'Escape') closeOidcModal(); }}
 		>
-			<div class="card w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl">
 				<h3 class="h3">{editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'}</h3>
 
 				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -854,9 +865,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			onclick={(e) => { if (e.target === e.currentTarget) closeMqttModal(); }}
 			onkeydown={(e) => { if (e.key === 'Escape') closeMqttModal(); }}
 		>
-			<div class="card w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl">
 				<h3 class="h3">{editingMqttClient ? 'Edit MQTT Client' : 'Add MQTT Client'}</h3>
 
 				<label class="flex items-center gap-3">
@@ -916,9 +928,10 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-			onkeydown={(e) => { if (e.key === 'Escape') { deleteConfirm = null; } }}
+			onclick={(e) => { if (e.target === e.currentTarget) deleteConfirm = null; }}
+			onkeydown={(e) => { if (e.key === 'Escape') deleteConfirm = null; }}
 		>
-			<div class="card w-full max-w-md space-y-4 p-6 shadow-xl">
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
 				<h3 class="h3">Delete OIDC Provider</h3>
 				<p>
 					Are you sure you want to delete

@@ -73,7 +73,7 @@
 {:else}
 	<div class="flex h-full flex-col">
 		<!-- Header -->
-		<header class="flex items-center justify-between border-b border-surface-200 px-4 py-1 shadow-xs dark:border-surface-700">
+		<header class="relative z-[60] flex items-center justify-between border-b border-surface-200 px-4 py-1 shadow-xs dark:border-surface-700">
 			<a href="/" class="text-xl font-bold">Uptrakit</a>
 			<div class="flex items-center gap-2">
 				{#if $user}
@@ -113,7 +113,7 @@
 		<div class="flex min-h-0 flex-1">
 			<!-- Sidebar -->
 			{#if showSidebar}
-				<aside class="w-60 border-r border-surface-200 bg-surface-50 p-4 dark:border-surface-700 dark:bg-surface-900">
+				<aside class="relative z-[60] w-60 border-r border-surface-200 bg-surface-50 p-4 dark:border-surface-700 dark:bg-surface-900">
 					<nav>
 						<ul class="space-y-1">
 							{#each navItems as item}
