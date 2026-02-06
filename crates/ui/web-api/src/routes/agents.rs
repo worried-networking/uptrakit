@@ -60,20 +60,32 @@ pub(crate) struct EnrollResult {
     pub status: AgentStatus,
 }
 
+/// Parameters for [`do_enroll`].
+pub(crate) struct EnrollParams<'a> {
+    pub db: &'a sea_orm::DatabaseConnection,
+    pub settings: &'a crate::settings::Settings,
+    pub tenant_id: uuid::Uuid,
+    pub hostname: &'a str,
+    pub friendly_name: &'a str,
+    pub enrollment_token: Option<&'a str>,
+    pub ip_address: Option<IpAddr>,
+    pub host_info: Option<&'a HostInfo>,
+}
+
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
 ///
 /// The controller generates a UUIDv7 `agent_id` for the enrolling agent.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn do_enroll(
-    db: &sea_orm::DatabaseConnection,
-    settings: &crate::settings::Settings,
-    tenant_id: uuid::Uuid,
-    hostname: &str,
-    friendly_name: &str,
-    enrollment_token: Option<&str>,
-    ip_address: Option<IpAddr>,
-    host_info: Option<&HostInfo>,
-) -> Result<EnrollResult, Report<AgentRouteError>> {
+pub(crate) async fn do_enroll(params: EnrollParams<'_>) -> Result<EnrollResult, Report<AgentRouteError>> {
+    let EnrollParams {
+        db,
+        settings,
+        tenant_id,
+        hostname,
+        friendly_name,
+        enrollment_token,
+        ip_address,
+        host_info,
+    } = params;
     if hostname.trim().is_empty() {
         return Err(report!(AgentRouteError::BadRequest(
             "hostname must not be empty".into()

@@ -67,6 +67,18 @@ pub enum OidcUserResolution {
     Deactivated,
 }
 
+/// Parameters for [`resolve_oidc_user`].
+pub struct OidcUserParams<'a> {
+    pub db: &'a DatabaseConnection,
+    pub tenant_id: uuid::Uuid,
+    pub provider_id: uuid::Uuid,
+    pub oidc_subject: &'a str,
+    pub email: &'a str,
+    pub first_name: Option<&'a str>,
+    pub last_name: Option<&'a str>,
+    pub auto_create: bool,
+}
+
 /// Resolve an OIDC-authenticated user.
 ///
 /// Resolution order:
@@ -77,17 +89,17 @@ pub enum OidcUserResolution {
 ///    c. Has password_hash -> `LinkViaPasswordRequired`.
 ///    d. Otherwise -> `AutoLink`.
 /// 3. Not found: auto_create -> create user + link -> `NewUser`. Else -> `NotAllowed`.
-#[allow(clippy::too_many_arguments)]
-pub async fn resolve_oidc_user(
-    db: &DatabaseConnection,
-    tenant_id: uuid::Uuid,
-    provider_id: uuid::Uuid,
-    oidc_subject: &str,
-    email: &str,
-    first_name: Option<&str>,
-    last_name: Option<&str>,
-    auto_create: bool,
-) -> Result<OidcUserResolution> {
+pub async fn resolve_oidc_user(params: OidcUserParams<'_>) -> Result<OidcUserResolution> {
+    let OidcUserParams {
+        db,
+        tenant_id,
+        provider_id,
+        oidc_subject,
+        email,
+        first_name,
+        last_name,
+        auto_create,
+    } = params;
     // 1. Check for existing link
     let existing_link = UserOidcLink::find()
         .filter(user_oidc_link::Column::ProviderId.eq(provider_id))

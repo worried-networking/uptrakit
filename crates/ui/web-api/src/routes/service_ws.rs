@@ -588,18 +588,18 @@ async fn enroll_agent(
     client_ip: Option<std::net::IpAddr>,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
 ) -> Option<(uuid::Uuid, bool)> {
-    use crate::routes::agents::{AgentStatus, do_enroll};
+    use crate::routes::agents::{AgentStatus, EnrollParams, do_enroll};
 
-    let result = do_enroll(
-        &state.db,
-        &state.settings,
-        state.default_tenant_id,
-        &payload.hostname,
-        &payload.friendly_name,
-        payload.enrollment_token.as_deref(),
-        client_ip,
-        payload.host_info.as_ref(),
-    )
+    let result = do_enroll(EnrollParams {
+        db: &state.db,
+        settings: &state.settings,
+        tenant_id: state.default_tenant_id,
+        hostname: &payload.hostname,
+        friendly_name: &payload.friendly_name,
+        enrollment_token: payload.enrollment_token.as_deref(),
+        ip_address: client_ip,
+        host_info: payload.host_info.as_ref(),
+    })
     .await;
 
     match result {

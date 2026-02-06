@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::auth::authentication::{
-    OidcUserResolution, extract_mapped_roles, resolve_oidc_user, sync_oidc_roles,
+    OidcUserParams, OidcUserResolution, extract_mapped_roles, resolve_oidc_user, sync_oidc_roles,
 };
 use crate::auth::password;
 use crate::auth::session::SessionService;
@@ -406,16 +406,16 @@ pub async fn oidc_callback(
     }
 
     // Resolve user
-    let resolution = match resolve_oidc_user(
-        &state.db,
-        state.default_tenant_id,
-        flow.provider_id,
-        &sub,
-        &email,
-        first_name.as_deref(),
-        last_name.as_deref(),
-        provider.auto_create_users,
-    )
+    let resolution = match resolve_oidc_user(OidcUserParams {
+        db: &state.db,
+        tenant_id: state.default_tenant_id,
+        provider_id: flow.provider_id,
+        oidc_subject: &sub,
+        email: &email,
+        first_name: first_name.as_deref(),
+        last_name: last_name.as_deref(),
+        auto_create: provider.auto_create_users,
+    })
     .await
     {
         Ok(r) => r,
