@@ -769,6 +769,7 @@ components:
         - type
         - hostname
         - friendly_name
+        - service_type
       properties:
         type:
           type: string
@@ -786,7 +787,7 @@ components:
             - Production Node 1
         service_type:
           type: string
-          description: "Service type: 'agent' or 'mqtt'. Defaults to 'agent' if omitted"
+          description: "Service type: 'agent' or 'mqtt'"
           examples:
             - agent
             - mqtt
