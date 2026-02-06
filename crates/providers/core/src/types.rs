@@ -46,17 +46,6 @@ impl fmt::Display for ProviderType {
     }
 }
 
-impl ProviderType {
-    /// Returns the capabilities supported by this provider type.
-    pub fn capabilities(&self) -> &'static [ProviderCapability] {
-        match self {
-            Self::GithubReleases => &[],
-            Self::DockerRegistry => &[],
-            Self::ProxmoxHelperScripts => &[ProviderCapability::DiscoverLocalSoftware],
-        }
-    }
-}
-
 /// A downloadable asset attached to a release.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReleaseAsset {
@@ -270,24 +259,5 @@ mod tests {
         let cap = ProviderCapability::DiscoverLocalSoftware;
         let cap2 = cap; // Copy, not move
         assert_eq!(cap, cap2);
-    }
-
-    #[test]
-    fn provider_type_capabilities_github() {
-        let caps = ProviderType::GithubReleases.capabilities();
-        assert!(caps.is_empty());
-    }
-
-    #[test]
-    fn provider_type_capabilities_docker_registry() {
-        let caps = ProviderType::DockerRegistry.capabilities();
-        assert!(caps.is_empty());
-    }
-
-    #[test]
-    fn provider_type_capabilities_proxmox_helper_scripts() {
-        let caps = ProviderType::ProxmoxHelperScripts.capabilities();
-        assert_eq!(caps.len(), 1);
-        assert!(caps.contains(&ProviderCapability::DiscoverLocalSoftware));
     }
 }
