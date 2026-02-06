@@ -242,16 +242,16 @@ async fn run_authenticated_with_reconnect(
             .context_to::<Error>()?,
         };
 
-        match client::run_authenticated_loop(
+        match client::run_authenticated_loop(client::AuthenticatedLoopParams {
             host,
             port,
             base_url,
             pki_addr,
             ca_pem,
-            mtls_connector,
+            tls_connector: mtls_connector,
             cert_not_after_ts,
             identity,
-        )
+        })
         .await?
         {
             LoopOutcome::Shutdown => return Ok(()),

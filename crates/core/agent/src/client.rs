@@ -47,18 +47,30 @@ struct InFlightUpdate {
     output_rx: tokio::sync::mpsc::Receiver<crate::update::UpdateOutputMessage>,
 }
 
+/// Parameters for [`run_authenticated_loop`].
+pub struct AuthenticatedLoopParams<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub base_url: &'a str,
+    pub pki_addr: Option<&'a str>,
+    pub ca_pem: Option<&'a [u8]>,
+    pub tls_connector: tokio_rustls::TlsConnector,
+    pub cert_not_after_ts: Option<i64>,
+    pub identity: &'a uptrakit_enrollment::ServiceIdentityState,
+}
+
 /// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
-#[allow(clippy::too_many_arguments)]
-pub async fn run_authenticated_loop(
-    host: &str,
-    port: u16,
-    base_url: &str,
-    pki_addr: Option<&str>,
-    ca_pem: Option<&[u8]>,
-    tls_connector: tokio_rustls::TlsConnector,
-    cert_not_after_ts: Option<i64>,
-    identity: &uptrakit_enrollment::ServiceIdentityState,
-) -> Result<LoopOutcome> {
+pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Result<LoopOutcome> {
+    let AuthenticatedLoopParams {
+        host,
+        port,
+        base_url,
+        pki_addr,
+        ca_pem,
+        tls_connector,
+        cert_not_after_ts,
+        identity,
+    } = params;
     use std::pin::Pin;
     use std::time::Duration;
     use tokio_tungstenite::tungstenite::Message;
