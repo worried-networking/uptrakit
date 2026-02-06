@@ -105,7 +105,7 @@ Defined in `crates/shared/wire/`:
 
 **Service → Controller (agent-specific):** `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
-**Service → Controller (MQTT-specific):** `register`, `heartbeat`, `release_tenants`
+**Service → Controller (MQTT-specific):** `register`, `release_tenants`
 
 **Controller → Service (shared):** `pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `service_settings`, `ca_bundle_updated`, `request_cert_renewal`, `server_restarting`
 
@@ -284,7 +284,7 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 1. **Enrollment**: MQTT service connects anonymously to `/api/v1/ws/service`, sends `enroll` with hostname and optional enrollment token. Controller generates a UUIDv7 service_id and responds with `enrolled`. If a valid MQTT enrollment token is provided, the service is auto-approved; otherwise manual approval is required via the REST API. All messages use the unified `ServiceMessage`/`ControllerMessage` wire enums.
 2. **Certificate issuance**: After approval, the service generates an ECDSA P-256 keypair + CSR (CN=service_id) and sends `request_certificate`. Controller signs and returns the certificate.
 3. **Authenticated operation**: Service reconnects with mTLS, sends `register` with instance_id, max_tenants, and active_tenants (for reconnect reconciliation). Controller responds with tenant assignments.
-4. **Runtime**: Controller pushes `tenant_config_updated` and `tenant_revoked` messages when MQTT settings change via the REST API. Service sends periodic heartbeats to keep leases alive.
+4. **Runtime**: Controller pushes `tenant_config_updated` and `tenant_revoked` messages when MQTT settings change via the REST API. Service sends periodic `ping` messages; the controller uses Ping receipt to update lease heartbeats and responds with `pong`.
 
 ### Lease management
 

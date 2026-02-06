@@ -51,7 +51,7 @@ type MqttWsResult<T> = std::result::Result<T, Report<MqttWsError>>;
 ///
 /// Called by [`super::service_ws`] after certificate validation, service status
 /// check, and sending `ServiceSettings`. Waits for a `Register` message, then
-/// enters the MQTT-specific operational loop (Heartbeat, ReleaseTenants,
+/// enters the MQTT-specific operational loop (Ping/Pong, ReleaseTenants,
 /// RenewCertificate).
 pub(crate) async fn handle_mqtt_authenticated(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
@@ -225,16 +225,10 @@ pub(crate) async fn handle_mqtt_authenticated(
                                 if sink.send(Message::Text(json.into())).await.is_err() {
                                     break;
                                 }
-                            }
-                            ServiceMessage::Heartbeat(payload) => {
-                                let tenant_ids: Vec<uuid::Uuid> = payload
-                                    .active_tenants
-                                    .iter()
-                                    .filter_map(|s| uuid::Uuid::parse_str(s).ok())
-                                    .collect();
 
+                                // Update lease heartbeats for all tenants held by this service
                                 if let Err(e) = lease_coordinator
-                                    .record_heartbeat(&service_id, &tenant_ids)
+                                    .record_heartbeat(&service_id)
                                     .await
                                 {
                                     tracing::warn!(error = %e, "failed to record heartbeat");

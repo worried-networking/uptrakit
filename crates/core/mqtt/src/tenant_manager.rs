@@ -60,7 +60,7 @@ impl TenantManager {
         }
     }
 
-    /// Return list of active tenant IDs (for heartbeat).
+    /// Return list of active tenant IDs (used in `Disconnecting` payload).
     pub fn active_tenant_ids(&self) -> Vec<String> {
         self.tenants.keys().cloned().collect()
     }

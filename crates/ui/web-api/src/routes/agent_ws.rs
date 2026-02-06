@@ -622,7 +622,6 @@ pub(crate) async fn run_agent_enrolled_loop(
                             }
                             // MQTT-specific variants are not valid on an agent connection
                             ServiceMessage::Register(_)
-                            | ServiceMessage::Heartbeat(_)
                             | ServiceMessage::ReleaseTenants(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: "bad_request".to_string(),

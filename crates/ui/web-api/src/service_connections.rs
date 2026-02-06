@@ -218,6 +218,15 @@ impl ServiceConnectionRegistry {
         }
     }
 
+    /// Get the instance ID for a connected MQTT service.
+    pub async fn get_instance_id(&self, service_id: &Uuid) -> Option<String> {
+        self.inner
+            .read()
+            .await
+            .get(service_id)
+            .and_then(|c| c.instance_id.clone())
+    }
+
     /// Assign a tenant to an MQTT service instance.
     ///
     /// Returns `true` if the assignment was recorded, `false` if the service

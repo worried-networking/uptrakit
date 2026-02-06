@@ -11,7 +11,8 @@ use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uptrakit_enrollment::ServiceIdentityState;
 use uptrakit_internal_wire::{
-    ControllerMessage, MqttHeartbeatPayload, MqttRegisterPayload, ServiceMessage,
+    ControllerMessage, DisconnectReason, DisconnectingPayload, MqttRegisterPayload, PingPayload,
+    ServiceMessage, now_millis,
 };
 
 use crate::controller_client::ControllerConnection;
@@ -208,11 +209,11 @@ async fn run_authenticated(
     .context_to::<AppError>()?;
 
     let mut tenant_mgr = TenantManager::new();
-    let heartbeat_interval = Duration::from_secs(args.heartbeat_interval);
-    let mut heartbeat_ticker = tokio::time::interval(heartbeat_interval);
+    let ping_interval = Duration::from_secs(args.ping_interval);
+    let mut ping_ticker = tokio::time::interval(ping_interval);
 
     // Skip the first immediate tick
-    heartbeat_ticker.tick().await;
+    ping_ticker.tick().await;
 
     loop {
         tokio::select! {
@@ -240,6 +241,10 @@ async fn run_authenticated(
                     Some(ControllerMessage::RequestCertRenewal(_)) => {
                         tracing::info!("certificate renewal requested");
                     }
+                    Some(ControllerMessage::Pong(payload)) => {
+                        let rtt = now_millis() - payload.agent_ts;
+                        tracing::trace!(rtt_ms = rtt, "pong received");
+                    }
                     Some(ControllerMessage::ServerRestarting(payload)) => {
                         tracing::info!(reason = %payload.reason, "server restarting, preparing for reconnect");
                     }
@@ -252,12 +257,11 @@ async fn run_authenticated(
                     }
                 }
             }
-            _ = heartbeat_ticker.tick() => {
-                let active = tenant_mgr.active_tenant_ids();
-                if let Err(e) = conn.send(ServiceMessage::Heartbeat(MqttHeartbeatPayload {
-                    active_tenants: active,
+            _ = ping_ticker.tick() => {
+                if let Err(e) = conn.send(ServiceMessage::Ping(PingPayload {
+                    agent_ts: now_millis(),
                 })).await {
-                    tracing::error!(error = ?e, "heartbeat failed");
+                    tracing::error!(error = ?e, "ping failed");
                     break;
                 }
             }
@@ -268,7 +272,15 @@ async fn run_authenticated(
         }
     }
 
-    // Graceful shutdown
+    // Graceful shutdown: notify controller with active tenant list
+    let active = tenant_mgr.active_tenant_ids();
+    let _ = conn
+        .send(ServiceMessage::Disconnecting(DisconnectingPayload {
+            reason: DisconnectReason::Shutdown,
+            active_tenants: active,
+        }))
+        .await;
+
     tracing::info!("shutting down MQTT clients");
     tenant_mgr.shutdown_all().await;
 

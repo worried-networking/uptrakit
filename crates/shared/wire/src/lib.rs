@@ -31,7 +31,6 @@ pub enum ServiceMessage {
     UpdateResult(UpdateResultPayload),
     // -- MQTT-specific --
     Register(MqttRegisterPayload),
-    Heartbeat(MqttHeartbeatPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
 }
 
@@ -419,13 +418,6 @@ pub struct MqttRegisterPayload {
 pub struct MqttRegisteredPayload {
     /// Echo back the instance ID for confirmation.
     pub instance_id: String,
-}
-
-/// Payload for MQTT service heartbeat.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MqttHeartbeatPayload {
-    /// List of tenant IDs currently being served.
-    pub active_tenants: Vec<String>,
 }
 
 /// Payload for explicitly releasing tenants.
@@ -817,17 +809,6 @@ mod tests {
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("active_tenants"));
-        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, msg);
-    }
-
-    #[test]
-    fn heartbeat_serialization_roundtrip() {
-        let msg = ServiceMessage::Heartbeat(MqttHeartbeatPayload {
-            active_tenants: vec!["tenant-1".to_string(), "tenant-2".to_string()],
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"heartbeat"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }

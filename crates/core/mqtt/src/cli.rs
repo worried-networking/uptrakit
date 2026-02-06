@@ -16,9 +16,9 @@ pub struct Args {
     #[arg(long, default_value = "0")]
     pub max_tenants: u32,
 
-    /// Heartbeat interval in seconds.
+    /// Ping interval in seconds.
     #[arg(long, default_value = "15")]
-    pub heartbeat_interval: u64,
+    pub ping_interval: u64,
 }
 
 #[cfg(test)]
@@ -35,7 +35,7 @@ mod tests {
         assert!(args.common.config_dir.is_none());
         assert!(args.common.state_dir.is_none());
         assert_eq!(args.max_tenants, 0);
-        assert_eq!(args.heartbeat_interval, 15);
+        assert_eq!(args.ping_interval, 15);
         assert!(args.common.enrollment_token.is_none());
         assert!(args.common.friendly_name.is_none());
         assert!(!args.common.tofu);
@@ -53,7 +53,7 @@ mod tests {
             "/opt/mqtt-state",
             "--max-tenants",
             "5",
-            "--heartbeat-interval",
+            "--ping-interval",
             "30",
             "--enrollment-token",
             "secret-token-123",
@@ -72,7 +72,7 @@ mod tests {
             "/opt/mqtt-state"
         );
         assert_eq!(args.max_tenants, 5);
-        assert_eq!(args.heartbeat_interval, 30);
+        assert_eq!(args.ping_interval, 30);
         assert_eq!(
             args.common.enrollment_token.as_deref(),
             Some("secret-token-123")

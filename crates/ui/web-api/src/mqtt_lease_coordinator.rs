@@ -190,29 +190,28 @@ impl MqttLeaseCoordinator {
         Ok(tenants)
     }
 
-    /// Update heartbeat for tenants held by a service.
+    /// Update heartbeat for all leases held by a service.
     ///
-    /// Called when a service sends Heartbeat message.
-    pub async fn record_heartbeat(
-        &self,
-        service_id: &Uuid,
-        active_tenant_ids: &[Uuid],
-    ) -> Result<()> {
+    /// Called when a service sends Ping. Updates the `heartbeat_at` timestamp
+    /// for all leases matching the service's `instance_id`.
+    pub async fn record_heartbeat(&self, service_id: &Uuid) -> Result<()> {
         // Update connection registry heartbeat
         self.connections.record_heartbeat(service_id).await;
 
-        if active_tenant_ids.is_empty() {
-            return Ok(());
-        }
+        // Look up instance_id from the connection registry
+        let instance_id = match self.connections.get_instance_id(service_id).await {
+            Some(id) => id,
+            None => return Ok(()),
+        };
 
-        // Update heartbeat timestamps in database
+        // Update heartbeat timestamps for all leases belonging to this instance
         let now = OffsetDateTime::now_utc();
         mqtt_lease::Entity::update_many()
             .col_expr(
                 mqtt_lease::Column::HeartbeatAt,
                 sea_orm::sea_query::Expr::value(now),
             )
-            .filter(mqtt_lease::Column::TenantId.is_in(active_tenant_ids.to_vec()))
+            .filter(mqtt_lease::Column::InstanceId.eq(instance_id))
             .exec(&self.db)
             .await
             .context(LeaseCoordinatorError::Database(

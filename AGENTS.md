@@ -643,7 +643,7 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--max-tenants` | `0` | Max tenants per instance (0 = unlimited) |
-| `--heartbeat-interval` | `15` | Heartbeat interval in seconds |
+| `--ping-interval` | `15` | Ping interval in seconds |
 
 **Connection lifecycle (shared with agent via `uptrakit-enrollment`):**
 1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU → system trust (via `uptrakit_enrollment::ca::bootstrap_ca`)
@@ -662,11 +662,11 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 4. Receive `CaBundleUpdated` → update local CA certificate
 5. Receive `RequestCertRenewal` → trigger certificate renewal
 6. Receive `ServerRestarting` → prepare for reconnect
-7. Send `Heartbeat` periodically with active tenant IDs
+7. Send `Ping` periodically (controller uses Ping receipt to update lease heartbeats)
 
 **Wire protocol:**
 
-Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `ControllerMessage`) defined in `crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHostInfo`, `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`, `Heartbeat`, `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`). `ControllerMessage` is fully shared. The `service_ws.rs` module is the single public WebSocket entry point; `agent_ws.rs` and `mqtt_ws.rs` are `pub(crate)` internal implementation modules.
+Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `ControllerMessage`) defined in `crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHostInfo`, `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`, `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`). `ControllerMessage` is fully shared. The `service_ws.rs` module is the single public WebSocket entry point; `agent_ws.rs` and `mqtt_ws.rs` are `pub(crate)` internal implementation modules.
 
 **Enrollment and approval:**
 
@@ -887,7 +887,6 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 - `UpdateOutput(UpdateOutputPayload)` variant in `ServiceMessage` (agent-specific) — agent streams update output (stdout, stderr, pre/post-hook, system)
 - `UpdateResult(UpdateResultPayload)` variant in `ServiceMessage` (agent-specific) — agent reports final update status with accumulated output
 - `Register(RegisterPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service registers with the controller
-- `Heartbeat(HeartbeatPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service periodic heartbeat with active tenant IDs
 - `ReleaseTenants(ReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases tenant leases
 - `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify services; includes a human-readable `reason` field
 - `Disconnecting(DisconnectingPayload)` variant in `ServiceMessage` — service notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`; optional `active_tenants: Vec<String>` for MQTT)
