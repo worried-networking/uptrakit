@@ -18,25 +18,21 @@ default = []
 clap = { workspace = true }
 futures-util = { workspace = true }
 hostname = { workspace = true }
-rcgen = { workspace = true }
 rootcause = { workspace = true }
-# Required for rcgen CSR verification - ensure verify feature is enabled
-x509-parser = { workspace = true }
 rumqttc = { version = "0.25.1" }
 rustls = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
-tokio-rustls = { workspace = true }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 tracing = { workspace = true }
-url = "2"
-rustls-pemfile = { workspace = true }
 tracing-subscriber = { workspace = true }
+url = "2"
+uptrakit-directories = { path = "../../shared/directories" }
+uptrakit-enrollment = { path = "../../shared/enrollment" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
-uptrakit-directories = { path = "../../shared/directories" }
 uuid = { workspace = true }
 webpki-roots = { workspace = true }
 

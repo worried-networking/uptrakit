@@ -10,30 +10,21 @@ version.workspace = true
 clap = { workspace = true }
 futures-util = { workspace = true }
 hex = { workspace = true }
-hostname = { workspace = true }
-http = { workspace = true }
 rootcause = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-url = { workspace = true }
+uptrakit-enrollment = { path = "../../shared/enrollment" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-provider-core = { path = "../../providers/core" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
-uptrakit-directories = { path = "../../shared/directories" }
-rcgen = { workspace = true }
-x509-parser = { workspace = true } # required for rcgen's x509-parser verify feature unification
-reqwest = { workspace = true }
-uuid = { workspace = true }
-webpki-roots = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

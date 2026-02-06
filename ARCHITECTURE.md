@@ -67,7 +67,7 @@ crates/
 │   ├── core/                      # uptrakit-core (lib) — shared domain models
 │   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities & migrations
 │   ├── directories/               # uptrakit-directories (lib) — cross-platform directory management
-│   ├── enrollment/                # uptrakit-enrollment (lib) — shared service identity
+│   ├── enrollment/                # uptrakit-enrollment (lib) — shared enrollment, TLS, CA, CLI
 │   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/
@@ -315,7 +315,8 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. Runs as a separate binary (`uptrakit-mqtt`) that connects to the controller via WebSocket/mTLS (same enrollment model as agents). No direct database access -- the controller pushes tenant configs and manages leases centrally. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
 | **HTTPS-only controller** | The controller listens on HTTPS by default. An optional plain HTTP listener (`--pki-http listener`) can be started for PKI-only endpoints (OCSP, CRL, CA cert) when needed by Nginx `ssl_ocsp_responder`. All agent and browser connections use TLS. |
-| **Flexible agent bootstrap** | Agents support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
+| **Shared enrollment crate** | The `uptrakit-enrollment` crate provides unified service identity management, TLS configuration, CA bootstrap, WebSocket enrollment protocol, and CLI arguments shared by both agent and MQTT service binaries. This eliminates code duplication and ensures consistent enrollment behavior across service types. |
+| **Flexible agent bootstrap** | Both agent and MQTT service support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--pki-addr` fetch, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
 | **Reverse proxy support** | L4 passthrough and L7 TLS termination. Agent identity forwarded via structured info or PEM headers with CA CN verification. Header stripping prevents spoofing from non-proxy clients. Docker integration tests validate all 5 supported proxies (Nginx, Traefik, Caddy, HAProxy, Envoy). |
 | **Zero-downtime graceful restart** | HAProxy-style restart using `SO_REUSEPORT`. New process binds the same port, starts accepting immediately, then signals the old process (SIGUSR1). Old process stops accepting, scatters `ServerRestarting` notifications to agents over 5 seconds to avoid thundering herd, drains existing connections, then exits. Agents may not notice the restart if their connection stays open. |
 | **Agent graceful shutdown** | Agents handle SIGINT/SIGTERM/SIGHUP with graceful shutdown: wait for in-flight updates (configurable timeout), notify controller, close cleanly. SIGHUP returns exit code 0 for systemd restart. Prevents abandoned updates and data loss. |

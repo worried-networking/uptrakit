@@ -36,7 +36,7 @@ uptrakit/
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared service identity state
+│   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared enrollment, TLS, CA bootstrap, CLI
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
@@ -206,7 +206,7 @@ These are non-negotiable design constraints. Do not violate them.
 9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
-12. **Do not add any `allow()`** without explicit confirmation. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`), `run_authenticated_loop` in the agent (gained `pki_addr` parameter), and `create_mqtt_client`/`update_mqtt_client` in `mqtt_client_store` (many connection parameters).
+12. **Do not add any `allow()`** without explicit confirmation. **Approved exceptions**: `#[allow(clippy::too_many_arguments)]` on functions that gained a `tenant_id` parameter during the multi-tenancy refactor (`do_enroll`, `resolve_oidc_user`, `reconcile_setting`, `reconcile_setting_vec`), `run_authenticated_loop` in the agent (gained `pki_addr` parameter), `create_mqtt_client`/`update_mqtt_client` in `mqtt_client_store` (many connection parameters), and `run_enrollment` in `uptrakit-enrollment` ws.rs (takes identity, connection, enrollment, and host parameters).
 13. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling" section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers). **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
 ## Directory management
@@ -622,21 +622,33 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 
 **CLI flags (`uptrakit-mqtt`):**
 
+The agent and MQTT service share a common set of CLI flags via `CommonServiceArgs` (defined in `uptrakit-enrollment::cli`). Service-specific flags are listed separately.
+
+**Common flags (shared with agent via `CommonServiceArgs`):**
+
 | Flag | Env var | Default | Description |
 | --- | --- | --- | --- |
-| `--controller-url` | `UPTRAKIT_CONTROLLER_URL` | (required) | Controller WebSocket URL (e.g., `wss://controller:8443`) |
+| `--url` | | (required) | Controller URL (e.g., `https://controller:8443`). Port defaults to 443. |
+| `--tofu` | | `false` | Trust the controller's TLS certificate on first connection (TOFU). Conflicts with `--ca-cert` and `--pki-addr`. |
+| `--ca-cert` | | | Path to a PEM-encoded CA certificate file |
+| `--pki-addr` | | | Optional URL for PKI endpoints (CA certificate, OCSP). Supports `http://` and `https://`. |
 | `--config-dir` | `UPTRAKIT_CONFIG_DIR` | platform-specific | Config directory for CA certificate |
 | `--state-dir` | `UPTRAKIT_STATE_DIR` | platform-specific | State directory for service identity (service_id, keypair, certificate) |
-| `--max-tenants` | | `0` | Max tenants per instance (0 = unlimited) |
-| `--heartbeat-interval` | | `15` | Heartbeat interval in seconds |
-| `--enrollment-token` | `UPTRAKIT_ENROLLMENT_TOKEN` | | Enrollment token for auto-approval |
 | `--friendly-name` | | hostname | Human-readable display name |
-| `--insecure` | | `false` | Skip TLS verification (DANGEROUS, only for initial CA trust) |
+| `--enrollment-token` | `UPTRAKIT_ENROLLMENT_TOKEN` | | Enrollment token for auto-approval |
+| `--force-enroll` | | `false` | Force fresh enrollment, discarding existing state (preserves cached CA certificate) |
 
-**Connection lifecycle (same TOFU pattern as agents):**
-1. **CA fetch (TOFU)**: Fetch CA certificate from `GET /api/v1/pki/ca.crt` (using system roots or `--insecure`), save to `ca.crt` in config dir
-2. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`, hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret (saved to state dir)
-3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate (saved to state dir)
+**MQTT-specific flags:**
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--max-tenants` | `0` | Max tenants per instance (0 = unlimited) |
+| `--heartbeat-interval` | `15` | Heartbeat interval in seconds |
+
+**Connection lifecycle (shared with agent via `uptrakit-enrollment`):**
+1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU → system trust (via `uptrakit_enrollment::ca::bootstrap_ca`)
+2. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`, hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret (saved to state dir) (via `uptrakit_enrollment::ws::run_enrollment`)
+3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate (saved to state dir) (via `uptrakit_enrollment::ws::resume_enrollment`)
 4. **Authenticated operation**: Reconnect with mTLS, send `Register`, receive `TenantAssignments`, run MQTT clients
 
 **Instance identification:**
@@ -689,7 +701,7 @@ MQTT services use the unified service entity:
 | `crates/shared/db/src/entity/service_certificate.rs` | SeaORM entity for service certificates |
 | `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
 | `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
-| `crates/shared/enrollment/` | `uptrakit-enrollment` crate for shared service identity state |
+| `crates/shared/enrollment/` | `uptrakit-enrollment` crate: shared enrollment, identity, TLS, CA bootstrap, WebSocket protocol, and CLI args |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
 | `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services |
 | `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |

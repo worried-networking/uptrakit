@@ -1,105 +1,12 @@
-use std::path::PathBuf;
-
 use clap::Parser;
-use uptrakit_directories::AppDirs;
+use uptrakit_enrollment::cli::CommonServiceArgs;
 
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-agent")]
 #[command(about = "Uptrakit agent that connects to the controller")]
 pub struct Args {
-    /// Controller URL in the format https://host:port.
-    /// Port defaults to 443 if omitted.
-    #[arg(long)]
-    pub url: String,
-
-    /// Trust the controller's TLS certificate on first connection (TOFU).
-    /// Only effective when no CA certificate is cached locally.
-    #[arg(long, conflicts_with_all = ["ca_cert", "pki_addr"])]
-    pub tofu: bool,
-
-    /// Path to a PEM-encoded CA certificate file.
-    #[arg(long)]
-    pub ca_cert: Option<PathBuf>,
-
-    /// Config directory for persistent configuration (controller's CA cert).
-    /// Supports `~` for home directory expansion.
-    /// Default: platform-specific (e.g., ~/.config/agent on Linux).
-    #[arg(long)]
-    pub config_dir: Option<PathBuf>,
-
-    /// State directory for runtime state (agent.json, private keys, certificate).
-    /// Supports `~` for home directory expansion.
-    /// Default: platform-specific (e.g., ~/.local/state/agent on Linux).
-    #[arg(long)]
-    pub state_dir: Option<PathBuf>,
-
-    /// Friendly name for this agent (defaults to system hostname)
-    #[arg(long)]
-    pub friendly_name: Option<String>,
-
-    /// Pre-shared enrollment token for auto-approval
-    #[arg(long)]
-    pub enrollment_token: Option<String>,
-
-    /// Force fresh enrollment, discarding any existing state.
-    /// Use when the agent's certificate has been revoked.
-    #[arg(long)]
-    pub force_enroll: bool,
-
-    /// Optional URL for PKI endpoints (CA certificate, OCSP).
-    /// When set, the agent fetches the CA certificate from this address
-    /// instead of from the main --url.
-    /// Supports both http:// and https:// schemes.
-    #[arg(long, value_parser = parse_pki_addr)]
-    pub pki_addr: Option<String>,
-}
-
-impl Args {
-    /// Resolve application directories using platform-specific defaults.
-    ///
-    /// Returns `AppDirs` with separate config and state directories.
-    /// CLI overrides take precedence over platform defaults.
-    pub fn resolve_dirs(&self) -> uptrakit_directories::Result<AppDirs> {
-        AppDirs::resolve(
-            "agent",
-            self.config_dir.as_deref(),
-            self.state_dir.as_deref(),
-        )
-    }
-
-    /// Parse `--url` into `(host, port)`.
-    pub fn parsed_url(&self) -> Result<(String, u16), String> {
-        let url_str = self.url.trim_end_matches('/');
-        let parsed = url::Url::parse(url_str).map_err(|e| format!("invalid URL: {e}"))?;
-        if parsed.scheme() != "https" {
-            return Err("URL scheme must be https".to_string());
-        }
-        let host = parsed
-            .host_str()
-            .ok_or("URL must contain a host")?
-            .to_string();
-        let port = parsed.port().unwrap_or(443);
-        Ok((host, port))
-    }
-}
-
-/// Validate `--pki-addr`: must be http:// or https://, must have a host,
-/// trailing slashes are stripped.
-fn parse_pki_addr(s: &str) -> std::result::Result<String, String> {
-    let trimmed = s.trim_end_matches('/');
-    let parsed = url::Url::parse(trimmed).map_err(|e| format!("invalid PKI address URL: {e}"))?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        other => {
-            return Err(format!(
-                "unsupported URL scheme: {other} (expected http or https)"
-            ));
-        }
-    }
-    if parsed.host_str().is_none() {
-        return Err("PKI address URL must contain a host".to_string());
-    }
-    Ok(trimmed.to_string())
+    #[command(flatten)]
+    pub common: CommonServiceArgs,
 }
 
 #[cfg(test)]
@@ -113,13 +20,13 @@ mod tests {
         let args =
             Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
                 .expect("should parse defaults");
-        assert!(!args.tofu);
-        assert!(args.ca_cert.is_none());
-        assert!(args.config_dir.is_none());
-        assert!(args.state_dir.is_none());
-        assert!(args.friendly_name.is_none());
-        assert!(args.enrollment_token.is_none());
-        assert!(!args.force_enroll);
+        assert!(!args.common.tofu);
+        assert!(args.common.ca_cert.is_none());
+        assert!(args.common.config_dir.is_none());
+        assert!(args.common.state_dir.is_none());
+        assert!(args.common.friendly_name.is_none());
+        assert!(args.common.enrollment_token.is_none());
+        assert!(!args.common.force_enroll);
     }
 
     #[test]
@@ -127,8 +34,10 @@ mod tests {
         let args =
             Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
                 .expect("should parse defaults");
-        let dirs = args.resolve_dirs().expect("should resolve dirs");
-        // Should return platform-specific paths
+        let dirs = args
+            .common
+            .resolve_dirs("agent")
+            .expect("should resolve dirs");
         assert!(!dirs.config_dir().as_os_str().is_empty());
         assert!(!dirs.state_dir().as_os_str().is_empty());
     }
@@ -145,7 +54,10 @@ mod tests {
             "/custom/state",
         ])
         .expect("should parse");
-        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        let dirs = args
+            .common
+            .resolve_dirs("agent")
+            .expect("should resolve dirs");
         assert_eq!(dirs.config_dir().to_str().unwrap(), "/custom/config");
         assert_eq!(dirs.state_dir().to_str().unwrap(), "/custom/state");
     }
@@ -180,7 +92,7 @@ mod tests {
     fn parsed_url_with_port() {
         let args =
             Args::try_parse_from(["uptrakit-agent", "--url", "https://myhost:9443"]).unwrap();
-        let (host, port) = args.parsed_url().unwrap();
+        let (host, port) = args.common.parsed_url().unwrap();
         assert_eq!(host, "myhost");
         assert_eq!(port, 9443);
     }
@@ -188,7 +100,7 @@ mod tests {
     #[test]
     fn parsed_url_default_port() {
         let args = Args::try_parse_from(["uptrakit-agent", "--url", "https://myhost"]).unwrap();
-        let (host, port) = args.parsed_url().unwrap();
+        let (host, port) = args.common.parsed_url().unwrap();
         assert_eq!(host, "myhost");
         assert_eq!(port, 443);
     }
@@ -197,7 +109,7 @@ mod tests {
     fn parsed_url_trailing_slash() {
         let args =
             Args::try_parse_from(["uptrakit-agent", "--url", "https://myhost:8443/"]).unwrap();
-        let (host, port) = args.parsed_url().unwrap();
+        let (host, port) = args.common.parsed_url().unwrap();
         assert_eq!(host, "myhost");
         assert_eq!(port, 8443);
     }
@@ -205,7 +117,7 @@ mod tests {
     #[test]
     fn parsed_url_rejects_http() {
         let args = Args::try_parse_from(["uptrakit-agent", "--url", "http://myhost:8443"]).unwrap();
-        let err = args.parsed_url().unwrap_err();
+        let err = args.common.parsed_url().unwrap_err();
         assert!(err.contains("https"), "should reject non-https: {err}");
     }
 
@@ -219,7 +131,10 @@ mod tests {
             "http://controller:8080",
         ])
         .expect("should parse --pki-addr with http://");
-        assert_eq!(args.pki_addr.as_deref(), Some("http://controller:8080"));
+        assert_eq!(
+            args.common.pki_addr.as_deref(),
+            Some("http://controller:8080")
+        );
     }
 
     #[test]
@@ -232,7 +147,10 @@ mod tests {
             "https://pki.example.com",
         ])
         .expect("should parse --pki-addr with https://");
-        assert_eq!(args.pki_addr.as_deref(), Some("https://pki.example.com"));
+        assert_eq!(
+            args.common.pki_addr.as_deref(),
+            Some("https://pki.example.com")
+        );
     }
 
     #[test]
@@ -245,7 +163,10 @@ mod tests {
             "http://controller:8080/",
         ])
         .expect("should strip trailing slash");
-        assert_eq!(args.pki_addr.as_deref(), Some("http://controller:8080"));
+        assert_eq!(
+            args.common.pki_addr.as_deref(),
+            Some("http://controller:8080")
+        );
     }
 
     #[test]

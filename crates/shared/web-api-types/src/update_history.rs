@@ -20,8 +20,7 @@ impl UpdateStatus {
         }
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),
             "in_progress" => Some(Self::InProgress),

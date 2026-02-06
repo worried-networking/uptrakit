@@ -816,39 +816,39 @@ pub async fn oidc_complete_registration(
         && let Some(provider) =
             find_active_provider(&state.db, state.default_tenant_id, pending.provider_id).await
     {
-            let mut fake_claims = serde_json::Map::new();
-            if let Some(ref path) = provider.role_claim_path {
-                let reverse_mapped: Vec<String> = pending
-                    .mapped_roles
-                    .iter()
-                    .filter_map(|local_name| {
-                        provider
-                            .role_mapping
-                            .0
-                            .iter()
-                            .find(|(_, v)| v.as_str() == local_name)
-                            .map(|(k, _)| k.clone())
-                    })
-                    .collect();
-                let first_segment = path.split('.').next().unwrap_or(path);
-                fake_claims.insert(
-                    first_segment.to_string(),
-                    serde_json::Value::Array(
-                        reverse_mapped
-                            .into_iter()
-                            .map(serde_json::Value::String)
-                            .collect(),
-                    ),
-                );
-            }
-            let _ = sync_oidc_roles(
-                &state.db,
-                state.default_tenant_id,
-                user_id,
-                &provider,
-                &serde_json::Value::Object(fake_claims),
-            )
-            .await;
+        let mut fake_claims = serde_json::Map::new();
+        if let Some(ref path) = provider.role_claim_path {
+            let reverse_mapped: Vec<String> = pending
+                .mapped_roles
+                .iter()
+                .filter_map(|local_name| {
+                    provider
+                        .role_mapping
+                        .0
+                        .iter()
+                        .find(|(_, v)| v.as_str() == local_name)
+                        .map(|(k, _)| k.clone())
+                })
+                .collect();
+            let first_segment = path.split('.').next().unwrap_or(path);
+            fake_claims.insert(
+                first_segment.to_string(),
+                serde_json::Value::Array(
+                    reverse_mapped
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        let _ = sync_oidc_roles(
+            &state.db,
+            state.default_tenant_id,
+            user_id,
+            &provider,
+            &serde_json::Value::Object(fake_claims),
+        )
+        .await;
     }
 
     // 8. Create session + JWT (same pattern as oidc_exchange)

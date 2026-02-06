@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::auth::device_flow::DeviceFlowStore;
 use uptrakit_web_api::auth::jwt::JwtManager;
-use uptrakit_web_api::auth::oidc_state::{AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore};
+use uptrakit_web_api::auth::oidc_state::{
+    AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
+};
 use uptrakit_web_api::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api::ca_snapshot::CaSnapshotData;
 use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};

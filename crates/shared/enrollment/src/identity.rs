@@ -213,6 +213,14 @@ impl ServiceIdentityState {
         asn1_time.to_datetime().into()
     }
 
+    /// Certificate expiry as milliseconds since the Unix epoch.
+    ///
+    /// Returns `None` if no certificate is loaded or parsing fails.
+    pub fn cert_not_after_ms(&self) -> Option<i64> {
+        let not_after = self.cert_not_after()?;
+        Some(not_after.unix_timestamp() * 1000)
+    }
+
     /// Check if the certificate is expired or within the renewal window.
     ///
     /// Returns `None` if no certificate is loaded or parsing fails.
@@ -270,6 +278,17 @@ impl ServiceIdentityState {
 
         self.keypair = Some(keypair);
         Ok(())
+    }
+
+    /// Generate a PKCS#10 CSR using the stored service_id.
+    ///
+    /// Convenience wrapper around [`generate_csr`](Self::generate_csr) that uses the
+    /// already-enrolled service_id. Returns an error if not enrolled or no keypair.
+    pub fn generate_csr_for_self(&self) -> Result<String> {
+        let sid = self
+            .service_id
+            .ok_or_else(|| report!(EnrollmentError::NotEnrolled))?;
+        self.generate_csr(sid)
     }
 
     /// Generate a PKCS#10 CSR with `CN=<service_id>`.
@@ -424,6 +443,38 @@ impl ServiceIdentityState {
         self.certificate_pem = None;
         Ok(())
     }
+}
+
+/// Generate a fresh ECDSA P-256 keypair and a CSR with `CN=<service_id>`.
+///
+/// Returns `(key_pem, csr_pem)`. The keypair is **not** persisted; this is
+/// used for certificate renewal where a fresh keypair is needed without
+/// overwriting the current one on disk until the new certificate arrives.
+pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
+    let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
+        report!(EnrollmentError::CsrGeneration(format!(
+            "key generation failed: {e}"
+        )))
+    })?;
+
+    let mut params = rcgen::CertificateParams::default();
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, service_id.to_string());
+
+    let csr = params.serialize_request(&key_pair).map_err(|e| {
+        report!(EnrollmentError::CsrGeneration(format!(
+            "CSR serialization failed: {e}"
+        )))
+    })?;
+
+    let csr_pem = csr.pem().map_err(|e| {
+        report!(EnrollmentError::CsrGeneration(format!(
+            "CSR PEM encoding failed: {e}"
+        )))
+    })?;
+
+    Ok((key_pair.serialize_pem(), csr_pem))
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

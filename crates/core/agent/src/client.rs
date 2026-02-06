@@ -1,52 +1,17 @@
-use std::sync::Arc;
-
 use futures_util::{SinkExt, StreamExt};
-use http::Uri;
-use rcgen::{CertificateParams, DnType, KeyPair};
 use rootcause::prelude::*;
-use rustls::RootCertStore;
-use rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
 use sha2::{Digest, Sha256};
-use tokio_rustls::TlsConnector;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use uptrakit_enrollment::ca::{CaTlsMode, fetch_ca_certificate};
+use uptrakit_enrollment::identity::generate_keypair_and_csr;
+use uptrakit_enrollment::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, EnrollPayload,
-    EnrolledPayload, HostInfo, PingPayload, RenewCertificatePayload, ReportHostInfoPayload,
-    RequestCertificatePayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
-    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload, now_millis,
+    CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
+    RenewCertificatePayload, ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
+    now_millis,
 };
 
 use crate::error::{Error, Result};
-
-/// Generate an ECDSA P-256 keypair and a CSR with CN=agent_id.
-/// Returns `(key_pem, csr_pem)`.
-pub fn generate_keypair_and_csr(agent_id: &str) -> Result<(String, String)> {
-    let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-        .map_err(|e| report!(Error::CsrGeneration(format!("key generation failed: {e}"))))?;
-
-    let mut params = CertificateParams::default();
-    params
-        .distinguished_name
-        .push(DnType::CommonName, agent_id.to_string());
-    params
-        .distinguished_name
-        .push(DnType::OrganizationName, "Uptrakit Agent");
-
-    let csr = params.serialize_request(&key_pair).map_err(|e| {
-        report!(Error::CsrGeneration(format!(
-            "CSR serialization failed: {e}"
-        )))
-    })?;
-
-    let csr_pem = csr.pem().map_err(|e| {
-        report!(Error::CsrGeneration(format!(
-            "CSR PEM encoding failed: {e}"
-        )))
-    })?;
-
-    Ok((key_pair.serialize_pem(), csr_pem))
-}
 
 /// Outcome of the authenticated event loop.
 pub enum LoopOutcome {
@@ -58,380 +23,6 @@ pub enum LoopOutcome {
     Disconnected,
     /// SIGHUP received — exit for external restart.
     Restart,
-}
-
-/// TLS mode for the CA certificate fetch via reqwest.
-pub enum TlsMode<'a> {
-    /// Use system/built-in root certificates (for https:// pki_addr).
-    SystemTrust,
-    /// Accept any server cert (TOFU).
-    TrustOnFirstUse,
-    /// Use a pinned CA certificate.
-    PinnedCa(&'a [u8]),
-}
-
-/// Fetch the CA certificate bundle using reqwest.
-///
-/// The caller passes the correct `base_url` (either the main controller URL
-/// or the `--pki-addr` value). If `base_url` starts with `http://`, plain
-/// HTTP is used (no TLS configuration needed). Otherwise the provided
-/// `tls_mode` applies.
-pub async fn fetch_ca_certificate(base_url: &str, tls_mode: TlsMode<'_>) -> Result<Vec<u8>> {
-    let fetch_url = format!("{base_url}/api/v1/pki/ca.crt");
-    let use_plain_http = base_url.starts_with("http://");
-
-    tracing::info!(url = %fetch_url, "fetching CA certificate");
-
-    let mut builder = reqwest::Client::builder();
-    if use_plain_http {
-        // Plain HTTP — no TLS configuration needed
-    } else {
-        match tls_mode {
-            TlsMode::SystemTrust => {
-                // reqwest defaults to system/built-in roots — nothing to configure
-            }
-            TlsMode::TrustOnFirstUse => {
-                builder = builder.tls_danger_accept_invalid_certs(true);
-            }
-            TlsMode::PinnedCa(ca_pem) => {
-                let cert = reqwest::Certificate::from_pem(ca_pem)
-                    .map_err(|e| report!(Error::FetchCa(format!("invalid CA PEM: {e}"))))?;
-                builder = builder.tls_certs_only([cert]);
-            }
-        }
-    }
-
-    let client = builder
-        .build()
-        .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
-
-    let resp = client
-        .get(&fetch_url)
-        .send()
-        .await
-        .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
-
-    if !resp.status().is_success() {
-        return Err(report!(Error::FetchCa(format!("HTTP {}", resp.status()))));
-    }
-
-    let body = resp
-        .bytes()
-        .await
-        .map_err(|e| report!(Error::FetchCa(e.to_string())))?;
-
-    tracing::info!(bytes = body.len(), "CA certificate fetched");
-    Ok(body.to_vec())
-}
-
-/// Build a TLS connector that trusts only the given CA PEM (no client auth).
-pub fn build_tls_connector(ca_pem: &[u8]) -> Result<TlsConnector> {
-    let root_store = build_root_store(ca_pem)?;
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    Ok(TlsConnector::from(Arc::new(config)))
-}
-
-/// Build a TLS connector that trusts only the given CA PEM, with client cert (mTLS).
-pub fn build_tls_connector_with_client_cert(
-    ca_pem: &[u8],
-    cert_pem: &str,
-    key_pem: &str,
-) -> Result<TlsConnector> {
-    use rustls::pki_types::PrivateKeyDer;
-
-    let root_store = build_root_store(ca_pem)?;
-
-    let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_to::<Error>()?;
-
-    let client_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<Error>()?;
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_client_auth_cert(client_certs, client_key)
-        .context_to::<Error>()?;
-
-    Ok(TlsConnector::from(Arc::new(config)))
-}
-
-/// Build a TLS connector using system/webpki root certificates (no client auth).
-pub fn build_system_trust_tls_connector() -> Result<TlsConnector> {
-    let root_store = build_webpki_root_store();
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    Ok(TlsConnector::from(Arc::new(config)))
-}
-
-/// Build a TLS connector using system/webpki root certs with client cert (mTLS).
-pub fn build_system_trust_tls_connector_with_client_cert(
-    cert_pem: &str,
-    key_pem: &str,
-) -> Result<TlsConnector> {
-    use rustls::pki_types::PrivateKeyDer;
-
-    let root_store = build_webpki_root_store();
-
-    let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_to::<Error>()?;
-
-    let client_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).context_to::<Error>()?;
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_client_auth_cert(client_certs, client_key)
-        .context_to::<Error>()?;
-
-    Ok(TlsConnector::from(Arc::new(config)))
-}
-
-fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
-    let certs = CertificateDer::pem_slice_iter(ca_pem)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context_to::<Error>()?;
-
-    if certs.is_empty() {
-        return Err(report!(Error::NoCertificates));
-    }
-
-    let mut root_store = RootCertStore::empty();
-    for cert in certs {
-        root_store.add(cert).context_to::<Error>()?;
-    }
-
-    Ok(root_store)
-}
-
-fn build_webpki_root_store() -> RootCertStore {
-    let mut root_store = RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    root_store
-}
-
-/// Type alias for the WebSocket stream produced by `connect_ws`.
-type WsStream =
-    tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
-
-/// Connect TCP → TLS → WebSocket upgrade, with optional Authorization header.
-pub async fn connect_ws(
-    host: &str,
-    port: u16,
-    tls_connector: &TlsConnector,
-    auth_header: Option<&str>,
-) -> Result<WsStream> {
-    let ws_url = format!("wss://{host}:{port}/api/v1/ws/service");
-    tracing::info!(url = %ws_url, "connecting to controller");
-
-    let tcp_stream = tokio::net::TcpStream::connect((host, port))
-        .await
-        .context_to::<Error>()?;
-
-    let server_name = ServerName::try_from(host.to_string()).context_to::<Error>()?;
-
-    let tls_stream = tls_connector
-        .connect(server_name, tcp_stream)
-        .await
-        .context_to::<Error>()?;
-
-    let uri: Uri = ws_url.parse().context_to::<Error>()?;
-    let mut request = uri
-        .to_string()
-        .into_client_request()
-        .context_to::<Error>()?;
-
-    if let Some(header_value) = auth_header {
-        request.headers_mut().insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_str(header_value).map_err(|e| {
-                report!(Error::Enrollment(format!(
-                    "invalid authorization header: {e}"
-                )))
-            })?,
-        );
-    }
-
-    let (ws_stream, _response) = tokio_tungstenite::client_async(request, tls_stream)
-        .await
-        .context_to::<Error>()?;
-
-    tracing::info!("WebSocket connected");
-    Ok(ws_stream)
-}
-
-/// Send Enroll message and read Enrolled response.
-pub async fn send_enroll(
-    ws: &mut WsStream,
-    hostname: &str,
-    friendly_name: &str,
-    enrollment_token: Option<&str>,
-    host_info: HostInfo,
-) -> Result<EnrolledPayload> {
-    let msg = ServiceMessage::Enroll(EnrollPayload {
-        hostname: hostname.to_string(),
-        friendly_name: friendly_name.to_string(),
-        enrollment_token: enrollment_token.map(|s| s.to_string()),
-        service_type: "agent".to_string(),
-        host_info: Some(host_info),
-    });
-    let json = serde_json::to_string(&msg).context_to::<Error>()?;
-    ws.send(Message::Text(json.into()))
-        .await
-        .context_to::<Error>()?;
-
-    tracing::info!("sent Enroll, waiting for Enrolled response");
-
-    loop {
-        let resp = ws
-            .next()
-            .await
-            .ok_or_else(|| report!(Error::ReceiveClosed))?
-            .context_to::<Error>()?;
-
-        match resp {
-            Message::Text(text) => {
-                let controller_msg: ControllerMessage =
-                    serde_json::from_str(&text).context_to::<Error>()?;
-
-                match controller_msg {
-                    ControllerMessage::Enrolled(payload) => return Ok(payload),
-                    ControllerMessage::Error(err) => {
-                        return Err(report!(Error::Enrollment(format!(
-                            "{}: {}",
-                            err.code, err.message
-                        ))));
-                    }
-                    ControllerMessage::ServerRestarting(payload) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting during enrollment");
-                        return Err(report!(Error::ReceiveClosed));
-                    }
-                    _ => {
-                        return Err(report!(Error::UnexpectedMessage));
-                    }
-                }
-            }
-            Message::Close(frame) => {
-                log_close_frame(frame);
-                return Err(report!(Error::ReceiveClosed));
-            }
-            _ => continue,
-        }
-    }
-}
-
-/// Wait for Approved/Rejected push from controller. Returns on Approved, errors on Rejected.
-pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
-    tracing::info!("waiting for approval...");
-
-    loop {
-        let msg = match ws.next().await {
-            Some(Ok(m)) => m,
-            Some(Err(e)) if is_peer_closed(&e) => {
-                tracing::info!("connection closed by controller while waiting for approval");
-                return Err(report!(Error::ReceiveClosed));
-            }
-            Some(Err(e)) => return Err(e).context_to::<Error>()?,
-            None => return Err(report!(Error::ReceiveClosed)),
-        };
-
-        match msg {
-            Message::Text(text) => {
-                let controller_msg: ControllerMessage =
-                    serde_json::from_str(&text).context_to::<Error>()?;
-
-                match controller_msg {
-                    ControllerMessage::Approved(payload) => {
-                        tracing::info!(service_id = %payload.service_id, "enrollment approved");
-                        return Ok(());
-                    }
-                    ControllerMessage::Rejected(payload) => {
-                        tracing::error!(service_id = %payload.service_id, "enrollment rejected");
-                        return Err(report!(Error::EnrollmentRejected));
-                    }
-                    ControllerMessage::Pong(_) => {
-                        // Ignore pongs while waiting
-                        continue;
-                    }
-                    ControllerMessage::Error(err) => {
-                        return Err(report!(Error::Enrollment(format!(
-                            "{}: {}",
-                            err.code, err.message
-                        ))));
-                    }
-                    ControllerMessage::ServerRestarting(payload) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting while waiting for approval");
-                        return Err(report!(Error::ReceiveClosed));
-                    }
-                    _ => continue,
-                }
-            }
-            Message::Close(frame) => {
-                log_close_frame(frame);
-                return Err(report!(Error::ReceiveClosed));
-            }
-            _ => continue,
-        }
-    }
-}
-
-/// Send RequestCertificate with a CSR and read Certificate response.
-pub async fn request_certificate_ws(
-    ws: &mut WsStream,
-    csr_pem: &str,
-) -> Result<CertificatePayload> {
-    let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
-        csr_pem: csr_pem.to_string(),
-    });
-    let json = serde_json::to_string(&msg).context_to::<Error>()?;
-    ws.send(Message::Text(json.into()))
-        .await
-        .context_to::<Error>()?;
-
-    tracing::info!("sent RequestCertificate, waiting for Certificate response");
-
-    loop {
-        let resp = ws
-            .next()
-            .await
-            .ok_or_else(|| report!(Error::ReceiveClosed))?
-            .context_to::<Error>()?;
-
-        match resp {
-            Message::Text(text) => {
-                let controller_msg: ControllerMessage =
-                    serde_json::from_str(&text).context_to::<Error>()?;
-
-                match controller_msg {
-                    ControllerMessage::Certificate(payload) => return Ok(payload),
-                    ControllerMessage::Error(err) => {
-                        return Err(report!(Error::Enrollment(format!(
-                            "{}: {}",
-                            err.code, err.message
-                        ))));
-                    }
-                    ControllerMessage::ServerRestarting(payload) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting during certificate request");
-                        return Err(report!(Error::ReceiveClosed));
-                    }
-                    _ => {
-                        return Err(report!(Error::UnexpectedMessage));
-                    }
-                }
-            }
-            Message::Close(frame) => {
-                log_close_frame(frame);
-                return Err(report!(Error::ReceiveClosed));
-            }
-            _ => continue,
-        }
-    }
 }
 
 /// Far-future delay used when no renewal is scheduled (30 days).
@@ -464,18 +55,20 @@ pub async fn run_authenticated_loop(
     base_url: &str,
     pki_addr: Option<&str>,
     ca_pem: Option<&[u8]>,
-    tls_connector: TlsConnector,
+    tls_connector: tokio_rustls::TlsConnector,
     cert_not_after_ts: Option<i64>,
-    config_dir: &std::path::Path,
-    state_dir: &std::path::Path,
+    identity: &uptrakit_enrollment::ServiceIdentityState,
 ) -> Result<LoopOutcome> {
     use std::pin::Pin;
     use std::time::Duration;
+    use tokio_tungstenite::tungstenite::Message;
 
     const PING_INTERVAL: Duration = Duration::from_secs(300);
     const DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120;
 
-    let mut ws_stream = connect_ws(host, port, &tls_connector, None).await?;
+    let mut ws_stream = connect_ws(host, port, &tls_connector, None)
+        .await
+        .context_to::<Error>()?;
 
     // Send host info immediately after connecting
     let host_info = crate::host_info::collect_host_info();
@@ -513,6 +106,9 @@ pub async fn run_authenticated_loop(
 
     // Track in-flight update (only one at a time)
     let mut in_flight_update: Option<InFlightUpdate> = None;
+
+    let config_dir = identity.config_dir();
+    let state_dir = identity.state_dir();
 
     let outcome = loop {
         // If there's an in-flight update, poll it alongside other events
@@ -571,9 +167,9 @@ pub async fn run_authenticated_loop(
             }
             _ = &mut renewal_sleep => {
                 tracing::info!("renewal window reached, requesting certificate renewal");
-                // Extract client_id from the current cert CN
-                let client_id_str = extract_agent_id_from_state(state_dir);
-                let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)?;
+                let client_id_str = extract_service_id(identity);
+                let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)
+                    .context_to::<Error>()?;
                 pending_renewal_key = Some(key_pem);
                 let msg = ServiceMessage::RenewCertificate(RenewCertificatePayload {
                     csr_pem,
@@ -629,11 +225,7 @@ pub async fn run_authenticated_loop(
                                         break LoopOutcome::Disconnected;
                                     }
                                 };
-                                let cert_state = crate::state::AgentCertState {
-                                    cert_pem: payload.cert_pem,
-                                    key_pem,
-                                };
-                                cert_state.save(state_dir)?;
+                                save_renewed_cert(state_dir, &payload, &key_pem)?;
                                 tracing::info!("renewed certificate saved, reconnecting");
                                 break LoopOutcome::Reconnect;
                             }
@@ -659,12 +251,12 @@ pub async fn run_authenticated_loop(
                                         tracing::info!("CA bundle hash mismatch, fetching updated bundle");
                                         let ca_fetch_url = pki_addr.unwrap_or(base_url);
                                         let tls_mode = match ca_pem {
-                                            Some(pem) => TlsMode::PinnedCa(pem),
-                                            None => TlsMode::SystemTrust,
+                                            Some(pem) => CaTlsMode::PinnedCa(pem),
+                                            None => CaTlsMode::SystemTrust,
                                         };
                                         match fetch_ca_certificate(ca_fetch_url, tls_mode).await {
                                             Ok(pem) => {
-                                                if let Err(e) = crate::state::save_ca_cert(config_dir, &pem) {
+                                                if let Err(e) = save_ca_cert_sync(config_dir, &pem) {
                                                     tracing::warn!("failed to save updated CA: {e}");
                                                 } else {
                                                     tracing::info!("updated CA bundle saved to disk");
@@ -677,7 +269,7 @@ pub async fn run_authenticated_loop(
                             }
                             ControllerMessage::CaBundleUpdated(payload) => {
                                 tracing::info!("received CA bundle update from controller");
-                                if let Err(e) = crate::state::save_ca_cert(config_dir, payload.ca_bundle_pem.as_bytes()) {
+                                if let Err(e) = save_ca_cert_sync(config_dir, payload.ca_bundle_pem.as_bytes()) {
                                     tracing::warn!("failed to save updated CA bundle: {e}");
                                 } else {
                                     tracing::info!("updated CA bundle saved to disk");
@@ -685,8 +277,8 @@ pub async fn run_authenticated_loop(
                             }
                             ControllerMessage::RequestCertRenewal(payload) => {
                                 tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
-                                let client_id_str = extract_agent_id_from_state(state_dir);
-                                let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str) {
+                                let client_id_str = extract_service_id(identity);
+                                let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str).context_to::<Error>() {
                                     Ok(pair) => pair,
                                     Err(e) => {
                                         tracing::error!(error = %e, "failed to generate keypair for renewal");
@@ -875,6 +467,8 @@ async fn send_update_result(
     update_history_id: &str,
     result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
 ) {
+    use tokio_tungstenite::tungstenite::Message;
+
     match result {
         Ok(exec_result) => {
             let result_msg = ServiceMessage::UpdateResult(exec_result.result);
@@ -912,6 +506,7 @@ async fn handle_graceful_shutdown(
     outcome: LoopOutcome,
 ) -> LoopOutcome {
     use std::time::Duration;
+    use tokio_tungstenite::tungstenite::Message;
 
     if let Some(mut update) = in_flight_update {
         tracing::info!(
@@ -994,52 +589,59 @@ async fn handle_graceful_shutdown(
 }
 
 /// Compute SHA-256 hex hash of the local CA certificate file.
-fn compute_local_ca_hash(data_dir: &std::path::Path) -> String {
-    match crate::state::load_ca_cert(data_dir) {
-        Ok(Some(bytes)) => {
+fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
+    let ca_path = config_dir.join("ca.pem");
+    match std::fs::read(&ca_path) {
+        Ok(bytes) => {
             let mut hasher = Sha256::new();
             hasher.update(&bytes);
             hex::encode(hasher.finalize())
         }
-        _ => String::new(),
+        Err(_) => String::new(),
     }
 }
 
-/// Extract the agent_id (CN) from the agent's current state on disk.
-fn extract_agent_id_from_state(data_dir: &std::path::Path) -> String {
-    if let Ok(Some(state)) = crate::state::AgentState::load(data_dir) {
-        return state.agent_id;
-    }
-    // Fallback: this shouldn't happen in normal flow
-    "unknown".to_string()
+/// Extract the service_id string from the identity state.
+fn extract_service_id(identity: &uptrakit_enrollment::ServiceIdentityState) -> String {
+    identity
+        .service_id()
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn log_close_frame(frame: Option<tokio_tungstenite::tungstenite::protocol::CloseFrame>) {
-    match frame {
-        Some(frame) => {
-            tracing::warn!(
-                code = %frame.code,
-                reason = %frame.reason,
-                "connection closed by controller: {}", frame.reason
-            );
-        }
-        None => {
-            tracing::info!("connection closed by controller");
-        }
-    }
+/// Save renewed cert + key to state directory.
+fn save_renewed_cert(
+    state_dir: &std::path::Path,
+    payload: &CertificatePayload,
+    key_pem: &str,
+) -> Result<()> {
+    let cert_path = state_dir.join("service.crt");
+    let key_path = state_dir.join("service.key");
+    std::fs::write(&cert_path, &payload.cert_pem).context_to::<Error>()?;
+    set_secure_permissions(&cert_path)?;
+    std::fs::write(&key_path, key_pem).context_to::<Error>()?;
+    set_secure_permissions(&key_path)?;
+    Ok(())
 }
 
-/// Returns `true` when the error indicates the peer dropped the TCP
-/// connection without sending a TLS `close_notify`.  This is normal
-/// when the controller terminates a connection (e.g. agent deactivated).
-fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
-    use tokio_tungstenite::tungstenite::Error as WsErr;
-    use tokio_tungstenite::tungstenite::error::ProtocolError;
-    match err {
-        WsErr::Io(io) => io.kind() == std::io::ErrorKind::UnexpectedEof,
-        WsErr::Protocol(
-            ProtocolError::ResetWithoutClosingHandshake | ProtocolError::SendAfterClosing,
-        ) => true,
-        _ => false,
+/// Save CA cert bytes to config directory (sync, for use in authenticated loop).
+fn save_ca_cert_sync(config_dir: &std::path::Path, pem: &[u8]) -> Result<()> {
+    let path = config_dir.join("ca.pem");
+    std::fs::write(&path, pem).context_to::<Error>()?;
+    set_secure_permissions(&path)?;
+    Ok(())
+}
+
+fn set_secure_permissions(path: &std::path::Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .context_to::<Error>()?;
     }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
 }

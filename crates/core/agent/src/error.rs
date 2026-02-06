@@ -1,61 +1,26 @@
 use rootcause::{Report, ReportConversion, markers};
 use thiserror::Error;
+use uptrakit_enrollment::EnrollmentError;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    // External error types with #[from]
+    // ── Enrollment (delegates to enrollment crate) ────────────────────
+    #[error(transparent)]
+    Enrollment(#[from] EnrollmentError),
+
+    // ── I/O and serialization (needed in authenticated loop) ─────────
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
 
-    #[error("TLS name validation error: {0}")]
-    TlsName(#[from] rustls::pki_types::InvalidDnsNameError),
-
-    #[error("rustls error: {0}")]
-    Rustls(#[from] rustls::Error),
-
-    #[error("PEM parsing error: {0}")]
-    Pem(#[from] rustls::pki_types::pem::Error),
-
     #[error("JSON serialization error: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("HTTP URI parsing error: {0}")]
-    HttpUri(#[from] http::uri::InvalidUri),
-
-    // Context-specific variants (keep these - they add semantic meaning)
-    #[error("failed to fetch CA certificate: {0}")]
-    FetchCa(String),
-
-    #[error("failed to read CA certificate file: {0}")]
-    CaCertFile(String),
-
-    #[error("no certificates found in CA response")]
-    NoCertificates,
-
-    #[error("connection closed by controller")]
-    ReceiveClosed,
-
-    #[error("unexpected message type")]
-    UnexpectedMessage,
-
-    #[error("enrollment failed: {0}")]
-    Enrollment(String),
-
-    #[error("enrollment rejected by controller")]
-    EnrollmentRejected,
-
-    #[error("CSR generation error: {0}")]
-    CsrGeneration(String),
-
+    // ── Agent-specific ───────────────────────────────────────────────
     #[error("update execution failed: {0}")]
     UpdateExecution(String),
-
-    #[allow(dead_code)]
-    #[error("update timeout after {0} seconds")]
-    UpdateTimeout(u32),
 
     #[error("Pre-update hook failed: {0}")]
     PreUpdateHookFailed(String),
@@ -65,23 +30,40 @@ pub enum Error {
 }
 
 impl Error {
+    /// `true` when the controller closed the connection.
     pub fn is_receive_closed(&self) -> bool {
-        matches!(self, Error::ReceiveClosed)
+        match self {
+            Error::Enrollment(e) => e.is_receive_closed(),
+            _ => false,
+        }
     }
 
-    /// Returns `true` when the TLS handshake failed because the server
-    /// considers our client certificate expired.
+    /// `true` when the TLS handshake failed because the server considers
+    /// our client certificate expired.
     pub fn is_cert_expired(&self) -> bool {
-        let msg = match self {
-            Error::WebSocket(e) => e.to_string(),
-            Error::Io(e) => e.to_string(),
-            _ => return false,
-        };
-        msg.contains("CertificateExpired")
+        match self {
+            Error::Enrollment(e) => e.is_cert_expired(),
+            Error::WebSocket(e) => e.to_string().contains("CertificateExpired"),
+            Error::Io(e) => e.to_string().contains("CertificateExpired"),
+            _ => false,
+        }
     }
 }
 
 pub type Result<T> = std::result::Result<T, Report<Error>>;
+
+// ── ReportConversion impls ───────────────────────────────────────────
+
+impl<T> ReportConversion<EnrollmentError, markers::Mutable, T> for Error
+where
+    Error: markers::ObjectMarkerFor<T>,
+{
+    fn convert_report(
+        report: Report<EnrollmentError, markers::Mutable, T>,
+    ) -> Report<Self, markers::Mutable, T> {
+        report.context_transform(Error::Enrollment)
+    }
+}
 
 impl<T> ReportConversion<std::io::Error, markers::Mutable, T> for Error
 where
@@ -105,39 +87,6 @@ where
     }
 }
 
-impl<T> ReportConversion<rustls::pki_types::InvalidDnsNameError, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::pki_types::InvalidDnsNameError, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::TlsName)
-    }
-}
-
-impl<T> ReportConversion<rustls::Error, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::Rustls)
-    }
-}
-
-impl<T> ReportConversion<rustls::pki_types::pem::Error, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<rustls::pki_types::pem::Error, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::Pem)
-    }
-}
-
 impl<T> ReportConversion<serde_json::Error, markers::Mutable, T> for Error
 where
     Error: markers::ObjectMarkerFor<T>,
@@ -146,16 +95,5 @@ where
         report: Report<serde_json::Error, markers::Mutable, T>,
     ) -> Report<Self, markers::Mutable, T> {
         report.context_transform(Error::Json)
-    }
-}
-
-impl<T> ReportConversion<http::uri::InvalidUri, markers::Mutable, T> for Error
-where
-    Error: markers::ObjectMarkerFor<T>,
-{
-    fn convert_report(
-        report: Report<http::uri::InvalidUri, markers::Mutable, T>,
-    ) -> Report<Self, markers::Mutable, T> {
-        report.context_transform(Error::HttpUri)
     }
 }

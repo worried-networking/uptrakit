@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-
 use clap::Parser;
-use uptrakit_directories::AppDirs;
+use uptrakit_enrollment::cli::CommonServiceArgs;
 
 /// Uptrakit MQTT Service — WebSocket-connected MQTT client service.
 ///
@@ -10,22 +8,8 @@ use uptrakit_directories::AppDirs;
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-mqtt")]
 pub struct Args {
-    /// Controller WebSocket URL (e.g., wss://controller:8443).
-    /// Used for both enrollment and runtime communication.
-    #[arg(long, env = "UPTRAKIT_CONTROLLER_URL")]
-    pub controller_url: String,
-
-    /// Config directory for persistent configuration (controller's CA cert).
-    /// Supports `~` for home directory expansion.
-    /// Default: platform-specific (e.g., ~/.config/mqtt on Linux).
-    #[arg(long, env = "UPTRAKIT_CONFIG_DIR")]
-    pub config_dir: Option<PathBuf>,
-
-    /// State directory for runtime state (service_id, keypair, certificate).
-    /// Supports `~` for home directory expansion.
-    /// Default: platform-specific (e.g., ~/.local/state/mqtt on Linux).
-    #[arg(long, env = "UPTRAKIT_STATE_DIR")]
-    pub state_dir: Option<PathBuf>,
+    #[command(flatten)]
+    pub common: CommonServiceArgs,
 
     /// Maximum number of tenants this instance will manage.
     /// 0 means unlimited.
@@ -35,44 +19,6 @@ pub struct Args {
     /// Heartbeat interval in seconds.
     #[arg(long, default_value = "15")]
     pub heartbeat_interval: u64,
-
-    /// Enrollment token for auto-approval.
-    /// If provided and valid, the service is approved immediately.
-    #[arg(long, env = "UPTRAKIT_ENROLLMENT_TOKEN")]
-    pub enrollment_token: Option<String>,
-
-    /// Friendly name for this service instance.
-    /// Defaults to hostname if not specified.
-    #[arg(long)]
-    pub friendly_name: Option<String>,
-
-    /// Skip TLS certificate verification (DANGEROUS).
-    /// Only use for initial CA trust establishment or testing.
-    #[arg(long, default_value = "false")]
-    pub insecure: bool,
-}
-
-impl Args {
-    /// Resolve application directories using platform-specific defaults.
-    ///
-    /// Returns `AppDirs` with separate config and state directories.
-    /// CLI overrides take precedence over platform defaults.
-    pub fn resolve_dirs(&self) -> uptrakit_directories::Result<AppDirs> {
-        AppDirs::resolve(
-            "mqtt",
-            self.config_dir.as_deref(),
-            self.state_dir.as_deref(),
-        )
-    }
-
-    /// Get the friendly name, falling back to hostname.
-    pub fn friendly_name_or_hostname(&self) -> String {
-        self.friendly_name.clone().unwrap_or_else(|| {
-            hostname::get()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|_| "unknown".to_string())
-        })
-    }
 }
 
 #[cfg(test)]
@@ -84,24 +30,23 @@ mod tests {
     #[test]
     fn defaults_parse() {
         let args =
-            Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"])
-                .unwrap();
-        assert_eq!(args.controller_url, "wss://localhost:8443");
-        assert!(args.config_dir.is_none());
-        assert!(args.state_dir.is_none());
+            Args::try_parse_from(["uptrakit-mqtt", "--url", "https://localhost:8443"]).unwrap();
+        assert_eq!(args.common.url, "https://localhost:8443");
+        assert!(args.common.config_dir.is_none());
+        assert!(args.common.state_dir.is_none());
         assert_eq!(args.max_tenants, 0);
         assert_eq!(args.heartbeat_interval, 15);
-        assert!(args.enrollment_token.is_none());
-        assert!(args.friendly_name.is_none());
-        assert!(!args.insecure);
+        assert!(args.common.enrollment_token.is_none());
+        assert!(args.common.friendly_name.is_none());
+        assert!(!args.common.tofu);
     }
 
     #[test]
     fn custom_values_parsed() {
         let args = Args::try_parse_from([
             "uptrakit-mqtt",
-            "--controller-url",
-            "wss://controller.example.com:9443",
+            "--url",
+            "https://controller.example.com:9443",
             "--config-dir",
             "/opt/mqtt-config",
             "--state-dir",
@@ -114,41 +59,45 @@ mod tests {
             "secret-token-123",
             "--friendly-name",
             "Production MQTT Node 1",
-            "--insecure",
+            "--tofu",
         ])
         .unwrap();
-        assert_eq!(args.controller_url, "wss://controller.example.com:9443");
+        assert_eq!(args.common.url, "https://controller.example.com:9443");
         assert_eq!(
-            args.config_dir.as_ref().unwrap().to_str().unwrap(),
+            args.common.config_dir.as_ref().unwrap().to_str().unwrap(),
             "/opt/mqtt-config"
         );
         assert_eq!(
-            args.state_dir.as_ref().unwrap().to_str().unwrap(),
+            args.common.state_dir.as_ref().unwrap().to_str().unwrap(),
             "/opt/mqtt-state"
         );
         assert_eq!(args.max_tenants, 5);
         assert_eq!(args.heartbeat_interval, 30);
-        assert_eq!(args.enrollment_token.as_deref(), Some("secret-token-123"));
         assert_eq!(
-            args.friendly_name.as_deref(),
+            args.common.enrollment_token.as_deref(),
+            Some("secret-token-123")
+        );
+        assert_eq!(
+            args.common.friendly_name.as_deref(),
             Some("Production MQTT Node 1")
         );
-        assert!(args.insecure);
+        assert!(args.common.tofu);
     }
 
     #[test]
-    fn controller_url_required() {
+    fn url_required() {
         let result = Args::try_parse_from(["uptrakit-mqtt"]);
         assert!(result.is_err());
     }
 
     #[test]
     fn resolve_dirs_with_defaults() {
-        let args =
-            Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"])
-                .expect("should parse defaults");
-        let dirs = args.resolve_dirs().expect("should resolve dirs");
-        // Should return platform-specific paths
+        let args = Args::try_parse_from(["uptrakit-mqtt", "--url", "https://localhost:8443"])
+            .expect("should parse defaults");
+        let dirs = args
+            .common
+            .resolve_dirs("mqtt")
+            .expect("should resolve dirs");
         assert!(!dirs.config_dir().as_os_str().is_empty());
         assert!(!dirs.state_dir().as_os_str().is_empty());
     }
@@ -157,15 +106,18 @@ mod tests {
     fn resolve_dirs_with_overrides() {
         let args = Args::try_parse_from([
             "uptrakit-mqtt",
-            "--controller-url",
-            "wss://localhost:8443",
+            "--url",
+            "https://localhost:8443",
             "--config-dir",
             "/custom/config",
             "--state-dir",
             "/custom/state",
         ])
         .expect("should parse");
-        let dirs = args.resolve_dirs().expect("should resolve dirs");
+        let dirs = args
+            .common
+            .resolve_dirs("mqtt")
+            .expect("should resolve dirs");
         assert_eq!(dirs.config_dir().to_str().unwrap(), "/custom/config");
         assert_eq!(dirs.state_dir().to_str().unwrap(), "/custom/state");
     }
@@ -174,22 +126,19 @@ mod tests {
     fn friendly_name_or_hostname_returns_provided() {
         let args = Args::try_parse_from([
             "uptrakit-mqtt",
-            "--controller-url",
-            "wss://localhost:8443",
+            "--url",
+            "https://localhost:8443",
             "--friendly-name",
             "My Node",
         ])
         .unwrap();
-        assert_eq!(args.friendly_name_or_hostname(), "My Node");
+        assert_eq!(args.common.friendly_name_or_hostname(), "My Node");
     }
 
     #[test]
     fn friendly_name_or_hostname_falls_back_to_hostname() {
         let args =
-            Args::try_parse_from(["uptrakit-mqtt", "--controller-url", "wss://localhost:8443"])
-                .unwrap();
-        // Should return the system hostname, which we can't predict in tests,
-        // but it should not be empty
-        assert!(!args.friendly_name_or_hostname().is_empty());
+            Args::try_parse_from(["uptrakit-mqtt", "--url", "https://localhost:8443"]).unwrap();
+        assert!(!args.common.friendly_name_or_hostname().is_empty());
     }
 }

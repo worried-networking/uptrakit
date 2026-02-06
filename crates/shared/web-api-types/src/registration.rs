@@ -22,8 +22,7 @@ impl RegistrationMode {
         }
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s {
             "open" => Some(Self::Open),
             "invite" => Some(Self::Invite),

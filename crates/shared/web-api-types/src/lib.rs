@@ -137,22 +137,25 @@ mod tests {
 
     #[test]
     fn agent_status_from_str_valid() {
-        assert_eq!(AgentStatus::from_str("pending"), Some(AgentStatus::Pending));
         assert_eq!(
-            AgentStatus::from_str("approved"),
+            AgentStatus::parse_str("pending"),
+            Some(AgentStatus::Pending)
+        );
+        assert_eq!(
+            AgentStatus::parse_str("approved"),
             Some(AgentStatus::Approved)
         );
         assert_eq!(
-            AgentStatus::from_str("rejected"),
+            AgentStatus::parse_str("rejected"),
             Some(AgentStatus::Rejected)
         );
     }
 
     #[test]
     fn agent_status_from_str_invalid_returns_none() {
-        assert_eq!(AgentStatus::from_str("unknown"), None);
-        assert_eq!(AgentStatus::from_str(""), None);
-        assert_eq!(AgentStatus::from_str("PENDING"), None);
+        assert_eq!(AgentStatus::parse_str("unknown"), None);
+        assert_eq!(AgentStatus::parse_str(""), None);
+        assert_eq!(AgentStatus::parse_str("PENDING"), None);
     }
 
     #[test]
@@ -165,7 +168,7 @@ mod tests {
         for status in &variants {
             let s = status.as_str();
             let parsed =
-                AgentStatus::from_str(s).expect("from_str should succeed for as_str output");
+                AgentStatus::parse_str(s).expect("from_str should succeed for as_str output");
             assert_eq!(&parsed, status);
         }
     }
@@ -196,24 +199,24 @@ mod tests {
     #[test]
     fn registration_mode_from_str_valid() {
         assert_eq!(
-            RegistrationMode::from_str("open"),
+            RegistrationMode::parse_str("open"),
             Some(RegistrationMode::Open)
         );
         assert_eq!(
-            RegistrationMode::from_str("invite"),
+            RegistrationMode::parse_str("invite"),
             Some(RegistrationMode::Invite)
         );
         assert_eq!(
-            RegistrationMode::from_str("closed"),
+            RegistrationMode::parse_str("closed"),
             Some(RegistrationMode::Closed)
         );
     }
 
     #[test]
     fn registration_mode_from_str_invalid_returns_none() {
-        assert_eq!(RegistrationMode::from_str("disabled"), None);
-        assert_eq!(RegistrationMode::from_str(""), None);
-        assert_eq!(RegistrationMode::from_str("OPEN"), None);
+        assert_eq!(RegistrationMode::parse_str("disabled"), None);
+        assert_eq!(RegistrationMode::parse_str(""), None);
+        assert_eq!(RegistrationMode::parse_str("OPEN"), None);
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod tests {
         for mode in &variants {
             let s = mode.as_str();
             let parsed =
-                RegistrationMode::from_str(s).expect("from_str should succeed for as_str output");
+                RegistrationMode::parse_str(s).expect("from_str should succeed for as_str output");
             assert_eq!(&parsed, mode);
         }
     }
@@ -545,25 +548,28 @@ mod tests {
     #[test]
     fn update_status_from_str_valid() {
         assert_eq!(
-            UpdateStatus::from_str("pending"),
+            UpdateStatus::parse_str("pending"),
             Some(UpdateStatus::Pending)
         );
         assert_eq!(
-            UpdateStatus::from_str("in_progress"),
+            UpdateStatus::parse_str("in_progress"),
             Some(UpdateStatus::InProgress)
         );
         assert_eq!(
-            UpdateStatus::from_str("completed"),
+            UpdateStatus::parse_str("completed"),
             Some(UpdateStatus::Completed)
         );
-        assert_eq!(UpdateStatus::from_str("failed"), Some(UpdateStatus::Failed));
+        assert_eq!(
+            UpdateStatus::parse_str("failed"),
+            Some(UpdateStatus::Failed)
+        );
     }
 
     #[test]
     fn update_status_from_str_invalid_returns_none() {
-        assert_eq!(UpdateStatus::from_str("unknown"), None);
-        assert_eq!(UpdateStatus::from_str(""), None);
-        assert_eq!(UpdateStatus::from_str("PENDING"), None);
+        assert_eq!(UpdateStatus::parse_str("unknown"), None);
+        assert_eq!(UpdateStatus::parse_str(""), None);
+        assert_eq!(UpdateStatus::parse_str("PENDING"), None);
     }
 
     #[test]
@@ -577,7 +583,7 @@ mod tests {
         for status in &variants {
             let s = status.as_str();
             let parsed =
-                UpdateStatus::from_str(s).expect("from_str should succeed for as_str output");
+                UpdateStatus::parse_str(s).expect("from_str should succeed for as_str output");
             assert_eq!(&parsed, status);
         }
     }

@@ -1,7 +1,6 @@
 mod cli;
 mod controller_client;
 mod error;
-mod identity;
 mod mqtt_client;
 mod tenant_manager;
 
@@ -10,14 +9,13 @@ use std::time::Duration;
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
+use uptrakit_enrollment::ServiceIdentityState;
 use uptrakit_internal_wire::{
-    ControllerMessage, EnrollPayload, MqttHeartbeatPayload, MqttRegisterPayload,
-    RequestCertificatePayload, ServiceMessage,
+    ControllerMessage, MqttHeartbeatPayload, MqttRegisterPayload, ServiceMessage,
 };
 
-use crate::controller_client::{ConnectionMode, ControllerConnection};
+use crate::controller_client::ControllerConnection;
 use crate::error::{AppError, Result};
-use crate::identity::Identity;
 use crate::tenant_manager::TenantManager;
 
 #[tokio::main]
@@ -54,194 +52,151 @@ async fn run(args: cli::Args) -> Result<()> {
     let instance_id = generate_instance_id();
     tracing::info!(%instance_id, "starting uptrakit-mqtt service");
 
+    // Parse URL early
+    let (host, port) = args.common.parsed_url().map_err(|s| {
+        report!(AppError::Enrollment(
+            uptrakit_enrollment::EnrollmentError::Enrollment(s)
+        ))
+    })?;
+    let base_url = args.common.base_url();
+    let pki_addr = args.common.pki_addr();
+
     // Resolve application directories
-    let app_dirs = args.resolve_dirs().context_to()?;
-    app_dirs.ensure_dirs().context_to()?;
+    let app_dirs = args.common.resolve_dirs("mqtt").context_to::<AppError>()?;
+    app_dirs.ensure_dirs().map_err(|e| {
+        report!(AppError::Enrollment(
+            uptrakit_enrollment::EnrollmentError::Enrollment(format!(
+                "failed to create directories: {e}"
+            ))
+        ))
+    })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 
-    // Load or create identity (config for CA cert, state for service identity)
-    let mut identity = Identity::new(app_dirs.config_dir(), app_dirs.state_dir());
-    identity.load().await.context_to()?;
+    // Create and load identity state
+    let mut identity = ServiceIdentityState::new(app_dirs.config_dir(), app_dirs.state_dir());
+    identity.load().await.context_to::<AppError>()?;
 
-    // Phase 1: Ensure we have a CA certificate (TOFU)
-    if identity.ca_cert_pem.is_none() {
-        tracing::info!("fetching CA certificate from controller (TOFU)");
-        let ca_pem = controller_client::fetch_ca_cert(&args.controller_url, args.insecure)
+    // --force-enroll: clear existing enrollment state (preserves CA cert)
+    if args.common.force_enroll {
+        tracing::info!("--force-enroll: clearing existing enrollment state");
+        identity
+            .clear_enrollment_state()
             .await
-            .context_to()?;
-        identity.save_ca_cert(&ca_pem).await.context_to()?;
-        tracing::info!("CA certificate saved");
+            .context_to::<AppError>()?;
     }
 
-    // Phase 2: Ensure we're enrolled
-    if identity.is_fresh() {
-        tracing::info!("enrolling with controller");
-        enroll(&mut identity, &args).await?;
+    // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust
+    let ca_pem = uptrakit_enrollment::ca::bootstrap_ca(
+        &mut identity,
+        base_url,
+        args.common.tofu,
+        args.common.ca_cert.as_deref(),
+        pki_addr,
+    )
+    .await
+    .context_to::<AppError>()?;
+
+    // Enrollment (if not yet certified)
+    if !identity.is_certified() {
+        let tls_connector = match ca_pem.as_deref() {
+            Some(pem) => {
+                uptrakit_enrollment::tls::build_tls_connector(pem).context_to::<AppError>()?
+            }
+            None => uptrakit_enrollment::tls::build_system_trust_tls_connector()
+                .context_to::<AppError>()?,
+        };
+
+        if identity.is_enrolled_only() {
+            tracing::info!("resuming enrollment (have service_id, awaiting certificate)");
+            uptrakit_enrollment::ws::resume_enrollment(&mut identity, &host, port, &tls_connector)
+                .await
+                .context_to::<AppError>()?;
+        } else {
+            tracing::info!("starting fresh enrollment");
+            let hostname = args.common.hostname();
+            let friendly_name = args.common.friendly_name_or_hostname();
+
+            uptrakit_enrollment::ws::run_enrollment(
+                &mut identity,
+                &host,
+                port,
+                &tls_connector,
+                &hostname,
+                &friendly_name,
+                args.common.enrollment_token.as_deref(),
+                "mqtt",
+                None, // MQTT service doesn't collect host_info
+            )
+            .await
+            .context_to::<AppError>()?;
+        }
+
+        tracing::info!("enrollment complete, certificate saved to disk");
     }
 
-    // Phase 3: Ensure we have a certificate
-    if identity.is_enrolled_only() {
-        tracing::info!("requesting certificate from controller");
-        request_certificate(&mut identity, &args).await?;
-    }
-
-    // Phase 4: Run the main loop with authenticated connection
+    // Run the main authenticated loop
     tracing::info!("connecting to controller (authenticated)");
-    run_authenticated(&identity, &args, &instance_id).await
-}
-
-/// Enroll with the controller (anonymous connection).
-async fn enroll(identity: &mut Identity, args: &cli::Args) -> Result<()> {
-    // Ensure we have a keypair for the CSR
-    identity.ensure_keypair().await.context_to()?;
-
-    let mut conn = ControllerConnection::connect(
-        &args.controller_url,
-        identity,
-        ConnectionMode::Anonymous,
-        args.insecure,
-    )
-    .await
-    .context_to()?;
-
-    // Send enrollment request
-    let hostname = hostname::get()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "unknown".to_string());
-
-    conn.send(ServiceMessage::Enroll(EnrollPayload {
-        hostname,
-        friendly_name: args.friendly_name_or_hostname(),
-        enrollment_token: args.enrollment_token.clone(),
-        service_type: "mqtt".to_string(),
-        host_info: None,
-    }))
-    .await
-    .context_to()?;
-
-    // Wait for enrollment response
-    loop {
-        match conn.recv().await.context_to()? {
-            Some(ControllerMessage::Enrolled(payload)) => {
-                let service_id = uuid::Uuid::parse_str(&payload.service_id)
-                    .map_err(|_| report!(AppError::Protocol("invalid service_id".into())))?;
-
-                identity
-                    .save_enrollment(service_id, &payload.enrollment_secret)
-                    .await
-                    .context_to()?;
-
-                tracing::info!(%service_id, status = %payload.status, "enrolled successfully");
-
-                if payload.status == "approved" {
-                    // Auto-approved, can proceed to certificate request
-                    break;
-                } else {
-                    // Need to wait for approval
-                    tracing::info!("waiting for approval from controller...");
-                }
-            }
-            Some(ControllerMessage::Approved(payload)) => {
-                tracing::info!(service_id = %payload.service_id, "approved by controller");
-                break;
-            }
-            Some(ControllerMessage::Rejected(payload)) => {
-                return Err(report!(AppError::Protocol(format!(
-                    "enrollment rejected: service_id={}",
-                    payload.service_id
-                ))));
-            }
-            Some(ControllerMessage::Error(payload)) => {
-                return Err(report!(AppError::Protocol(format!(
-                    "enrollment error: {} - {}",
-                    payload.code, payload.message
-                ))));
-            }
-            Some(msg) => {
-                tracing::debug!(?msg, "ignoring unexpected message during enrollment");
-            }
-            None => {
-                return Err(report!(AppError::Protocol(
-                    "connection closed during enrollment".into()
-                )));
-            }
-        }
-    }
-
-    conn.close().await.context_to()?;
-    Ok(())
-}
-
-/// Request certificate from controller (enrolled connection).
-async fn request_certificate(identity: &mut Identity, args: &cli::Args) -> Result<()> {
-    let mut conn = ControllerConnection::connect(
-        &args.controller_url,
-        identity,
-        ConnectionMode::Enrolled,
-        args.insecure,
-    )
-    .await
-    .context_to()?;
-
-    // Generate and send CSR
-    let service_id = identity
-        .service_id
-        .ok_or_else(|| report!(AppError::Identity(identity::IdentityError::NotEnrolled)))?;
-
-    let csr_pem = identity.generate_csr(service_id).context_to()?;
-
-    conn.send(ServiceMessage::RequestCertificate(
-        RequestCertificatePayload { csr_pem },
-    ))
-    .await
-    .context_to()?;
-
-    // Wait for certificate
-    loop {
-        match conn.recv().await.context_to()? {
-            Some(ControllerMessage::Certificate(payload)) => {
-                identity
-                    .save_certificate(&payload.cert_pem)
-                    .await
-                    .context_to()?;
-                tracing::info!("certificate received and saved");
-                break;
-            }
-            Some(ControllerMessage::Error(payload)) => {
-                return Err(report!(AppError::Protocol(format!(
-                    "certificate request error: {} - {}",
-                    payload.code, payload.message
-                ))));
-            }
-            Some(msg) => {
-                tracing::debug!(
-                    ?msg,
-                    "ignoring unexpected message during certificate request"
-                );
-            }
-            None => {
-                return Err(report!(AppError::Protocol(
-                    "connection closed during certificate request".into()
-                )));
-            }
-        }
-    }
-
-    conn.close().await.context_to()?;
-    Ok(())
+    run_authenticated(&identity, &args, &instance_id, ca_pem.as_deref()).await
 }
 
 /// Run the main loop with authenticated mTLS connection.
-async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &str) -> Result<()> {
-    let mut conn = ControllerConnection::connect(
-        &args.controller_url,
-        identity,
-        ConnectionMode::Authenticated,
-        false, // Never use insecure mode for authenticated connections
-    )
-    .await
-    .context_to()?;
+async fn run_authenticated(
+    identity: &ServiceIdentityState,
+    args: &cli::Args,
+    instance_id: &str,
+    ca_pem: Option<&[u8]>,
+) -> Result<()> {
+    let cert_pem = identity.cert_pem().ok_or_else(|| {
+        report!(AppError::Enrollment(
+            uptrakit_enrollment::EnrollmentError::NotCertified
+        ))
+    })?;
+    let key_pem = identity.key_pem().ok_or_else(|| {
+        report!(AppError::Enrollment(
+            uptrakit_enrollment::EnrollmentError::NotCertified
+        ))
+    })?;
+
+    let client_config = match ca_pem {
+        Some(pem) => uptrakit_enrollment::tls::build_mtls_client_config(pem, cert_pem, &key_pem)
+            .context_to::<AppError>()?,
+        None => {
+            // System trust mTLS — build a ClientConfig with webpki roots and client cert.
+            use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+
+            let root_store =
+                rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+            let client_certs: Vec<_> = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    report!(AppError::Enrollment(
+                        uptrakit_enrollment::EnrollmentError::Tls(e.to_string())
+                    ))
+                })?;
+
+            let client_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).map_err(|e| {
+                report!(AppError::Enrollment(
+                    uptrakit_enrollment::EnrollmentError::Tls(e.to_string())
+                ))
+            })?;
+
+            rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_client_auth_cert(client_certs, client_key)
+                .map_err(|e| {
+                    report!(AppError::Enrollment(
+                        uptrakit_enrollment::EnrollmentError::Rustls(e)
+                    ))
+                })?
+        }
+    };
+
+    let controller_url = args.common.base_url();
+    let mut conn = ControllerConnection::connect(controller_url, client_config)
+        .await
+        .context_to::<AppError>()?;
 
     // Register with controller
     conn.send(ServiceMessage::Register(MqttRegisterPayload {
@@ -250,7 +205,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
         active_tenants: vec![], // Empty on fresh start
     }))
     .await
-    .context_to()?;
+    .context_to::<AppError>()?;
 
     let mut tenant_mgr = TenantManager::new();
     let heartbeat_interval = Duration::from_secs(args.heartbeat_interval);
@@ -262,7 +217,7 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
     loop {
         tokio::select! {
             msg = conn.recv() => {
-                match msg.context_to()? {
+                match msg.context_to::<AppError>()? {
                     Some(ControllerMessage::Registered(payload)) => {
                         tracing::info!(instance_id = %payload.instance_id, "registered with controller");
                     }
@@ -280,12 +235,10 @@ async fn run_authenticated(identity: &Identity, args: &cli::Args, instance_id: &
                     }
                     Some(ControllerMessage::CaBundleUpdated(payload)) => {
                         tracing::info!("CA bundle updated");
-                        // In a full implementation, would update identity.ca_cert_pem
                         let _ = payload;
                     }
                     Some(ControllerMessage::RequestCertRenewal(_)) => {
                         tracing::info!("certificate renewal requested");
-                        // In a full implementation, would trigger certificate renewal
                     }
                     Some(ControllerMessage::ServerRestarting(payload)) => {
                         tracing::info!(reason = %payload.reason, "server restarting, preparing for reconnect");
