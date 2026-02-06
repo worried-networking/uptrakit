@@ -269,21 +269,34 @@ pub fn is_peer_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
     }
 }
 
+/// Parameters for [`run_enrollment`].
+pub struct EnrollmentParams<'a> {
+    pub identity: &'a mut crate::identity::ServiceIdentityState,
+    pub host: &'a str,
+    pub port: u16,
+    pub tls_connector: &'a TlsConnector,
+    pub hostname: &'a str,
+    pub friendly_name: &'a str,
+    pub enrollment_token: Option<&'a str>,
+    pub service_type: &'a str,
+    pub host_info: Option<HostInfo>,
+}
+
 /// Run a fresh enrollment flow: enroll → wait for approval → generate CSR → request certificate.
 ///
 /// On success, the identity is fully certified (service_id, key, and cert persisted).
-#[allow(clippy::too_many_arguments)]
-pub async fn run_enrollment(
-    identity: &mut crate::identity::ServiceIdentityState,
-    host: &str,
-    port: u16,
-    tls_connector: &TlsConnector,
-    hostname: &str,
-    friendly_name: &str,
-    enrollment_token: Option<&str>,
-    service_type: &str,
-    host_info: Option<HostInfo>,
-) -> Result<()> {
+pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
+    let EnrollmentParams {
+        identity,
+        host,
+        port,
+        tls_connector,
+        hostname,
+        friendly_name,
+        enrollment_token,
+        service_type,
+        host_info,
+    } = params;
     let mut ws = connect_ws(host, port, tls_connector, None).await?;
 
     let enrolled = send_enroll(

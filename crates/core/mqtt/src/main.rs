@@ -118,17 +118,17 @@ async fn run(args: cli::Args) -> Result<()> {
             let hostname = args.common.hostname();
             let friendly_name = args.common.friendly_name_or_hostname();
 
-            uptrakit_enrollment::ws::run_enrollment(
-                &mut identity,
-                &host,
+            uptrakit_enrollment::ws::run_enrollment(uptrakit_enrollment::ws::EnrollmentParams {
+                identity: &mut identity,
+                host: &host,
                 port,
-                &tls_connector,
-                &hostname,
-                &friendly_name,
-                args.common.enrollment_token.as_deref(),
-                "mqtt",
-                None, // MQTT service doesn't collect host_info
-            )
+                tls_connector: &tls_connector,
+                hostname: &hostname,
+                friendly_name: &friendly_name,
+                enrollment_token: args.common.enrollment_token.as_deref(),
+                service_type: "mqtt",
+                host_info: None, // MQTT service doesn't collect host_info
+            })
             .await
             .context_to::<AppError>()?;
         }

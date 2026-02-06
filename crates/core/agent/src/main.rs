@@ -190,17 +190,17 @@ async fn do_enrollment(
         tracing::info!(machine_id = %host_info.machine_id, "collected host info");
 
         tracing::info!("enrolling via WebSocket");
-        uptrakit_enrollment::ws::run_enrollment(
+        uptrakit_enrollment::ws::run_enrollment(uptrakit_enrollment::ws::EnrollmentParams {
             identity,
             host,
             port,
             tls_connector,
-            &hostname,
-            &friendly_name,
-            args.common.enrollment_token.as_deref(),
-            "agent",
-            Some(host_info),
-        )
+            hostname: &hostname,
+            friendly_name: &friendly_name,
+            enrollment_token: args.common.enrollment_token.as_deref(),
+            service_type: "agent",
+            host_info: Some(host_info),
+        })
         .await
         .context_to::<Error>()?;
     }
