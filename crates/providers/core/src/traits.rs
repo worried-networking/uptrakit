@@ -39,9 +39,11 @@ pub trait Provider: Send + Sync {
 
     /// Detect the currently installed version (local operation).
     ///
-    /// Default implementation returns `None` (no version detected).
+    /// Default implementation returns an error indicating the operation is not supported.
     async fn detect_installed_version(&self) -> Result<Option<Version>> {
-        Ok(None)
+        Err(report!(ProviderError::Configuration(
+            "detect_installed_version not supported by this provider".to_string()
+        )))
     }
 
     /// Execute an update to the specified release (local operation).
@@ -57,9 +59,11 @@ pub trait Provider: Send + Sync {
     ///
     /// Returns a list of discovered software with their identifiers and optionally
     /// detected installed versions. Providers that do not support discovery return
-    /// an empty list via the default implementation.
+    /// an error via the default implementation.
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        Ok(vec![])
+        Err(report!(ProviderError::Configuration(
+            "discover_software not supported by this provider".to_string()
+        )))
     }
 }
 
@@ -91,13 +95,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_detect_installed_version_returns_none() {
+    async fn default_detect_installed_version_returns_error() {
         let provider = StubProvider;
-        let result = provider
-            .detect_installed_version()
-            .await
-            .expect("should succeed");
-        assert!(result.is_none());
+        let result = provider.detect_installed_version().await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -117,10 +118,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_discover_software_returns_empty_list() {
+    async fn default_discover_software_returns_error() {
         let provider = StubProvider;
-        let result = provider.discover_software().await.expect("should succeed");
-        assert!(result.is_empty());
+        let result = provider.discover_software().await;
+        assert!(result.is_err());
     }
 
     #[test]
