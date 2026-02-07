@@ -1,3 +1,4 @@
+pub mod api_rate_limit;
 pub mod api_token;
 pub mod auth_method;
 pub mod available_version;

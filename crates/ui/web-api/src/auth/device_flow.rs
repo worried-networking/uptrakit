@@ -12,9 +12,6 @@ use super::token::generate_secure_token;
 /// TTL for device flow sessions (10 minutes).
 const DEVICE_CODE_TTL_SECONDS: i64 = 600;
 
-/// Minimum interval between poll requests (5 seconds).
-pub const MIN_POLL_INTERVAL_SECONDS: i64 = 5;
-
 /// Consonant alphabet for user codes (avoids vowels to prevent offensive words).
 const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ";
 
@@ -25,9 +22,6 @@ pub enum DeviceFlowError {
 
     #[error("device flow already authorized")]
     AlreadyAuthorized,
-
-    #[error("device flow polling too fast")]
-    RateLimited,
 
     #[error("token generation failed: {0}")]
     TokenGeneration(String),
@@ -75,7 +69,6 @@ impl DeviceFlowStore {
             user_id: Set(None),
             client_name: Set(client_name),
             created_at: Set(now),
-            last_polled_at: Set(None),
             expires_at: Set(expires_at),
         };
 
@@ -106,39 +99,6 @@ impl DeviceFlowStore {
             }
             _ => Ok(DeviceFlowStatus::Pending),
         }
-    }
-
-    /// Check if polling is too fast (rate limiting).
-    pub async fn is_rate_limited(&self, device_code: &str) -> Result<bool> {
-        let flow = PendingDeviceFlow::find_by_id(device_code)
-            .one(&self.db)
-            .await
-            .context_to()?
-            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
-
-        if let Some(last_polled) = flow.last_polled_at {
-            let min_interval = time::Duration::seconds(MIN_POLL_INTERVAL_SECONDS);
-            if OffsetDateTime::now_utc() - last_polled < min_interval {
-                return Ok(true);
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Record a poll timestamp for rate limiting.
-    pub async fn record_poll(&self, device_code: &str) -> Result<()> {
-        let flow = PendingDeviceFlow::find_by_id(device_code)
-            .one(&self.db)
-            .await
-            .context_to()?
-            .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
-
-        let mut active: pending_device_flow::ActiveModel = flow.into();
-        active.last_polled_at = Set(Some(OffsetDateTime::now_utc()));
-        active.update(&self.db).await.context_to()?;
-
-        Ok(())
     }
 
     /// Look up the client name for a device code.
@@ -405,22 +365,6 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err.current_context(), DeviceFlowError::NotFound));
-    }
-
-    #[tokio::test]
-    async fn test_rate_limiting() {
-        let db = test_db().await;
-        let store = DeviceFlowStore::new(db);
-        let (device_code, _) = store.create(None).await.unwrap();
-
-        // First poll: not rate limited
-        assert!(!store.is_rate_limited(&device_code).await.unwrap());
-
-        // Record poll
-        store.record_poll(&device_code).await.unwrap();
-
-        // Immediately poll again: should be rate limited
-        assert!(store.is_rate_limited(&device_code).await.unwrap());
     }
 
     #[tokio::test]

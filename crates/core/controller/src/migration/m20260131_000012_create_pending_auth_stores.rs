@@ -32,7 +32,6 @@ impl MigrationTrait for Migration {
                             .timestamp()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(PendingDeviceFlows::LastPolledAt).timestamp())
                     .col(
                         ColumnDef::new(PendingDeviceFlows::ExpiresAt)
                             .timestamp()
@@ -238,7 +237,6 @@ enum PendingDeviceFlows {
     UserId,
     ClientName,
     CreatedAt,
-    LastPolledAt,
     ExpiresAt,
 }
 

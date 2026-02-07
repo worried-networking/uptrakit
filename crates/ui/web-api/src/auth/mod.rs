@@ -6,6 +6,7 @@ pub mod jwt;
 pub mod oidc_state;
 pub mod password;
 pub mod permissions;
+pub mod rate_limit;
 pub mod registration;
 pub mod session;
 pub mod token;

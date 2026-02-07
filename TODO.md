@@ -78,7 +78,7 @@ Essential infrastructure needed before feature development.
 - [x] OpenAPI documentation with Swagger UI (optional feature flag)
 - [x] Full RBAC permission checking in middleware
 - [x] OIDC integration
-- [ ] Rate limiting on login endpoint
+- [x] Rate limiting on login endpoint
 - [ ] Audit logging for security events
 - [x] Use JWT token
 
@@ -277,7 +277,7 @@ Ways users interact with the system.
   - [x] Get update history endpoint
   - [ ] Get system status endpoint
 - [x] Add API authentication
-- [ ] Implement API rate limiting
+- [x] Implement API rate limiting
 - [x] Add API documentation (OpenAPI/Swagger)
 - [x] Add WebSocket endpoint for real-time updates
 
@@ -607,8 +607,8 @@ Comprehensive security hardening.
 
 ### Additional Security
 
-- [ ] Implement rate limiting for all endpoints
-- [ ] Add brute force protection
+- [x] Implement rate limiting for all endpoints
+- [x] Add brute force protection
 - [ ] Implement security headers
 - [ ] Add input validation and sanitization
 - [ ] Implement secrets management

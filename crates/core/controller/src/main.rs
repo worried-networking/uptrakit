@@ -644,6 +644,7 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::oidc_state::OidcRegistrationStore::new(db_conn.clone());
     let device_flow_store =
         uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
+    let rate_limit_store = uptrakit_web_api::auth::rate_limit::RateLimitStore::new(db_conn.clone());
 
     let service_connections =
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
@@ -661,6 +662,7 @@ async fn run(args: cli::Args) -> Result<()> {
         oidc_token_exchange_store: oidc_token_exchange_store.clone(),
         oidc_registration_store: oidc_registration_store.clone(),
         device_flow_store: device_flow_store.clone(),
+        rate_limit_store: rate_limit_store.clone(),
         pki_path: pki_path.clone(),
         rustls_config: rustls_config.clone(),
         crl_pem_cache,
@@ -680,6 +682,7 @@ async fn run(args: cli::Args) -> Result<()> {
                     oidc_token_exchange_store.cleanup_expired().await;
                     oidc_registration_store.cleanup_expired().await;
                     device_flow_store.cleanup_expired().await;
+                    rate_limit_store.cleanup_expired().await;
                 }
                 _ = oidc_cleanup_token.cancelled() => {
                     tracing::debug!("auth state cleanup task shutting down");

@@ -34,6 +34,7 @@ use auth::jwt::JwtManager;
 use auth::oidc_state::{
     AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
 };
+use auth::rate_limit::RateLimitStore;
 use service_connections::ServiceConnectionRegistry;
 use settings::Settings;
 
@@ -88,6 +89,8 @@ pub struct AppState {
     pub oidc_registration_store: OidcRegistrationStore,
     /// Database-backed store for pending device authorization flows.
     pub device_flow_store: DeviceFlowStore,
+    /// Database-backed rate limiter for public authentication endpoints.
+    pub rate_limit_store: RateLimitStore,
     /// Path to the PKI directory (for server cert renewal).
     pub pki_path: std::path::PathBuf,
     /// RustlsConfig handle for hot-reloading TLS.
@@ -455,6 +458,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .layer(axum_mw::from_fn_with_state(
             Arc::clone(&state),
+            middleware::rate_limit::rate_limit_auth,
+        ))
+        .layer(axum_mw::from_fn_with_state(
+            Arc::clone(&state),
             middleware::resolve_ip::resolve_ip,
         ))
         .layer(axum_mw::from_fn(middleware::request_log::request_log))
@@ -598,6 +605,7 @@ mod tests {
                 db.clone(),
             ),
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),

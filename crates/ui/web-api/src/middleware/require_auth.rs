@@ -248,6 +248,7 @@ mod tests {
                 db.clone(),
             ),
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
             db,
             default_tenant_id: uuid::Uuid::nil(),
             settings: Settings::new(

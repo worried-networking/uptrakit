@@ -310,7 +310,7 @@ The CLI uses an RFC 8628-style device authorization flow instead of password-bas
 
 - **Device code**: 32-byte crypto random (base64url), unguessable.
 - **User code**: 8 uppercase consonants from a 20-char alphabet (avoids vowels to prevent offensive words), ~34.5 bits entropy, formatted `XXXX-XXXX`.
-- **Rate limiting**: 429 returned if polling faster than the 5-second interval.
+- **Rate limiting**: all public auth endpoints (including device/poll) are rate-limited via the unified `api_rate_limits` DB table; see the "API rate limiting" section below.
 - **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.
 - **10-minute expiry**: flows auto-expire; cleanup runs every 5 minutes alongside OIDC state cleanup.
 - **Database-backed store**: all pending device flow state is persisted to the `pending_device_flows` table (shared with OIDC flow, account link, token exchange, and OIDC registration stores). Survives controller restarts and supports HA multi-instance deployments. Only the resulting API token is persisted to the `api_tokens` table.
@@ -923,6 +923,43 @@ All route handlers, middleware rejections, and custom `IntoResponse` impls use t
 ### Frontend integration
 
 The frontend (`frontend/src/lib/api.ts`) uses `extractErrorMessage(res)` to parse error responses. It tries to parse JSON and extract the `error` field; falls back to the raw response text if parsing fails. The `ErrorResponse` TypeScript interface is defined in `frontend/src/lib/types.ts`.
+
+## API rate limiting
+
+Database-backed per-IP rate limiting protects public authentication endpoints from brute-force attacks, credential stuffing, and abuse. All rate limit state is in the `api_rate_limits` table, making it HA-safe across multiple controller instances.
+
+### Rate-limited endpoints
+
+| Endpoint | Limit | Key format |
+| --- | --- | --- |
+| `POST /api/v1/auth/login` | 10 req/min/IP | `/api/v1/auth/login:{ip}` |
+| `POST /api/v1/auth/register` | 10 req/min/IP | `/api/v1/auth/register:{ip}` |
+| `POST /api/v1/auth/refresh` | 10 req/min/IP | `/api/v1/auth/refresh:{ip}` |
+| `POST /api/v1/auth/device` | 10 req/min/IP | `/api/v1/auth/device:{ip}` |
+| `POST /api/v1/auth/device/poll` | 12 req/min/IP | `/api/v1/auth/device/poll:{ip}` |
+
+Endpoints **not** rate-limited: logout (requires valid refresh token), device/approve (requires auth), OIDC (external IdP interaction), all authenticated endpoints (require valid JWT/API token).
+
+### Implementation
+
+- **Store**: `crates/ui/web-api/src/auth/rate_limit.rs` — `RateLimitStore` with sliding-window counter algorithm using atomic upserts.
+- **Middleware**: `crates/ui/web-api/src/middleware/rate_limit.rs` — `rate_limit_auth` middleware with `LazyLock<HashMap>` endpoint config. Fails open on store errors.
+- **Entity**: `crates/shared/db/src/entity/api_rate_limit.rs` — SeaORM entity for the `api_rate_limits` table (columns: `key` TEXT PK, `request_count` INTEGER, `window_start` TIMESTAMP, `expires_at` TIMESTAMP).
+- **Migration**: `crates/core/controller/src/migration/m20260207_000021_create_api_rate_limits.rs`.
+- **Cleanup**: expired entries are pruned every 5 minutes by the controller's periodic cleanup task.
+
+### Response format
+
+When rate-limited, the API returns HTTP 429 with a JSON `ErrorResponse` body and a `Retry-After` header:
+
+```json
+{ "error": "Too many requests, please try again later" }
+```
+
+### Adding a new rate-limited endpoint
+
+1. Add an entry to the `RATE_LIMITS` HashMap in `crates/ui/web-api/src/middleware/rate_limit.rs`.
+2. Update the table in this section.
 
 ## Pagination
 

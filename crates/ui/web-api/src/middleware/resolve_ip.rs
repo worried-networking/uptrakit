@@ -215,6 +215,7 @@ mod tests {
                 db.clone(),
             ),
             device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
             pki_path: std::path::PathBuf::from("/tmp/test-pki"),
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),

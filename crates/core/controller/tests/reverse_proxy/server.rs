@@ -16,6 +16,7 @@ use uptrakit_web_api::auth::jwt::JwtManager;
 use uptrakit_web_api::auth::oidc_state::{
     AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
 };
+use uptrakit_web_api::auth::rate_limit::RateLimitStore;
 use uptrakit_web_api::auth::registration::{RegistrationMode, RegistrationSettings};
 use uptrakit_web_api::ca_snapshot::CaSnapshotData;
 use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
@@ -181,6 +182,7 @@ async fn build_state(
         oidc_token_exchange_store: OidcTokenExchangeStore::new(db.clone()),
         oidc_registration_store: OidcRegistrationStore::new(db.clone()),
         device_flow_store: DeviceFlowStore::new(db.clone()),
+        rate_limit_store: RateLimitStore::new(db.clone()),
         pki_path: std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"),
         rustls_config: rustls_cfg,
         crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),

@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
-use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus, MIN_POLL_INTERVAL_SECONDS};
+use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::http::HeaderMap;
@@ -66,7 +66,7 @@ pub async fn device_auth_start(
         user_code,
         verification_url,
         expires_in: 600,
-        interval: MIN_POLL_INTERVAL_SECONDS as u64,
+        interval: 5,
     };
 
     (StatusCode::OK, Json(response)).into_response()
@@ -88,40 +88,6 @@ pub async fn device_auth_poll(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeviceAuthPollRequest>,
 ) -> Response {
-    // Check rate limiting
-    match state
-        .device_flow_store
-        .is_rate_limited(&req.device_code)
-        .await
-    {
-        Ok(true) => {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(DeviceAuthPollResponse {
-                    status: "slow_down".into(),
-                    token: None,
-                    token_name: None,
-                }),
-            )
-                .into_response();
-        }
-        Ok(false) => {}
-        Err(e) => match e.current_context() {
-            DeviceFlowError::NotFound => {
-                return error_response(StatusCode::NOT_FOUND, "Device flow not found or expired");
-            }
-            _ => {
-                tracing::error!("Device flow rate limit check failed: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        },
-    }
-
-    // Record poll timestamp
-    if let Err(e) = state.device_flow_store.record_poll(&req.device_code).await {
-        tracing::error!("Failed to record poll: {e}");
-    }
-
     // Check status
     let status = match state.device_flow_store.get_status(&req.device_code).await {
         Ok(s) => s,

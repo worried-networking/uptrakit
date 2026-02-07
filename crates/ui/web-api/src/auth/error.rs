@@ -91,9 +91,6 @@ pub enum AuthError {
     #[error("device flow already authorized")]
     DeviceFlowAlreadyAuthorized,
 
-    #[error("device flow polling too fast")]
-    DeviceFlowRateLimited,
-
     #[error("internal error: {0}")]
     Internal(String),
 }
