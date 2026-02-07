@@ -39,6 +39,26 @@ impl std::fmt::Display for ServiceType {
     }
 }
 
+/// MQTT connection transport protocol.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MqttTransport {
+    /// Plain TCP connection.
+    #[default]
+    Tcp,
+    /// TLS-encrypted connection.
+    Tls,
+}
+
+impl std::fmt::Display for MqttTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tcp => f.write_str("tcp"),
+            Self::Tls => f.write_str("tls"),
+        }
+    }
+}
+
 /// Shell type for hook execution in update payloads.
 ///
 /// Determines which shell interpreter and fail-early settings are used.
@@ -505,7 +525,7 @@ pub struct MqttTenantConfig {
     /// Whether MQTT is enabled for this tenant.
     pub enabled: bool,
     /// Transport protocol (tcp, tls).
-    pub transport: String,
+    pub transport: MqttTransport,
     /// Broker hostname.
     pub host: String,
     /// Broker port.
@@ -1266,7 +1286,7 @@ mod tests {
                 mqtt_client_id: TEST_UUID_3,
                 tenant_id: TEST_UUID_1,
                 enabled: true,
-                transport: "tls".to_string(),
+                transport: MqttTransport::Tls,
                 host: "broker.example.com".to_string(),
                 port: 8883,
                 client_id: "uptrakit".to_string(),
@@ -1290,7 +1310,7 @@ mod tests {
                 mqtt_client_id: TEST_UUID_1,
                 tenant_id: TEST_UUID_2,
                 enabled: true,
-                transport: "tcp".to_string(),
+                transport: MqttTransport::Tcp,
                 host: "broker.local".to_string(),
                 port: 1883,
                 client_id: "uptrakit".to_string(),
@@ -1418,6 +1438,33 @@ mod tests {
     }
 
     #[test]
+    fn mqtt_transport_serde_roundtrip() {
+        for (variant, expected_str) in [(MqttTransport::Tcp, "tcp"), (MqttTransport::Tls, "tls")] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, format!(r#""{expected_str}""#));
+            let deserialized: MqttTransport = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn mqtt_transport_rejects_invalid() {
+        let result: std::result::Result<MqttTransport, _> = serde_json::from_str(r#""udp""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mqtt_transport_default_is_tcp() {
+        assert_eq!(MqttTransport::default(), MqttTransport::Tcp);
+    }
+
+    #[test]
+    fn mqtt_transport_display() {
+        assert_eq!(MqttTransport::Tcp.to_string(), "tcp");
+        assert_eq!(MqttTransport::Tls.to_string(), "tls");
+    }
+
+    #[test]
     fn disconnect_reason_all_variants() {
         for (reason, expected) in [
             (DisconnectReason::Shutdown, "shutdown"),
@@ -1501,7 +1548,7 @@ mod tests {
             mqtt_client_id: TEST_UUID_1,
             tenant_id: TEST_UUID_2,
             enabled: true,
-            transport: "tcp".to_string(),
+            transport: MqttTransport::Tcp,
             host: "localhost".to_string(),
             port: 1883,
             client_id: "uptrakit".to_string(),

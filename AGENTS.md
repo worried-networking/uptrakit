@@ -1062,10 +1062,11 @@ A `Host` represents a physical or virtual machine, decoupled from the `Agent` pr
 
 All UUID-typed ID fields (`service_id`, `software_item_id`, `update_history_id`, `mqtt_client_id`, `tenant_id`) in wire protocol structs use `uuid::Uuid` instead of `String`. This ensures UUID validation at serde deserialization time rather than requiring manual `Uuid::parse_str()` in consumers. The JSON format remains the same (hyphenated UUID strings).
 
-Three wire payload fields use typed enums instead of raw strings — invalid values are rejected at deserialization:
+Four wire payload fields use typed enums instead of raw strings — invalid values are rejected at deserialization:
 - `EnrollPayload.service_type: ServiceType` — `Agent` or `Mqtt` (serialized as `"agent"` / `"mqtt"`)
 - `EnrolledPayload.status: EnrollmentStatus` — `Pending` or `Approved` (serialized as `"pending"` / `"approved"`)
 - `ExecuteUpdatePayload.shell: Option<HookShell>` — `Bash`, `Sh`, or `PowerShell` (serialized as `"bash"` / `"sh"` / `"powershell"`); defaults to `Bash`
+- `MqttTenantConfig.transport: MqttTransport` — `Tcp` or `Tls` (serialized as `"tcp"` / `"tls"`); defaults to `Tcp`
 
 Other crates (`web-api-types`, `db`) keep their own parallel enums; conversion happens in consuming crates (e.g. `wire_hook_shell()` in the web-api crate).
 

@@ -9,6 +9,7 @@ use sea_orm::{
 use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_internal_wire::{
     ControllerMessage, MqttTenantConfig, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
+    MqttTransport,
 };
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
@@ -473,7 +474,7 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         mqtt_client_id: client.id,
         tenant_id: client.tenant_id,
         enabled: client.enabled,
-        transport: client.transport.clone(),
+        transport: wire_mqtt_transport(&client.transport),
         host: client.host.clone(),
         port: client.port as u16,
         client_id: client.client_id.clone(),
@@ -482,5 +483,13 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         topic_prefix: client.topic_prefix.clone(),
         updated_at: UtcDateTime::from_unix_timestamp(client.updated_at.unix_timestamp())
             .unwrap_or(UtcDateTime::UNIX_EPOCH),
+    }
+}
+
+/// Convert a DB transport string to the wire protocol `MqttTransport`.
+fn wire_mqtt_transport(transport: &str) -> MqttTransport {
+    match transport {
+        "tls" => MqttTransport::Tls,
+        _ => MqttTransport::Tcp,
     }
 }
