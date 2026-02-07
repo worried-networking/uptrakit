@@ -507,9 +507,10 @@ async fn handle_anonymous(
                 let service_msg: ServiceMessage = match serde_json::from_str(&text) {
                     Ok(m) => m,
                     Err(e) => {
+                        tracing::debug!(error = %e, "invalid message from anonymous client");
                         let err = ControllerMessage::Error(ErrorPayload {
                             code: ErrorCode::BadRequest,
-                            message: format!("invalid message: {e}"),
+                            message: "invalid message".to_string(),
                         });
                         if let Some(json) = serialize_msg(&err) {
                             let _ = sink.send(Message::Text(json.into())).await;
