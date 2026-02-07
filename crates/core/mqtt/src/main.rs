@@ -242,7 +242,7 @@ async fn run_authenticated(
                         tracing::info!("certificate renewal requested");
                     }
                     Some(ControllerMessage::Pong(payload)) => {
-                        let rtt = now_millis() - payload.agent_ts;
+                        let rtt = now_millis() - payload.service_ts;
                         tracing::trace!(rtt_ms = rtt, "pong received");
                     }
                     Some(ControllerMessage::ServerRestarting(payload)) => {
@@ -259,7 +259,7 @@ async fn run_authenticated(
             }
             _ = ping_ticker.tick() => {
                 if let Err(e) = conn.send(ServiceMessage::Ping(PingPayload {
-                    agent_ts: now_millis(),
+                    service_ts: now_millis(),
                 })).await {
                     tracing::error!(error = ?e, "ping failed");
                     break;

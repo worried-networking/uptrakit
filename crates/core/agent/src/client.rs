@@ -170,11 +170,11 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
             }
 
             _ = ping_interval.tick() => {
-                let agent_ts = now_millis();
-                let ping = ServiceMessage::Ping(PingPayload { agent_ts });
+                let service_ts = now_millis();
+                let ping = ServiceMessage::Ping(PingPayload { service_ts });
                 let ping_json = serde_json::to_string(&ping).context_to::<Error>()?;
 
-                tracing::trace!(agent_ts, "sending ping");
+                tracing::trace!(service_ts, "sending ping");
                 ws_stream
                     .send(Message::Text(ping_json.into()))
                     .await
@@ -223,9 +223,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                         match controller_msg {
                             ControllerMessage::Pong(pong) => {
                                 let now = now_millis();
-                                let rtt = now - pong.agent_ts;
+                                let rtt = now - pong.service_ts;
                                 tracing::trace!(
-                                    agent_ts = pong.agent_ts,
+                                    service_ts = pong.service_ts,
                                     controller_ts = pong.controller_ts,
                                     rtt_ms = rtt,
                                     "received pong"

@@ -93,8 +93,8 @@ pub(crate) async fn handle_mqtt_authenticated(
                             payload.active_mqtt_clients,
                         );
                     }
-                    ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                        if send_pong(sink, agent_ts).await.is_err() {
+                    ServiceMessage::Ping(PingPayload { service_ts }) => {
+                        if send_pong(sink, service_ts).await.is_err() {
                             return;
                         }
                     }
@@ -204,9 +204,9 @@ pub(crate) async fn handle_mqtt_authenticated(
                         };
 
                         match service_msg {
-                            ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                                let Ok(controller_ts) = send_pong(sink, agent_ts).await else { break };
-                                tracing::trace!(agent_ts, controller_ts, "ping/pong");
+                            ServiceMessage::Ping(PingPayload { service_ts }) => {
+                                let Ok(controller_ts) = send_pong(sink, service_ts).await else { break };
+                                tracing::trace!(service_ts, controller_ts, "ping/pong");
 
                                 // Update lease heartbeats for all tenants held by this service
                                 if let Err(e) = lease_coordinator
@@ -375,11 +375,11 @@ pub(crate) async fn handle_mqtt_enrolled(
                 };
 
                 match service_msg {
-                    ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                        let Ok(controller_ts) = send_pong(sink, agent_ts).await else {
+                    ServiceMessage::Ping(PingPayload { service_ts }) => {
+                        let Ok(controller_ts) = send_pong(sink, service_ts).await else {
                             break;
                         };
-                        tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
+                        tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
 
                         // Poll database for status change (simplified).
                         if !approved

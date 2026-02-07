@@ -144,14 +144,14 @@ pub enum ControllerMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PingPayload {
     /// Timestamp when the service sent the ping.
-    pub agent_ts: Timestamp,
+    pub service_ts: Timestamp,
 }
 
 /// Payload for pong messages.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PongPayload {
     /// Original timestamp from the service's ping.
-    pub agent_ts: Timestamp,
+    pub service_ts: Timestamp,
     /// Timestamp when the controller processed the ping.
     pub controller_ts: Timestamp,
 }
@@ -618,10 +618,10 @@ mod tests {
     #[test]
     fn ping_serialization_roundtrip() {
         let ping = ServiceMessage::Ping(PingPayload {
-            agent_ts: 1706400000000,
+            service_ts: 1706400000000,
         });
         let json = serde_json::to_string(&ping).unwrap();
-        assert_eq!(json, r#"{"type":"ping","agent_ts":1706400000000}"#);
+        assert_eq!(json, r#"{"type":"ping","service_ts":1706400000000}"#);
 
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, ping);
@@ -960,13 +960,13 @@ mod tests {
     #[test]
     fn pong_serialization_roundtrip() {
         let pong = ControllerMessage::Pong(PongPayload {
-            agent_ts: 1706400000000,
+            service_ts: 1706400000000,
             controller_ts: 1706400000050,
         });
         let json = serde_json::to_string(&pong).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"pong","agent_ts":1706400000000,"controller_ts":1706400000050}"#
+            r#"{"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#
         );
 
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();

@@ -69,11 +69,11 @@ pub(crate) async fn close_with_reason(
 /// for trace logging.
 pub(crate) async fn send_pong(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    agent_ts: i64,
+    service_ts: i64,
 ) -> Result<i64, ()> {
     let controller_ts = now_millis();
     let response = ControllerMessage::Pong(PongPayload {
-        agent_ts,
+        service_ts,
         controller_ts,
     });
     let Some(json) = serialize_msg(&response) else {

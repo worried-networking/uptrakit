@@ -726,13 +726,13 @@ components:
       type: object
       required:
         - type
-        - agent_ts
+        - service_ts
       properties:
         type:
           type: string
           const: ping
           description: Message type discriminator
-        agent_ts:
+        service_ts:
           type: integer
           format: int64
           description: Unix epoch timestamp in milliseconds when the service sent the ping
@@ -743,14 +743,14 @@ components:
       type: object
       required:
         - type
-        - agent_ts
+        - service_ts
         - controller_ts
       properties:
         type:
           type: string
           const: pong
           description: Message type discriminator
-        agent_ts:
+        service_ts:
           type: integer
           format: int64
           description: Original timestamp from the service's ping message

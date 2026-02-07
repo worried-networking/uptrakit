@@ -81,9 +81,9 @@ pub(crate) async fn handle_agent_authenticated(
                         };
 
                         match agent_msg {
-                            ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                                let Ok(controller_ts) = send_pong(sink, agent_ts).await else { break };
-                                tracing::trace!(agent_ts, controller_ts, "ping/pong");
+                            ServiceMessage::Ping(PingPayload { service_ts }) => {
+                                let Ok(controller_ts) = send_pong(sink, service_ts).await else { break };
+                                tracing::trace!(service_ts, controller_ts, "ping/pong");
                             }
                             ServiceMessage::ReportHostInfo(payload) => {
                                 // Check agent version
@@ -491,9 +491,9 @@ pub(crate) async fn run_agent_enrolled_loop(
                         };
 
                         match agent_msg {
-                            ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                                let Ok(controller_ts) = send_pong(sink, agent_ts).await else { break };
-                                tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
+                            ServiceMessage::Ping(PingPayload { service_ts }) => {
+                                let Ok(controller_ts) = send_pong(sink, service_ts).await else { break };
+                                tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
                             }
                             ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {
