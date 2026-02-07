@@ -564,12 +564,6 @@ For each DB-managed setting at startup:
 
 The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettings` behind a `RwLock`. Runtime-changeable fields (proxies, header, SANs) are updated in-memory immediately when changed via the API. Restart-required fields (addresses) are saved to DB only.
 
-#### Cross-instance cache synchronisation
-
-In multi-instance deployments (e.g. behind a load balancer with a shared DB), settings changes made on one instance must propagate to others. A **periodic reload task** runs every 30 seconds in the controller, calling `Settings::reload_from_db()` to refresh the in-memory cache from the database. This ensures eventual consistency across instances with at most 30 seconds of stale data.
-
-The reload task uses the same `CancellationToken` pattern as other background tasks and shuts down gracefully during controller stop.
-
 ### Settings API endpoints
 
 | Endpoint | Permission | Purpose |

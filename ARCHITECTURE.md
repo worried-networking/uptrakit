@@ -160,7 +160,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` (OIDC bootstrap flags write directly to the `oidc_providers` table).
 
-The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for each settings group, allowing runtime-changeable settings to take effect immediately without restart. A periodic reload task (`reload_from_db()`) refreshes the in-memory cache from the database every 30 seconds, ensuring cross-instance consistency in multi-instance deployments. See [AGENTS.md](AGENTS.md) section "DB-managed settings" for the full key reference.
+The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for each settings group, allowing runtime-changeable settings to take effect immediately without restart. See [AGENTS.md](AGENTS.md) section "DB-managed settings" for the full key reference.
 
 ## Authentication & Authorization
 
