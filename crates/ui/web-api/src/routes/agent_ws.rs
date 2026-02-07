@@ -5,8 +5,9 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, ExecuteUpdatePayload,
-    IncomingSeq, OutgoingSeq, PingPayload, ProviderType, ServiceMessage, UpdateFinalStatus,
+    ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload,
+    ExecuteUpdatePayload, IncomingSeq, OutgoingSeq, PingPayload, ProviderType, RejectedPayload,
+    ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     host_software_item, provider_config, service_host as agent_host, software_item, update_history,
@@ -498,6 +499,35 @@ pub(crate) async fn run_agent_enrolled_loop(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
+
+                                // Poll database for status change on each ping.
+                                // This handles cross-controller approval: if the
+                                // agent is connected to Controller A but approved
+                                // on Controller B, the outbox event may not arrive
+                                // before the next ping.
+                                if !approved
+                                    && let Ok(Some(s)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+                                        .one(&state.db)
+                                        .await
+                                {
+                                    match s.status {
+                                        uptrakit_shared_db::entity::service::ServiceStatus::Approved => {
+                                            approved = true;
+                                            let msg = ControllerMessage::Approved(ApprovedPayload { service_id: agent_id });
+                                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                                let _ = sink.send(Message::Text(json.into())).await;
+                                            }
+                                        }
+                                        uptrakit_shared_db::entity::service::ServiceStatus::Rejected => {
+                                            let msg = ControllerMessage::Rejected(RejectedPayload { service_id: agent_id });
+                                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                                let _ = sink.send(Message::Text(json.into())).await;
+                                            }
+                                            break;
+                                        }
+                                        _ => {}
+                                    }
+                                }
                             }
                             ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {
