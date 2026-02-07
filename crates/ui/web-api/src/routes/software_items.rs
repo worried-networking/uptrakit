@@ -1035,10 +1035,11 @@ pub async fn trigger_update(
                 assets: ri
                     .assets
                     .into_iter()
-                    .map(|a| uptrakit_internal_wire::ReleaseAssetInfo {
+                    .map(|a| uptrakit_internal_wire::ReleaseAsset {
                         name: a.name,
                         download_url: a.download_url,
                         size: a.size,
+                        content_type: None,
                     })
                     .collect(),
             }),

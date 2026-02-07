@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 use uuid::Uuid;
 
-// Re-export ProviderType from provider-core for use in wire protocol messages.
-pub use uptrakit_provider_core::ProviderType;
+// Re-export provider-core types used directly in wire protocol messages.
+pub use uptrakit_provider_core::{ProviderType, ReleaseAsset};
 
 /// Enrollment status returned in the `Enrolled` message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,16 +419,7 @@ pub struct ReleaseInfo {
     pub tag: String,
     pub release_url: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub assets: Vec<ReleaseAssetInfo>,
-}
-
-/// Information about a release asset.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReleaseAssetInfo {
-    pub name: String,
-    pub download_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<u64>,
+    pub assets: Vec<ReleaseAsset>,
 }
 
 /// Controller -> Agent: Trigger an update.
@@ -1195,10 +1186,11 @@ mod tests {
             release_info: Some(ReleaseInfo {
                 tag: "v20.10.0".to_string(),
                 release_url: "https://github.com/nodejs/node/releases/tag/v20.10.0".to_string(),
-                assets: vec![ReleaseAssetInfo {
+                assets: vec![ReleaseAsset {
                     name: "node-v20.10.0-linux-x64.tar.gz".to_string(),
                     download_url: "https://github.com/nodejs/node/releases/download/v20.10.0/node-v20.10.0-linux-x64.tar.gz".to_string(),
                     size: Some(25_000_000),
+                    content_type: None,
                 }],
             }),
             timeout_seconds: 600,
@@ -1584,15 +1576,17 @@ mod tests {
             tag: "v1.0.0".to_string(),
             release_url: "https://example.com/release".to_string(),
             assets: vec![
-                ReleaseAssetInfo {
+                ReleaseAsset {
                     name: "app.tar.gz".to_string(),
                     download_url: "https://example.com/app.tar.gz".to_string(),
                     size: Some(1024),
+                    content_type: None,
                 },
-                ReleaseAssetInfo {
+                ReleaseAsset {
                     name: "app.deb".to_string(),
                     download_url: "https://example.com/app.deb".to_string(),
                     size: None,
+                    content_type: None,
                 },
             ],
         };

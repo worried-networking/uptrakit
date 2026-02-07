@@ -49,7 +49,7 @@ impl fmt::Display for ProviderType {
 }
 
 /// A downloadable asset attached to a release.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseAsset {
     /// Asset filename.
     pub name: String,

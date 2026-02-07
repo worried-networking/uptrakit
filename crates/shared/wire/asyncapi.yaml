@@ -1224,7 +1224,7 @@ components:
         - failed
       description: Final status of an update execution
 
-    releaseAssetInfo:
+    releaseAsset:
       type: object
       required:
         - name
@@ -1245,6 +1245,11 @@ components:
           type: integer
           format: int64
           description: Optional asset size in bytes
+        content_type:
+          type: string
+          description: Optional MIME content type of the asset
+          examples:
+            - application/gzip
 
     releaseInfo:
       type: object
@@ -1266,7 +1271,7 @@ components:
         assets:
           type: array
           items:
-            $ref: "#/components/schemas/releaseAssetInfo"
+            $ref: "#/components/schemas/releaseAsset"
           description: Optional list of release assets
           default: []
 
