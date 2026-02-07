@@ -923,12 +923,15 @@ components:
           description: Message type discriminator
         code:
           type: string
-          description: Machine-readable error code
-          examples:
-            - invalid_token
-            - not_approved
+          enum:
             - bad_request
             - enrollment_failed
+            - not_approved
+            - forbidden
+            - certificate_error
+            - internal_error
+            - agent_version_too_old
+          description: Machine-readable error code
         message:
           type: string
           description: Human-readable error description

@@ -5,8 +5,8 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, ErrorPayload, ExecuteUpdatePayload, PingPayload,
-    ProviderType, ServiceMessage, UpdateFinalStatus,
+    CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, ExecuteUpdatePayload,
+    PingPayload, ProviderType, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     host_software_item, provider_config, service_host as agent_host, software_item, update_history,
@@ -96,7 +96,7 @@ pub(crate) async fn handle_agent_authenticated(
                                             "agent sent invalid version string"
                                         );
                                         let err = ControllerMessage::Error(ErrorPayload {
-                                            code: "agent_version_too_old".to_string(),
+                                            code: ErrorCode::AgentVersionTooOld,
                                             message: format!(
                                                 "invalid agent version '{}', minimum required: {MIN_AGENT_VERSION}",
                                                 payload.agent_version
@@ -121,7 +121,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         "agent version too old"
                                     );
                                     let err = ControllerMessage::Error(ErrorPayload {
-                                        code: "agent_version_too_old".to_string(),
+                                        code: ErrorCode::AgentVersionTooOld,
                                         message: format!(
                                             "agent version {} is too old, minimum required: {MIN_AGENT_VERSION}",
                                             payload.agent_version
@@ -171,7 +171,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     Ok(Some(a)) if a.status == uptrakit_shared_db::entity::service::ServiceStatus::Approved && a.deactivated_at.is_none() => a,
                                     _ => {
                                         let err = ControllerMessage::Error(ErrorPayload {
-                                            code: "forbidden".to_string(),
+                                            code: ErrorCode::Forbidden,
                                             message: "agent is not approved".to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
@@ -213,7 +213,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     }
                                     Err(e) => {
                                         let err = ControllerMessage::Error(ErrorPayload {
-                                            code: "certificate_error".to_string(),
+                                            code: ErrorCode::CertificateError,
                                             message: e.current_context().to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
@@ -394,7 +394,7 @@ pub(crate) async fn handle_agent_authenticated(
                             }
                             _ => {
                                 let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "bad_request".to_string(),
+                                    code: ErrorCode::BadRequest,
                                     message: "unexpected message for authenticated connection".to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {
@@ -498,7 +498,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                             ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {
                                     let err = ControllerMessage::Error(ErrorPayload {
-                                        code: "not_approved".to_string(),
+                                        code: ErrorCode::NotApproved,
                                         message: "agent is not yet approved".to_string(),
                                     });
                                     if let Some(json) = serialize_msg(&err) {
@@ -515,7 +515,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     Ok(Some(a)) => a,
                                     _ => {
                                         let err = ControllerMessage::Error(ErrorPayload {
-                                            code: "internal_error".to_string(),
+                                            code: ErrorCode::InternalError,
                                             message: "agent not found".to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
@@ -545,7 +545,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     }
                                     Err(e) => {
                                         let err = ControllerMessage::Error(ErrorPayload {
-                                            code: "certificate_error".to_string(),
+                                            code: ErrorCode::CertificateError,
                                             message: e.current_context().to_string(),
                                         });
                                         if let Some(json) = serialize_msg(&err) {
@@ -560,7 +560,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                             }
                             ServiceMessage::Enroll(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "bad_request".to_string(),
+                                    code: ErrorCode::BadRequest,
                                     message: "already enrolled".to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {
@@ -569,7 +569,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                             }
                             ServiceMessage::RenewCertificate(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "bad_request".to_string(),
+                                    code: ErrorCode::BadRequest,
                                     message: "not available during enrollment".to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {
@@ -583,7 +583,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                             | ServiceMessage::UpdateOutput(_)
                             | ServiceMessage::UpdateResult(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "bad_request".to_string(),
+                                    code: ErrorCode::BadRequest,
                                     message: "update messages not available during enrollment".to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {
@@ -602,7 +602,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                             ServiceMessage::Register(_)
                             | ServiceMessage::ReleaseTenants(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
-                                    code: "bad_request".to_string(),
+                                    code: ErrorCode::BadRequest,
                                     message: "message type not supported on agent connections".to_string(),
                                 });
                                 if let Some(json) = serialize_msg(&err) {

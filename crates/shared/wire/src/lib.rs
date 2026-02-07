@@ -261,10 +261,44 @@ mod utc_datetime_millis {
     }
 }
 
+/// Machine-readable error code sent in `ErrorPayload`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// Malformed or unexpected message from the service.
+    BadRequest,
+    /// Enrollment attempt failed on the controller side.
+    EnrollmentFailed,
+    /// Service is not approved (pending or rejected).
+    NotApproved,
+    /// Service is not allowed to perform this action.
+    Forbidden,
+    /// Certificate signing or renewal error.
+    CertificateError,
+    /// Unrecoverable server-side error.
+    InternalError,
+    /// Agent binary version is below the minimum required.
+    AgentVersionTooOld,
+}
+
+impl std::fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadRequest => f.write_str("bad_request"),
+            Self::EnrollmentFailed => f.write_str("enrollment_failed"),
+            Self::NotApproved => f.write_str("not_approved"),
+            Self::Forbidden => f.write_str("forbidden"),
+            Self::CertificateError => f.write_str("certificate_error"),
+            Self::InternalError => f.write_str("internal_error"),
+            Self::AgentVersionTooOld => f.write_str("agent_version_too_old"),
+        }
+    }
+}
+
 /// Payload for error responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorPayload {
-    pub code: String,
+    pub code: ErrorCode,
     pub message: String,
 }
 
@@ -999,13 +1033,13 @@ mod tests {
     #[test]
     fn error_serialization_roundtrip() {
         let msg = ControllerMessage::Error(ErrorPayload {
-            code: "invalid_token".to_string(),
+            code: ErrorCode::EnrollmentFailed,
             message: "The enrollment token is invalid".to_string(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"error","code":"invalid_token","message":"The enrollment token is invalid"}"#
+            r#"{"type":"error","code":"enrollment_failed","message":"The enrollment token is invalid"}"#
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -1462,6 +1496,44 @@ mod tests {
     fn mqtt_transport_display() {
         assert_eq!(MqttTransport::Tcp.to_string(), "tcp");
         assert_eq!(MqttTransport::Tls.to_string(), "tls");
+    }
+
+    #[test]
+    fn error_code_serde_roundtrip() {
+        for (variant, expected_str) in [
+            (ErrorCode::BadRequest, "bad_request"),
+            (ErrorCode::EnrollmentFailed, "enrollment_failed"),
+            (ErrorCode::NotApproved, "not_approved"),
+            (ErrorCode::Forbidden, "forbidden"),
+            (ErrorCode::CertificateError, "certificate_error"),
+            (ErrorCode::InternalError, "internal_error"),
+            (ErrorCode::AgentVersionTooOld, "agent_version_too_old"),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, format!(r#""{expected_str}""#));
+            let deserialized: ErrorCode = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn error_code_rejects_invalid() {
+        let result: std::result::Result<ErrorCode, _> = serde_json::from_str(r#""unknown_code""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn error_code_display() {
+        assert_eq!(ErrorCode::BadRequest.to_string(), "bad_request");
+        assert_eq!(ErrorCode::EnrollmentFailed.to_string(), "enrollment_failed");
+        assert_eq!(ErrorCode::NotApproved.to_string(), "not_approved");
+        assert_eq!(ErrorCode::Forbidden.to_string(), "forbidden");
+        assert_eq!(ErrorCode::CertificateError.to_string(), "certificate_error");
+        assert_eq!(ErrorCode::InternalError.to_string(), "internal_error");
+        assert_eq!(
+            ErrorCode::AgentVersionTooOld.to_string(),
+            "agent_version_too_old"
+        );
     }
 
     #[test]

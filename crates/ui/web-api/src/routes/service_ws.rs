@@ -9,7 +9,7 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uptrakit_internal_wire::{
-    ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorPayload, PongPayload,
+    ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload, PongPayload,
     RejectedPayload, ServiceMessage, ServiceSettingsPayload, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
@@ -508,7 +508,7 @@ async fn handle_anonymous(
                     Ok(m) => m,
                     Err(e) => {
                         let err = ControllerMessage::Error(ErrorPayload {
-                            code: "bad_request".to_string(),
+                            code: ErrorCode::BadRequest,
                             message: format!("invalid message: {e}"),
                         });
                         if let Some(json) = serialize_msg(&err) {
@@ -541,7 +541,7 @@ async fn handle_anonymous(
                     }
                     _ => {
                         let err = ControllerMessage::Error(ErrorPayload {
-                            code: "bad_request".to_string(),
+                            code: ErrorCode::BadRequest,
                             message: "expected enroll message".to_string(),
                         });
                         if let Some(json) = serialize_msg(&err) {
@@ -648,7 +648,7 @@ async fn enroll_agent(
         }
         Err(e) => {
             let err = ControllerMessage::Error(ErrorPayload {
-                code: "enrollment_failed".to_string(),
+                code: ErrorCode::EnrollmentFailed,
                 message: e.current_context().to_string(),
             });
             if let Some(json) = serialize_msg(&err) {
@@ -718,7 +718,7 @@ async fn enroll_mqtt(
         }
         Err(e) => {
             let err = ControllerMessage::Error(ErrorPayload {
-                code: "enrollment_failed".to_string(),
+                code: ErrorCode::EnrollmentFailed,
                 message: e.to_string(),
             });
             if let Some(json) = serialize_msg(&err) {
