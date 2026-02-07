@@ -27,7 +27,8 @@
 	async function loadHosts() {
 		try {
 			error = null;
-			hosts = await getHosts();
+			const result = await getHosts();
+			hosts = result.items;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load hosts';
 		}

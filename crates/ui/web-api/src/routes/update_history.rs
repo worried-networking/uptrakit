@@ -9,12 +9,13 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{host, prelude::*, update_history};
 
+pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::update_history::{
     UpdateHistoryQuery, UpdateHistoryResponse, UpdateStatus,
 };
@@ -96,10 +97,12 @@ async fn resolve_software_item_name(
     params(
         ("host_id" = Option<String>, Query, description = "Filter by host UUID"),
         ("software_item_id" = Option<String>, Query, description = "Filter by software item UUID"),
-        ("status" = Option<String>, Query, description = "Filter by status (pending, in_progress, completed, failed)")
+        ("status" = Option<String>, Query, description = "Filter by status (pending, in_progress, completed, failed)"),
+        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
     ),
     responses(
-        (status = 200, description = "List of update history records", body = Vec<UpdateHistoryResponse>),
+        (status = 200, description = "Paginated list of update history records", body = PaginatedResponse<UpdateHistoryResponse>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
@@ -116,6 +119,8 @@ pub async fn list_update_history(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
+    let pagination = query.pagination().resolve();
+
     // Tenant scoping: get all host IDs belonging to this tenant
     let host_ids = match tenant_host_ids(&state.db, tenant.tenant_id).await {
         Ok(ids) => ids,
@@ -126,7 +131,15 @@ pub async fn list_update_history(
     };
 
     if host_ids.is_empty() {
-        return (StatusCode::OK, Json(Vec::<UpdateHistoryResponse>::new())).into_response();
+        return (
+            StatusCode::OK,
+            Json(PaginatedResponse::<UpdateHistoryResponse>::new(
+                vec![],
+                0,
+                pagination,
+            )),
+        )
+            .into_response();
     }
 
     let mut q = UpdateHistory::find().filter(update_history::Column::HostId.is_in(host_ids));
@@ -155,8 +168,19 @@ pub async fn list_update_history(
         q = q.filter(update_history::Column::Status.eq(status.as_str()));
     }
 
-    let records = match q
-        .order_by_desc(update_history::Column::CreatedAt)
+    let base_query = q.order_by_desc(update_history::Column::CreatedAt);
+
+    let total = match base_query.clone().count(&state.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to count update history: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let records = match base_query
+        .offset(Some(pagination.offset()))
+        .limit(Some(pagination.per_page))
         .all(&state.db)
         .await
     {
@@ -167,14 +191,18 @@ pub async fn list_update_history(
         }
     };
 
-    let mut response = Vec::with_capacity(records.len());
+    let mut items = Vec::with_capacity(records.len());
     for record in records {
         let host_name = resolve_host_name(&state.db, record.host_id).await;
         let si_name = resolve_software_item_name(&state.db, record.software_item_id).await;
-        response.push(build_response(record, host_name, si_name));
+        items.push(build_response(record, host_name, si_name));
     }
 
-    (StatusCode::OK, Json(response)).into_response()
+    (
+        StatusCode::OK,
+        Json(PaginatedResponse::new(items, total, pagination)),
+    )
+        .into_response()
 }
 
 /// Get a single update history record by ID.

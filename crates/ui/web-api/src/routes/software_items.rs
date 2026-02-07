@@ -6,13 +6,13 @@ use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, Set,
+    QueryOrder, QuerySelect, Set,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -24,6 +24,7 @@ use uptrakit_shared_db::entity::{
 
 use uptrakit_provider_registry::ProviderRegistry;
 
+pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
     SoftwareItemHostSummary, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
@@ -304,8 +305,12 @@ pub async fn create_software_item(
 #[utoipa::path(
     get,
     path = "/api/v1/software-items",
+    params(
+        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
+    ),
     responses(
-        (status = 200, description = "List of software items", body = Vec<SoftwareItemResponse>),
+        (status = 200, description = "Paginated list of software items", body = PaginatedResponse<SoftwareItemResponse>),
     ),
     tag = "Software Items",
     security(("bearer_token" = []))
@@ -314,15 +319,30 @@ pub async fn list_software_items(
     State(state): State<Arc<AppState>>,
     tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
+    Query(params): Query<PaginationParams>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let items = match SoftwareItem::find()
+    let pagination = params.resolve();
+
+    let base_query = SoftwareItem::find()
         .filter(software_item::Column::TenantId.eq(tenant.tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
-        .order_by_asc(software_item::Column::Name)
+        .order_by_asc(software_item::Column::Name);
+
+    let total = match base_query.clone().count(&state.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to count software items: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let items = match base_query
+        .offset(Some(pagination.offset()))
+        .limit(Some(pagination.per_page))
         .all(&state.db)
         .await
     {
@@ -353,7 +373,11 @@ pub async fn list_software_items(
         response.push(build_list_response(item, &config, host_count));
     }
 
-    (StatusCode::OK, Json(response)).into_response()
+    (
+        StatusCode::OK,
+        Json(PaginatedResponse::new(response, total, pagination)),
+    )
+        .into_response()
 }
 
 /// Get a software item with assigned hosts and installed versions.

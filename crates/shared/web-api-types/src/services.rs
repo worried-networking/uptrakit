@@ -74,6 +74,19 @@ pub struct ListServicesQuery {
     pub r#type: Option<String>,
     /// Filter by status: `pending`, `approved`, `rejected`, `deactivated`.
     pub status: Option<String>,
+    /// Page number (1-indexed). Defaults to 1.
+    pub page: Option<u64>,
+    /// Items per page. Defaults to 20, max 1000.
+    pub per_page: Option<u64>,
+}
+
+impl ListServicesQuery {
+    pub fn pagination(&self) -> crate::pagination::PaginationParams {
+        crate::pagination::PaginationParams {
+            page: self.page,
+            per_page: self.per_page,
+        }
+    }
 }
 
 // Re-export generic types that are shared across service operations.

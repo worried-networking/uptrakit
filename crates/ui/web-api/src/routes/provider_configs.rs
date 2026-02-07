@@ -6,17 +6,21 @@ use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
+};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::provider_config;
 
+pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
 };
@@ -106,8 +110,12 @@ pub async fn create_provider_config(
 #[utoipa::path(
     get,
     path = "/api/v1/provider-configs",
+    params(
+        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
+    ),
     responses(
-        (status = 200, description = "List of provider configs", body = Vec<ProviderConfigResponse>),
+        (status = 200, description = "Paginated list of provider configs", body = PaginatedResponse<ProviderConfigResponse>),
     ),
     tag = "Provider Configs",
     security(("bearer_token" = []))
@@ -116,24 +124,43 @@ pub async fn list_provider_configs(
     State(state): State<Arc<AppState>>,
     tenant: TenantContext,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    Query(params): Query<PaginationParams>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    match ProviderConfig::find()
+    let pagination = params.resolve();
+
+    let base_query = ProviderConfig::find()
         .filter(provider_config::Column::TenantId.eq(tenant.tenant_id))
         .filter(provider_config::Column::DeactivatedAt.is_null())
-        .order_by_asc(provider_config::Column::Name)
+        .order_by_asc(provider_config::Column::Name);
+
+    let total = match base_query.clone().count(&state.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to count provider configs: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    match base_query
+        .offset(Some(pagination.offset()))
+        .limit(Some(pagination.per_page))
         .all(&state.db)
         .await
     {
         Ok(configs) => {
-            let resp: Vec<ProviderConfigResponse> = configs
+            let items: Vec<ProviderConfigResponse> = configs
                 .into_iter()
                 .map(provider_config_response_from)
                 .collect();
-            (StatusCode::OK, Json(resp)).into_response()
+            (
+                StatusCode::OK,
+                Json(PaginatedResponse::new(items, total, pagination)),
+            )
+                .into_response()
         }
         Err(e) => {
             tracing::error!("Failed to list provider configs: {e}");

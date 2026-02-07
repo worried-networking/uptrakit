@@ -6,11 +6,14 @@ use crate::middleware::tenant_context::TenantContext;
 use crate::routes::services::ServiceStatus;
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
+};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -23,6 +26,7 @@ use uptrakit_shared_db::entity::{
 pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
 };
+pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 
 // --- Endpoints ---
 
@@ -30,8 +34,12 @@ pub use uptrakit_web_api_types::hosts::{
 #[utoipa::path(
     get,
     path = "/api/v1/hosts",
+    params(
+        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
+    ),
     responses(
-        (status = 200, description = "List of hosts", body = Vec<HostResponse>),
+        (status = 200, description = "Paginated list of hosts", body = PaginatedResponse<HostResponse>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
@@ -42,15 +50,30 @@ pub async fn list_hosts(
     State(state): State<Arc<AppState>>,
     tenant: TenantContext,
     Extension(user): Extension<AuthenticatedUser>,
+    Query(params): Query<PaginationParams>,
 ) -> Response {
     if !user.has_permission(Permission::ViewAgents) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let hosts = match Host::find()
+    let pagination = params.resolve();
+
+    let base_query = Host::find()
         .filter(host::Column::TenantId.eq(tenant.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
-        .order_by_desc(host::Column::CreatedAt)
+        .order_by_desc(host::Column::CreatedAt);
+
+    let total = match base_query.clone().count(&state.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to count hosts: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let hosts = match base_query
+        .offset(Some(pagination.offset()))
+        .limit(Some(pagination.per_page))
         .all(&state.db)
         .await
     {
@@ -61,13 +84,17 @@ pub async fn list_hosts(
         }
     };
 
-    let mut response = Vec::with_capacity(hosts.len());
+    let mut items = Vec::with_capacity(hosts.len());
     for h in hosts {
         let agents = load_host_agents(&state.db, h.id).await;
-        response.push(host_to_response(h, agents));
+        items.push(host_to_response(h, agents));
     }
 
-    (StatusCode::OK, Json(response)).into_response()
+    (
+        StatusCode::OK,
+        Json(PaginatedResponse::new(items, total, pagination)),
+    )
+        .into_response()
 }
 
 /// Get a single host by ID

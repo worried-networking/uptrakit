@@ -924,6 +924,58 @@ All route handlers, middleware rejections, and custom `IntoResponse` impls use t
 
 The frontend (`frontend/src/lib/api.ts`) uses `extractErrorMessage(res)` to parse error responses. It tries to parse JSON and extract the `error` field; falls back to the raw response text if parsing fails. The `ErrorResponse` TypeScript interface is defined in `frontend/src/lib/types.ts`.
 
+## Pagination
+
+All list endpoints that can grow unboundedly use server-side pagination with a consistent response envelope. Shared types are defined in `crates/shared/web-api-types/src/pagination.rs`.
+
+### Query parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `page` | u64 | 1 | Page number (1-indexed) |
+| `per_page` | u64 | 20 | Items per page (clamped to 1–1000) |
+
+### Response envelope
+
+All paginated endpoints return a `PaginatedResponse<T>`:
+
+```json
+{
+  "items": [...],
+  "total": 42,
+  "page": 1,
+  "per_page": 20,
+  "total_pages": 3
+}
+```
+
+### Paginated endpoints
+
+| Endpoint | Query struct | Notes |
+| --- | --- | --- |
+| `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `type`, `status` |
+| `GET /api/v1/hosts` | `PaginationParams` | |
+| `GET /api/v1/software-items` | `PaginationParams` | |
+| `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
+| `GET /api/v1/provider-configs` | `PaginationParams` | |
+
+### Endpoints NOT paginated (already bounded)
+
+| Endpoint | Reason |
+| --- | --- |
+| `GET /api/v1/settings/mqtt` | Bounded by `MqttMaxClientsPerTenant` (default 10) |
+| `GET /api/v1/auth/api-tokens` | Per-user, typically small |
+
+### Adding pagination to a new endpoint
+
+For endpoints with an existing query struct, add `page: Option<u64>` and `per_page: Option<u64>` fields directly (serde_urlencoded does not support `#[serde(flatten)]`) and provide a `pagination()` helper method. For endpoints without an existing query struct, use `Query<PaginationParams>` as a new extractor.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/web-api-types/src/pagination.rs` | `PaginationParams`, `ResolvedPagination`, `PaginatedResponse<T>` |
+
 ## Host entity
 
 A `Host` represents a physical or virtual machine, decoupled from the `Agent` process identity. Hosts are identified by `machine_id` — a persistent system identifier (`/etc/machine-id` on Linux, `IOPlatformUUID` on macOS).

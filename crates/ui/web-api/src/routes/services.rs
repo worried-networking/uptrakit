@@ -13,7 +13,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set, sea_query::Expr,
+    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set, sea_query::Expr,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -24,6 +25,7 @@ use uptrakit_shared_db::entity::prelude::{
 };
 use uptrakit_shared_db::entity::{service, service_certificate, service_host};
 
+pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
     EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
     MessageResponse, ServiceResponse, ServiceStatus, ServiceType,
@@ -115,10 +117,12 @@ fn enrollment_setting_key(
     path = "/api/v1/services",
     params(
         ("type" = Option<String>, Query, description = "Filter by service type (agent, mqtt)"),
-        ("status" = Option<String>, Query, description = "Filter by status (pending, approved, rejected, deactivated)")
+        ("status" = Option<String>, Query, description = "Filter by status (pending, approved, rejected, deactivated)"),
+        ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
     ),
     responses(
-        (status = 200, description = "List of services", body = Vec<ServiceResponse>),
+        (status = 200, description = "Paginated list of services", body = PaginatedResponse<ServiceResponse>),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Not authorized")
     ),
@@ -134,6 +138,8 @@ pub async fn list_services(
     if !user.has_permission(Permission::ViewAgents) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+
+    let pagination = query.pagination().resolve();
 
     let mut q = Service::find()
         .filter(service::Column::TenantId.eq(tenant.tenant_id))
@@ -151,8 +157,19 @@ pub async fn list_services(
         q = q.filter(service::Column::Status.eq(db_status));
     }
 
-    let services = match q
-        .order_by_desc(service::Column::CreatedAt)
+    let base_query = q.order_by_desc(service::Column::CreatedAt);
+
+    let total = match base_query.clone().count(&state.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to count services: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let services = match base_query
+        .offset(Some(pagination.offset()))
+        .limit(Some(pagination.per_page))
         .all(&state.db)
         .await
     {
@@ -163,8 +180,12 @@ pub async fn list_services(
         }
     };
 
-    let response: Vec<ServiceResponse> = services.into_iter().map(model_to_response).collect();
-    (StatusCode::OK, Json(response)).into_response()
+    let items: Vec<ServiceResponse> = services.into_iter().map(model_to_response).collect();
+    (
+        StatusCode::OK,
+        Json(PaginatedResponse::new(items, total, pagination)),
+    )
+        .into_response()
 }
 
 /// Approve a pending service

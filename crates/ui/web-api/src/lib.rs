@@ -258,6 +258,11 @@ pub struct AppState {
             routes::settings_ca::RotateCaResponse,
             routes::update_history::UpdateHistoryResponse,
             routes::update_history::UpdateStatus,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::services::ServiceResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::hosts::HostResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::software_items::SoftwareItemResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::update_history::UpdateHistoryResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::provider_configs::ProviderConfigResponse>,
         )
     ),
     info(

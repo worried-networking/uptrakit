@@ -46,6 +46,19 @@ pub struct UpdateHistoryQuery {
     pub host_id: Option<String>,
     pub software_item_id: Option<String>,
     pub status: Option<String>,
+    /// Page number (1-indexed). Defaults to 1.
+    pub page: Option<u64>,
+    /// Items per page. Defaults to 20, max 1000.
+    pub per_page: Option<u64>,
+}
+
+impl UpdateHistoryQuery {
+    pub fn pagination(&self) -> crate::pagination::PaginationParams {
+        crate::pagination::PaginationParams {
+            page: self.page,
+            per_page: self.per_page,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

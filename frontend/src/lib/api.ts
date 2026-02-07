@@ -16,6 +16,7 @@ import type {
 	NetworkSettings,
 	OidcLinkRequest,
 	OidcProviderResponse,
+	PaginatedResponse,
 	RefreshResponse,
 	RegisterRequest,
 	RegistrationSettings,
@@ -216,8 +217,12 @@ export function mergeAgent(targetId: string, sourceId: string): Promise<AgentRes
 
 // --- Host APIs ---
 
-export function getHosts(): Promise<HostResponse[]> {
-	return request('/hosts');
+export function getHosts(page?: number, perPage?: number): Promise<PaginatedResponse<HostResponse>> {
+	const params = new URLSearchParams();
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
+	const query = params.toString();
+	return request(`/hosts${query ? `?${query}` : ''}`);
 }
 
 export function getHost(id: string): Promise<HostResponse> {

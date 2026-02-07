@@ -9,6 +9,7 @@ pub mod mqtt_transport;
 pub mod mqtt_url;
 pub mod oidc_auth;
 pub mod oidc_providers;
+pub mod pagination;
 pub mod permissions;
 pub mod provider_configs;
 pub mod registration;
@@ -660,5 +661,133 @@ mod tests {
 
         assert_eq!(resp.error, "test error");
         assert!(resp.code.is_none());
+    }
+
+    // ── 9. Pagination ────────────────────────────────────────────────────
+
+    #[test]
+    fn pagination_resolve_defaults() {
+        use crate::pagination::{DEFAULT_PER_PAGE, PaginationParams};
+        let params = PaginationParams {
+            page: None,
+            per_page: None,
+        };
+        let resolved = params.resolve();
+        assert_eq!(resolved.page, 1);
+        assert_eq!(resolved.per_page, DEFAULT_PER_PAGE);
+    }
+
+    #[test]
+    fn pagination_resolve_explicit_values() {
+        use crate::pagination::PaginationParams;
+        let params = PaginationParams {
+            page: Some(3),
+            per_page: Some(50),
+        };
+        let resolved = params.resolve();
+        assert_eq!(resolved.page, 3);
+        assert_eq!(resolved.per_page, 50);
+    }
+
+    #[test]
+    fn pagination_resolve_clamps_page_zero_to_one() {
+        use crate::pagination::PaginationParams;
+        let params = PaginationParams {
+            page: Some(0),
+            per_page: None,
+        };
+        let resolved = params.resolve();
+        assert_eq!(resolved.page, 1);
+    }
+
+    #[test]
+    fn pagination_resolve_clamps_per_page_zero_to_one() {
+        use crate::pagination::PaginationParams;
+        let params = PaginationParams {
+            page: None,
+            per_page: Some(0),
+        };
+        let resolved = params.resolve();
+        assert_eq!(resolved.per_page, 1);
+    }
+
+    #[test]
+    fn pagination_resolve_clamps_per_page_above_max() {
+        use crate::pagination::{MAX_PER_PAGE, PaginationParams};
+        let params = PaginationParams {
+            page: None,
+            per_page: Some(5000),
+        };
+        let resolved = params.resolve();
+        assert_eq!(resolved.per_page, MAX_PER_PAGE);
+    }
+
+    #[test]
+    fn pagination_offset_calculation() {
+        use crate::pagination::ResolvedPagination;
+        let p = ResolvedPagination {
+            page: 1,
+            per_page: 20,
+        };
+        assert_eq!(p.offset(), 0);
+
+        let p = ResolvedPagination {
+            page: 2,
+            per_page: 20,
+        };
+        assert_eq!(p.offset(), 20);
+
+        let p = ResolvedPagination {
+            page: 3,
+            per_page: 50,
+        };
+        assert_eq!(p.offset(), 100);
+    }
+
+    #[test]
+    fn pagination_total_pages_calculation() {
+        use crate::pagination::ResolvedPagination;
+        let p = ResolvedPagination {
+            page: 1,
+            per_page: 20,
+        };
+        assert_eq!(p.total_pages(0), 0);
+        assert_eq!(p.total_pages(1), 1);
+        assert_eq!(p.total_pages(20), 1);
+        assert_eq!(p.total_pages(21), 2);
+        assert_eq!(p.total_pages(100), 5);
+    }
+
+    #[test]
+    fn paginated_response_serialization_round_trip() {
+        use crate::pagination::{PaginatedResponse, ResolvedPagination};
+        let pagination = ResolvedPagination {
+            page: 2,
+            per_page: 10,
+        };
+        let resp = PaginatedResponse::new(vec!["a".to_string(), "b".to_string()], 25, pagination);
+
+        let json = serde_json::to_string(&resp).unwrap();
+        let deserialized: PaginatedResponse<String> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.items, vec!["a", "b"]);
+        assert_eq!(deserialized.total, 25);
+        assert_eq!(deserialized.page, 2);
+        assert_eq!(deserialized.per_page, 10);
+        assert_eq!(deserialized.total_pages, 3);
+    }
+
+    #[test]
+    fn paginated_response_empty_items() {
+        use crate::pagination::{PaginatedResponse, ResolvedPagination};
+        let pagination = ResolvedPagination {
+            page: 1,
+            per_page: 20,
+        };
+        let resp = PaginatedResponse::<String>::new(vec![], 0, pagination);
+
+        assert!(resp.items.is_empty());
+        assert_eq!(resp.total, 0);
+        assert_eq!(resp.total_pages, 0);
     }
 }
