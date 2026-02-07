@@ -57,9 +57,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20260207_000021_create_api_rate_limits::Migration),
             Box::new(m20260207_000022_create_settings_version::Migration),
             Box::new(m20260207_000023_add_revocation_version::Migration),
-            Box::new(m20260207_000021_create_api_rate_limits::Migration),
-            Box::new(m20260207_000022_create_settings_version::Migration),
-            Box::new(m20260207_000023_add_revocation_version::Migration),
             Box::new(m20260207_000024_create_controller_events::Migration),
         ]
     }
