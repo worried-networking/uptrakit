@@ -9,8 +9,8 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uptrakit_internal_wire::{
-    ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorPayload, RejectedPayload,
-    ServiceMessage, ServiceSettingsPayload,
+    ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorPayload, PongPayload,
+    RejectedPayload, ServiceMessage, ServiceSettingsPayload, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 
@@ -61,6 +61,28 @@ pub(crate) async fn close_with_reason(
         reason: reason.into(),
     })))
     .await
+}
+
+/// Send a Pong response for a received Ping.
+///
+/// Returns the controller timestamp on success so callers can use it
+/// for trace logging.
+pub(crate) async fn send_pong(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    agent_ts: i64,
+) -> Result<i64, ()> {
+    let controller_ts = now_millis();
+    let response = ControllerMessage::Pong(PongPayload {
+        agent_ts,
+        controller_ts,
+    });
+    let Some(json) = serialize_msg(&response) else {
+        return Err(());
+    };
+    sink.send(Message::Text(json.into()))
+        .await
+        .map(|()| controller_ts)
+        .map_err(|_| ())
 }
 
 fn extract_bearer(headers: &HeaderMap) -> Option<String> {

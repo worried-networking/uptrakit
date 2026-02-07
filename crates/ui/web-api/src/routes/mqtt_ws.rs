@@ -5,8 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
     ApprovedPayload, CertificatePayload, ControllerMessage, ErrorPayload, MqttRegisteredPayload,
-    MqttTenantAssignmentsPayload, PingPayload, PongPayload, RejectedPayload, ServiceMessage,
-    now_millis,
+    MqttTenantAssignmentsPayload, PingPayload, RejectedPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
@@ -16,7 +15,7 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
-use super::service_ws::{close_with_reason, serialize_msg};
+use super::service_ws::{close_with_reason, send_pong, serialize_msg};
 use crate::AppState;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 
@@ -94,15 +93,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                         );
                     }
                     ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                        let controller_ts = now_millis();
-                        let response = ControllerMessage::Pong(PongPayload {
-                            agent_ts,
-                            controller_ts,
-                        });
-                        let Some(json) = serialize_msg(&response) else {
-                            return;
-                        };
-                        if sink.send(Message::Text(json.into())).await.is_err() {
+                        if send_pong(sink, agent_ts).await.is_err() {
                             return;
                         }
                     }
@@ -213,16 +204,8 @@ pub(crate) async fn handle_mqtt_authenticated(
 
                         match service_msg {
                             ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                                let controller_ts = now_millis();
+                                let Ok(controller_ts) = send_pong(sink, agent_ts).await else { break };
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong");
-                                let response = ControllerMessage::Pong(PongPayload {
-                                    agent_ts,
-                                    controller_ts,
-                                });
-                                let Some(json) = serialize_msg(&response) else { break };
-                                if sink.send(Message::Text(json.into())).await.is_err() {
-                                    break;
-                                }
 
                                 // Update lease heartbeats for all tenants held by this service
                                 if let Err(e) = lease_coordinator
@@ -389,17 +372,9 @@ pub(crate) async fn handle_mqtt_enrolled(
 
                 match service_msg {
                     ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                        let controller_ts = now_millis();
-                        let response = ControllerMessage::Pong(PongPayload {
-                            agent_ts,
-                            controller_ts,
-                        });
-                        let Some(json) = serialize_msg(&response) else {
+                        let Ok(controller_ts) = send_pong(sink, agent_ts).await else {
                             break;
                         };
-                        if sink.send(Message::Text(json.into())).await.is_err() {
-                            break;
-                        }
                         tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
 
                         // Poll database for status change (simplified).

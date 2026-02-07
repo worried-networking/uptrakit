@@ -6,7 +6,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     CertificatePayload, ControllerMessage, ErrorPayload, ExecuteUpdatePayload, PingPayload,
-    PongPayload, ProviderType, ServiceMessage, UpdateFinalStatus, now_millis,
+    ProviderType, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     host_software_item, provider_config, service_host as agent_host, software_item, update_history,
@@ -16,7 +16,7 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
-use super::service_ws::{close_with_reason, serialize_msg};
+use super::service_ws::{close_with_reason, send_pong, serialize_msg};
 use crate::AppState;
 use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
 
@@ -82,16 +82,8 @@ pub(crate) async fn handle_agent_authenticated(
 
                         match agent_msg {
                             ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                                let controller_ts = now_millis();
+                                let Ok(controller_ts) = send_pong(sink, agent_ts).await else { break };
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong");
-                                let response = ControllerMessage::Pong(PongPayload {
-                                    agent_ts,
-                                    controller_ts,
-                                });
-                                let Some(json) = serialize_msg(&response) else { break };
-                                if sink.send(Message::Text(json.into())).await.is_err() {
-                                    break;
-                                }
                             }
                             ServiceMessage::ReportHostInfo(payload) => {
                                 // Check agent version
@@ -497,15 +489,7 @@ pub(crate) async fn run_agent_enrolled_loop(
 
                         match agent_msg {
                             ServiceMessage::Ping(PingPayload { agent_ts }) => {
-                                let controller_ts = now_millis();
-                                let response = ControllerMessage::Pong(PongPayload {
-                                    agent_ts,
-                                    controller_ts,
-                                });
-                                let Some(json) = serialize_msg(&response) else { break };
-                                if sink.send(Message::Text(json.into())).await.is_err() {
-                                    break;
-                                }
+                                let Ok(controller_ts) = send_pong(sink, agent_ts).await else { break };
                                 tracing::trace!(agent_ts, controller_ts, "ping/pong (enrolled)");
                             }
                             ServiceMessage::RequestCertificate(payload) => {
