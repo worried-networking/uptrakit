@@ -138,8 +138,11 @@ pub(crate) async fn handle_mqtt_authenticated(
     }
 
     // Create lease coordinator.
-    let lease_coordinator =
-        MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+    let lease_coordinator = MqttLeaseCoordinator::new(
+        state.db.clone(),
+        state.service_connections.clone(),
+        state.notification_service.clone(),
+    );
 
     // Reconcile MQTT clients if reconnecting with active clients.
     let tenant_configs = if !active_mqtt_clients.is_empty() {

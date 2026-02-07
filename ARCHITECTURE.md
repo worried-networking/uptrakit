@@ -203,13 +203,15 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 29 entities in `crates/shared/db/src/entity/`:
+The data model comprises 31 entities in `crates/shared/db/src/entity/`:
 
-`api_rate_limit`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `settings_version`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
+`api_rate_limit`, `api_token`, `auth_method`, `available_version`, `controller_event`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `settings_version`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `service_host` junction table models the many-to-many relationship between services and hosts, enabling automatic host matching across service re-enrollments and hostname changes.
 
 The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange, OIDC registration with token). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
+
+The `controller_event` entity implements a notification outbox for cross-controller push message delivery. Each controller instance generates a unique `controller_id` (UUIDv7) at startup, writes push events to the outbox alongside local delivery, and a background poller picks up events from other controllers for local delivery. Events are cleaned up after 1 hour.
 
 The `provider_config` entity stores per-provider-type configuration (e.g. GitHub owner/repo, auth tokens, asset filters). Multiple configs can exist per provider type (e.g. tracking releases from several GitHub repositories). Configs are managed via CRUD API endpoints with secret masking (auth tokens are replaced with `"***"` in responses) and provider-specific validation.
 

@@ -539,6 +539,44 @@ The controller supports HAProxy-style zero-downtime restarts using `SO_REUSEPORT
 
 **Platform support:** `SO_REUSEPORT` is available on Linux, macOS, FreeBSD, and OpenBSD. Not available on Windows.
 
+### Cross-controller notification delivery (notification outbox)
+
+In a multi-controller deployment (multiple controller instances behind a load balancer sharing a database), the in-memory `ServiceConnectionRegistry` cannot deliver push messages across controllers. The **notification outbox** pattern solves this: push messages are written to a `controller_events` DB table alongside local delivery. A background `EventPoller` on each controller picks up events from other controllers and delivers them to locally connected services.
+
+**How it works:**
+
+1. Each controller generates a unique `controller_id` (UUIDv7) at startup (stored in `AppState.controller_id`).
+2. `NotificationService` wraps `ServiceConnectionRegistry` and writes outbox events on every `send()` and `broadcast()` call.
+3. `EventPoller` runs as a background task, polling every 1 second for new events from other controllers (`source_controller_id != self`), using a cursor-based approach (`id > last_seen_id`).
+4. Events are routed based on `target_service_id` (specific service) and `target_service_type` (`"agent"`, `"mqtt"`, or `null` for broadcast).
+5. Old events (>1 hour) are cleaned up every 5 minutes.
+
+**Design rules:**
+
+- `ServerRestarting` is local-only — it stays on `ServiceConnectionRegistry.broadcast_server_restarting_scattered()` and is NOT sent through `NotificationService`.
+- Outbox writes are fire-and-forget (errors are logged, not propagated to the caller).
+- Single-controller overhead is negligible: one extra INSERT per push event, plus one SELECT/second returning 0 rows.
+
+**Database table (`controller_events`):**
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT PK | Cursor for polling |
+| `source_controller_id` | UUID NOT NULL | Controller that wrote the event |
+| `target_service_id` | UUID NULL | NULL = broadcast |
+| `target_service_type` | TEXT NULL | `"agent"`, `"mqtt"`, or NULL = all |
+| `message_json` | TEXT NOT NULL | Serialized `ControllerMessage` |
+| `created_at` | TIMESTAMP NOT NULL | For cleanup |
+
+**Key files:**
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — send + outbox write |
+| `crates/ui/web-api/src/event_poller.rs` | `EventPoller` — background polling + delivery |
+| `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity |
+| `crates/core/controller/src/migration/m20260207_000021_create_controller_events.rs` | Migration |
+
 ### Bulk loading and known-keys registry
 
 At startup, `Settings::load(db, tenant_id)` issues a single `SELECT * FROM settings WHERE tenant_id = ?` via `load_all_settings(db, tenant_id)` and distributes the resulting `RawSettings` (`HashMap<String, serde_json::Value>`) to all sub-loaders. This replaces the previous pattern of one query per key.
@@ -763,7 +801,10 @@ MQTT services use the unified service entity:
 | `crates/shared/enrollment/` | `uptrakit-enrollment` crate: shared enrollment, identity, TLS, CA bootstrap, WebSocket protocol, and CLI args |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
 | `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services |
+| `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — cross-controller notification outbox |
+| `crates/ui/web-api/src/event_poller.rs` | `EventPoller` — background poller for cross-controller events |
 | `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
+| `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity for the notification outbox |
 | `crates/ui/web-api/src/routes/settings_mqtt.rs` | MQTT config API route handlers |
 | `crates/ui/web-api/src/routes/service_ws.rs` | Unified WebSocket entry point (`/api/v1/ws/service`) |
 | `crates/ui/web-api/src/routes/mqtt_ws.rs` | Internal MQTT WebSocket handler (`pub(crate)`) |

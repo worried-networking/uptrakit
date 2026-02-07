@@ -1047,12 +1047,11 @@ pub async fn trigger_update(
         shell,
     };
 
-    // 12. Check if agent is connected and send
+    // 12. Check if agent is connected locally and send (also writes outbox for cross-controller delivery)
     let agent_connected = state.service_connections.is_connected(&agent.id).await;
+    let msg = uptrakit_internal_wire::ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
     let status = if agent_connected {
-        let msg =
-            uptrakit_internal_wire::ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
-        if state.service_connections.send(&agent.id, msg).await {
+        if state.notification_service.send(&agent.id, msg).await {
             tracing::info!(
                 update_id = %update_history_id,
                 agent_id = %agent.id,
@@ -1070,12 +1069,14 @@ pub async fn trigger_update(
             TriggerUpdateStatus::Queued
         }
     } else {
+        // Agent not connected locally — attempt cross-controller delivery via outbox
+        state.notification_service.send(&agent.id, msg).await;
         tracing::info!(
             update_id = %update_history_id,
             agent_id = %agent.id,
             host = %host_record.friendly_name,
             software = %item.name,
-            "agent offline, update queued for reconnect"
+            "agent not connected locally, update queued (outbox written for cross-controller delivery)"
         );
         TriggerUpdateStatus::Queued
     };

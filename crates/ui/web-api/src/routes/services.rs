@@ -250,9 +250,9 @@ pub async fn approve_service(
         }
     };
 
-    // Push approval via WebSocket
+    // Push approval via WebSocket (local + cross-controller outbox)
     let _ = state
-        .service_connections
+        .notification_service
         .send(
             &service_id,
             ControllerMessage::Approved(ApprovedPayload { service_id }),
@@ -325,9 +325,9 @@ pub async fn reject_service(
         }
     };
 
-    // Push rejection via WebSocket
+    // Push rejection via WebSocket (local + cross-controller outbox)
     let _ = state
-        .service_connections
+        .notification_service
         .send(
             &service_id,
             ControllerMessage::Rejected(RejectedPayload { service_id }),

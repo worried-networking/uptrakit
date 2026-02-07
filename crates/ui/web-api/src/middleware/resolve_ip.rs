@@ -195,6 +195,12 @@ mod tests {
         settings.set_trusted_proxies(proxies).await;
         settings.set_real_ip_header(header.to_string()).await;
 
+        let notification_service = crate::notification_service::NotificationService::new(
+            db.clone(),
+            crate::service_connections::ServiceConnectionRegistry::new(),
+            uuid::Uuid::nil(),
+        );
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             db: db.clone(),
@@ -220,6 +226,8 @@ mod tests {
             rustls_config: rustls_cfg,
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            controller_id: uuid::Uuid::nil(),
+            notification_service,
         })
     }
 

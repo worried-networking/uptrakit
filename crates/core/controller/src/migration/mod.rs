@@ -26,6 +26,7 @@ mod m20260205_000020_create_pending_oidc_registrations;
 mod m20260207_000021_create_api_rate_limits;
 mod m20260207_000022_create_settings_version;
 mod m20260207_000023_add_revocation_version;
+mod m20260207_000024_create_controller_events;
 
 pub struct Migrator;
 
@@ -56,6 +57,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260207_000021_create_api_rate_limits::Migration),
             Box::new(m20260207_000022_create_settings_version::Migration),
             Box::new(m20260207_000023_add_revocation_version::Migration),
+            Box::new(m20260207_000021_create_api_rate_limits::Migration),
+            Box::new(m20260207_000022_create_settings_version::Migration),
+            Box::new(m20260207_000023_add_revocation_version::Migration),
+            Box::new(m20260207_000024_create_controller_events::Migration),
         ]
     }
 }

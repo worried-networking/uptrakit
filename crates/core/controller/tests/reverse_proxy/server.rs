@@ -168,13 +168,21 @@ async fn build_state(
             .await;
     }
 
+    let service_connections =
+        uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
+    let controller_id = uuid::Uuid::nil();
+    let notification_service = uptrakit_web_api::notification_service::NotificationService::new(
+        db.clone(),
+        service_connections.clone(),
+        controller_id,
+    );
+
     Arc::new(AppState {
         ca_snapshot: ca_rx,
         db: db.clone(),
         settings,
         cert_signer: Arc::new(NoopCertSigner),
-        service_connections: uptrakit_web_api::service_connections::ServiceConnectionRegistry::new(
-        ),
+        service_connections,
         revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
         oidc_flow_store: OidcFlowStore::new(db.clone()),
         account_link_store: AccountLinkStore::new(db.clone()),
@@ -188,6 +196,8 @@ async fn build_state(
         crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
         ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
         default_tenant_id: uuid::Uuid::nil(),
+        controller_id,
+        notification_service,
     })
 }
 

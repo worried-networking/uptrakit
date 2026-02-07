@@ -14,6 +14,7 @@ use uptrakit_internal_wire::{
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
 
+use crate::notification_service::NotificationService;
 use crate::service_connections::ServiceConnectionRegistry;
 
 /// Error type for lease coordinator operations.
@@ -37,11 +38,20 @@ pub type Result<T> = std::result::Result<T, rootcause::Report<LeaseCoordinatorEr
 pub struct MqttLeaseCoordinator {
     db: DatabaseConnection,
     connections: ServiceConnectionRegistry,
+    notifications: NotificationService,
 }
 
 impl MqttLeaseCoordinator {
-    pub fn new(db: DatabaseConnection, connections: ServiceConnectionRegistry) -> Self {
-        Self { db, connections }
+    pub fn new(
+        db: DatabaseConnection,
+        connections: ServiceConnectionRegistry,
+        notifications: NotificationService,
+    ) -> Self {
+        Self {
+            db,
+            connections,
+            notifications,
+        }
     }
 
     /// Assign unclaimed MQTT clients to a service that has capacity.
@@ -233,17 +243,8 @@ impl MqttLeaseCoordinator {
     /// Push a config update to the service holding a specific MQTT client.
     ///
     /// Called when MQTT settings are updated via REST API.
+    /// Uses the notification service for cross-controller delivery.
     pub async fn push_mqtt_client_config_update(&self, mqtt_client_id: Uuid) -> Result<bool> {
-        // Find the service holding this MQTT client
-        let service_id = match self
-            .connections
-            .get_instance_for_mqtt_client(&mqtt_client_id)
-            .await
-        {
-            Some(id) => id,
-            None => return Ok(false), // No service holds this MQTT client
-        };
-
         // Load current config from database
         let client = mqtt_client::Entity::find_by_id(mqtt_client_id)
             .one(&self.db)
@@ -258,34 +259,29 @@ impl MqttLeaseCoordinator {
             tenant: config,
         });
 
-        Ok(self.connections.send(&service_id, msg).await)
+        // Find the service holding this MQTT client locally
+        if let Some(service_id) = self
+            .connections
+            .get_instance_for_mqtt_client(&mqtt_client_id)
+            .await
+        {
+            // Local holder found — send directly + write outbox
+            Ok(self.notifications.send(&service_id, msg).await)
+        } else {
+            // No local holder — write outbox event for cross-controller delivery
+            self.notifications
+                .write_outbox_event(None, Some("mqtt"), &msg)
+                .await;
+            Ok(false)
+        }
     }
 
     /// Revoke an MQTT client (disabled or deleted) from the holding service.
     ///
     /// Called when MQTT settings are disabled/deleted via REST API.
+    /// Uses the notification service for cross-controller delivery.
     pub async fn revoke_mqtt_client(&self, mqtt_client_id: Uuid, reason: &str) -> Result<bool> {
-        // Find the service holding this MQTT client
-        let service_id = match self
-            .connections
-            .get_instance_for_mqtt_client(&mqtt_client_id)
-            .await
-        {
-            Some(id) => id,
-            None => {
-                // No service holds this MQTT client, just delete any orphaned lease
-                mqtt_lease::Entity::delete_many()
-                    .filter(mqtt_lease::Column::MqttClientId.eq(mqtt_client_id))
-                    .exec(&self.db)
-                    .await
-                    .context(LeaseCoordinatorError::Database(
-                        "failed to delete lease".into(),
-                    ))?;
-                return Ok(false);
-            }
-        };
-
-        // Delete lease from database
+        // Delete lease from database regardless
         mqtt_lease::Entity::delete_many()
             .filter(mqtt_lease::Column::MqttClientId.eq(mqtt_client_id))
             .exec(&self.db)
@@ -294,18 +290,31 @@ impl MqttLeaseCoordinator {
                 "failed to delete lease".into(),
             ))?;
 
-        // Update registry
-        self.connections
-            .release_mqtt_client(&service_id, &mqtt_client_id)
-            .await;
-
-        // Push revocation message
         let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
             mqtt_client_id,
             reason: reason.to_string(),
         });
 
-        Ok(self.connections.send(&service_id, msg).await)
+        // Find the service holding this MQTT client locally
+        if let Some(service_id) = self
+            .connections
+            .get_instance_for_mqtt_client(&mqtt_client_id)
+            .await
+        {
+            // Update local registry
+            self.connections
+                .release_mqtt_client(&service_id, &mqtt_client_id)
+                .await;
+
+            // Send directly + write outbox for cross-controller
+            Ok(self.notifications.send(&service_id, msg).await)
+        } else {
+            // No local holder — write outbox event for cross-controller delivery
+            self.notifications
+                .write_outbox_event(None, Some("mqtt"), &msg)
+                .await;
+            Ok(false)
+        }
     }
 
     /// Clean up stale leases (no heartbeat within timeout).

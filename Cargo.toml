@@ -51,6 +51,7 @@ aws-lc-rs = "1"
 strum = { version = "0.27", features = ["derive"] }
 regex = "1"
 semver = "1"
+tokio-util = "0.7"
 async-trait = "0.1"
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 

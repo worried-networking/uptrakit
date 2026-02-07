@@ -657,6 +657,13 @@ async fn run(args: cli::Args) -> Result<()> {
     let service_connections =
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
 
+    let controller_id = uuid::Uuid::now_v7();
+    let notification_service = uptrakit_web_api::notification_service::NotificationService::new(
+        db_conn.clone(),
+        service_connections.clone(),
+        controller_id,
+    );
+
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
         db: db_conn,
@@ -676,6 +683,8 @@ async fn run(args: cli::Args) -> Result<()> {
         crl_pem_cache,
         ca_rotation_trigger: Arc::clone(&ca_rotation_trigger),
         default_tenant_id,
+        controller_id,
+        notification_service: notification_service.clone(),
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
@@ -728,6 +737,14 @@ async fn run(args: cli::Args) -> Result<()> {
             }
         })
     };
+    // Spawn event poller for cross-controller notification delivery
+    let event_poller_token = shutdown_token.child_token();
+    let event_poller = uptrakit_web_api::event_poller::EventPoller::new(
+        app_state.db.clone(),
+        service_connections.clone(),
+        controller_id,
+    );
+    let event_poller_handle = tokio::spawn(event_poller.run(event_poller_token));
 
     // Spawn CA rotation background task (managed CAs only, every 24h or on API trigger)
     let ca_rotation_token = shutdown_token.child_token();
@@ -735,7 +752,7 @@ async fn run(args: cli::Args) -> Result<()> {
         let pki_for_task = pki_path.clone();
         let ca_tx_for_task = ca_tx;
         let crl_mgr_for_task = Arc::clone(&crl_manager);
-        let conns_for_task = service_connections.clone();
+        let notifications_for_task = notification_service.clone();
         let settings_for_rotation = app_state.settings.clone();
         let trigger = Arc::clone(&ca_rotation_trigger);
         let token = ca_rotation_token;
@@ -779,18 +796,20 @@ async fn run(args: cli::Args) -> Result<()> {
                                     continue;
                                 }
 
-                                // Broadcast CA bundle update to all connected agents
+                                // Broadcast CA bundle update to all connected services
                                 let ca_payload = uptrakit_internal_wire::CaBundleUpdatedPayload {
                                     ca_bundle_pem: new_snapshot.bundle_pem.clone(),
                                 };
-                                conns_for_task.broadcast_ca_bundle_updated(ca_payload).await;
+                                notifications_for_task
+                                    .broadcast_ca_bundle_updated(ca_payload)
+                                    .await;
 
-                                // Request all agents to renew their certificates
+                                // Request all services to renew their certificates
                                 let renewal_payload =
                                     uptrakit_internal_wire::RequestCertRenewalPayload {
                                         reason: "CA rotation".to_string(),
                                     };
-                                conns_for_task
+                                notifications_for_task
                                     .broadcast_request_cert_renewal(renewal_payload)
                                     .await;
 
@@ -1022,6 +1041,9 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Wait for CRL manager
     crl_handle.abort();
+
+    // Wait for event poller
+    let _ = tokio::time::timeout(Duration::from_secs(5), event_poller_handle).await;
 
     // Wait for cleanup task
     let _ = tokio::time::timeout(Duration::from_secs(5), oidc_cleanup_handle).await;

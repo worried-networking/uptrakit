@@ -2,6 +2,7 @@ pub mod api_rate_limit;
 pub mod api_token;
 pub mod auth_method;
 pub mod available_version;
+pub mod controller_event;
 pub mod host;
 pub mod host_software_item;
 pub mod mqtt_client;

@@ -1,10 +1,12 @@
 pub mod auth;
 pub mod cert_signer;
 pub mod error_response;
+pub mod event_poller;
 pub mod extract;
 pub mod middleware;
 pub mod mqtt_client_store;
 pub mod mqtt_lease_coordinator;
+pub mod notification_service;
 pub mod ocsp;
 pub mod pki_utils;
 pub mod routes;
@@ -35,6 +37,7 @@ use auth::oidc_state::{
     AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
 };
 use auth::rate_limit::RateLimitStore;
+use notification_service::NotificationService;
 use service_connections::ServiceConnectionRegistry;
 use settings::Settings;
 
@@ -101,6 +104,10 @@ pub struct AppState {
     pub ca_rotation_trigger: Arc<tokio::sync::Notify>,
     /// UUID of the default (seeded) tenant. Used as fallback when no tenant header is present.
     pub default_tenant_id: uuid::Uuid,
+    /// Unique identifier for this controller instance (used for cross-controller notification delivery).
+    pub controller_id: uuid::Uuid,
+    /// Cross-controller notification service for push message delivery via outbox pattern.
+    pub notification_service: NotificationService,
 }
 
 /// OpenAPI documentation
@@ -587,11 +594,19 @@ mod tests {
             settings.set_trusted_proxies(trusted_proxies).await;
         }
 
+        let service_connections = crate::service_connections::ServiceConnectionRegistry::new();
+        let controller_id = uuid::Uuid::nil();
+        let notification_service = crate::notification_service::NotificationService::new(
+            db.clone(),
+            service_connections.clone(),
+            controller_id,
+        );
+
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
-            service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
+            service_connections,
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
@@ -611,6 +626,8 @@ mod tests {
             crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             default_tenant_id: uuid::Uuid::nil(),
+            controller_id,
+            notification_service,
             db,
         })
     }
