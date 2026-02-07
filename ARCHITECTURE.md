@@ -116,6 +116,10 @@ Defined in `crates/shared/wire/`:
 
 The previous `AgentMessage` and `MqttServiceMessage` enums have been unified into `ServiceMessage`; likewise `ControllerMessage` and `MqttControllerMessage` are now a single `ControllerMessage` enum. The former `agent_settings` and `mqtt_service_settings` variants are unified as `service_settings`.
 
+### Replay protection
+
+Every message is wrapped in an envelope (`ServiceEnvelope` / `ControllerEnvelope`) containing a monotonically increasing `seq` field starting at 1. Each WebSocket connection maintains per-direction counters. On sequence mismatch, the connection is closed with `ErrorCode::SequenceError`. Counters are per-connection and reset on reconnect.
+
 For the full message schema with payloads, see the [AsyncAPI specification](crates/shared/wire/asyncapi.yaml).
 
 ## PKI & mTLS

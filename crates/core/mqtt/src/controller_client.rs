@@ -13,7 +13,9 @@ use tokio_tungstenite::{
     Connector,
     tungstenite::{self, Message},
 };
-use uptrakit_internal_wire::{ControllerMessage, ServiceMessage};
+use uptrakit_internal_wire::{
+    ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq, ServiceMessage,
+};
 use uptrakit_shared_macros::impl_report_conversion;
 
 /// Errors that can occur during controller communication.
@@ -27,6 +29,9 @@ pub enum ControllerError {
 
     #[error("JSON serialization error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("sequence validation failed: expected {expected}, received {received}")]
+    SequenceError { expected: u64, received: u64 },
 }
 
 pub type Result<T> = std::result::Result<T, Report<ControllerError>>;
@@ -53,6 +58,8 @@ pub struct ControllerConnection {
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
     >,
+    out_seq: OutgoingSeq,
+    in_seq: IncomingSeq,
 }
 
 impl ControllerConnection {
@@ -89,12 +96,18 @@ impl ControllerConnection {
 
         let (sink, stream) = ws_stream.split();
 
-        Ok(Self { sink, stream })
+        Ok(Self {
+            sink,
+            stream,
+            out_seq: OutgoingSeq::new(),
+            in_seq: IncomingSeq::new(),
+        })
     }
 
     /// Send a message to the controller.
     pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
-        let json = serde_json::to_string(&msg).context_to::<ControllerError>()?;
+        let envelope = self.out_seq.wrap_service(msg);
+        let json = serde_json::to_string(&envelope).context_to::<ControllerError>()?;
         self.sink
             .send(Message::Text(json.into()))
             .await
@@ -107,14 +120,16 @@ impl ControllerConnection {
         loop {
             match self.stream.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    let msg: ControllerMessage =
+                    let envelope: ControllerEnvelope =
                         serde_json::from_str(&text).context_to::<ControllerError>()?;
-                    return Ok(Some(msg));
+                    self.validate_incoming_seq(envelope.seq)?;
+                    return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let msg: ControllerMessage =
+                    let envelope: ControllerEnvelope =
                         serde_json::from_slice(&data).context_to::<ControllerError>()?;
-                    return Ok(Some(msg));
+                    self.validate_incoming_seq(envelope.seq)?;
+                    return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Ping(data))) => {
                     self.sink
@@ -132,6 +147,17 @@ impl ControllerConnection {
                 None => return Ok(None),
             }
         }
+    }
+
+    /// Validate an incoming sequence number, returning a [`ControllerError::SequenceError`]
+    /// on mismatch.
+    fn validate_incoming_seq(&mut self, seq: u64) -> Result<()> {
+        self.in_seq.validate(seq).map_err(|e| {
+            report!(ControllerError::SequenceError {
+                expected: e.expected,
+                received: e.received,
+            })
+        })
     }
 }
 

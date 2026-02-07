@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 use uuid::Uuid;
@@ -279,6 +281,8 @@ pub enum ErrorCode {
     InternalError,
     /// Agent binary version is below the minimum required.
     AgentVersionTooOld,
+    /// Message sequence number mismatch (replay protection).
+    SequenceError,
 }
 
 impl std::fmt::Display for ErrorCode {
@@ -291,6 +295,7 @@ impl std::fmt::Display for ErrorCode {
             Self::CertificateError => f.write_str("certificate_error"),
             Self::InternalError => f.write_str("internal_error"),
             Self::AgentVersionTooOld => f.write_str("agent_version_too_old"),
+            Self::SequenceError => f.write_str("sequence_error"),
         }
     }
 }
@@ -585,6 +590,123 @@ pub struct MqttTenantRevokedPayload {
     /// Reason for revocation.
     pub reason: String,
 }
+
+// =============================================================================
+// Envelope types for application-level replay protection
+// =============================================================================
+
+/// Envelope wrapping a [`ServiceMessage`] with a monotonically increasing
+/// sequence number for replay protection.
+///
+/// JSON on the wire: `{"seq":1,"type":"ping","service_ts":123}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceEnvelope {
+    pub seq: u64,
+    #[serde(flatten)]
+    pub message: ServiceMessage,
+}
+
+/// Envelope wrapping a [`ControllerMessage`] with a monotonically increasing
+/// sequence number for replay protection.
+///
+/// JSON on the wire: `{"seq":1,"type":"pong","service_ts":123,"controller_ts":456}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerEnvelope {
+    pub seq: u64,
+    #[serde(flatten)]
+    pub message: ControllerMessage,
+}
+
+/// Tracks outgoing sequence numbers for a single direction of a WebSocket
+/// connection. Assigns monotonically increasing numbers starting at 1.
+#[derive(Debug)]
+pub struct OutgoingSeq {
+    next: u64,
+}
+
+impl OutgoingSeq {
+    /// Create a new outgoing sequence counter (first message gets seq 1).
+    pub fn new() -> Self {
+        Self { next: 1 }
+    }
+
+    /// Wrap a [`ServiceMessage`] in a [`ServiceEnvelope`], assigning the next
+    /// sequence number.
+    pub fn wrap_service(&mut self, message: ServiceMessage) -> ServiceEnvelope {
+        let seq = self.next;
+        self.next += 1;
+        ServiceEnvelope { seq, message }
+    }
+
+    /// Wrap a [`ControllerMessage`] in a [`ControllerEnvelope`], assigning the
+    /// next sequence number.
+    pub fn wrap_controller(&mut self, message: ControllerMessage) -> ControllerEnvelope {
+        let seq = self.next;
+        self.next += 1;
+        ControllerEnvelope { seq, message }
+    }
+}
+
+impl Default for OutgoingSeq {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Validates incoming sequence numbers for a single direction of a WebSocket
+/// connection. Expects messages to arrive as 1, 2, 3, ...
+#[derive(Debug)]
+pub struct IncomingSeq {
+    expected: u64,
+}
+
+impl IncomingSeq {
+    /// Create a new incoming sequence validator (first expected seq is 1).
+    pub fn new() -> Self {
+        Self { expected: 1 }
+    }
+
+    /// Validate that the received sequence number matches the expected value.
+    ///
+    /// On success, advances the expected counter. On failure, returns a
+    /// [`SeqError`] describing the mismatch.
+    pub fn validate(&mut self, received: u64) -> Result<(), SeqError> {
+        if received != self.expected {
+            return Err(SeqError {
+                expected: self.expected,
+                received,
+            });
+        }
+        self.expected += 1;
+        Ok(())
+    }
+}
+
+impl Default for IncomingSeq {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Error returned when a received sequence number does not match the expected
+/// value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeqError {
+    pub expected: u64,
+    pub received: u64,
+}
+
+impl fmt::Display for SeqError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "sequence error: expected {}, received {}",
+            self.expected, self.received
+        )
+    }
+}
+
+impl std::error::Error for SeqError {}
 
 #[cfg(test)]
 mod tests {
@@ -1500,12 +1622,21 @@ mod tests {
             (ErrorCode::CertificateError, "certificate_error"),
             (ErrorCode::InternalError, "internal_error"),
             (ErrorCode::AgentVersionTooOld, "agent_version_too_old"),
+            (ErrorCode::SequenceError, "sequence_error"),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, format!(r#""{expected_str}""#));
             let deserialized: ErrorCode = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, variant);
         }
+    }
+
+    #[test]
+    fn error_code_sequence_error_serde() {
+        let json = serde_json::to_string(&ErrorCode::SequenceError).unwrap();
+        assert_eq!(json, r#""sequence_error""#);
+        let deserialized: ErrorCode = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ErrorCode::SequenceError);
     }
 
     #[test]
@@ -1526,6 +1657,7 @@ mod tests {
             ErrorCode::AgentVersionTooOld.to_string(),
             "agent_version_too_old"
         );
+        assert_eq!(ErrorCode::SequenceError.to_string(), "sequence_error");
     }
 
     #[test]
@@ -1650,5 +1782,160 @@ mod tests {
         } else {
             panic!("Expected Enroll");
         }
+    }
+
+    // =========================================================================
+    // Envelope and sequence number tests
+    // =========================================================================
+
+    #[test]
+    fn service_envelope_serde_roundtrip() {
+        let envelope = ServiceEnvelope {
+            seq: 1,
+            message: ServiceMessage::Ping(PingPayload {
+                service_ts: 1706400000000,
+            }),
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"seq":1,"type":"ping","service_ts":1706400000000}"#
+        );
+        let deserialized: ServiceEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, envelope);
+    }
+
+    #[test]
+    fn controller_envelope_serde_roundtrip() {
+        let envelope = ControllerEnvelope {
+            seq: 42,
+            message: ControllerMessage::Pong(PongPayload {
+                service_ts: 1706400000000,
+                controller_ts: 1706400000050,
+            }),
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(
+            json,
+            r#"{"seq":42,"type":"pong","service_ts":1706400000000,"controller_ts":1706400000050}"#
+        );
+        let deserialized: ControllerEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, envelope);
+    }
+
+    #[test]
+    fn service_envelope_complex_message() {
+        let envelope = ServiceEnvelope {
+            seq: 3,
+            message: ServiceMessage::Enroll(EnrollPayload {
+                hostname: "test-host".to_string(),
+                friendly_name: "Test".to_string(),
+                enrollment_token: None,
+                service_type: ServiceType::Agent,
+                host_info: None,
+            }),
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains(r#""seq":3"#));
+        assert!(json.contains(r#""type":"enroll"#));
+        let deserialized: ServiceEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, envelope);
+    }
+
+    #[test]
+    fn controller_envelope_error_message() {
+        let envelope = ControllerEnvelope {
+            seq: 5,
+            message: ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::SequenceError,
+                message: "sequence error: expected 3, received 5".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains(r#""seq":5"#));
+        assert!(json.contains(r#""code":"sequence_error""#));
+        let deserialized: ControllerEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, envelope);
+    }
+
+    #[test]
+    fn outgoing_seq_increments() {
+        let mut seq = OutgoingSeq::new();
+        let e1 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 1 }));
+        let e2 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 2 }));
+        let e3 = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 3 }));
+        assert_eq!(e1.seq, 1);
+        assert_eq!(e2.seq, 2);
+        assert_eq!(e3.seq, 3);
+    }
+
+    #[test]
+    fn outgoing_seq_wrap_controller() {
+        let mut seq = OutgoingSeq::new();
+        let e1 = seq.wrap_controller(ControllerMessage::Pong(PongPayload {
+            service_ts: 1,
+            controller_ts: 2,
+        }));
+        let e2 = seq.wrap_controller(ControllerMessage::Pong(PongPayload {
+            service_ts: 3,
+            controller_ts: 4,
+        }));
+        assert_eq!(e1.seq, 1);
+        assert_eq!(e2.seq, 2);
+    }
+
+    #[test]
+    fn incoming_seq_accepts_sequential() {
+        let mut seq = IncomingSeq::new();
+        assert!(seq.validate(1).is_ok());
+        assert!(seq.validate(2).is_ok());
+        assert!(seq.validate(3).is_ok());
+    }
+
+    #[test]
+    fn incoming_seq_rejects_replay() {
+        let mut seq = IncomingSeq::new();
+        assert!(seq.validate(1).is_ok());
+        let err = seq.validate(1).unwrap_err();
+        assert_eq!(err.expected, 2);
+        assert_eq!(err.received, 1);
+    }
+
+    #[test]
+    fn incoming_seq_rejects_skip() {
+        let mut seq = IncomingSeq::new();
+        let err = seq.validate(2).unwrap_err();
+        assert_eq!(err.expected, 1);
+        assert_eq!(err.received, 2);
+    }
+
+    #[test]
+    fn incoming_seq_rejects_zero() {
+        let mut seq = IncomingSeq::new();
+        let err = seq.validate(0).unwrap_err();
+        assert_eq!(err.expected, 1);
+        assert_eq!(err.received, 0);
+    }
+
+    #[test]
+    fn seq_error_display() {
+        let err = SeqError {
+            expected: 3,
+            received: 5,
+        };
+        assert_eq!(err.to_string(), "sequence error: expected 3, received 5");
+    }
+
+    #[test]
+    fn outgoing_seq_default() {
+        let mut seq = OutgoingSeq::default();
+        let e = seq.wrap_service(ServiceMessage::Ping(PingPayload { service_ts: 1 }));
+        assert_eq!(e.seq, 1);
+    }
+
+    #[test]
+    fn incoming_seq_default() {
+        let mut seq = IncomingSeq::default();
+        assert!(seq.validate(1).is_ok());
     }
 }

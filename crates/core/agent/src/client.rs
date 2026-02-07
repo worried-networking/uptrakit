@@ -5,10 +5,10 @@ use uptrakit_enrollment::ca::{CaTlsMode, fetch_ca_certificate};
 use uptrakit_enrollment::identity::generate_keypair_and_csr;
 use uptrakit_enrollment::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
-    RenewCertificatePayload, ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
-    now_millis,
+    CertificatePayload, ControllerEnvelope, ControllerMessage, DisconnectReason,
+    DisconnectingPayload, IncomingSeq, OutgoingSeq, PingPayload, RenewCertificatePayload,
+    ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload, now_millis,
 };
 
 use crate::error::{Error, Result};
@@ -82,13 +82,17 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
         .await
         .context_to::<Error>()?;
 
+    let mut out_seq = OutgoingSeq::new();
+    let mut in_seq = IncomingSeq::new();
+
     // Send host info immediately after connecting
     let host_info = crate::host_info::collect_host_info();
     let report_msg = ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
         host_info,
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
     });
-    let report_json = serde_json::to_string(&report_msg).context_to::<Error>()?;
+    let report_json =
+        serde_json::to_string(&out_seq.wrap_service(report_msg)).context_to::<Error>()?;
     ws_stream
         .send(Message::Text(report_json.into()))
         .await
@@ -158,12 +162,12 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             output: output_msg.output,
                             stream: output_msg.stream,
                         });
-                        if let Ok(json) = serde_json::to_string(&output) {
+                        if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(output)) {
                             let _ = ws_stream.send(Message::Text(json.into())).await;
                         }
                     }
                     UpdateEvent::Completed(result) => {
-                        send_update_result(&mut ws_stream, update_history_id, result).await;
+                        send_update_result(&mut ws_stream, &mut out_seq, update_history_id, result).await;
                         in_flight_update = None;
                     }
                 }
@@ -172,7 +176,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
             _ = ping_interval.tick() => {
                 let service_ts = now_millis();
                 let ping = ServiceMessage::Ping(PingPayload { service_ts });
-                let ping_json = serde_json::to_string(&ping).context_to::<Error>()?;
+                let ping_json = serde_json::to_string(&out_seq.wrap_service(ping)).context_to::<Error>()?;
 
                 tracing::trace!(service_ts, "sending ping");
                 ws_stream
@@ -189,7 +193,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                 let msg = ServiceMessage::RenewCertificate(RenewCertificatePayload {
                     csr_pem,
                 });
-                let json = serde_json::to_string(&msg).context_to::<Error>()?;
+                let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<Error>()?;
                 ws_stream.send(Message::Text(json.into())).await.context_to::<Error>()?;
                 // Reset to far-future so it doesn't fire again
                 renewal_sleep.as_mut().reset(
@@ -212,13 +216,18 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
                 match msg {
                     Message::Text(text) => {
-                        let controller_msg: ControllerMessage = match serde_json::from_str(&text) {
-                            Ok(msg) => msg,
+                        let envelope: ControllerEnvelope = match serde_json::from_str(&text) {
+                            Ok(env) => env,
                             Err(e) => {
                                 tracing::debug!("ignoring unrecognized controller message: {e}");
                                 continue;
                             }
                         };
+                        if let Err(e) = in_seq.validate(envelope.seq) {
+                            tracing::error!("sequence validation failed: {e}");
+                            break LoopOutcome::Disconnected;
+                        }
+                        let controller_msg = envelope.message;
 
                         match controller_msg {
                             ControllerMessage::Pong(pong) => {
@@ -302,9 +311,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 };
                                 pending_renewal_key = Some(key_pem);
                                 let renew_msg = serde_json::to_string(
-                                    &ServiceMessage::RenewCertificate(RenewCertificatePayload {
+                                    &out_seq.wrap_service(ServiceMessage::RenewCertificate(RenewCertificatePayload {
                                         csr_pem,
-                                    }),
+                                    })),
                                 )
                                 .context_to::<Error>()?;
                                 if let Err(e) = ws_stream.send(Message::Text(renew_msg.into())).await {
@@ -337,7 +346,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
                                     results,
                                 });
-                                let response_json = serde_json::to_string(&response).context_to::<Error>()?;
+                                let response_json = serde_json::to_string(&out_seq.wrap_service(response)).context_to::<Error>()?;
                                 if let Err(e) = ws_stream.send(Message::Text(response_json.into())).await {
                                     tracing::error!(error = %e, "failed to send VersionCheckResults");
                                     break LoopOutcome::Disconnected;
@@ -367,7 +376,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         output: String::new(),
                                         error: Some("Another update is already in progress".to_string()),
                                     });
-                                    if let Ok(json) = serde_json::to_string(&result_msg) {
+                                    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
                                         let _ = ws_stream.send(Message::Text(json.into())).await;
                                     }
                                     continue;
@@ -389,7 +398,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                     update_history_id,
                                     from_version: None,
                                 });
-                                let started_json = serde_json::to_string(&started_msg).context_to::<Error>()?;
+                                let started_json = serde_json::to_string(&out_seq.wrap_service(started_msg)).context_to::<Error>()?;
                                 if let Err(e) = ws_stream.send(Message::Text(started_json.into())).await {
                                     tracing::error!(error = %e, "failed to send UpdateStarted");
                                 }
@@ -431,6 +440,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                 tracing::info!("received SIGINT, initiating graceful shutdown");
                 break handle_graceful_shutdown(
                     &mut ws_stream,
+                    &mut out_seq,
                     in_flight_update.take(),
                     shutdown_timeout_seconds,
                     DisconnectReason::Shutdown,
@@ -441,6 +451,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                 tracing::info!("received SIGTERM, initiating graceful shutdown");
                 break handle_graceful_shutdown(
                     &mut ws_stream,
+                    &mut out_seq,
                     in_flight_update.take(),
                     shutdown_timeout_seconds,
                     DisconnectReason::Shutdown,
@@ -451,6 +462,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                 tracing::info!("received SIGHUP, initiating graceful restart");
                 break handle_graceful_shutdown(
                     &mut ws_stream,
+                    &mut out_seq,
                     in_flight_update.take(),
                     shutdown_timeout_seconds,
                     DisconnectReason::Restart,
@@ -479,6 +491,7 @@ enum UpdateEvent {
 /// Send the final update result to the controller.
 async fn send_update_result(
     ws_stream: &mut WsStream,
+    out_seq: &mut OutgoingSeq,
     update_history_id: uuid::Uuid,
     result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
 ) {
@@ -487,7 +500,7 @@ async fn send_update_result(
     match result {
         Ok(exec_result) => {
             let result_msg = ServiceMessage::UpdateResult(exec_result.result);
-            if let Ok(json) = serde_json::to_string(&result_msg) {
+            if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
                 let _ = ws_stream.send(Message::Text(json.into())).await;
             }
             tracing::info!(update_id = %update_history_id, "update execution completed");
@@ -502,7 +515,7 @@ async fn send_update_result(
                 output: String::new(),
                 error: Some("Update task panicked".to_string()),
             });
-            if let Ok(json) = serde_json::to_string(&result_msg) {
+            if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
                 let _ = ws_stream.send(Message::Text(json.into())).await;
             }
         }
@@ -515,6 +528,7 @@ async fn send_update_result(
 /// 3. Return the appropriate LoopOutcome
 async fn handle_graceful_shutdown(
     ws_stream: &mut WsStream,
+    out_seq: &mut OutgoingSeq,
     in_flight_update: Option<InFlightUpdate>,
     timeout_seconds: u32,
     disconnect_reason: DisconnectReason,
@@ -544,12 +558,12 @@ async fn handle_graceful_shutdown(
                         output: output_msg.output,
                         stream: output_msg.stream,
                     });
-                    if let Ok(json) = serde_json::to_string(&output) {
+                    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(output)) {
                         let _ = ws_stream.send(Message::Text(json.into())).await;
                     }
                 }
                 result = &mut update.handle => {
-                    send_update_result(ws_stream, update.update_history_id, result).await;
+                    send_update_result(ws_stream, out_seq, update.update_history_id, result).await;
                     break;
                 }
                 _ = tokio::time::sleep_until(deadline) => {
@@ -566,7 +580,7 @@ async fn handle_graceful_shutdown(
                         output: String::new(),
                         error: Some(format!("Agent shutdown timeout ({timeout_seconds}s) reached")),
                     });
-                    if let Ok(json) = serde_json::to_string(&result_msg) {
+                    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
                         let _ = ws_stream.send(Message::Text(json.into())).await;
                     }
                     break;
@@ -581,7 +595,7 @@ async fn handle_graceful_shutdown(
                 output: output_msg.output,
                 stream: output_msg.stream,
             });
-            if let Ok(json) = serde_json::to_string(&output) {
+            if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(output)) {
                 let _ = ws_stream.send(Message::Text(json.into())).await;
             }
         }
@@ -592,7 +606,7 @@ async fn handle_graceful_shutdown(
         reason: disconnect_reason,
         active_mqtt_clients: vec![],
     });
-    if let Ok(json) = serde_json::to_string(&disconnecting_msg) {
+    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(disconnecting_msg)) {
         if let Err(e) = ws_stream.send(Message::Text(json.into())).await {
             tracing::debug!(error = %e, "failed to send Disconnecting message");
         } else {

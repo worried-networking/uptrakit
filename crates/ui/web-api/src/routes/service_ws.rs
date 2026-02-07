@@ -9,8 +9,9 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uptrakit_internal_wire::{
-    ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload, PongPayload,
-    RejectedPayload, ServiceMessage, ServiceSettingsPayload, now_millis,
+    ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload, IncomingSeq,
+    OutgoingSeq, PongPayload, RejectedPayload, ServiceEnvelope, ServiceMessage,
+    ServiceSettingsPayload, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 
@@ -41,15 +42,32 @@ impl_report_conversion!(sea_orm::DbErr => ServiceWsError::Database);
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// Serialize a [`ControllerMessage`] to JSON, logging on failure.
-pub(crate) fn serialize_msg(msg: &ControllerMessage) -> Option<String> {
-    match serde_json::to_string(msg) {
+/// Serialize a [`ControllerMessage`] into a sequenced [`ControllerEnvelope`]
+/// JSON string, logging on failure.
+pub(crate) fn serialize_controller_msg(
+    out_seq: &mut OutgoingSeq,
+    msg: ControllerMessage,
+) -> Option<String> {
+    let envelope = out_seq.wrap_controller(msg);
+    match serde_json::to_string(&envelope) {
         Ok(json) => Some(json),
         Err(e) => {
             tracing::error!(error = %e, "failed to serialize controller message");
             None
         }
     }
+}
+
+/// Deserialize a [`ServiceMessage`] from a sequenced [`ServiceEnvelope`]
+/// JSON string, validating the sequence number.
+pub(crate) fn deserialize_service_msg(
+    in_seq: &mut IncomingSeq,
+    text: &str,
+) -> Result<ServiceMessage, String> {
+    let envelope: ServiceEnvelope =
+        serde_json::from_str(text).map_err(|e| format!("invalid message: {e}"))?;
+    in_seq.validate(envelope.seq).map_err(|e| e.to_string())?;
+    Ok(envelope.message)
 }
 
 pub(crate) async fn close_with_reason(
@@ -69,6 +87,7 @@ pub(crate) async fn close_with_reason(
 /// for trace logging.
 pub(crate) async fn send_pong(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
     service_ts: i64,
 ) -> Result<i64, ()> {
     let controller_ts = now_millis();
@@ -76,7 +95,7 @@ pub(crate) async fn send_pong(
         service_ts,
         controller_ts,
     });
-    let Some(json) = serialize_msg(&response) else {
+    let Some(json) = serialize_controller_msg(out_seq, response) else {
         return Err(());
     };
     sink.send(Message::Text(json.into()))
@@ -97,6 +116,14 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
 // ---------------------------------------------------------------------------
 // Connection type (shared across both service types)
 // ---------------------------------------------------------------------------
+
+/// Certificate identity information extracted from the mTLS handshake.
+///
+/// Bundled into a struct to keep function signatures under the argument limit.
+pub(crate) struct CertIdentity {
+    pub serial: String,
+    pub ca_fingerprint: String,
+}
 
 /// Connection type determined at WebSocket upgrade time.
 enum ConnectionType {
@@ -214,18 +241,29 @@ async fn handle_connection(
     conn_type: ConnectionType,
     client_ip: Option<std::net::IpAddr>,
 ) {
+    let mut out_seq = OutgoingSeq::new();
+    let mut in_seq = IncomingSeq::new();
+
     match conn_type {
         ConnectionType::Authenticated {
             service_id,
             cert_serial,
         } => {
-            handle_authenticated(socket, state, service_id, cert_serial).await;
+            handle_authenticated(
+                socket,
+                state,
+                service_id,
+                cert_serial,
+                &mut out_seq,
+                &mut in_seq,
+            )
+            .await;
         }
         ConnectionType::Enrolled(service_id) => {
-            handle_enrolled(socket, state, service_id).await;
+            handle_enrolled(socket, state, service_id, &mut out_seq, &mut in_seq).await;
         }
         ConnectionType::Anonymous => {
-            handle_anonymous(socket, state, client_ip).await;
+            handle_anonymous(socket, state, client_ip, &mut out_seq, &mut in_seq).await;
         }
     }
 }
@@ -242,6 +280,8 @@ async fn handle_authenticated(
     state: Arc<AppState>,
     service_id: uuid::Uuid,
     cert_serial: String,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
 ) {
     tracing::debug!(%service_id, "authenticated service connected");
 
@@ -350,8 +390,11 @@ async fn handle_authenticated(
         }
     };
 
-    // Save CA fingerprint before moving cert_record.
-    let cert_ca_fingerprint = cert_record.ca_fingerprint.clone();
+    // Bundle certificate identity before moving cert_record.
+    let cert_id = CertIdentity {
+        serial: cert_serial,
+        ca_fingerprint: cert_record.ca_fingerprint.clone(),
+    };
 
     // Record certificate usage.
     let mut active: uptrakit_shared_db::entity::service_certificate::ActiveModel =
@@ -373,7 +416,7 @@ async fn handle_authenticated(
         ca_bundle_hash,
         shutdown_timeout_seconds: shutdown_timeout,
     });
-    let Some(json) = serialize_msg(&settings_msg) else {
+    let Some(json) = serialize_controller_msg(out_seq, settings_msg) else {
         return;
     };
     if sink.send(Message::Text(json.into())).await.is_err() {
@@ -388,8 +431,9 @@ async fn handle_authenticated(
                 &mut stream,
                 &state,
                 service_id,
-                cert_serial,
-                cert_ca_fingerprint,
+                cert_id,
+                out_seq,
+                in_seq,
             )
             .await;
         }
@@ -399,8 +443,9 @@ async fn handle_authenticated(
                 &mut stream,
                 &state,
                 service_id,
-                cert_serial,
-                cert_ca_fingerprint,
+                cert_id,
+                out_seq,
+                in_seq,
             )
             .await;
         }
@@ -412,7 +457,13 @@ async fn handle_authenticated(
 // ---------------------------------------------------------------------------
 
 /// Enrolled path: service reconnecting with Bearer secret, waiting for approval.
-async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uuid::Uuid) {
+async fn handle_enrolled(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    service_id: uuid::Uuid,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+) {
     tracing::debug!(%service_id, "enrolled service connected (bearer)");
 
     // Look up service to determine type and current status.
@@ -437,7 +488,7 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uu
     match service.status {
         service_entity::ServiceStatus::Approved => {
             let msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-            let Some(json) = serialize_msg(&msg) else {
+            let Some(json) = serialize_controller_msg(out_seq, msg) else {
                 return;
             };
             if sink.send(Message::Text(json.into())).await.is_err() {
@@ -446,7 +497,7 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uu
         }
         service_entity::ServiceStatus::Rejected => {
             let msg = ControllerMessage::Rejected(RejectedPayload { service_id });
-            if let Some(json) = serialize_msg(&msg) {
+            if let Some(json) = serialize_controller_msg(out_seq, msg) {
                 let _ = sink.send(Message::Text(json.into())).await;
             }
             return;
@@ -459,8 +510,15 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uu
     // Dispatch to service-type-specific enrolled loop.
     match service.service_type {
         service_entity::ServiceType::Agent => {
-            super::agent_ws::handle_agent_enrolled(&mut sink, &mut stream, &state, service_id)
-                .await;
+            super::agent_ws::handle_agent_enrolled(
+                &mut sink,
+                &mut stream,
+                &state,
+                service_id,
+                out_seq,
+                in_seq,
+            )
+            .await;
         }
         service_entity::ServiceType::Mqtt => {
             super::mqtt_ws::handle_mqtt_enrolled(
@@ -469,6 +527,8 @@ async fn handle_enrolled(socket: WebSocket, state: Arc<AppState>, service_id: uu
                 &state,
                 service_id,
                 service.status == service_entity::ServiceStatus::Approved,
+                out_seq,
+                in_seq,
             )
             .await;
         }
@@ -486,6 +546,8 @@ async fn handle_anonymous(
     socket: WebSocket,
     state: Arc<AppState>,
     client_ip: Option<std::net::IpAddr>,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
 ) {
     tracing::debug!("anonymous service connected");
 
@@ -504,15 +566,17 @@ async fn handle_anonymous(
 
         match msg {
             Message::Text(text) => {
-                let service_msg: ServiceMessage = match serde_json::from_str(&text) {
+                let service_msg = match deserialize_service_msg(in_seq, &text) {
                     Ok(m) => m,
                     Err(e) => {
                         tracing::debug!(error = %e, "invalid message from anonymous client");
-                        let err = ControllerMessage::Error(ErrorPayload {
-                            code: ErrorCode::BadRequest,
-                            message: "invalid message".to_string(),
-                        });
-                        if let Some(json) = serialize_msg(&err) {
+                        let code = if e.starts_with("sequence error:") {
+                            ErrorCode::SequenceError
+                        } else {
+                            ErrorCode::BadRequest
+                        };
+                        let err = ControllerMessage::Error(ErrorPayload { code, message: e });
+                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                             let _ = sink.send(Message::Text(json.into())).await;
                         }
                         return;
@@ -523,7 +587,9 @@ async fn handle_anonymous(
                     ServiceMessage::Enroll(payload) => {
                         match payload.service_type {
                             uptrakit_internal_wire::ServiceType::Agent => {
-                                match enroll_agent(&state, &payload, client_ip, &mut sink).await {
+                                match enroll_agent(&state, &payload, client_ip, &mut sink, out_seq)
+                                    .await
+                                {
                                     Some((id, approved)) => {
                                         break (id, service_entity::ServiceType::Agent, approved);
                                     }
@@ -531,7 +597,7 @@ async fn handle_anonymous(
                                 }
                             }
                             uptrakit_internal_wire::ServiceType::Mqtt => {
-                                match enroll_mqtt(&state, &payload, &mut sink).await {
+                                match enroll_mqtt(&state, &payload, &mut sink, out_seq).await {
                                     Some((id, approved)) => {
                                         break (id, service_entity::ServiceType::Mqtt, approved);
                                     }
@@ -545,7 +611,7 @@ async fn handle_anonymous(
                             code: ErrorCode::BadRequest,
                             message: "expected enroll message".to_string(),
                         });
-                        if let Some(json) = serialize_msg(&err) {
+                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                             let _ = sink.send(Message::Text(json.into())).await;
                         }
                         return;
@@ -568,6 +634,8 @@ async fn handle_anonymous(
                 &mut push_rx,
                 &state,
                 service_id,
+                out_seq,
+                in_seq,
             )
             .await;
             state.service_connections.unregister(&service_id).await;
@@ -579,6 +647,8 @@ async fn handle_anonymous(
                 &state,
                 service_id,
                 initial_approved,
+                out_seq,
+                in_seq,
             )
             .await;
         }
@@ -598,6 +668,7 @@ async fn enroll_agent(
     payload: &uptrakit_internal_wire::EnrollPayload,
     client_ip: Option<std::net::IpAddr>,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
     use crate::routes::agents::{AgentStatus, EnrollParams, do_enroll};
 
@@ -625,7 +696,7 @@ async fn enroll_agent(
                 enrollment_secret: enroll_result.enrollment_secret,
                 status: wire_status,
             });
-            let json = serialize_msg(&enrolled_msg)?;
+            let json = serialize_controller_msg(out_seq, enrolled_msg)?;
             if sink.send(Message::Text(json.into())).await.is_err() {
                 return None;
             }
@@ -639,7 +710,7 @@ async fn enroll_agent(
             let approved = enroll_result.status == AgentStatus::Approved;
             if approved {
                 let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                let json = serialize_msg(&approved_msg)?;
+                let json = serialize_controller_msg(out_seq, approved_msg)?;
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     return None;
                 }
@@ -652,7 +723,7 @@ async fn enroll_agent(
                 code: ErrorCode::EnrollmentFailed,
                 message: e.current_context().to_string(),
             });
-            if let Some(json) = serialize_msg(&err) {
+            if let Some(json) = serialize_controller_msg(out_seq, err) {
                 let _ = sink.send(Message::Text(json.into())).await;
             }
             None
@@ -670,6 +741,7 @@ async fn enroll_mqtt(
     state: &Arc<AppState>,
     payload: &uptrakit_internal_wire::EnrollPayload,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
     let result = super::mqtt_ws::do_mqtt_service_enroll(
         &state.db,
@@ -695,7 +767,7 @@ async fn enroll_mqtt(
                 enrollment_secret: enroll_result.enrollment_secret,
                 status: wire_status,
             });
-            let json = serialize_msg(&enrolled_msg)?;
+            let json = serialize_controller_msg(out_seq, enrolled_msg)?;
             if sink.send(Message::Text(json.into())).await.is_err() {
                 return None;
             }
@@ -709,7 +781,7 @@ async fn enroll_mqtt(
             let approved = enroll_result.status == service_entity::ServiceStatus::Approved;
             if approved {
                 let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
-                let json = serialize_msg(&approved_msg)?;
+                let json = serialize_controller_msg(out_seq, approved_msg)?;
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     return None;
                 }
@@ -722,7 +794,7 @@ async fn enroll_mqtt(
                 code: ErrorCode::EnrollmentFailed,
                 message: e.to_string(),
             });
-            if let Some(json) = serialize_msg(&err) {
+            if let Some(json) = serialize_controller_msg(out_seq, err) {
                 let _ = sink.send(Message::Text(json.into())).await;
             }
             None

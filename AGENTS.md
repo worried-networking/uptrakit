@@ -1067,7 +1067,7 @@ Five wire payload fields use typed enums instead of raw strings — invalid valu
 - `EnrolledPayload.status: EnrollmentStatus` — `Pending` or `Approved` (serialized as `"pending"` / `"approved"`)
 - `ExecuteUpdatePayload.shell: Option<HookShell>` — `Bash`, `Sh`, or `PowerShell` (serialized as `"bash"` / `"sh"` / `"powershell"`); defaults to `Bash`
 - `MqttTenantConfig.transport: MqttTransport` — `Tcp` or `Tls` (serialized as `"tcp"` / `"tls"`); defaults to `Tcp`
-- `ErrorPayload.code: ErrorCode` — `BadRequest`, `EnrollmentFailed`, `NotApproved`, `Forbidden`, `CertificateError`, `InternalError`, or `AgentVersionTooOld` (serialized as snake_case strings)
+- `ErrorPayload.code: ErrorCode` — `BadRequest`, `EnrollmentFailed`, `NotApproved`, `Forbidden`, `CertificateError`, `InternalError`, `AgentVersionTooOld`, or `SequenceError` (serialized as snake_case strings)
 
 Other crates (`web-api-types`, `db`) keep their own parallel enums; conversion happens in consuming crates (e.g. `wire_hook_shell()` in the web-api crate).
 
@@ -1092,6 +1092,27 @@ Other crates (`web-api-types`, `db`) keep their own parallel enums; conversion h
 - `ReleaseTenants(MqttReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases MQTT client leases (by `mqtt_client_ids`)
 - `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify services; includes a human-readable `reason` field
 - `Disconnecting(DisconnectingPayload)` variant in `ServiceMessage` — service notifies controller before graceful disconnect (includes `DisconnectReason`: `shutdown` or `restart`; optional `active_mqtt_clients: Vec<Uuid>` for MQTT)
+
+### Replay protection (message sequence numbers)
+
+Every message on the wire is wrapped in an envelope struct containing a monotonically increasing `seq: u64` field. The envelope types are `ServiceEnvelope` (wraps `ServiceMessage`) and `ControllerEnvelope` (wraps `ControllerMessage`), both using `#[serde(flatten)]` so the JSON on the wire is `{"seq":1,"type":"ping","service_ts":123}`.
+
+Each WebSocket connection maintains per-direction counters:
+- `OutgoingSeq` — assigns seq 1, 2, 3, ... to each sent message
+- `IncomingSeq` — validates that received messages arrive as seq 1, 2, 3, ...
+
+Rules:
+- Counters are **per-connection** and **per-direction**, starting at 1
+- Within a single connection that transitions between phases (anonymous → enrolled → authenticated on the controller side), counters are shared across all phases
+- On sequence validation failure, the receiver sends an `Error` with `ErrorCode::SequenceError` and closes the connection
+- Services reconnect for each major phase (enrollment, certificate request, authenticated operation), so each new WebSocket connection gets fresh counters
+
+Key types (defined in `crates/shared/wire/src/lib.rs`):
+- `ServiceEnvelope { seq: u64, message: ServiceMessage }` — outgoing from service
+- `ControllerEnvelope { seq: u64, message: ControllerMessage }` — outgoing from controller
+- `OutgoingSeq` — wraps messages with `wrap_service()` or `wrap_controller()`
+- `IncomingSeq` — validates with `validate(seq) -> Result<(), SeqError>`
+- `SeqError { expected: u64, received: u64 }` — validation error
 
 ### Agent graceful shutdown
 

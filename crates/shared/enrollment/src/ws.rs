@@ -14,8 +14,9 @@ use tokio_rustls::TlsConnector;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, EnrollPayload, EnrolledPayload, EnrollmentStatus,
-    HostInfo, RequestCertificatePayload, ServiceMessage, ServiceType,
+    CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload, EnrolledPayload,
+    EnrollmentStatus, HostInfo, IncomingSeq, OutgoingSeq, RequestCertificatePayload,
+    ServiceMessage, ServiceType,
 };
 
 use crate::error::{EnrollmentError, Result};
@@ -73,20 +74,12 @@ pub async fn connect_ws(
 /// Send Enroll message and read Enrolled response.
 pub async fn send_enroll(
     ws: &mut WsStream,
-    hostname: &str,
-    friendly_name: &str,
-    enrollment_token: Option<&str>,
-    service_type: ServiceType,
-    host_info: Option<HostInfo>,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+    payload: EnrollPayload,
 ) -> Result<EnrolledPayload> {
-    let msg = ServiceMessage::Enroll(EnrollPayload {
-        hostname: hostname.to_string(),
-        friendly_name: friendly_name.to_string(),
-        enrollment_token: enrollment_token.map(|s| s.to_string()),
-        service_type,
-        host_info,
-    });
-    let json = serde_json::to_string(&msg).context_to::<EnrollmentError>()?;
+    let msg = ServiceMessage::Enroll(payload);
+    let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<EnrollmentError>()?;
     ws.send(Message::Text(json.into()))
         .await
         .context_to::<EnrollmentError>()?;
@@ -102,10 +95,16 @@ pub async fn send_enroll(
 
         match resp {
             Message::Text(text) => {
-                let controller_msg: ControllerMessage =
+                let envelope: ControllerEnvelope =
                     serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
-                match controller_msg {
+                if let Err(e) = in_seq.validate(envelope.seq) {
+                    return Err(report!(EnrollmentError::Enrollment(format!(
+                        "sequence validation failed: {e}"
+                    ))));
+                }
+
+                match envelope.message {
                     ControllerMessage::Enrolled(payload) => return Ok(payload),
                     ControllerMessage::Error(err) => {
                         return Err(report!(EnrollmentError::Enrollment(format!(
@@ -134,7 +133,7 @@ pub async fn send_enroll(
 /// Wait for Approved/Rejected push from controller.
 ///
 /// Returns `Ok(())` on `Approved`, errors on `Rejected`.
-pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
+pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> Result<()> {
     tracing::info!("waiting for approval...");
 
     loop {
@@ -150,10 +149,16 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
 
         match msg {
             Message::Text(text) => {
-                let controller_msg: ControllerMessage =
+                let envelope: ControllerEnvelope =
                     serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
-                match controller_msg {
+                if let Err(e) = in_seq.validate(envelope.seq) {
+                    return Err(report!(EnrollmentError::Enrollment(format!(
+                        "sequence validation failed: {e}"
+                    ))));
+                }
+
+                match envelope.message {
                     ControllerMessage::Approved(payload) => {
                         tracing::info!(service_id = %payload.service_id, "enrollment approved");
                         return Ok(());
@@ -188,12 +193,14 @@ pub async fn wait_for_approval(ws: &mut WsStream) -> Result<()> {
 /// Send `RequestCertificate` with a CSR and read `Certificate` response.
 pub async fn request_certificate_ws(
     ws: &mut WsStream,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
     csr_pem: &str,
 ) -> Result<CertificatePayload> {
     let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
         csr_pem: csr_pem.to_string(),
     });
-    let json = serde_json::to_string(&msg).context_to::<EnrollmentError>()?;
+    let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<EnrollmentError>()?;
     ws.send(Message::Text(json.into()))
         .await
         .context_to::<EnrollmentError>()?;
@@ -209,10 +216,16 @@ pub async fn request_certificate_ws(
 
         match resp {
             Message::Text(text) => {
-                let controller_msg: ControllerMessage =
+                let envelope: ControllerEnvelope =
                     serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
-                match controller_msg {
+                if let Err(e) = in_seq.validate(envelope.seq) {
+                    return Err(report!(EnrollmentError::Enrollment(format!(
+                        "sequence validation failed: {e}"
+                    ))));
+                }
+
+                match envelope.message {
                     ControllerMessage::Certificate(payload) => return Ok(payload),
                     ControllerMessage::Error(err) => {
                         return Err(report!(EnrollmentError::Enrollment(format!(
@@ -298,14 +311,20 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         host_info,
     } = params;
     let mut ws = connect_ws(host, port, tls_connector, None).await?;
+    let mut out_seq = OutgoingSeq::new();
+    let mut in_seq = IncomingSeq::new();
 
     let enrolled = send_enroll(
         &mut ws,
-        hostname,
-        friendly_name,
-        enrollment_token,
-        service_type,
-        host_info,
+        &mut out_seq,
+        &mut in_seq,
+        EnrollPayload {
+            hostname: hostname.to_string(),
+            friendly_name: friendly_name.to_string(),
+            enrollment_token: enrollment_token.map(|s| s.to_string()),
+            service_type,
+            host_info,
+        },
     )
     .await?;
 
@@ -322,14 +341,14 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
 
     // Wait for approval (may come immediately if auto-approved via token)
     if enrolled.status != EnrollmentStatus::Approved {
-        wait_for_approval(&mut ws).await?;
+        wait_for_approval(&mut ws, &mut in_seq).await?;
     }
 
     // Generate keypair + CSR, request certificate
     identity.ensure_keypair().await?;
     let csr_pem = identity.generate_csr_for_self()?;
 
-    let cert = request_certificate_ws(&mut ws, &csr_pem).await?;
+    let cert = request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem).await?;
     tracing::info!(not_after = %cert.not_after, "received client certificate");
 
     identity.save_certificate(&cert.cert_pem).await?;
@@ -355,15 +374,17 @@ pub async fn resume_enrollment(
     tracing::info!("reconnecting with enrollment secret");
     let auth_header = format!("Bearer {enrollment_secret}");
     let mut ws = connect_ws(host, port, tls_connector, Some(&auth_header)).await?;
+    let mut out_seq = OutgoingSeq::new();
+    let mut in_seq = IncomingSeq::new();
 
     // Wait for approval (controller pushes immediately if already approved)
-    wait_for_approval(&mut ws).await?;
+    wait_for_approval(&mut ws, &mut in_seq).await?;
 
     // Generate keypair + CSR, request certificate
     identity.ensure_keypair().await?;
     let csr_pem = identity.generate_csr_for_self()?;
 
-    let cert = request_certificate_ws(&mut ws, &csr_pem).await?;
+    let cert = request_certificate_ws(&mut ws, &mut out_seq, &mut in_seq, &csr_pem).await?;
     tracing::info!(not_after = %cert.not_after, "received client certificate");
 
     identity.save_certificate(&cert.cert_pem).await?;

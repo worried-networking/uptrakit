@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Service-Controller Protocol
-  version: 0.0.7
+  version: 0.0.8
   description: |
     WebSocket protocol for communication between Uptrakit services (agents, MQTT bridges, etc.) and the controller.
 
@@ -53,6 +53,20 @@ info:
     For reconnection during enrollment (before certificate issuance), services
     present the `enrollment_secret` via an `Authorization: Bearer` header
     during the WebSocket upgrade handshake.
+
+    ## Replay Protection
+
+    Every message on the wire is wrapped in an envelope containing a monotonically
+    increasing `seq` field (starting at 1). Each WebSocket connection maintains
+    per-direction counters:
+    - **Outgoing**: assigns seq 1, 2, 3, ... to each sent message
+    - **Incoming**: validates that received messages arrive as seq 1, 2, 3, ...
+
+    Sequence counters are per-connection and per-direction. They start fresh with
+    each new WebSocket connection. Within a single connection that transitions
+    between phases (e.g., anonymous → enrolled → authenticated), counters are
+    shared across all phases. On sequence validation failure, the receiver sends
+    an `error` message with code `sequence_error` and closes the connection.
 
 servers:
   controller:
@@ -725,9 +739,15 @@ components:
     pingPayload:
       type: object
       required:
+        - seq
         - type
         - service_ts
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: ping
@@ -742,10 +762,16 @@ components:
     pongPayload:
       type: object
       required:
+        - seq
         - type
         - service_ts
         - controller_ts
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: pong
@@ -766,11 +792,17 @@ components:
     enrollPayload:
       type: object
       required:
+        - seq
         - type
         - hostname
         - friendly_name
         - service_type
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: enroll
@@ -803,11 +835,17 @@ components:
     enrolledPayload:
       type: object
       required:
+        - seq
         - type
         - service_id
         - enrollment_secret
         - status
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: enrolled
@@ -835,9 +873,15 @@ components:
     approvedPayload:
       type: object
       required:
+        - seq
         - type
         - service_id
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: approved
@@ -852,9 +896,15 @@ components:
     rejectedPayload:
       type: object
       required:
+        - seq
         - type
         - service_id
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: rejected
@@ -869,9 +919,15 @@ components:
     requestCertificatePayload:
       type: object
       required:
+        - seq
         - type
         - csr_pem
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: request_certificate
@@ -889,10 +945,16 @@ components:
     certificatePayload:
       type: object
       required:
+        - seq
         - type
         - cert_pem
         - not_after
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: certificate
@@ -913,10 +975,16 @@ components:
     errorPayload:
       type: object
       required:
+        - seq
         - type
         - code
         - message
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: error
@@ -931,6 +999,7 @@ components:
             - certificate_error
             - internal_error
             - agent_version_too_old
+            - sequence_error
           description: Machine-readable error code
         message:
           type: string
@@ -971,10 +1040,16 @@ components:
     reportHostInfoPayload:
       type: object
       required:
+        - seq
         - type
         - host_info
         - agent_version
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: report_host_info
@@ -992,9 +1067,15 @@ components:
     renewCertificatePayload:
       type: object
       required:
+        - seq
         - type
         - csr_pem
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: renew_certificate
@@ -1013,9 +1094,15 @@ components:
     serviceSettingsPayload:
       type: object
       required:
+        - seq
         - type
         - renewal_window_hours
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: service_settings
@@ -1054,9 +1141,15 @@ components:
     caBundleUpdatedPayload:
       type: object
       required:
+        - seq
         - type
         - ca_bundle_pem
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: ca_bundle_updated
@@ -1072,9 +1165,15 @@ components:
     requestCertRenewalPayload:
       type: object
       required:
+        - seq
         - type
         - reason
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: request_cert_renewal
@@ -1090,9 +1189,15 @@ components:
     serverRestartingPayload:
       type: object
       required:
+        - seq
         - type
         - reason
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: server_restarting
@@ -1110,9 +1215,15 @@ components:
     checkVersionsPayload:
       type: object
       required:
+        - seq
         - type
         - assignments
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: check_versions
@@ -1163,9 +1274,15 @@ components:
     versionCheckResultsPayload:
       type: object
       required:
+        - seq
         - type
         - results
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: version_check_results
@@ -1291,6 +1408,7 @@ components:
     executeUpdatePayload:
       type: object
       required:
+        - seq
         - type
         - update_history_id
         - software_item_id
@@ -1300,6 +1418,11 @@ components:
         - provider_type
         - provider_config
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: execute_update
@@ -1376,9 +1499,15 @@ components:
     updateStartedPayload:
       type: object
       required:
+        - seq
         - type
         - update_history_id
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: update_started
@@ -1398,10 +1527,16 @@ components:
     updateOutputPayload:
       type: object
       required:
+        - seq
         - type
         - update_history_id
         - output
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: update_output
@@ -1422,11 +1557,17 @@ components:
     updateResultPayload:
       type: object
       required:
+        - seq
         - type
         - update_history_id
         - status
         - output
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: update_result
@@ -1468,9 +1609,15 @@ components:
     disconnectingPayload:
       type: object
       required:
+        - seq
         - type
         - reason
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: disconnecting
@@ -1489,9 +1636,15 @@ components:
     mqttRegisterPayload:
       type: object
       required:
+        - seq
         - type
         - instance_id
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: register
@@ -1522,9 +1675,15 @@ components:
     mqttRegisteredPayload:
       type: object
       required:
+        - seq
         - type
         - instance_id
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: registered
@@ -1538,9 +1697,15 @@ components:
     mqttReleaseTenantsPayload:
       type: object
       required:
+        - seq
         - type
         - mqtt_client_ids
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: release_tenants
@@ -1556,9 +1721,15 @@ components:
     mqttTenantAssignmentsPayload:
       type: object
       required:
+        - seq
         - type
         - tenants
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: tenant_assignments
@@ -1641,9 +1812,15 @@ components:
     mqttTenantConfigUpdatedPayload:
       type: object
       required:
+        - seq
         - type
         - tenant
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: tenant_config_updated
@@ -1655,10 +1832,16 @@ components:
     mqttTenantRevokedPayload:
       type: object
       required:
+        - seq
         - type
         - mqtt_client_id
         - reason
       properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
         type:
           type: string
           const: tenant_revoked

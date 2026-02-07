@@ -6,7 +6,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
     CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, ExecuteUpdatePayload,
-    PingPayload, ProviderType, ServiceMessage, UpdateFinalStatus,
+    IncomingSeq, OutgoingSeq, PingPayload, ProviderType, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     host_software_item, provider_config, service_host as agent_host, software_item, update_history,
@@ -16,7 +16,9 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
-use super::service_ws::{close_with_reason, send_pong, serialize_msg};
+use super::service_ws::{
+    close_with_reason, deserialize_service_msg, send_pong, serialize_controller_msg,
+};
 use crate::AppState;
 use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
 
@@ -49,11 +51,12 @@ pub(crate) async fn handle_agent_authenticated(
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
-    cert_serial: String,
-    cert_ca_fingerprint: String,
+    cert: super::service_ws::CertIdentity,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
 ) {
     // Deliver pending updates for hosts linked to this agent.
-    if let Err(e) = deliver_pending_updates(state, agent_id, sink).await {
+    if let Err(e) = deliver_pending_updates(state, agent_id, sink, out_seq).await {
         tracing::error!(error = %e, %agent_id, "failed to deliver pending updates on reconnect");
     }
 
@@ -72,7 +75,7 @@ pub(crate) async fn handle_agent_authenticated(
                 };
                 match msg {
                     Message::Text(text) => {
-                        let agent_msg: ServiceMessage = match serde_json::from_str(&text) {
+                        let agent_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
                             Ok(m) => m,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
@@ -82,7 +85,7 @@ pub(crate) async fn handle_agent_authenticated(
 
                         match agent_msg {
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
-                                let Ok(controller_ts) = send_pong(sink, service_ts).await else { break };
+                                let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
                             }
                             ServiceMessage::ReportHostInfo(payload) => {
@@ -102,7 +105,7 @@ pub(crate) async fn handle_agent_authenticated(
                                                 payload.agent_version
                                             ),
                                         });
-                                        if let Some(json) = serialize_msg(&err) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         let _ = close_with_reason(sink, "agent version too old").await;
@@ -127,7 +130,7 @@ pub(crate) async fn handle_agent_authenticated(
                                             payload.agent_version
                                         ),
                                     });
-                                    if let Some(json) = serialize_msg(&err) {
+                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
                                     let _ = close_with_reason(sink, "agent version too old").await;
@@ -174,7 +177,7 @@ pub(crate) async fn handle_agent_authenticated(
                                             code: ErrorCode::Forbidden,
                                             message: "agent is not approved".to_string(),
                                         });
-                                        if let Some(json) = serialize_msg(&err) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         break;
@@ -194,12 +197,12 @@ pub(crate) async fn handle_agent_authenticated(
                                             cert_pem: bundle.cert_pem,
                                             not_after: bundle.not_after,
                                         });
-                                        if let Some(json) = serialize_msg(&cert_msg) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
 
                                         // Revoke old cert
-                                        if let Err(e) = revoke_certificate(&state.db, &cert_serial, &cert_ca_fingerprint, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
+                                        if let Err(e) = revoke_certificate(&state.db, &cert.serial, &cert.ca_fingerprint, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
@@ -207,7 +210,7 @@ pub(crate) async fn handle_agent_authenticated(
                                             tracing::warn!(error = ?e, "failed to bump revocation version counter");
                                         }
                                         state.revocation_notify.notify_one();
-                                        tracing::info!(%agent_id, old_serial = %cert_serial, "certificate renewed, old cert revoked");
+                                        tracing::info!(%agent_id, old_serial = %cert.serial, "certificate renewed, old cert revoked");
                                         let _ = close_with_reason(sink, "certificate rotated").await;
                                         break;
                                     }
@@ -216,7 +219,7 @@ pub(crate) async fn handle_agent_authenticated(
                                             code: ErrorCode::CertificateError,
                                             message: e.current_context().to_string(),
                                         });
-                                        if let Some(json) = serialize_msg(&err) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         break;
@@ -397,7 +400,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     code: ErrorCode::BadRequest,
                                     message: "unexpected message for authenticated connection".to_string(),
                                 });
-                                if let Some(json) = serialize_msg(&err) {
+                                if let Some(json) = serialize_controller_msg(out_seq, err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                                 break;
@@ -410,10 +413,7 @@ pub(crate) async fn handle_agent_authenticated(
             }
             push = push_rx.recv() => {
                 let Some(msg) = push else { break };
-                let json = match serde_json::to_string(&msg) {
-                    Ok(j) => j,
-                    Err(_) => break,
-                };
+                let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     break;
                 }
@@ -438,9 +438,11 @@ pub(crate) async fn handle_agent_enrolled(
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
 ) {
     let mut push_rx = state.service_connections.register_agent(agent_id).await;
-    run_agent_enrolled_loop(sink, stream, &mut push_rx, state, agent_id).await;
+    run_agent_enrolled_loop(sink, stream, &mut push_rx, state, agent_id, out_seq, in_seq).await;
     state.service_connections.unregister(&agent_id).await;
 }
 
@@ -456,6 +458,8 @@ pub(crate) async fn run_agent_enrolled_loop(
     push_rx: &mut mpsc::Receiver<ControllerMessage>,
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
 ) {
     let mut approved = false;
 
@@ -482,7 +486,7 @@ pub(crate) async fn run_agent_enrolled_loop(
 
                 match msg {
                     Message::Text(text) => {
-                        let agent_msg: ServiceMessage = match serde_json::from_str(&text) {
+                        let agent_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
                             Ok(m) => m,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
@@ -492,7 +496,7 @@ pub(crate) async fn run_agent_enrolled_loop(
 
                         match agent_msg {
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
-                                let Ok(controller_ts) = send_pong(sink, service_ts).await else { break };
+                                let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
                             }
                             ServiceMessage::RequestCertificate(payload) => {
@@ -501,7 +505,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                         code: ErrorCode::NotApproved,
                                         message: "agent is not yet approved".to_string(),
                                     });
-                                    if let Some(json) = serialize_msg(&err) {
+                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
                                     continue;
@@ -518,7 +522,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                             code: ErrorCode::InternalError,
                                             message: "agent not found".to_string(),
                                         });
-                                        if let Some(json) = serialize_msg(&err) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         break;
@@ -537,7 +541,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                             cert_pem: bundle.cert_pem,
                                             not_after: bundle.not_after,
                                         });
-                                        if let Some(json) = serialize_msg(&cert_msg) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, cert_msg) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         tracing::info!(%agent_id, "certificate issued via WS");
@@ -548,7 +552,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                             code: ErrorCode::CertificateError,
                                             message: e.current_context().to_string(),
                                         });
-                                        if let Some(json) = serialize_msg(&err) {
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
                                         break;
@@ -563,7 +567,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     code: ErrorCode::BadRequest,
                                     message: "already enrolled".to_string(),
                                 });
-                                if let Some(json) = serialize_msg(&err) {
+                                if let Some(json) = serialize_controller_msg(out_seq, err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
@@ -572,7 +576,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     code: ErrorCode::BadRequest,
                                     message: "not available during enrollment".to_string(),
                                 });
-                                if let Some(json) = serialize_msg(&err) {
+                                if let Some(json) = serialize_controller_msg(out_seq, err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
@@ -586,7 +590,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     code: ErrorCode::BadRequest,
                                     message: "update messages not available during enrollment".to_string(),
                                 });
-                                if let Some(json) = serialize_msg(&err) {
+                                if let Some(json) = serialize_controller_msg(out_seq, err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
@@ -605,7 +609,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     code: ErrorCode::BadRequest,
                                     message: "message type not supported on agent connections".to_string(),
                                 });
-                                if let Some(json) = serialize_msg(&err) {
+                                if let Some(json) = serialize_controller_msg(out_seq, err) {
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
@@ -618,26 +622,17 @@ pub(crate) async fn run_agent_enrolled_loop(
             push = push_rx.recv() => {
                 let Some(msg) = push else { break };
 
-                // Track state transitions
-                match &msg {
-                    ControllerMessage::Approved(_) => {
-                        approved = true;
-                    }
-                    ControllerMessage::Rejected(_) => {
-                        // Forward rejection and close
-                        if let Some(json) = serialize_msg(&msg) {
-                            let _ = sink.send(Message::Text(json.into())).await;
-                        }
-                        break;
-                    }
-                    _ => {}
+                // Track state transitions; handle Rejected specially (send + break).
+                let is_rejected = matches!(&msg, ControllerMessage::Rejected(_));
+                if matches!(&msg, ControllerMessage::Approved(_)) {
+                    approved = true;
                 }
 
-                let json = match serde_json::to_string(&msg) {
-                    Ok(j) => j,
-                    Err(_) => break,
-                };
+                let Some(json) = serialize_controller_msg(out_seq, msg) else { break };
                 if sink.send(Message::Text(json.into())).await.is_err() {
+                    break;
+                }
+                if is_rejected {
                     break;
                 }
             }
@@ -657,6 +652,7 @@ async fn deliver_pending_updates(
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    out_seq: &mut OutgoingSeq,
 ) -> AgentWsResult<()> {
     // 1. Find host_ids linked to this agent
     let host_links = agent_host::Entity::find()
@@ -774,7 +770,7 @@ async fn deliver_pending_updates(
         };
 
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
-        let Some(json) = serialize_msg(&msg) else {
+        let Some(json) = serialize_controller_msg(out_seq, msg) else {
             continue;
         };
 
