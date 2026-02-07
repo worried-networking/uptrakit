@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
@@ -70,6 +71,10 @@ struct Inner {
     renewal_window_hours: RwLock<u16>,
     network: RwLock<NetworkSettings>,
     mqtt_max_clients_per_tenant: RwLock<u16>,
+    /// Per-tenant settings version counter (for cross-instance invalidation).
+    version: AtomicI64,
+    /// Global settings version counter (for cross-instance invalidation).
+    global_version: AtomicI64,
 }
 
 impl Settings {
@@ -96,6 +101,8 @@ impl Settings {
                 renewal_window_hours: RwLock::new(renewal_window_hours),
                 network: RwLock::new(NetworkSettings::default()),
                 mqtt_max_clients_per_tenant: RwLock::new(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT),
+                version: AtomicI64::new(0),
+                global_version: AtomicI64::new(0),
             }),
         }
     }
@@ -132,6 +139,10 @@ impl Settings {
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
 
+        // Read initial version counters
+        let (version, global_version) =
+            crate::settings_store::get_settings_versions(db, tenant_id).await?;
+
         let settings = Self {
             inner: Arc::new(Inner {
                 registration: RwLock::new(registration),
@@ -140,6 +151,8 @@ impl Settings {
                 renewal_window_hours: RwLock::new(renewal_window_hours),
                 network: RwLock::new(network),
                 mqtt_max_clients_per_tenant: RwLock::new(mqtt_max_clients_per_tenant),
+                version: AtomicI64::new(version),
+                global_version: AtomicI64::new(global_version),
             }),
         };
 
@@ -211,6 +224,82 @@ impl Settings {
             forwarded_client_cert_pem_header,
             pki_addr,
         }
+    }
+
+    /// Reload all settings from the database and update cached version counters.
+    ///
+    /// Used by the periodic settings check when a version mismatch is detected.
+    pub async fn reload_from_db(
+        &self,
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+    ) -> auth::Result<()> {
+        let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
+
+        // Update registration settings
+        let registration = RegistrationSettings::from_raw(&raw);
+        *self.inner.registration.write().await = registration;
+
+        // Update authentication settings
+        let authentication = AuthenticationSettings::from_raw(&raw);
+        *self.inner.authentication.write().await = authentication;
+
+        // Update agent cert lifetime
+        let agent_cert_lifetime_days = raw
+            .get_setting(SettingKey::AgentCertLifetimeDays)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
+        *self.inner.agent_cert_lifetime_days.write().await = agent_cert_lifetime_days;
+
+        // Update renewal window
+        let renewal_window_hours = raw
+            .get_setting(SettingKey::AgentCertRenewalWindowHours)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
+        *self.inner.renewal_window_hours.write().await = renewal_window_hours;
+
+        // Update network settings
+        let network = Self::load_network_settings(&raw);
+        *self.inner.network.write().await = network;
+
+        // Update MQTT max clients
+        let mqtt_max_clients_per_tenant = raw
+            .get_setting(SettingKey::MqttMaxClientsPerTenant)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
+        *self.inner.mqtt_max_clients_per_tenant.write().await = mqtt_max_clients_per_tenant;
+
+        // Update cached version counters
+        let (version, global_version) =
+            crate::settings_store::get_settings_versions(db, tenant_id).await?;
+        self.inner.version.store(version, Ordering::Release);
+        self.inner
+            .global_version
+            .store(global_version, Ordering::Release);
+
+        Ok(())
+    }
+
+    /// Check whether the DB version counters differ from the cached ones.
+    ///
+    /// If they differ, perform a full reload. Returns `true` if a reload happened.
+    pub async fn check_version_and_reload(
+        &self,
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+    ) -> auth::Result<bool> {
+        let (db_version, db_global_version) =
+            crate::settings_store::get_settings_versions(db, tenant_id).await?;
+
+        let cached_version = self.inner.version.load(Ordering::Relaxed);
+        let cached_global_version = self.inner.global_version.load(Ordering::Relaxed);
+
+        if db_version == cached_version && db_global_version == cached_global_version {
+            return Ok(false);
+        }
+
+        self.reload_from_db(db, tenant_id).await?;
+        Ok(true)
     }
 
     // --- Registration ---

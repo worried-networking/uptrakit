@@ -31,6 +31,7 @@ pub use super::service_certificate::{
 pub use super::service_host::{Entity as ServiceHost, Model as ServiceHostModel};
 pub use super::session::{Entity as Session, Model as SessionModel};
 pub use super::setting::{Entity as Setting, Model as SettingModel};
+pub use super::settings_version::{Entity as SettingsVersion, Model as SettingsVersionModel};
 pub use super::software_item::{Entity as SoftwareItem, Model as SoftwareItemModel};
 pub use super::tenant::{Entity as Tenant, Model as TenantModel};
 pub use super::update_history::{

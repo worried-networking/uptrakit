@@ -692,6 +692,35 @@ async fn run(args: cli::Args) -> Result<()> {
         }
     });
 
+    // Spawn periodic settings version check (every 30s, for cross-instance cache invalidation)
+    let settings_reload_token = shutdown_token.child_token();
+    let settings_reload_handle = {
+        let settings = app_state.settings.clone();
+        let db = app_state.db.clone();
+        let tid = default_tenant_id;
+        let token = settings_reload_token;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            // Skip the first immediate tick — settings were just loaded
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        match settings.check_version_and_reload(&db, tid).await {
+                            Ok(true) => tracing::info!("settings reloaded from database (version changed)"),
+                            Ok(false) => tracing::debug!("settings version unchanged"),
+                            Err(e) => tracing::warn!(error = ?e, "periodic settings version check failed"),
+                        }
+                    }
+                    _ = token.cancelled() => {
+                        tracing::debug!("settings reload task shutting down");
+                        break;
+                    }
+                }
+            }
+        })
+    };
+
     // Spawn CA rotation background task (managed CAs only, every 24h or on API trigger)
     let ca_rotation_token = shutdown_token.child_token();
     let ca_rotation_handle = if ca_state.managed {
@@ -988,6 +1017,9 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Wait for cleanup task
     let _ = tokio::time::timeout(Duration::from_secs(5), oidc_cleanup_handle).await;
+
+    // Wait for settings reload task
+    let _ = tokio::time::timeout(Duration::from_secs(5), settings_reload_handle).await;
 
     // Wait for CA rotation task
     if let Some(h) = ca_rotation_handle {

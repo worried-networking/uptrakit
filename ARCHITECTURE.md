@@ -160,7 +160,7 @@ This ensures that settings persist across restarts without requiring CLI flags a
 
 **Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--oidc-*` (OIDC bootstrap flags write directly to the `oidc_providers` table).
 
-The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for each settings group, allowing runtime-changeable settings to take effect immediately without restart. See [AGENTS.md](AGENTS.md) section "DB-managed settings" for the full key reference.
+The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for each settings group, allowing runtime-changeable settings to take effect immediately without restart. In multi-instance deployments, a version-gated periodic reload (every 30s) detects cross-instance changes via the `settings_version` table and triggers a full reload only when version counters differ. See [AGENTS.md](AGENTS.md) section "DB-managed settings" for the full key reference.
 
 ## Authentication & Authorization
 
@@ -199,9 +199,9 @@ SeaORM provides a multi-backend abstraction layer. The controller supports:
 
 ### Entities
 
-The data model comprises 28 entities in `crates/shared/db/src/entity/`:
+The data model comprises 29 entities in `crates/shared/db/src/entity/`:
 
-`api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
+`api_rate_limit`, `api_token`, `auth_method`, `available_version`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `settings_version`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `service_host` junction table models the many-to-many relationship between services and hosts, enabling automatic host matching across service re-enrollments and hostname changes.
 

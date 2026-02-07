@@ -384,6 +384,7 @@ The following tables have a `tenant_id UUID NOT NULL` column with a FK to `tenan
 | `user_roles` | PK `(user_id, role_id)` → `(tenant_id, user_id, role_id)` |
 | `settings` | PK `(key)` → `(tenant_id, key)` |
 | `mqtt_clients` | Non-unique index on `tenant_id` (multiple clients per tenant, limit controlled by `MqttMaxClientsPerTenant` global setting) |
+| `settings_version` | PK `tenant_id` (one row per tenant, version counters for cross-instance cache invalidation) |
 
 ### Tables NOT changed (remain global)
 
@@ -563,6 +564,30 @@ For each DB-managed setting at startup:
 ### In-memory settings
 
 The `Settings` struct (`crates/ui/web-api/src/settings.rs`) holds `NetworkSettings` behind a `RwLock`. Runtime-changeable fields (proxies, header, SANs) are updated in-memory immediately when changed via the API. Restart-required fields (addresses) are saved to DB only.
+
+#### Cross-instance cache synchronisation
+
+In multi-instance deployments (multiple controllers sharing one DB behind a load balancer), the in-memory settings cache is invalidated cross-instance via a **version-gated periodic reload**. The `settings_version` table stores per-tenant rows with two version counters:
+
+| Column | Type | Purpose |
+| --- | --- | --- |
+| `tenant_id` | UUID PK (FK → tenants) | Tenant identifier |
+| `version` | BIGINT | Per-tenant settings version (bumped on per-tenant setting changes) |
+| `global_version` | BIGINT | Global settings version (bumped on ALL rows when a global setting changes) |
+| `updated_at` | TIMESTAMP | Last update timestamp |
+
+**Write semantics:** `upsert_setting()` and `delete_setting()` call `bump_settings_version()` after each write. `SettingKey::is_global()` determines which counter to bump.
+
+**Read semantics:** A background task (every 30s) calls `Settings::check_version_and_reload()`, which reads a single row and compares both counters with cached `AtomicI64` values. A full reload (`reload_from_db()`) only happens when either version differs.
+
+**Key files:**
+
+| File | Purpose |
+| --- | --- |
+| `crates/core/controller/src/migration/m20260207_000022_create_settings_version.rs` | Migration |
+| `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity |
+| `crates/ui/web-api/src/settings_store.rs` | `bump_settings_version()`, `get_settings_versions()` |
+| `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |
 
 ### Settings API endpoints
 

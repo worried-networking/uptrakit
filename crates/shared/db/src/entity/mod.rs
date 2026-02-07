@@ -21,6 +21,7 @@ pub mod service_certificate;
 pub mod service_host;
 pub mod session;
 pub mod setting;
+pub mod settings_version;
 pub mod software_item;
 pub mod tenant;
 pub mod update_history;

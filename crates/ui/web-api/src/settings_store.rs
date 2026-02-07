@@ -3,9 +3,12 @@ use std::collections::HashMap;
 use crate::SettingKey;
 use crate::auth::Result;
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter, Set,
+    sea_query::Expr,
+};
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{prelude::*, setting};
+use uptrakit_shared_db::entity::{prelude::*, setting, settings_version};
 use uuid::Uuid;
 
 /// All settings from the DB, keyed by setting name.
@@ -72,6 +75,11 @@ pub async fn upsert_setting(
         model.insert(db).await.context_to()?;
     }
 
+    // Bump the version counter (non-fatal on failure)
+    if let Err(e) = bump_settings_version(db, tenant_id, key.is_global()).await {
+        tracing::warn!(error = ?e, key = db_key, "failed to bump settings version counter");
+    }
+
     Ok(())
 }
 
@@ -98,5 +106,82 @@ pub async fn delete_setting(
         .exec(db)
         .await
         .context_to()?;
+
+    // Bump the version counter (non-fatal on failure)
+    if let Err(e) = bump_settings_version(db, tenant_id, key.is_global()).await {
+        tracing::warn!(
+            error = ?e,
+            key = key.as_str(),
+            "failed to bump settings version counter"
+        );
+    }
+
     Ok(())
+}
+
+/// Bump the settings version counter after a settings write.
+///
+/// If `is_global` is true, increments `global_version` on ALL tenant rows.
+/// If false, increments `version` on the specific tenant's row only.
+/// Non-fatal on failure: callers should log and continue.
+pub async fn bump_settings_version(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    is_global: bool,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    if is_global {
+        // Increment global_version on ALL rows
+        SettingsVersion::update_many()
+            .col_expr(
+                settings_version::Column::GlobalVersion,
+                Expr::col(settings_version::Column::GlobalVersion).add(1),
+            )
+            .col_expr(settings_version::Column::UpdatedAt, Expr::value(now))
+            .exec(db)
+            .await
+            .context_to()?;
+    } else {
+        // Increment version on just this tenant's row
+        let result = SettingsVersion::update_many()
+            .col_expr(
+                settings_version::Column::Version,
+                Expr::col(settings_version::Column::Version).add(1),
+            )
+            .col_expr(settings_version::Column::UpdatedAt, Expr::value(now))
+            .filter(settings_version::Column::TenantId.eq(tenant_id))
+            .exec(db)
+            .await
+            .context_to()?;
+
+        // Defensive: if the row didn't exist (tenant created after migration), insert it
+        if result.rows_affected == 0 {
+            let model = settings_version::ActiveModel {
+                tenant_id: Set(tenant_id),
+                version: Set(1),
+                global_version: Set(0),
+                updated_at: Set(now),
+            };
+            model.insert(db).await.context_to()?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Read both version counters for a tenant.
+///
+/// Returns `(version, global_version)`.
+pub async fn get_settings_versions(db: &DatabaseConnection, tenant_id: Uuid) -> Result<(i64, i64)> {
+    let row = SettingsVersion::find_by_id(tenant_id)
+        .one(db)
+        .await
+        .context_to()?;
+
+    match row {
+        Some(model) => Ok((model.version, model.global_version)),
+        // No row yet — treat as (0, 0)
+        None => Ok((0, 0)),
+    }
 }
