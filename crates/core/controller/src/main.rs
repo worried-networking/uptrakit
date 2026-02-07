@@ -581,6 +581,12 @@ async fn run(args: cli::Args) -> Result<()> {
     // Create CA rotation trigger (used by the rotate-ca API endpoint)
     let ca_rotation_trigger = Arc::new(tokio::sync::Notify::const_new());
 
+    // Read initial revocation version for CRL version-gated polling
+    let initial_revocation_version =
+        uptrakit_web_api::settings_store::get_revocation_version(&db_conn, default_tenant_id)
+            .await
+            .context(AppError::Settings)?;
+
     // Build initial CRLs from DB before server starts
     let crl_pem_cache = Arc::new(tokio::sync::RwLock::new(String::new()));
     let (initial_crls, initial_crl_pem) = crl_manager::build_initial_crls(&db_conn, &ca_snapshot)
@@ -610,6 +616,8 @@ async fn run(args: cli::Args) -> Result<()> {
                 rustls_config: rustls_config.clone(),
                 revocation_notify: Arc::clone(&revocation_notify),
                 crl_pem_cache: Arc::clone(&crl_pem_cache),
+                default_tenant_id,
+                initial_revocation_version,
             },
             &ca_snapshot,
         )

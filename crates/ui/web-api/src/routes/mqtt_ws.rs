@@ -273,6 +273,9 @@ pub(crate) async fn handle_mqtt_authenticated(
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
+                                        if let Err(e) = crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await {
+                                            tracing::warn!(error = ?e, "failed to bump revocation version counter");
+                                        }
                                         state.revocation_notify.notify_one();
                                         tracing::info!(%service_id, old_serial = %cert_serial, "MQTT service certificate renewed, old cert revoked");
                                         let _ = close_with_reason(sink, "certificate rotated").await;

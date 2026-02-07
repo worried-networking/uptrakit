@@ -8,6 +8,7 @@ pub struct Model {
     pub tenant_id: Uuid,
     pub version: i64,
     pub global_version: i64,
+    pub revocation_version: i64,
     pub updated_at: OffsetDateTime,
 }
 

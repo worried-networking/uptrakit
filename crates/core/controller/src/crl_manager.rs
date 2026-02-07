@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use rcgen::{
     CertificateRevocationListParams, Issuer, KeyIdMethod, KeyPair, RevokedCertParams, SerialNumber,
@@ -20,6 +20,8 @@ pub struct CrlManagerConfig {
     pub rustls_config: axum_server::tls_rustls::RustlsConfig,
     pub revocation_notify: Arc<Notify>,
     pub crl_pem_cache: Arc<tokio::sync::RwLock<String>>,
+    pub default_tenant_id: uuid::Uuid,
+    pub initial_revocation_version: i64,
 }
 
 /// Mutable CA material that can be updated at runtime when the CA rotates.
@@ -37,6 +39,7 @@ struct CaIssuers {
 pub struct CrlManager {
     config: CrlManagerConfig,
     crl_number: AtomicU64,
+    cached_revocation_version: AtomicI64,
     issuers: RwLock<CaIssuers>,
     server_cert: RwLock<(String, String)>,
 }
@@ -94,10 +97,12 @@ impl CrlManager {
 
         let server_cert_pem = config.server_cert_pem.clone();
         let server_key_pem = config.server_key_pem.clone();
+        let initial_revocation_version = config.initial_revocation_version;
 
         Ok(Self {
             config,
             crl_number: AtomicU64::new(1),
+            cached_revocation_version: AtomicI64::new(initial_revocation_version),
             issuers: RwLock::new(CaIssuers {
                 active: active_issuer,
                 active_fingerprint: snapshot.active_fingerprint.clone(),
@@ -190,12 +195,17 @@ impl CrlManager {
         Ok(())
     }
 
-    /// Background task: rebuilds CRL on revocation events or periodic timer.
+    /// Background task: rebuilds CRL on revocation events or version-gated periodic poll.
+    ///
+    /// Uses a 60-second poll to check the `revocation_version` counter in the database.
+    /// If the version is unchanged, the CRL rebuild is skipped. This enables cross-instance
+    /// revocation propagation in multi-instance deployments while keeping the local `Notify`
+    /// for instant same-instance rebuilds.
     ///
     /// Accepts an optional `CancellationToken` for graceful shutdown. When the
     /// token is cancelled, the task exits cleanly.
     pub async fn run(self: Arc<Self>, shutdown_token: Option<tokio_util::sync::CancellationToken>) {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         // The first tick completes immediately — skip it since we already
         // built the initial CRL synchronously before starting.
         interval.tick().await;
@@ -203,10 +213,28 @@ impl CrlManager {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    tracing::debug!("periodic CRL refresh");
+                    // Check DB version — only rebuild if changed
+                    match uptrakit_web_api::settings_store::get_revocation_version(
+                        &self.config.db, self.config.default_tenant_id,
+                    ).await {
+                        Ok(db_ver) => {
+                            let cached = self.cached_revocation_version.load(Ordering::Relaxed);
+                            if db_ver == cached {
+                                tracing::debug!("revocation version unchanged, skipping CRL rebuild");
+                                continue;
+                            }
+                            tracing::info!(cached, db_ver, "revocation version changed, rebuilding CRL");
+                            self.cached_revocation_version.store(db_ver, Ordering::Release);
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = ?e, "failed to check revocation version, forcing CRL rebuild");
+                        }
+                    }
                 }
                 _ = self.config.revocation_notify.notified() => {
-                    tracing::debug!("CRL rebuild triggered by revocation event");
+                    tracing::debug!("CRL rebuild triggered by local revocation event");
+                    // Optimistic version bump to avoid redundant rebuild on next poll
+                    self.cached_revocation_version.fetch_add(1, Ordering::Release);
                 }
                 _ = async {
                     if let Some(ref token) = shutdown_token {

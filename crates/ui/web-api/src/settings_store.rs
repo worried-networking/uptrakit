@@ -161,6 +161,7 @@ pub async fn bump_settings_version(
                 tenant_id: Set(tenant_id),
                 version: Set(1),
                 global_version: Set(0),
+                revocation_version: Set(0),
                 updated_at: Set(now),
             };
             model.insert(db).await.context_to()?;
@@ -183,5 +184,52 @@ pub async fn get_settings_versions(db: &DatabaseConnection, tenant_id: Uuid) -> 
         Some(model) => Ok((model.version, model.global_version)),
         // No row yet — treat as (0, 0)
         None => Ok((0, 0)),
+    }
+}
+
+/// Atomically bump the revocation version counter after a certificate revocation.
+///
+/// Non-fatal on failure: callers should log and continue.
+pub async fn bump_revocation_version(db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    let result = SettingsVersion::update_many()
+        .col_expr(
+            settings_version::Column::RevocationVersion,
+            Expr::col(settings_version::Column::RevocationVersion).add(1),
+        )
+        .col_expr(settings_version::Column::UpdatedAt, Expr::value(now))
+        .filter(settings_version::Column::TenantId.eq(tenant_id))
+        .exec(db)
+        .await
+        .context_to()?;
+
+    // Defensive: if the row didn't exist (tenant created after migration), insert it
+    if result.rows_affected == 0 {
+        let model = settings_version::ActiveModel {
+            tenant_id: Set(tenant_id),
+            version: Set(0),
+            global_version: Set(0),
+            revocation_version: Set(1),
+            updated_at: Set(now),
+        };
+        model.insert(db).await.context_to()?;
+    }
+
+    Ok(())
+}
+
+/// Read the revocation version counter for a tenant.
+///
+/// Returns `0` if no row exists yet.
+pub async fn get_revocation_version(db: &DatabaseConnection, tenant_id: Uuid) -> Result<i64> {
+    let row = SettingsVersion::find_by_id(tenant_id)
+        .one(db)
+        .await
+        .context_to()?;
+
+    match row {
+        Some(model) => Ok(model.revocation_version),
+        None => Ok(0),
     }
 }

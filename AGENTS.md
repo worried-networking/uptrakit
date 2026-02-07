@@ -574,20 +574,31 @@ In multi-instance deployments (multiple controllers sharing one DB behind a load
 | `tenant_id` | UUID PK (FK → tenants) | Tenant identifier |
 | `version` | BIGINT | Per-tenant settings version (bumped on per-tenant setting changes) |
 | `global_version` | BIGINT | Global settings version (bumped on ALL rows when a global setting changes) |
+| `revocation_version` | BIGINT | Revocation version (bumped on every certificate revocation for cross-instance CRL propagation) |
 | `updated_at` | TIMESTAMP | Last update timestamp |
 
-**Write semantics:** `upsert_setting()` and `delete_setting()` call `bump_settings_version()` after each write. `SettingKey::is_global()` determines which counter to bump.
+**Write semantics:** `upsert_setting()` and `delete_setting()` call `bump_settings_version()` after each write. `SettingKey::is_global()` determines which counter to bump. Certificate revocation sites call `bump_revocation_version()` before the local `Notify`.
 
-**Read semantics:** A background task (every 30s) calls `Settings::check_version_and_reload()`, which reads a single row and compares both counters with cached `AtomicI64` values. A full reload (`reload_from_db()`) only happens when either version differs.
+**Read semantics:** A background task (every 30s) calls `Settings::check_version_and_reload()`, which reads a single row and compares both counters with cached `AtomicI64` values. A full reload (`reload_from_db()`) only happens when either version differs. The CRL manager polls `revocation_version` every 60s to detect cross-instance revocations (see below).
+
+#### Cross-instance CRL propagation
+
+The `CrlManager` uses a version-gated 60-second poll on `revocation_version` to detect certificate revocations made by other controller instances. Each revocation site bumps `revocation_version` in the database and fires the local `Notify`. The CRL manager:
+
+- **Local revocation:** Instant rebuild via `revocation_notify` + optimistic cached version bump.
+- **Cross-instance revocation:** Detected within 60s via the version poll. If the DB version differs from the cached version, CRL is rebuilt.
+- **Fallback:** If the version check fails, the CRL rebuild is forced (fail-safe).
 
 **Key files:**
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/controller/src/migration/m20260207_000022_create_settings_version.rs` | Migration |
+| `crates/core/controller/src/migration/m20260207_000022_create_settings_version.rs` | Settings version table migration |
+| `crates/core/controller/src/migration/m20260207_000023_add_revocation_version.rs` | Adds `revocation_version` column |
 | `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity |
-| `crates/ui/web-api/src/settings_store.rs` | `bump_settings_version()`, `get_settings_versions()` |
+| `crates/ui/web-api/src/settings_store.rs` | `bump_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
 | `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |
+| `crates/core/controller/src/crl_manager.rs` | Version-gated CRL rebuild loop |
 
 ### Settings API endpoints
 

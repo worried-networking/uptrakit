@@ -413,6 +413,11 @@ pub async fn deactivate_service(
         tracing::error!("Failed to revoke certificates: {}", e);
     }
 
+    if let Err(e) =
+        crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await
+    {
+        tracing::warn!(error = ?e, "failed to bump revocation version counter");
+    }
     state.revocation_notify.notify_one();
 
     // Terminate active WebSocket connection
@@ -571,6 +576,11 @@ pub async fn merge_service(
         }
     }
 
+    if let Err(e) =
+        crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await
+    {
+        tracing::warn!(error = ?e, "failed to bump revocation version counter");
+    }
     state.revocation_notify.notify_one();
 
     // Copy source's enrollment_secret_hash to target
