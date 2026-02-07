@@ -53,6 +53,32 @@ pub struct RegistrationSettings {
 }
 
 impl RegistrationSettings {
+    /// Build from pre-fetched settings map without DB writes.
+    ///
+    /// Used by the periodic settings reload task to refresh the in-memory cache
+    /// without re-running the initial-setup token generation logic.
+    pub fn from_raw(raw: &RawSettings) -> Self {
+        let mode = raw
+            .get_setting(SettingKey::RegistrationMode)
+            .and_then(|v| v.as_str().and_then(|s| s.parse::<RegistrationMode>().ok()))
+            .unwrap_or(RegistrationMode::Closed);
+
+        let token_hash = raw
+            .get_setting(SettingKey::RegistrationTokenHash)
+            .and_then(|v| v.as_str().map(String::from));
+
+        let require_token_for_oidc = raw
+            .get_setting(SettingKey::RegistrationRequireTokenForOidc)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        Self {
+            mode,
+            token_hash,
+            require_token_for_oidc,
+        }
+    }
+
     /// Load from DB or generate initial invite token (if no users exist).
     ///
     /// - If no users exist: generate a new invite token, store/overwrite it, return
@@ -96,26 +122,7 @@ impl RegistrationSettings {
             Ok((settings, Some(plaintext)))
         } else {
             // Read from pre-fetched map
-            let mode = raw
-                .get_setting(SettingKey::RegistrationMode)
-                .and_then(|v| v.as_str().and_then(|s| s.parse::<RegistrationMode>().ok()))
-                .unwrap_or(RegistrationMode::Closed);
-
-            let token_hash = raw
-                .get_setting(SettingKey::RegistrationTokenHash)
-                .and_then(|v| v.as_str().map(String::from));
-
-            let require_token_for_oidc = raw
-                .get_setting(SettingKey::RegistrationRequireTokenForOidc)
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-
-            let settings = RegistrationSettings {
-                mode,
-                token_hash,
-                require_token_for_oidc,
-            };
-            Ok((settings, None))
+            Ok((Self::from_raw(raw), None))
         }
     }
 

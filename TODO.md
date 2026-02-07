@@ -848,6 +848,7 @@ Items to consider for future versions but not currently prioritized:
   - [ ] API token scoping per tenant
 - [ ] Agent clustering
 - [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready)
+  - [x] Periodic settings cache reload (every 30s) for cross-instance consistency
 - [ ] Update preview/dry-run mode
 - [ ] Cost tracking for cloud-based updates
 - [ ] Compliance reporting (update audit trails)

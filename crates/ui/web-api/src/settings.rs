@@ -213,6 +213,55 @@ impl Settings {
         }
     }
 
+    /// Reload all settings from the database and update the in-memory cache.
+    ///
+    /// This is used by the periodic reload task to keep the cache fresh across
+    /// multiple controller instances. Unlike [`load`](Self::load), this method
+    /// does *not* run the initial-setup token generation logic — it only reads
+    /// the current DB state and updates the RwLock-protected fields.
+    pub async fn reload_from_db(
+        &self,
+        db: &DatabaseConnection,
+        tenant_id: Uuid,
+    ) -> auth::Result<()> {
+        let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
+
+        // Registration (read-only parse, no first-user logic)
+        let registration = RegistrationSettings::from_raw(&raw);
+        *self.inner.registration.write().await = registration;
+
+        // Authentication
+        let authentication = AuthenticationSettings::from_raw(&raw);
+        *self.inner.authentication.write().await = authentication;
+
+        // Agent certificate lifetime
+        let agent_cert_lifetime_days = raw
+            .get_setting(SettingKey::AgentCertLifetimeDays)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
+        *self.inner.agent_cert_lifetime_days.write().await = agent_cert_lifetime_days;
+
+        // Renewal window
+        let renewal_window_hours = raw
+            .get_setting(SettingKey::AgentCertRenewalWindowHours)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
+        *self.inner.renewal_window_hours.write().await = renewal_window_hours;
+
+        // Network settings
+        let network = Self::load_network_settings(&raw);
+        *self.inner.network.write().await = network;
+
+        // MQTT max clients per tenant
+        let mqtt_max_clients_per_tenant = raw
+            .get_setting(SettingKey::MqttMaxClientsPerTenant)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
+        *self.inner.mqtt_max_clients_per_tenant.write().await = mqtt_max_clients_per_tenant;
+
+        Ok(())
+    }
+
     // --- Registration ---
 
     /// Read registration settings (acquires read lock, returns clone).
