@@ -472,7 +472,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **TOP 5 Priority** — The five most impactful issues are marked with detailed implementation-ready fix plans below. Remaining issues have concise plans.
+> **TOP 10 Priority** — The ten most impactful issues are marked with detailed implementation-ready fix plans below. Remaining issues have concise plans.
 
 ---
 
@@ -910,47 +910,540 @@ impl ServerCertVerifier for AcceptAnyCert {
 
 ---
 
+### FP-CR6: Require auth on logout (TOP 5 — #6)
+
+**Addresses:** CR-6 (Critical — authorization bypass on session revocation)
+
+**Problem:** The `logout` route is registered alongside `register`, `login`, and `refresh` in the public (unauthenticated) router group in `web-api/src/lib.rs:437`. It is NOT inside the `auth_routes` group that has `require_auth` middleware. Any unauthenticated caller can revoke any valid refresh token by providing its value.
+
+**Current router setup (`web-api/src/lib.rs:434-448`):**
+```rust
+let (api_router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+    .routes(routes!(routes::auth::register))
+    .routes(routes!(routes::auth::login))
+    .routes(routes!(routes::auth::logout))      // ← PUBLIC — no auth!
+    .routes(routes!(routes::auth::refresh))
+    .merge(auth_routes)                          // ← auth_routes has require_auth
+    .split_for_parts();
+```
+
+**Current logout handler (`web-api/src/routes/auth.rs:307-321`):**
+```rust
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<LogoutRequest>,
+) -> Response {
+    let session_service = SessionService::new(state.db.clone());
+    if let Err(e) = session_service
+        .revoke_refresh_token(&req.refresh_token)
+        .await
+    {
+        tracing::error!("Failed to revoke refresh token: {:?}", e);
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+```
+
+**Issues:**
+1. No `AuthenticatedUser` extraction — handler doesn't know who is calling
+2. Accepts any refresh token from request body with no ownership verification
+3. Returns 204 even on failure — silent error swallowing
+4. An attacker with a leaked token can revoke it to deny service to the legitimate user
+
+**Detailed implementation plan:**
+
+1. **Move the `logout` route into the `auth_routes` group** (`web-api/src/lib.rs`):
+   ```rust
+   let auth_routes = OpenApiRouter::new()
+       .routes(routes!(routes::auth::logout))   // ← Move here
+       .routes(routes!(routes::auth::me))
+       // ... other authenticated routes ...
+       .route_layer(axum_mw::from_fn_with_state(
+           Arc::clone(&state),
+           middleware::require_auth::require_auth,
+       ));
+   ```
+
+2. **Update the handler to require authentication and validate ownership:**
+   ```rust
+   pub async fn logout(
+       State(state): State<Arc<AppState>>,
+       Extension(user): Extension<AuthenticatedUser>,
+       Json(req): Json<LogoutRequest>,
+   ) -> Response {
+       let session_service = SessionService::new(state.db.clone());
+
+       // Verify the refresh token belongs to the authenticated user
+       match session_service.verify_refresh_token(&req.refresh_token).await {
+           Ok(verified) if verified.user_id == user.user_id => {
+               if let Err(e) = session_service
+                   .revoke_refresh_token(&req.refresh_token)
+                   .await
+               {
+                   tracing::error!(user_id = %user.user_id, "Failed to revoke refresh token: {e:?}");
+                   return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to logout");
+               }
+           }
+           Ok(_) => {
+               // Token belongs to a different user
+               return error_response(StatusCode::FORBIDDEN, "Token does not belong to this user");
+           }
+           Err(_) => {
+               // Token is invalid/expired/already revoked — still return success
+               // (idempotent logout)
+           }
+       }
+
+       StatusCode::NO_CONTENT.into_response()
+   }
+   ```
+
+3. **Update OpenAPI spec** to reflect that logout now requires `Authorization: Bearer` header.
+
+4. **Frontend update:** Ensure the logout call sends the access token in the `Authorization` header alongside the refresh token in the body.
+
+**Files to modify:**
+- `crates/ui/web-api/src/lib.rs` — move route registration
+- `crates/ui/web-api/src/routes/auth.rs` — add `Extension(user)`, validate ownership
+
+**Testing:**
+- Unit test: unauthenticated logout returns 401
+- Unit test: logout with someone else's token returns 403
+- Unit test: logout with own valid token returns 204 and revokes session
+- Unit test: logout with already-revoked token returns 204 (idempotent)
+
+---
+
+### FP-CR4: Restrict tenant context header (TOP 5 — #7)
+
+**Addresses:** CR-4 (Critical — tenant isolation bypass, latent until multi-tenancy)
+
+**Problem:** The `TenantContext` Axum extractor (`web-api/src/middleware/tenant_context.rs:29-51`) reads the `X-Tenant-Id` header from any request and uses it directly as the tenant ID — with NO authorization check. Any client (authenticated or not) can set this header to any UUID. All 40+ route handlers across 7 route modules use `TenantContext` to scope database queries.
+
+**Current extractor:**
+```rust
+impl FromRequestParts<Arc<AppState>> for TenantContext {
+    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {
+        if let Some(header_val) = parts.headers.get("x-tenant-id") {
+            let tenant_id = header_val.to_str()?.parse::<Uuid>()?;
+            return Ok(TenantContext { tenant_id });    // ← No auth check!
+        }
+        Ok(TenantContext { tenant_id: state.default_tenant_id })
+    }
+}
+```
+
+**Current risk:** In single-tenant mode, the risk is limited because there's only one tenant with data. But if multi-tenancy is ever activated, this becomes a complete tenant isolation bypass — any user can read/modify any tenant's data by setting the header.
+
+**An additional concern:** `require_auth` middleware always fetches permissions for `state.default_tenant_id` (hardcoded), not for the tenant in the request. This means even if a user has no permissions in tenant B, they'd still pass the permission check because permissions are loaded for the default tenant.
+
+**Detailed implementation plan:**
+
+1. **Immediate fix (single-tenant mode):** Ignore the `X-Tenant-Id` header entirely:
+   ```rust
+   impl FromRequestParts<Arc<AppState>> for TenantContext {
+       async fn from_request_parts(
+           parts: &mut Parts,
+           state: &Arc<AppState>,
+       ) -> Result<Self, Self::Rejection> {
+           // In single-tenant mode, always use the default tenant.
+           // Log if someone sends the header (could indicate misconfiguration or probing).
+           if parts.headers.get("x-tenant-id").is_some() {
+               tracing::warn!(
+                   "X-Tenant-Id header ignored in single-tenant mode"
+               );
+           }
+           Ok(TenantContext {
+               tenant_id: state.default_tenant_id,
+           })
+       }
+   }
+   ```
+
+2. **Future multi-tenant preparation (design only, not implemented now):**
+   - `require_auth` middleware must resolve the tenant from the request (header or path) and fetch the user's roles/permissions for **that** tenant
+   - `AuthenticatedUser` should include a `tenant_ids: Vec<Uuid>` field listing authorized tenants
+   - `TenantContext` extractor should verify `tenant_id ∈ auth_user.tenant_ids`
+   - Unauthenticated endpoints (login, register) always use the default tenant
+
+3. **Add a `multi_tenant` feature flag** to the `web-api` crate. The header-based tenant switching code should only compile when the flag is active. This prevents accidental re-introduction.
+
+**Files to modify:**
+- `crates/ui/web-api/src/middleware/tenant_context.rs` — ignore header, log warning
+
+**Testing:**
+- Unit test: request with `X-Tenant-Id` header returns data from `default_tenant_id` (not the header value)
+- Unit test: warning is logged when header is present
+
+---
+
+### FP-HI2: Wrap service merge in transaction (TOP 5 — #8)
+
+**Addresses:** HI-2 (High — irrecoverable data corruption on partial failure)
+
+**Problem:** The `merge_service` handler in `web-api/src/routes/services.rs:455-635` performs 9+ sequential database operations without a transaction. A failure partway through leaves the system in an inconsistent state: the source service may be deactivated and its certificates revoked, but the target service was never updated with the source's data, and host links were never copied.
+
+**Current operation sequence (all separate auto-committed writes):**
+```
+1. SELECT target service
+2. SELECT source service
+3. UPDATE source service → deactivate, invalidate enrollment hash     ← FIRST WRITE
+4. UPDATE service_certificates → revoke source certs                  ← errors only logged
+5. UPDATE service_certificates → revoke target certs                  ← errors only logged
+6. UPDATE settings_version → bump revocation counter                  ← errors only logged
+7. UPDATE target service → copy hostname, IP, enrollment secret       ← returns 500 on error
+8. SELECT source host links
+9. For each link: SELECT + INSERT → copy to target                    ← errors only logged
+```
+
+**Failure scenario (e.g., failure at step 7):**
+- Source is deactivated (step 3) — cannot reconnect
+- Source + target certificates revoked (steps 4-5) — agents lose mTLS
+- Target not updated (step 7 failed) — lost enrollment secret, hostname, IP
+- Host links not copied (step 9 never ran) — host associations lost
+- **Result:** Both services are broken with no automatic recovery path
+
+**Detailed implementation plan:**
+
+1. **Wrap all operations in a single transaction:**
+   ```rust
+   pub async fn merge_service(
+       State(state): State<Arc<AppState>>,
+       tenant: TenantContext,
+       Extension(user): Extension<AuthenticatedUser>,
+       Path(target_id): Path<String>,
+       Json(body): Json<MergeAgentRequest>,
+   ) -> Response {
+       // ... validation, UUID parsing ...
+
+       let txn = match state.db.begin().await {
+           Ok(txn) => txn,
+           Err(e) => {
+               tracing::error!("Failed to begin transaction: {e}");
+               return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+           }
+       };
+
+       // All DB operations use &txn instead of &state.db
+       let target = Service::find_by_id(target_uuid)
+           .filter(service::Column::TenantId.eq(tenant.tenant_id))
+           .filter(service::Column::DeactivatedAt.is_null())
+           .one(&txn).await;
+       // ... etc ...
+
+       // On any error, txn is dropped → automatic rollback
+       // Only commit at the very end:
+       if let Err(e) = txn.commit().await {
+           tracing::error!("Failed to commit merge transaction: {e}");
+           return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+       }
+
+       // Post-commit side effects (notifications, cache invalidation)
+       state.revocation_notify.notify_one();
+
+       // Return success response
+   }
+   ```
+
+2. **Convert all error-swallowing log-and-continue patterns to early returns:**
+   Currently, certificate revocation errors (steps 4-5) and host link copy errors (step 9) are only logged. Inside a transaction, these should propagate errors so the entire operation rolls back:
+   ```rust
+   // Before (broken):
+   if let Err(e) = ServiceCertificate::update_many()...exec(&state.db).await {
+       tracing::error!("Failed to revoke certificates: {e}");
+       // continues anyway!
+   }
+
+   // After (correct):
+   ServiceCertificate::update_many()...exec(&txn).await
+       .map_err(|e| {
+           tracing::error!("Failed to revoke certificates during merge: {e}");
+           error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+       })?;
+   ```
+
+3. **Move side effects after commit:** The `revocation_notify.notify_one()` and any other notifications must happen AFTER `txn.commit()` succeeds, not inside the transaction. If they trigger before commit, other components may read stale data.
+
+4. **Add a `SELECT FOR UPDATE` on both source and target** to prevent concurrent merge operations on the same services:
+   ```rust
+   // SeaORM doesn't have native SELECT FOR UPDATE, use raw query or lock_exclusive()
+   let target = Service::find_by_id(target_uuid)
+       .lock_exclusive()  // SELECT ... FOR UPDATE
+       .one(&txn).await;
+   ```
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/services.rs` — wrap in transaction, propagate errors, move side effects
+
+**Testing:**
+- Unit test: successful merge commits all changes atomically
+- Unit test: failure at any step rolls back everything (source still active, certs not revoked)
+- Unit test: concurrent merges on the same service don't corrupt data
+
+---
+
+### FP-HI4: Cap certificate lifetime (TOP 5 — #9)
+
+**Addresses:** HI-4 (High — unlimited certificate validity)
+
+**Problem:** `sign_agent_csr()` in `controller/src/cert_signer.rs` accepts an arbitrary `time::Duration` for certificate lifetime with no upper bound. The lifetime originates from the `agent_cert_lifetime_days` setting, which is a `u16` validated only as `>= 1` — allowing up to 65,535 days (179 years). No validation exists at any layer in the chain.
+
+**Current flow:**
+```
+Admin API → settings.set_agent_cert_lifetime_days(days: u16)    // only validates >= 1
+           ↓
+Agent WS  → do_sign_csr() → Duration::days(settings.agent_cert_lifetime_days())
+           ↓
+Signer    → sign_agent_csr(lifetime) → not_after = now() + lifetime    // NO CAP
+```
+
+**Current code (`cert_signer.rs:49-95`):**
+```rust
+fn sign_agent_csr(
+    csr_pem: &str,
+    issuer: &Issuer<'_, KeyPair>,
+    agent_id: &Uuid,
+    lifetime: time::Duration,        // ← accepts anything
+    pki_addr: Option<&str>,
+) -> Result<SignedCertBundle, Report<CertSignerError>> {
+    // ...
+    let not_after = OffsetDateTime::now_utc() + lifetime;  // ← no cap
+    // ...
+}
+```
+
+**Security impact:** An admin (or compromised admin account) can set `lifetime_days = 65535`, producing certificates valid until ~2205. Such certificates:
+- Cannot be practically rotated (no expiry pressure)
+- Increase the blast radius of key compromise
+- Make CRL the sole revocation mechanism (CRLs have their own gaps — see ME-12)
+- Violate CA/Browser Forum and industry best practices
+
+**Detailed implementation plan:**
+
+1. **Add a constant and clamp in the cert signer (defense in depth):**
+   ```rust
+   /// Maximum certificate lifetime: 2 years (730 days).
+   /// Aligns with industry best practices and ensures regular key rotation.
+   const MAX_CERT_LIFETIME: time::Duration = time::Duration::days(730);
+
+   fn sign_agent_csr(
+       csr_pem: &str,
+       issuer: &Issuer<'_, KeyPair>,
+       agent_id: &Uuid,
+       lifetime: time::Duration,
+       pki_addr: Option<&str>,
+   ) -> Result<SignedCertBundle, Report<CertSignerError>> {
+       let capped = lifetime.min(MAX_CERT_LIFETIME);
+       if lifetime > MAX_CERT_LIFETIME {
+           tracing::warn!(
+               agent_id = %agent_id,
+               requested_days = lifetime.whole_days(),
+               capped_days = MAX_CERT_LIFETIME.whole_days(),
+               "Certificate lifetime capped to maximum allowed value"
+           );
+       }
+       // ...
+       let not_after = OffsetDateTime::now_utc() + capped;
+       // ...
+   }
+   ```
+
+2. **Also cap `not_after` to the CA's own `not_after`:**
+   A certificate should never outlive its issuing CA. Add:
+   ```rust
+   // Ensure cert doesn't outlive the CA
+   let ca_not_after = /* from snapshot */;
+   let not_after = not_after.min(ca_not_after);
+   ```
+
+3. **Add validation at the settings API layer:**
+   In `web-api/src/routes/settings_agent_certs.rs`, add a maximum check:
+   ```rust
+   if let Some(days) = req.lifetime_days {
+       if days < 1 {
+           return error_response(StatusCode::BAD_REQUEST, "Certificate lifetime must be at least 1 day");
+       }
+       if days > 730 {
+           return error_response(StatusCode::BAD_REQUEST, "Certificate lifetime must not exceed 730 days");
+       }
+       // ...
+   }
+   ```
+
+4. **Update the MQTT service certificate path** (`web-api/src/routes/mqtt_ws.rs:627-651`) — same `do_sign_mqtt_service_csr` flow uses the same setting, so the signer-level cap protects both paths.
+
+**Files to modify:**
+- `crates/core/controller/src/cert_signer.rs` — add `MAX_CERT_LIFETIME` constant, clamp + warn
+- `crates/ui/web-api/src/routes/settings_agent_certs.rs` — add maximum validation
+- `crates/shared/web-api-types/src/settings_agent_certs.rs` — document the maximum in field docs
+
+**Testing:**
+- Unit test: lifetime > 730 days is capped to 730
+- Unit test: lifetime <= 730 days passes through unchanged
+- Unit test: settings API rejects `lifetime_days > 730` with 400
+- Unit test: cert `not_after` never exceeds CA `not_after`
+
+---
+
+### FP-ME1: Implement refresh token rotation (TOP 5 — #10)
+
+**Addresses:** ME-1 (Medium — stolen refresh tokens remain usable for 7 days)
+
+**Problem:** When a refresh token is used at `POST /api/v1/auth/refresh`, the server verifies it and issues a new access token (JWT), but the refresh token itself is NOT rotated — the same token remains valid for its full 7-day lifetime. If stolen (via XSS, log exposure, or device theft), an attacker can silently maintain access for 7 days with no detection mechanism.
+
+**Current refresh flow (`web-api/src/routes/auth.rs:382-443`):**
+```rust
+pub async fn refresh(State(state): State<Arc<AppState>>, Json(req): Json<RefreshRequest>) -> Response {
+    let session_service = SessionService::new(state.db.clone());
+    let verified = session_service.verify_refresh_token(&req.refresh_token).await?;
+    // ... check user active, get permissions ...
+    let access_token = state.jwt.create_access_token(user.id, &permissions, ...)?;
+    // Returns ONLY new access token — refresh token unchanged
+    Json(RefreshResponse { access_token, expires_in, token_type })
+}
+```
+
+**Current `verify_refresh_token` (`web-api/src/auth/session.rs:62-92`):**
+```rust
+pub async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession> {
+    let hash = token::hash_token(token);
+    let session = Session::find()
+        .filter(session::Column::RefreshTokenHash.eq(&hash))
+        .one(&self.db).await?
+        .ok_or(AuthError::InvalidRefreshToken)?;
+    if session.revoked_at.is_some() { return Err(AuthError::RefreshTokenRevoked); }
+    if session.expires_at <= OffsetDateTime::now_utc() { return Err(AuthError::RefreshTokenExpired); }
+    Ok(VerifiedSession { user_id: session.user_id, auth_method: ... })
+}
+```
+
+**Security impact:** With no rotation, there is no way to detect token theft. Both the attacker and the legitimate user can independently refresh using the same token. Compare with rotation: if the attacker refreshes first, the old token is revoked, and the legitimate user's next refresh attempt fails — immediately signaling a breach.
+
+**Detailed implementation plan:**
+
+1. **Add `rotate_refresh_token()` method to `SessionService`:**
+   ```rust
+   /// Atomically rotate a refresh token: verify old → revoke old → create new.
+   /// Returns the verified session info and the new plaintext refresh token.
+   pub async fn rotate_refresh_token(
+       &self,
+       old_token: &str,
+       user_agent: Option<String>,
+       ip_address: Option<String>,
+   ) -> Result<(VerifiedSession, String)> {
+       let verified = self.verify_refresh_token(old_token).await?;
+
+       // Revoke the old token
+       self.revoke_refresh_token(old_token).await?;
+
+       // Create a new session with a fresh token
+       let new_token = self.create_refresh_token(
+           verified.user_id,
+           verified.auth_method.clone(),
+           user_agent,
+           ip_address,
+       ).await?;
+
+       Ok((verified, new_token))
+   }
+   ```
+
+2. **Add replay detection — revoke all sessions on reuse of revoked token:**
+   ```rust
+   pub async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession> {
+       let hash = token::hash_token(token);
+       let session = Session::find()
+           .filter(session::Column::RefreshTokenHash.eq(&hash))
+           .one(&self.db).await?
+           .ok_or(AuthError::InvalidRefreshToken)?;
+
+       if session.revoked_at.is_some() {
+           // REPLAY DETECTED: a revoked token was reused.
+           // This means the old token was stolen before rotation.
+           // Revoke ALL sessions for this user as a safety measure.
+           tracing::warn!(
+               user_id = %session.user_id,
+               "Revoked refresh token reused — revoking all sessions (possible token theft)"
+           );
+           self.revoke_all_user_sessions(session.user_id).await?;
+           return Err(report!(AuthError::RefreshTokenRevoked));
+       }
+
+       if session.expires_at <= OffsetDateTime::now_utc() {
+           return Err(report!(AuthError::RefreshTokenExpired));
+       }
+       Ok(VerifiedSession { user_id: session.user_id, auth_method: ... })
+   }
+
+   /// Revoke all active sessions for a user (nuclear option on token theft).
+   async fn revoke_all_user_sessions(&self, user_id: Uuid) -> Result<()> {
+       let now = OffsetDateTime::now_utc();
+       Session::update_many()
+           .col_expr(session::Column::RevokedAt, Expr::value(Some(now)))
+           .filter(session::Column::UserId.eq(user_id))
+           .filter(session::Column::RevokedAt.is_null())
+           .exec(&self.db)
+           .await
+           .context_to()?;
+       Ok(())
+   }
+   ```
+
+3. **Update the refresh endpoint to return the new token:**
+   ```rust
+   pub async fn refresh(
+       State(state): State<Arc<AppState>>,
+       Json(req): Json<RefreshRequest>,
+   ) -> Response {
+       let session_service = SessionService::new(state.db.clone());
+       let (verified, new_refresh_token) = match session_service
+           .rotate_refresh_token(&req.refresh_token, None, None)
+           .await
+       {
+           Ok(v) => v,
+           Err(_) => return error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token"),
+       };
+
+       // ... check user active, get permissions, create JWT ...
+
+       Json(RefreshResponse {
+           access_token,
+           refresh_token: new_refresh_token,    // NEW FIELD
+           expires_in: state.jwt.expires_in(),
+           token_type: "Bearer".to_string(),
+       }).into_response()
+   }
+   ```
+
+4. **Update `RefreshResponse` type:**
+   ```rust
+   pub struct RefreshResponse {
+       pub access_token: String,
+       pub refresh_token: String,    // ← ADD
+       pub expires_in: u64,
+       pub token_type: String,
+   }
+   ```
+
+5. **Frontend update:** The SvelteKit auth store must persist the new `refresh_token` from each refresh response, replacing the old one. This is a one-line change in the token refresh handler.
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/session.rs` — add `rotate_refresh_token()`, `revoke_all_user_sessions()`, replay detection in `verify_refresh_token()`
+- `crates/ui/web-api/src/routes/auth.rs` — call `rotate_refresh_token()`, return new token
+- `crates/shared/web-api-types/src/auth.rs` — add `refresh_token` field to `RefreshResponse`
+- `frontend/src/lib/` — update auth store to persist new refresh token
+
+**Testing:**
+- Unit test: rotation creates new token and revokes old one
+- Unit test: old token is invalid after rotation
+- Unit test: new token works after rotation
+- Unit test: reuse of revoked token triggers revocation of ALL user sessions
+- Unit test: concurrent rotation attempts — second attempt sees revoked token → triggers nuclear revoke
+- Integration test: full login → refresh (with rotation) → refresh (with new token) cycle
+
+---
+
 ### Remaining Fix Plans (concise)
-
-### FP-CR4: Restrict tenant context header
-
-**Addresses:** CR-4
-
-**Plan:** Ignore `X-Tenant-Id` header entirely in single-tenant mode. Always use `default_tenant_id`. Log a warning if the header is present.
-
-**Files:** `web-api/src/middleware/tenant_context.rs`
-
----
-
-### FP-CR6: Require auth on logout
-
-**Addresses:** CR-6
-
-**Plan:** Move `logout` route into the `auth_routes` group. Validate the refresh token belongs to the authenticated user's session.
-
-**Files:** `web-api/src/lib.rs`, `web-api/src/routes/auth.rs`
-
----
-
-### FP-HI2: Wrap merge in transaction
-
-**Addresses:** HI-2
-
-**Plan:** Wrap the entire merge operation in `db.begin()` / `txn.commit()`. On error, auto-rollback preserves consistency.
-
-**Files:** `web-api/src/routes/services.rs`
-
----
-
-### FP-HI4: Cap certificate lifetime
-
-**Addresses:** HI-4
-
-**Plan:** Add `MAX_AGENT_CERT_LIFETIME_DAYS = 730`. Clamp requested lifetime in `sign_agent_csr()`. Log warning on cap.
-
-**Files:** `controller/src/cert_signer.rs`
-
----
 
 ### FP-HI8: Fix FK cascade inconsistencies
 
@@ -979,16 +1472,6 @@ impl ServerCertVerifier for AcceptAnyCert {
 **Plan:** Add `/api/v1/auth/refresh` (10 req/min/IP) and `/api/v1/auth/device/approve` (5 req/min/IP) to `RATE_LIMITS`.
 
 **Files:** `web-api/src/middleware/rate_limit.rs`
-
----
-
-### FP-ME1: Implement refresh token rotation
-
-**Addresses:** ME-1
-
-**Plan:** On refresh: revoke old session, create new session with new token. On revoked token reuse: revoke all user sessions (replay detection).
-
-**Files:** `web-api/src/auth/session.rs`, `web-api/src/routes/auth.rs`
 
 ---
 
