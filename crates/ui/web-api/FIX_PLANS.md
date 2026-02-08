@@ -3159,3 +3159,687 @@ Or, since we always store the normalized form, the existing unique index on `ema
 | `src/auth/authentication.rs` | Normalize email in `resolve_oidc_user` |
 | `src/routes/oidc_auth.rs` | Normalize email in `oidc_link` |
 | Migration | Lowercase existing emails |
+
+---
+
+## Plan 31: M13 — assign_hosts Missing Tenant Check on Host
+
+### Problem
+
+`assign_hosts` (`src/routes/software_items.rs:666-669`) verifies that a host exists and is not deactivated, but the query has no `tenant_id` filter. A user authenticated in tenant A can assign hosts belonging to tenant B to a software item. The `trigger_update` endpoint correctly filters by `tenant_id`, making this inconsistency security-relevant.
+
+### Plan
+
+**Step 1 — Add tenant_id filter to the host existence check**
+
+The `TenantContext` is already extracted in the handler. Add the filter:
+
+```rust
+// Before (line 666-669):
+let host_exists = Host::find_by_id(host_id)
+    .filter(host::Column::DeactivatedAt.is_null())
+    .one(&state.db)
+    .await;
+
+// After:
+let host_exists = Host::find_by_id(host_id)
+    .filter(host::Column::TenantId.eq(tenant.tenant_id))
+    .filter(host::Column::DeactivatedAt.is_null())
+    .one(&state.db)
+    .await;
+```
+
+**Step 2 — Audit all host lookups for tenant filtering**
+
+Search for all `Host::find_by_id` and `Host::find()` calls and verify they include a `tenant_id` filter where the caller has a tenant context. Fix any that don't.
+
+**Step 3 — Tests**
+
+- Test that assigning a host from a different tenant returns 400 ("Host not found or deactivated").
+- Test that assigning a host from the same tenant succeeds.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/software_items.rs` | Add `tenant_id` filter to `assign_hosts` host lookup |
+
+---
+
+## Plan 32: M14 — MQTT Lease Takeover Without Authorization
+
+### Problem
+
+`reconcile_assignments` (`src/mqtt_lease_coordinator.rs:421-444`) allows any MQTT service instance to claim arbitrary MQTT client IDs and steal leases from other instances. When a different instance already holds a lease, the code unconditionally overwrites `instance_id` without verifying the requesting service has authorization to take over that client.
+
+### Plan
+
+**Step 1 — Add service_id to the lease table**
+
+Currently leases track `instance_id` (a string) but not which `service_id` (database entity) owns them. Add a `service_id` column to the `mqtt_leases` table:
+
+```sql
+ALTER TABLE mqtt_leases ADD COLUMN service_id UUID NOT NULL REFERENCES services(id);
+```
+
+**Step 2 — Verify service ownership during reconciliation**
+
+During `reconcile_assignments`, only allow a service to:
+a. Take leases for MQTT clients within its own tenant.
+b. Take over a stale lease (heartbeat expired) from another service.
+c. NOT take over an active lease from another healthy service.
+
+```rust
+} else {
+    // Different instance had the lease
+    let lease_age = now - existing.heartbeat_at;
+    let stale_threshold = time::Duration::seconds(60);
+
+    if lease_age > stale_threshold {
+        // Stale lease — safe to take over
+        let mut active = existing.clone().into_active_model();
+        active.instance_id = ActiveValue::Set(instance_id.to_string());
+        active.service_id = ActiveValue::Set(service_id);
+        active.heartbeat_at = ActiveValue::Set(now);
+        active.update(&txn).await.context(...)?;
+    } else {
+        // Active lease held by another instance — skip
+        tracing::debug!(
+            mqtt_client_id = %mqtt_client_id,
+            holder = %existing.instance_id,
+            "mqtt client lease held by healthy instance, skipping"
+        );
+        continue;
+    }
+}
+```
+
+**Step 3 — Verify tenant match for MQTT client IDs**
+
+Before claiming any MQTT client, verify that the client belongs to a tenant the requesting service is allowed to serve. The service's `tenant_id` must match the MQTT client's `tenant_id`:
+
+```rust
+let client = match clients.get(mqtt_client_id) {
+    Some(c) if c.tenant_id == service_tenant_id || service_tenant_id == default_tenant_id => c,
+    _ => continue,
+};
+```
+
+**Step 4 — Migration**
+
+Add the `service_id` column and backfill from existing leases (can set to NULL or drop stale leases during migration).
+
+**Step 5 — Tests**
+
+- Test that a service cannot take over an active lease from a healthy instance.
+- Test that a service CAN take over a stale lease (heartbeat expired).
+- Test that a service cannot claim MQTT clients from a different tenant.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/mqtt_lease_coordinator.rs` | Add ownership checks, stale-only takeover logic |
+| Migration | Add `service_id` column to `mqtt_leases` |
+| `crates/shared/db/src/entity/mqtt_lease.rs` | Add `service_id` field |
+
+---
+
+## Plan 33: M15 — Stale Lease Cleanup Does Not Notify In-Memory Registry
+
+### Problem
+
+`cleanup_stale_leases` (`src/mqtt_lease_coordinator.rs:323-335`) deletes expired leases from the database but does not update the in-memory `ServiceConnectionRegistry`. The registry still holds references to MQTT clients that were assigned to disconnected services, causing dual assignment when a new service tries to claim the same client.
+
+### Plan
+
+**Step 1 — Return the cleaned-up client assignments**
+
+Change `cleanup_stale_leases` to return which MQTT client IDs were freed and which services they belonged to:
+
+```rust
+pub async fn cleanup_stale_leases(
+    &self,
+    timeout: Duration,
+) -> Result<Vec<(Uuid, Uuid)>> {  // Vec<(mqtt_client_id, service_id)>
+    let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(timeout.as_secs() as i64);
+
+    // First, find the stale leases so we know what to clean up in the registry
+    let stale_leases = mqtt_lease::Entity::find()
+        .filter(mqtt_lease::Column::HeartbeatAt.lt(cutoff))
+        .all(&self.db)
+        .await
+        .context(LeaseCoordinatorError::Database("failed to find stale leases".into()))?;
+
+    let freed: Vec<(Uuid, Uuid)> = stale_leases
+        .iter()
+        .map(|l| (l.mqtt_client_id, l.service_id))
+        .collect();
+
+    // Delete them
+    if !freed.is_empty() {
+        mqtt_lease::Entity::delete_many()
+            .filter(mqtt_lease::Column::HeartbeatAt.lt(cutoff))
+            .exec(&self.db)
+            .await
+            .context(LeaseCoordinatorError::Database("failed to delete stale leases".into()))?;
+    }
+
+    Ok(freed)
+}
+```
+
+**Step 2 — Update the in-memory registry after cleanup**
+
+In the periodic cleanup task that calls `cleanup_stale_leases`, also release the assignments in the connection registry:
+
+```rust
+let freed = lease_coordinator.cleanup_stale_leases(timeout).await?;
+for (mqtt_client_id, service_id) in &freed {
+    connections.release_mqtt_client(service_id, mqtt_client_id).await;
+}
+if !freed.is_empty() {
+    tracing::info!(count = freed.len(), "released stale MQTT lease assignments from registry");
+}
+```
+
+**Step 3 — Tests**
+
+- Test that after stale cleanup, `get_instance_for_mqtt_client` returns `None` for freed clients.
+- Test that `assigned_mqtt_client_count` decreases after cleanup.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/mqtt_lease_coordinator.rs` | Return freed assignments from `cleanup_stale_leases` |
+| Periodic task caller | Update connection registry with freed assignments |
+
+---
+
+## Plan 34: M16 — OCSP Hardcoded to ECDSA P-256
+
+### Problem
+
+`sign_response` (`src/ocsp.rs:331-335`) hardcodes `ECDSA_P256_SHA256_ASN1_SIGNING` for signing OCSP responses. If the CA uses RSA or P-384, OCSP signing fails entirely, returning malformed responses for all revocation checks.
+
+### Plan
+
+**Step 1 — Detect the CA key type and select the appropriate algorithm**
+
+Parse the CA private key to determine its type and select the matching signing algorithm:
+
+```rust
+fn sign_response(response_data: &ResponseData, key_pem: &str) -> OcspResult<Vec<u8>> {
+    let tbs_der = response_data
+        .to_der()
+        .map_err(|e| report!(OcspError::DerEncode(e.to_string())))?;
+
+    let key_der = pem_to_der_key(key_pem)?;
+
+    // Detect key type and sign accordingly
+    let (signature_bytes, algorithm_oid) = sign_with_detected_algorithm(&key_der, &tbs_der)?;
+
+    let signature = BitString::from_bytes(&signature_bytes)
+        .map_err(|e| report!(OcspError::Construction(e.to_string())))?;
+
+    let algorithm = spki::AlgorithmIdentifierOwned {
+        oid: algorithm_oid,
+        parameters: None,
+    };
+
+    // ... rest of response construction unchanged
+}
+
+fn sign_with_detected_algorithm(
+    key_der: &[u8],
+    data: &[u8],
+) -> OcspResult<(Vec<u8>, const_oid::ObjectIdentifier)> {
+    let rng = aws_lc_rs::rand::SystemRandom::new();
+
+    // Try ECDSA P-256
+    if let Ok(key) = aws_lc_rs::signature::EcdsaKeyPair::from_pkcs8(
+        &aws_lc_rs::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+        key_der,
+    ) {
+        let sig = key.sign(&rng, data)
+            .map_err(|e| report!(OcspError::Signing(e.to_string())))?;
+        return Ok((sig.as_ref().to_vec(), const_oid::db::rfc5912::ECDSA_WITH_SHA_256));
+    }
+
+    // Try ECDSA P-384
+    if let Ok(key) = aws_lc_rs::signature::EcdsaKeyPair::from_pkcs8(
+        &aws_lc_rs::signature::ECDSA_P384_SHA384_ASN1_SIGNING,
+        key_der,
+    ) {
+        let sig = key.sign(&rng, data)
+            .map_err(|e| report!(OcspError::Signing(e.to_string())))?;
+        return Ok((sig.as_ref().to_vec(), const_oid::db::rfc5912::ECDSA_WITH_SHA_384));
+    }
+
+    // Try RSA (PKCS#1 v1.5 SHA-256)
+    if let Ok(key) = aws_lc_rs::signature::RsaKeyPair::from_pkcs8(key_der) {
+        let mut sig = vec![0u8; key.public().modulus_len()];
+        key.sign(
+            &aws_lc_rs::signature::RSA_PKCS1_SHA256,
+            &rng,
+            data,
+            &mut sig,
+        )
+        .map_err(|e| report!(OcspError::Signing(e.to_string())))?;
+        return Ok((sig, const_oid::db::rfc5912::SHA_256_WITH_RSA_ENCRYPTION));
+    }
+
+    Err(report!(OcspError::KeyParse(
+        "unsupported key type — expected ECDSA P-256, P-384, or RSA".to_string()
+    )))
+}
+```
+
+**Step 2 — Update the algorithm in the OCSP response to match**
+
+The `algorithm` field in the `BasicOcspResponse` must match the actual signing algorithm. This is already handled by returning the OID from `sign_with_detected_algorithm`.
+
+**Step 3 — Tests**
+
+- Test OCSP signing with an ECDSA P-256 CA key (existing behavior).
+- Test OCSP signing with an ECDSA P-384 CA key.
+- Test OCSP signing with an RSA CA key.
+- Test that an unsupported key type produces a clear error.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/ocsp.rs` | Replace hardcoded P-256 with key-type detection in `sign_response` |
+
+---
+
+## Plan 35: M17 — Silent Fallback to Weak UUID on CSPRNG Failure
+
+### Problem
+
+Multiple locations in `src/routes/oidc_auth.rs` (lines 380, 516, 551, 1159) use `generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string())`. This silently falls from 256-bit cryptographic randomness to ~122-bit UUIDv7 entropy without any alarm. These tokens are used as OIDC exchange codes, registration tokens, and link tokens — security-critical values.
+
+### Plan
+
+**Step 1 — Remove the silent fallback**
+
+Replace all `unwrap_or_else(|_| generate_uuid())` with explicit error handling that logs and returns an error to the user:
+
+```rust
+// Before:
+let exchange_code = generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
+
+// After:
+let exchange_code = match generate_secure_token() {
+    Ok(token) => token,
+    Err(e) => {
+        tracing::error!(error = %e, "CSPRNG failure — cannot generate secure token");
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal server error",
+        );
+    }
+};
+```
+
+**Step 2 — Apply to all 4 locations**
+
+Update all four occurrences:
+- Line 380: OIDC callback exchange code
+- Line 516: OIDC callback registration token
+- Line 551: OIDC callback link token
+- Line 1159: `create_oidc_exchange_and_redirect` helper
+
+**Step 3 — Add a metric/alert hook**
+
+A CSPRNG failure is a critical system event. Add a counter or structured log event that monitoring systems can alert on:
+
+```rust
+tracing::error!(
+    error = %e,
+    event = "csprng_failure",
+    "CRITICAL: system CSPRNG failed — security degraded"
+);
+```
+
+**Step 4 — Consider making `generate_secure_token` infallible**
+
+The underlying `OsRng` from the `rand` crate should never fail on modern systems. If it does, the entire system is in a compromised state. Consider using `expect()` instead of `Result`:
+
+```rust
+pub fn generate_secure_token() -> String {
+    // OsRng panics on failure, which is the correct behavior —
+    // a CSPRNG failure means the system cannot operate securely.
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+```
+
+This is arguably more correct than returning an error, since there is no safe recovery from CSPRNG failure. However, panicking in a web handler is harsh — returning a 500 error is more graceful.
+
+**Recommended:** Use explicit error handling (Step 1-2) rather than panic, but log at ERROR level.
+
+**Step 5 — Tests**
+
+- Verify that all `generate_secure_token` call sites handle errors explicitly (no `unwrap_or_else`).
+- Grep for the pattern to ensure no regressions.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/oidc_auth.rs` | Replace all 4 `unwrap_or_else` fallbacks with explicit error handling |
+
+---
+
+## Plan 36: L1 — User Enumeration via Differential Login Responses
+
+### Problem
+
+The `login` handler (`src/routes/auth.rs:221-223`) returns "User is deactivated" (403) when a deactivated user tries to log in, but "Invalid credentials" (401) for non-existent users. This difference allows an attacker to enumerate which email addresses have accounts and whether they are active.
+
+### Plan
+
+**Step 1 — Unify error responses for all login failures**
+
+Return the same generic response for all authentication failures:
+
+```rust
+// Before (line 221-223):
+if !user.is_active {
+    return error_response(StatusCode::FORBIDDEN, "User is deactivated");
+}
+
+// After:
+if !user.is_active {
+    return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+}
+```
+
+Also ensure that the "no password hash" case (line 228-230) returns the same message (it already does).
+
+**Step 2 — Add constant-time comparison for non-existent users**
+
+To prevent timing-based enumeration, perform a dummy password hash verification even when the user doesn't exist:
+
+```rust
+let user = match User::find()
+    .filter(user::Column::Email.eq(&email))
+    .one(&state.db)
+    .await
+{
+    Ok(Some(user)) => user,
+    _ => {
+        // Perform dummy hash to prevent timing oracle
+        let _ = password::verify_password(&req.password, "$argon2id$v=19$m=19456,t=2,p=1$dummy_salt$dummy_hash");
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+    }
+};
+```
+
+**Step 3 — Tests**
+
+- Test that a deactivated user gets 401 with "Invalid credentials" (not 403).
+- Test that a non-existent user gets 401 with "Invalid credentials".
+- Test that timing between the two cases is similar (within margin).
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/auth.rs` | Unify login error responses, add dummy hash for non-existent users |
+
+---
+
+## Plan 37: L2 — Logout Is Unauthenticated
+
+### Problem
+
+The `logout` endpoint (`src/routes/auth.rs:307-321`) accepts a `LogoutRequest` containing a refresh token and revokes it without requiring authentication. Anyone with a refresh token can revoke it without proving they own the associated identity.
+
+### Plan
+
+**Step 1 — Require authentication for logout**
+
+Add the `require_auth` middleware to the logout route and verify the refresh token belongs to the authenticated user:
+
+```rust
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    Extension(user): Extension<AuthenticatedUser>,
+    Json(req): Json<LogoutRequest>,
+) -> Response {
+    let session_service = SessionService::new(state.db.clone());
+
+    // Verify the refresh token belongs to the authenticated user
+    match session_service.verify_refresh_token_owner(&req.refresh_token, user.user_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return error_response(StatusCode::FORBIDDEN, "Token does not belong to this user");
+        }
+        Err(e) => {
+            tracing::error!("Failed to verify refresh token owner: {e:?}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    if let Err(e) = session_service.revoke_refresh_token(&req.refresh_token).await {
+        tracing::error!("Failed to revoke refresh token: {e:?}");
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+```
+
+**Step 2 — Add `verify_refresh_token_owner` to SessionService**
+
+```rust
+pub async fn verify_refresh_token_owner(
+    &self,
+    token: &str,
+    user_id: Uuid,
+) -> Result<bool> {
+    let token_hash = hash_token(token);
+    let session = Session::find()
+        .filter(session::Column::RefreshTokenHash.eq(token_hash))
+        .one(&self.db)
+        .await
+        .context_to()?;
+
+    match session {
+        Some(s) => Ok(s.user_id == user_id),
+        None => Ok(false),
+    }
+}
+```
+
+**Step 3 — Update the route registration**
+
+Move the `/api/v1/auth/logout` route inside the `require_auth` middleware layer.
+
+**Step 4 — Tests**
+
+- Test that logout without authentication returns 401.
+- Test that logout with a token belonging to a different user returns 403.
+- Test that logout with the correct user's token succeeds.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/auth.rs` | Add `AuthenticatedUser` extraction and ownership check to `logout` |
+| `src/auth/session.rs` | Add `verify_refresh_token_owner` method |
+| Router setup | Move logout route inside auth middleware |
+
+---
+
+## Plan 38: L3 — Bearer Token Prefix Is Case-Sensitive
+
+### Problem
+
+`extract_bearer_token` (`src/middleware/require_auth.rs:158-165`) uses `strip_prefix("Bearer ")` which is case-sensitive. RFC 6750 specifies that the `Bearer` prefix should be compared case-insensitively. A client sending `bearer ` (lowercase) will fail authentication.
+
+### Plan
+
+**Step 1 — Use case-insensitive prefix matching**
+
+```rust
+fn extract_bearer_token(req: &Request) -> Option<String> {
+    let value = req.headers()
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+
+    // RFC 6750: "Bearer" is case-insensitive
+    if value.len() > 7 && value[..7].eq_ignore_ascii_case("bearer ") {
+        Some(value[7..].to_string())
+    } else {
+        None
+    }
+}
+```
+
+**Step 2 — Apply same fix to WebSocket bearer extraction**
+
+The `extract_bearer` function in `src/routes/service_ws.rs:107-114` has the same issue:
+
+```rust
+fn extract_bearer(headers: &HeaderMap) -> Option<String> {
+    let value = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+
+    if value.len() > 7 && value[..7].eq_ignore_ascii_case("bearer ") {
+        Some(value[7..].to_string())
+    } else {
+        None
+    }
+}
+```
+
+**Step 3 — Tests**
+
+- Test that `Bearer token123` works (existing behavior).
+- Test that `bearer token123` works (new behavior).
+- Test that `BEARER token123` works.
+- Test that `Basic token123` does NOT extract a token.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/middleware/require_auth.rs` | Case-insensitive bearer prefix in `extract_bearer_token` |
+| `src/routes/service_ws.rs` | Case-insensitive bearer prefix in `extract_bearer` |
+
+---
+
+## Plan 39: L4 — Error Messages Contain Trailing Newlines
+
+### Problem
+
+Several error messages in `src/middleware/require_auth.rs` (lines 100, 107, 110, 133, 136) contain trailing `\n` characters. This is inconsistent with the rest of the codebase and can cause issues with clients that display error messages verbatim.
+
+### Plan
+
+**Step 1 — Remove trailing newlines from all error strings**
+
+```rust
+// Before:
+AuthFailure::Unauthorized("Invalid or revoked API token\n")
+AuthFailure::Unauthorized("User not found\n")
+AuthFailure::Forbidden("User is deactivated\n")
+AuthFailure::Unauthorized("Invalid or expired token\n")
+AuthFailure::Unauthorized("Invalid token subject\n")
+
+// After:
+AuthFailure::Unauthorized("Invalid or revoked API token")
+AuthFailure::Unauthorized("User not found")
+AuthFailure::Forbidden("User is deactivated")
+AuthFailure::Unauthorized("Invalid or expired token")
+AuthFailure::Unauthorized("Invalid token subject")
+```
+
+**Step 2 — Audit other files for the same pattern**
+
+Search for `\\n"` in error messages across the codebase and fix any other trailing newlines.
+
+**Step 3 — Tests**
+
+- Existing tests should continue to pass. If any tests assert on the exact error message including the newline, update them.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/middleware/require_auth.rs` | Remove `\n` from 5 error message strings |
+
+---
+
+## Plan 40: L5 — API Token `last_used_at` Written on Every Request
+
+### Problem
+
+`verify_token` (`src/auth/api_token.rs:121-126`) updates `last_used_at` with a DB write on every single request authenticated via API token. Under high API token usage this creates unnecessary write load on the database.
+
+### Plan
+
+**Step 1 — Debounce `last_used_at` updates**
+
+Only write `last_used_at` if it hasn't been updated recently (e.g., within the last 5 minutes):
+
+```rust
+pub async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
+    let token_hash = hash_token(plaintext);
+
+    let token = ApiToken::find()
+        .filter(api_token::Column::TokenHash.eq(token_hash))
+        .one(&self.db)
+        .await
+        .context_to()?
+        .ok_or_else(|| report!(AuthError::ApiTokenNotFound))?;
+
+    if token.revoked_at.is_some() {
+        return Err(report!(AuthError::ApiTokenRevoked));
+    }
+
+    let token_id = token.id;
+    let user_id = token.user_id;
+
+    // Debounce last_used_at updates — only write if stale (>5 min)
+    let now = OffsetDateTime::now_utc();
+    let should_update = token.last_used_at
+        .map(|last| (now - last).whole_seconds() > 300)
+        .unwrap_or(true);
+
+    if should_update {
+        let mut model: api_token::ActiveModel = token.into();
+        model.last_used_at = Set(Some(now));
+        model.update(&self.db).await.context_to()?;
+    }
+
+    Ok((user_id, token_id))
+}
+```
+
+**Step 2 — Extract debounce interval as a constant**
+
+```rust
+/// Minimum interval between `last_used_at` writes for the same API token.
+const API_TOKEN_LAST_USED_DEBOUNCE_SECS: i64 = 300; // 5 minutes
+```
+
+**Step 3 — Tests**
+
+- Test that `last_used_at` is updated on first use.
+- Test that `last_used_at` is NOT updated on a second request within 5 minutes.
+- Test that `last_used_at` IS updated after 5 minutes have passed.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/auth/api_token.rs` | Add debounce logic to `verify_token` |
