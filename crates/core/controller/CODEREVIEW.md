@@ -472,7 +472,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **TOP 35 Priority** — Thirty-five implementation-ready fix plans below cover all 6 Critical, all 12 High, all 18 Medium, and 6 of 16 Low findings. Remaining 10 Low issues (LO-3, LO-6, LO-7, LO-8, LO-9, LO-12, LO-13, LO-14, LO-15, LO-16) do not yet have detailed plans. Additionally, 5 issues (HI-3, HI-5, HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
+> **Complete Coverage** — Forty-five implementation-ready fix plans below cover all 52 findings: 6 Critical, 12 High, 18 Medium, and 16 Low. Additionally, 5 issues (HI-3, HI-5, HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
 
 ---
 
@@ -3037,6 +3037,609 @@ User::find().filter(user::Column::Email.eq(email)).one(db).await
 - Migration runs cleanly
 - Inserting duplicate `(software_item_id, version)` fails with constraint error
 - Upsert correctly updates existing version metadata
+
+---
+
+### FP-LO3: Add API token name length validation (#36)
+
+**Addresses:** LO-3 (Low — unbounded token name)
+
+**Problem:** `CreateApiTokenRequest` accepts a plain `String` for `name` with no length validation at any layer — request struct, route handler, service, or database schema. An attacker or misbehaving client can submit an arbitrarily long name, wasting storage and potentially causing display issues.
+
+**Current code path:**
+- `web-api-types/src/api_tokens.rs:5-7` — `CreateApiTokenRequest { name: String }` with no constraints
+- `routes/api_tokens.rs:36` — passes `req.name` directly to service
+- `auth/api_token.rs:51` — `Set(name.to_string())` with no validation
+- Migration 010, line 22 — `string(Name)` unbounded column
+
+**Detailed implementation plan:**
+
+1. **Add validation in the route handler** (`routes/api_tokens.rs`):
+   ```rust
+   pub async fn create_api_token(
+       State(state): State<Arc<AppState>>,
+       axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+       Json(req): Json<CreateApiTokenRequest>,
+   ) -> Response {
+       let name = req.name.trim();
+       if name.is_empty() || name.len() > 255 {
+           return error_response(
+               StatusCode::BAD_REQUEST,
+               "Token name must be between 1 and 255 characters",
+           );
+       }
+       // ... proceed with trimmed name
+   }
+   ```
+
+2. **Constrain the database column** in migration 010:
+   ```rust
+   .col(ColumnDef::new(ApiTokens::Name).string_len(255).not_null())
+   ```
+
+3. **Add the same validation to token rename** if such an endpoint exists.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/api_tokens.rs` — add length check before service call
+- `crates/core/controller/src/migration/m20260131_000010_create_api_tokens.rs` — constrain column to 255 chars
+
+**Testing:**
+- Empty name → 400
+- 256-char name → 400
+- 1-char and 255-char names → 201
+- Whitespace-only name → 400
+
+---
+
+### FP-LO6: Add JWT audience and issuer claim validation (#37)
+
+**Addresses:** LO-6 (Low — no `aud`/`iss` in JWT)
+
+**Problem:** `AccessTokenClaims` has no `aud` (audience) or `iss` (issuer) fields. `Validation::default()` only checks signature and expiration. In a multi-service deployment sharing signing keys, tokens from one service could be accepted by another.
+
+**Current code:**
+- `auth/jwt.rs:16-26` — struct missing `aud`/`iss` fields
+- `auth/jwt.rs:94-102` — token created without audience/issuer
+- `auth/jwt.rs:113` — `Validation::default()` with no audience/issuer checks
+
+**Detailed implementation plan:**
+
+1. **Define constants** in `jwt.rs`:
+   ```rust
+   const JWT_ISSUER: &str = "uptrakit-controller";
+   const JWT_AUDIENCE: &str = "uptrakit-api";
+   ```
+
+2. **Add fields to `AccessTokenClaims`:**
+   ```rust
+   pub struct AccessTokenClaims {
+       pub sub: String,
+       pub jti: String,
+       pub iss: String,
+       pub aud: String,
+       pub permissions: Vec<Permission>,
+       pub auth_method: String,
+       #[serde(skip_serializing_if = "Option::is_none")]
+       pub oidc_provider_id: Option<String>,
+       pub iat: i64,
+       pub exp: i64,
+   }
+   ```
+
+3. **Populate on creation** in `create_access_token()`:
+   ```rust
+   let claims = AccessTokenClaims {
+       iss: JWT_ISSUER.to_string(),
+       aud: JWT_AUDIENCE.to_string(),
+       // ... existing fields
+   };
+   ```
+
+4. **Validate on decode** in `decode_access_token()`:
+   ```rust
+   let mut validation = Validation::default();
+   validation.set_issuer(&[JWT_ISSUER]);
+   validation.set_audience(&[JWT_AUDIENCE]);
+   ```
+
+5. **Backwards compatibility:** Existing tokens lack `iss`/`aud`. Since access tokens expire in 15 minutes (`ACCESS_TOKEN_EXPIRY_SECS = 900`), all tokens will rotate naturally. No migration needed — just deploy and wait 15 minutes.
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/jwt.rs` — add fields, constants, validation
+
+**Testing:**
+- Newly created tokens contain `iss` and `aud` claims
+- Token with wrong issuer → rejected
+- Token with wrong audience → rejected
+- Token with correct claims → accepted
+
+---
+
+### FP-LO7: Throttle `last_used_at` writes for API tokens (#38)
+
+**Addresses:** LO-7 (Low — DB write on every API token use)
+
+**Problem:** Every authenticated API request using a token triggers a synchronous `UPDATE` to `last_used_at` in `verify_token()` (line 121-126 of `api_token.rs`). Under heavy API token usage, this creates write amplification with one DB write per request.
+
+**Current code:** `auth/api_token.rs:121-126` — `model.update(&self.db).await` on every call to `verify_token()`.
+
+**Detailed implementation plan:**
+
+1. **Add time-based throttle** in `verify_token()` — only update if the last recorded timestamp is older than a threshold (e.g., 5 minutes):
+   ```rust
+   pub async fn verify_token(&self, plaintext: &str) -> Result<(uuid::Uuid, uuid::Uuid)> {
+       let token_hash = hash_token(plaintext);
+
+       let token = ApiToken::find()
+           .filter(api_token::Column::TokenHash.eq(token_hash))
+           .one(&self.db)
+           .await
+           .context_to()?
+           .ok_or_else(|| report!(AuthError::ApiTokenNotFound))?;
+
+       if token.revoked_at.is_some() {
+           return Err(report!(AuthError::ApiTokenRevoked));
+       }
+
+       let token_id = token.id;
+       let user_id = token.user_id;
+
+       // Only update last_used_at if stale (>5 minutes old)
+       let now = OffsetDateTime::now_utc();
+       let should_update = token
+           .last_used_at
+           .is_none_or(|last| (now - last).whole_minutes() >= 5);
+
+       if should_update {
+           let mut model: api_token::ActiveModel = token.into();
+           model.last_used_at = Set(Some(now));
+           model.update(&self.db).await.context_to()?;
+       }
+
+       Ok((user_id, token_id))
+   }
+   ```
+
+2. This reduces writes from once-per-request to at most once-per-5-minutes per token, while still providing useful "last used" information.
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/api_token.rs` — add staleness check around the `last_used_at` update
+
+**Testing:**
+- First use of a token → `last_used_at` is set
+- Second use within 5 minutes → `last_used_at` unchanged
+- Use after 5 minutes → `last_used_at` updated
+- Revoked token → still rejected regardless of throttle
+
+---
+
+### FP-LO8: Clean up revoked sessions and schedule cleanup (#39)
+
+**Addresses:** LO-8 (Low — revoked sessions accumulate)
+
+**Problem:** `cleanup_expired_sessions()` in `session.rs:125-136` only deletes sessions where `expires_at < now()`. Revoked sessions (where `revoked_at IS NOT NULL`) are never cleaned up. Additionally, this function is **never called** in production — it's dead code (only used in tests).
+
+**Current code:**
+- `session.rs:125-136` — cleanup only checks `expires_at`
+- No caller anywhere in production code
+
+**Detailed implementation plan:**
+
+1. **Extend cleanup to include revoked sessions:**
+   ```rust
+   pub async fn cleanup_expired_sessions(&self) -> Result<u64> {
+       let now = OffsetDateTime::now_utc();
+
+       let result = Session::delete_many()
+           .filter(
+               Condition::any()
+                   .add(session::Column::ExpiresAt.lt(now))
+                   .add(session::Column::RevokedAt.is_not_null()),
+           )
+           .exec(&self.db)
+           .await
+           .context_to()?;
+
+       Ok(result.rows_affected)
+   }
+   ```
+
+2. **Schedule periodic cleanup** — add a background task in the controller startup (similar to `event_poller`). In `main.rs` or the app initialization:
+   ```rust
+   // Spawn session cleanup task
+   tokio::spawn(async move {
+       let session_service = SessionService::new(db.clone());
+       let mut interval = tokio::time::interval(Duration::from_secs(3600)); // 1 hour
+       loop {
+           interval.tick().await;
+           match session_service.cleanup_expired_sessions().await {
+               Ok(count) if count > 0 => {
+                   tracing::info!(deleted = count, "cleaned up expired/revoked sessions");
+               }
+               Err(e) => {
+                   tracing::warn!(error = %e, "session cleanup failed");
+               }
+               _ => {}
+           }
+       }
+   });
+   ```
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/session.rs` — extend filter to include `revoked_at IS NOT NULL`
+- Controller startup code — spawn periodic cleanup task
+
+**Testing:**
+- Expired sessions → deleted
+- Revoked-but-not-expired sessions → deleted
+- Active (not expired, not revoked) sessions → preserved
+- Cleanup task runs on schedule
+
+---
+
+### FP-LO9: Standardize soft-delete column naming (#40)
+
+**Addresses:** LO-9 (Low — inconsistent naming: `deactivated_at`, `deleted_at`, `revoked_at`)
+
+**Problem:** Three different column names for the soft-delete concept across 12 entities:
+- `deactivated_at` — tenant, user, service, host, software_item, provider_config, ca_certificate (7 entities)
+- `revoked_at` — api_token, session, service_certificate (3 entities)
+- `deleted_at` — oidc_provider (1 entity)
+
+**Analysis:** Upon closer examination, these names are **semantically distinct** and mostly intentional:
+- `deactivated_at` — entity is disabled but may be reactivated (tenants, users, services, hosts)
+- `revoked_at` — cryptographic/security revocation, permanent (tokens, sessions, certificates)
+- `deleted_at` — the outlier; OIDC provider uses `deleted_at` where `deactivated_at` would be consistent
+
+**Detailed implementation plan:**
+
+1. **Rename only the true outlier:** `oidc_providers.deleted_at` → `oidc_providers.deactivated_at`. This aligns the OIDC provider entity with the dominant pattern for "disabled but recoverable" entities.
+
+2. **Add a migration** to rename the column:
+   ```rust
+   // In a new migration or modify m20260129_000004_create_oidc.rs
+   manager.alter_table(
+       Table::alter()
+           .table(OidcProviders::Table)
+           .rename_column(
+               Alias::new("deleted_at"),
+               Alias::new("deactivated_at"),
+           )
+           .to_owned(),
+   ).await?;
+   ```
+
+3. **Update entity definition** (`db/src/entity/oidc_provider.rs`):
+   ```rust
+   // Change:
+   pub deleted_at: Option<OffsetDateTime>,
+   // To:
+   pub deactivated_at: Option<OffsetDateTime>,
+   ```
+
+4. **Keep `revoked_at` as-is** for tokens, sessions, and certificates — the semantic distinction between "deactivated" (can reactivate) and "revoked" (permanent invalidation) is valuable and correct.
+
+5. **Update all queries** that filter on `oidc_providers.deleted_at` to use `deactivated_at`.
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260129_000004_create_oidc.rs` — rename column
+- `crates/shared/db/src/entity/oidc_provider.rs` — rename field
+- All code referencing `oidc_provider::Column::DeletedAt` or `.deleted_at`
+
+**Testing:**
+- Migration runs cleanly (up and down)
+- OIDC provider soft-delete/restore works with new column name
+- Existing queries return correct results
+
+---
+
+### FP-LO12: Add CHECK constraint for update history status (#41)
+
+**Addresses:** LO-12 (Low — free-form status string)
+
+**Problem:** The `update_history.status` column is a plain string with no database-level constraint. While Rust code defines an `UpdateStatus` enum (`Pending`, `InProgress`, `Completed`, `Failed`), nothing prevents invalid values at the database level (e.g., via direct SQL or a bug in deserialization).
+
+**Current code:**
+- Migration 018, line 29 — `string(UpdateHistory::Status)` with no CHECK
+- Entity `update_history.rs` — `UpdateStatus` enum with `DeriveActiveEnum` and 4 values
+- The codebase already uses `.check()` in migration 015 for `available_versions`, confirming SeaORM supports it
+
+**Detailed implementation plan:**
+
+1. **Add a CHECK constraint** in migration 018:
+   ```rust
+   .col(string(UpdateHistory::Status))
+   .check(
+       Expr::col(UpdateHistory::Status).is_in(["pending", "in_progress", "completed", "failed"])
+   )
+   ```
+
+2. **Alternative for databases that don't support `CHECK IN`:** Use raw SQL in the migration:
+   ```rust
+   manager.get_connection().execute_unprepared(
+       "ALTER TABLE update_history ADD CONSTRAINT chk_update_history_status \
+        CHECK (status IN ('pending', 'in_progress', 'completed', 'failed'))"
+   ).await?;
+   ```
+
+3. Since we're modifying migrations directly (per project convention), add the CHECK inline in the table creation statement.
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260203_000018_create_update_history.rs` — add CHECK constraint
+
+**Testing:**
+- Migration runs cleanly
+- Inserting valid status values succeeds
+- Inserting invalid status value fails with constraint violation
+
+---
+
+### FP-LO13: Fail registration on owner role assignment error (#42)
+
+**Addresses:** LO-13 (Low — silent failure leaves first user without admin access)
+
+**Problem:** All three registration paths (password, OIDC callback, OIDC complete-registration) silently ignore errors from `assign_owner_role()`. The user is created (HTTP 201) but has no owner role, leaving the system in a broken state with no admin user and no recovery path.
+
+**Current code:**
+- `routes/auth.rs:117-121` — `if let Err(e)` logs and continues
+- `routes/oidc_auth.rs:458-463` — same pattern
+- `routes/oidc_auth.rs:802-808` — same pattern
+
+**Detailed implementation plan:**
+
+1. **Make owner role assignment a hard error** in all three paths. If assigning the owner role fails during first-user registration, the entire registration should fail and the user creation should be rolled back.
+
+2. **Wrap in a transaction** in `routes/auth.rs`:
+   ```rust
+   if is_first_user {
+       assign_owner_role(&state.db, state.default_tenant_id, user_id)
+           .await
+           .map_err(|e| {
+               tracing::error!("Failed to assign owner role to first user: {:?}", e);
+               error_response(
+                   StatusCode::INTERNAL_SERVER_ERROR,
+                   "Registration failed: could not assign owner role",
+               )
+           })?;
+
+       state
+           .settings
+           .registration_write()
+           .await
+           .complete_initial_setup(&state.db, state.default_tenant_id)
+           .await
+           .map_err(|e| {
+               tracing::error!("Failed to complete initial setup: {:?}", e);
+               error_response(
+                   StatusCode::INTERNAL_SERVER_ERROR,
+                   "Registration failed: could not complete setup",
+               )
+           })?;
+   }
+   ```
+
+3. **Apply the same pattern** in both OIDC registration paths (`oidc_auth.rs:458` and `oidc_auth.rs:802`).
+
+4. **Ideally use a database transaction** to ensure atomicity: if role assignment fails, the user row is also rolled back. This prevents orphaned users without roles.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/auth.rs` — return error instead of logging and continuing
+- `crates/ui/web-api/src/routes/oidc_auth.rs` — same fix in both OIDC paths
+
+**Testing:**
+- Successful first-user registration → owner role assigned, HTTP 201
+- Simulate role assignment failure → HTTP 500, user NOT created (rolled back)
+- Subsequent users → owner role logic not triggered
+
+---
+
+### FP-LO14: Make PKI HTTP bind address configurable (#43)
+
+**Addresses:** LO-14 (Low — hardcoded `0.0.0.0` for PKI listener)
+
+**Problem:** The PKI HTTP listener in `main.rs:1070` is hardcoded to `SocketAddr::from(([0, 0, 0, 0], port))`, binding on all IPv4 interfaces. The HTTPS server uses a configurable `https_addr` setting, but no equivalent exists for the PKI HTTP listener. In multi-NIC environments, this exposes PKI endpoints (CRL, OCSP) to untrusted networks.
+
+**Current code:**
+- `main.rs:1070` — `SocketAddr::from(([0, 0, 0, 0], port))` hardcoded
+- HTTPS uses configurable `NetworkSettings.https_addr` with default `[::]:8443`
+- CLI has `--https-addr` but no `--pki-http-addr`
+
+**Detailed implementation plan:**
+
+1. **Add a CLI argument** in `cli.rs`:
+   ```rust
+   /// Bind address for the PKI HTTP listener (default: same host as --https-addr)
+   #[arg(long)]
+   pub pki_http_addr: Option<SocketAddr>,
+   ```
+
+2. **Derive the default from `https_addr`** — use the same host as the HTTPS listener with the PKI port:
+   ```rust
+   let pki_http_addr = match cli.pki_http_addr {
+       Some(addr) => addr,
+       None => {
+           let https_addr = network_settings.https_addr;
+           SocketAddr::new(https_addr.ip(), port)
+       }
+   };
+   ```
+
+3. **Update `main.rs:1070`** to use the derived address:
+   ```rust
+   let pki_http_task = if let Some(port) = pki_http_port {
+       let addr = pki_http_addr.unwrap_or_else(|| {
+           SocketAddr::new(network_settings.https_addr.ip(), port)
+       });
+       let app_state_for_pki = Arc::clone(&app_state);
+       Some(tokio::spawn(server::run_pki_http(addr, app_state_for_pki)))
+   } else {
+       None
+   };
+   ```
+
+4. This ensures the PKI HTTP listener defaults to the same interface as the HTTPS listener, rather than unconditionally binding to all interfaces.
+
+**Files to modify:**
+- `crates/core/controller/src/cli.rs` — add `--pki-http-addr` argument
+- `crates/core/controller/src/main.rs` — use configured address instead of hardcoded `0.0.0.0`
+
+**Testing:**
+- Default: PKI HTTP binds to same host as HTTPS listener
+- Explicit `--pki-http-addr 127.0.0.1:8080` → binds to loopback only
+- PKI endpoints accessible on configured interface, not on others
+
+---
+
+### FP-LO15: Add expiration column and retention policy for controller events (#44)
+
+**Addresses:** LO-15 (Low — no partition/expiration strategy for outbox table)
+
+**Problem:** The `controller_events` table (migration 024) has no `expires_at` column and no database-level retention policy. Currently, cleanup relies solely on a background task in `event_poller.rs` that deletes events older than 1 hour every 5 minutes. If the poller fails or is not running (e.g., single-instance deployment without HA), the table grows unbounded.
+
+**Current code:**
+- Migration 024 — table with `id`, `source_controller_id`, `target_service_id`, `target_service_type`, `message_json`, `created_at` — no `expires_at`
+- `event_poller.rs:201-221` — `cleanup_old_events()` deletes `created_at < now - 1h`, hardcoded
+- Index on `created_at` exists for cleanup queries
+
+**Detailed implementation plan:**
+
+1. **Add an `expires_at` column** to migration 024:
+   ```rust
+   .col(timestamp(ControllerEvents::ExpiresAt))
+   ```
+   Set `expires_at = created_at + 1 hour` by default in the outbox writer.
+
+2. **Update `notification_service.rs`** to populate `expires_at` when writing events:
+   ```rust
+   let now = OffsetDateTime::now_utc();
+   let model = controller_event::ActiveModel {
+       // ... existing fields
+       created_at: Set(now),
+       expires_at: Set(now + time::Duration::hours(1)),
+   };
+   ```
+
+3. **Update cleanup to use `expires_at`** in `event_poller.rs`:
+   ```rust
+   async fn cleanup_old_events(&self) {
+       let now = OffsetDateTime::now_utc();
+       match controller_event::Entity::delete_many()
+           .filter(controller_event::Column::ExpiresAt.lt(now))
+           .exec(&self.db)
+           .await
+       {
+           // ... existing logging
+       }
+   }
+   ```
+
+4. **Replace the `created_at` cleanup index** with an index on `expires_at` for efficient cleanup queries.
+
+5. **Make retention configurable** via a constant or setting:
+   ```rust
+   const EVENT_RETENTION: time::Duration = time::Duration::hours(1);
+   ```
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260207_000024_create_controller_events.rs` — add `expires_at` column and index
+- `crates/shared/db/src/entity/controller_event.rs` — add `expires_at` field
+- `crates/ui/web-api/src/notification_service.rs` — set `expires_at` on insert
+- `crates/ui/web-api/src/event_poller.rs` — use `expires_at` for cleanup
+
+**Testing:**
+- Events inserted with correct `expires_at` (created_at + 1h)
+- Cleanup deletes events past their `expires_at`
+- Events within retention window are preserved
+
+---
+
+### FP-LO16: Make migration 011 down path non-lossy (#45)
+
+**Addresses:** LO-16 (Low — rolling back migration destroys user-role assignments)
+
+**Problem:** Migration 011 (`m20260131_000011_update_rbac_permissions.rs`) migrates all admin users to the new owner role in `up()`. The `down()` path deletes the owner role, which cascades and destroys all user-role assignments for migrated users. There is no way to restore the original admin assignments after rollback.
+
+**Current code:**
+- `up()` lines 155-165 — `UPDATE user_roles SET role_id = owner_role_id WHERE role_id = admin_role_id`
+- `down()` lines 172-179 — `DELETE FROM roles WHERE name = 'owner'` (cascades to user_roles)
+
+**Detailed implementation plan:**
+
+1. **In `down()`, reverse the role migration before deleting** — reassign owner users back to admin:
+   ```rust
+   async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+       // 1. Find the admin and owner role IDs
+       let db = manager.get_connection();
+
+       let admin_role = db.query_one(Statement::from_string(
+           db.get_database_backend(),
+           "SELECT id FROM roles WHERE name = 'admin'".to_string(),
+       )).await?;
+
+       let owner_role = db.query_one(Statement::from_string(
+           db.get_database_backend(),
+           "SELECT id FROM roles WHERE name = 'owner'".to_string(),
+       )).await?;
+
+       // 2. Migrate owner users back to admin (reverse of up())
+       if let (Some(admin_row), Some(owner_row)) = (admin_role, owner_role) {
+           let admin_id: uuid::Uuid = admin_row.try_get_by_index(0)?;
+           let owner_id: uuid::Uuid = owner_row.try_get_by_index(0)?;
+
+           manager.exec_stmt(
+               Query::update()
+                   .table(UserRoles::Table)
+                   .value(UserRoles::RoleId, admin_id)
+                   .and_where(Expr::col(UserRoles::RoleId).eq(owner_id))
+                   .to_owned(),
+           ).await?;
+       }
+
+       // 3. Now safe to delete owner role (no user_roles point to it)
+       manager.exec_stmt(
+           Query::delete()
+               .from_table(Roles::Table)
+               .and_where(Expr::col(Roles::Name).eq("owner"))
+               .to_owned(),
+       ).await?;
+
+       // 4. Delete user role
+       manager.exec_stmt(
+           Query::delete()
+               .from_table(Roles::Table)
+               .and_where(Expr::col(Roles::Name).eq("user"))
+               .to_owned(),
+       ).await?;
+
+       // 5. Clear new permissions
+       let new_perms = [
+           "view_settings", "manage_settings", "view_agents",
+           "manage_agents", "manage_global_settings",
+       ];
+       for name in new_perms {
+           manager.exec_stmt(
+               Query::delete()
+                   .from_table(Permissions::Table)
+                   .and_where(Expr::col(Permissions::Name).eq(name))
+                   .to_owned(),
+           ).await?;
+       }
+
+       Ok(())
+   }
+   ```
+
+2. **Key insight:** The reverse migration (`owner → admin`) must happen *before* the owner role is deleted. This preserves user access — users who were previously admin get admin back. Users who were directly assigned owner (if any were created post-migration) also get admin, which is the closest safe fallback.
+
+3. **Note:** The `manage_global_settings` permission (owner-only) is lost on rollback, which is expected since the admin role didn't have it pre-migration. This is acceptable data loss since the permission itself is being removed.
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260131_000011_update_rbac_permissions.rs` — rewrite `down()` to reverse role assignments before deletion
+
+**Testing:**
+- Run `up()` → admin users become owner users
+- Run `down()` → owner users become admin users (not orphaned)
+- Verify user_roles table has no orphaned entries after rollback
 
 The following findings from `crates/shared/wire/CODEREVIEW.md` are confirmed and not duplicated here:
 
