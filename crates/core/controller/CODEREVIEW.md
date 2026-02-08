@@ -472,7 +472,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **TOP 10 Priority** — The ten most impactful issues are marked with detailed implementation-ready fix plans below. Remaining issues have concise plans.
+> **TOP 15 Priority** — The fifteen most impactful issues have detailed implementation-ready fix plans below (covering all 6 Critical, all 12 High, and the 3 most impactful Medium findings). Remaining 30 issues (14 Medium, 16 Low) do not yet have detailed plans.
 
 ---
 
@@ -1443,45 +1443,397 @@ pub async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession>
 
 ---
 
-### Remaining Fix Plans (concise)
+### FP-HI8: Fix FK cascade inconsistencies (TOP 5 — #11)
 
-### FP-HI8: Fix FK cascade inconsistencies
+**Addresses:** HI-8 (High — FK missing ON DELETE), HI-9 (High — missing FK entirely)
 
-**Addresses:** HI-8, HI-9
+**Problem:** The `service_certificates` table has two foreign key issues:
+1. **HI-8:** The FK `service_certificates.service_id → services.id` has NO `on_delete` clause (defaults to `RESTRICT` in most databases). This is inconsistent with `service_hosts` (which uses `CASCADE`). Deleting a service cascades host links but is blocked by certificates — creating a half-deleted state.
+2. **HI-9:** The `service_certificates.ca_fingerprint` column references `ca_certificates.fingerprint` but has NO foreign key constraint at all. Migration 008 (which creates `service_certificates`) runs before migration 025 (which creates `ca_certificates`), so the FK couldn't be defined at creation time — and no subsequent migration adds it.
 
-**Plan:** Migration to add explicit `ON DELETE` to `service_certificates.service_id`, FK from `service_certificates.ca_fingerprint` to `ca_certificates.fingerprint`, unique constraint on `mqtt_leases.mqtt_client_id`.
+**Current migration 008 FK definition:**
+```rust
+.foreign_key(
+    ForeignKey::create()
+        .name("fk_service_certificates_service_id")
+        .from(ServiceCertificates::Table, ServiceCertificates::ServiceId)
+        .to(Services::Table, Services::Id),
+        // ❌ MISSING: .on_delete(ForeignKeyAction::...)
+)
+// ❌ MISSING: FK from ca_fingerprint → ca_certificates.fingerprint
+```
 
-**Files:** New migration file.
+**Comparison — correctly defined FKs in `service_hosts` (migration 013):**
+```rust
+.foreign_key(
+    ForeignKey::create()
+        .name("fk_service_hosts_service")
+        .from(ServiceHosts::Table, ServiceHosts::ServiceId)
+        .to(Services::Table, Services::Id)
+        .on_delete(ForeignKeyAction::Cascade), // ✅ explicit
+)
+```
+
+**Detailed implementation plan:**
+
+1. **Modify migration 008** to add explicit `on_delete` to the `service_id` FK. Since this project allows modifying existing migrations (per AGENTS.md), update the FK in-place:
+   ```rust
+   .foreign_key(
+       ForeignKey::create()
+           .name("fk_service_certificates_service_id")
+           .from(ServiceCertificates::Table, ServiceCertificates::ServiceId)
+           .to(Services::Table, Services::Id)
+           .on_delete(ForeignKeyAction::Cascade),  // ← ADD
+   )
+   ```
+   **Rationale for CASCADE:** When a service is deleted (soft-delete via `deactivated_at`), its certificates should also be marked as revoked. Since the codebase uses soft-delete, actual row deletion only happens in edge cases — but the FK behavior should be consistent with `service_hosts` which uses CASCADE.
+
+2. **Add FK from `ca_fingerprint` to `ca_certificates`** in migration 008. Since migration 025 creates `ca_certificates` after migration 008, either:
+   - **Option A (preferred):** Add the FK in migration 025's `up()` method after creating the `ca_certificates` table:
+     ```rust
+     // After creating ca_certificates table, add the FK from service_certificates
+     manager.create_foreign_key(
+         ForeignKey::create()
+             .name("fk_service_certificates_ca_fingerprint")
+             .from(ServiceCertificates::Table, ServiceCertificates::CaFingerprint)
+             .to(CaCertificates::Table, CaCertificates::Fingerprint)
+             .on_delete(ForeignKeyAction::Restrict)  // CA must not be deleted while certs reference it
+             .to_owned(),
+     ).await?;
+     ```
+   - **Option B:** Create a new migration specifically for this FK.
+
+3. **Audit all other FKs for consistency.** Based on the exploration, the current state is:
+   - Tenant FKs: all `Restrict` (correct — prevents orphaned data)
+   - Junction table FKs: all `Cascade` (correct — cleanup on parent delete)
+   - `service_certificates.service_id`: `Restrict` by default ← **FIX to explicit CASCADE**
+   - `service_certificates.ca_fingerprint`: missing FK entirely ← **FIX to add with RESTRICT**
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260129_000008_create_agent_certificates.rs` — add `on_delete(Cascade)` to service_id FK
+- `crates/core/controller/src/migration/m20260207_000025_create_ca_certificates.rs` — add FK from `service_certificates.ca_fingerprint`
+
+**Testing:**
+- Verify migration runs clean on fresh database
+- Verify deleting a service cascades to its certificates
+- Verify deleting a CA certificate with active service_certificates is blocked (RESTRICT)
 
 ---
 
-### FP-HI10: Add tenant filter to host agents
+### FP-HI10: Add tenant filter to host agents (TOP 5 — #12)
 
-**Addresses:** HI-10
+**Addresses:** HI-10 (High — cross-tenant data leak)
 
-**Plan:** Accept `tenant_id` in `load_host_agents()`. Join through `service_hosts` → `services` and filter `services.tenant_id`.
+**Problem:** The `load_host_agents()` helper in `web-api/src/routes/hosts.rs:301-339` queries agents by `host_id` via the `service_hosts` junction table without any tenant filtering. If a `service_hosts` link points to an agent in a different tenant (through data corruption or future multi-tenancy), that agent's information leaks into the response.
 
-**Files:** `web-api/src/routes/hosts.rs`
+**Current code (`hosts.rs:301-339`):**
+```rust
+async fn load_host_agents(
+    db: &sea_orm::DatabaseConnection,
+    host_id: uuid::Uuid,
+) -> Vec<HostAgentSummary> {
+    let links = AgentHost::find()
+        .filter(agent_host::Column::HostId.eq(host_id))
+        .all(db).await?;
+
+    for link in links {
+        if let Ok(Some(a)) = Agent::find_by_id(link.service_id)
+            .filter(agent::Column::DeactivatedAt.is_null())
+            // ❌ MISSING: .filter(agent::Column::TenantId.eq(tenant_id))
+            .one(db).await
+        { /* build summary */ }
+    }
+}
+```
+
+**Additionally, this has an N+1 query pattern** (also flagged as ME-7): one query to get links, then one query per agent. This can be fixed simultaneously.
+
+**Detailed implementation plan:**
+
+1. **Add `tenant_id` parameter and use a single JOIN query:**
+   ```rust
+   async fn load_host_agents(
+       db: &sea_orm::DatabaseConnection,
+       host_id: uuid::Uuid,
+       tenant_id: uuid::Uuid,
+   ) -> Vec<HostAgentSummary> {
+       // Single query with join — fixes both N+1 (ME-7 partially) and tenant scoping (HI-10)
+       let agents = match Service::find()
+           .inner_join(ServiceHost)
+           .filter(service_host::Column::HostId.eq(host_id))
+           .filter(service::Column::TenantId.eq(tenant_id))
+           .filter(service::Column::DeactivatedAt.is_null())
+           .all(db)
+           .await
+       {
+           Ok(agents) => agents,
+           Err(e) => {
+               tracing::warn!("Failed to load host agents: {e}");
+               return Vec::new();
+           }
+       };
+
+       agents.into_iter().map(|a| HostAgentSummary {
+           id: a.id.to_string(),
+           friendly_name: a.friendly_name,
+           status: a.status.into(),
+       }).collect()
+   }
+   ```
+
+2. **Update all 3 call sites** to pass `tenant.tenant_id`:
+   - `list_hosts` (line 89): `load_host_agents(&state.db, h.id, tenant.tenant_id).await`
+   - `get_host` (line 145): `load_host_agents(&state.db, host_id, tenant.tenant_id).await`
+   - `update_host` (line 210): `load_host_agents(&state.db, host_id, tenant.tenant_id).await`
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/hosts.rs` — rewrite `load_host_agents()`, update call sites
+
+**Testing:**
+- Unit test: agents from different tenants are not returned
+- Unit test: deactivated agents are not returned
+- Verify existing host listing behavior is unchanged for single-tenant
 
 ---
 
-### FP-HI11: Rate limit refresh endpoint
+### FP-HI11: Add rate limiting to device approval endpoint (TOP 5 — #13)
 
-**Addresses:** HI-11
+**Addresses:** HI-11 (High — brute-force risk), ME-5 (Medium — device flow approval lacks rate limiting)
 
-**Plan:** Add `/api/v1/auth/refresh` (10 req/min/IP) and `/api/v1/auth/device/approve` (5 req/min/IP) to `RATE_LIMITS`.
+**Problem:** The `/api/v1/auth/device/approve` endpoint is NOT in the `RATE_LIMITS` HashMap and has no rate limiting. Device flow user codes are short (typically 8 characters) and can be brute-forced. Any authenticated user can approve device flows regardless of permissions.
 
-**Files:** `web-api/src/middleware/rate_limit.rs`
+**Note:** The original HI-11 finding mentions the refresh endpoint, which has since been added to `RATE_LIMITS` at 10 req/min. The remaining gap is `/api/v1/auth/device/approve`.
+
+**Current `RATE_LIMITS` configuration (`middleware/rate_limit.rs:20-58`):**
+```rust
+static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLock::new(|| {
+    HashMap::from([
+        ("/api/v1/auth/login",        EndpointRateLimit { max_requests: 10, window_secs: 60 }),
+        ("/api/v1/auth/register",     EndpointRateLimit { max_requests: 10, window_secs: 60 }),
+        ("/api/v1/auth/refresh",      EndpointRateLimit { max_requests: 10, window_secs: 60 }),
+        ("/api/v1/auth/device",       EndpointRateLimit { max_requests: 10, window_secs: 60 }),
+        ("/api/v1/auth/device/poll",  EndpointRateLimit { max_requests: 12, window_secs: 60 }),
+        // ❌ MISSING: /api/v1/auth/device/approve
+    ])
+});
+```
+
+**Detailed implementation plan:**
+
+1. **Add `/api/v1/auth/device/approve` to `RATE_LIMITS`:**
+   ```rust
+   (
+       "/api/v1/auth/device/approve",
+       EndpointRateLimit {
+           max_requests: 5,    // Strict — approval is infrequent
+           window_secs: 60,
+       },
+   ),
+   ```
+
+2. **Add permission check to the approval handler** (addresses ME-5):
+   The approval endpoint should require a specific permission (e.g., `ManageAgents` or a new `ApproveDeviceFlow` permission) rather than allowing any authenticated user to approve. This is a defense-in-depth measure beyond rate limiting.
+
+3. **Update tests:** Add `/api/v1/auth/device/approve` to the `rate_limited_paths_list` test and remove it from `non_rate_limited_paths` if present.
+
+**Files to modify:**
+- `crates/ui/web-api/src/middleware/rate_limit.rs` — add endpoint to `RATE_LIMITS`
+- `crates/ui/web-api/src/routes/device_auth.rs` — add permission check to approval handler
+
+**Testing:**
+- Unit test: 6th approval request within 60 seconds returns 429
+- Unit test: unauthenticated approval returns 401
+- Unit test: authenticated user without permission returns 403
 
 ---
 
-### FP-ME2: Check email_verified before auto-link
+### FP-ME2: Check email_verified before OIDC auto-link (TOP 5 — #14)
 
-**Addresses:** ME-2
+**Addresses:** ME-2 (Medium — account takeover via unverified email)
 
-**Plan:** In the `AutoLink` branch, check `email_verified` claim. If false or absent, require explicit `AccountLinkStore` flow.
+**Problem:** The `resolve_oidc_user()` function in `web-api/src/auth/authentication.rs:82-210` auto-links an OIDC identity to an existing user based solely on email match. The `email_verified` claim from the OIDC provider is never checked. If an OIDC provider doesn't verify email addresses (or an attacker controls a provider), they can claim any email and hijack the corresponding account.
 
-**Files:** `web-api/src/auth/authentication.rs`
+**Current auto-link decision flow (`authentication.rs:115-159`):**
+```rust
+// Check for existing user by email
+if let Some(found_user) = User::find()
+    .filter(user::Column::Email.eq(email))
+    .one(db).await?
+{
+    if !found_user.is_active { return Ok(Deactivated); }
+    // Check for existing OIDC links...
+    if has_other_oidc_link { return Ok(LinkViaOidcRequired { ... }); }
+    // Check for password...
+    if found_user.password_hash.is_some() { return Ok(LinkViaPasswordRequired { ... }); }
+    // ❌ Auto-link WITHOUT checking email_verified
+    return Ok(AutoLink { user_id: found_user.id });
+}
+```
+
+**Available but unused data:** The `openidconnect` crate's `StandardClaims` provides `email_verified()` which returns `Option<bool>`. The callback handler in `oidc_auth.rs` already extracts `claims.email()` but never calls `claims.email_verified()`.
+
+**Detailed implementation plan:**
+
+1. **Add `email_verified` to `OidcUserParams`:**
+   ```rust
+   pub struct OidcUserParams<'a> {
+       pub db: &'a DatabaseConnection,
+       pub tenant_id: Uuid,
+       pub provider_id: Uuid,
+       pub oidc_subject: &'a str,
+       pub email: &'a str,
+       pub first_name: Option<&'a str>,
+       pub last_name: Option<&'a str>,
+       pub auto_create: bool,
+       pub email_verified: Option<bool>,  // ← ADD
+   }
+   ```
+
+2. **Extract `email_verified` in the OIDC callback handler** (`oidc_auth.rs`, around lines 292-344):
+   ```rust
+   let email_verified = claims.email_verified();
+   ```
+   Pass it through to `resolve_oidc_user()` via `OidcUserParams`.
+
+3. **Gate auto-link on verified email** (`authentication.rs`, around line 156):
+   ```rust
+   // Only auto-link if the OIDC provider asserts the email is verified
+   if params.email_verified == Some(true) {
+       return Ok(OidcUserResolution::AutoLink { user_id: found_user.id });
+   }
+
+   // Email not verified (false or absent) — require explicit linking
+   if found_user.password_hash.is_some() {
+       return Ok(OidcUserResolution::LinkViaPasswordRequired {
+           user_id: found_user.id,
+       });
+   }
+
+   // No password and unverified email — cannot auto-link safely
+   // Return a new resolution variant that tells the UI to prompt manual verification
+   return Ok(OidcUserResolution::LinkViaPasswordRequired {
+       user_id: found_user.id,
+   });
+   ```
+
+4. **Log when auto-link is blocked for unverified email** (defense observability):
+   ```rust
+   tracing::info!(
+       email = %params.email,
+       provider_id = %params.provider_id,
+       email_verified = ?params.email_verified,
+       "OIDC auto-link blocked: email not verified by provider"
+   );
+   ```
+
+5. **Consider a per-provider trust setting** (optional, future enhancement):
+   Some internal IdPs (e.g., Keycloak, Authentik) are trusted to always verify emails. Add an optional `trust_email_without_verification: bool` flag to the `oidc_providers` table/config. When `true`, auto-link proceeds regardless of the `email_verified` claim.
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/authentication.rs` — add `email_verified` param, gate auto-link
+- `crates/ui/web-api/src/routes/oidc_auth.rs` — extract `email_verified` from claims, pass to resolver
+
+**Testing:**
+- Unit test: `email_verified = Some(true)` → auto-link succeeds
+- Unit test: `email_verified = Some(false)` → auto-link blocked, returns `LinkViaPasswordRequired`
+- Unit test: `email_verified = None` → auto-link blocked (absent is untrusted)
+- Unit test: new user creation still works regardless of `email_verified` (only affects auto-link)
+
+---
+
+### FP-ME6: Check user active status on JWT-authenticated requests (TOP 5 — #15)
+
+**Addresses:** ME-6 (Medium — deactivated user access for up to 15 minutes)
+
+**Problem:** The `authenticate_jwt()` function in `web-api/src/middleware/require_auth.rs:125-156` is completely stateless — it decodes the JWT, extracts claims, and returns `AuthenticatedUser` without any database query. When an admin deactivates a user, the user's existing JWT tokens remain valid for their remaining lifetime (up to 15 minutes). In contrast, the `authenticate_api_token()` path correctly checks `is_active` on every request.
+
+**Current JWT path (`require_auth.rs:125-156`):**
+```rust
+fn authenticate_jwt(                    // ← synchronous, no DB access
+    state: &AppState,
+    token: &str,
+) -> std::result::Result<AuthenticatedUser, AuthFailure> {
+    let claims = state.jwt.decode_access_token(token)?;
+    let user_id = uuid::Uuid::parse_str(&claims.sub)?;
+    // ... extract auth_method from claims ...
+    // ❌ NO DATABASE CHECK — returns directly from JWT claims
+    Ok(AuthenticatedUser {
+        user_id,
+        auth_method,
+        permissions: claims.permissions,
+    })
+}
+```
+
+**Current API token path (for comparison, `require_auth.rs:91-123`):**
+```rust
+async fn authenticate_api_token(state: &AppState, token: &str) -> Result<...> {
+    let (user_id, _) = service.verify_token(token).await?;
+    let user = User::find_by_id(user_id).one(&state.db).await?;
+    if !user.is_active {                // ✅ checks active status
+        return Err(AuthFailure::Forbidden("User is deactivated\n"));
+    }
+    // ...
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Convert `authenticate_jwt` to async and add DB check:**
+   ```rust
+   async fn authenticate_jwt(
+       state: &AppState,
+       token: &str,
+   ) -> std::result::Result<AuthenticatedUser, AuthFailure> {
+       let claims = state
+           .jwt
+           .decode_access_token(token)
+           .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token\n"))?;
+
+       let user_id = uuid::Uuid::parse_str(&claims.sub)
+           .map_err(|_| AuthFailure::Unauthorized("Invalid token subject\n"))?;
+
+       // Check user is active (matches API token behavior)
+       let user = User::find_by_id(user_id)
+           .one(&state.db)
+           .await
+           .map_err(|_| AuthFailure::InternalError)?
+           .ok_or(AuthFailure::Unauthorized("User not found\n"))?;
+
+       if !user.is_active {
+           return Err(AuthFailure::Forbidden("User is deactivated\n"));
+       }
+
+       let auth_method = /* ... existing auth_method extraction ... */;
+
+       Ok(AuthenticatedUser {
+           user_id,
+           auth_method,
+           permissions: claims.permissions,
+       })
+   }
+   ```
+
+2. **Update the call site in `require_auth` middleware** (around line 58):
+   ```rust
+   // Before:
+   match authenticate_jwt(&state, &token) {
+   // After:
+   match authenticate_jwt(&state, &token).await {
+   ```
+
+3. **Performance consideration:** This adds one `SELECT users WHERE id = ?` query per JWT-authenticated request. This is a primary key lookup (indexed, sub-millisecond on SQLite/PostgreSQL). Given that the API token path already performs this check on every request, consistency is more important than the minor performance cost.
+
+4. **Alternative (deferred, if performance becomes an issue):** Add an in-memory `deactivated_users: DashSet<Uuid>` cache to `AppState`, populated on user deactivation, checked on JWT auth. This avoids the DB query but adds complexity. Not recommended unless profiling shows the DB check is a bottleneck.
+
+**Files to modify:**
+- `crates/ui/web-api/src/middleware/require_auth.rs` — make `authenticate_jwt` async, add DB check
+
+**Testing:**
+- Unit test: deactivated user's JWT is rejected with 403
+- Unit test: active user's JWT still works
+- Unit test: deleted user (not in DB) returns 401
+- Integration test: deactivate user → immediate JWT rejection (no 15-minute delay)
 
 ---
 
