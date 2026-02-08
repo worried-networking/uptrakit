@@ -75,7 +75,7 @@ For the full operational flow (rotation steps, bundle distribution, `CaSnapshot`
 | --- | --- | --- |
 | Password (Argon2id) | User login | Local accounts with hashed passwords |
 | OIDC | User login | External identity providers; auto-create or link accounts |
-| JWT access tokens | API requests | Short-lived; carry resolved permissions (not roles) |
+| JWT access tokens | API requests | Short-lived; carry resolved permissions (not roles); held in-memory only (never persisted to localStorage) |
 | Device authorization | CLI login | Short-lived user code + browser approval; results in API token |
 | API tokens | Programmatic access | Long-lived bearer tokens; revocable |
 | mTLS client certificates | Agent and MQTT service connections | Issued during enrollment; validated on every WebSocket connection |
@@ -101,6 +101,7 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 - Passwords are hashed with Argon2id before storage; plaintext is never persisted.
 - Session tokens (refresh tokens) are SHA-256 hashed in the database and **rotated on each use** — the old token is atomically revoked and a new one issued, preventing replay attacks.
 - JWT signing keys are held in memory only.
+- Refresh tokens are stored in `HttpOnly; Secure; SameSite=Strict` cookies scoped to `/api/v1/auth`, preventing JavaScript access (XSS-resistant). Access tokens are held in-memory only and never written to localStorage or sessionStorage.
 - Agent and MQTT service private keys are generated and stored locally on each agent/service; they never leave the host.
 - CA private keys are stored on the controller filesystem and held in a separate in-memory key store (`CaKeyStore`) with `zeroize` memory protection. Only signing operations (OCSP, CRL, certificate issuance) access the key store; public CA data (certificates, fingerprints) is shared separately.
 - No secrets appear in log output, error messages, or API responses.

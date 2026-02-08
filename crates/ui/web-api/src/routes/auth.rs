@@ -1,12 +1,15 @@
 use crate::AppState;
 use crate::auth::permissions::Permission;
+use crate::auth::refresh_cookie::{
+    clear_refresh_token_cookie, extract_refresh_token_from_cookie, set_refresh_token_cookie,
+};
 use crate::auth::{AuthError, password, session::SessionService, token::generate_uuid};
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use rootcause::prelude::*;
@@ -170,6 +173,7 @@ pub async fn register(
         }
     };
 
+    let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token,
         refresh_token,
@@ -184,7 +188,7 @@ pub async fn register(
         },
     };
 
-    (StatusCode::CREATED, Json(response)).into_response()
+    (StatusCode::CREATED, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
 }
 
 /// Login with email and password
@@ -277,6 +281,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         }
     };
 
+    let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token,
         refresh_token,
@@ -291,7 +296,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         },
     };
 
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
 }
 
 /// Logout and revoke refresh token
@@ -306,18 +311,31 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
 )]
 pub async fn logout(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<LogoutRequest>,
+    req: axum::extract::Request,
 ) -> Response {
-    // Revoke refresh token
-    let session_service = SessionService::new(state.db.clone());
-    if let Err(e) = session_service
-        .revoke_refresh_token(&req.refresh_token)
-        .await
-    {
-        tracing::error!("Failed to revoke refresh token: {:?}", e);
+    // Extract refresh token: prefer cookie, fall back to JSON body
+    let cookie_token = extract_refresh_token_from_cookie(&req);
+    let body_token = {
+        let body_bytes = match axum::body::to_bytes(req.into_body(), 1024 * 16).await {
+            Ok(b) => b,
+            Err(_) => axum::body::Bytes::new(),
+        };
+        serde_json::from_slice::<LogoutRequest>(&body_bytes)
+            .ok()
+            .and_then(|r| r.refresh_token.filter(|t| !t.is_empty()))
+    };
+
+    let refresh_token = cookie_token.or(body_token);
+
+    if let Some(token) = &refresh_token {
+        let session_service = SessionService::new(state.db.clone());
+        if let Err(e) = session_service.revoke_refresh_token(token).await {
+            tracing::error!("Failed to revoke refresh token: {:?}", e);
+        }
     }
 
-    StatusCode::NO_CONTENT.into_response()
+    let cookie = clear_refresh_token_cookie();
+    (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
 }
 
 /// Get current user information
@@ -381,12 +399,31 @@ pub async fn me(
 )]
 pub async fn refresh(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<RefreshRequest>,
+    req: axum::extract::Request,
 ) -> Response {
+    // Extract refresh token: prefer cookie, fall back to JSON body
+    let cookie_token = extract_refresh_token_from_cookie(&req);
+    let body_token = {
+        let body_bytes = match axum::body::to_bytes(req.into_body(), 1024 * 16).await {
+            Ok(b) => b,
+            Err(_) => axum::body::Bytes::new(),
+        };
+        serde_json::from_slice::<RefreshRequest>(&body_bytes)
+            .ok()
+            .and_then(|r| r.refresh_token.filter(|t| !t.is_empty()))
+    };
+
+    let refresh_token = match cookie_token.or(body_token) {
+        Some(t) => t,
+        None => {
+            return error_response(StatusCode::UNAUTHORIZED, "No refresh token provided");
+        }
+    };
+
     // Rotate refresh token: revoke old, create new
     let session_service = SessionService::new(state.db.clone());
     let (verified, new_refresh_token) = match session_service
-        .rotate_refresh_token(&req.refresh_token)
+        .rotate_refresh_token(&refresh_token)
         .await
     {
         Ok(v) => v,
@@ -437,6 +474,7 @@ pub async fn refresh(
             }
         };
 
+    let cookie = set_refresh_token_cookie(&new_refresh_token);
     let response = RefreshResponse {
         access_token,
         refresh_token: new_refresh_token,
@@ -444,7 +482,7 @@ pub async fn refresh(
         token_type: "Bearer".to_string(),
     };
 
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
 }
 
 // Helper functions

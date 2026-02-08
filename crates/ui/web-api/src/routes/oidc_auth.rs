@@ -3,13 +3,14 @@ use crate::auth::authentication::{
     OidcUserParams, OidcUserResolution, extract_mapped_roles, resolve_oidc_user, sync_oidc_roles,
 };
 use crate::auth::password;
+use crate::auth::refresh_cookie::set_refresh_token_cookie;
 use crate::auth::session::SessionService;
 use crate::auth::token::{generate_secure_token, generate_uuid};
 use crate::error_response::error_response;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
 use openidconnect::{
@@ -675,6 +676,7 @@ pub async fn oidc_exchange(
         }
     };
 
+    let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token,
         refresh_token,
@@ -689,7 +691,7 @@ pub async fn oidc_exchange(
         },
     };
 
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
 }
 
 /// Complete OIDC registration with a registration token (public).
@@ -932,6 +934,7 @@ pub async fn oidc_complete_registration(
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
+    let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token,
         refresh_token,
@@ -946,7 +949,7 @@ pub async fn oidc_complete_registration(
         },
     };
 
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
 }
 
 /// Link a pending OIDC account (public)
@@ -1129,6 +1132,7 @@ pub async fn oidc_link(
         }
     };
 
+    let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
         access_token,
         refresh_token,
@@ -1143,7 +1147,7 @@ pub async fn oidc_link(
         },
     };
 
-    (StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
 }
 
 // Helper functions

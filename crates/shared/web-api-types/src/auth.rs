@@ -38,13 +38,19 @@ pub struct LoginRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LogoutRequest {
-    pub refresh_token: String,
+    /// The refresh token to revoke. Optional when the token is provided
+    /// via the `refresh_token` `HttpOnly` cookie.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RefreshRequest {
-    pub refresh_token: String,
+    /// The refresh token. Optional when the token is provided via the
+    /// `refresh_token` `HttpOnly` cookie.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

@@ -1,6 +1,6 @@
+import { getAccessToken, setAccessToken } from './auth';
 import type {
 	AgentCertificateSettings,
-	AgentResponse,
 	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
@@ -21,6 +21,7 @@ import type {
 	RegisterRequest,
 	RegistrationSettings,
 	RenewServerCertResponse,
+	ServiceResponse,
 	SystemAlertsResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
@@ -50,22 +51,18 @@ async function extractErrorMessage(res: Response): Promise<string> {
 }
 
 function authHeaders(): Record<string, string> {
-	const token = localStorage.getItem('access_token');
+	const token = getAccessToken();
 	return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 let refreshPromise: Promise<RefreshResponse> | null = null;
 
 async function refreshAccessToken(): Promise<RefreshResponse> {
-	const refreshToken = localStorage.getItem('refresh_token');
-	if (!refreshToken) {
-		throw new Error('No refresh token');
-	}
-
 	const res = await fetch(`${BASE}/auth/refresh`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ refresh_token: refreshToken })
+		credentials: 'same-origin',
+		body: JSON.stringify({})
 	});
 
 	if (!res.ok) {
@@ -77,32 +74,33 @@ async function refreshAccessToken(): Promise<RefreshResponse> {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
+		credentials: 'same-origin',
+		...options,
 		headers: {
 			'Content-Type': 'application/json',
 			...authHeaders(),
 			...(options.headers as Record<string, string> | undefined)
-		},
-		...options
+		}
 	});
 
-	if (res.status === 401 && localStorage.getItem('refresh_token')) {
+	if (res.status === 401 && getAccessToken()) {
 		// Attempt token refresh, deduplicating concurrent attempts
 		try {
 			if (!refreshPromise) {
 				refreshPromise = refreshAccessToken();
 			}
 			const refreshed = await refreshPromise;
-			localStorage.setItem('access_token', refreshed.access_token);
-			localStorage.setItem('refresh_token', refreshed.refresh_token);
+			setAccessToken(refreshed.access_token);
 
 			// Retry original request with new token
 			const retryRes = await fetch(`${BASE}${path}`, {
+				credentials: 'same-origin',
+				...options,
 				headers: {
 					'Content-Type': 'application/json',
 					Authorization: `Bearer ${refreshed.access_token}`,
 					...(options.headers as Record<string, string> | undefined)
-				},
-				...options
+				}
 			});
 
 			if (!retryRes.ok) {
@@ -112,9 +110,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 			if (retryRes.status === 204) return undefined as T;
 			return retryRes.json();
 		} catch {
-			// Refresh failed — clear tokens and redirect to login
-			localStorage.removeItem('access_token');
-			localStorage.removeItem('refresh_token');
+			// Refresh failed — clear token and redirect to login
+			setAccessToken(null);
 			window.location.href = '/login';
 			throw new Error('Session expired');
 		} finally {
@@ -139,10 +136,9 @@ export function login(data: LoginRequest): Promise<AuthResponse> {
 }
 
 export function logout(): Promise<void> {
-	const refreshToken = localStorage.getItem('refresh_token');
 	return request('/auth/logout', {
 		method: 'POST',
-		body: JSON.stringify({ refresh_token: refreshToken || '' })
+		body: JSON.stringify({})
 	});
 }
 
@@ -169,6 +165,7 @@ export async function oidcCompleteRegistration(
 	const res = await fetch(`${BASE}/auth/oidc/complete-registration`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
+		credentials: 'same-origin',
 		body: JSON.stringify({ registration_code: registrationCode, registration_token: registrationToken })
 	});
 	if (!res.ok) {
@@ -183,6 +180,7 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 	const res = await fetch(`${BASE}/auth/oidc/exchange`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
+		credentials: 'same-origin',
 		body: JSON.stringify({ code })
 	});
 	if (!res.ok) {
@@ -192,25 +190,27 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 	return res.json();
 }
 
-export function getAgents(status?: string): Promise<AgentResponse[]> {
-	const query = status ? `?status=${status}` : '';
-	return request(`/agents${query}`);
+export function getAgents(status?: string): Promise<PaginatedResponse<ServiceResponse>> {
+	const params = new URLSearchParams();
+	params.set('type', 'agent');
+	if (status) params.set('status', status);
+	return request(`/services?${params.toString()}`);
 }
 
-export function approveAgent(id: string): Promise<AgentResponse> {
-	return request(`/agents/${id}/approve`, { method: 'POST' });
+export function approveAgent(id: string): Promise<ServiceResponse> {
+	return request(`/services/${id}/approve`, { method: 'POST' });
 }
 
-export function rejectAgent(id: string): Promise<AgentResponse> {
-	return request(`/agents/${id}/reject`, { method: 'POST' });
+export function rejectAgent(id: string): Promise<ServiceResponse> {
+	return request(`/services/${id}/reject`, { method: 'POST' });
 }
 
 export function deleteAgent(id: string): Promise<MessageResponse> {
-	return request(`/agents/${id}`, { method: 'DELETE' });
+	return request(`/services/${id}`, { method: 'DELETE' });
 }
 
-export function mergeAgent(targetId: string, sourceId: string): Promise<AgentResponse> {
-	return request(`/agents/${targetId}/merge`, {
+export function mergeAgent(targetId: string, sourceId: string): Promise<ServiceResponse> {
+	return request(`/services/${targetId}/merge`, {
 		method: 'POST',
 		body: JSON.stringify({ source_id: sourceId })
 	});
@@ -270,16 +270,20 @@ export function updateAgentCertificateSettings(
 	return request('/settings/agent-certificates', { method: 'PUT', body: JSON.stringify(data) });
 }
 
-export function getEnrollmentTokenStatus(): Promise<EnrollmentTokenStatus> {
-	return request('/agents/enrollment-token/status');
+export function getEnrollmentTokenStatus(
+	type: 'agent' | 'mqtt' = 'agent'
+): Promise<EnrollmentTokenStatus> {
+	return request(`/services/enrollment-token/status?type=${type}`);
 }
 
-export function createEnrollmentToken(): Promise<EnrollmentTokenResponse> {
-	return request('/agents/enrollment-token', { method: 'POST' });
+export function createEnrollmentToken(
+	type: 'agent' | 'mqtt' = 'agent'
+): Promise<EnrollmentTokenResponse> {
+	return request(`/services/enrollment-token?type=${type}`, { method: 'POST' });
 }
 
-export function revokeEnrollmentToken(): Promise<MessageResponse> {
-	return request('/agents/enrollment-token', { method: 'DELETE' });
+export function revokeEnrollmentToken(type: 'agent' | 'mqtt' = 'agent'): Promise<MessageResponse> {
+	return request(`/services/enrollment-token?type=${type}`, { method: 'DELETE' });
 }
 
 // --- Network Settings APIs ---

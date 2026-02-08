@@ -16,7 +16,7 @@ export interface User {
 	email: string;
 	first_name: string;
 	last_name: string;
-	permissions: string[];
+	permissions: Permission[];
 }
 
 export interface AuthResponse {
@@ -47,12 +47,18 @@ export interface LoginRequest {
 	password: string;
 }
 
-export interface AgentResponse {
+export type ServiceType = 'agent' | 'mqtt';
+
+export type ServiceStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';
+
+export interface ServiceResponse {
 	id: string;
+	service_type: ServiceType;
 	hostname: string;
 	friendly_name: string;
 	ip_address: string | null;
-	status: 'pending' | 'approved' | 'rejected';
+	status: ServiceStatus;
+	client_version: string | null;
 	last_seen_at: string | null;
 	created_at: string;
 	updated_at: string;
@@ -233,7 +239,7 @@ export interface UpdateMqttLimitRequest {
 export interface HostAgentSummary {
 	id: string;
 	friendly_name: string;
-	status: 'pending' | 'approved' | 'rejected';
+	status: ServiceStatus;
 }
 
 export interface HostResponse {

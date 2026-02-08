@@ -5,9 +5,19 @@ import * as api from './api';
 export const user = writable<User | null>(null);
 export const loading = writable(true);
 
+/** In-memory access token — never persisted to localStorage. */
+let accessToken: string | null = null;
+
+export function getAccessToken(): string | null {
+	return accessToken;
+}
+
+export function setAccessToken(token: string | null): void {
+	accessToken = token;
+}
+
 export async function initialize() {
-	const token = localStorage.getItem('access_token');
-	if (!token) {
+	if (!accessToken) {
 		loading.set(false);
 		return;
 	}
@@ -15,8 +25,7 @@ export async function initialize() {
 		const u = await api.me();
 		user.set(u);
 	} catch {
-		localStorage.removeItem('access_token');
-		localStorage.removeItem('refresh_token');
+		accessToken = null;
 	} finally {
 		loading.set(false);
 	}
@@ -24,15 +33,13 @@ export async function initialize() {
 
 export async function handleLogin(data: LoginRequest) {
 	const res = await api.login(data);
-	localStorage.setItem('access_token', res.access_token);
-	localStorage.setItem('refresh_token', res.refresh_token);
+	accessToken = res.access_token;
 	user.set(res.user);
 }
 
 export async function handleRegister(data: RegisterRequest) {
 	const res = await api.register(data);
-	localStorage.setItem('access_token', res.access_token);
-	localStorage.setItem('refresh_token', res.refresh_token);
+	accessToken = res.access_token;
 	user.set(res.user);
 }
 
@@ -40,8 +47,7 @@ export async function handleLogout() {
 	try {
 		await api.logout();
 	} finally {
-		localStorage.removeItem('access_token');
-		localStorage.removeItem('refresh_token');
+		accessToken = null;
 		user.set(null);
 	}
 }
@@ -53,15 +59,13 @@ export async function handleOidcLogin(providerId: string) {
 
 export async function handleOidcCallback(code: string) {
 	const res = await api.oidcExchange(code);
-	localStorage.setItem('access_token', res.access_token);
-	localStorage.setItem('refresh_token', res.refresh_token);
+	accessToken = res.access_token;
 	user.set(res.user);
 }
 
 export async function handleOidcCompleteRegistration(registrationCode: string, registrationToken: string) {
 	const res = await api.oidcCompleteRegistration(registrationCode, registrationToken);
-	localStorage.setItem('access_token', res.access_token);
-	localStorage.setItem('refresh_token', res.refresh_token);
+	accessToken = res.access_token;
 	user.set(res.user);
 }
 
@@ -71,7 +75,6 @@ export async function handleOidcLink(linkToken: string, password?: string) {
 		data.password = password;
 	}
 	const res = await api.oidcLink(data);
-	localStorage.setItem('access_token', res.access_token);
-	localStorage.setItem('refresh_token', res.refresh_token);
+	accessToken = res.access_token;
 	user.set(res.user);
 }

@@ -24,14 +24,16 @@
 	} from '$lib/api';
 	import {
 		Permission,
-		type RegistrationSettings,
 		type AuthenticationSettings,
 		type AgentCertificateSettings,
+		type CreateMqttClient,
 		type EnrollmentTokenStatus,
+		type MqttClientResponse,
 		type OidcProviderResponse,
 		type CreateOidcProviderRequest,
-		type UpdateOidcProviderRequest,
-		type MqttClientResponse
+		type RegistrationSettings,
+		type UpdateMqttClient,
+		type UpdateOidcProviderRequest
 	} from '$lib/types';
 
 	// --- Global feedback ---
@@ -50,6 +52,10 @@
 
 	let enrollmentConfigured: boolean = $state(false);
 	let generatedToken: string | null = $state(null);
+
+	// --- MQTT Enrollment Token ---
+	let mqttEnrollmentConfigured: boolean = $state(false);
+	let mqttGeneratedToken: string | null = $state(null);
 
 	let oidcProviders: OidcProviderResponse[] = $state([]);
 
@@ -142,9 +148,10 @@
 			getRegistrationSettings(),
 			getAuthenticationSettings(),
 			getAgentCertificateSettings(),
-			getEnrollmentTokenStatus(),
+			getEnrollmentTokenStatus('agent'),
 			getOidcProviders(),
-			getMqttClients()
+			getMqttClients(),
+			getEnrollmentTokenStatus('mqtt')
 		]);
 
 		if (results[0].status === 'fulfilled') {
@@ -166,6 +173,9 @@
 		}
 		if (results[5].status === 'fulfilled') {
 			mqttClients = results[5].value;
+		}
+		if (results[6].status === 'fulfilled') {
+			mqttEnrollmentConfigured = results[6].value.configured;
 		}
 
 		loading = false;
@@ -207,16 +217,14 @@
 		clearError();
 		try {
 			if (editingMqttClient) {
-				const data: Record<string, unknown> = {
+				const data: UpdateMqttClient = {
 					url: mqttForm.url || undefined,
 					enabled: mqttForm.enabled,
 					client_id: mqttForm.client_id,
 					username: mqttForm.username || null,
-					topic_prefix: mqttForm.topic_prefix
+					topic_prefix: mqttForm.topic_prefix,
+					...(mqttForm.password ? { password: mqttForm.password } : {})
 				};
-				if (mqttForm.password) {
-					data.password = mqttForm.password;
-				}
 				const res = await updateMqttClient(editingMqttClient.id, data);
 				mqttClients = mqttClients.map((c) => (c.id === res.id ? res : c));
 				showSuccess('MQTT client updated.');
@@ -225,7 +233,7 @@
 					showError('URL is required to create an MQTT client');
 					return;
 				}
-				const data: Record<string, unknown> = {
+				const data: CreateMqttClient = {
 					url: mqttForm.url,
 					enabled: mqttForm.enabled,
 					client_id: mqttForm.client_id || undefined,
@@ -314,28 +322,53 @@
 		}
 	}
 
-	// --- Enrollment Token ---
+	// --- Agent Enrollment Token ---
 	async function handleGenerateToken() {
 		clearError();
 		try {
-			const res = await createEnrollmentToken();
+			const res = await createEnrollmentToken('agent');
 			generatedToken = res.token;
 			enrollmentConfigured = true;
-			showSuccess('Enrollment token generated.');
+			showSuccess('Agent enrollment token generated.');
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to generate enrollment token');
+			showError(e instanceof Error ? e.message : 'Failed to generate agent enrollment token');
 		}
 	}
 
 	async function handleRevokeToken() {
 		clearError();
 		try {
-			await revokeEnrollmentToken();
+			await revokeEnrollmentToken('agent');
 			enrollmentConfigured = false;
 			generatedToken = null;
-			showSuccess('Enrollment token revoked.');
+			showSuccess('Agent enrollment token revoked.');
 		} catch (e) {
-			showError(e instanceof Error ? e.message : 'Failed to revoke enrollment token');
+			showError(e instanceof Error ? e.message : 'Failed to revoke agent enrollment token');
+		}
+	}
+
+	// --- MQTT Enrollment Token ---
+	async function handleGenerateMqttToken() {
+		clearError();
+		try {
+			const res = await createEnrollmentToken('mqtt');
+			mqttGeneratedToken = res.token;
+			mqttEnrollmentConfigured = true;
+			showSuccess('MQTT enrollment token generated.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to generate MQTT enrollment token');
+		}
+	}
+
+	async function handleRevokeMqttToken() {
+		clearError();
+		try {
+			await revokeEnrollmentToken('mqtt');
+			mqttEnrollmentConfigured = false;
+			mqttGeneratedToken = null;
+			showSuccess('MQTT enrollment token revoked.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to revoke MQTT enrollment token');
 		}
 	}
 
@@ -745,9 +778,9 @@
 			</button>
 		</div>
 
-		<!-- Section 5: Enrollment Token -->
+		<!-- Section 5: Agent Enrollment Token -->
 		<div class="card mb-6 p-6">
-			<h2 class="h3 mb-4">Enrollment Token</h2>
+			<h2 class="h3 mb-4">Agent Enrollment Token</h2>
 			<div class="mb-4 flex items-center gap-3">
 				<span>Status:</span>
 				{#if enrollmentConfigured}
@@ -770,6 +803,41 @@
 				</button>
 				{#if enrollmentConfigured}
 					<button class="btn preset-filled-error-500" onclick={handleRevokeToken}>
+						Revoke
+					</button>
+				{/if}
+			</div>
+		</div>
+
+		<!-- Section 6: MQTT Enrollment Token -->
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">MQTT Enrollment Token</h2>
+			<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+				This token is used by MQTT services to register with the controller.
+				It is separate from the agent enrollment token.
+			</p>
+			<div class="mb-4 flex items-center gap-3">
+				<span>Status:</span>
+				{#if mqttEnrollmentConfigured}
+					<span class="badge preset-filled-success-500">Configured</span>
+				{:else}
+					<span class="badge preset-tonal">Not configured</span>
+				{/if}
+			</div>
+
+			{#if mqttGeneratedToken}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+					<p class="font-bold">Copy it now — it will not be shown again</p>
+					<code class="break-all">{mqttGeneratedToken}</code>
+				</aside>
+			{/if}
+
+			<div class="flex gap-2">
+				<button class="btn preset-filled-primary-500" onclick={handleGenerateMqttToken}>
+					{mqttEnrollmentConfigured ? 'Regenerate' : 'Generate'}
+				</button>
+				{#if mqttEnrollmentConfigured}
+					<button class="btn preset-filled-error-500" onclick={handleRevokeMqttToken}>
 						Revoke
 					</button>
 				{/if}

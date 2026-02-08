@@ -7,6 +7,7 @@ pub mod oidc_state;
 pub mod password;
 pub mod permissions;
 pub mod rate_limit;
+pub mod refresh_cookie;
 pub mod registration;
 pub mod session;
 pub mod token;

@@ -174,7 +174,7 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 - **OIDC**: External identity providers with auto-create or account linking. Can be bootstrapped at startup via `--oidc-*` CLI flags (see [AGENTS.md](AGENTS.md) "OIDC provider bootstrap"). When registration mode is `Invite`, new OIDC users may need to provide a registration token (always for the first user, optionally for subsequent users via `require_token_for_oidc` setting).
 - **Device authorization**: RFC 8628-style flow for CLI login. The CLI requests a device code, the user approves in the browser, and the CLI receives an API token. Works with any auth method (password or OIDC).
 - **Sessions**: SHA-256 hashed refresh tokens, 7-day expiry. Refresh tokens are **rotated on each use** — the old token is atomically revoked and a new one issued, preventing replay attacks.
-- **JWT**: Short-lived access tokens carrying resolved permissions.
+- **JWT**: Short-lived access tokens (in-memory only, never persisted) carrying resolved permissions. Refresh tokens are stored in `HttpOnly; Secure; SameSite=Strict` cookies scoped to `/api/v1/auth`.
 - **API tokens**: Long-lived, revocable bearer tokens for programmatic access.
 
 ### Agent authentication

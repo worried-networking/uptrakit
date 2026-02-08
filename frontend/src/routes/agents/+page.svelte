@@ -2,9 +2,9 @@
 	import { user } from '$lib/auth';
 	import { goto } from '$app/navigation';
 	import { getAgents, approveAgent, rejectAgent, deleteAgent, mergeAgent } from '$lib/api';
-	import type { AgentResponse } from '$lib/types';
+	import type { ServiceResponse } from '$lib/types';
 
-	let agents: AgentResponse[] = $state([]);
+	let agents: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
@@ -28,7 +28,8 @@
 	async function loadAgents() {
 		try {
 			error = null;
-			agents = await getAgents();
+			const result = await getAgents();
+			agents = result.items;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load agents';
 		}
@@ -57,7 +58,7 @@
 		confirmAction = null;
 	}
 
-	function openMergeDialog(agent: AgentResponse) {
+	function openMergeDialog(agent: ServiceResponse) {
 		closeMenu();
 		mergeSource = { id: agent.id, name: agent.friendly_name };
 		mergeTargetId = null;
@@ -161,6 +162,8 @@
 								<span class="badge preset-filled-warning-500">Pending</span>
 							{:else if agent.status === 'approved'}
 								<span class="badge preset-filled-success-500">Approved</span>
+							{:else if agent.status === 'deactivated'}
+								<span class="badge preset-tonal">Deactivated</span>
 							{:else}
 								<span class="badge preset-filled-error-500">Rejected</span>
 							{/if}
