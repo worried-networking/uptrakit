@@ -553,14 +553,15 @@ In a multi-controller deployment (multiple controller instances behind a load ba
 **How it works:**
 
 1. Each controller generates a unique `controller_id` (UUIDv7) at startup (stored in `AppState.controller_id`).
-2. `NotificationService` wraps `ServiceConnectionRegistry` and writes outbox events on every `send()` and `broadcast()` call.
-3. `EventPoller` runs as a background task, polling every 1 second for new events from other controllers (`source_controller_id != self`), using a cursor-based approach (`id > last_seen_id`).
+2. `NotificationService` wraps `ServiceConnectionRegistry` and writes outbox events on every `send()` and `broadcast()` call. MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are delivered locally but **not** written to the outbox to prevent plaintext credential persistence in the database. The MQTT service reconciles its state from the DB on reconnect.
+3. `EventPoller` runs as a background task, polling every 1 second for new events from other controllers (`source_controller_id != self`), using a cursor-based approach (`id > last_seen_id`). The cursor only advances past events that were successfully delivered (or permanently skipped after 3 failed retries), providing at-least-once delivery semantics under backpressure.
 4. Events are routed based on `target_service_id` (specific service) and `target_service_type` (`"agent"`, `"mqtt"`, or `null` for broadcast).
 5. Old events (>1 hour) are cleaned up every 5 minutes.
 
 **Design rules:**
 
 - `ServerRestarting` is local-only — it stays on `ServiceConnectionRegistry.broadcast_server_restarting_scattered()` and is NOT sent through `NotificationService`.
+- MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are local-only — filtered by `is_mqtt_tenant_message()` in `NotificationService`. `MqttLeaseCoordinator` delivers these directly via `ServiceConnectionRegistry` without outbox writes.
 - Outbox writes are fire-and-forget (errors are logged, not propagated to the caller).
 - Single-controller overhead is negligible: one extra INSERT per push event, plus one SELECT/second returning 0 rows.
 
@@ -1161,6 +1162,19 @@ Key types (defined in `crates/shared/wire/src/lib.rs`):
 - `OutgoingSeq` — wraps messages with `wrap_service()` or `wrap_controller()`
 - `IncomingSeq` — validates with `validate(seq) -> Result<(), SeqError>`
 - `SeqError { expected: u64, received: u64 }` — validation error
+
+### Connection limits and safety
+
+The controller enforces several connection-level limits on the WebSocket endpoint (`/api/v1/ws/service`):
+
+| Limit | Value | Purpose |
+| --- | --- | --- |
+| Max incoming message size | 1 MB | Prevents memory exhaustion from oversized messages |
+| Anonymous connection timeout | 30 seconds | Closes unauthenticated connections that don't enroll in time |
+| Approval polling interval | 5 seconds | Rate-limits DB polling for approval status (decoupled from client-controlled pings) |
+| Update output cap | 1 MB | Caps accumulated `UpdateOutput` per update record to prevent unbounded DB growth |
+
+These limits are defined as constants in `service_ws.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`), `agent_ws.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), and `mqtt_ws.rs` (`APPROVAL_POLL_INTERVAL`).
 
 ### Agent graceful shutdown
 

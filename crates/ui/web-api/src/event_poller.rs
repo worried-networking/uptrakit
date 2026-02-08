@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use sea_orm::{
@@ -11,12 +12,17 @@ use uuid::Uuid;
 
 use crate::service_connections::ServiceConnectionRegistry;
 
+/// Maximum number of delivery retries before an event is skipped.
+const MAX_DELIVERY_RETRIES: u8 = 3;
+
 /// Background task that polls the `controller_events` table for events written by
 /// other controller instances and delivers them to locally connected services.
 pub struct EventPoller {
     db: DatabaseConnection,
     registry: ServiceConnectionRegistry,
     controller_id: Uuid,
+    /// Tracks delivery retry counts for events that failed delivery.
+    retry_counts: HashMap<i64, u8>,
 }
 
 impl EventPoller {
@@ -29,11 +35,12 @@ impl EventPoller {
             db,
             registry,
             controller_id,
+            retry_counts: HashMap::new(),
         }
     }
 
     /// Run the event poller until the cancellation token is triggered.
-    pub async fn run(self, token: CancellationToken) {
+    pub async fn run(mut self, token: CancellationToken) {
         // Initialize cursor to current max ID to avoid replaying old events.
         let mut last_seen_id = self.fetch_max_id().await;
         tracing::info!(
@@ -84,7 +91,11 @@ impl EventPoller {
     }
 
     /// Poll for new events from other controllers. Returns the updated cursor.
-    async fn poll_events(&self, last_seen_id: i64) -> i64 {
+    ///
+    /// Only advances the cursor past events that were successfully delivered (or
+    /// permanently skipped after [`MAX_DELIVERY_RETRIES`] failures). This
+    /// prevents message loss under backpressure.
+    async fn poll_events(&mut self, last_seen_id: i64) -> i64 {
         let events = match controller_event::Entity::find()
             .filter(controller_event::Column::SourceControllerId.ne(self.controller_id))
             .filter(controller_event::Column::Id.gt(last_seen_id))
@@ -103,62 +114,99 @@ impl EventPoller {
         let mut new_cursor = last_seen_id;
 
         for event in events {
-            new_cursor = event.id;
+            let event_id = event.id;
 
             let msg: ControllerMessage = match serde_json::from_str(&event.message_json) {
                 Ok(m) => m,
                 Err(e) => {
                     tracing::warn!(
-                        event_id = event.id,
+                        event_id,
                         error = %e,
                         "failed to deserialize controller event, skipping"
                     );
+                    // Deserialization failures are permanent — advance past them.
+                    new_cursor = event_id;
                     continue;
                 }
             };
 
-            self.deliver_event(
-                event.target_service_id,
-                event.target_service_type.as_deref(),
-                msg,
-            )
-            .await;
+            let delivered = self
+                .deliver_event(
+                    event.target_service_id,
+                    event.target_service_type.as_deref(),
+                    msg,
+                )
+                .await;
+
+            if delivered {
+                new_cursor = event_id;
+                self.retry_counts.remove(&event_id);
+            } else {
+                let retries = self.retry_counts.entry(event_id).or_insert(0);
+                *retries += 1;
+                if *retries >= MAX_DELIVERY_RETRIES {
+                    tracing::warn!(
+                        event_id,
+                        retries = *retries,
+                        "event exceeded max delivery retries, skipping"
+                    );
+                    new_cursor = event_id;
+                    self.retry_counts.remove(&event_id);
+                } else {
+                    // Stop processing this batch — retry from this event next poll.
+                    break;
+                }
+            }
         }
+
+        // Clean up retry entries for events we've moved past.
+        self.retry_counts.retain(|&id, _| id > new_cursor);
 
         new_cursor
     }
 
     /// Deliver a single event to the appropriate local service(s).
+    ///
+    /// Returns `true` if the message was delivered (or the target is not on
+    /// this controller), `false` if delivery failed (channel full / send error).
     async fn deliver_event(
         &self,
         target_service_id: Option<Uuid>,
         target_service_type: Option<&str>,
         msg: ControllerMessage,
-    ) {
+    ) -> bool {
         match (target_service_id, target_service_type) {
             // Targeted to a specific service
             (Some(id), _) => {
-                self.registry.send(&id, msg).await;
+                if self.registry.is_connected(&id).await {
+                    self.registry.send(&id, msg).await
+                } else {
+                    // Service not on this controller — not our responsibility.
+                    true
+                }
             }
             // Targeted to MQTT services
-            (None, Some("mqtt")) => {
-                self.deliver_mqtt_event(msg).await;
-            }
+            (None, Some("mqtt")) => self.deliver_mqtt_event(msg).await,
             // Targeted to agent services
             (None, Some("agent")) => {
                 self.registry
                     .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::Agent, msg)
                     .await;
+                true
             }
             // Broadcast to all services
             (None, _) => {
                 self.registry.broadcast(msg).await;
+                true
             }
         }
     }
 
     /// Deliver an MQTT-targeted event with special routing for tenant messages.
-    async fn deliver_mqtt_event(&self, msg: ControllerMessage) {
+    ///
+    /// Returns `true` if delivery succeeded or the target is not on this
+    /// controller.
+    async fn deliver_mqtt_event(&self, msg: ControllerMessage) -> bool {
         match &msg {
             ControllerMessage::TenantConfigUpdated(payload) => {
                 // Route to the specific instance holding this MQTT client
@@ -168,9 +216,11 @@ impl EventPoller {
                     .get_instance_for_mqtt_client(&mqtt_client_id)
                     .await
                 {
-                    self.registry.send(&service_id, msg).await;
+                    self.registry.send(&service_id, msg).await
+                } else {
+                    // Not on this controller.
+                    true
                 }
-                // If no local holder, the event is not for this controller
             }
             ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
                 mqtt_client_id, ..
@@ -185,15 +235,18 @@ impl EventPoller {
                     self.registry
                         .release_mqtt_client(&service_id, &mqtt_client_id)
                         .await;
-                    self.registry.send(&service_id, msg).await;
+                    self.registry.send(&service_id, msg).await
+                } else {
+                    // Not on this controller.
+                    true
                 }
-                // If no local holder, the event is not for this controller
             }
             _ => {
                 // Other MQTT messages: broadcast to all local MQTT services
                 self.registry
                     .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::Mqtt, msg)
                     .await;
+                true
             }
         }
     }

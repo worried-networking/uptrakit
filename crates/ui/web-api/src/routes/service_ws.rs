@@ -184,7 +184,8 @@ pub async fn service_ws(
 
     let ip = client_ip.map(|Extension(ClientIp(ip))| ip);
 
-    ws.on_upgrade(move |socket| handle_connection(socket, state, conn_type, ip))
+    ws.max_message_size(MAX_WS_MESSAGE_SIZE)
+        .on_upgrade(move |socket| handle_connection(socket, state, conn_type, ip))
 }
 
 // ---------------------------------------------------------------------------
@@ -193,42 +194,20 @@ pub async fn service_ws(
 
 /// Look up a service by bearer enrollment secret.
 ///
-/// For agent services the secret hash is computed deterministically (SHA-256);
-/// for MQTT services the hash is verified via argon2 (variable-time).
-/// We first try the fast agent-style lookup, then fall back to the MQTT-style
-/// brute-force verification.
+/// All services (agent and MQTT) use deterministic SHA-256 hashing for enrollment
+/// secrets. This allows a single indexed DB query instead of iterating rows.
 async fn lookup_by_secret(
     db: &sea_orm::DatabaseConnection,
     secret: &str,
 ) -> ServiceWsResult<service_entity::Model> {
-    // Agent-style: deterministic hash lookup.
     let secret_hash = crate::auth::token::hash_token(secret);
-    if let Ok(Some(service)) = uptrakit_shared_db::entity::prelude::Service::find()
+    uptrakit_shared_db::entity::prelude::Service::find()
         .filter(service_entity::Column::EnrollmentSecretHash.eq(&secret_hash))
         .filter(service_entity::Column::DeactivatedAt.is_null())
         .one(db)
         .await
-    {
-        return Ok(service);
-    }
-
-    // MQTT-style: iterate non-deactivated MQTT services and verify via argon2.
-    let mqtt_services = uptrakit_shared_db::entity::prelude::Service::find()
-        .filter(service_entity::Column::ServiceType.eq(service_entity::ServiceType::Mqtt))
-        .filter(service_entity::Column::DeactivatedAt.is_null())
-        .all(db)
-        .await
-        .context_to::<ServiceWsError>()?;
-
-    for svc in mqtt_services {
-        if let Ok(true) =
-            crate::auth::password::verify_password(secret, &svc.enrollment_secret_hash)
-        {
-            return Ok(svc);
-        }
-    }
-
-    Err(report!(ServiceWsError::InvalidSecret))
+        .context_to::<ServiceWsError>()?
+        .ok_or_else(|| report!(ServiceWsError::InvalidSecret))
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +520,17 @@ async fn handle_enrolled(
 // Anonymous path
 // ---------------------------------------------------------------------------
 
+/// Maximum incoming WebSocket message size (1 MB).
+///
+/// The largest legitimate message is `ExecuteUpdate` with provider config and
+/// release assets, typically well under 100 KB. 1 MB provides ample headroom
+/// while preventing memory-exhaustion DoS from oversized payloads.
+const MAX_WS_MESSAGE_SIZE: usize = 1_048_576;
+
+/// Maximum time an anonymous WebSocket connection may remain idle before
+/// sending the initial `Enroll` message.
+const ANONYMOUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Anonymous path: expects an Enroll message, then promotes in-place.
 async fn handle_anonymous(
     socket: WebSocket,
@@ -553,15 +543,22 @@ async fn handle_anonymous(
 
     let (mut sink, mut stream) = socket.split();
 
+    let deadline = tokio::time::Instant::now() + ANONYMOUS_TIMEOUT;
+
     // Wait for first message -- must be Enroll.
     let (service_id, service_type, initial_approved) = loop {
-        let msg = match stream.next().await {
-            Some(Ok(m)) => m,
-            Some(Err(e)) => {
+        let msg = match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(Ok(m))) => m,
+            Ok(Some(Err(e))) => {
                 tracing::debug!(error = %e, "websocket receive error");
                 return;
             }
-            None => return,
+            Ok(None) => return,
+            Err(_) => {
+                tracing::warn!("anonymous connection timed out after {ANONYMOUS_TIMEOUT:?}");
+                let _ = close_with_reason(&mut sink, "enrollment timeout").await;
+                return;
+            }
         };
 
         match msg {

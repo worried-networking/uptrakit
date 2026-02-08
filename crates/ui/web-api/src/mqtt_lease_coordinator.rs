@@ -14,7 +14,6 @@ use uptrakit_internal_wire::{
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
 
-use crate::notification_service::NotificationService;
 use crate::service_connections::ServiceConnectionRegistry;
 
 /// Error type for lease coordinator operations.
@@ -34,24 +33,20 @@ pub type Result<T> = std::result::Result<T, rootcause::Report<LeaseCoordinatorEr
 ///
 /// Manages the assignment of MQTT clients to MQTT service instances, updates the
 /// `mqtt_leases` table, and pushes configuration changes to holding instances.
+///
+/// MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`,
+/// `TenantRevoked`) are delivered locally only and never written to the outbox to
+/// prevent plaintext credential persistence. The MQTT service reconciles its
+/// state from the DB on reconnect.
 #[derive(Clone)]
 pub struct MqttLeaseCoordinator {
     db: DatabaseConnection,
     connections: ServiceConnectionRegistry,
-    notifications: NotificationService,
 }
 
 impl MqttLeaseCoordinator {
-    pub fn new(
-        db: DatabaseConnection,
-        connections: ServiceConnectionRegistry,
-        notifications: NotificationService,
-    ) -> Self {
-        Self {
-            db,
-            connections,
-            notifications,
-        }
+    pub fn new(db: DatabaseConnection, connections: ServiceConnectionRegistry) -> Self {
+        Self { db, connections }
     }
 
     /// Assign unclaimed MQTT clients to a service that has capacity.
@@ -259,19 +254,22 @@ impl MqttLeaseCoordinator {
             tenant: config,
         });
 
-        // Find the service holding this MQTT client locally
+        // Find the service holding this MQTT client locally.
+        // MQTT credential-bearing messages are never written to the outbox
+        // (they contain plaintext passwords). The MQTT service reconciles
+        // its state from the DB on reconnect to any controller.
         if let Some(service_id) = self
             .connections
             .get_instance_for_mqtt_client(&mqtt_client_id)
             .await
         {
-            // Local holder found — send directly + write outbox
-            Ok(self.notifications.send(&service_id, msg).await)
+            // Local holder found — deliver directly (no outbox write).
+            Ok(self.connections.send(&service_id, msg).await)
         } else {
-            // No local holder — write outbox event for cross-controller delivery
-            self.notifications
-                .write_outbox_event(None, Some("mqtt"), &msg)
-                .await;
+            tracing::debug!(
+                %mqtt_client_id,
+                "no local MQTT holder for config update; service will reconcile on reconnect"
+            );
             Ok(false)
         }
     }
@@ -279,7 +277,8 @@ impl MqttLeaseCoordinator {
     /// Revoke an MQTT client (disabled or deleted) from the holding service.
     ///
     /// Called when MQTT settings are disabled/deleted via REST API.
-    /// Uses the notification service for cross-controller delivery.
+    /// MQTT credential-bearing messages are never written to the outbox.
+    /// The MQTT service reconciles state from the DB on reconnect.
     pub async fn revoke_mqtt_client(&self, mqtt_client_id: Uuid, reason: &str) -> Result<bool> {
         // Delete lease from database regardless
         mqtt_lease::Entity::delete_many()
@@ -295,7 +294,7 @@ impl MqttLeaseCoordinator {
             reason: reason.to_string(),
         });
 
-        // Find the service holding this MQTT client locally
+        // Find the service holding this MQTT client locally.
         if let Some(service_id) = self
             .connections
             .get_instance_for_mqtt_client(&mqtt_client_id)
@@ -306,13 +305,13 @@ impl MqttLeaseCoordinator {
                 .release_mqtt_client(&service_id, &mqtt_client_id)
                 .await;
 
-            // Send directly + write outbox for cross-controller
-            Ok(self.notifications.send(&service_id, msg).await)
+            // Deliver directly (no outbox write for credential-bearing messages).
+            Ok(self.connections.send(&service_id, msg).await)
         } else {
-            // No local holder — write outbox event for cross-controller delivery
-            self.notifications
-                .write_outbox_event(None, Some("mqtt"), &msg)
-                .await;
+            tracing::debug!(
+                %mqtt_client_id,
+                "no local MQTT holder for revocation; lease already deleted from DB"
+            );
             Ok(false)
         }
     }

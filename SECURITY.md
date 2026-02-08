@@ -104,6 +104,7 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 - Agent and MQTT service private keys are generated and stored locally on each agent/service; they never leave the host.
 - CA private keys are stored on the controller filesystem and held in a separate in-memory key store (`CaKeyStore`) with `zeroize` memory protection. Only signing operations (OCSP, CRL, certificate issuance) access the key store; public CA data (certificates, fingerprints) is shared separately.
 - No secrets appear in log output, error messages, or API responses.
+- MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are delivered locally only and never written to the cross-controller notification outbox, preventing plaintext credential persistence in the database.
 
 ## Filesystem Security
 

@@ -408,11 +408,8 @@ pub async fn update_mqtt_settings(
     {
         Ok(model) => {
             // Push config update to MQTT service if assigned
-            let lease_coordinator = MqttLeaseCoordinator::new(
-                state.db.clone(),
-                state.service_connections.clone(),
-                state.notification_service.clone(),
-            );
+            let lease_coordinator =
+                MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
             if let Err(e) = lease_coordinator
                 .push_mqtt_client_config_update(mqtt_client_id)
                 .await
@@ -471,11 +468,8 @@ pub async fn delete_mqtt_settings(
     }
 
     // Revoke lease first
-    let lease_coordinator = MqttLeaseCoordinator::new(
-        state.db.clone(),
-        state.service_connections.clone(),
-        state.notification_service.clone(),
-    );
+    let lease_coordinator =
+        MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
     if let Err(e) = lease_coordinator
         .revoke_mqtt_client(mqtt_client_id, "mqtt client deleted")
         .await

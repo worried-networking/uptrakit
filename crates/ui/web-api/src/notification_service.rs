@@ -35,16 +35,28 @@ impl NotificationService {
     }
 
     /// Push a message to a specific service (local + outbox).
+    ///
+    /// MQTT-specific messages that may contain credentials (`TenantAssignments`,
+    /// `TenantConfigUpdated`, `TenantRevoked`) are delivered locally but **not**
+    /// written to the outbox to prevent plaintext credential persistence. The
+    /// MQTT service reconciles its state from the DB on reconnect.
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
         let local = self.registry.send(service_id, msg.clone()).await;
-        self.write_outbox_event(Some(*service_id), None, &msg).await;
+        if !is_mqtt_tenant_message(&msg) {
+            self.write_outbox_event(Some(*service_id), None, &msg).await;
+        }
         local
     }
 
     /// Broadcast a message to all connected services (local + outbox).
+    ///
+    /// MQTT-specific messages that may contain credentials are delivered locally
+    /// but **not** written to the outbox (see [`Self::send`] doc comment).
     pub async fn broadcast(&self, msg: ControllerMessage) {
         self.registry.broadcast(msg.clone()).await;
-        self.write_outbox_event(None, None, &msg).await;
+        if !is_mqtt_tenant_message(&msg) {
+            self.write_outbox_event(None, None, &msg).await;
+        }
     }
 
     /// Broadcast a CA bundle update to all connected services (local + outbox).
@@ -101,6 +113,21 @@ impl NotificationService {
     }
 }
 
+/// Returns `true` for MQTT-specific messages that may contain credentials
+/// (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`).
+///
+/// These messages are delivered locally but **not** written to the outbox to
+/// prevent plaintext credential persistence. The MQTT service reconciles its
+/// state from the DB on reconnect.
+fn is_mqtt_tenant_message(msg: &ControllerMessage) -> bool {
+    matches!(
+        msg,
+        ControllerMessage::TenantAssignments(_)
+            | ControllerMessage::TenantConfigUpdated(_)
+            | ControllerMessage::TenantRevoked(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +166,47 @@ mod tests {
         });
         // The message type exists and is valid
         assert!(matches!(msg, ControllerMessage::ServerRestarting(_)));
+    }
+
+    #[test]
+    fn is_mqtt_tenant_message_matches_credential_bearing_variants() {
+        use uptrakit_internal_wire::{
+            MqttTenantAssignmentsPayload, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
+        };
+
+        // Credential-bearing variants must be filtered from the outbox.
+        assert!(is_mqtt_tenant_message(
+            &ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload { tenants: vec![] })
+        ));
+        assert!(is_mqtt_tenant_message(
+            &ControllerMessage::TenantConfigUpdated(MqttTenantConfigUpdatedPayload {
+                tenant: uptrakit_internal_wire::MqttTenantConfig {
+                    mqtt_client_id: Uuid::nil(),
+                    tenant_id: Uuid::nil(),
+                    enabled: true,
+                    transport: uptrakit_internal_wire::MqttTransport::Tcp,
+                    host: "localhost".into(),
+                    port: 1883,
+                    client_id: "test".into(),
+                    username: Some("user".into()),
+                    password: Some("secret".into()),
+                    topic_prefix: "test/".into(),
+                    updated_at: time::UtcDateTime::UNIX_EPOCH,
+                },
+            })
+        ));
+        assert!(is_mqtt_tenant_message(&ControllerMessage::TenantRevoked(
+            MqttTenantRevokedPayload {
+                mqtt_client_id: Uuid::nil(),
+                reason: "test".into(),
+            }
+        )));
+
+        // Non-credential variants must NOT be filtered.
+        assert!(!is_mqtt_tenant_message(&ControllerMessage::Approved(
+            ApprovedPayload {
+                service_id: Uuid::nil(),
+            }
+        )));
     }
 }

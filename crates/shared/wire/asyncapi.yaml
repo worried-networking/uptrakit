@@ -68,6 +68,18 @@ info:
     shared across all phases. On sequence validation failure, the receiver sends
     an `error` message with code `sequence_error` and closes the connection.
 
+    ## Connection Limits
+
+    - **Maximum incoming message size:** 1 MB (1,048,576 bytes). Messages exceeding
+      this limit are rejected by the WebSocket layer and the connection is closed.
+    - **Anonymous connection timeout:** 30 seconds. An anonymous connection that does
+      not send an `Enroll` message within 30 seconds is closed by the controller.
+    - **Update output cap:** The controller caps the accumulated `update_history.output`
+      at 1 MB. Further `UpdateOutput` messages are silently dropped once the cap is
+      reached.
+    - **Approval polling:** The controller polls the database for approval status
+      changes at a fixed 5-second interval, independent of client ping frequency.
+
 servers:
   controller:
     host: "{host}:{port}"

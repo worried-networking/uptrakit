@@ -38,6 +38,12 @@ impl_report_conversion!(sea_orm::DbErr => AgentWsError::Database);
 /// Minimum agent version required for connection.
 const MIN_AGENT_VERSION: &str = "0.0.1";
 
+/// Maximum size of the `update_history.output` column (1 MB).
+///
+/// Once the output reaches this limit, further `UpdateOutput` messages are
+/// silently dropped to prevent unbounded DB growth.
+const MAX_UPDATE_OUTPUT_BYTES: usize = 1_048_576;
+
 // ---------------------------------------------------------------------------
 // Authenticated agent handler (called from service_ws after shared auth)
 // ---------------------------------------------------------------------------
@@ -334,11 +340,19 @@ pub(crate) async fn handle_agent_authenticated(
                                         .one(&state.db)
                                         .await
                                 {
-                                    let mut active: update_history::ActiveModel = record.clone().into();
-                                    let new_output = format!("{}{}\n", record.output, payload.output);
-                                    active.output = Set(new_output);
-                                    if let Err(e) = active.update(&state.db).await {
-                                        tracing::warn!(error = %e, "failed to append update output");
+                                    if record.output.len() >= MAX_UPDATE_OUTPUT_BYTES {
+                                        tracing::debug!(
+                                            update_id = %payload.update_history_id,
+                                            output_len = record.output.len(),
+                                            "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
+                                        );
+                                    } else {
+                                        let mut active: update_history::ActiveModel = record.clone().into();
+                                        let new_output = format!("{}{}\n", record.output, payload.output);
+                                        active.output = Set(new_output);
+                                        if let Err(e) = active.update(&state.db).await {
+                                            tracing::warn!(error = %e, "failed to append update output");
+                                        }
                                     }
                                 }
                             }
@@ -359,12 +373,15 @@ pub(crate) async fn handle_agent_authenticated(
                                         UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
                                     });
                                     active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                    let final_output = if payload.output.is_empty() {
-                                        record.output.clone()
-                                    } else {
-                                        format!("{}{}", record.output, payload.output)
-                                    };
-                                    active.output = Set(final_output);
+                                    if !payload.output.is_empty() {
+                                        // Cap final output at MAX_UPDATE_OUTPUT_BYTES.
+                                        let remaining = MAX_UPDATE_OUTPUT_BYTES.saturating_sub(record.output.len());
+                                        if remaining > 0 {
+                                            let capped = &payload.output[..payload.output.len().min(remaining)];
+                                            let final_output = format!("{}{}", record.output, capped);
+                                            active.output = Set(final_output);
+                                        }
+                                    }
                                     if payload.from_version.is_some() {
                                         active.from_version = Set(payload.from_version);
                                     }
@@ -451,6 +468,9 @@ pub(crate) async fn handle_agent_enrolled(
 // Shared agent enrolled loop
 // ---------------------------------------------------------------------------
 
+/// Interval between approval-status DB polls in enrolled loops.
+const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Shared enrolled loop for agents: handles Ping, RequestCertificate, and
 /// push messages (Approved / Rejected).
 pub(crate) async fn run_agent_enrolled_loop(
@@ -472,6 +492,11 @@ pub(crate) async fn run_agent_enrolled_loop(
     {
         approved = true;
     }
+
+    // Dedicated interval for polling approval status from the DB, decoupled
+    // from client-controlled ping frequency.
+    let mut approval_poll = tokio::time::interval(APPROVAL_POLL_INTERVAL);
+    approval_poll.tick().await; // skip immediate first tick
 
     loop {
         tokio::select! {
@@ -499,35 +524,6 @@ pub(crate) async fn run_agent_enrolled_loop(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
-
-                                // Poll database for status change on each ping.
-                                // This handles cross-controller approval: if the
-                                // agent is connected to Controller A but approved
-                                // on Controller B, the outbox event may not arrive
-                                // before the next ping.
-                                if !approved
-                                    && let Ok(Some(s)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
-                                        .one(&state.db)
-                                        .await
-                                {
-                                    match s.status {
-                                        uptrakit_shared_db::entity::service::ServiceStatus::Approved => {
-                                            approved = true;
-                                            let msg = ControllerMessage::Approved(ApprovedPayload { service_id: agent_id });
-                                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                                                let _ = sink.send(Message::Text(json.into())).await;
-                                            }
-                                        }
-                                        uptrakit_shared_db::entity::service::ServiceStatus::Rejected => {
-                                            let msg = ControllerMessage::Rejected(RejectedPayload { service_id: agent_id });
-                                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
-                                                let _ = sink.send(Message::Text(json.into())).await;
-                                            }
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
-                                }
                             }
                             ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {
@@ -664,6 +660,32 @@ pub(crate) async fn run_agent_enrolled_loop(
                 }
                 if is_rejected {
                     break;
+                }
+            }
+            // Dedicated approval poll at a fixed interval, decoupled from
+            // client-controlled ping frequency.
+            _ = approval_poll.tick(), if !approved => {
+                if let Ok(Some(s)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+                    .one(&state.db)
+                    .await
+                {
+                    match s.status {
+                        uptrakit_shared_db::entity::service::ServiceStatus::Approved => {
+                            approved = true;
+                            let msg = ControllerMessage::Approved(ApprovedPayload { service_id: agent_id });
+                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                let _ = sink.send(Message::Text(json.into())).await;
+                            }
+                        }
+                        uptrakit_shared_db::entity::service::ServiceStatus::Rejected => {
+                            let msg = ControllerMessage::Rejected(RejectedPayload { service_id: agent_id });
+                            if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                                let _ = sink.send(Message::Text(json.into())).await;
+                            }
+                            break;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
