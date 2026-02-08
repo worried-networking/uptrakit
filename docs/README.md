@@ -32,6 +32,13 @@ Entry point for all Uptrakit documentation.
 | [Envoy](reverse-proxy/envoy.md) | TCP proxy and L7 with XFCC header |
 | [HAProxy](reverse-proxy/haproxy.md) | TCP mode and L7 with `ssl_c_s_dn` / `ssl_c_serial` |
 
+## Code Reviews
+
+| Resource | Description |
+| --- | --- |
+| [Controller System Code Review](CODEREVIEW-CONTROLLER.md) | Full-stack review: architecture, security, safety, HA, data integrity (2026-02-08) |
+| [Wire Protocol Code Review](../crates/shared/wire/CODEREVIEW.md) | Wire protocol and WebSocket handler review with 20 fix plans (2026-02-08) |
+
 ## Planned Documentation
 
 The following guides are planned but not yet written. Contributions are welcome.
