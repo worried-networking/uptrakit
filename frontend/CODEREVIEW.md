@@ -1348,3 +1348,775 @@ These backend changes should be done in a separate commit/PR:
 7. Logout → verify the `refresh_token` cookie is cleared.
 8. Open a JavaScript console → `document.cookie` does not contain `refresh_token` (HttpOnly prevents JS access).
 9. Simulate XSS: `localStorage.getItem('access_token')` returns `null` (token is not in storage).
+
+---
+
+### DFP-6: Validate OIDC `logo_url` — HTTPS-only (F-6, High)
+
+**Goal**: Prevent XSS and SSRF vectors by validating that OIDC provider `logo_url` values are `https://` URLs before rendering them as `<img src>`.
+
+#### Threat model
+
+The `logo_url` is admin-configured and stored in the database. It is rendered on the login page for every visitor:
+
+```svelte
+<!-- src/routes/login/+page.svelte:246-248 -->
+{#if provider.logo_url}
+    <img src={provider.logo_url} alt="" class="h-5 w-5" />
+{/if}
+```
+
+Risks:
+- **SSRF**: A `logo_url` pointing to an internal IP (e.g., `http://192.168.1.1/admin`) causes every visitor's browser to make a GET request to that address.
+- **Tracking**: A `logo_url` pointing to an attacker-controlled server leaks user IPs, `Referer` headers, and timing data.
+- **Protocol confusion**: While `javascript:` URIs in `<img src>` are blocked by modern browsers, `data:` URIs could embed tracking pixels.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/routes/login/+page.svelte` | 246–248 | Add URL validation before rendering |
+| `src/routes/settings/+page.svelte` | 803–804 | Add client-side validation on the OIDC logo_url input |
+| `src/lib/utils.ts` | (new) | Create `isValidLogoUrl()` helper |
+
+#### Step-by-step
+
+**Step 1 — Create URL validation helper** (`src/lib/utils.ts`, new file or add to existing if created by other DFPs)
+
+```typescript
+/**
+ * Validates that a URL is a safe logo URL (HTTPS only).
+ * Returns true for valid https:// URLs, false for everything else.
+ */
+export function isValidLogoUrl(url: string | null | undefined): boolean {
+    if (!url) return false;
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+```
+
+Using `new URL()` for parsing handles edge cases like `https:///evil.com`, `HTTPS://`, whitespace padding, etc.
+
+**Step 2 — Guard the `<img>` on the login page** (`src/routes/login/+page.svelte:246-248`)
+
+Before:
+```svelte
+{#if provider.logo_url}
+    <img src={provider.logo_url} alt="" class="h-5 w-5" />
+{/if}
+```
+
+After:
+```svelte
+{#if isValidLogoUrl(provider.logo_url)}
+    <img src={provider.logo_url} alt="" class="h-5 w-5" />
+{/if}
+```
+
+Add `import { isValidLogoUrl } from '$lib/utils';` to the `<script>` block.
+
+**Step 3 — Add client-side validation to the OIDC form** (`src/routes/settings/+page.svelte:803-804`)
+
+Before:
+```svelte
+<label class="label">
+    <span>Logo URL</span>
+    <input class="input" type="text" placeholder="https://..." bind:value={oidcForm.logo_url} />
+</label>
+```
+
+After:
+```svelte
+<label class="label">
+    <span>Logo URL</span>
+    <input class="input" type="url" placeholder="https://..." bind:value={oidcForm.logo_url} />
+    {#if oidcForm.logo_url && !isValidLogoUrl(oidcForm.logo_url)}
+        <small class="text-error-500">Logo URL must use HTTPS</small>
+    {/if}
+</label>
+```
+
+Also add `import { isValidLogoUrl } from '$lib/utils';` to the settings page script.
+
+**Step 4 — (Optional) Add `referrerpolicy` to the img tag** for defense-in-depth:
+
+```svelte
+<img src={provider.logo_url} alt="" class="h-5 w-5" referrerpolicy="no-referrer" />
+```
+
+This prevents the browser from sending a `Referer` header to the logo server, even for legitimate HTTPS logos.
+
+#### Dependencies
+
+- None. This plan is standalone.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. Set an OIDC provider's `logo_url` to `http://example.com/logo.png` → logo does not render on the login page.
+3. Set `logo_url` to `javascript:alert(1)` → logo does not render.
+4. Set `logo_url` to `data:image/svg+xml,...` → logo does not render.
+5. Set `logo_url` to `https://example.com/logo.png` → logo renders normally.
+6. In the settings OIDC form, enter a non-HTTPS URL → validation message appears.
+
+---
+
+### DFP-7: Type `User.permissions` as `Permission[]` (F-19, High)
+
+**Goal**: Change `User.permissions` from `string[]` to `Permission[]` so that permission checks are type-safe and typos are caught at compile time.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/lib/types.ts` | 19 | Change `permissions: string[]` to `permissions: Permission[]` |
+
+That's it — one line change. All existing call sites already use `Permission.ManageSettings` etc. with `.includes()`, so they will work without modification because `Permission` is a `string` enum.
+
+#### Step-by-step
+
+**Step 1 — Update the type** (`src/lib/types.ts:14-20`)
+
+Before:
+```typescript
+export interface User {
+	id: string;
+	email: string;
+	first_name: string;
+	last_name: string;
+	permissions: string[];
+}
+```
+
+After:
+```typescript
+export interface User {
+	id: string;
+	email: string;
+	first_name: string;
+	last_name: string;
+	permissions: Permission[];
+}
+```
+
+#### Why this is safe
+
+The `Permission` enum in `types.ts:6-12` is:
+```typescript
+export enum Permission {
+	ViewSettings = 'view_settings',
+	ManageSettings = 'manage_settings',
+	ViewAgents = 'view_agents',
+	ManageAgents = 'manage_agents',
+	ManageGlobalSettings = 'manage_global_settings'
+}
+```
+
+All 5 usage sites already pass `Permission.*` enum members to `.includes()`:
+- `+layout.svelte:45` — `$user?.permissions.includes(Permission.ManageGlobalSettings)`
+- `+layout.svelte:56` — `item.permission` (typed as `Permission`)
+- `settings/+page.svelte:108` — `$user?.permissions.includes(Permission.ManageSettings)`
+- `settings/global/+page.svelte:32` — `$user?.permissions.includes(Permission.ManageGlobalSettings)`
+- `hosts/+page.svelte:106` — `$user?.permissions.includes(Permission.ManageAgents)`
+
+TypeScript allows `Permission[].includes(Permission.X)` — the call is already type-correct. What changes is that code like `$user.permissions.includes('manage_settings')` (raw string) would now produce a type error, which is the desired outcome.
+
+**Important caveat**: The backend might return permission strings that are not in the frontend enum (e.g., if a new permission is added server-side before the frontend is updated). With `Permission[]`, the JSON deserialization still works at runtime (TypeScript types are erased), but TypeScript will consider unknown permission strings as type errors if accessed directly. This is acceptable — unknown permissions are simply not checked in the UI.
+
+#### Dependencies
+
+- None. This is a one-line, zero-risk change.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. Try adding `$user?.permissions.includes('typo_permission')` anywhere → TypeScript produces an error (proves the type guard is working).
+3. App behaves identically at runtime (no functional change).
+
+---
+
+### DFP-8: Use typed interfaces for MQTT form data (F-20, High)
+
+**Goal**: Replace `Record<string, unknown>` with properly typed `CreateMqttClient` and `UpdateMqttClient` interfaces in the MQTT client form handler, restoring TypeScript's type checking.
+
+#### Current state (unsafe)
+
+In `src/routes/settings/+page.svelte:206-244`, the `saveMqttClient()` function builds untyped objects:
+
+```typescript
+// Update path (line 210-220)
+const data: Record<string, unknown> = {
+    url: mqttForm.url || undefined,
+    enabled: mqttForm.enabled,
+    client_id: mqttForm.client_id,
+    username: mqttForm.username || null,
+    topic_prefix: mqttForm.topic_prefix
+};
+if (mqttForm.password) {
+    data.password = mqttForm.password;
+}
+const res = await updateMqttClient(editingMqttClient.id, data);
+
+// Create path (line 228-236)
+const data: Record<string, unknown> = {
+    url: mqttForm.url,
+    enabled: mqttForm.enabled,
+    client_id: mqttForm.client_id || undefined,
+    username: mqttForm.username || undefined,
+    password: mqttForm.password || undefined,
+    topic_prefix: mqttForm.topic_prefix || undefined
+};
+const res = await createMqttClient(data);
+```
+
+The `updateMqttClient()` signature expects `UpdateMqttClient` and `createMqttClient()` expects `CreateMqttClient`, but `Record<string, unknown>` is assignable to both (TypeScript structural typing). This bypasses all type checking — a misspelled field name, wrong type, or missing required field would not be caught.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/routes/settings/+page.svelte` | 206–244 | Replace `Record<string, unknown>` with typed interfaces |
+
+#### Step-by-step
+
+**Step 1 — Replace the update path** (`src/routes/settings/+page.svelte:209-220`)
+
+Before:
+```typescript
+if (editingMqttClient) {
+    const data: Record<string, unknown> = {
+        url: mqttForm.url || undefined,
+        enabled: mqttForm.enabled,
+        client_id: mqttForm.client_id,
+        username: mqttForm.username || null,
+        topic_prefix: mqttForm.topic_prefix
+    };
+    if (mqttForm.password) {
+        data.password = mqttForm.password;
+    }
+    const res = await updateMqttClient(editingMqttClient.id, data);
+```
+
+After:
+```typescript
+if (editingMqttClient) {
+    const data: UpdateMqttClient = {
+        url: mqttForm.url || undefined,
+        enabled: mqttForm.enabled,
+        client_id: mqttForm.client_id,
+        username: mqttForm.username || null,
+        topic_prefix: mqttForm.topic_prefix,
+        ...(mqttForm.password ? { password: mqttForm.password } : {})
+    };
+    const res = await updateMqttClient(editingMqttClient.id, data);
+```
+
+Key changes:
+- `Record<string, unknown>` → `UpdateMqttClient` (from `$lib/types`).
+- The conditional `password` assignment is replaced with a spread expression so the object is constructed in a single statement.
+
+**Step 2 — Replace the create path** (`src/routes/settings/+page.svelte:228-236`)
+
+Before:
+```typescript
+const data: Record<string, unknown> = {
+    url: mqttForm.url,
+    enabled: mqttForm.enabled,
+    client_id: mqttForm.client_id || undefined,
+    username: mqttForm.username || undefined,
+    password: mqttForm.password || undefined,
+    topic_prefix: mqttForm.topic_prefix || undefined
+};
+const res = await createMqttClient(data);
+```
+
+After:
+```typescript
+const data: CreateMqttClient = {
+    url: mqttForm.url,
+    enabled: mqttForm.enabled,
+    client_id: mqttForm.client_id || undefined,
+    username: mqttForm.username || undefined,
+    password: mqttForm.password || undefined,
+    topic_prefix: mqttForm.topic_prefix || undefined
+};
+const res = await createMqttClient(data);
+```
+
+Key change: `Record<string, unknown>` → `CreateMqttClient`.
+
+**Step 3 — Add imports** (`src/routes/settings/+page.svelte:25-35`)
+
+Add `UpdateMqttClient` and `CreateMqttClient` to the existing imports from `$lib/types`:
+
+Before:
+```typescript
+import {
+    Permission,
+    type RegistrationSettings,
+    type AuthenticationSettings,
+    type AgentCertificateSettings,
+    type EnrollmentTokenStatus,
+    type OidcProviderResponse,
+    type CreateOidcProviderRequest,
+    type UpdateOidcProviderRequest,
+    type MqttClientResponse
+} from '$lib/types';
+```
+
+After:
+```typescript
+import {
+    Permission,
+    type RegistrationSettings,
+    type AuthenticationSettings,
+    type AgentCertificateSettings,
+    type CreateMqttClient,
+    type EnrollmentTokenStatus,
+    type MqttClientResponse,
+    type OidcProviderResponse,
+    type CreateOidcProviderRequest,
+    type UpdateMqttClient,
+    type UpdateOidcProviderRequest
+} from '$lib/types';
+```
+
+#### Dependencies
+
+- None. The types `CreateMqttClient` and `UpdateMqttClient` already exist in `types.ts:200-222`.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. `grep -n "Record<string, unknown>" src/routes/settings/+page.svelte` returns zero matches.
+3. Try adding a misspelled field (e.g., `enbled: true`) to the data object → TypeScript produces an error.
+4. MQTT client create and edit flows work identically in the browser.
+
+---
+
+### DFP-9: Extract settings page into sub-components (F-11, High)
+
+**Goal**: Break the 952-line `settings/+page.svelte` monolith into focused sub-components, each managing a single settings section.
+
+#### Current structure
+
+The settings page (`src/routes/settings/+page.svelte`) contains 6 distinct sections, each with independent state, handlers, and templates:
+
+| Section | State vars | Handlers | Template lines |
+|---------|-----------|----------|----------------|
+| Registration | `regMode`, `regToken`, `regRequireTokenForOidc` | `saveRegistration` | 508–542 |
+| Authentication | `passwordAuthEnabled` | `saveAuthentication` | 544–554 |
+| MQTT Clients | `mqttClients`, `showMqttModal`, `editingMqttClient`, `mqttForm`, `mqttDeleteConfirm` | `openCreateMqtt`, `openEditMqtt`, `closeMqttModal`, `saveMqttClient`, `requestDeleteMqtt`, `executeDeleteMqtt` | 556–641 + 863–924 (modal) |
+| OIDC Providers | `oidcProviders`, `showOidcModal`, `editingProvider`, `oidcForm`, `slugTouched`, `deleteConfirm` | `openCreateOidc`, `openEditOidc`, `closeOidcModal`, `saveOidcProvider`, `requestDeleteOidc`, `executeDeleteOidc`, `toggleOidcActive`, `onOidcNameInput`, `slugify` | 643–714 + 780–861 (modal) + 926–950 (delete confirm) |
+| Agent Certificates | `certLifetimeDays`, `certRenewalWindowHours` | `saveCertificates` | 716–746 |
+| Enrollment Token | `enrollmentConfigured`, `generatedToken` | `handleGenerateToken`, `handleRevokeToken` | 748–777 |
+
+Total: ~30 state variables, ~20 handler functions, 6 modals/confirms, all in one component.
+
+#### Target structure
+
+```text
+src/routes/settings/
+├── +page.svelte                 # Thin shell: auth guard, layout, notification display
+├── RegistrationSettings.svelte  # Registration mode + token
+├── AuthenticationSettings.svelte # Password auth toggle
+├── MqttClientsSettings.svelte   # MQTT client CRUD + modal + delete confirm
+├── AgentCertificateSettings.svelte # Certificate lifetime + renewal window
+├── EnrollmentTokenSettings.svelte  # Enrollment token status + generate/revoke
+└── OidcProvidersSettings.svelte # OIDC provider CRUD + modal + delete confirm
+```
+
+#### Files to modify/create
+
+| File | Action | Description |
+|------|--------|-------------|
+| `src/routes/settings/+page.svelte` | Rewrite | Keep auth guard, notification system, and data loading. Render child components. |
+| `src/routes/settings/RegistrationSettings.svelte` | Create | Extract lines 42–44 (state), 264–283 (handler), 508–542 (template) |
+| `src/routes/settings/AuthenticationSettings.svelte` | Create | Extract line 46 (state), 285–297 (handler), 544–554 (template) |
+| `src/routes/settings/MqttClientsSettings.svelte` | Create | Extract lines 56–68 (state), 174–261 (handlers), 556–641 + 863–924 (template) |
+| `src/routes/settings/AgentCertificateSettings.svelte` | Create | Extract lines 48–49 (state), 299–315 (handler), 716–746 (template) |
+| `src/routes/settings/EnrollmentTokenSettings.svelte` | Create | Extract lines 51–52 (state), 317–340 (handlers), 748–777 (template) |
+| `src/routes/settings/OidcProvidersSettings.svelte` | Create | Extract lines 54, 70–103 (state), 342–475 (handlers), 643–714 + 780–861 + 926–950 (template) |
+
+#### Step-by-step
+
+**Step 1 — Define the component interface pattern**
+
+Each child component receives callbacks for success/error notifications and loads its own initial data. Use Svelte 5 props:
+
+```svelte
+<!-- Example: RegistrationSettings.svelte -->
+<script lang="ts">
+    import { getRegistrationSettings, updateRegistrationSettings } from '$lib/api';
+    import type { RegistrationSettings } from '$lib/types';
+
+    let { onSuccess, onError }: {
+        onSuccess: (msg: string) => void;
+        onError: (msg: string) => void;
+    } = $props();
+
+    let regMode: 'open' | 'invite' | 'closed' = $state('open');
+    let regToken: string = $state('');
+    let regRequireTokenForOidc: boolean = $state(false);
+
+    export async function load() {
+        const settings = await getRegistrationSettings();
+        regMode = settings.mode;
+        regRequireTokenForOidc = settings.require_token_for_oidc;
+    }
+
+    async function saveRegistration() {
+        try {
+            const data = { mode: regMode } as any;
+            if (regMode === 'invite' && regToken) data.token = regToken;
+            if (regMode === 'invite') data.require_token_for_oidc = regRequireTokenForOidc;
+            const res = await updateRegistrationSettings(data);
+            regMode = res.mode;
+            regRequireTokenForOidc = res.require_token_for_oidc;
+            regToken = '';
+            onSuccess('Registration settings saved.');
+        } catch (e) {
+            onError(e instanceof Error ? e.message : 'Failed to save registration settings');
+        }
+    }
+</script>
+
+<!-- Template: same as current lines 508-542, unchanged -->
+```
+
+**Step 2 — Rewrite the parent shell** (`src/routes/settings/+page.svelte`)
+
+The parent page shrinks to ~80 lines:
+
+```svelte
+<script lang="ts">
+    import { user } from '$lib/auth';
+    import { goto } from '$app/navigation';
+    import { Permission } from '$lib/types';
+    import RegistrationSettings from './RegistrationSettings.svelte';
+    import AuthenticationSettings from './AuthenticationSettings.svelte';
+    import MqttClientsSettings from './MqttClientsSettings.svelte';
+    import AgentCertificateSettings from './AgentCertificateSettings.svelte';
+    import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
+    import OidcProvidersSettings from './OidcProvidersSettings.svelte';
+
+    let successMessage: string | null = $state(null);
+    let errorMessage: string | null = $state(null);
+    let loading: boolean = $state(true);
+
+    const canManageSettings = $derived(
+        $user?.permissions.includes(Permission.ManageSettings) ?? false
+    );
+
+    $effect(() => {
+        if (!$user) goto('/login');
+        else if (!canManageSettings) goto('/');
+    });
+
+    function showSuccess(msg: string) {
+        successMessage = msg;
+        setTimeout(() => { successMessage = null; }, 3000);
+    }
+
+    function showError(msg: string) {
+        errorMessage = msg;
+    }
+
+    function clearError() {
+        errorMessage = null;
+    }
+
+    // Each child component loads its own data independently
+</script>
+
+{#if $user && canManageSettings}
+    <h1 class="h1 mb-6">Settings</h1>
+
+    {#if successMessage}
+        <aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+            <p>{successMessage}</p>
+        </aside>
+    {/if}
+
+    {#if errorMessage}
+        <aside class="mb-4 flex items-center justify-between rounded-lg p-4 preset-filled-error-500">
+            <p>{errorMessage}</p>
+            <button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
+        </aside>
+    {/if}
+
+    <RegistrationSettings onSuccess={showSuccess} onError={showError} />
+    <AuthenticationSettings onSuccess={showSuccess} onError={showError} />
+    <MqttClientsSettings onSuccess={showSuccess} onError={showError} />
+    <OidcProvidersSettings onSuccess={showSuccess} onError={showError} />
+    <AgentCertificateSettings onSuccess={showSuccess} onError={showError} />
+    <EnrollmentTokenSettings onSuccess={showSuccess} onError={showError} />
+{/if}
+```
+
+**Step 3 — Move each section's code into its component**
+
+For each new component file:
+1. Move the relevant state variables from the parent `<script>` block.
+2. Move the relevant handler functions.
+3. Move the relevant template section (the `<div class="card mb-6 p-6">` block and any associated modals).
+4. Add `onSuccess` and `onError` props to replace the parent's `showSuccess()` and `showError()` calls.
+5. Add the necessary imports (`$lib/api`, `$lib/types`).
+6. Each component loads its own data in an `$effect` or `onMount`.
+
+The largest components are:
+- **OidcProvidersSettings.svelte** (~280 lines): state (lines 54, 70–103), handlers (lines 342–475), template (lines 643–714 + 780–861 + 926–950)
+- **MqttClientsSettings.svelte** (~230 lines): state (lines 56–68), handlers (lines 174–261), template (lines 556–641 + 863–924)
+
+The smallest are:
+- **AuthenticationSettings.svelte** (~40 lines)
+- **RegistrationSettings.svelte** (~60 lines)
+
+**Step 4 — Remove the monolithic `loadAllSettings()` function**
+
+The current parent uses `Promise.allSettled()` to load all 6 data sources at once. After extraction, each child component loads its own data independently. This is slightly less efficient (6 sequential waterfalls vs. 1 parallel batch), but the trade-off is worth it for component isolation.
+
+To preserve the parallel loading optimization, you can instead:
+1. Keep `loadAllSettings()` in the parent.
+2. Pass loaded data as props to each child.
+3. Use `bind:this` with exported `setData()` methods.
+
+The simpler approach (each child loads its own) is recommended first.
+
+#### Dependencies
+
+- None directly. However, if DFP-4 (MQTT enrollment tokens) and DFP-8 (typed MQTT form) are done first, the extraction will include those changes automatically.
+- Recommended order: do DFP-8 first, then DFP-9.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. `wc -l src/routes/settings/+page.svelte` shows ~80 lines (down from 952).
+3. Each sub-component file is under 300 lines.
+4. All settings pages function identically: Registration, Authentication, MQTT, OIDC, Certificates, Enrollment Token.
+5. Success/error notifications still display at the top of the page (managed by the parent).
+6. Auth guard still works (unauthorized users are redirected).
+7. Escape key still closes open modals.
+
+---
+
+### DFP-10: Centralize auth guards in layout (F-12, High)
+
+**Goal**: Replace the duplicated `$effect(() => { if (!$user) goto('/login') })` pattern across 5 pages with a single auth guard in the root layout, eliminating the flash-of-content bug and preventing new pages from accidentally omitting the guard.
+
+#### Current state (duplicated guards)
+
+Every protected page independently implements auth checking:
+
+| File | Lines | Guard |
+|------|-------|-------|
+| `src/routes/+page.svelte` | 5–9 | `if (!$user) goto('/login')` |
+| `src/routes/agents/+page.svelte` | 16–20 | `if (!$user) goto('/login')` |
+| `src/routes/hosts/+page.svelte` | 15–19 | `if (!$user) goto('/login')` |
+| `src/routes/settings/+page.svelte` | 110–116 | `if (!$user) goto('/login')` + `if (!canManageSettings) goto('/')` |
+| `src/routes/settings/global/+page.svelte` | 34–39 | `if (!$user) goto('/login')` + `if (!canManageGlobalSettings) goto('/')` |
+
+Problems:
+1. A new page that forgets the guard is unprotected.
+2. The component renders briefly before the `$effect` fires, causing a flash of content.
+3. Five copies of the same logic to maintain.
+
+#### Target architecture
+
+The root layout (`+layout.svelte`) already knows the current route and whether the user is authenticated. It already defines `publicRoutes`:
+
+```typescript
+// src/routes/+layout.svelte:50
+const publicRoutes = new Set(['/login', '/register', '/device']);
+```
+
+The fix moves the guard into the layout so it runs before any page component renders.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/routes/+layout.svelte` | 39–67 | Add auth redirect logic after `initialize()` |
+| `src/routes/+page.svelte` | 5–9 | Remove auth guard `$effect` |
+| `src/routes/agents/+page.svelte` | 16–20 | Remove auth guard `$effect` |
+| `src/routes/hosts/+page.svelte` | 15–19 | Remove auth guard `$effect` |
+| `src/routes/settings/+page.svelte` | 110–116 | Remove auth guard `$effect`, keep permission check |
+| `src/routes/settings/global/+page.svelte` | 34–39 | Remove auth guard `$effect`, keep permission check |
+
+#### Step-by-step
+
+**Step 1 — Add centralized auth guard to root layout** (`src/routes/+layout.svelte`)
+
+Add a reactive `$effect` in the layout that runs after `initialize()` completes (i.e., after `$loading` becomes `false`):
+
+After the existing `onMount` block (line 42), add:
+
+```typescript
+$effect(() => {
+    if ($loading) return; // Wait for auth initialization
+
+    const path = $page.url.pathname;
+    const isPublic = publicRoutes.has(path);
+
+    if (!$user && !isPublic) {
+        goto('/login?redirect=' + encodeURIComponent(path + $page.url.search));
+    }
+});
+```
+
+Key behaviors:
+- Waits for `initialize()` to finish (the `$loading` guard).
+- Skips public routes (`/login`, `/register`, `/device`).
+- Includes the current path as a `redirect` parameter so the user returns to where they were after login.
+
+**Step 2 — Update the layout template to hide protected content before auth**
+
+The layout already has `{#if $loading}…{:else}…{/if}`. Inside the `{:else}` branch, add an additional check before rendering `{@render children()}`:
+
+Before (`+layout.svelte:155-157`):
+```svelte
+<div class="container mx-auto max-w-2xl p-4">
+    {@render children()}
+</div>
+```
+
+After:
+```svelte
+<div class="container mx-auto max-w-2xl p-4">
+    {#if $user || publicRoutes.has($page.url.pathname)}
+        {@render children()}
+    {/if}
+</div>
+```
+
+This prevents the flash-of-content by not rendering the page component until the user is confirmed authenticated (or the route is public).
+
+**Step 3 — Remove auth guards from individual pages**
+
+**`src/routes/+page.svelte`** — Remove the entire `$effect` block:
+
+Before:
+```svelte
+<script lang="ts">
+    import { user } from '$lib/auth';
+    import { goto } from '$app/navigation';
+
+    $effect(() => {
+        if (!$user) {
+            goto('/login');
+        }
+    });
+</script>
+```
+
+After:
+```svelte
+<script lang="ts">
+    import { user } from '$lib/auth';
+</script>
+```
+
+The `goto` import is no longer needed (unless used elsewhere in the file).
+
+**`src/routes/agents/+page.svelte:16-20`** — Remove:
+
+```svelte
+$effect(() => {
+    if (!$user) {
+        goto('/login');
+    }
+});
+```
+
+Also remove the `import { goto } from '$app/navigation';` line if `goto` is no longer used elsewhere in the file. In this case, `goto` is not used anywhere else, so it can be removed.
+
+**`src/routes/hosts/+page.svelte:15-19`** — Remove the same pattern. Remove `goto` import.
+
+**`src/routes/settings/+page.svelte:110-116`** — Simplify the auth `$effect`:
+
+Before:
+```svelte
+$effect(() => {
+    if (!$user) {
+        goto('/login');
+    } else if (!canManageSettings) {
+        goto('/');
+    }
+});
+```
+
+After:
+```svelte
+$effect(() => {
+    if ($user && !canManageSettings) {
+        goto('/');
+    }
+});
+```
+
+The `!$user` → `/login` redirect is now handled by the layout. This `$effect` only needs to handle the **permission** check. The `goto` import remains because it's still used for the permission redirect.
+
+**`src/routes/settings/global/+page.svelte:34-39`** — Same simplification:
+
+Before:
+```svelte
+$effect(() => {
+    if (!$user) {
+        goto('/login');
+    } else if (!canManageGlobalSettings) {
+        goto('/');
+    }
+});
+```
+
+After:
+```svelte
+$effect(() => {
+    if ($user && !canManageGlobalSettings) {
+        goto('/');
+    }
+});
+```
+
+**Step 4 — Handle the redirect parameter on the login page**
+
+After successful login in `src/routes/login/+page.svelte`, check for a `redirect` parameter:
+
+In `onSubmit()` (line 87-96):
+
+Before:
+```typescript
+await handleLogin({ email, password });
+goto('/');
+```
+
+After:
+```typescript
+await handleLogin({ email, password });
+const redirect = $page.url.searchParams.get('redirect');
+goto(redirect && redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/');
+```
+
+The validation (`startsWith('/')` and `!startsWith('//')`) prevents open redirect attacks.
+
+Apply the same pattern to `onOidcLogin` and `onSubmitRegistrationToken` success paths.
+
+#### Dependencies
+
+- None. This plan is standalone.
+- Can be combined with DFP-9 (settings refactor) — the settings page's auth guard simplification applies regardless.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. `grep -rn "if (!\\$user)" src/routes/` returns only the layout file (no individual pages).
+3. Navigate to `/agents` while logged out → redirected to `/login?redirect=%2Fagents`.
+4. After logging in → redirected back to `/agents` (not `/`).
+5. Navigate to `/settings` without `ManageSettings` permission → redirected to `/`.
+6. Navigate to `/login` while logged in → redirected to `/`.
+7. No flash of page content before redirect on any protected route.
+8. Public routes (`/login`, `/register`, `/device`) remain accessible without authentication.
