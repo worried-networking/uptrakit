@@ -503,3 +503,848 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 6. **OIDC flow completeness**: Account linking, registration with token, device authorization — all covered.
 7. **Proper autocomplete hints**: Login/register forms use correct `autocomplete` attributes for password managers.
 8. **Static adapter**: Correct choice for embedding in the controller binary.
+
+---
+
+## Detailed Fixing Plans (Top 5)
+
+The following are implementation-ready plans for the 5 worst findings. Each includes exact files, before/after code, step-by-step instructions, dependencies between plans, and verification steps.
+
+---
+
+### DFP-1: Fix API paths — `/agents` → `/services` (F-1, Critical)
+
+**Goal**: Every frontend API call that currently hits `/api/v1/agents/…` must be rewritten to hit `/api/v1/services/…`, matching the backend routes defined in `crates/ui/web-api/src/routes/services.rs`.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/lib/api.ts` | 194–216 | Rename all `/agents/` paths to `/services/` |
+| `src/lib/api.ts` | 272–282 | Rename enrollment-token paths from `/agents/enrollment-token` to `/services/enrollment-token` |
+
+#### Step-by-step
+
+**Step 1 — Rename CRUD functions' paths** (`src/lib/api.ts:194-216`)
+
+Before:
+```typescript
+export function getAgents(status?: string): Promise<AgentResponse[]> {
+	const query = status ? `?status=${status}` : '';
+	return request(`/agents${query}`);
+}
+
+export function approveAgent(id: string): Promise<AgentResponse> {
+	return request(`/agents/${id}/approve`, { method: 'POST' });
+}
+
+export function rejectAgent(id: string): Promise<AgentResponse> {
+	return request(`/agents/${id}/reject`, { method: 'POST' });
+}
+
+export function deleteAgent(id: string): Promise<MessageResponse> {
+	return request(`/agents/${id}`, { method: 'DELETE' });
+}
+
+export function mergeAgent(targetId: string, sourceId: string): Promise<AgentResponse> {
+	return request(`/agents/${targetId}/merge`, {
+		method: 'POST',
+		body: JSON.stringify({ source_id: sourceId })
+	});
+}
+```
+
+After:
+```typescript
+export function getAgents(status?: string): Promise<PaginatedResponse<ServiceResponse>> {
+	const params = new URLSearchParams();
+	params.set('type', 'agent');
+	if (status) params.set('status', status);
+	return request(`/services?${params.toString()}`);
+}
+
+export function approveAgent(id: string): Promise<ServiceResponse> {
+	return request(`/services/${id}/approve`, { method: 'POST' });
+}
+
+export function rejectAgent(id: string): Promise<ServiceResponse> {
+	return request(`/services/${id}/reject`, { method: 'POST' });
+}
+
+export function deleteAgent(id: string): Promise<MessageResponse> {
+	return request(`/services/${id}`, { method: 'DELETE' });
+}
+
+export function mergeAgent(targetId: string, sourceId: string): Promise<ServiceResponse> {
+	return request(`/services/${targetId}/merge`, {
+		method: 'POST',
+		body: JSON.stringify({ source_id: sourceId })
+	});
+}
+```
+
+Key changes:
+- All `/agents/…` paths become `/services/…`.
+- `getAgents()` always passes `type=agent` (see DFP-3).
+- Return types switch from `AgentResponse` to `ServiceResponse` (see DFP-2).
+- `getAgents()` now returns `PaginatedResponse<ServiceResponse>` to match the backend's paginated list endpoint.
+
+**Step 2 — Rename enrollment-token paths** (`src/lib/api.ts:272-282`)
+
+Before:
+```typescript
+export function getEnrollmentTokenStatus(): Promise<EnrollmentTokenStatus> {
+	return request('/agents/enrollment-token/status');
+}
+
+export function createEnrollmentToken(): Promise<EnrollmentTokenResponse> {
+	return request('/agents/enrollment-token', { method: 'POST' });
+}
+
+export function revokeEnrollmentToken(): Promise<MessageResponse> {
+	return request('/agents/enrollment-token', { method: 'DELETE' });
+}
+```
+
+After:
+```typescript
+export function getEnrollmentTokenStatus(type: 'agent' | 'mqtt' = 'agent'): Promise<EnrollmentTokenStatus> {
+	return request(`/services/enrollment-token/status?type=${type}`);
+}
+
+export function createEnrollmentToken(type: 'agent' | 'mqtt' = 'agent'): Promise<EnrollmentTokenResponse> {
+	return request(`/services/enrollment-token?type=${type}`, { method: 'POST' });
+}
+
+export function revokeEnrollmentToken(type: 'agent' | 'mqtt' = 'agent'): Promise<MessageResponse> {
+	return request(`/services/enrollment-token?type=${type}`, { method: 'DELETE' });
+}
+```
+
+Key changes:
+- Paths change from `/agents/enrollment-token` to `/services/enrollment-token`.
+- A `type` parameter is added (defaults to `'agent'`), preparing for DFP-4.
+
+**Step 3 — Update imports in `api.ts`** (`src/lib/api.ts:1-34`)
+
+Remove `AgentResponse` from the import block and add `ServiceResponse` (once DFP-2 creates it).
+
+#### Dependencies
+
+- **DFP-2** must be completed first (or simultaneously) — `ServiceResponse` must exist in `types.ts` before `api.ts` can reference it.
+- **DFP-3** is folded into Step 1 above (the `type=agent` filter).
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. Open the Agents page in the browser with DevTools Network tab: requests should go to `/api/v1/services?type=agent` (not `/api/v1/agents`).
+3. Approve/reject/delete/merge actions should call `/api/v1/services/{id}/…`.
+4. Settings → Enrollment Token should call `/api/v1/services/enrollment-token/…`.
+5. All requests should return 200/201/204 (not 404).
+
+---
+
+### DFP-2: Align `AgentResponse` type with backend `ServiceResponse` (F-2, Critical)
+
+**Goal**: Replace the frontend's `AgentResponse` interface with a `ServiceResponse` interface that matches the backend struct defined in `crates/shared/web-api-types/src/services.rs:54-67`.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/lib/types.ts` | 49–58 | Replace `AgentResponse` with `ServiceResponse` |
+| `src/lib/types.ts` | (new) | Add `ServiceType` and `ServiceStatus` types |
+| `src/lib/api.ts` | 1–5 | Update import to use `ServiceResponse` |
+| `src/routes/agents/+page.svelte` | 5, 7, 60, 62, 93 | Update type references |
+
+#### Step-by-step
+
+**Step 1 — Add `ServiceType` and `ServiceStatus`, replace `AgentResponse`** (`src/lib/types.ts`)
+
+Before (`types.ts:49-58`):
+```typescript
+export interface AgentResponse {
+	id: string;
+	hostname: string;
+	friendly_name: string;
+	ip_address: string | null;
+	status: 'pending' | 'approved' | 'rejected';
+	last_seen_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+```
+
+After:
+```typescript
+export type ServiceType = 'agent' | 'mqtt';
+
+export type ServiceStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';
+
+export interface ServiceResponse {
+	id: string;
+	service_type: ServiceType;
+	hostname: string;
+	friendly_name: string;
+	ip_address: string | null;
+	status: ServiceStatus;
+	client_version: string | null;
+	last_seen_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+```
+
+Key changes vs. the old `AgentResponse`:
+- **Added `service_type`** — `'agent'` or `'mqtt'` (backend: `ServiceType` enum, serde `rename_all = "snake_case"`).
+- **Added `'deactivated'` to `status`** — the backend's `ServiceStatus` has four variants, not three.
+- **Added `client_version`** — `string | null`, reported by the agent/mqtt binary on connection.
+- **Renamed** from `AgentResponse` to `ServiceResponse` to match the backend.
+
+**Step 2 — Update `HostAgentSummary` status type** (`src/lib/types.ts:235`)
+
+Before:
+```typescript
+export interface HostAgentSummary {
+	id: string;
+	friendly_name: string;
+	status: 'pending' | 'approved' | 'rejected';
+}
+```
+
+After:
+```typescript
+export interface HostAgentSummary {
+	id: string;
+	friendly_name: string;
+	status: ServiceStatus;
+}
+```
+
+This reuses the `ServiceStatus` type instead of duplicating the union.
+
+**Step 3 — Update imports in `api.ts`** (`src/lib/api.ts:1-34`)
+
+Replace `AgentResponse` with `ServiceResponse` in the import block:
+
+Before:
+```typescript
+import type {
+	AgentCertificateSettings,
+	AgentResponse,
+	// ...
+```
+
+After:
+```typescript
+import type {
+	AgentCertificateSettings,
+	ServiceResponse,
+	// ...
+```
+
+**Step 4 — Update Agents page** (`src/routes/agents/+page.svelte`)
+
+Replace every occurrence of `AgentResponse` with `ServiceResponse`:
+
+| Line | Before | After |
+|------|--------|-------|
+| 5 | `import type { AgentResponse } from '$lib/types';` | `import type { ServiceResponse } from '$lib/types';` |
+| 7 | `let agents: AgentResponse[] = $state([]);` | `let agents: ServiceResponse[] = $state([]);` |
+| 60 | `function openMergeDialog(agent: AgentResponse) {` | `function openMergeDialog(agent: ServiceResponse) {` |
+
+Update `loadAgents()` to unpack the paginated response (line 31):
+
+Before:
+```typescript
+agents = await getAgents();
+```
+
+After:
+```typescript
+const result = await getAgents();
+agents = result.items;
+```
+
+Add handling for the `'deactivated'` status in the status badge template (line 160-166):
+
+Before:
+```svelte
+{#if agent.status === 'pending'}
+    <span class="badge preset-filled-warning-500">Pending</span>
+{:else if agent.status === 'approved'}
+    <span class="badge preset-filled-success-500">Approved</span>
+{:else}
+    <span class="badge preset-filled-error-500">Rejected</span>
+{/if}
+```
+
+After:
+```svelte
+{#if agent.status === 'pending'}
+    <span class="badge preset-filled-warning-500">Pending</span>
+{:else if agent.status === 'approved'}
+    <span class="badge preset-filled-success-500">Approved</span>
+{:else if agent.status === 'deactivated'}
+    <span class="badge preset-tonal">Deactivated</span>
+{:else}
+    <span class="badge preset-filled-error-500">Rejected</span>
+{/if}
+```
+
+#### Dependencies
+
+- None — this plan can be done first, and DFP-1 depends on it.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors (all references to the old `AgentResponse` are gone).
+2. `grep -r "AgentResponse" src/` returns zero matches.
+3. The agents table correctly renders the `deactivated` status badge.
+4. The `client_version` field is available for future use (no UI change required yet).
+
+---
+
+### DFP-3: Add `?type=agent` filter to service list calls (F-3, Critical)
+
+**Goal**: Ensure the Agents page only displays agents (not MQTT services) by always sending `?type=agent` when calling the list endpoint.
+
+> **Note**: This plan is folded into DFP-1 Step 1. It is documented separately for traceability.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/lib/api.ts` | 194–197 | Add `type=agent` to `getAgents()` query params |
+
+#### Step-by-step
+
+**Step 1 — Always include `type=agent`**
+
+This is already covered in DFP-1 Step 1. The new `getAgents()` uses `URLSearchParams` and always sets `type=agent`:
+
+```typescript
+export function getAgents(status?: string): Promise<PaginatedResponse<ServiceResponse>> {
+	const params = new URLSearchParams();
+	params.set('type', 'agent');
+	if (status) params.set('status', status);
+	return request(`/services?${params.toString()}`);
+}
+```
+
+The backend's `ListServicesQuery` (in `crates/shared/web-api-types/src/services.rs:69-81`) accepts:
+- `type` — `"agent"` or `"mqtt"` (optional, returns all types if omitted)
+- `status` — `"pending"`, `"approved"`, `"rejected"`, `"deactivated"` (optional)
+- `page` — page number, 1-indexed (optional, default 1)
+- `per_page` — items per page (optional, default 20, max 1000)
+
+Without `type=agent`, the endpoint returns both agents and MQTT services interleaved — making the Agents page show MQTT entries that don't belong there.
+
+#### Dependencies
+
+- Part of DFP-1. No additional dependencies.
+
+#### Verification
+
+1. With both agent and MQTT services in the database, navigate to the Agents page.
+2. Verify the Network tab shows `GET /api/v1/services?type=agent`.
+3. Verify no MQTT services appear in the table.
+
+---
+
+### DFP-4: Add MQTT enrollment token support (F-4, Critical)
+
+**Goal**: The settings page currently manages a single "Enrollment Token" (implicitly for agents). The backend supports separate enrollment tokens for agents and MQTT services via the `?type=agent|mqtt` query parameter on the same `/services/enrollment-token` endpoints. The settings page must support both.
+
+#### Backend context
+
+The backend handler `enrollment_setting_key()` (`crates/ui/web-api/src/routes/services.rs:98-108`) routes the `type` parameter:
+- `type=agent` (or omitted) → `SettingKey::EnrollmentTokenHash` (DB key: `agent_enrollment.token_hash`)
+- `type=mqtt` → `SettingKey::MqttEnrollmentTokenHash` (DB key: `mqtt_enrollment.token_hash`)
+
+All three endpoints (`GET …/status`, `POST`, `DELETE`) accept this parameter.
+
+#### Files to modify
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/lib/api.ts` | 272–282 | Add `type` parameter (already done in DFP-1 Step 2) |
+| `src/routes/settings/+page.svelte` | ~130–140 (state), ~318–340 (handlers), ~748–777 (template) | Duplicate enrollment token state and UI for MQTT |
+
+#### Step-by-step
+
+**Step 1 — API functions already accept `type`**
+
+Done in DFP-1 Step 2. The three enrollment-token functions now accept `type: 'agent' | 'mqtt' = 'agent'`.
+
+**Step 2 — Add MQTT enrollment token state** (`src/routes/settings/+page.svelte`, state declarations ~line 130)
+
+Add new state variables alongside the existing agent ones:
+
+```typescript
+// Existing agent enrollment state
+let enrollmentConfigured: boolean = $state(false);
+let generatedToken: string | null = $state(null);
+
+// New MQTT enrollment state
+let mqttEnrollmentConfigured: boolean = $state(false);
+let mqttGeneratedToken: string | null = $state(null);
+```
+
+**Step 3 — Load MQTT enrollment status on mount** (inside the existing `$effect` or `onMount` that loads settings)
+
+Add after the existing `getEnrollmentTokenStatus()` call:
+
+```typescript
+// Existing:
+const enrollStatus = await getEnrollmentTokenStatus('agent');
+enrollmentConfigured = enrollStatus.configured;
+
+// Add:
+const mqttEnrollStatus = await getEnrollmentTokenStatus('mqtt');
+mqttEnrollmentConfigured = mqttEnrollStatus.configured;
+```
+
+**Step 4 — Add MQTT enrollment token handlers** (after existing `handleGenerateToken` / `handleRevokeToken`)
+
+```typescript
+async function handleGenerateMqttToken() {
+    clearError();
+    try {
+        const res = await createEnrollmentToken('mqtt');
+        mqttGeneratedToken = res.token;
+        mqttEnrollmentConfigured = true;
+        showSuccess('MQTT enrollment token generated.');
+    } catch (e) {
+        showError(e instanceof Error ? e.message : 'Failed to generate MQTT enrollment token');
+    }
+}
+
+async function handleRevokeMqttToken() {
+    clearError();
+    try {
+        await revokeEnrollmentToken('mqtt');
+        mqttEnrollmentConfigured = false;
+        mqttGeneratedToken = null;
+        showSuccess('MQTT enrollment token revoked.');
+    } catch (e) {
+        showError(e instanceof Error ? e.message : 'Failed to revoke MQTT enrollment token');
+    }
+}
+```
+
+**Step 5 — Add MQTT enrollment token UI section** (after the existing "Enrollment Token" card, ~line 777)
+
+Insert a new card that mirrors the existing enrollment token section:
+
+```svelte
+<!-- Section 5b: MQTT Enrollment Token -->
+<div class="card mb-6 p-6">
+    <h2 class="h3 mb-4">MQTT Enrollment Token</h2>
+    <p class="mb-4 text-sm opacity-70">
+        This token is used by MQTT services to register with the controller.
+        It is separate from the agent enrollment token.
+    </p>
+    <div class="mb-4 flex items-center gap-3">
+        <span>Status:</span>
+        {#if mqttEnrollmentConfigured}
+            <span class="badge preset-filled-success-500">Configured</span>
+        {:else}
+            <span class="badge preset-tonal">Not configured</span>
+        {/if}
+    </div>
+
+    {#if mqttGeneratedToken}
+        <aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+            <p class="font-bold">Copy it now — it will not be shown again</p>
+            <code class="break-all">{mqttGeneratedToken}</code>
+        </aside>
+    {/if}
+
+    <div class="flex gap-2">
+        <button class="btn preset-filled-primary-500" onclick={handleGenerateMqttToken}>
+            {mqttEnrollmentConfigured ? 'Regenerate' : 'Generate'}
+        </button>
+        {#if mqttEnrollmentConfigured}
+            <button class="btn preset-filled-error-500" onclick={handleRevokeMqttToken}>
+                Revoke
+            </button>
+        {/if}
+    </div>
+</div>
+```
+
+**Step 6 — Update the existing enrollment token section title** (~line 750)
+
+Change the heading from "Enrollment Token" to "Agent Enrollment Token" for clarity:
+
+Before:
+```svelte
+<h2 class="h3 mb-4">Enrollment Token</h2>
+```
+
+After:
+```svelte
+<h2 class="h3 mb-4">Agent Enrollment Token</h2>
+```
+
+#### Dependencies
+
+- **DFP-1** must be done first (enrollment-token API paths and `type` parameter).
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. Settings page shows two separate enrollment token sections: "Agent Enrollment Token" and "MQTT Enrollment Token".
+3. Generating an agent token sends `POST /api/v1/services/enrollment-token?type=agent`.
+4. Generating an MQTT token sends `POST /api/v1/services/enrollment-token?type=mqtt`.
+5. Each token's status, generate, and revoke work independently.
+6. Backend database has separate setting keys: `agent_enrollment.token_hash` and `mqtt_enrollment.token_hash`.
+
+---
+
+### DFP-5: Move JWT tokens out of `localStorage` (F-5, High)
+
+**Goal**: Eliminate XSS-based token theft by moving the `refresh_token` to an `HttpOnly` cookie (managed by the backend) and keeping the `access_token` only in memory (a module-level variable, not `localStorage`).
+
+This is the most complex fix because it requires **coordinated frontend + backend changes**.
+
+#### Current state (vulnerable)
+
+Both tokens are stored in `localStorage`:
+
+- `src/lib/auth.ts:27-28` — `localStorage.setItem('access_token', …)` and `localStorage.setItem('refresh_token', …)` in `handleLogin()`, `handleRegister()`, and all OIDC handlers.
+- `src/lib/api.ts:53` — `authHeaders()` reads `localStorage.getItem('access_token')`.
+- `src/lib/api.ts:60` — `refreshAccessToken()` reads `localStorage.getItem('refresh_token')`.
+- `src/lib/api.ts:88-121` — refresh logic reads/writes both tokens in `localStorage`.
+
+Any XSS vulnerability (e.g., a compromised dependency, the OIDC `logo_url` injection from F-6, or a future CSP gap) can steal both tokens via `localStorage.getItem()`.
+
+#### Target architecture
+
+```
+┌──────────────────┐     ┌──────────────────────────────┐
+│   Browser (SPA)  │     │       Backend (Rust)          │
+│                  │     │                                │
+│  access_token:   │     │  POST /auth/login → response: │
+│   module-level   │◄────│    body: { access_token, … }  │
+│   variable       │     │    Set-Cookie: refresh_token=… │
+│                  │     │      HttpOnly; Secure;         │
+│  refresh_token:  │     │      SameSite=Strict; Path=/   │
+│   NOT stored     │────►│                                │
+│   in JS at all   │     │  POST /auth/refresh →          │
+│                  │     │    reads cookie automatically   │
+│                  │     │    body: { access_token, … }   │
+└──────────────────┘     └──────────────────────────────┘
+```
+
+#### Files to modify
+
+**Frontend:**
+
+| File | Lines | Change |
+|------|-------|--------|
+| `src/lib/auth.ts` | 9, 19, 26–28, 34–36, 43–44, 56–57, 64–65, 74–75 | Replace all `localStorage` usage with in-memory token |
+| `src/lib/api.ts` | 52–55, 57–76, 88, 95, 115–116 | Read token from memory, drop refresh_token send |
+
+**Backend** (separate PR recommended):
+
+| File | Lines | Change |
+|------|-------|--------|
+| `crates/ui/web-api/src/routes/auth.rs` | login/register/OIDC handlers | Set `refresh_token` as `HttpOnly` cookie, remove it from response body |
+| `crates/ui/web-api/src/routes/auth.rs` | `refresh` handler | Read `refresh_token` from cookie instead of request body |
+| `crates/ui/web-api/src/routes/auth.rs` | `logout` handler | Clear the cookie via `Set-Cookie` with `Max-Age=0` |
+
+#### Step-by-step (Frontend)
+
+**Step 1 — Create in-memory token store** (`src/lib/auth.ts`, top of file)
+
+Before:
+```typescript
+export const user = writable<User | null>(null);
+export const loading = writable(true);
+```
+
+After:
+```typescript
+export const user = writable<User | null>(null);
+export const loading = writable(true);
+
+/** In-memory access token — intentionally NOT persisted to storage. */
+let accessToken: string | null = null;
+
+export function getAccessToken(): string | null {
+    return accessToken;
+}
+
+export function setAccessToken(token: string | null): void {
+    accessToken = token;
+}
+```
+
+**Step 2 — Update `initialize()`** (`src/lib/auth.ts:8-23`)
+
+Before:
+```typescript
+export async function initialize() {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        loading.set(false);
+        return;
+    }
+    try {
+        const u = await api.me();
+        user.set(u);
+    } catch {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+    } finally {
+        loading.set(false);
+    }
+}
+```
+
+After:
+```typescript
+export async function initialize() {
+    // On page load, no access_token exists in memory.
+    // Attempt a silent refresh via the HttpOnly cookie.
+    try {
+        const refreshed = await api.refreshAccessToken();
+        accessToken = refreshed.access_token;
+        const u = await api.me();
+        user.set(u);
+    } catch {
+        accessToken = null;
+    } finally {
+        loading.set(false);
+    }
+}
+```
+
+Key change: instead of reading `localStorage`, the app attempts a `/auth/refresh` call. The browser automatically sends the `HttpOnly` cookie. If it succeeds, the access token is stored in memory. If it fails (no cookie, expired), the user is directed to log in.
+
+**Step 3 — Update login/register/OIDC handlers** (`src/lib/auth.ts:25-77`)
+
+Remove all `localStorage.setItem('refresh_token', …)` calls. Only store the access token in memory:
+
+Before (e.g., `handleLogin`):
+```typescript
+export async function handleLogin(data: LoginRequest) {
+    const res = await api.login(data);
+    localStorage.setItem('access_token', res.access_token);
+    localStorage.setItem('refresh_token', res.refresh_token);
+    user.set(res.user);
+}
+```
+
+After:
+```typescript
+export async function handleLogin(data: LoginRequest) {
+    const res = await api.login(data);
+    accessToken = res.access_token;
+    // refresh_token is now set as HttpOnly cookie by the backend
+    user.set(res.user);
+}
+```
+
+Apply the same pattern to: `handleRegister`, `handleOidcCallback`, `handleOidcCompleteRegistration`, `handleOidcLink`.
+
+**Step 4 — Update logout** (`src/lib/auth.ts:39-47`)
+
+Before:
+```typescript
+export async function handleLogout() {
+    try {
+        await api.logout();
+    } finally {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        user.set(null);
+    }
+}
+```
+
+After:
+```typescript
+export async function handleLogout() {
+    try {
+        await api.logout();
+        // Backend clears the HttpOnly cookie via Set-Cookie: Max-Age=0
+    } finally {
+        accessToken = null;
+        user.set(null);
+    }
+}
+```
+
+**Step 5 — Update `authHeaders()`** (`src/lib/api.ts:52-55`)
+
+Before:
+```typescript
+function authHeaders(): Record<string, string> {
+    const token = localStorage.getItem('access_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+```
+
+After:
+```typescript
+function authHeaders(): Record<string, string> {
+    const token = getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+```
+
+Add `import { getAccessToken, setAccessToken } from './auth';` at the top of `api.ts`.
+
+**Step 6 — Update `refreshAccessToken()`** (`src/lib/api.ts:59-76`)
+
+Before:
+```typescript
+async function refreshAccessToken(): Promise<RefreshResponse> {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) {
+        throw new Error('No refresh token');
+    }
+
+    const res = await fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    // ...
+}
+```
+
+After:
+```typescript
+export async function refreshAccessToken(): Promise<RefreshResponse> {
+    const res = await fetch(`${BASE}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'same-origin',    // sends the HttpOnly cookie
+        headers: { 'Content-Type': 'application/json' }
+        // No body — refresh_token comes from the cookie
+    });
+
+    if (!res.ok) {
+        throw new Error('Refresh failed');
+    }
+
+    return res.json();
+}
+```
+
+Key changes:
+- No `localStorage` read.
+- `credentials: 'same-origin'` ensures the browser includes the cookie.
+- Empty body (the backend reads the token from the cookie header).
+- Made `export` so `auth.ts:initialize()` can call it.
+
+**Step 7 — Update the 401 refresh block** (`src/lib/api.ts:88-121`)
+
+Before:
+```typescript
+if (res.status === 401 && localStorage.getItem('refresh_token')) {
+    try {
+        // ...
+        localStorage.setItem('access_token', refreshed.access_token);
+        // ...
+    } catch {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        window.location.href = '/login';
+        // ...
+    }
+}
+```
+
+After:
+```typescript
+if (res.status === 401) {
+    try {
+        if (!refreshPromise) {
+            refreshPromise = refreshAccessToken();
+        }
+        const refreshed = await refreshPromise;
+        setAccessToken(refreshed.access_token);
+
+        // Retry original request with new token
+        const retryRes = await fetch(`${BASE}${path}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${refreshed.access_token}`,
+                ...(options.headers as Record<string, string> | undefined)
+            },
+            ...options
+        });
+
+        if (!retryRes.ok) {
+            const message = await extractErrorMessage(retryRes);
+            throw new Error(message);
+        }
+        if (retryRes.status === 204) return undefined as T;
+        return retryRes.json();
+    } catch {
+        setAccessToken(null);
+        window.location.href = '/login';
+        throw new Error('Session expired');
+    } finally {
+        refreshPromise = null;
+    }
+}
+```
+
+Key changes:
+- Removed `localStorage.getItem('refresh_token')` guard — we always attempt refresh on 401 (the cookie may or may not be present; the backend returns 401 if it's missing).
+- Replaced `localStorage.setItem/removeItem` with `setAccessToken()`.
+
+#### Step-by-step (Backend — outline only)
+
+These backend changes should be done in a separate commit/PR:
+
+1. **Login/register/OIDC handlers**: After generating tokens, set the refresh token as a cookie:
+   ```rust
+   let cookie = format!(
+       "refresh_token={}; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age={}",
+       refresh_token, refresh_token_lifetime_secs
+   );
+   headers.insert(header::SET_COOKIE, cookie.parse().unwrap());
+   ```
+   Remove `refresh_token` from the JSON response body.
+
+2. **Refresh handler**: Read the token from the cookie header instead of the JSON body:
+   ```rust
+   let refresh_token = req.cookies().get("refresh_token")
+       .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "No refresh token"))?;
+   ```
+
+3. **Logout handler**: Clear the cookie:
+   ```rust
+   let cookie = "refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=0";
+   headers.insert(header::SET_COOKIE, cookie.parse().unwrap());
+   ```
+
+4. **Update `RefreshResponse` type**: Remove `refresh_token` field if it was present, or keep the struct as-is (it currently only has `access_token`, `expires_in`, `token_type` — already correct).
+
+5. **Update `AuthResponse` type**: Remove `refresh_token` from the JSON body. The frontend type `AuthResponse` in `types.ts:22-28` should also drop the `refresh_token` field.
+
+#### Dependencies
+
+- **Backend changes are required first** — the frontend changes will break login if the backend still expects `refresh_token` in the JSON body for `/auth/refresh`.
+- Recommended implementation order:
+  1. Backend: add cookie-based refresh (support both cookie and body for backward compatibility).
+  2. Frontend: switch to in-memory + cookie.
+  3. Backend: remove body-based refresh support.
+
+#### Verification
+
+1. `npm run check` — no TypeScript errors.
+2. `grep -r "localStorage" src/` returns zero matches (all storage removed).
+3. Open DevTools → Application → Local Storage: no `access_token` or `refresh_token` keys.
+4. Open DevTools → Application → Cookies: `refresh_token` cookie is present with `HttpOnly`, `Secure`, `SameSite=Strict`.
+5. Login → verify `access_token` is in the response body but not in localStorage or cookies.
+6. Refresh the page → the app silently re-authenticates via the cookie (no login redirect).
+7. Logout → verify the `refresh_token` cookie is cleared.
+8. Open a JavaScript console → `document.cookie` does not contain `refresh_token` (HttpOnly prevents JS access).
+9. Simulate XSS: `localStorage.getItem('access_token')` returns `null` (token is not in storage).
