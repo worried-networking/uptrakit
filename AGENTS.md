@@ -125,8 +125,8 @@ The controller manages a self-signed internal CA for mTLS agent authentication.
 ### CA rotation flow
 
 1. Background task checks every 24 hours whether the active CA enters the 6-month rotation window. Can also be triggered on demand via `POST /api/v1/settings/rotate-ca`.
-2. On rotation: current CA files move to `ca-previous.{crt,key}`, a new CA is generated as `ca.{crt,key}`.
-3. Both CAs form a trust bundle (`bundle_pem`). The controller trusts client certs signed by either CA.
+2. On rotation: the current CA row is marked as deactivated, a new CA row is inserted, and `pki.active_ca_fingerprint` is updated in settings.
+3. All non-expired CAs form the trust bundle (`bundle_pem`). The controller trusts client certs signed by any non-expired historical CA.
 4. CRLs are partitioned: each CA signs a CRL only for certificates it issued (tracked via `ca_fingerprint` column in `service_certificates`).
 5. Connected agents receive a `CaBundleUpdated` WebSocket message with the new bundle PEM, followed by `RequestCertRenewal` to trigger immediate cert renewal.
 6. Agents that were offline detect staleness via `ca_bundle_hash` in `ServiceSettings` and fetch the updated bundle over HTTPS.
@@ -152,9 +152,9 @@ When `--pki-addr` is configured, the controller embeds AIA (Authority Informatio
 
 At startup, the controller validates the existing CA certificate's embedded URLs against the reconciled `pki_addr`:
 - PKI address set and matching CA extensions: OK
-- PKI address set but different from CA extensions: **startup failure** (suggests updating the setting or deleting CA files)
-- PKI address set but CA has no extensions: **startup failure** (suggests deleting CA files to regenerate with extensions)
-- PKI address not set but CA has extensions: **startup failure** (suggests providing `--pki-addr` or deleting CA files)
+- PKI address set but different from CA extensions: **startup failure** (suggests updating the setting or rotating the CA)
+- PKI address set but CA has no extensions: **startup failure** (suggests rotating the CA to regenerate with extensions)
+- PKI address not set but CA has extensions: **startup failure** (suggests providing `--pki-addr` or rotating the CA to regenerate without extensions)
 - Neither set: OK
 
 Changing the PKI address requires CA rotation (the URLs are embedded in the CA certificate). See the [reverse proxy guide](docs/reverse-proxy/README.md) for the full flow.
@@ -191,6 +191,7 @@ Shared PKI utility functions (`SanCollection`, `collect_sans`, `cert_signed_by_c
 ### CaSnapshot sharing
 
 Runtime CA state is shared across async tasks via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct. The cert signer, CRL manager, API handlers, and background tasks all read from this channel.
+Controllers poll the `pki.ca_version` settings key to detect CA changes made by other instances and reload the snapshot.
 
 ## Architecture rules and invariants
 
@@ -226,12 +227,12 @@ Where `{app}` is one of: `controller`, `agent`, `mqtt`.
 
 | Directory | Contents | Characteristics |
 | --- | --- | --- |
-| **Config** | Rarely-changing, persistent configuration | CA certificates, user-provided TLS certs |
+| **Config** | Rarely-changing, persistent configuration | External CA certificates, user-provided TLS certs |
 | **State** | Runtime state that may change frequently | SQLite DB, JWT keys, service identity, private keys, issued certificates |
 
 **Controller:**
-- Config: PKI files (CA certificate/key, server TLS certificate/key)
-- State: SQLite database, JWT signing key
+- Config: External CA certificate/key (if configured), server TLS certificate/key
+- State: SQLite database (includes managed CA history), JWT signing key
 
 **Agent/MQTT Service:**
 - Config: Controller's CA certificate

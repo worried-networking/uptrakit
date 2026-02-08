@@ -1,7 +1,7 @@
 use der::asn1::{BitString, OctetString};
 use der::{Decode, Encode};
 use rootcause::prelude::*;
-use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_macros::impl_report_conversion;
@@ -73,66 +73,74 @@ pub async fn build_ocsp_response(
         Err(_) => return build_error_response(OcspResponseStatus::MalformedRequest),
     };
 
-    // Extract the raw CA public key bytes (used to compute hashes on demand)
-    let active_pub_key = match extract_ca_public_key_bytes(&ca_snapshot.active_cert_pem) {
-        Ok(v) => v,
-        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
-    };
+    #[derive(Clone)]
+    struct TrustedOcspCa {
+        fingerprint: String,
+        pub_key_bytes: Vec<u8>,
+        key_pem: String,
+    }
 
-    let prev_pub_key = ca_snapshot
-        .previous_cert_pem
-        .as_deref()
-        .and_then(|pem| extract_ca_public_key_bytes(pem).ok());
+    let mut trusted = Vec::new();
+    for ca in &ca_snapshot.trusted_cas {
+        let pub_key_bytes = match extract_ca_public_key_bytes(&ca.cert_pem) {
+            Ok(v) => v,
+            Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+        };
+        trusted.push(TrustedOcspCa {
+            fingerprint: ca.fingerprint.clone(),
+            pub_key_bytes,
+            key_pem: ca.key_pem.clone(),
+        });
+    }
 
-    // Build responder ID using SHA-1 per RFC 6960 Section 2.3
-    let responder_id = match build_responder_id(&active_pub_key) {
-        Ok(v) => v,
-        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
-    };
+    if trusted.is_empty() {
+        return build_error_response(OcspResponseStatus::InternalError);
+    }
 
     // Process each request in the list
     let mut single_responses = Vec::new();
+
+    let mut selected_ca_index: Option<usize> = None;
 
     for request in &ocsp_request.tbs_request.request_list {
         let cert_id = &request.req_cert;
         let hash_oid = &cert_id.hash_algorithm.oid;
 
-        // Compute the CA key hash using the same algorithm the client used
-        let active_hash = match compute_key_hash(&active_pub_key, hash_oid) {
-            Some(h) => h,
-            None => {
-                // Unsupported hash algorithm — return unknown
-                single_responses.push(build_single_response(
-                    cert_id.clone(),
-                    CertStatus::unknown(),
-                ));
+        let mut matched_index: Option<usize> = None;
+        for (idx, ca) in trusted.iter().enumerate() {
+            let Some(hash) = compute_key_hash(&ca.pub_key_bytes, hash_oid) else {
                 continue;
+            };
+            if cert_id.issuer_key_hash.as_bytes() == hash.as_slice() {
+                if matched_index.is_some() {
+                    return build_error_response(OcspResponseStatus::MalformedRequest);
+                }
+                matched_index = Some(idx);
             }
-        };
+        }
 
-        let prev_hash = prev_pub_key
-            .as_ref()
-            .and_then(|pk| compute_key_hash(pk, hash_oid));
-
-        // Validate that the issuer key hash matches our CA (active or previous)
-        let matches_active = cert_id.issuer_key_hash.as_bytes() == active_hash.as_slice();
-        let matches_previous = prev_hash
-            .as_ref()
-            .is_some_and(|h| cert_id.issuer_key_hash.as_bytes() == h.as_slice());
-
-        if !matches_active && !matches_previous {
+        let Some(ca_index) = matched_index else {
             single_responses.push(build_single_response(
                 cert_id.clone(),
                 CertStatus::unknown(),
             ));
             continue;
+        };
+
+        if let Some(selected) = selected_ca_index {
+            if selected != ca_index {
+                return build_error_response(OcspResponseStatus::MalformedRequest);
+            }
+        } else {
+            selected_ca_index = Some(ca_index);
         }
 
         // Extract serial number for DB lookup (hex-encoded)
         let serial_hex = format_serial_hex(cert_id.serial_number.as_bytes());
 
         // Query certificate status from DB
-        let status = match lookup_cert_status(db, &serial_hex, ca_snapshot).await {
+        let ca_fingerprint = &trusted[ca_index].fingerprint;
+        let status = match lookup_cert_status(db, &serial_hex, ca_fingerprint).await {
             Ok(s) => s,
             Err(_) => return build_error_response(OcspResponseStatus::InternalError),
         };
@@ -143,6 +151,21 @@ pub async fn build_ocsp_response(
     // Build the response data
     let now = make_ocsp_time(OffsetDateTime::now_utc());
 
+    let signer_index = selected_ca_index.or_else(|| {
+        trusted
+            .iter()
+            .position(|ca| ca.fingerprint == ca_snapshot.active_fingerprint)
+    });
+
+    let Some(signer_index) = signer_index else {
+        return build_error_response(OcspResponseStatus::InternalError);
+    };
+
+    let responder_id = match build_responder_id(&trusted[signer_index].pub_key_bytes) {
+        Ok(v) => v,
+        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+    };
+
     let response_data = ResponseData {
         version: Version::V1,
         responder_id,
@@ -152,7 +175,7 @@ pub async fn build_ocsp_response(
     };
 
     // Sign the response
-    match sign_response(&response_data, ca_snapshot) {
+    match sign_response(&response_data, &trusted[signer_index].key_pem) {
         Ok(response_bytes) => response_bytes,
         Err(_) => build_error_response(OcspResponseStatus::InternalError),
     }
@@ -250,27 +273,13 @@ fn build_single_response(cert_id: CertId, status: CertStatus) -> SingleResponse 
 async fn lookup_cert_status(
     db: &DatabaseConnection,
     serial_hex: &str,
-    ca_snapshot: &CaSnapshotData,
+    ca_fingerprint: &str,
 ) -> OcspResult<CertStatus> {
     use uptrakit_shared_db::entity::service_certificate;
 
-    // Search by serial number across both active and previous CA fingerprints
-    let mut condition = Condition::any().add(
-        Condition::all()
-            .add(service_certificate::Column::SerialNumber.eq(serial_hex))
-            .add(service_certificate::Column::CaFingerprint.eq(&ca_snapshot.active_fingerprint)),
-    );
-
-    if let Some(prev_fp) = &ca_snapshot.previous_fingerprint {
-        condition = condition.add(
-            Condition::all()
-                .add(service_certificate::Column::SerialNumber.eq(serial_hex))
-                .add(service_certificate::Column::CaFingerprint.eq(prev_fp)),
-        );
-    }
-
     let cert = service_certificate::Entity::find()
-        .filter(condition)
+        .filter(service_certificate::Column::SerialNumber.eq(serial_hex))
+        .filter(service_certificate::Column::CaFingerprint.eq(ca_fingerprint))
         .one(db)
         .await
         .context_to::<OcspError>()?;
@@ -309,17 +318,13 @@ async fn lookup_cert_status(
 }
 
 /// Sign the response data and produce a DER-encoded OcspResponse.
-fn sign_response(
-    response_data: &ResponseData,
-    ca_snapshot: &CaSnapshotData,
-) -> OcspResult<Vec<u8>> {
+fn sign_response(response_data: &ResponseData, key_pem: &str) -> OcspResult<Vec<u8>> {
     // Encode the response data to DER for signing
     let tbs_der = response_data
         .to_der()
         .map_err(|e| report!(OcspError::DerEncode(e.to_string())))?;
 
     // Parse the CA private key
-    let key_pem = &ca_snapshot.active_key_pem;
     let key_der = pem_to_der_key(key_pem)?;
 
     // Sign with ECDSA P-256 SHA-256 using aws-lc-rs
@@ -506,6 +511,8 @@ mod tests {
                 previous_cert_pem: None,
                 previous_key_pem: None,
                 previous_fingerprint: None,
+                trusted_cas: Vec::new(),
+                trusted_ca_cns: Vec::new(),
                 bundle_pem: String::new(),
                 bundle_hash: String::new(),
                 managed: true,

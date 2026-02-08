@@ -126,10 +126,24 @@ mod tests {
     use crate::pki;
 
     fn make_test_signer() -> (RcgenAgentCertSigner, watch::Sender<CaSnapshot>) {
-        let ca = pki::load_or_generate_ca(tempfile::tempdir().unwrap().path(), None).unwrap();
+        let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut params = CertificateParams::default();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "Test CA");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Uptrakit");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params.self_signed(&key_pair).unwrap();
+        let cert_pem = cert.pem();
+        let key_pem = key_pair.serialize_pem();
+
+        let ca = pki::bundle_from_pem(cert_pem.clone(), key_pem.clone()).unwrap();
         let state = pki::CaState {
-            active: ca,
+            active: pki::bundle_from_pem(cert_pem.clone(), key_pem.clone()).unwrap(),
             previous: None,
+            trusted: vec![ca],
             managed: true,
         };
         let snapshot = state.to_snapshot(None).unwrap();

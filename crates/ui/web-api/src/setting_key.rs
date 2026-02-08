@@ -22,6 +22,8 @@ pub enum SettingKey {
     ForwardedClientCertInfoHeader,
     ForwardedClientCertPemHeader,
     PkiAddr,
+    PkiActiveCaFingerprint,
+    PkiCaVersion,
     MultiTenancyEnabled,
     RegistrationRequireTokenForOidc,
     MqttMaxClientsPerTenant,
@@ -45,6 +47,8 @@ impl SettingKey {
             Self::ForwardedClientCertInfoHeader => "network.forwarded_client_cert_info_header",
             Self::ForwardedClientCertPemHeader => "network.forwarded_client_cert_pem_header",
             Self::PkiAddr => "network.pki_addr",
+            Self::PkiActiveCaFingerprint => "pki.active_ca_fingerprint",
+            Self::PkiCaVersion => "pki.ca_version",
             Self::MultiTenancyEnabled => "multi_tenancy.enabled",
             Self::RegistrationRequireTokenForOidc => "registration.require_token_for_oidc",
             Self::MqttMaxClientsPerTenant => "mqtt.max_clients_per_tenant",
@@ -70,6 +74,8 @@ impl SettingKey {
             }
             "network.forwarded_client_cert_pem_header" => Some(Self::ForwardedClientCertPemHeader),
             "network.pki_addr" => Some(Self::PkiAddr),
+            "pki.active_ca_fingerprint" => Some(Self::PkiActiveCaFingerprint),
+            "pki.ca_version" => Some(Self::PkiCaVersion),
             "multi_tenancy.enabled" => Some(Self::MultiTenancyEnabled),
             "registration.require_token_for_oidc" => Some(Self::RegistrationRequireTokenForOidc),
             "mqtt.max_clients_per_tenant" => Some(Self::MqttMaxClientsPerTenant),
@@ -88,6 +94,8 @@ impl SettingKey {
                 | Self::ForwardedClientCertInfoHeader
                 | Self::ForwardedClientCertPemHeader
                 | Self::PkiAddr
+                | Self::PkiActiveCaFingerprint
+                | Self::PkiCaVersion
                 | Self::MultiTenancyEnabled
                 | Self::MqttMaxClientsPerTenant
         )
@@ -137,6 +145,8 @@ mod tests {
         assert!(SettingKey::ForwardedClientCertInfoHeader.is_global());
         assert!(SettingKey::ForwardedClientCertPemHeader.is_global());
         assert!(SettingKey::PkiAddr.is_global());
+        assert!(SettingKey::PkiActiveCaFingerprint.is_global());
+        assert!(SettingKey::PkiCaVersion.is_global());
         assert!(SettingKey::MultiTenancyEnabled.is_global());
         assert!(SettingKey::MqttMaxClientsPerTenant.is_global());
         // Per-tenant keys

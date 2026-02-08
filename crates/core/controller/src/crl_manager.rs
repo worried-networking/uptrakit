@@ -25,11 +25,14 @@ pub struct CrlManagerConfig {
 }
 
 /// Mutable CA material that can be updated at runtime when the CA rotates.
+struct TrustedIssuer {
+    issuer: Issuer<'static, KeyPair>,
+    fingerprint: String,
+}
+
 struct CaIssuers {
-    active: Issuer<'static, KeyPair>,
-    active_fingerprint: String,
-    active_bundle_pem: String,
-    prev: Option<(Issuer<'static, KeyPair>, String)>,
+    trusted: Vec<TrustedIssuer>,
+    bundle_pem: String,
 }
 
 /// CRL lifecycle manager.
@@ -49,27 +52,22 @@ pub async fn build_initial_crls(
     db: &DatabaseConnection,
     snapshot: &CaSnapshot,
 ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
-    let active_key = KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
-    let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
-        .context_to::<pki::PkiError>()?;
+    if snapshot.trusted_cas.is_empty() {
+        return Err(report!(pki::PkiError::CaValidation(
+            "no trusted CA material available".into()
+        )));
+    }
 
-    let active_revoked = query_revoked_certs_for_ca(db, &snapshot.active_fingerprint).await?;
-    let (active_crl, active_pem) = sign_crl(&active_issuer, active_revoked, 0)?;
-    let mut crls = vec![active_crl];
-    let mut combined_pem = active_pem;
+    let mut crls = Vec::new();
+    let mut combined_pem = String::new();
 
-    if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
-        &snapshot.previous_cert_pem,
-        &snapshot.previous_key_pem,
-        &snapshot.previous_fingerprint,
-    ) {
-        let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
-        let prev_issuer =
-            Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
-        let prev_revoked = query_revoked_certs_for_ca(db, prev_fp).await?;
-        let (prev_crl, prev_pem) = sign_crl(&prev_issuer, prev_revoked, 0)?;
-        crls.push(prev_crl);
-        combined_pem.push_str(&prev_pem);
+    for ca in &snapshot.trusted_cas {
+        let key = KeyPair::from_pem(&ca.key_pem).context_to::<pki::PkiError>()?;
+        let issuer = Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
+        let revoked = query_revoked_certs_for_ca(db, &ca.fingerprint).await?;
+        let (crl, pem) = sign_crl(&issuer, revoked, 0)?;
+        crls.push(crl);
+        combined_pem.push_str(&pem);
     }
 
     Ok((crls, combined_pem))
@@ -77,23 +75,22 @@ pub async fn build_initial_crls(
 
 impl CrlManager {
     pub fn new(config: CrlManagerConfig, snapshot: &CaSnapshot) -> pki::Result<Self> {
-        let active_key =
-            KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
-        let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
-            .context_to::<pki::PkiError>()?;
+        if snapshot.trusted_cas.is_empty() {
+            return Err(report!(pki::PkiError::CaValidation(
+                "no trusted CA material available".into()
+            )));
+        }
 
-        let prev = if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
-            &snapshot.previous_cert_pem,
-            &snapshot.previous_key_pem,
-            &snapshot.previous_fingerprint,
-        ) {
-            let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
-            let prev_issuer =
-                Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
-            Some((prev_issuer, prev_fp.clone()))
-        } else {
-            None
-        };
+        let mut trusted = Vec::new();
+        for ca in &snapshot.trusted_cas {
+            let key = KeyPair::from_pem(&ca.key_pem).context_to::<pki::PkiError>()?;
+            let issuer =
+                Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
+            trusted.push(TrustedIssuer {
+                issuer,
+                fingerprint: ca.fingerprint.clone(),
+            });
+        }
 
         let server_cert_pem = config.server_cert_pem.clone();
         let server_key_pem = config.server_key_pem.clone();
@@ -104,10 +101,8 @@ impl CrlManager {
             crl_number: AtomicU64::new(1),
             cached_revocation_version: AtomicI64::new(initial_revocation_version),
             issuers: RwLock::new(CaIssuers {
-                active: active_issuer,
-                active_fingerprint: snapshot.active_fingerprint.clone(),
-                active_bundle_pem: snapshot.bundle_pem.clone(),
-                prev,
+                trusted,
+                bundle_pem: snapshot.bundle_pem.clone(),
             }),
             server_cert: RwLock::new((server_cert_pem, server_key_pem)),
         })
@@ -115,29 +110,26 @@ impl CrlManager {
 
     /// Update CA issuers after a rotation event.
     pub async fn update_ca(&self, snapshot: &CaSnapshot) -> pki::Result<()> {
-        let active_key =
-            KeyPair::from_pem(&snapshot.active_key_pem).context_to::<pki::PkiError>()?;
-        let active_issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, active_key)
-            .context_to::<pki::PkiError>()?;
+        if snapshot.trusted_cas.is_empty() {
+            return Err(report!(pki::PkiError::CaValidation(
+                "no trusted CA material available".into()
+            )));
+        }
 
-        let prev = if let (Some(prev_cert_pem), Some(prev_key_pem), Some(prev_fp)) = (
-            &snapshot.previous_cert_pem,
-            &snapshot.previous_key_pem,
-            &snapshot.previous_fingerprint,
-        ) {
-            let prev_key = KeyPair::from_pem(prev_key_pem).context_to::<pki::PkiError>()?;
-            let prev_issuer =
-                Issuer::from_ca_cert_pem(prev_cert_pem, prev_key).context_to::<pki::PkiError>()?;
-            Some((prev_issuer, prev_fp.clone()))
-        } else {
-            None
-        };
+        let mut trusted = Vec::new();
+        for ca in &snapshot.trusted_cas {
+            let key = KeyPair::from_pem(&ca.key_pem).context_to::<pki::PkiError>()?;
+            let issuer =
+                Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
+            trusted.push(TrustedIssuer {
+                issuer,
+                fingerprint: ca.fingerprint.clone(),
+            });
+        }
 
         let mut issuers = self.issuers.write().await;
-        issuers.active = active_issuer;
-        issuers.active_fingerprint = snapshot.active_fingerprint.clone();
-        issuers.active_bundle_pem = snapshot.bundle_pem.clone();
-        issuers.prev = prev;
+        issuers.trusted = trusted;
+        issuers.bundle_pem = snapshot.bundle_pem.clone();
 
         Ok(())
     }
@@ -155,17 +147,13 @@ impl CrlManager {
         let issuers = self.issuers.read().await;
         let crl_number = self.crl_number.fetch_add(1, Ordering::Relaxed);
 
-        let active_revoked =
-            query_revoked_certs_for_ca(&self.config.db, &issuers.active_fingerprint).await?;
-        let (active_crl, active_pem) = sign_crl(&issuers.active, active_revoked, crl_number)?;
-        let mut crls = vec![active_crl];
-        let mut combined_pem = active_pem;
-
-        if let Some((ref prev_issuer, ref prev_fp)) = issuers.prev {
-            let prev_revoked = query_revoked_certs_for_ca(&self.config.db, prev_fp).await?;
-            let (prev_crl, prev_pem) = sign_crl(prev_issuer, prev_revoked, crl_number)?;
-            crls.push(prev_crl);
-            combined_pem.push_str(&prev_pem);
+        let mut crls = Vec::new();
+        let mut combined_pem = String::new();
+        for issuer in &issuers.trusted {
+            let revoked = query_revoked_certs_for_ca(&self.config.db, &issuer.fingerprint).await?;
+            let (crl, pem) = sign_crl(&issuer.issuer, revoked, crl_number)?;
+            crls.push(crl);
+            combined_pem.push_str(&pem);
         }
 
         Ok((crls, combined_pem))
@@ -180,7 +168,7 @@ impl CrlManager {
         let server_config = pki::build_rustls_config_with_client_auth_and_crls(
             &server_cert.0,
             &server_cert.1,
-            &issuers.active_bundle_pem,
+            &issuers.bundle_pem,
             crls,
         )?;
 

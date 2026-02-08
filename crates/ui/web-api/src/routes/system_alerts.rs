@@ -54,44 +54,46 @@ pub async fn get_system_alerts(
         }
     }
 
-    // Check if server cert is signed by a previous CA (needs re-issue)
-    if snapshot.previous_fingerprint.is_some() {
-        let server_cert_path = state.pki_path.join("server.crt");
-        if let Ok(server_cert_pem) = std::fs::read_to_string(&server_cert_path) {
-            // Check if server cert's issuer matches the active CA
-            if let (Ok(server_not_after), Ok(active_fp)) = (
-                cert_not_after_from_pem(&server_cert_pem),
-                crate::pki_utils::cert_signed_by_ca(&server_cert_pem, &snapshot.active_cert_pem),
-            ) {
-                if !active_fp {
-                    alerts.push(SystemAlert {
-                        id: "server_cert_old_ca".to_string(),
-                        severity: "info".to_string(),
-                        title: "Server Certificate Under Previous CA".to_string(),
-                        message: "The HTTPS server certificate was signed by the previous CA. \
-                                  Consider renewing it to use the current active CA."
-                            .to_string(),
-                        action: Some("renew_server_certificate".to_string()),
-                    });
-                }
+    // Check if server cert is signed by a non-active trusted CA (needs re-issue)
+    let server_cert_path = state.pki_path.join("server.crt");
+    if let Ok(server_cert_pem) = std::fs::read_to_string(&server_cert_path)
+        && let Ok(server_not_after) = cert_not_after_from_pem(&server_cert_pem)
+    {
+        let signed_by_active =
+            crate::pki_utils::cert_signed_by_ca(&server_cert_pem, &snapshot.active_cert_pem)
+                .unwrap_or(false);
 
-                // Check if server cert is nearing expiry
-                let now = time::OffsetDateTime::now_utc();
-                let days_until_expiry = (server_not_after - now).whole_days();
-                if days_until_expiry <= 30 {
-                    alerts.push(SystemAlert {
-                        id: "server_cert_expiring".to_string(),
-                        severity: "warning".to_string(),
-                        title: "Server Certificate Expiring".to_string(),
-                        message: format!(
-                            "The HTTPS server certificate expires in {} days. \
-                             Automatic renewal will occur during the next check cycle.",
-                            days_until_expiry
-                        ),
-                        action: Some("renew_server_certificate".to_string()),
-                    });
-                }
-            }
+        let signed_by_trusted = snapshot.trusted_cas.iter().any(|ca| {
+            crate::pki_utils::cert_signed_by_ca(&server_cert_pem, &ca.cert_pem).unwrap_or(false)
+        });
+
+        if signed_by_trusted && !signed_by_active {
+            alerts.push(SystemAlert {
+                id: "server_cert_old_ca".to_string(),
+                severity: "info".to_string(),
+                title: "Server Certificate Under Non-Active CA".to_string(),
+                message: "The HTTPS server certificate was signed by a non-active CA. \
+                          Consider renewing it to use the current active CA."
+                    .to_string(),
+                action: Some("renew_server_certificate".to_string()),
+            });
+        }
+
+        // Check if server cert is nearing expiry
+        let now = time::OffsetDateTime::now_utc();
+        let days_until_expiry = (server_not_after - now).whole_days();
+        if days_until_expiry <= 30 {
+            alerts.push(SystemAlert {
+                id: "server_cert_expiring".to_string(),
+                severity: "warning".to_string(),
+                title: "Server Certificate Expiring".to_string(),
+                message: format!(
+                    "The HTTPS server certificate expires in {} days. \
+                     Automatic renewal will occur during the next check cycle.",
+                    days_until_expiry
+                ),
+                action: Some("renew_server_certificate".to_string()),
+            });
         }
     }
 

@@ -158,6 +158,13 @@ mod tests {
             previous_cert_pem: None,
             previous_key_pem: None,
             previous_fingerprint: None,
+            trusted_cas: vec![crate::ca_snapshot::TrustedCaSnapshot {
+                cert_pem: ca_pem.to_string(),
+                key_pem: String::new(),
+                fingerprint: "0".repeat(64),
+                not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            }],
+            trusted_ca_cns: Vec::new(),
             bundle_pem: ca_pem.to_string(),
             bundle_hash: "0".repeat(64),
             managed: true,

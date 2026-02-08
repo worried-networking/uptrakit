@@ -112,6 +112,13 @@ async fn build_state(
         previous_cert_pem: None,
         previous_key_pem: None,
         previous_fingerprint: None,
+        trusted_cas: vec![uptrakit_web_api::ca_snapshot::TrustedCaSnapshot {
+            cert_pem: pki.ca_cert_pem.clone(),
+            key_pem: String::new(),
+            fingerprint: "0".repeat(64),
+            not_after: ::time::OffsetDateTime::now_utc() + ::time::Duration::days(365),
+        }],
+        trusted_ca_cns: Vec::new(),
         bundle_pem: pki.ca_cert_pem.clone(),
         bundle_hash: "0".repeat(64),
         managed: true,

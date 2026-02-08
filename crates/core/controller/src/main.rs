@@ -499,19 +499,33 @@ async fn run(args: cli::Args) -> Result<()> {
     let ca_state = if let (Some(ca_cert_path), Some(ca_key_path)) = (&args.ca_cert, &args.ca_key) {
         // External CA — not managed
         let ca = pki::load_external_ca(ca_cert_path, ca_key_path).context(AppError::Pki)?;
+        let trusted = vec![
+            pki::bundle_from_pem(ca.cert_pem.clone(), ca.key_pem.clone()).context(AppError::Pki)?,
+        ];
         pki::CaState {
             active: ca,
             previous: None,
+            trusted,
             managed: false,
         }
     } else {
         let mut state =
-            pki::load_ca_state(&pki_path, pki_addr_opt.as_deref()).context(AppError::Pki)?;
+            pki::load_or_init_managed_ca(&db_conn, default_tenant_id, pki_addr_opt.as_deref())
+                .await
+                .context(AppError::Pki)?;
 
-        // Auto-rotate if managed and within rotation window
-        if state.managed && pki::should_rotate_ca(&state.active.cert_pem) {
+        if pki::should_rotate_ca(&state.active.cert_pem) {
             tracing::info!("CA certificate is within rotation window, rotating now");
-            state = pki::rotate_ca(&pki_path, pki_addr_opt.as_deref()).context(AppError::Pki)?;
+            let active_fp = pki::ca_fingerprint(&state.active.cert_pem).context(AppError::Pki)?;
+            let rotation = pki::rotate_managed_ca(
+                &db_conn,
+                default_tenant_id,
+                pki_addr_opt.as_deref(),
+                &active_fp,
+            )
+            .await
+            .context(AppError::Pki)?;
+            state = rotation.state;
         }
 
         state
@@ -519,12 +533,8 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Validate CA extensions match pki_addr (managed CAs only)
     if ca_state.managed {
-        pki::validate_ca_pki_addr(
-            &ca_state.active.cert_pem,
-            pki_addr_opt.as_deref(),
-            &pki_path,
-        )
-        .context(AppError::Pki)?;
+        pki::validate_ca_pki_addr(&ca_state.active.cert_pem, pki_addr_opt.as_deref())
+            .context(AppError::Pki)?;
     }
 
     let ca_snapshot = ca_state
@@ -666,7 +676,7 @@ async fn run(args: cli::Args) -> Result<()> {
 
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
-        db: db_conn,
+        db: db_conn.clone(),
         settings,
         cert_signer,
         service_connections: service_connections.clone(),
@@ -737,6 +747,80 @@ async fn run(args: cli::Args) -> Result<()> {
             }
         })
     };
+
+    let initial_ca_version = if ca_state.managed {
+        pki::load_ca_version(&app_state.db, default_tenant_id)
+            .await
+            .context(AppError::Pki)?
+    } else {
+        0
+    };
+
+    let ca_reload_token = shutdown_token.child_token();
+    let ca_reload_handle = if ca_state.managed {
+        let db = app_state.db.clone();
+        let ca_tx_for_task = ca_tx.clone();
+        let crl_mgr_for_task = Arc::clone(&crl_manager);
+        let tenant_id = default_tenant_id;
+        let settings_for_task = app_state.settings.clone();
+        let token = ca_reload_token;
+
+        Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            let mut cached_version = initial_ca_version;
+            interval.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = token.cancelled() => {
+                        tracing::debug!("CA reload task shutting down");
+                        break;
+                    }
+                }
+
+                let Ok(db_version) = pki::load_ca_version(&db, tenant_id).await else {
+                    continue;
+                };
+
+                if db_version == cached_version {
+                    continue;
+                }
+
+                let state = match pki::load_managed_ca_state(&db, tenant_id).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!(error = ?e, "failed to reload CA state from database");
+                        continue;
+                    }
+                };
+
+                let pki_addr = settings_for_task.pki_addr().await;
+                let snapshot = match state.to_snapshot(pki_addr) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!(error = ?e, "failed to build CA snapshot after reload");
+                        continue;
+                    }
+                };
+
+                if let Err(e) = crl_mgr_for_task.update_ca(&snapshot).await {
+                    tracing::error!(error = ?e, "failed to update CRL manager after CA reload");
+                    continue;
+                }
+
+                let _ = ca_tx_for_task.send(snapshot);
+
+                if let Err(e) = crl_mgr_for_task.reload_tls_config().await {
+                    tracing::error!(error = ?e, "failed to reload TLS after CA reload");
+                }
+
+                cached_version = db_version;
+            }
+        }))
+    } else {
+        None
+    };
     // Spawn event poller for cross-controller notification delivery
     let event_poller_token = shutdown_token.child_token();
     let event_poller = uptrakit_web_api::event_poller::EventPoller::new(
@@ -749,11 +833,12 @@ async fn run(args: cli::Args) -> Result<()> {
     // Spawn CA rotation background task (managed CAs only, every 24h or on API trigger)
     let ca_rotation_token = shutdown_token.child_token();
     let ca_rotation_handle = if ca_state.managed {
-        let pki_for_task = pki_path.clone();
-        let ca_tx_for_task = ca_tx;
+        let ca_tx_for_task = ca_tx.clone();
         let crl_mgr_for_task = Arc::clone(&crl_manager);
         let notifications_for_task = notification_service.clone();
         let settings_for_rotation = app_state.settings.clone();
+        let db_for_rotation = app_state.db.clone();
+        let tenant_id = default_tenant_id;
         let trigger = Arc::clone(&ca_rotation_trigger);
         let token = ca_rotation_token;
 
@@ -785,10 +870,27 @@ async fn run(args: cli::Args) -> Result<()> {
                 }
 
                 let current_pki_addr = settings_for_rotation.pki_addr().await;
-                match pki::rotate_ca(&pki_for_task, current_pki_addr.as_deref()) {
-                    Ok(new_state) => {
+                let snapshot = ca_tx_for_task.borrow().clone();
+                let expected_fp = snapshot.active_fingerprint.clone();
+
+                match pki::rotate_managed_ca(
+                    &db_for_rotation,
+                    tenant_id,
+                    current_pki_addr.as_deref(),
+                    &expected_fp,
+                )
+                .await
+                {
+                    Ok(rotation) => {
+                        if !rotation.rotated {
+                            tracing::info!(
+                                "CA rotation skipped (another controller already rotated)"
+                            );
+                            continue;
+                        }
+
                         let rotation_pki_addr = current_pki_addr.clone();
-                        match new_state.to_snapshot(rotation_pki_addr) {
+                        match rotation.state.to_snapshot(rotation_pki_addr) {
                             Ok(new_snapshot) => {
                                 // Update CRL manager with new CA material
                                 if let Err(e) = crl_mgr_for_task.update_ca(&new_snapshot).await {
@@ -1050,6 +1152,11 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Wait for settings reload task
     let _ = tokio::time::timeout(Duration::from_secs(5), settings_reload_handle).await;
+
+    // Wait for CA reload task
+    if let Some(h) = ca_reload_handle {
+        let _ = tokio::time::timeout(Duration::from_secs(5), h).await;
+    }
 
     // Wait for CA rotation task
     if let Some(h) = ca_rotation_handle {

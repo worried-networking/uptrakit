@@ -5,10 +5,17 @@ use std::sync::Arc;
 
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rootcause::prelude::*;
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    Set, TransactionTrait,
+};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::entity::{ca_certificate, setting};
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_web_api::SettingKey;
 use uptrakit_web_api::pki_utils::{self, SanCollection};
 
 /// Build the DER-encoded value for an Authority Information Access (AIA) extension.
@@ -152,6 +159,7 @@ pub struct ServerCertBundle {
 pub struct CaState {
     pub active: CaBundle,
     pub previous: Option<CaBundle>,
+    pub trusted: Vec<CaBundle>,
     pub managed: bool,
 }
 
@@ -159,14 +167,14 @@ pub struct CaState {
 pub type CaSnapshot = uptrakit_web_api::ca_snapshot::CaSnapshotData;
 
 impl CaState {
-    /// Build a PEM bundle of all trusted CA certs (active + optional previous).
+    /// Build a PEM bundle of all trusted CA certs (active + historical).
     pub fn ca_bundle_pem(&self) -> String {
-        let mut bundle = self.active.cert_pem.clone();
-        if let Some(prev) = &self.previous {
-            if !bundle.ends_with('\n') {
+        let mut bundle = String::new();
+        for ca in &self.trusted {
+            if !bundle.is_empty() && !bundle.ends_with('\n') {
                 bundle.push('\n');
             }
-            bundle.push_str(&prev.cert_pem);
+            bundle.push_str(&ca.cert_pem);
         }
         bundle
     }
@@ -182,6 +190,28 @@ impl CaState {
         let bundle_hash = sha256_hex(bundle_pem.as_bytes());
         let active_not_after = cert_not_after(&self.active.cert_pem)?;
 
+        let trusted_cas = self
+            .trusted
+            .iter()
+            .map(|ca| {
+                let fingerprint = ca_fingerprint(&ca.cert_pem)?;
+                let not_after = cert_not_after(&ca.cert_pem)?;
+                Ok(uptrakit_web_api::ca_snapshot::TrustedCaSnapshot {
+                    cert_pem: ca.cert_pem.clone(),
+                    key_pem: ca.key_pem.clone(),
+                    fingerprint,
+                    not_after,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut trusted_ca_cns = Vec::new();
+        for ca in &self.trusted {
+            if let Some(cn) = cert_common_name(&ca.cert_pem) {
+                trusted_ca_cns.push(cn);
+            }
+        }
+
         Ok(CaSnapshot {
             active_cert_pem: self.active.cert_pem.clone(),
             active_key_pem: self.active.key_pem.clone(),
@@ -189,6 +219,8 @@ impl CaState {
             previous_cert_pem: self.previous.as_ref().map(|p| p.cert_pem.clone()),
             previous_key_pem: self.previous.as_ref().map(|p| p.key_pem.clone()),
             previous_fingerprint,
+            trusted_cas,
+            trusted_ca_cns,
             bundle_pem,
             bundle_hash,
             managed: self.managed,
@@ -205,48 +237,231 @@ pub fn pki_dir(data_dir: &Path) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Load the full CA state from the PKI directory (active + optional previous).
-pub fn load_ca_state(pki: &Path, pki_addr: Option<&str>) -> Result<CaState> {
-    let active = load_or_generate_ca(pki, pki_addr)?;
-    let previous = load_previous_ca(pki)?;
-    let managed = is_ca_managed(pki);
+/// Load or initialize the managed CA from the database.
+pub async fn load_or_init_managed_ca(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    pki_addr: Option<&str>,
+) -> Result<CaState> {
+    let existing = load_active_ca_fingerprint(db, tenant_id).await?;
+    if existing.is_some() {
+        return load_managed_ca_state(db, tenant_id).await;
+    }
+
+    let tx = db.begin().await.context_to::<PkiError>()?;
+    let current = load_active_ca_fingerprint(&tx, tenant_id).await?;
+    if current.is_some() {
+        tx.rollback().await.context_to::<PkiError>()?;
+        return load_managed_ca_state(db, tenant_id).await;
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let bundle = generate_ca(pki_addr)?;
+    let fingerprint = ca_fingerprint(&bundle.cert_pem)?;
+    let not_before = cert_not_before(&bundle.cert_pem)?;
+    let not_after = cert_not_after(&bundle.cert_pem)?;
+
+    let inserted = insert_setting_string_if_absent(
+        &tx,
+        tenant_id,
+        SettingKey::PkiActiveCaFingerprint,
+        &fingerprint,
+    )
+    .await?;
+    if !inserted {
+        tx.rollback().await.context_to::<PkiError>()?;
+        return load_managed_ca_state(db, tenant_id).await;
+    }
+
+    let cert_model = ca_certificate::ActiveModel {
+        fingerprint: Set(fingerprint.clone()),
+        cert_pem: Set(bundle.cert_pem.clone()),
+        key_pem: Set(bundle.key_pem.clone()),
+        not_before: Set(not_before),
+        not_after: Set(not_after),
+        activated_at: Set(now),
+        deactivated_at: Set(None),
+        created_at: Set(now),
+    };
+    ca_certificate::Entity::insert(cert_model)
+        .exec(&tx)
+        .await
+        .context_to::<PkiError>()?;
+
+    set_setting_i64(&tx, tenant_id, SettingKey::PkiCaVersion, 1).await?;
+
+    tx.commit().await.context_to::<PkiError>()?;
+    tracing::info!("generated new internal CA and stored in database");
+
+    load_managed_ca_state(db, tenant_id).await
+}
+
+/// Load the full managed CA state from the database.
+pub async fn load_managed_ca_state(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+) -> Result<CaState> {
+    let active_fp = load_active_ca_fingerprint(db, tenant_id)
+        .await?
+        .ok_or_else(|| {
+            report!(PkiError::CaValidation(
+                "missing active CA fingerprint".into()
+            ))
+        })?;
+
+    let active_model = ca_certificate::Entity::find_by_id(active_fp.clone())
+        .one(db)
+        .await
+        .context_to::<PkiError>()?
+        .ok_or_else(|| report!(PkiError::CaValidation("active CA record not found".into())))?;
+
+    let now = OffsetDateTime::now_utc();
+    let mut trusted_models = ca_certificate::Entity::find()
+        .filter(ca_certificate::Column::NotAfter.gte(now))
+        .all(db)
+        .await
+        .context_to::<PkiError>()?;
+
+    if !trusted_models.iter().any(|m| m.fingerprint == active_fp) {
+        return Err(report!(PkiError::CaValidation(
+            "active CA is expired or missing from trusted set".into()
+        )));
+    }
+
+    trusted_models.sort_by(|a, b| {
+        if a.fingerprint == active_fp && b.fingerprint != active_fp {
+            return std::cmp::Ordering::Less;
+        }
+        if b.fingerprint == active_fp && a.fingerprint != active_fp {
+            return std::cmp::Ordering::Greater;
+        }
+
+        let a_deact = a.deactivated_at;
+        let b_deact = b.deactivated_at;
+        match (a_deact, b_deact) {
+            (Some(a_time), Some(b_time)) => b_time.cmp(&a_time),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => b.activated_at.cmp(&a.activated_at),
+        }
+        .then_with(|| b.activated_at.cmp(&a.activated_at))
+        .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+    });
+
+    let active = bundle_from_model(active_model)?;
+    let previous = most_recent_deactivated(&trusted_models).and_then(|m| bundle_from_model(m).ok());
+
+    let mut trusted = Vec::new();
+    for model in trusted_models {
+        let bundle = bundle_from_model(model)?;
+        trusted.push(bundle);
+    }
 
     Ok(CaState {
         active,
         previous,
-        managed,
+        trusted,
+        managed: true,
     })
 }
 
-/// Load or generate the internal CA.
-pub fn load_or_generate_ca(pki: &Path, pki_addr: Option<&str>) -> Result<CaBundle> {
-    let cert_path = pki.join("ca.crt");
-    let key_path = pki.join("ca.key");
-
-    if cert_path.exists() && key_path.exists() {
-        load_ca(&cert_path, &key_path)
-    } else {
-        let bundle = generate_ca(pki_addr)?;
-        fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
-        fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;
-        mark_ca_managed(pki)?;
-        tracing::info!("generated new internal CA at {}", pki.display());
-        Ok(bundle)
-    }
+/// Result of a CA rotation attempt.
+pub struct RotationOutcome {
+    pub rotated: bool,
+    pub state: CaState,
 }
 
-/// Load the previous (rotated-out) CA if present.
-fn load_previous_ca(pki: &Path) -> Result<Option<CaBundle>> {
-    let cert_path = pki.join("ca-previous.crt");
-    let key_path = pki.join("ca-previous.key");
+/// Rotate the managed CA using a compare-and-swap guard in the database.
+pub async fn rotate_managed_ca(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    pki_addr: Option<&str>,
+    expected_active_fp: &str,
+) -> Result<RotationOutcome> {
+    let tx = db.begin().await.context_to::<PkiError>()?;
+    let current_active = load_active_ca_fingerprint(&tx, tenant_id).await?;
+    let Some(current_active) = current_active else {
+        tx.rollback().await.context_to::<PkiError>()?;
+        let state = load_managed_ca_state(db, tenant_id).await?;
+        return Ok(RotationOutcome {
+            rotated: false,
+            state,
+        });
+    };
 
-    if cert_path.exists() && key_path.exists() {
-        let bundle = load_ca(&cert_path, &key_path)?;
-        tracing::info!("loaded previous CA from {}", cert_path.display());
-        Ok(Some(bundle))
-    } else {
-        Ok(None)
+    if current_active != expected_active_fp {
+        tx.rollback().await.context_to::<PkiError>()?;
+        let state = load_managed_ca_state(db, tenant_id).await?;
+        return Ok(RotationOutcome {
+            rotated: false,
+            state,
+        });
     }
+
+    let now = OffsetDateTime::now_utc();
+    let new_ca = generate_ca(pki_addr)?;
+    let new_fp = ca_fingerprint(&new_ca.cert_pem)?;
+    let not_before = cert_not_before(&new_ca.cert_pem)?;
+    let not_after = cert_not_after(&new_ca.cert_pem)?;
+
+    let cert_model = ca_certificate::ActiveModel {
+        fingerprint: Set(new_fp.clone()),
+        cert_pem: Set(new_ca.cert_pem.clone()),
+        key_pem: Set(new_ca.key_pem.clone()),
+        not_before: Set(not_before),
+        not_after: Set(not_after),
+        activated_at: Set(now),
+        deactivated_at: Set(None),
+        created_at: Set(now),
+    };
+    ca_certificate::Entity::insert(cert_model)
+        .exec(&tx)
+        .await
+        .context_to::<PkiError>()?;
+
+    let update_old = ca_certificate::Entity::update_many()
+        .col_expr(ca_certificate::Column::DeactivatedAt, Expr::value(now))
+        .filter(ca_certificate::Column::Fingerprint.eq(current_active.clone()))
+        .exec(&tx)
+        .await
+        .context_to::<PkiError>()?;
+
+    if update_old.rows_affected == 0 {
+        tx.rollback().await.context_to::<PkiError>()?;
+        let state = load_managed_ca_state(db, tenant_id).await?;
+        return Ok(RotationOutcome {
+            rotated: false,
+            state,
+        });
+    }
+
+    let updated = update_setting_string_cas(
+        &tx,
+        tenant_id,
+        SettingKey::PkiActiveCaFingerprint,
+        &current_active,
+        &new_fp,
+    )
+    .await?;
+
+    if !updated {
+        tx.rollback().await.context_to::<PkiError>()?;
+        let state = load_managed_ca_state(db, tenant_id).await?;
+        return Ok(RotationOutcome {
+            rotated: false,
+            state,
+        });
+    }
+
+    bump_setting_i64(&tx, tenant_id, SettingKey::PkiCaVersion).await?;
+
+    tx.commit().await.context_to::<PkiError>()?;
+
+    let state = load_managed_ca_state(db, tenant_id).await?;
+    Ok(RotationOutcome {
+        rotated: true,
+        state,
+    })
 }
 
 fn generate_ca(pki_addr: Option<&str>) -> Result<CaBundle> {
@@ -293,6 +508,164 @@ fn load_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
         key_pem,
         issuer,
     })
+}
+
+fn bundle_from_model(model: ca_certificate::Model) -> Result<CaBundle> {
+    let key_pair = KeyPair::from_pem(&model.key_pem).context_to::<PkiError>()?;
+    let issuer = Issuer::from_ca_cert_pem(&model.cert_pem, key_pair).context_to::<PkiError>()?;
+    Ok(CaBundle {
+        cert_pem: model.cert_pem,
+        key_pem: model.key_pem,
+        issuer,
+    })
+}
+
+pub fn bundle_from_pem(cert_pem: String, key_pem: String) -> Result<CaBundle> {
+    let key_pair = KeyPair::from_pem(&key_pem).context_to::<PkiError>()?;
+    let issuer = Issuer::from_ca_cert_pem(&cert_pem, key_pair).context_to::<PkiError>()?;
+    Ok(CaBundle {
+        cert_pem,
+        key_pem,
+        issuer,
+    })
+}
+
+fn most_recent_deactivated(models: &[ca_certificate::Model]) -> Option<ca_certificate::Model> {
+    let mut candidates: Vec<_> = models
+        .iter()
+        .filter(|m| m.deactivated_at.is_some())
+        .cloned()
+        .collect();
+    candidates.sort_by(|a, b| {
+        b.deactivated_at
+            .cmp(&a.deactivated_at)
+            .then_with(|| b.activated_at.cmp(&a.activated_at))
+            .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+    });
+    candidates.into_iter().next()
+}
+
+async fn load_active_ca_fingerprint(
+    db: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+) -> Result<Option<String>> {
+    let row = setting::Entity::find_by_id((
+        tenant_id,
+        SettingKey::PkiActiveCaFingerprint.as_str().to_string(),
+    ))
+    .one(db)
+    .await
+    .context_to::<PkiError>()?;
+
+    let value = row.and_then(|r| r.value.as_str().map(String::from));
+    Ok(value)
+}
+
+async fn insert_setting_string_if_absent(
+    db: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    key: SettingKey,
+    value: &str,
+) -> Result<bool> {
+    let now = OffsetDateTime::now_utc();
+    let model = setting::ActiveModel {
+        tenant_id: Set(tenant_id),
+        key: Set(key.as_str().to_string()),
+        value: Set(serde_json::Value::String(value.to_string())),
+        updated_at: Set(now),
+    };
+
+    let _ = setting::Entity::insert(model)
+        .on_conflict(
+            OnConflict::columns([setting::Column::TenantId, setting::Column::Key])
+                .do_nothing()
+                .to_owned(),
+        )
+        .exec(db)
+        .await
+        .context_to::<PkiError>()?;
+
+    let current = load_active_ca_fingerprint(db, tenant_id).await?;
+    Ok(current.as_deref() == Some(value))
+}
+
+async fn set_setting_i64(
+    db: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    key: SettingKey,
+    value: i64,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let existing = setting::Entity::find_by_id((tenant_id, key.as_str().to_string()))
+        .one(db)
+        .await
+        .context_to::<PkiError>()?;
+
+    if let Some(existing) = existing {
+        let mut model: setting::ActiveModel = existing.into();
+        model.value = Set(serde_json::Value::from(value));
+        model.updated_at = Set(now);
+        model.update(db).await.context_to::<PkiError>()?;
+    } else {
+        let model = setting::ActiveModel {
+            tenant_id: Set(tenant_id),
+            key: Set(key.as_str().to_string()),
+            value: Set(serde_json::Value::from(value)),
+            updated_at: Set(now),
+        };
+        model.insert(db).await.context_to::<PkiError>()?;
+    }
+    Ok(())
+}
+
+async fn update_setting_string_cas(
+    db: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    key: SettingKey,
+    expected: &str,
+    new_value: &str,
+) -> Result<bool> {
+    let now = OffsetDateTime::now_utc();
+    let result = setting::Entity::update_many()
+        .col_expr(
+            setting::Column::Value,
+            Expr::value(serde_json::Value::String(new_value.to_string())),
+        )
+        .col_expr(setting::Column::UpdatedAt, Expr::value(now))
+        .filter(setting::Column::TenantId.eq(tenant_id))
+        .filter(setting::Column::Key.eq(key.as_str()))
+        .filter(setting::Column::Value.eq(serde_json::Value::String(expected.to_string())))
+        .exec(db)
+        .await
+        .context_to::<PkiError>()?;
+
+    Ok(result.rows_affected > 0)
+}
+
+async fn bump_setting_i64(
+    db: &impl ConnectionTrait,
+    tenant_id: uuid::Uuid,
+    key: SettingKey,
+) -> Result<i64> {
+    let current = setting::Entity::find_by_id((tenant_id, key.as_str().to_string()))
+        .one(db)
+        .await
+        .context_to::<PkiError>()?
+        .and_then(|row| row.value.as_i64())
+        .unwrap_or(0);
+
+    let next = current.saturating_add(1);
+    set_setting_i64(db, tenant_id, key, next).await?;
+    Ok(next)
+}
+
+pub async fn load_ca_version(db: &DatabaseConnection, tenant_id: uuid::Uuid) -> Result<i64> {
+    let row =
+        setting::Entity::find_by_id((tenant_id, SettingKey::PkiCaVersion.as_str().to_string()))
+            .one(db)
+            .await
+            .context_to::<PkiError>()?;
+    Ok(row.and_then(|r| r.value.as_i64()).unwrap_or(0))
 }
 
 /// Load a CA from user-provided (external) paths.
@@ -390,19 +763,6 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
-// --- Managed CA marker ---
-
-/// Mark the CA as auto-generated (managed).
-pub fn mark_ca_managed(pki: &Path) -> Result<()> {
-    fs::write(pki.join("ca-managed"), "").context_to::<PkiError>()?;
-    Ok(())
-}
-
-/// Check if the CA was auto-generated (managed).
-pub fn is_ca_managed(pki: &Path) -> bool {
-    pki.join("ca-managed").exists()
-}
-
 // --- Cert introspection ---
 
 /// Check if a PEM-encoded certificate is expired.
@@ -428,6 +788,24 @@ pub fn cert_not_after(pem: &str) -> Result<OffsetDateTime> {
         .map_err(|e| report!(PkiError::Timestamp(e.to_string())))
 }
 
+/// Extract the `not_before` timestamp from a PEM-encoded certificate.
+pub fn cert_not_before(pem: &str) -> Result<OffsetDateTime> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes())
+        .map_err(|_| report!(PkiError::PemParse))?;
+    let cert = pem_block
+        .parse_x509()
+        .map_err(|_| report!(PkiError::PemParse))?;
+    OffsetDateTime::from_unix_timestamp(cert.validity().not_before.timestamp())
+        .map_err(|e| report!(PkiError::Timestamp(e.to_string())))
+}
+
+fn cert_common_name(pem: &str) -> Option<String> {
+    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
+    let cert = pem_block.parse_x509().ok()?;
+    let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
+    Some(cn.to_string())
+}
+
 // --- Rotation helpers ---
 
 /// Returns `true` if the CA certificate expires within 183 days (6 months).
@@ -437,34 +815,6 @@ pub fn should_rotate_ca(cert_pem: &str) -> bool {
     };
     let threshold = OffsetDateTime::now_utc() + time::Duration::days(183);
     not_after <= threshold
-}
-
-/// Rotate the CA: move current → previous, generate new active CA.
-pub fn rotate_ca(pki: &Path, pki_addr: Option<&str>) -> Result<CaState> {
-    let active_cert = pki.join("ca.crt");
-    let active_key = pki.join("ca.key");
-    let prev_cert = pki.join("ca-previous.crt");
-    let prev_key = pki.join("ca-previous.key");
-
-    // Move current active → previous
-    fs::copy(&active_cert, &prev_cert).context_to::<PkiError>()?;
-    fs::copy(&active_key, &prev_key).context_to::<PkiError>()?;
-
-    // Generate new CA
-    let new_ca = generate_ca(pki_addr)?;
-    fs::write(&active_cert, &new_ca.cert_pem).context_to::<PkiError>()?;
-    fs::write(&active_key, &new_ca.key_pem).context_to::<PkiError>()?;
-
-    // Load previous for issuer
-    let previous = load_ca(&prev_cert, &prev_key)?;
-
-    tracing::info!("CA rotated: new CA generated, previous CA preserved");
-
-    Ok(CaState {
-        active: new_ca,
-        previous: Some(previous),
-        managed: true,
-    })
 }
 
 // --- Server cert renewal ---
@@ -658,7 +1008,7 @@ pub fn extract_cert_pki_urls(cert_pem: &str) -> Result<CertPkiUrls> {
 ///
 /// Call this after loading CA state and before building the snapshot.
 /// Mismatch causes a hard startup failure with descriptive error.
-pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>, pki_path: &Path) -> Result<()> {
+pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Result<()> {
     let cert_urls = extract_cert_pki_urls(cert_pem)?;
     let has_extensions = cert_urls.has_extensions();
 
@@ -689,11 +1039,10 @@ pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>, pki_path: &P
                      \n\
                      To fix this, either:\n\
                      \x20 1. Update --pki-addr to match the CA certificate's URLs, or\n\
-                     \x20 2. Delete the CA files in {} and restart to regenerate with the new URL",
+                     \x20 2. Rotate the CA to regenerate it with the new URL",
                     cert_urls.ocsp_url.as_deref().unwrap_or("<none>"),
                     cert_urls.ca_issuers_url.as_deref().unwrap_or("<none>"),
                     cert_urls.crl_url.as_deref().unwrap_or("<none>"),
-                    pki_path.display(),
                 ))));
             }
             Ok(())
@@ -705,9 +1054,7 @@ pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>, pki_path: &P
                  The CA needs to be regenerated with the backend URL to embed OCSP, CA Issuers,\n\
                  and CRL Distribution Point URLs in certificates.\n\
                  \n\
-                 To fix this, delete the CA files in {} and restart the controller.\n\
-                 A new CA will be generated with the correct extensions.",
-            pki_path.display(),
+                 To fix this, rotate the CA so it is regenerated with the correct extensions.",
         )))),
         // pki_addr not set, CA has extensions — unexpected
         (None, true) => Err(report!(PkiError::CaValidation(format!(
@@ -720,11 +1067,10 @@ pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>, pki_path: &P
                  \n\
                  To fix this, either:\n\
                  \x20 1. Provide --pki-addr matching the URLs in the CA certificate, or\n\
-                 \x20 2. Delete the CA files in {} and restart to regenerate without extensions",
+                 \x20 2. Rotate the CA to regenerate without extensions",
             cert_urls.ocsp_url.as_deref().unwrap_or("<none>"),
             cert_urls.ca_issuers_url.as_deref().unwrap_or("<none>"),
             cert_urls.crl_url.as_deref().unwrap_or("<none>"),
-            pki_path.display(),
         )))),
         // pki_addr not set, CA has no extensions — OK
         (None, false) => Ok(()),
@@ -811,17 +1157,6 @@ mod tests {
         let ca = generate_ca(None).unwrap();
         assert!(ca.cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(ca.key_pem.contains("BEGIN"));
-    }
-
-    #[test]
-    fn ca_round_trip() {
-        let dir = tempfile::tempdir().unwrap();
-        let pki = dir.path();
-
-        let ca1 = load_or_generate_ca(pki, None).unwrap();
-        let ca2 = load_or_generate_ca(pki, None).unwrap();
-
-        assert_eq!(ca1.cert_pem, ca2.cert_pem);
     }
 
     #[test]
@@ -939,8 +1274,9 @@ mod tests {
         let ca1 = generate_ca(None).unwrap();
         let ca2 = generate_ca(None).unwrap();
         let state = CaState {
-            active: ca1,
-            previous: Some(ca2),
+            active: bundle_from_pem(ca1.cert_pem.clone(), ca1.key_pem.clone()).unwrap(),
+            previous: Some(bundle_from_pem(ca2.cert_pem.clone(), ca2.key_pem.clone()).unwrap()),
+            trusted: vec![ca1, ca2],
             managed: true,
         };
         let bundle = state.ca_bundle_pem();
@@ -952,42 +1288,15 @@ mod tests {
     fn ca_snapshot_roundtrip() {
         let ca = generate_ca(None).unwrap();
         let state = CaState {
-            active: ca,
+            active: bundle_from_pem(ca.cert_pem.clone(), ca.key_pem.clone()).unwrap(),
             previous: None,
+            trusted: vec![ca],
             managed: true,
         };
         let snapshot = state.to_snapshot(None).unwrap();
         assert!(!snapshot.active_fingerprint.is_empty());
         assert!(snapshot.previous_fingerprint.is_none());
         assert!(!snapshot.bundle_hash.is_empty());
-    }
-
-    #[test]
-    fn managed_marker_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let pki = dir.path();
-        assert!(!is_ca_managed(pki));
-        mark_ca_managed(pki).unwrap();
-        assert!(is_ca_managed(pki));
-    }
-
-    #[test]
-    fn ca_rotation() {
-        let dir = tempfile::tempdir().unwrap();
-        let pki = dir.path();
-
-        // Generate initial CA
-        let initial = load_or_generate_ca(pki, None).unwrap();
-        let initial_fp = ca_fingerprint(&initial.cert_pem).unwrap();
-
-        // Rotate
-        let state = rotate_ca(pki, None).unwrap();
-        let new_fp = ca_fingerprint(&state.active.cert_pem).unwrap();
-        assert_ne!(initial_fp, new_fp);
-
-        let prev = state.previous.as_ref().unwrap();
-        let prev_fp = ca_fingerprint(&prev.cert_pem).unwrap();
-        assert_eq!(initial_fp, prev_fp);
     }
 
     #[test]
@@ -1084,6 +1393,59 @@ mod tests {
         assert!(!cert_signed_by_ca(&server_pem, &ca2_pem).unwrap());
     }
 
+    #[tokio::test]
+    async fn managed_ca_init_and_rotation() -> std::result::Result<(), String> {
+        use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
+        use uptrakit_shared_db::entity::tenant;
+
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.map_err(|e| e.to_string())?;
+        crate::migration::run_migrations(&db)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+
+        let tenant = tenant::Entity::find()
+            .filter(tenant::Column::IsDefault.eq(true))
+            .one(&db)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "default tenant not found".to_string())?;
+
+        let state = load_or_init_managed_ca(&db, tenant.id, None)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        let active_fp = ca_fingerprint(&state.active.cert_pem).map_err(|e| format!("{e:?}"))?;
+
+        let version = load_ca_version(&db, tenant.id)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        if version != 1 {
+            return Err(format!("expected CA version 1, got {version}"));
+        }
+
+        let rotation = rotate_managed_ca(&db, tenant.id, None, &active_fp)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        if !rotation.rotated {
+            return Err("rotation should succeed".to_string());
+        }
+
+        let new_fp =
+            ca_fingerprint(&rotation.state.active.cert_pem).map_err(|e| format!("{e:?}"))?;
+        if new_fp == active_fp {
+            return Err("rotation did not update active CA".to_string());
+        }
+
+        let version = load_ca_version(&db, tenant.id)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        if version != 2 {
+            return Err(format!("expected CA version 2, got {version}"));
+        }
+
+        Ok(())
+    }
+
     // --- AIA/CDP extension tests ---
 
     #[test]
@@ -1134,19 +1496,13 @@ mod tests {
     fn validate_ca_pki_addr_matching() {
         let url = "https://controller.example.com";
         let ca = generate_ca(Some(url)).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        assert!(validate_ca_pki_addr(&ca.cert_pem, Some(url), dir.path()).is_ok());
+        assert!(validate_ca_pki_addr(&ca.cert_pem, Some(url)).is_ok());
     }
 
     #[test]
     fn validate_ca_pki_addr_mismatched() {
         let ca = generate_ca(Some("https://old-url.example.com")).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let result = validate_ca_pki_addr(
-            &ca.cert_pem,
-            Some("https://new-url.example.com"),
-            dir.path(),
-        );
+        let result = validate_ca_pki_addr(&ca.cert_pem, Some("https://new-url.example.com"));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("do not match"));
@@ -1155,8 +1511,7 @@ mod tests {
     #[test]
     fn validate_ca_pki_addr_set_but_no_extensions() {
         let ca = generate_ca(None).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let result = validate_ca_pki_addr(&ca.cert_pem, Some("https://example.com"), dir.path());
+        let result = validate_ca_pki_addr(&ca.cert_pem, Some("https://example.com"));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("no AIA/CDP extensions"));
@@ -1165,8 +1520,7 @@ mod tests {
     #[test]
     fn validate_ca_pki_addr_not_set_but_has_extensions() {
         let ca = generate_ca(Some("https://example.com")).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let result = validate_ca_pki_addr(&ca.cert_pem, None, dir.path());
+        let result = validate_ca_pki_addr(&ca.cert_pem, None);
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("no --pki-addr is configured"));
@@ -1175,27 +1529,7 @@ mod tests {
     #[test]
     fn validate_ca_pki_addr_neither_set() {
         let ca = generate_ca(None).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        assert!(validate_ca_pki_addr(&ca.cert_pem, None, dir.path()).is_ok());
-    }
-
-    #[test]
-    fn rotate_ca_with_pki_addr_preserves_extensions() {
-        let dir = tempfile::tempdir().unwrap();
-        let pki = dir.path();
-        let url = "https://controller.internal:8443";
-
-        // Generate initial CA with pki_addr
-        let _initial = load_or_generate_ca(pki, Some(url)).unwrap();
-
-        // Rotate with same URL
-        let state = rotate_ca(pki, Some(url)).unwrap();
-        let urls = extract_cert_pki_urls(&state.active.cert_pem).unwrap();
-        assert!(urls.has_extensions());
-        assert_eq!(
-            urls.ocsp_url.as_deref(),
-            Some(&format!("{url}/api/v1/pki/ocsp") as &str)
-        );
+        assert!(validate_ca_pki_addr(&ca.cert_pem, None).is_ok());
     }
 
     #[test]

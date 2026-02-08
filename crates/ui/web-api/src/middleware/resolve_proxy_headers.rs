@@ -245,45 +245,7 @@ fn verify_issuer_cn(issuer_dn: &str, state: &AppState) -> bool {
 /// Verify that the issuer CN string matches a known CA CN.
 fn verify_issuer_cn_str(issuer_cn: &str, state: &AppState) -> bool {
     let snapshot = state.ca_snapshot.borrow().clone();
-
-    // Check active CA CN
-    if let Some(active_cn) = ca_cn_from_pem(&snapshot.active_cert_pem)
-        && active_cn == issuer_cn
-    {
-        return true;
-    }
-
-    // Check previous CA CN (only if not expired)
-    if let Some(ref prev_pem) = snapshot.previous_cert_pem
-        && let Some(prev_cn) = ca_cn_from_pem(prev_pem)
-        && prev_cn == issuer_cn
-        && !is_cert_expired(prev_pem)
-    {
-        return true;
-    }
-
-    false
-}
-
-/// Extract the CN from a PEM-encoded certificate.
-fn ca_cn_from_pem(pem: &str) -> Option<String> {
-    let (_, pem_block) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
-    let (_, cert) = x509_parser::parse_x509_certificate(&pem_block.contents).ok()?;
-    let cn = cert.subject().iter_common_name().next()?.as_str().ok()?;
-    Some(cn.to_string())
-}
-
-/// Check if a PEM-encoded certificate is expired.
-fn is_cert_expired(pem: &str) -> bool {
-    let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(pem.as_bytes()) else {
-        return true;
-    };
-    let Ok((_, cert)) = x509_parser::parse_x509_certificate(&pem_block.contents) else {
-        return true;
-    };
-    let not_after = cert.validity().not_after.to_datetime();
-    let now = time::OffsetDateTime::now_utc();
-    now > not_after
+    snapshot.trusted_ca_cns.iter().any(|cn| cn == issuer_cn)
 }
 
 /// Strip proxy-related headers from non-proxy requests to prevent spoofing.
@@ -473,33 +435,5 @@ mod tests {
         let headers = HeaderMap::new();
         let url = resolve_external_base_url(&headers, false);
         assert_eq!(url, None);
-    }
-
-    #[test]
-    fn is_cert_expired_future_cert() {
-        // Generate a self-signed cert valid for 365 days
-        let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
-        let cert = rcgen::CertificateParams::new(vec!["test".into()])
-            .expect("params")
-            .self_signed(&key_pair)
-            .expect("self-sign");
-        let pem = cert.pem();
-        assert!(!is_cert_expired(&pem));
-    }
-
-    #[test]
-    fn ca_cn_from_pem_extracts_cn() {
-        let key_pair =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
-        let mut params = rcgen::CertificateParams::new(vec![]).expect("params");
-        params.distinguished_name = rcgen::DistinguishedName::new();
-        params
-            .distinguished_name
-            .push(rcgen::DnType::CommonName, "Test CA");
-        let cert = params.self_signed(&key_pair).expect("self-sign");
-        let pem = cert.pem();
-
-        assert_eq!(ca_cn_from_pem(&pem), Some("Test CA".to_string()));
     }
 }

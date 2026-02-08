@@ -48,6 +48,15 @@ pub mod ca_snapshot {
     /// Type alias for the watch receiver carrying CA snapshot data.
     pub type CaSnapshotReceiver = tokio::sync::watch::Receiver<CaSnapshotData>;
 
+    /// Trusted CA material included in the active bundle.
+    #[derive(Clone, Debug)]
+    pub struct TrustedCaSnapshot {
+        pub cert_pem: String,
+        pub key_pem: String,
+        pub fingerprint: String,
+        pub not_after: time::OffsetDateTime,
+    }
+
     /// Cloneable snapshot of CA state shared across the application.
     #[derive(Clone, Debug)]
     pub struct CaSnapshotData {
@@ -57,6 +66,8 @@ pub mod ca_snapshot {
         pub previous_cert_pem: Option<String>,
         pub previous_key_pem: Option<String>,
         pub previous_fingerprint: Option<String>,
+        pub trusted_cas: Vec<TrustedCaSnapshot>,
+        pub trusted_ca_cns: Vec<String>,
         pub bundle_pem: String,
         pub bundle_hash: String,
         pub managed: bool,
@@ -554,6 +565,13 @@ mod tests {
             previous_cert_pem: None,
             previous_key_pem: None,
             previous_fingerprint: None,
+            trusted_cas: vec![crate::ca_snapshot::TrustedCaSnapshot {
+                cert_pem: ca_pem.to_string(),
+                key_pem: String::new(),
+                fingerprint: "0".repeat(64),
+                not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            }],
+            trusted_ca_cns: Vec::new(),
             bundle_pem: ca_pem.to_string(),
             bundle_hash: "0".repeat(64),
             managed: true,

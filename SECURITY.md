@@ -59,9 +59,9 @@ Uptrakit operates an internal PKI for mTLS authentication of agents and MQTT ser
 
 Agent and MQTT service certificates are issued via a CSR (Certificate Signing Request) flow. The controller generates a UUIDv7 `service_id` during enrollment. After approval, the agent/service generates an ECDSA P-256 keypair locally and creates a PKCS#10 CSR with CN set to its `service_id`. The controller validates the CSR signature, verifies the CN matches the authenticated identity, and signs the certificate with controller-controlled parameters (DN, EKU, validity period). **The private key never leaves the agent/service.** A fresh keypair is generated for each CSR, including both initial enrollment and certificate renewals. MQTT services follow the same TOFU CA pinning, enrollment, and certificate issuance flow as agents, connecting to the same WebSocket endpoint (`/api/v1/ws/service`). MQTT enrollment tokens are settings-based (stored under a separate key: `mqtt_enrollment.token_hash`) and managed through the unified services REST API (`/api/v1/services/enrollment-token?type=mqtt`).
 
-CA rotation produces a dual-CA trust bundle so agents signed by the previous CA remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
+CA rotation preserves the full CA history in the database. All non-expired CAs form the trust bundle so agents signed by historical CAs remain trusted during the transition period. CRLs are partitioned per CA -- each CA signs a CRL only for certificates it issued. Combined PEM CRLs are publicly available at `GET /api/v1/pki/ca.crl`.
 
-An OCSP responder is available at `POST /api/v1/pki/ocsp` (and `GET /api/v1/pki/ocsp/{base64}`), providing real-time certificate revocation status per RFC 6960. The responder supports both SHA-1 and SHA-256 hash algorithms in requests (Nginx/OpenSSL uses SHA-1). `ResponderID::ByKey` uses SHA-1 as required by RFC 6960 Section 2.3. OCSP responses are signed with the active CA's private key using ECDSA P-256 SHA-256.
+An OCSP responder is available at `POST /api/v1/pki/ocsp` (and `GET /api/v1/pki/ocsp/{base64}`), providing real-time certificate revocation status per RFC 6960. The responder supports both SHA-1 and SHA-256 hash algorithms in requests (Nginx/OpenSSL uses SHA-1). `ResponderID::ByKey` uses SHA-1 as required by RFC 6960 Section 2.3. OCSP responses are signed with the matching CA's private key using ECDSA P-256 SHA-256.
 
 When `--pki-addr` is configured, certificates embed Authority Information Access (AIA) and CRL Distribution Points (CDP) extensions. These extensions point reverse proxies to the OCSP responder, CA certificate download, and CRL endpoints. At startup, the controller validates that an existing managed CA's embedded URLs match the reconciled `--pki-addr` — mismatches cause a hard startup failure with actionable error messages.
 
@@ -115,7 +115,7 @@ All sensitive files and directories are created with secure permissions:
 | Files | Owner rw only | 0o600 | Private keys, certificates, database, configuration |
 
 The `uptrakit-directories` crate provides helper functions (`create_secure_dir`, `write_secure_file`) that enforce these permissions on Unix systems. This applies to:
-- Controller: PKI directories, database files, JWT key files
+- Controller: external CA / TLS cert files (if configured), database files (including managed CA history), JWT key files
 - Agent/MQTT Service: State directories, private keys, certificates, CA certificate
 
 ## Dependency Security

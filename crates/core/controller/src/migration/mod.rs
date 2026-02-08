@@ -27,6 +27,7 @@ mod m20260207_000021_create_api_rate_limits;
 mod m20260207_000022_create_settings_version;
 mod m20260207_000023_add_revocation_version;
 mod m20260207_000024_create_controller_events;
+mod m20260207_000025_create_ca_certificates;
 
 pub struct Migrator;
 
@@ -58,6 +59,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260207_000022_create_settings_version::Migration),
             Box::new(m20260207_000023_add_revocation_version::Migration),
             Box::new(m20260207_000024_create_controller_events::Migration),
+            Box::new(m20260207_000025_create_ca_certificates::Migration),
         ]
     }
 }
