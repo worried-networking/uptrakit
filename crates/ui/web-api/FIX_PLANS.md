@@ -1026,3 +1026,713 @@ fn external_base_url_origin_spoofing_blocked() {
 | File | Change |
 |------|--------|
 | `src/middleware/resolve_proxy_headers.rs` | Move Origin inside `from_trusted_proxy` guard, add to `strip_proxy_headers` |
+
+---
+
+## Plan 11: H2 — JWT Access Tokens Cannot Be Revoked (15-Minute Window)
+
+### Problem
+
+JWT access tokens (`src/middleware/require_auth.rs:126-156`, `src/auth/jwt.rs:109-118`) are validated purely statelessly — no DB lookup, no revocation check, no `is_active` check. Permissions are baked into the JWT at issuance and trusted for the full 15-minute lifetime. After user deactivation, role changes, or logout, access persists until the token expires.
+
+### Plan
+
+**Step 1 — Introduce a short-lived token denylist**
+
+Create a new in-memory denylist backed by a time-based eviction cache. Since JWT tokens are short-lived (15 min), the denylist only needs to hold entries until they would have expired anyway.
+
+Add a new module `src/auth/token_denylist.rs`:
+
+```rust
+use std::collections::HashMap;
+use std::sync::Arc;
+use time::OffsetDateTime;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+/// In-memory denylist for revoked JWT access tokens.
+///
+/// Entries auto-expire after the JWT's `exp` time. The denylist is periodically
+/// purged of expired entries.
+pub struct TokenDenylist {
+    inner: Arc<RwLock<HashMap<String, i64>>>,  // jti -> exp timestamp
+}
+
+impl TokenDenylist {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Add a JWT ID to the denylist. The entry will be kept until `exp_timestamp`.
+    pub async fn deny(&self, jti: &str, exp_timestamp: i64) {
+        self.inner.write().await.insert(jti.to_string(), exp_timestamp);
+    }
+
+    /// Deny all tokens for a given user (by adding user_id to a separate set).
+    pub async fn deny_user(&self, user_id: Uuid, until: i64) {
+        // Store user-level revocation with a "user:" prefix
+        let key = format!("user:{user_id}");
+        self.inner.write().await.insert(key, until);
+    }
+
+    /// Check if a token's JTI or its user is denied.
+    pub async fn is_denied(&self, jti: &str, user_id: &Uuid, iat: i64) -> bool {
+        let guard = self.inner.read().await;
+        if guard.contains_key(jti) {
+            return true;
+        }
+        // Check user-level revocation: if the user was denied after the token's iat
+        let user_key = format!("user:{user_id}");
+        if let Some(&until) = guard.get(&user_key) {
+            if iat < until {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Purge expired entries. Call periodically (e.g., every 5 minutes).
+    pub async fn purge_expired(&self) {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        self.inner.write().await.retain(|_, exp| *exp > now);
+    }
+}
+```
+
+**Step 2 — Wire denylist into `AppState`**
+
+Add the denylist to `AppState`:
+
+```rust
+pub struct AppState {
+    // ... existing fields ...
+    pub token_denylist: TokenDenylist,
+}
+```
+
+**Step 3 — Check denylist in JWT authentication**
+
+In `authenticate_jwt` (`src/middleware/require_auth.rs:126-156`), after decoding the token, check the denylist:
+
+```rust
+fn authenticate_jwt(
+    state: &AppState,
+    token: &str,
+) -> std::result::Result<AuthenticatedUser, AuthFailure> {
+    let claims = state.jwt.decode_access_token(token)
+        .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token"))?;
+
+    let user_id = uuid::Uuid::parse_str(&claims.sub)
+        .map_err(|_| AuthFailure::Unauthorized("Invalid token subject"))?;
+
+    // Check token denylist (requires async — see Step 4)
+    // This is the revocation check.
+}
+```
+
+Since `authenticate_jwt` is currently synchronous (it calls `decode_access_token` which is pure crypto), but the denylist is async (`RwLock::read`), we need to make it async. Change `authenticate_jwt` to an `async fn` and update the call site.
+
+**Step 4 — Populate denylist on revocation events**
+
+Add denylist entries when:
+
+1. **User deactivation** (`src/routes/users.rs` — deactivate endpoint): call `deny_user(user_id, now + 900)` to invalidate all tokens issued before now, for the max token lifetime.
+2. **Role changes** (`src/routes/users.rs` — role assignment): same as deactivation.
+3. **Logout** (`src/routes/auth.rs` — logout endpoint): since we don't have the JWT's `jti` at logout (only the refresh token), use `deny_user(user_id, now + 900)`.
+4. **Password change**: `deny_user(user_id, now + 900)`.
+
+**Step 5 — HA synchronization via database**
+
+For multi-instance HA, add a `token_revocations` table that instances poll:
+
+```sql
+CREATE TABLE token_revocations (
+    id UUID PRIMARY KEY,
+    revocation_key TEXT NOT NULL,   -- "jti:<jti>" or "user:<user_id>"
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_token_revocations_expires ON token_revocations (expires_at);
+```
+
+Each instance polls this table periodically (every 5-10 seconds) and merges new entries into its local denylist. Old entries are purged based on `expires_at`.
+
+**Step 6 — Start a periodic cleanup task**
+
+In the server startup, spawn a task that runs `token_denylist.purge_expired()` every 5 minutes and polls the `token_revocations` table every 10 seconds for HA sync.
+
+**Step 7 — Tests**
+
+- Test that a denied JTI is rejected by `authenticate_jwt`.
+- Test that `deny_user` revokes all tokens for that user issued before the revocation.
+- Test that tokens issued *after* the revocation are still valid.
+- Test that expired denylist entries are purged.
+- Test the HA sync: insert into `token_revocations` table, verify the other "instance" picks it up.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/auth/token_denylist.rs` | New module — in-memory denylist |
+| `src/auth/mod.rs` | Add `pub mod token_denylist` |
+| `src/lib.rs` | Add `TokenDenylist` to `AppState` |
+| `src/middleware/require_auth.rs` | Make `authenticate_jwt` async, add denylist check |
+| `src/routes/users.rs` | Call `deny_user` on deactivation and role change |
+| `src/routes/auth.rs` | Call `deny_user` on logout |
+| Migration | Add `token_revocations` table |
+
+### Risks
+
+- Adds a small performance cost (async `RwLock` read) to every JWT-authenticated request. The denylist is in-memory so this should be sub-microsecond.
+- HA polling introduces up to 10 seconds of staleness between instances. This is acceptable given the current 15-minute window.
+- The denylist is in-memory, so a server restart clears it — but the DB table ensures entries are re-populated on next poll.
+
+---
+
+## Plan 12: H3 — JWT Signing Key Divergence in HA Deployments
+
+### Problem
+
+Each controller instance generates its own JWT signing key from its local `data_dir` (`src/auth/jwt.rs:38-73`). If instances don't share the same state directory, tokens issued by instance A are rejected by instance B, breaking HA.
+
+### Plan
+
+**Step 1 — Store the JWT signing key in the database**
+
+Instead of using a file-based key, store the JWT signing key in the `settings` table. This ensures all HA instances share the same key.
+
+Add a new function to `settings_store.rs`:
+
+```rust
+/// Load or generate the JWT signing key from the database.
+///
+/// If no key exists, generates a new 64-byte random key and stores it.
+/// Uses INSERT ... ON CONFLICT DO NOTHING to handle concurrent initialization.
+pub async fn load_or_generate_jwt_key(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+) -> Result<Vec<u8>> {
+    // Try to load existing key
+    let raw = load_all_settings(db, tenant_id).await?;
+    if let Some(value) = raw.get_setting(SettingKey::JwtSigningKey) {
+        if let Some(b64) = value.as_str() {
+            let bytes = base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                b64,
+            )
+            .map_err(|e| report!(AuthError::Internal(format!("invalid JWT key encoding: {e}"))))?;
+            return Ok(bytes);
+        }
+    }
+
+    // Generate new key
+    let mut rng = rand::rng();
+    let mut bytes = vec![0u8; 64];
+    rng.fill(&mut bytes[..]);
+
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+
+    // Atomic insert — if another instance already created the key, use theirs
+    upsert_setting(db, tenant_id, SettingKey::JwtSigningKey, &serde_json::json!(b64)).await?;
+
+    // Re-read to ensure we have the canonical value (in case of race)
+    let raw = load_all_settings(db, tenant_id).await?;
+    if let Some(value) = raw.get_setting(SettingKey::JwtSigningKey) {
+        if let Some(b64) = value.as_str() {
+            let bytes = base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                b64,
+            )
+            .map_err(|e| report!(AuthError::Internal(format!("invalid JWT key encoding: {e}"))))?;
+            return Ok(bytes);
+        }
+    }
+
+    Ok(bytes)
+}
+```
+
+**Step 2 — Add `JwtSigningKey` to `SettingKey` enum**
+
+In the settings key enum, add:
+
+```rust
+JwtSigningKey => "jwt_signing_key",
+```
+
+**Step 3 — Update `JwtManager` initialization**
+
+Change the server startup to load the JWT key from DB instead of file:
+
+```rust
+// Before:
+let jwt = JwtManager::load_or_generate(&data_dir)?;
+
+// After:
+let jwt_secret = settings_store::load_or_generate_jwt_key(&db, tenant_id).await?;
+let jwt = JwtManager::from_secret(&jwt_secret);
+```
+
+**Step 4 — Migration from file-based key**
+
+For existing deployments, add a one-time migration that:
+1. Checks if `jwt_signing.key` exists on disk.
+2. If yes and no DB key exists, reads the file key and stores it in DB.
+3. Logs a warning about the migration.
+
+```rust
+pub async fn migrate_file_jwt_key(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    data_dir: &Path,
+) -> Result<()> {
+    let key_path = data_dir.join("jwt_signing.key");
+    if !key_path.exists() {
+        return Ok(());
+    }
+
+    // Check if DB already has a key
+    let raw = load_all_settings(db, tenant_id).await?;
+    if raw.get_setting(SettingKey::JwtSigningKey).is_some() {
+        tracing::info!("JWT key already in database, skipping file migration");
+        return Ok(());
+    }
+
+    let bytes = std::fs::read(&key_path)?;
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    upsert_setting(db, tenant_id, SettingKey::JwtSigningKey, &serde_json::json!(b64)).await?;
+    tracing::info!("migrated JWT signing key from file to database");
+    Ok(())
+}
+```
+
+**Step 5 — Keep `load_or_generate` for backward compatibility in tests**
+
+The file-based `load_or_generate` can remain as a convenience for tests but should not be used in production startup.
+
+**Step 6 — Tests**
+
+- Test that two `JwtManager` instances from the same DB key can cross-validate tokens.
+- Test the file-to-DB migration path.
+- Test that concurrent `load_or_generate_jwt_key` calls produce the same key.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/settings_store.rs` | Add `load_or_generate_jwt_key`, `migrate_file_jwt_key` |
+| `src/lib.rs` or startup code | Load JWT key from DB instead of file |
+| `src/auth/jwt.rs` | Keep `from_secret`, deprecate `load_or_generate` for production |
+| `SettingKey` enum | Add `JwtSigningKey` variant |
+
+---
+
+## Plan 13: H6 — Server Private Key Written Without Restricted Permissions + Non-Atomic Write
+
+### Problem
+
+`renew_server_certificate_inner` (`src/routes/server_cert.rs:138-147`) uses `std::fs::write()` which creates files with default umask permissions (typically 0644). The `server.key` file is world-readable. The cert and key are also written in two separate calls — a crash between them produces a mismatched pair that would break TLS on restart.
+
+### Plan
+
+**Step 1 — Write to temporary files then atomically rename**
+
+Replace the two `std::fs::write` calls with an atomic write pattern:
+
+```rust
+use std::io::Write;
+
+// Write to temp files first
+let cert_path = state.pki_path.join("server.crt");
+let key_path = state.pki_path.join("server.key");
+let cert_tmp = state.pki_path.join("server.crt.tmp");
+let key_tmp = state.pki_path.join("server.key.tmp");
+
+// Write key with restricted permissions
+write_restricted(&key_tmp, key_pem.as_bytes())?;
+// Write cert (less sensitive, but still temp first for atomicity)
+write_restricted(&cert_tmp, cert_pem.as_bytes())?;
+
+// Atomic rename — both succeed or neither
+std::fs::rename(&key_tmp, &key_path).context_to::<RenewCertError>()?;
+std::fs::rename(&cert_tmp, &cert_path).context_to::<RenewCertError>()?;
+```
+
+**Step 2 — Create a `write_restricted` helper**
+
+Add a helper that writes a file with `0o600` permissions on Unix:
+
+```rust
+/// Write data to a file with restricted permissions (0o600 on Unix).
+fn write_restricted(path: &std::path::Path, data: &[u8]) -> RenewCertResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .context_to::<RenewCertError>()?;
+        file.write_all(data).context_to::<RenewCertError>()?;
+        file.sync_all().context_to::<RenewCertError>()?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, data).context_to::<RenewCertError>()?;
+    }
+
+    Ok(())
+}
+```
+
+**Step 3 — Handle crash between renames**
+
+On Unix, `rename(2)` is atomic per-file, but two separate renames are not jointly atomic. However, the key is renamed first so:
+- If the process crashes after key rename but before cert rename, the old cert still pairs with... the new key (mismatch). This is better handled by:
+
+Write both files under a single "generation" directory, then atomically swap a symlink:
+
+```rust
+let gen_dir = state.pki_path.join(format!("gen-{}", uuid::Uuid::now_v7()));
+std::fs::create_dir_all(&gen_dir).context_to::<RenewCertError>()?;
+
+write_restricted(&gen_dir.join("server.key"), key_pem.as_bytes())?;
+write_restricted(&gen_dir.join("server.crt"), cert_pem.as_bytes())?;
+
+// Atomically swap symlink
+let current_link = state.pki_path.join("current");
+let tmp_link = state.pki_path.join("current.tmp");
+std::os::unix::fs::symlink(&gen_dir, &tmp_link).context_to::<RenewCertError>()?;
+std::fs::rename(&tmp_link, &current_link).context_to::<RenewCertError>()?;
+```
+
+**Alternative (simpler):** Since the TLS config is hot-reloaded in memory immediately after the write, the on-disk files are only used for server restart. A simpler approach is to keep the two-rename pattern but also write a `server.gen` marker file that records the generation. On startup, verify that the cert and key match (the cert's public key matches the key) and if not, re-trigger renewal.
+
+**Recommended approach:** Use the simpler two-rename pattern (Step 1-2) since the hot-reload immediately applies the new config in memory. Add a startup validation check (Step 4) to catch any crash-induced mismatch.
+
+**Step 4 — Startup cert/key consistency check**
+
+In the server startup code, after loading `server.crt` and `server.key`, verify they match:
+
+```rust
+/// Verify the cert's public key matches the private key.
+fn verify_cert_key_match(cert_pem: &str, key_pem: &str) -> bool {
+    // Parse cert's public key, parse private key's public component, compare
+    // Use rcgen or x509-parser to extract the public key from both
+}
+```
+
+If they don't match, log an error and trigger automatic renewal.
+
+**Step 5 — Apply same pattern to initial cert generation**
+
+The initial server cert generation in the controller startup code should also use `write_restricted`.
+
+**Step 6 — Tests**
+
+- Test that `write_restricted` creates files with `0o600` permissions on Unix.
+- Test that the atomic rename pattern doesn't leave partial state.
+- Test the startup consistency check detects mismatched cert/key pairs.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/server_cert.rs` | Add `write_restricted`, atomic rename pattern |
+| Controller startup code | Add cert/key consistency check, use `write_restricted` for initial generation |
+
+---
+
+## Plan 14: H7 — Connection Registry Overwrites on Concurrent Reconnect
+
+### Problem
+
+When a service reconnects before its previous connection's cleanup runs, `register_agent`/`register_mqtt` (`src/service_connections.rs:55-67, 74-91`) unconditionally overwrite via `HashMap::insert`. The old handler's cleanup then calls `unregister` which removes the **new** connection's entry, leaving the service unable to receive push notifications.
+
+### Plan
+
+**Step 1 — Add a generation counter to each connection**
+
+Add a monotonically increasing generation counter to distinguish connections:
+
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CONNECTION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+struct ServiceConnection {
+    sender: mpsc::Sender<ControllerMessage>,
+    service_type: ServiceType,
+    generation: u64,  // NEW
+    instance_id: Option<String>,
+    max_tenants: Option<u32>,
+    assigned_mqtt_clients: HashSet<Uuid>,
+    last_heartbeat: Option<Instant>,
+}
+```
+
+**Step 2 — Return generation from registration**
+
+Change `register_agent` and `register_mqtt` to return the generation along with the receiver:
+
+```rust
+pub async fn register_agent(
+    &self,
+    service_id: Uuid,
+) -> (mpsc::Receiver<ControllerMessage>, u64) {
+    let generation = CONNECTION_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = mpsc::channel(16);
+    let conn = ServiceConnection {
+        sender: tx,
+        service_type: ServiceType::Agent,
+        generation,
+        instance_id: None,
+        max_tenants: None,
+        assigned_mqtt_clients: HashSet::new(),
+        last_heartbeat: None,
+    };
+    self.inner.write().await.insert(service_id, conn);
+    (rx, generation)
+}
+```
+
+Same for `register_mqtt`.
+
+**Step 3 — Guard `unregister` with generation check**
+
+Change `unregister` to accept the generation and only remove if it matches:
+
+```rust
+pub async fn unregister(
+    &self,
+    service_id: &Uuid,
+    generation: u64,
+) -> Option<HashSet<Uuid>> {
+    let mut guard = self.inner.write().await;
+    if let Some(conn) = guard.get(service_id) {
+        if conn.generation == generation {
+            return guard.remove(service_id).map(|c| c.assigned_mqtt_clients);
+        }
+        // Different generation — newer connection exists, don't remove
+        tracing::debug!(
+            service_id = %service_id,
+            old_gen = generation,
+            new_gen = conn.generation,
+            "skipping unregister for superseded connection"
+        );
+        None
+    } else {
+        None
+    }
+}
+```
+
+**Step 4 — Update all callers**
+
+The WebSocket handlers (`agent_ws.rs`, `mqtt_ws.rs`) need to capture the generation on registration and pass it to `unregister` on disconnect:
+
+```rust
+// On connect:
+let (push_rx, generation) = state.service_connections.register_agent(service_id).await;
+
+// On disconnect:
+let released = state.service_connections.unregister(&service_id, generation).await;
+```
+
+**Step 5 — Tests**
+
+- Test that registering the same service_id twice produces different generations.
+- Test that `unregister` with the old generation does NOT remove the new connection.
+- Test that `unregister` with the current generation removes the connection.
+- Test that after reconnect, the old handler's cleanup is a no-op.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/service_connections.rs` | Add generation counter to `ServiceConnection`, guard `unregister` |
+| `src/routes/agent_ws.rs` | Capture and pass generation |
+| `src/routes/mqtt_ws.rs` | Capture and pass generation |
+
+---
+
+## Plan 15: H8 — Settings Reload Torn Reads (6 Independent RwLocks Updated Sequentially)
+
+### Problem
+
+`reload_from_db` (`src/settings.rs:232-281`) acquires and releases 6 independent `RwLock`s sequentially. A concurrent request handler can observe a mix of old and new settings (e.g., new registration settings but old network settings). The `check_version_and_reload` method also uses `Ordering::Relaxed` for version counter loads, which can return stale values on ARM/multi-core.
+
+### Plan
+
+**Step 1 — Replace individual RwLocks with a single atomic snapshot**
+
+Replace the 6 independent `RwLock`s with a single `tokio::sync::watch` channel that holds an immutable settings snapshot:
+
+```rust
+#[derive(Clone)]
+pub struct SettingsSnapshot {
+    pub registration: RegistrationSettings,
+    pub authentication: AuthenticationSettings,
+    pub agent_cert_lifetime_days: u16,
+    pub renewal_window_hours: u16,
+    pub network: NetworkSettings,
+    pub mqtt_max_clients_per_tenant: u16,
+}
+
+pub struct Settings {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    /// Watch channel for atomic settings reads. Readers see a consistent snapshot.
+    snapshot_tx: tokio::sync::watch::Sender<SettingsSnapshot>,
+    snapshot_rx: tokio::sync::watch::Receiver<SettingsSnapshot>,
+    /// Version counters for cross-instance invalidation.
+    version: AtomicI64,
+    global_version: AtomicI64,
+    /// Write mutex — only one reload at a time.
+    reload_mutex: tokio::sync::Mutex<()>,
+}
+```
+
+**Step 2 — Readers subscribe to the watch channel**
+
+Replace all the individual `RwLock`-based readers with watch channel reads:
+
+```rust
+impl Settings {
+    /// Get a consistent snapshot of all settings.
+    pub fn snapshot(&self) -> SettingsSnapshot {
+        self.inner.snapshot_rx.borrow().clone()
+    }
+
+    pub fn registration(&self) -> RegistrationSettings {
+        self.inner.snapshot_rx.borrow().registration.clone()
+    }
+
+    pub fn authentication(&self) -> AuthenticationSettings {
+        self.inner.snapshot_rx.borrow().authentication.clone()
+    }
+
+    pub fn agent_cert_lifetime_days(&self) -> u16 {
+        self.inner.snapshot_rx.borrow().agent_cert_lifetime_days
+    }
+
+    // ... etc for each setting
+}
+```
+
+Note these are now synchronous (no `.await`), since `watch::Receiver::borrow()` is sync. This simplifies all call sites.
+
+**Step 3 — Atomic reload via watch channel send**
+
+`reload_from_db` builds the complete new snapshot, then atomically publishes it:
+
+```rust
+pub async fn reload_from_db(
+    &self,
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+) -> auth::Result<()> {
+    let _guard = self.inner.reload_mutex.lock().await;
+    let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
+
+    let snapshot = SettingsSnapshot {
+        registration: RegistrationSettings::from_raw(&raw),
+        authentication: AuthenticationSettings::from_raw(&raw),
+        agent_cert_lifetime_days: raw.get_setting(SettingKey::AgentCertLifetimeDays)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS),
+        renewal_window_hours: raw.get_setting(SettingKey::AgentCertRenewalWindowHours)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS),
+        network: Self::load_network_settings(&raw),
+        mqtt_max_clients_per_tenant: raw.get_setting(SettingKey::MqttMaxClientsPerTenant)
+            .and_then(|v| v.as_u64()?.try_into().ok())
+            .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT),
+    };
+
+    // Atomic publish — all readers see the complete new snapshot
+    let _ = self.inner.snapshot_tx.send(snapshot);
+
+    // Update version counters with Release ordering
+    let (version, global_version) =
+        crate::settings_store::get_settings_versions(db, tenant_id).await?;
+    self.inner.version.store(version, Ordering::Release);
+    self.inner.global_version.store(global_version, Ordering::Release);
+
+    Ok(())
+}
+```
+
+**Step 4 — Fix memory ordering on version counter loads**
+
+Change `check_version_and_reload` to use `Ordering::Acquire` for loads (matching the `Release` stores):
+
+```rust
+let cached_version = self.inner.version.load(Ordering::Acquire);
+let cached_global_version = self.inner.global_version.load(Ordering::Acquire);
+```
+
+**Step 5 — Handle write-side settings updates**
+
+Several endpoints update individual settings (e.g., `set_trusted_proxies`, `set_agent_cert_lifetime_days`). These need to:
+1. Acquire the reload mutex.
+2. Get the current snapshot.
+3. Clone and modify the relevant field.
+4. Publish the new snapshot.
+
+```rust
+pub async fn set_agent_cert_lifetime_days(&self, days: u16) {
+    let _guard = self.inner.reload_mutex.lock().await;
+    let mut snapshot = self.inner.snapshot_rx.borrow().clone();
+    snapshot.agent_cert_lifetime_days = days;
+    let _ = self.inner.snapshot_tx.send(snapshot);
+}
+```
+
+Alternatively, for write-side operations that update and persist settings, the caller should persist to DB first, then bump the settings version, which will trigger a reload on all instances (including self).
+
+**Step 6 — Simplify registration_write/authentication_write**
+
+The current `registration_write()` and `authentication_write()` return `RwLockWriteGuard`s which are used for mutation. Replace these with explicit update methods:
+
+```rust
+pub async fn update_registration<F>(&self, f: F)
+where
+    F: FnOnce(&mut RegistrationSettings),
+{
+    let _guard = self.inner.reload_mutex.lock().await;
+    let mut snapshot = self.inner.snapshot_rx.borrow().clone();
+    f(&mut snapshot.registration);
+    let _ = self.inner.snapshot_tx.send(snapshot);
+}
+```
+
+Update all call sites that use `registration_write()` and `authentication_write()`.
+
+**Step 7 — Tests**
+
+- Test that `snapshot()` returns a consistent snapshot (all fields from the same generation).
+- Test that concurrent reads during a reload all see either the old or new snapshot, never a mix.
+- Test that `set_*` methods atomically update the snapshot.
+- Test that version counters use correct ordering.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/settings.rs` | Replace 6 `RwLock`s with `watch` channel, add `SettingsSnapshot`, `reload_mutex` |
+| All files calling `settings.registration()`, `settings.authentication()`, etc. | Remove `.await` from reads (now sync) |
+| Files using `registration_write()` / `authentication_write()` | Switch to `update_registration()` / `update_authentication()` |
+
+### Risks
+
+- This is a large refactor touching many files (every handler that reads settings).
+- The main simplification is that reads become synchronous, which actually makes call sites simpler.
+- The `reload_mutex` serializes writes but reads are lock-free via the watch channel, so there's no performance regression.
