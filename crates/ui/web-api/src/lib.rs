@@ -41,38 +41,113 @@ use notification_service::NotificationService;
 use service_connections::ServiceConnectionRegistry;
 use settings::Settings;
 
-/// Cloneable snapshot of CA state. Re-exported for use by consumers.
-pub use ca_snapshot::CaSnapshotReceiver;
+/// Public CA snapshot data and key store types. Re-exported for use by consumers.
+pub use ca_snapshot::{CaKeyStoreRef, CaSnapshotReceiver};
 
 pub mod ca_snapshot {
-    /// Type alias for the watch receiver carrying CA snapshot data.
-    pub type CaSnapshotReceiver = tokio::sync::watch::Receiver<CaSnapshotData>;
+    use std::fmt;
+    use std::sync::Arc;
 
-    /// Trusted CA material included in the active bundle.
-    #[derive(Clone, Debug)]
-    pub struct TrustedCaSnapshot {
-        pub cert_pem: String,
-        pub key_pem: String,
-        pub fingerprint: String,
-        pub not_after: time::OffsetDateTime,
-    }
+    use zeroize::Zeroizing;
 
-    /// Cloneable snapshot of CA state shared across the application.
+    /// Type alias for the watch receiver carrying public CA snapshot data.
+    pub type CaSnapshotReceiver = tokio::sync::watch::Receiver<CaPublicSnapshot>;
+
+    /// Public-facing CA material — safe to clone, debug, and distribute to all handlers.
     #[derive(Clone, Debug)]
-    pub struct CaSnapshotData {
+    pub struct CaPublicSnapshot {
         pub active_cert_pem: String,
-        pub active_key_pem: String,
         pub active_fingerprint: String,
         pub previous_cert_pem: Option<String>,
-        pub previous_key_pem: Option<String>,
         pub previous_fingerprint: Option<String>,
-        pub trusted_cas: Vec<TrustedCaSnapshot>,
+        pub trusted_cas: Vec<TrustedCaPublic>,
         pub trusted_ca_cns: Vec<String>,
         pub bundle_pem: String,
         pub bundle_hash: String,
         pub managed: bool,
         pub active_not_after: time::OffsetDateTime,
         pub pki_addr: Option<String>,
+    }
+
+    /// Public part of a trusted CA (no private key).
+    #[derive(Clone, Debug)]
+    pub struct TrustedCaPublic {
+        pub cert_pem: String,
+        pub fingerprint: String,
+        pub not_after: time::OffsetDateTime,
+    }
+
+    /// Private key material for a single trusted CA.
+    pub struct TrustedCaKey {
+        pub fingerprint: String,
+        pub key_pem: Zeroizing<String>,
+    }
+
+    /// Private key store — NOT Clone, NOT Debug. Only accessible by OCSP, CRL, and cert signers.
+    pub struct CaKeyStore {
+        pub active_key_pem: Zeroizing<String>,
+        pub previous_key_pem: Option<Zeroizing<String>>,
+        pub trusted_ca_keys: Vec<TrustedCaKey>,
+    }
+
+    impl fmt::Debug for CaKeyStore {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("CaKeyStore")
+                .field("active_key_pem", &"[REDACTED]")
+                .field(
+                    "previous_key_pem",
+                    &self.previous_key_pem.as_ref().map(|_| "[REDACTED]"),
+                )
+                .field(
+                    "trusted_ca_keys",
+                    &format!("[{} keys REDACTED]", self.trusted_ca_keys.len()),
+                )
+                .finish()
+        }
+    }
+
+    /// Type alias for the shared key store.
+    pub type CaKeyStoreRef = Arc<tokio::sync::RwLock<CaKeyStore>>;
+
+    /// Input parameters for building both a public snapshot and a key store.
+    pub struct SplitSnapshotInput {
+        pub active_cert_pem: String,
+        pub active_key_pem: String,
+        pub active_fingerprint: String,
+        pub previous_cert_pem: Option<String>,
+        pub previous_key_pem: Option<String>,
+        pub previous_fingerprint: Option<String>,
+        pub trusted_cas_public: Vec<TrustedCaPublic>,
+        pub trusted_ca_keys: Vec<TrustedCaKey>,
+        pub trusted_ca_cns: Vec<String>,
+        pub bundle_pem: String,
+        pub bundle_hash: String,
+        pub managed: bool,
+        pub active_not_after: time::OffsetDateTime,
+        pub pki_addr: Option<String>,
+    }
+
+    /// Build both a public snapshot and a key store from component parts.
+    pub fn split_snapshot(input: SplitSnapshotInput) -> (CaPublicSnapshot, CaKeyStore) {
+        let public = CaPublicSnapshot {
+            active_cert_pem: input.active_cert_pem,
+            active_fingerprint: input.active_fingerprint,
+            previous_cert_pem: input.previous_cert_pem,
+            previous_fingerprint: input.previous_fingerprint,
+            trusted_cas: input.trusted_cas_public,
+            trusted_ca_cns: input.trusted_ca_cns,
+            bundle_pem: input.bundle_pem,
+            bundle_hash: input.bundle_hash,
+            managed: input.managed,
+            active_not_after: input.active_not_after,
+            pki_addr: input.pki_addr,
+        };
+        let keys = CaKeyStore {
+            active_key_pem: Zeroizing::new(input.active_key_pem),
+            previous_key_pem: input.previous_key_pem.map(Zeroizing::new),
+            trusted_ca_keys: input.trusted_ca_keys,
+        };
+        (public, keys)
     }
 }
 
@@ -81,6 +156,8 @@ pub mod ca_snapshot {
 pub struct AppState {
     /// Watch receiver for the current CA snapshot (bundle PEM, fingerprints, etc.).
     pub ca_snapshot: CaSnapshotReceiver,
+    /// Private CA key store — only for OCSP, CRL, and cert signing operations.
+    pub ca_key_store: CaKeyStoreRef,
     /// Database connection pool.
     pub db: DatabaseConnection,
     /// Application settings catalogue (includes network settings).
@@ -558,16 +635,13 @@ mod tests {
 
     async fn test_state_with_proxies(trusted_proxies: Vec<IpNet>) -> Arc<AppState> {
         let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
-        let snapshot_data = crate::ca_snapshot::CaSnapshotData {
+        let snapshot_data = crate::ca_snapshot::CaPublicSnapshot {
             active_cert_pem: ca_pem.to_string(),
-            active_key_pem: String::new(),
             active_fingerprint: "0".repeat(64),
             previous_cert_pem: None,
-            previous_key_pem: None,
             previous_fingerprint: None,
-            trusted_cas: vec![crate::ca_snapshot::TrustedCaSnapshot {
+            trusted_cas: vec![crate::ca_snapshot::TrustedCaPublic {
                 cert_pem: ca_pem.to_string(),
-                key_pem: String::new(),
                 fingerprint: "0".repeat(64),
                 not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
             }],
@@ -579,6 +653,12 @@ mod tests {
             pki_addr: None,
         };
         let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+        let ca_key_store: crate::CaKeyStoreRef =
+            Arc::new(tokio::sync::RwLock::new(crate::ca_snapshot::CaKeyStore {
+                active_key_pem: zeroize::Zeroizing::new(String::new()),
+                previous_key_pem: None,
+                trusted_ca_keys: vec![],
+            }));
 
         // Create a dummy RustlsConfig — tests don't actually do TLS handshakes.
         let rustls_cfg = {
@@ -622,6 +702,7 @@ mod tests {
 
         Arc::new(AppState {
             ca_snapshot: ca_rx,
+            ca_key_store,
             settings,
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
@@ -791,5 +872,49 @@ mod tests {
             "ProxyIp should be present when request comes from a trusted proxy"
         );
         assert_eq!(proxy_ip.unwrap().0, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+    }
+
+    #[test]
+    fn ca_key_store_debug_redacts_keys() {
+        let store = crate::ca_snapshot::CaKeyStore {
+            active_key_pem: zeroize::Zeroizing::new(
+                "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n".to_string(),
+            ),
+            previous_key_pem: Some(zeroize::Zeroizing::new(
+                "-----BEGIN PRIVATE KEY-----\nold\n-----END PRIVATE KEY-----\n".to_string(),
+            )),
+            trusted_ca_keys: vec![],
+        };
+        let debug_output = format!("{store:?}");
+        assert!(
+            !debug_output.contains("BEGIN"),
+            "Debug output must not contain PEM markers"
+        );
+        assert!(
+            debug_output.contains("REDACTED"),
+            "Debug output must contain REDACTED"
+        );
+    }
+
+    #[test]
+    fn ca_public_snapshot_has_no_key_fields() {
+        let snapshot = crate::ca_snapshot::CaPublicSnapshot {
+            active_cert_pem: String::new(),
+            active_fingerprint: String::new(),
+            previous_cert_pem: None,
+            previous_fingerprint: None,
+            trusted_cas: vec![],
+            trusted_ca_cns: vec![],
+            bundle_pem: String::new(),
+            bundle_hash: String::new(),
+            managed: false,
+            active_not_after: time::OffsetDateTime::now_utc(),
+            pki_addr: None,
+        };
+        let debug_output = format!("{snapshot:?}");
+        assert!(
+            !debug_output.contains("key_pem"),
+            "CaPublicSnapshot must not expose key material"
+        );
     }
 }

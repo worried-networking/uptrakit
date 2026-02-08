@@ -61,6 +61,8 @@ pub struct AuthResponse {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RefreshResponse {
     pub access_token: String,
+    /// Rotated refresh token. The previous refresh token is now invalid.
+    pub refresh_token: String,
     pub expires_in: i64,
     pub token_type: String,
 }

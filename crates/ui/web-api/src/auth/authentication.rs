@@ -109,7 +109,16 @@ pub async fn resolve_oidc_user(params: OidcUserParams<'_>) -> Result<OidcUserRes
         .context_to()?;
 
     if let Some(link) = existing_link {
-        return Ok(OidcUserResolution::LinkedUser(link.user_id));
+        // Load user to check if they are still active
+        let linked_user = User::find_by_id(link.user_id).one(db).await.context_to()?;
+
+        match linked_user {
+            Some(u) if !u.is_active => return Ok(OidcUserResolution::Deactivated),
+            Some(_) => return Ok(OidcUserResolution::LinkedUser(link.user_id)),
+            None => {
+                // Orphaned link — user was deleted; fall through to email lookup
+            }
+        }
     }
 
     // 2. Check for existing user by email

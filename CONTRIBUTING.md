@@ -233,8 +233,8 @@ The controller manages an internal CA for mTLS. Relevant rules:
 
 - CA rotation, CRL generation, and server cert renewal are handled automatically by background tasks. See `AGENTS.md` § "PKI & CA rotation" for the full flow.
 - All service certificates record which CA signed them via the `ca_fingerprint` column. CRLs are partitioned by CA — never mix issuers.
-- Runtime CA state flows through a `tokio::sync::watch` channel (`CaSnapshot`). Read from the receiver; never cache PEM strings in long-lived structs.
-- When adding new code that needs the current CA material, accept a `watch::Receiver<CaSnapshot>` or read from `AppState.ca_snapshot`.
+- Runtime CA state is split: **public** data (`CaPublicSnapshot`) flows through a `tokio::sync::watch` channel; **private** keys (`CaKeyStore`, zeroized) live in `Arc<RwLock<CaKeyStore>>`. Never cache PEM strings in long-lived structs.
+- When adding new code that needs CA certificates, read from `AppState.ca_snapshot`. Code that needs to **sign** (OCSP, CRL, cert issuance) must also accept a `CaKeyStoreRef`.
 - External CA mode (`--ca-cert` / `--ca-key`) disables rotation. Ensure any new CA-related feature degrades gracefully when `managed` is `false`.
 
 ## Dependencies

@@ -205,16 +205,13 @@ mod tests {
         }
 
         let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
-        let snapshot_data = crate::ca_snapshot::CaSnapshotData {
+        let snapshot_data = crate::ca_snapshot::CaPublicSnapshot {
             active_cert_pem: ca_pem.to_string(),
-            active_key_pem: String::new(),
             active_fingerprint: "0".repeat(64),
             previous_cert_pem: None,
-            previous_key_pem: None,
             previous_fingerprint: None,
-            trusted_cas: vec![crate::ca_snapshot::TrustedCaSnapshot {
+            trusted_cas: vec![crate::ca_snapshot::TrustedCaPublic {
                 cert_pem: ca_pem.to_string(),
-                key_pem: String::new(),
                 fingerprint: "0".repeat(64),
                 not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
             }],
@@ -226,6 +223,12 @@ mod tests {
             pki_addr: None,
         };
         let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+        let ca_key_store: crate::CaKeyStoreRef =
+            Arc::new(tokio::sync::RwLock::new(crate::ca_snapshot::CaKeyStore {
+                active_key_pem: zeroize::Zeroizing::new(String::new()),
+                previous_key_pem: None,
+                trusted_ca_keys: vec![],
+            }));
 
         let rustls_cfg = {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -252,6 +255,7 @@ mod tests {
 
         Arc::new(AppState {
             ca_snapshot: ca_rx,
+            ca_key_store,
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(

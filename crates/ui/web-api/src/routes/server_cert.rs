@@ -95,9 +95,10 @@ async fn renew_server_certificate_inner(
     state: &AppState,
 ) -> RenewCertResult<RenewServerCertResponse> {
     let snapshot = state.ca_snapshot.borrow().clone();
+    let key_store = state.ca_key_store.read().await;
 
-    // Build CA issuer from the active snapshot
-    let ca_key = rcgen::KeyPair::from_pem(&snapshot.active_key_pem)
+    // Build CA issuer from the active snapshot and key store
+    let ca_key = rcgen::KeyPair::from_pem(&key_store.active_key_pem)
         .map_err(|e| report!(RenewCertError::CaKeyParse(e.to_string())))?;
     let ca_issuer = rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key)
         .map_err(|e| report!(RenewCertError::CaIssuer(e.to_string())))?;

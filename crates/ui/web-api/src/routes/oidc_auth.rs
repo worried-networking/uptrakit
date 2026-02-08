@@ -427,6 +427,21 @@ pub async fn oidc_callback(
 
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
+            // Defense-in-depth: verify user is still active before creating session
+            match User::find_by_id(user_id).one(&state.db).await {
+                Ok(Some(user)) if !user.is_active => {
+                    return Redirect::to("/login?error=account_deactivated").into_response();
+                }
+                Ok(None) => {
+                    return Redirect::to("/login?error=oidc_internal_error").into_response();
+                }
+                Err(e) => {
+                    tracing::error!("failed to load user for OIDC login: {e:?}");
+                    return Redirect::to("/login?error=oidc_internal_error").into_response();
+                }
+                _ => {}
+            }
+
             // Sync roles and create session
             let _ = sync_oidc_roles(
                 &state.db,

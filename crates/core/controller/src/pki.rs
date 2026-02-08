@@ -163,8 +163,11 @@ pub struct CaState {
     pub managed: bool,
 }
 
-/// Type alias for the canonical CA snapshot type from the web-api crate.
-pub type CaSnapshot = uptrakit_web_api::ca_snapshot::CaSnapshotData;
+/// Type alias for the canonical public CA snapshot type from the web-api crate.
+pub type CaSnapshot = uptrakit_web_api::ca_snapshot::CaPublicSnapshot;
+
+/// Type alias for the CA key store type from the web-api crate.
+pub type CaKeyStore = uptrakit_web_api::ca_snapshot::CaKeyStore;
 
 impl CaState {
     /// Build a PEM bundle of all trusted CA certs (active + historical).
@@ -179,8 +182,8 @@ impl CaState {
         bundle
     }
 
-    /// Build a shareable snapshot.
-    pub fn to_snapshot(&self, pki_addr: Option<String>) -> Result<CaSnapshot> {
+    /// Build a shareable public snapshot and a private key store.
+    pub fn to_snapshot(&self, pki_addr: Option<String>) -> Result<(CaSnapshot, CaKeyStore)> {
         let active_fingerprint = ca_fingerprint(&self.active.cert_pem)?;
         let previous_fingerprint = match &self.previous {
             Some(prev) => Some(ca_fingerprint(&prev.cert_pem)?),
@@ -190,20 +193,21 @@ impl CaState {
         let bundle_hash = sha256_hex(bundle_pem.as_bytes());
         let active_not_after = cert_not_after(&self.active.cert_pem)?;
 
-        let trusted_cas = self
-            .trusted
-            .iter()
-            .map(|ca| {
-                let fingerprint = ca_fingerprint(&ca.cert_pem)?;
-                let not_after = cert_not_after(&ca.cert_pem)?;
-                Ok(uptrakit_web_api::ca_snapshot::TrustedCaSnapshot {
-                    cert_pem: ca.cert_pem.clone(),
-                    key_pem: ca.key_pem.clone(),
-                    fingerprint,
-                    not_after,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut trusted_cas_public = Vec::new();
+        let mut trusted_ca_keys = Vec::new();
+        for ca in &self.trusted {
+            let fingerprint = ca_fingerprint(&ca.cert_pem)?;
+            let not_after = cert_not_after(&ca.cert_pem)?;
+            trusted_cas_public.push(uptrakit_web_api::ca_snapshot::TrustedCaPublic {
+                cert_pem: ca.cert_pem.clone(),
+                fingerprint: fingerprint.clone(),
+                not_after,
+            });
+            trusted_ca_keys.push(uptrakit_web_api::ca_snapshot::TrustedCaKey {
+                fingerprint,
+                key_pem: zeroize::Zeroizing::new(ca.key_pem.clone()),
+            });
+        }
 
         let mut trusted_ca_cns = Vec::new();
         for ca in &self.trusted {
@@ -212,21 +216,24 @@ impl CaState {
             }
         }
 
-        Ok(CaSnapshot {
-            active_cert_pem: self.active.cert_pem.clone(),
-            active_key_pem: self.active.key_pem.clone(),
-            active_fingerprint,
-            previous_cert_pem: self.previous.as_ref().map(|p| p.cert_pem.clone()),
-            previous_key_pem: self.previous.as_ref().map(|p| p.key_pem.clone()),
-            previous_fingerprint,
-            trusted_cas,
-            trusted_ca_cns,
-            bundle_pem,
-            bundle_hash,
-            managed: self.managed,
-            active_not_after,
-            pki_addr,
-        })
+        Ok(uptrakit_web_api::ca_snapshot::split_snapshot(
+            uptrakit_web_api::ca_snapshot::SplitSnapshotInput {
+                active_cert_pem: self.active.cert_pem.clone(),
+                active_key_pem: self.active.key_pem.clone(),
+                active_fingerprint,
+                previous_cert_pem: self.previous.as_ref().map(|p| p.cert_pem.clone()),
+                previous_key_pem: self.previous.as_ref().map(|p| p.key_pem.clone()),
+                previous_fingerprint,
+                trusted_cas_public,
+                trusted_ca_keys,
+                trusted_ca_cns,
+                bundle_pem,
+                bundle_hash,
+                managed: self.managed,
+                active_not_after,
+                pki_addr,
+            },
+        ))
     }
 }
 
@@ -1293,10 +1300,13 @@ mod tests {
             trusted: vec![ca],
             managed: true,
         };
-        let snapshot = state.to_snapshot(None).unwrap();
+        let (snapshot, key_store) = state.to_snapshot(None).unwrap();
         assert!(!snapshot.active_fingerprint.is_empty());
         assert!(snapshot.previous_fingerprint.is_none());
         assert!(!snapshot.bundle_hash.is_empty());
+        assert!(!key_store.active_key_pem.is_empty());
+        assert!(key_store.previous_key_pem.is_none());
+        assert_eq!(key_store.trusted_ca_keys.len(), 1);
     }
 
     #[test]

@@ -91,6 +91,74 @@ impl SessionService {
         })
     }
 
+    /// Atomically rotate a refresh token: revoke the old session and create a new one.
+    ///
+    /// Returns the verified session info and the new plaintext refresh token.
+    /// The old token is immediately revoked so it cannot be reused.
+    pub async fn rotate_refresh_token(&self, token: &str) -> Result<(VerifiedSession, String)> {
+        let token_hash = hash_token(token);
+        let now = OffsetDateTime::now_utc();
+
+        // Find the session by refresh token hash
+        let session_model = Session::find()
+            .filter(session::Column::RefreshTokenHash.eq(token_hash))
+            .one(&self.db)
+            .await
+            .context_to()?
+            .ok_or_else(|| report!(AuthError::InvalidRefreshToken))?;
+
+        // Check if already revoked
+        if session_model.revoked_at.is_some() {
+            return Err(report!(AuthError::RefreshTokenRevoked));
+        }
+
+        // Check if expired
+        if now >= session_model.expires_at {
+            return Err(report!(AuthError::RefreshTokenExpired));
+        }
+
+        // Revoke old session
+        let old_user_id = session_model.user_id;
+        let old_auth_method_str = session_model.auth_method.clone();
+        let old_oidc_provider_id = session_model.oidc_provider_id;
+        let old_user_agent = session_model.user_agent.clone();
+        let old_ip_address = session_model.ip_address.clone();
+
+        let mut old_active: session::ActiveModel = session_model.into();
+        old_active.revoked_at = Set(Some(now));
+        old_active.update(&self.db).await.context_to()?;
+
+        // Create new session with a fresh refresh token
+        let auth_method = AuthMethod::from_session(&old_auth_method_str, old_oidc_provider_id)
+            .unwrap_or(AuthMethod::Password);
+
+        let new_token = generate_secure_token()?;
+        let new_hash = hash_token(&new_token);
+        let expires_at = now + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS);
+
+        let new_session = session::ActiveModel {
+            id: Set(generate_uuid()),
+            user_id: Set(old_user_id),
+            refresh_token_hash: Set(new_hash),
+            auth_method: Set(old_auth_method_str),
+            oidc_provider_id: Set(old_oidc_provider_id),
+            token_type: Set("refresh_token".to_string()),
+            created_at: Set(now),
+            expires_at: Set(expires_at),
+            revoked_at: Set(None),
+            user_agent: Set(old_user_agent),
+            ip_address: Set(old_ip_address),
+        };
+        new_session.insert(&self.db).await.context_to()?;
+
+        let verified = VerifiedSession {
+            user_id: old_user_id,
+            auth_method,
+        };
+
+        Ok((verified, new_token))
+    }
+
     /// Revoke a refresh token (logout). Sets revoked_at instead of deleting.
     pub async fn revoke_refresh_token(&self, token: &str) -> Result<()> {
         let token_hash = hash_token(token);
@@ -307,5 +375,102 @@ mod tests {
         // Clean up expired sessions
         let deleted = service.cleanup_expired_sessions().await.unwrap();
         assert_eq!(deleted, 1);
+    }
+
+    #[tokio::test]
+    async fn test_rotate_refresh_token_returns_new_token() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        let old_token = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        let (verified, new_token) = service.rotate_refresh_token(&old_token).await.unwrap();
+        assert_eq!(verified.user_id, user.id);
+        assert_eq!(verified.auth_method, AuthMethod::Password);
+        assert_ne!(old_token, new_token, "rotated token must differ from old");
+        assert!(!new_token.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_rotate_refresh_token_old_is_revoked() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        let old_token = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        let (_verified, _new_token) = service.rotate_refresh_token(&old_token).await.unwrap();
+
+        // Old token must be rejected
+        let result = service.verify_refresh_token(&old_token).await;
+        assert!(result.is_err(), "old token must be revoked after rotation");
+    }
+
+    #[tokio::test]
+    async fn test_rotate_refresh_token_new_is_valid() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        let old_token = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        let (_verified, new_token) = service.rotate_refresh_token(&old_token).await.unwrap();
+
+        // New token must be valid
+        let verified = service.verify_refresh_token(&new_token).await.unwrap();
+        assert_eq!(verified.user_id, user.id);
+    }
+
+    #[tokio::test]
+    async fn test_rotate_revoked_token_fails() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        let token = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        // Revoke it first
+        service.revoke_refresh_token(&token).await.unwrap();
+
+        // Rotating a revoked token must fail
+        let result = service.rotate_refresh_token(&token).await;
+        assert!(result.is_err(), "rotating a revoked token must fail");
+    }
+
+    #[tokio::test]
+    async fn test_rotate_same_token_twice_fails() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        let token = service
+            .create_refresh_token(user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        // First rotation succeeds
+        let (_verified, _new_token) = service.rotate_refresh_token(&token).await.unwrap();
+
+        // Second rotation of the same token must fail (replay detection)
+        let result = service.rotate_refresh_token(&token).await;
+        assert!(result.is_err(), "rotating already-rotated token must fail");
     }
 }

@@ -93,6 +93,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 			}
 			const refreshed = await refreshPromise;
 			localStorage.setItem('access_token', refreshed.access_token);
+			localStorage.setItem('refresh_token', refreshed.refresh_token);
 
 			// Retry original request with new token
 			const retryRes = await fetch(`${BASE}${path}`, {

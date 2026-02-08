@@ -383,10 +383,10 @@ pub async fn refresh(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RefreshRequest>,
 ) -> Response {
-    // Verify refresh token in DB
+    // Rotate refresh token: revoke old, create new
     let session_service = SessionService::new(state.db.clone());
-    let verified = match session_service
-        .verify_refresh_token(&req.refresh_token)
+    let (verified, new_refresh_token) = match session_service
+        .rotate_refresh_token(&req.refresh_token)
         .await
     {
         Ok(v) => v,
@@ -404,6 +404,10 @@ pub async fn refresh(
     };
 
     if !user.is_active {
+        // Revoke the newly issued refresh token since user is deactivated
+        let _ = session_service
+            .revoke_refresh_token(&new_refresh_token)
+            .await;
         return error_response(StatusCode::FORBIDDEN, "User is deactivated");
     }
 
@@ -435,6 +439,7 @@ pub async fn refresh(
 
     let response = RefreshResponse {
         access_token,
+        refresh_token: new_refresh_token,
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
     };

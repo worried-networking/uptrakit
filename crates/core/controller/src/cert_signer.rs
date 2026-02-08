@@ -12,11 +12,18 @@ use crate::pki::CaSnapshot;
 
 pub struct RcgenAgentCertSigner {
     ca_rx: watch::Receiver<CaSnapshot>,
+    ca_key_store: uptrakit_web_api::CaKeyStoreRef,
 }
 
 impl RcgenAgentCertSigner {
-    pub fn new(ca_rx: watch::Receiver<CaSnapshot>) -> Self {
-        Self { ca_rx }
+    pub fn new(
+        ca_rx: watch::Receiver<CaSnapshot>,
+        ca_key_store: uptrakit_web_api::CaKeyStoreRef,
+    ) -> Self {
+        Self {
+            ca_rx,
+            ca_key_store,
+        }
     }
 }
 
@@ -27,8 +34,10 @@ impl AgentCertSigner for RcgenAgentCertSigner {
         agent_id: &Uuid,
         lifetime: time::Duration,
     ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
-        let snapshot = self.ca_rx.borrow();
-        let key_pair = KeyPair::from_pem(&snapshot.active_key_pem)
+        let snapshot = self.ca_rx.borrow().clone();
+        // Block on reading the key store (this is a synchronous trait method)
+        let key_store = self.ca_key_store.blocking_read();
+        let key_pair = KeyPair::from_pem(&key_store.active_key_pem)
             .map_err(|e| report!(CertSignerError::CaKeyParse(e.to_string())))?;
         let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
             .map_err(|e| report!(CertSignerError::CaIssuer(e.to_string())))?;
@@ -146,9 +155,10 @@ mod tests {
             trusted: vec![ca],
             managed: true,
         };
-        let snapshot = state.to_snapshot(None).unwrap();
+        let (snapshot, key_store) = state.to_snapshot(None).unwrap();
+        let ca_key_store = std::sync::Arc::new(tokio::sync::RwLock::new(key_store));
         let (tx, rx) = watch::channel(snapshot);
-        (RcgenAgentCertSigner::new(rx), tx)
+        (RcgenAgentCertSigner::new(rx, ca_key_store), tx)
     }
 
     /// Generate a test CSR with the given CN using rcgen.

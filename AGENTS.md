@@ -190,8 +190,14 @@ Shared PKI utility functions (`SanCollection`, `collect_sans`, `cert_signed_by_c
 
 ### CaSnapshot sharing
 
-Runtime CA state is shared across async tasks via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct. The cert signer, CRL manager, API handlers, and background tasks all read from this channel.
-Controllers poll the `pki.ca_version` settings key to detect CA changes made by other instances and reload the snapshot.
+Runtime CA state is split into **public** and **private** components:
+
+- **`CaPublicSnapshot`** (public certificates, fingerprints, CRL data) is shared via a `tokio::sync::watch` channel. API handlers and route middleware read from this channel. It contains no private key material.
+- **`CaKeyStore`** (private keys wrapped in `zeroize::Zeroizing<String>`) is shared via `Arc<tokio::sync::RwLock<CaKeyStore>>`. Only the OCSP responder, CRL manager, cert signer, and server cert renewal code access the key store. The `Debug` impl redacts all key material.
+
+When adding new code that needs CA certificates or fingerprints, read from `AppState.ca_snapshot`. When adding code that needs to **sign** (OCSP responses, CRLs, certificates), also accept a `CaKeyStoreRef` and look up keys by fingerprint.
+
+Controllers poll the `pki.ca_version` settings key to detect CA changes made by other instances and reload both the public snapshot and key store.
 
 ## Architecture rules and invariants
 

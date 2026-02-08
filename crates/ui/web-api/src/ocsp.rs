@@ -11,7 +11,7 @@ use x509_ocsp::{
     OcspResponseStatus, ResponderId, ResponseData, SingleResponse, Version,
 };
 
-use crate::ca_snapshot::CaSnapshotData;
+use crate::ca_snapshot::{CaKeyStoreRef, CaPublicSnapshot};
 
 /// Errors that can occur during OCSP response construction.
 #[derive(Debug, Error)]
@@ -64,7 +64,8 @@ const SHA256_OID: const_oid::ObjectIdentifier =
 /// Supports both SHA-1 and SHA-256 hash algorithms in requests per RFC 6960.
 pub async fn build_ocsp_response(
     request_der: &[u8],
-    ca_snapshot: &CaSnapshotData,
+    ca_public: &CaPublicSnapshot,
+    ca_key_store: &CaKeyStoreRef,
     db: &DatabaseConnection,
 ) -> Vec<u8> {
     // Parse the request
@@ -77,11 +78,10 @@ pub async fn build_ocsp_response(
     struct TrustedOcspCa {
         fingerprint: String,
         pub_key_bytes: Vec<u8>,
-        key_pem: String,
     }
 
     let mut trusted = Vec::new();
-    for ca in &ca_snapshot.trusted_cas {
+    for ca in &ca_public.trusted_cas {
         let pub_key_bytes = match extract_ca_public_key_bytes(&ca.cert_pem) {
             Ok(v) => v,
             Err(_) => return build_error_response(OcspResponseStatus::InternalError),
@@ -89,7 +89,6 @@ pub async fn build_ocsp_response(
         trusted.push(TrustedOcspCa {
             fingerprint: ca.fingerprint.clone(),
             pub_key_bytes,
-            key_pem: ca.key_pem.clone(),
         });
     }
 
@@ -154,7 +153,7 @@ pub async fn build_ocsp_response(
     let signer_index = selected_ca_index.or_else(|| {
         trusted
             .iter()
-            .position(|ca| ca.fingerprint == ca_snapshot.active_fingerprint)
+            .position(|ca| ca.fingerprint == ca_public.active_fingerprint)
     });
 
     let Some(signer_index) = signer_index else {
@@ -174,8 +173,21 @@ pub async fn build_ocsp_response(
         response_extensions: None,
     };
 
+    // Look up the signing key from the key store by fingerprint
+    let signer_fingerprint = &trusted[signer_index].fingerprint;
+    let key_store = ca_key_store.read().await;
+    let signing_key_pem = key_store
+        .trusted_ca_keys
+        .iter()
+        .find(|k| k.fingerprint == *signer_fingerprint)
+        .map(|k| k.key_pem.as_str());
+
+    let Some(signing_key_pem) = signing_key_pem else {
+        return build_error_response(OcspResponseStatus::InternalError);
+    };
+
     // Sign the response
-    match sign_response(&response_data, &trusted[signer_index].key_pem) {
+    match sign_response(&response_data, signing_key_pem) {
         Ok(response_bytes) => response_bytes,
         Err(_) => build_error_response(OcspResponseStatus::InternalError),
     }
@@ -504,12 +516,10 @@ mod tests {
             .unwrap();
 
         rt.block_on(async {
-            let snapshot = CaSnapshotData {
+            let snapshot = CaPublicSnapshot {
                 active_cert_pem: String::new(),
-                active_key_pem: String::new(),
                 active_fingerprint: String::new(),
                 previous_cert_pem: None,
-                previous_key_pem: None,
                 previous_fingerprint: None,
                 trusted_cas: Vec::new(),
                 trusted_ca_cns: Vec::new(),
@@ -520,12 +530,20 @@ mod tests {
                 pki_addr: None,
             };
 
+            let key_store: CaKeyStoreRef =
+                std::sync::Arc::new(tokio::sync::RwLock::new(crate::ca_snapshot::CaKeyStore {
+                    active_key_pem: zeroize::Zeroizing::new(String::new()),
+                    previous_key_pem: None,
+                    trusted_ca_keys: vec![],
+                }));
+
             let db = {
                 let opt = sea_orm::ConnectOptions::new("sqlite::memory:".to_owned());
                 sea_orm::Database::connect(opt).await.unwrap()
             };
 
-            let response_der = build_ocsp_response(b"not valid der", &snapshot, &db).await;
+            let response_der =
+                build_ocsp_response(b"not valid der", &snapshot, &key_store, &db).await;
             let response = OcspResponse::from_der(&response_der).unwrap();
             assert_eq!(
                 response.response_status,

@@ -51,6 +51,7 @@ pub struct CrlManager {
 pub async fn build_initial_crls(
     db: &DatabaseConnection,
     snapshot: &CaSnapshot,
+    key_store: &pki::CaKeyStore,
 ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
     if snapshot.trusted_cas.is_empty() {
         return Err(report!(pki::PkiError::CaValidation(
@@ -62,7 +63,17 @@ pub async fn build_initial_crls(
     let mut combined_pem = String::new();
 
     for ca in &snapshot.trusted_cas {
-        let key = KeyPair::from_pem(&ca.key_pem).context_to::<pki::PkiError>()?;
+        let ca_key = key_store
+            .trusted_ca_keys
+            .iter()
+            .find(|k| k.fingerprint == ca.fingerprint)
+            .ok_or_else(|| {
+                report!(pki::PkiError::CaValidation(format!(
+                    "missing key for CA fingerprint {}",
+                    ca.fingerprint
+                )))
+            })?;
+        let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
         let issuer = Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
         let revoked = query_revoked_certs_for_ca(db, &ca.fingerprint).await?;
         let (crl, pem) = sign_crl(&issuer, revoked, 0)?;
@@ -74,7 +85,11 @@ pub async fn build_initial_crls(
 }
 
 impl CrlManager {
-    pub fn new(config: CrlManagerConfig, snapshot: &CaSnapshot) -> pki::Result<Self> {
+    pub fn new(
+        config: CrlManagerConfig,
+        snapshot: &CaSnapshot,
+        key_store: &pki::CaKeyStore,
+    ) -> pki::Result<Self> {
         if snapshot.trusted_cas.is_empty() {
             return Err(report!(pki::PkiError::CaValidation(
                 "no trusted CA material available".into()
@@ -83,7 +98,17 @@ impl CrlManager {
 
         let mut trusted = Vec::new();
         for ca in &snapshot.trusted_cas {
-            let key = KeyPair::from_pem(&ca.key_pem).context_to::<pki::PkiError>()?;
+            let ca_key = key_store
+                .trusted_ca_keys
+                .iter()
+                .find(|k| k.fingerprint == ca.fingerprint)
+                .ok_or_else(|| {
+                    report!(pki::PkiError::CaValidation(format!(
+                        "missing key for CA fingerprint {}",
+                        ca.fingerprint
+                    )))
+                })?;
+            let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
             let issuer =
                 Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
             trusted.push(TrustedIssuer {
@@ -109,7 +134,11 @@ impl CrlManager {
     }
 
     /// Update CA issuers after a rotation event.
-    pub async fn update_ca(&self, snapshot: &CaSnapshot) -> pki::Result<()> {
+    pub async fn update_ca(
+        &self,
+        snapshot: &CaSnapshot,
+        key_store: &pki::CaKeyStore,
+    ) -> pki::Result<()> {
         if snapshot.trusted_cas.is_empty() {
             return Err(report!(pki::PkiError::CaValidation(
                 "no trusted CA material available".into()
@@ -118,7 +147,17 @@ impl CrlManager {
 
         let mut trusted = Vec::new();
         for ca in &snapshot.trusted_cas {
-            let key = KeyPair::from_pem(&ca.key_pem).context_to::<pki::PkiError>()?;
+            let ca_key = key_store
+                .trusted_ca_keys
+                .iter()
+                .find(|k| k.fingerprint == ca.fingerprint)
+                .ok_or_else(|| {
+                    report!(pki::PkiError::CaValidation(format!(
+                        "missing key for CA fingerprint {}",
+                        ca.fingerprint
+                    )))
+                })?;
+            let key = KeyPair::from_pem(&ca_key.key_pem).context_to::<pki::PkiError>()?;
             let issuer =
                 Issuer::from_ca_cert_pem(&ca.cert_pem, key).context_to::<pki::PkiError>()?;
             trusted.push(TrustedIssuer {

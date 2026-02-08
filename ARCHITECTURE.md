@@ -131,7 +131,7 @@ The controller operates an internal Certificate Authority for mutual TLS authent
 - **OCSP responder**: `POST /api/v1/pki/ocsp` (and GET variant) provides real-time certificate revocation status per RFC 6960. Supports SHA-1 and SHA-256 hash algorithms (Nginx/OpenSSL uses SHA-1). `ResponderID::ByKey` uses SHA-1 per RFC 6960 Section 2.3. Responses are signed with the matching CA's private key using ECDSA P-256 SHA-256. Only Nginx natively supports OCSP verification of client certificates (via `ssl_ocsp` directive).
 - **AIA/CDP extensions**: When `--pki-addr` is configured, certificates embed Authority Information Access (OCSP, CA Issuers) and CRL Distribution Points extensions. This enables proxies like Nginx to discover and use the OCSP responder automatically.
 - **Optional PKI HTTP listener**: When `--pki-http listener` is set alongside `--pki-addr`, the controller starts a plain HTTP listener serving only PKI routes. Required for Nginx `ssl_ocsp_responder` which only supports `http://` OCSP responder URLs. Use `--pki-http external` to suppress the warning when PKI HTTP is handled by a reverse proxy.
-- **Runtime state**: CA material is shared via a `tokio::sync::watch` channel carrying a `CaSnapshot` struct.
+- **Runtime state**: Public CA material (certificates, fingerprints) is shared via a `tokio::sync::watch` channel carrying a `CaPublicSnapshot` struct. Private keys are held separately in a `CaKeyStore` behind `Arc<RwLock>`, with `zeroize` memory protection. Only signing operations (OCSP, CRL, cert issuance) access the key store.
 - **External CA**: Supported via `--ca-cert` / `--ca-key` flags, which disable managed rotation.
 - **SAN sanity checks**: At startup, `--san` values are validated against the existing managed cert's SANs. Mismatched SANs trigger silent regeneration (same CA) or an error with fix instructions (different CA). `--san` is incompatible with `--tls-cert`/`--tls-key`.
 - **PKI address validation**: At startup, the controller validates that an existing managed CA's AIA/CDP URLs match the reconciled `--pki-addr`. Mismatches cause a hard startup failure with actionable error messages.
@@ -173,8 +173,8 @@ The `Settings` struct (in `crates/ui/web-api/src/settings.rs`) uses `RwLock` for
 - **Password**: Argon2id with OWASP-recommended parameters.
 - **OIDC**: External identity providers with auto-create or account linking. Can be bootstrapped at startup via `--oidc-*` CLI flags (see [AGENTS.md](AGENTS.md) "OIDC provider bootstrap"). When registration mode is `Invite`, new OIDC users may need to provide a registration token (always for the first user, optionally for subsequent users via `require_token_for_oidc` setting).
 - **Device authorization**: RFC 8628-style flow for CLI login. The CLI requests a device code, the user approves in the browser, and the CLI receives an API token. Works with any auth method (password or OIDC).
-- **Sessions**: SHA-256 hashed tokens, 7-day expiry, 30-min sliding window.
-- **JWT**: Access and refresh tokens carrying resolved permissions.
+- **Sessions**: SHA-256 hashed refresh tokens, 7-day expiry. Refresh tokens are **rotated on each use** — the old token is atomically revoked and a new one issued, preventing replay attacks.
+- **JWT**: Short-lived access tokens carrying resolved permissions.
 - **API tokens**: Long-lived, revocable bearer tokens for programmatic access.
 
 ### Agent authentication

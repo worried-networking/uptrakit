@@ -14,7 +14,8 @@ const OCSP_RESPONSE_CONTENT_TYPE: &str = "application/ocsp-response";
 /// Accepts a DER-encoded OCSP request body and returns a DER-encoded OCSP response.
 pub async fn ocsp_post(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let snapshot = state.ca_snapshot.borrow().clone();
-    let response_der = crate::ocsp::build_ocsp_response(&body, &snapshot, &state.db).await;
+    let response_der =
+        crate::ocsp::build_ocsp_response(&body, &snapshot, &state.ca_key_store, &state.db).await;
 
     (
         [
@@ -41,7 +42,9 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
         Err(_) => {
             // Return a malformed request OCSP response
             let snapshot = state.ca_snapshot.borrow().clone();
-            let err_der = crate::ocsp::build_ocsp_response(b"", &snapshot, &state.db).await;
+            let err_der =
+                crate::ocsp::build_ocsp_response(b"", &snapshot, &state.ca_key_store, &state.db)
+                    .await;
             return (
                 [
                     (header::CONTENT_TYPE, OCSP_RESPONSE_CONTENT_TYPE),
@@ -54,7 +57,9 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
     };
 
     let snapshot = state.ca_snapshot.borrow().clone();
-    let response_der = crate::ocsp::build_ocsp_response(&request_der, &snapshot, &state.db).await;
+    let response_der =
+        crate::ocsp::build_ocsp_response(&request_der, &snapshot, &state.ca_key_store, &state.db)
+            .await;
 
     (
         [

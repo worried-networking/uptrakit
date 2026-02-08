@@ -40,7 +40,7 @@ Uptrakit is designed with a defence-in-depth approach. Key principles:
 | Certificate hashing | SHA-256 | Certificate signing, CRL generation, and OCSP response signing |
 | Password hashing | [Argon2id](https://crates.io/crates/argon2) (OWASP-recommended: 19 MiB, 2 iterations) | User password storage |
 | JWT signing | [jsonwebtoken](https://crates.io/crates/jsonwebtoken) | Access and refresh tokens |
-| Session tokens | SHA-256 hashed, 7-day expiry, 30-min sliding window | Stateful user sessions |
+| Session tokens | SHA-256 hashed, 7-day expiry, rotated on each use | Stateful user sessions (refresh token rotation) |
 
 No custom cryptographic implementations are used.
 
@@ -99,10 +99,10 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 ## Secrets Handling
 
 - Passwords are hashed with Argon2id before storage; plaintext is never persisted.
-- Session tokens are SHA-256 hashed in the database.
+- Session tokens (refresh tokens) are SHA-256 hashed in the database and **rotated on each use** — the old token is atomically revoked and a new one issued, preventing replay attacks.
 - JWT signing keys are held in memory only.
 - Agent and MQTT service private keys are generated and stored locally on each agent/service; they never leave the host.
-- CA private keys are stored on the controller filesystem only.
+- CA private keys are stored on the controller filesystem and held in a separate in-memory key store (`CaKeyStore`) with `zeroize` memory protection. Only signing operations (OCSP, CRL, certificate issuance) access the key store; public CA data (certificates, fingerprints) is shared separately.
 - No secrets appear in log output, error messages, or API responses.
 
 ## Filesystem Security

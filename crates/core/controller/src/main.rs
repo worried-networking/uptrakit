@@ -537,10 +537,12 @@ async fn run(args: cli::Args) -> Result<()> {
             .context(AppError::Pki)?;
     }
 
-    let ca_snapshot = ca_state
+    let (ca_snapshot, ca_initial_key_store) = ca_state
         .to_snapshot(pki_addr_opt.clone())
         .context(AppError::Pki)?;
     let (ca_tx, ca_rx) = tokio::sync::watch::channel(ca_snapshot.clone());
+    let ca_key_store: uptrakit_web_api::CaKeyStoreRef =
+        Arc::new(tokio::sync::RwLock::new(ca_initial_key_store));
 
     // Resolve server certificate (using reconciled extra_sans)
     let server_cert = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
@@ -599,9 +601,12 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Build initial CRLs from DB before server starts
     let crl_pem_cache = Arc::new(tokio::sync::RwLock::new(String::new()));
-    let (initial_crls, initial_crl_pem) = crl_manager::build_initial_crls(&db_conn, &ca_snapshot)
-        .await
-        .context(AppError::Pki)?;
+    let (initial_crls, initial_crl_pem) = {
+        let ks = ca_key_store.read().await;
+        crl_manager::build_initial_crls(&db_conn, &ca_snapshot, &ks)
+            .await
+            .context(AppError::Pki)?
+    };
     *crl_pem_cache.write().await = initial_crl_pem;
 
     // Build initial server config with CRLs
@@ -617,7 +622,8 @@ async fn run(args: cli::Args) -> Result<()> {
         axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(initial_server_config));
 
     // Create CRL manager
-    let crl_manager = Arc::new(
+    let crl_manager = Arc::new({
+        let ks = ca_key_store.read().await;
         crl_manager::CrlManager::new(
             crl_manager::CrlManagerConfig {
                 server_cert_pem: server_cert.cert_pem.clone(),
@@ -630,9 +636,10 @@ async fn run(args: cli::Args) -> Result<()> {
                 initial_revocation_version,
             },
             &ca_snapshot,
+            &ks,
         )
-        .context(AppError::Pki)?,
-    );
+        .context(AppError::Pki)?
+    });
 
     // Create CancellationToken for graceful shutdown of background tasks
     let shutdown_token = CancellationToken::new();
@@ -644,8 +651,11 @@ async fn run(args: cli::Args) -> Result<()> {
     let crl_shutdown_token = shutdown_token.child_token();
     let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run(Some(crl_shutdown_token)));
 
-    // Create agent certificate signer (reads from watch receiver)
-    let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(ca_rx.clone()));
+    // Create agent certificate signer (reads from watch receiver and key store)
+    let cert_signer = Arc::new(cert_signer::RcgenAgentCertSigner::new(
+        ca_rx.clone(),
+        Arc::clone(&ca_key_store),
+    ));
 
     // Initialize JWT signing key (state directory)
     let jwt_manager =
@@ -676,6 +686,7 @@ async fn run(args: cli::Args) -> Result<()> {
 
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
+        ca_key_store: Arc::clone(&ca_key_store),
         db: db_conn.clone(),
         settings,
         cert_signer,
@@ -761,6 +772,7 @@ async fn run(args: cli::Args) -> Result<()> {
         let db = app_state.db.clone();
         let ca_tx_for_task = ca_tx.clone();
         let crl_mgr_for_task = Arc::clone(&crl_manager);
+        let ca_key_store_for_reload = Arc::clone(&ca_key_store);
         let tenant_id = default_tenant_id;
         let settings_for_task = app_state.settings.clone();
         let token = ca_reload_token;
@@ -796,7 +808,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 };
 
                 let pki_addr = settings_for_task.pki_addr().await;
-                let snapshot = match state.to_snapshot(pki_addr) {
+                let (snapshot, new_key_store) = match state.to_snapshot(pki_addr) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::error!(error = ?e, "failed to build CA snapshot after reload");
@@ -804,10 +816,13 @@ async fn run(args: cli::Args) -> Result<()> {
                     }
                 };
 
-                if let Err(e) = crl_mgr_for_task.update_ca(&snapshot).await {
+                if let Err(e) = crl_mgr_for_task.update_ca(&snapshot, &new_key_store).await {
                     tracing::error!(error = ?e, "failed to update CRL manager after CA reload");
                     continue;
                 }
+
+                // Update the shared key store
+                *ca_key_store_for_reload.write().await = new_key_store;
 
                 let _ = ca_tx_for_task.send(snapshot);
 
@@ -835,6 +850,7 @@ async fn run(args: cli::Args) -> Result<()> {
     let ca_rotation_handle = if ca_state.managed {
         let ca_tx_for_task = ca_tx.clone();
         let crl_mgr_for_task = Arc::clone(&crl_manager);
+        let ca_key_store_for_rotation = Arc::clone(&ca_key_store);
         let notifications_for_task = notification_service.clone();
         let settings_for_rotation = app_state.settings.clone();
         let db_for_rotation = app_state.db.clone();
@@ -891,12 +907,18 @@ async fn run(args: cli::Args) -> Result<()> {
 
                         let rotation_pki_addr = current_pki_addr.clone();
                         match rotation.state.to_snapshot(rotation_pki_addr) {
-                            Ok(new_snapshot) => {
+                            Ok((new_snapshot, new_key_store)) => {
                                 // Update CRL manager with new CA material
-                                if let Err(e) = crl_mgr_for_task.update_ca(&new_snapshot).await {
+                                if let Err(e) = crl_mgr_for_task
+                                    .update_ca(&new_snapshot, &new_key_store)
+                                    .await
+                                {
                                     tracing::error!(error = ?e, "failed to update CRL manager after CA rotation");
                                     continue;
                                 }
+
+                                // Update the shared key store
+                                *ca_key_store_for_rotation.write().await = new_key_store;
 
                                 // Broadcast CA bundle update to all connected services
                                 let ca_payload = uptrakit_internal_wire::CaBundleUpdatedPayload {
@@ -946,6 +968,7 @@ async fn run(args: cli::Args) -> Result<()> {
         // Only auto-renew when using internally-generated server certs
         let pki_for_task = pki_path;
         let crl_mgr_for_task = Arc::clone(&crl_manager);
+        let ca_key_store_for_renewal = Arc::clone(&ca_key_store);
         let app_state_for_task = Arc::clone(&app_state);
         let token = server_cert_renewal_token;
 
@@ -976,11 +999,12 @@ async fn run(args: cli::Args) -> Result<()> {
 
                 tracing::info!("server certificate is within renewal window, renewing");
 
-                // Get current active CA from watch channel
+                // Get current active CA from watch channel and key store
                 let snapshot = app_state_for_task.ca_snapshot.borrow().clone();
+                let key_store = ca_key_store_for_renewal.read().await;
 
                 // Build a temporary CaBundle for renewal
-                let ca_key = match rcgen::KeyPair::from_pem(&snapshot.active_key_pem) {
+                let ca_key = match rcgen::KeyPair::from_pem(&key_store.active_key_pem) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::error!(error = %e, "failed to parse CA key for server cert renewal");
@@ -1000,9 +1024,11 @@ async fn run(args: cli::Args) -> Result<()> {
 
                 let ca_bundle = pki::CaBundle {
                     cert_pem: snapshot.active_cert_pem.clone(),
-                    key_pem: snapshot.active_key_pem.clone(),
+                    key_pem: key_store.active_key_pem.to_string(),
                     issuer: ca_issuer,
                 };
+                // Drop the key store lock before proceeding with I/O
+                drop(key_store);
 
                 let extra_sans = app_state_for_task.settings.extra_sans().await;
                 match pki::renew_server_cert(&pki_for_task, &ca_bundle, &extra_sans) {

@@ -53,6 +53,7 @@ regex = "1"
 semver = "1"
 tokio-util = "0.7"
 async-trait = "0.1"
+zeroize = { version = "1", features = ["derive"] }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 
 [profile.release]

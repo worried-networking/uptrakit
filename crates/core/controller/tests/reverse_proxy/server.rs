@@ -18,7 +18,7 @@ use uptrakit_web_api::auth::oidc_state::{
 };
 use uptrakit_web_api::auth::rate_limit::RateLimitStore;
 use uptrakit_web_api::auth::registration::{RegistrationMode, RegistrationSettings};
-use uptrakit_web_api::ca_snapshot::CaSnapshotData;
+use uptrakit_web_api::ca_snapshot::CaPublicSnapshot;
 use uptrakit_web_api::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
 use uptrakit_web_api::extract::ServiceIdentity;
 use uptrakit_web_api::middleware;
@@ -105,16 +105,13 @@ async fn build_state(
     info_header: Option<&str>,
     pem_header: Option<&str>,
 ) -> Arc<AppState> {
-    let snapshot_data = CaSnapshotData {
+    let snapshot_data = CaPublicSnapshot {
         active_cert_pem: pki.ca_cert_pem.clone(),
-        active_key_pem: String::new(),
         active_fingerprint: "0".repeat(64),
         previous_cert_pem: None,
-        previous_key_pem: None,
         previous_fingerprint: None,
-        trusted_cas: vec![uptrakit_web_api::ca_snapshot::TrustedCaSnapshot {
+        trusted_cas: vec![uptrakit_web_api::ca_snapshot::TrustedCaPublic {
             cert_pem: pki.ca_cert_pem.clone(),
-            key_pem: String::new(),
             fingerprint: "0".repeat(64),
             not_after: ::time::OffsetDateTime::now_utc() + ::time::Duration::days(365),
         }],
@@ -126,6 +123,13 @@ async fn build_state(
         pki_addr: None,
     };
     let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+    let ca_key_store: uptrakit_web_api::CaKeyStoreRef = Arc::new(tokio::sync::RwLock::new(
+        uptrakit_web_api::ca_snapshot::CaKeyStore {
+            active_key_pem: zeroize::Zeroizing::new(String::new()),
+            previous_key_pem: None,
+            trusted_ca_keys: vec![],
+        },
+    ));
 
     let rustls_cfg = {
         let key_pair =
@@ -186,6 +190,7 @@ async fn build_state(
 
     Arc::new(AppState {
         ca_snapshot: ca_rx,
+        ca_key_store,
         db: db.clone(),
         settings,
         cert_signer: Arc::new(NoopCertSigner),
