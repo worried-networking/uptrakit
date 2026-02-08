@@ -1736,3 +1736,662 @@ Update all call sites that use `registration_write()` and `authentication_write(
 - This is a large refactor touching many files (every handler that reads settings).
 - The main simplification is that reads become synchronous, which actually makes call sites simpler.
 - The `reload_mutex` serializes writes but reads are lock-free via the watch channel, so there's no performance regression.
+
+---
+
+## Plan 16: H9 — TOCTOU in `upsert_setting` — Concurrent Upserts Can Conflict
+
+### Problem
+
+`upsert_setting` (`src/settings_store.rs:50-84`) performs a read-then-insert pattern without a transaction: `find_by_id` → `update` or `insert`. Two concurrent inserts for the same key produce a unique constraint violation. The same pattern exists in `bump_settings_version` (lines 159-168) where `rows_affected == 0` triggers a bare `insert` that races with another instance's insert.
+
+### Plan
+
+**Step 1 — Replace read-then-write with SeaORM `on_conflict`**
+
+SeaORM supports `INSERT ... ON CONFLICT DO UPDATE` via `insert` with `on_conflict`. Replace the find-then-branch pattern:
+
+```rust
+pub async fn upsert_setting(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    key: SettingKey,
+    value: serde_json::Value,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let db_key = key.as_str().to_string();
+
+    let model = setting::ActiveModel {
+        tenant_id: Set(tenant_id),
+        key: Set(db_key),
+        value: Set(value),
+        updated_at: Set(now),
+    };
+
+    Setting::insert(model)
+        .on_conflict(
+            sea_query::OnConflict::columns([
+                setting::Column::TenantId,
+                setting::Column::Key,
+            ])
+            .update_columns([setting::Column::Value, setting::Column::UpdatedAt])
+            .to_owned(),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+
+    // Bump the version counter (non-fatal on failure)
+    if let Err(e) = bump_settings_version(db, tenant_id, key.is_global()).await {
+        tracing::warn!(error = ?e, key = key.as_str(), "failed to bump settings version counter");
+    }
+
+    Ok(())
+}
+```
+
+This is a single atomic SQL statement — no TOCTOU.
+
+**Step 2 — Fix `bump_settings_version` defensive insert**
+
+The `rows_affected == 0` fallback at lines 159-168 uses a bare `insert` that races. Replace with `on_conflict`:
+
+```rust
+pub async fn bump_settings_version(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    is_global: bool,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+
+    if is_global {
+        // Increment global_version on ALL rows
+        SettingsVersion::update_many()
+            .col_expr(
+                settings_version::Column::GlobalVersion,
+                Expr::col(settings_version::Column::GlobalVersion).add(1),
+            )
+            .col_expr(settings_version::Column::UpdatedAt, Expr::value(now))
+            .exec(db)
+            .await
+            .context_to()?;
+    } else {
+        // Try to increment version on this tenant's row
+        let result = SettingsVersion::update_many()
+            .col_expr(
+                settings_version::Column::Version,
+                Expr::col(settings_version::Column::Version).add(1),
+            )
+            .col_expr(settings_version::Column::UpdatedAt, Expr::value(now))
+            .filter(settings_version::Column::TenantId.eq(tenant_id))
+            .exec(db)
+            .await
+            .context_to()?;
+
+        // Defensive: if the row didn't exist, insert with on_conflict
+        if result.rows_affected == 0 {
+            let model = settings_version::ActiveModel {
+                tenant_id: Set(tenant_id),
+                version: Set(1),
+                global_version: Set(0),
+                revocation_version: Set(0),
+                updated_at: Set(now),
+            };
+            SettingsVersion::insert(model)
+                .on_conflict(
+                    sea_query::OnConflict::column(settings_version::Column::TenantId)
+                        .update_columns([
+                            settings_version::Column::Version,
+                            settings_version::Column::UpdatedAt,
+                        ])
+                        .to_owned(),
+                )
+                .exec(db)
+                .await
+                .context_to()?;
+        }
+    }
+
+    Ok(())
+}
+```
+
+**Step 3 — Apply the same fix to `bump_revocation_version`**
+
+The `rows_affected == 0` path at lines 208-217 has the same race. Replace the bare `insert` with `on_conflict`:
+
+```rust
+if result.rows_affected == 0 {
+    let model = settings_version::ActiveModel {
+        tenant_id: Set(tenant_id),
+        version: Set(0),
+        global_version: Set(0),
+        revocation_version: Set(1),
+        updated_at: Set(now),
+    };
+    SettingsVersion::insert(model)
+        .on_conflict(
+            sea_query::OnConflict::column(settings_version::Column::TenantId)
+                .update_columns([
+                    settings_version::Column::RevocationVersion,
+                    settings_version::Column::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .exec(db)
+        .await
+        .context_to()?;
+}
+```
+
+**Step 4 — Tests**
+
+- Test that concurrent `upsert_setting` calls for the same key don't produce constraint violations.
+- Test that the value from the last writer wins.
+- Test that `bump_settings_version` initializes correctly on first call for a new tenant.
+- Test that concurrent `bump_settings_version` calls both succeed without error.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/settings_store.rs` | Replace `upsert_setting` with `on_conflict`, fix `bump_settings_version` and `bump_revocation_version` defensive inserts |
+
+---
+
+## Plan 17: H10 — Update History Operations Not Checked Against Agent Ownership (IDOR)
+
+### Problem
+
+`UpdateStarted`, `UpdateOutput`, and `UpdateResult` handlers in `src/routes/agent_ws.rs:306-389` look up `update_history` records by `update_history_id` from the message payload without verifying the record belongs to the authenticated agent. A compromised agent can tamper with any update record by submitting a valid `update_history_id` that belongs to a different agent's host.
+
+### Plan
+
+**Step 1 — Extract host_ids for the current agent once**
+
+At the beginning of `handle_agent_authenticated`, after registering the agent, look up the agent's linked host_ids and keep them for the session:
+
+```rust
+// At the top of handle_agent_authenticated, after register_agent:
+let agent_host_ids: HashSet<uuid::Uuid> = {
+    match uptrakit_shared_db::entity::prelude::ServiceHost::find()
+        .filter(uptrakit_shared_db::entity::service_host::Column::ServiceId.eq(agent_id))
+        .all(&state.db)
+        .await
+    {
+        Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
+        Err(e) => {
+            tracing::error!(error = %e, "failed to look up agent hosts");
+            HashSet::new()
+        }
+    }
+};
+```
+
+Note: This set should be refreshed after `ReportHostInfo` (which can create new host links).
+
+**Step 2 — Add ownership validation to all update history handlers**
+
+For `UpdateStarted`, `UpdateOutput`, and `UpdateResult`, after finding the `update_history` record, verify `record.host_id` is in the agent's set:
+
+```rust
+ServiceMessage::UpdateStarted(payload) => {
+    if let Ok(Some(record)) = UpdateHistory::find_by_id(payload.update_history_id)
+        .one(&state.db)
+        .await
+    {
+        // Verify this update belongs to a host linked to this agent
+        if !agent_host_ids.contains(&record.host_id) {
+            tracing::warn!(
+                %agent_id,
+                update_id = %payload.update_history_id,
+                host_id = %record.host_id,
+                "agent attempted to modify update for unlinked host"
+            );
+            let err = ControllerMessage::Error(ErrorPayload {
+                code: ErrorCode::Forbidden,
+                message: "update record does not belong to this agent".to_string(),
+            });
+            if let Some(json) = serialize_controller_msg(out_seq, err) {
+                let _ = sink.send(Message::Text(json.into())).await;
+            }
+            continue;
+        }
+        // ... proceed with update
+    }
+}
+```
+
+Apply the same check to `UpdateOutput` and `UpdateResult`.
+
+**Step 3 — Refresh host_ids after ReportHostInfo**
+
+After processing `ReportHostInfo` (which calls `find_or_create_host_and_link`), refresh `agent_host_ids`:
+
+```rust
+ServiceMessage::ReportHostInfo(payload) => {
+    // ... existing host info processing ...
+
+    // Refresh agent_host_ids after potential new host link
+    if let Ok(links) = uptrakit_shared_db::entity::prelude::ServiceHost::find()
+        .filter(uptrakit_shared_db::entity::service_host::Column::ServiceId.eq(agent_id))
+        .all(&state.db)
+        .await
+    {
+        agent_host_ids = links.into_iter().map(|l| l.host_id).collect();
+    }
+}
+```
+
+**Step 4 — Extract validation into a helper**
+
+To avoid repetition across the three update message types, create a helper:
+
+```rust
+async fn validate_update_ownership(
+    db: &sea_orm::DatabaseConnection,
+    update_id: uuid::Uuid,
+    agent_host_ids: &HashSet<uuid::Uuid>,
+) -> Option<update_history::Model> {
+    match UpdateHistory::find_by_id(update_id).one(db).await {
+        Ok(Some(record)) if agent_host_ids.contains(&record.host_id) => Some(record),
+        Ok(Some(record)) => {
+            tracing::warn!(
+                update_id = %update_id,
+                host_id = %record.host_id,
+                "ownership check failed for update record"
+            );
+            None
+        }
+        _ => None,
+    }
+}
+```
+
+**Step 5 — Tests**
+
+- Test that `UpdateStarted` for a record belonging to a different agent's host is rejected.
+- Test that `UpdateOutput` and `UpdateResult` for unlinked hosts are rejected.
+- Test that after `ReportHostInfo`, the agent can update records for the newly-linked host.
+- Test that valid updates still work (no regression).
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/agent_ws.rs` | Add `agent_host_ids` lookup, ownership check on all update handlers, refresh after `ReportHostInfo` |
+
+---
+
+## Plan 18: H11 — Unbounded Update Output Accumulation
+
+### Problem
+
+Each `UpdateOutput` message (`src/routes/agent_ws.rs:327-343`) appends to the existing output with `format!("{}{}\n", record.output, payload.output)` — loading the entire existing output from DB, concatenating in memory, and writing back. No size limit exists. This causes:
+
+1. **Quadratic memory growth:** Each append reads the full history, so N messages of M bytes each allocates O(N*M) memory per message, totaling O(N^2 * M).
+2. **Unbounded DB storage:** A misbehaving agent can fill the database with arbitrarily large output.
+
+### Plan
+
+**Step 1 — Define a maximum output size constant**
+
+```rust
+/// Maximum total output size per update record (10 MB).
+const MAX_UPDATE_OUTPUT_SIZE: usize = 10 * 1024 * 1024;
+```
+
+**Step 2 — Enforce the limit in UpdateOutput handler**
+
+Before appending, check the current size and truncate or reject:
+
+```rust
+ServiceMessage::UpdateOutput(payload) => {
+    if let Some(record) = validate_update_ownership(
+        &state.db, payload.update_history_id, &agent_host_ids
+    ).await {
+        let current_len = record.output.len();
+        if current_len >= MAX_UPDATE_OUTPUT_SIZE {
+            tracing::debug!(
+                update_id = %payload.update_history_id,
+                current_len,
+                "update output limit reached, dropping further output"
+            );
+            continue;
+        }
+
+        // Truncate incoming output if it would exceed the limit
+        let available = MAX_UPDATE_OUTPUT_SIZE - current_len;
+        let to_append = if payload.output.len() > available {
+            let truncated = &payload.output[..available];
+            format!("{truncated}\n[output truncated at {MAX_UPDATE_OUTPUT_SIZE} bytes]")
+        } else {
+            format!("{}\n", payload.output)
+        };
+
+        let mut active: update_history::ActiveModel = record.into();
+        // Use concat in SQL instead of loading full output into memory
+        active.output = Set(format!("{}{to_append}", "")); // see Step 3
+        if let Err(e) = active.update(&state.db).await {
+            tracing::warn!(error = %e, "failed to append update output");
+        }
+    }
+}
+```
+
+**Step 3 — Use SQL-level concatenation to avoid quadratic memory**
+
+Instead of loading the full output, appending in Rust, and writing it back, use a SQL UPDATE with concatenation:
+
+```rust
+// Instead of read-modify-write, use a direct SQL UPDATE:
+use sea_orm::Statement;
+
+let to_append = format!("{}\n", payload.output);
+let backend = state.db.get_database_backend();
+
+let stmt = Statement::from_sql_and_values(
+    backend,
+    r#"UPDATE update_history
+       SET output = output || $1
+       WHERE id = $2
+         AND length(output) < $3"#,
+    [to_append.into(), payload.update_history_id.into(), (MAX_UPDATE_OUTPUT_SIZE as i64).into()],
+);
+
+if let Err(e) = state.db.execute(stmt).await {
+    tracing::warn!(error = %e, "failed to append update output");
+}
+```
+
+This avoids loading the full output into memory entirely. The `length(output) < $3` condition enforces the limit at the DB level.
+
+**Note:** The SQL concatenation operator (`||`) works in SQLite, PostgreSQL, and MySQL (with `CONCAT()` for MySQL). Use a backend match:
+
+```rust
+let sql = match backend {
+    sea_orm::DatabaseBackend::MySql => {
+        r#"UPDATE update_history
+           SET output = CONCAT(output, ?)
+           WHERE id = ?
+             AND CHAR_LENGTH(output) < ?"#
+    }
+    _ => {
+        r#"UPDATE update_history
+           SET output = output || $1
+           WHERE id = $2
+             AND length(output) < $3"#
+    }
+};
+```
+
+**Step 4 — Apply the same limit to UpdateResult final output**
+
+The `UpdateResult` handler (lines 362-367) also appends output. Apply the same truncation:
+
+```rust
+let final_output = if payload.output.is_empty() {
+    record.output.clone()
+} else {
+    let combined = format!("{}{}", record.output, payload.output);
+    if combined.len() > MAX_UPDATE_OUTPUT_SIZE {
+        let truncated = &combined[..MAX_UPDATE_OUTPUT_SIZE];
+        format!("{truncated}\n[output truncated at {MAX_UPDATE_OUTPUT_SIZE} bytes]")
+    } else {
+        combined
+    }
+};
+```
+
+**Step 5 — Tests**
+
+- Test that output accumulation stops at `MAX_UPDATE_OUTPUT_SIZE`.
+- Test that the truncation marker is appended.
+- Test that `UpdateResult` also respects the limit.
+- Test that normal-sized outputs are not affected.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/agent_ws.rs` | Add `MAX_UPDATE_OUTPUT_SIZE`, enforce limit in `UpdateOutput` and `UpdateResult`, use SQL-level concatenation |
+
+---
+
+## Plan 19: M1 — Rate Limiter Fails Open on DB Errors
+
+### Problem
+
+`rate_limit_auth` middleware (`src/middleware/rate_limit.rs:96-100`) catches DB errors from `check_rate_limit` and allows the request through (fail-open). An attacker who can induce DB pressure (e.g., by overloading the connection pool) can disable all rate limiting.
+
+### Plan
+
+**Step 1 — Add configurable fail-open/fail-closed behavior per endpoint category**
+
+Not all endpoints should fail-closed — for general API endpoints, fail-open is reasonable to avoid availability issues. But for security-critical endpoints (login, register), fail-closed is safer:
+
+```rust
+struct EndpointRateLimit {
+    max_requests: i32,
+    window_secs: i64,
+    fail_closed: bool,  // NEW
+}
+```
+
+Set `fail_closed: true` for `login` and `register`, `false` for others:
+
+```rust
+static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLock::new(|| {
+    HashMap::from([
+        (
+            "/api/v1/auth/login",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/register",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/refresh",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: false,
+            },
+        ),
+        // ... etc
+    ])
+});
+```
+
+**Step 2 — Update the error handling in the middleware**
+
+```rust
+Err(e) => {
+    tracing::error!(path, error = %e, "rate limit check failed");
+    if limit.fail_closed {
+        error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Service temporarily unavailable, please try again later",
+        )
+    } else {
+        next.run(req).await
+    }
+}
+```
+
+**Step 3 — Add an in-memory fallback rate limiter**
+
+For fail-closed endpoints, add a simple in-memory counter as fallback when the DB is unavailable. This provides basic protection even when the database is down:
+
+```rust
+use std::sync::Mutex;
+use std::collections::HashMap;
+use std::time::Instant;
+
+static FALLBACK_COUNTERS: LazyLock<Mutex<HashMap<String, (u32, Instant)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn fallback_rate_check(key: &str, max: u32, window_secs: u64) -> bool {
+    let mut map = FALLBACK_COUNTERS.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let entry = map.entry(key.to_string()).or_insert((0, now));
+    if now.duration_since(entry.1).as_secs() > window_secs {
+        *entry = (1, now);
+        return true; // allowed
+    }
+    entry.0 += 1;
+    entry.0 <= max
+}
+```
+
+Update the error path:
+
+```rust
+Err(e) => {
+    tracing::error!(path, error = %e, "rate limit check failed");
+    if limit.fail_closed {
+        // Fallback to in-memory rate limiting
+        if fallback_rate_check(&key, limit.max_requests as u32, limit.window_secs as u64) {
+            next.run(req).await
+        } else {
+            error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many requests, please try again later",
+            )
+        }
+    } else {
+        next.run(req).await
+    }
+}
+```
+
+**Step 4 — Add periodic cleanup for the fallback counters**
+
+Spawn a task that periodically purges expired entries from `FALLBACK_COUNTERS` to prevent memory growth.
+
+**Step 5 — Tests**
+
+- Test that login/register return 503 or 429 when DB is unavailable (not 200).
+- Test that refresh/device endpoints still work when DB is unavailable (fail-open).
+- Test the in-memory fallback correctly limits requests.
+- Test that the fallback counter resets after the window expires.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/middleware/rate_limit.rs` | Add `fail_closed` flag, in-memory fallback limiter, update error handling |
+
+---
+
+## Plan 20: M2 — OIDC AutoLink Bypasses Account Ownership Verification
+
+### Problem
+
+`resolve_oidc_user` (`src/auth/authentication.rs:147-159`) returns `AutoLink` when a user has no password and no other active OIDC link. This automatically links the OIDC identity to the existing user without any proof that the OIDC user owns the email address. The risk depends on whether the OIDC provider verifies emails — if not (or if the provider allows arbitrary email claims), an attacker can claim any passwordless account.
+
+### Plan
+
+**Step 1 — Only auto-link if the OIDC provider is trusted for email verification**
+
+Add an `email_verified_trusted` flag to the OIDC provider configuration:
+
+```rust
+// In the oidc_provider entity or config
+pub email_verified_trusted: bool,  // Whether this provider's email_verified claim is trustworthy
+```
+
+In `resolve_oidc_user`, only auto-link if the provider is trusted AND the `email_verified` claim is true:
+
+```rust
+// 2d. Auto-link — only if provider is trusted for email verification
+//     and the ID token asserts email_verified = true
+return Ok(OidcUserResolution::AutoLink {
+    user_id: found_user.id,
+});
+```
+
+**Step 2 — Pass `email_verified` from the ID token to `resolve_oidc_user`**
+
+Add `email_verified: Option<bool>` to `OidcUserParams`:
+
+```rust
+pub struct OidcUserParams<'a> {
+    pub db: &'a DatabaseConnection,
+    pub tenant_id: uuid::Uuid,
+    pub provider_id: uuid::Uuid,
+    pub oidc_subject: &'a str,
+    pub email: &'a str,
+    pub first_name: Option<&'a str>,
+    pub last_name: Option<&'a str>,
+    pub auto_create: bool,
+    pub email_verified: Option<bool>,  // NEW
+    pub provider_trusts_email: bool,   // NEW
+}
+```
+
+**Step 3 — Guard AutoLink with email verification**
+
+```rust
+// 2d. Auto-link — only if we trust the email ownership
+if params.provider_trusts_email && params.email_verified == Some(true) {
+    return Ok(OidcUserResolution::AutoLink {
+        user_id: found_user.id,
+    });
+}
+
+// Otherwise, require explicit account linking via password or another provider
+if found_user.password_hash.is_some() {
+    return Ok(OidcUserResolution::LinkViaPasswordRequired {
+        user_id: found_user.id,
+    });
+}
+
+// No password, no trusted auto-link — the user cannot link without admin help
+return Ok(OidcUserResolution::NotAllowed);
+```
+
+**Step 4 — Add `email_verified_trusted` to the OIDC provider entity**
+
+Add a migration to add `email_verified_trusted BOOLEAN NOT NULL DEFAULT TRUE` to the `oidc_providers` table. Default to `true` for backward compatibility with existing providers (most major providers like Google, Microsoft, Okta do verify emails).
+
+Update the provider creation/update API to accept and store this flag.
+
+**Step 5 — Extract `email_verified` from ID token claims**
+
+In the OIDC callback handler (`src/routes/oidc_auth.rs`), extract the `email_verified` claim from the ID token:
+
+```rust
+let email_verified = claims
+    .get("email_verified")
+    .and_then(|v| v.as_bool());
+```
+
+Pass it to `OidcUserParams`.
+
+**Step 6 — Tests**
+
+- Test that `AutoLink` is returned when `email_verified = true` and `provider_trusts_email = true`.
+- Test that `NotAllowed` is returned when `email_verified = false`.
+- Test that `NotAllowed` is returned when `provider_trusts_email = false` even if `email_verified = true`.
+- Test that `LinkViaPasswordRequired` is returned for users with passwords regardless of email verification.
+- Test backward compatibility: existing providers default to `email_verified_trusted = true`.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/auth/authentication.rs` | Add `email_verified` and `provider_trusts_email` to `OidcUserParams`, guard `AutoLink` |
+| `src/routes/oidc_auth.rs` | Extract `email_verified` from ID token, pass to `resolve_oidc_user` |
+| `src/routes/oidc_providers.rs` | Add `email_verified_trusted` to provider create/update |
+| Migration | Add `email_verified_trusted` column to `oidc_providers` |
+| `crates/shared/db/src/entity/oidc_provider.rs` | Add `email_verified_trusted` field |
