@@ -472,7 +472,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **TOP 25 Priority** — Twenty-five implementation-ready fix plans below cover all 6 Critical, all 12 High, and 13 of 18 Medium findings. Remaining 20 issues (5 Medium, 16 Low) do not yet have detailed plans. Additionally, 5 issues (HI-3, HI-5, HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
+> **TOP 35 Priority** — Thirty-five implementation-ready fix plans below cover all 6 Critical, all 12 High, all 18 Medium, and 6 of 16 Low findings. Remaining 10 Low issues (LO-3, LO-6, LO-7, LO-8, LO-9, LO-12, LO-13, LO-14, LO-15, LO-16) do not yet have detailed plans. Additionally, 5 issues (HI-3, HI-5, HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
 
 ---
 
@@ -2482,7 +2482,561 @@ model.insert(db).await.context_to()                        // ACT
 
 ---
 
-## Cross-References to Wire Protocol CODEREVIEW
+### FP-ME10: URL-encode Docker Registry auth parameters (#26)
+
+**Addresses:** ME-10 (Medium — parameter injection via malicious registry)
+
+**Problem:** `providers/docker-registry/src/auth.rs:69-82` constructs the token endpoint URL by appending `service` and `scope` values from the `WWW-Authenticate` header using raw string concatenation. These values originate from an untrusted registry response and are not URL-encoded. A malicious registry can include `&`, `=`, or other query-string metacharacters in `scope` (e.g., `repository:lib/nginx:pull&admin=true`) to inject extra parameters into the token request.
+
+**Current code:**
+```rust
+url.push_str("service=");
+url.push_str(svc);        // ← raw, unencoded
+// ...
+url.push_str("scope=");
+url.push_str(sc);          // ← raw, unencoded
+```
+
+**Detailed implementation plan:**
+
+1. **URL-encode both parameters** using percent-encoding:
+   ```rust
+   use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+
+   if let Some(svc) = service {
+       url.push(if has_query { '&' } else { '?' });
+       has_query = true;
+       url.push_str("service=");
+       url.push_str(&utf8_percent_encode(svc, NON_ALPHANUMERIC).to_string());
+   }
+   if let Some(sc) = scope {
+       url.push(if has_query { '&' } else { '?' });
+       url.push_str("scope=");
+       url.push_str(&utf8_percent_encode(sc, NON_ALPHANUMERIC).to_string());
+   }
+   ```
+
+2. **Alternatively, use `url::Url` builder** which handles encoding automatically:
+   ```rust
+   let mut parsed = url::Url::parse(&realm)?;
+   if let Some(svc) = service {
+       parsed.query_pairs_mut().append_pair("service", svc);
+   }
+   if let Some(sc) = scope {
+       parsed.query_pairs_mut().append_pair("scope", sc);
+   }
+   let url = parsed.to_string();
+   ```
+
+**Files to modify:**
+- `crates/providers/docker-registry/src/auth.rs` — use `url::Url` or percent-encoding
+- `crates/providers/docker-registry/Cargo.toml` — add `url` or `percent-encoding` dependency
+
+**Testing:**
+- Unit test: scope containing `&extra=1` is properly encoded, not split into separate params
+- Unit test: standard Docker Hub `service`/`scope` values encode correctly
+
+---
+
+### FP-ME14: Fix settings version bump race (#27)
+
+**Addresses:** ME-14 (Medium — unique constraint violation on concurrent first-time writes)
+
+**Problem:** `settings_store.rs:127-172` uses an update-then-insert-if-zero pattern for `settings_version`. Two concurrent first-time writes for a new tenant can both see `rows_affected == 0` and both attempt to insert, causing a unique constraint violation on `tenant_id`.
+
+**Current code:**
+```rust
+let result = SettingsVersion::update_many()
+    .col_expr(Version, Expr::col(Version).add(1))
+    .filter(TenantId.eq(tenant_id))
+    .exec(db).await?;
+
+if result.rows_affected == 0 {
+    // Defensive: insert new row
+    settings_version::ActiveModel { tenant_id: Set(tenant_id), version: Set(1), ... }
+        .insert(db).await?;   // ← RACE: both threads try this
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Use `INSERT ... ON CONFLICT` (upsert)** to make the operation atomic:
+   ```rust
+   // SQLite/PostgreSQL compatible upsert
+   let now = OffsetDateTime::now_utc();
+   let model = settings_version::ActiveModel {
+       tenant_id: Set(tenant_id),
+       version: Set(1),
+       global_version: Set(0),
+       revocation_version: Set(0),
+       updated_at: Set(now),
+   };
+
+   if is_global {
+       SettingsVersion::insert(model)
+           .on_conflict(
+               OnConflict::column(settings_version::Column::TenantId)
+                   .update_columns([
+                       settings_version::Column::GlobalVersion,
+                       settings_version::Column::UpdatedAt,
+                   ])
+                   .to_owned(),
+           )
+           .exec(db).await?;
+       // Then do the increment separately
+       SettingsVersion::update_many()
+           .col_expr(GlobalVersion, Expr::col(GlobalVersion).add(1))
+           .exec(db).await?;
+   } else {
+       SettingsVersion::insert(model)
+           .on_conflict(
+               OnConflict::column(settings_version::Column::TenantId)
+                   .update_columns([
+                       settings_version::Column::Version,
+                       settings_version::Column::UpdatedAt,
+                   ])
+                   .to_owned(),
+           )
+           .exec(db).await?;
+       SettingsVersion::update_many()
+           .col_expr(Version, Expr::col(Version).add(1))
+           .filter(TenantId.eq(tenant_id))
+           .exec(db).await?;
+   }
+   ```
+
+2. **Simpler alternative:** Ensure the row always exists by inserting it during tenant creation (migration or seed). Then the update path is the only path, eliminating the race entirely.
+
+**Files to modify:**
+- `crates/ui/web-api/src/settings_store.rs` — use upsert or ensure row pre-exists
+
+**Testing:**
+- Concurrent test: multiple threads bumping version for the same tenant → no constraint violation
+
+---
+
+### FP-ME16: Invalidate registration settings cache across HA (#28)
+
+**Addresses:** ME-16 (Medium — stale registration mode on other instances)
+
+**Problem:** `RegistrationSettings` is cached in-memory in each controller instance's `AppState`. When `complete_initial_setup()` or `update()` modifies registration settings, the change is written to the DB and the local in-memory copy is updated, but other instances continue serving stale values. An instance running with `mode = Invite` could allow registrations even after another instance switched to `mode = Closed`.
+
+**Current code pattern:**
+```rust
+pub async fn complete_initial_setup(&mut self, db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
+    upsert_setting(db, tenant_id, SettingKey::RegistrationMode, "Closed").await?;
+    self.mode = RegistrationMode::Closed;  // ← only updates THIS instance
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Bump the settings version** when registration settings change. This is the existing HA mechanism — all instances poll `settings_version` and reload when it changes:
+   ```rust
+   pub async fn complete_initial_setup(&mut self, db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
+       upsert_setting(db, tenant_id, SettingKey::RegistrationMode, "Closed").await?;
+       delete_setting(db, tenant_id, SettingKey::RegistrationTokenHash).await?;
+       delete_setting(db, tenant_id, SettingKey::RegistrationRequireTokenForOidc).await?;
+
+       // Bump version so other instances reload
+       crate::settings_store::bump_settings_version(db, tenant_id, false).await?;
+
+       // Update local cache
+       self.mode = RegistrationMode::Closed;
+       self.token_hash = None;
+       self.require_token_for_oidc = false;
+       Ok(())
+   }
+   ```
+
+2. **Apply the same pattern to `update()`** — it should also bump the settings version after DB writes.
+
+3. **Verify the settings reload task** (`reload_from_db()`) correctly reloads registration settings. From the ME-8 analysis, `reload_from_db()` does update `registration` — so bumping the version is sufficient to trigger cross-instance refresh.
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/registration.rs` — bump settings version in `complete_initial_setup()` and `update()`
+
+**Testing:**
+- Integration test: update registration mode on instance A → instance B sees new mode after version poll
+
+---
+
+### FP-ME18: Optimize update history tenant scoping query (#29)
+
+**Addresses:** ME-18 (Medium — loads all host models just to extract UUIDs)
+
+**Problem:** `tenant_host_ids()` in `update_history.rs:61-70` loads full `Host` models (`SELECT * FROM hosts WHERE tenant_id = ?`) just to extract the `id` column. For tenants with many hosts, this transfers unnecessary data (hostname, IP, timestamps, etc.) and allocates full model objects.
+
+**Current code:**
+```rust
+async fn tenant_host_ids(db: &DatabaseConnection, tenant_id: Uuid) -> Result<Vec<Uuid>, DbErr> {
+    let hosts = Host::find()
+        .filter(host::Column::TenantId.eq(tenant_id))
+        .all(db).await?;                           // ← loads all columns
+    Ok(hosts.into_iter().map(|h| h.id).collect())  // ← only uses id
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Use `select_only()` + `column()` to fetch only IDs:**
+   ```rust
+   async fn tenant_host_ids(db: &DatabaseConnection, tenant_id: Uuid) -> Result<Vec<Uuid>, DbErr> {
+       let ids: Vec<Uuid> = Host::find()
+           .filter(host::Column::TenantId.eq(tenant_id))
+           .filter(host::Column::DeactivatedAt.is_null())
+           .select_only()
+           .column(host::Column::Id)
+           .into_values::<Uuid, host::Column>()
+           .all(db)
+           .await?;
+       Ok(ids)
+   }
+   ```
+
+2. **Consider using a subquery** instead of materializing IDs at all. The calling code uses `host_ids` in an `IN()` clause — this can be a single query:
+   ```rust
+   // Instead of:
+   //   let host_ids = tenant_host_ids(db, tenant_id).await?;
+   //   UpdateHistory::find().filter(HostId.is_in(host_ids))
+   // Use:
+   UpdateHistory::find()
+       .filter(update_history::Column::TenantId.eq(tenant_id))
+   ```
+   (If `update_history` has a `tenant_id` column, use it directly instead of the host-based indirection.)
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/update_history.rs` — use `select_only()` or subquery
+
+**Testing:**
+- Existing endpoint tests should return identical results
+- Verify SQL query only selects `id` column (check query log)
+
+---
+
+### FP-LO2: Add password maximum length check (#30)
+
+**Addresses:** LO-2 (Low — Argon2 CPU exhaustion via extremely long passwords)
+
+**Problem:** Registration (`auth.rs:49`) validates `password.len() >= 8` but has no maximum. The password is passed to `Argon2::hash_password()` (with OWASP-recommended parameters: 19 MiB memory, 2 iterations). Extremely long passwords (e.g., 1 MB) cause significant CPU and memory consumption. An attacker can send repeated registration or login requests with massive passwords to exhaust server resources.
+
+**Current validation:**
+```rust
+if req.password.len() < 8 {
+    return error_response(StatusCode::BAD_REQUEST, "Password must be at least 8 characters");
+}
+// ❌ No maximum check → password passed directly to Argon2
+```
+
+**Detailed implementation plan:**
+
+1. **Add a maximum length check** (128 characters is generous — NIST SP 800-63B recommends accepting at least 64):
+   ```rust
+   if req.password.len() < 8 {
+       return error_response(StatusCode::BAD_REQUEST, "Password must be at least 8 characters");
+   }
+   if req.password.len() > 128 {
+       return error_response(StatusCode::BAD_REQUEST, "Password must not exceed 128 characters");
+   }
+   ```
+
+2. **Apply to both registration and login endpoints.** The login path should also reject oversized passwords before hashing:
+   ```rust
+   // In login handler, before password::verify_password():
+   if req.password.len() > 128 {
+       return error_response(StatusCode::UNAUTHORIZED, "Invalid email or password");
+   }
+   ```
+   (Use the generic "invalid credentials" message on login to avoid information leakage.)
+
+3. **Apply to password change/reset** endpoints if they exist.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/auth.rs` — add max check in register + login handlers
+
+**Testing:**
+- Unit test: 129-char password returns 400 on registration
+- Unit test: 128-char password succeeds
+- Unit test: oversized password on login returns 401
+
+---
+
+### FP-LO10: Add missing indexes on hot query paths (#31)
+
+**Addresses:** LO-10 (Low — missing indexes cause full table scans on frequent queries)
+
+**Problem:** Several frequently-queried columns lack indexes:
+- `user_roles`: No index on `(user_id)` — used on every authenticated request to resolve permissions
+- `sessions(revoked_at)`: No index — used for active session queries and cleanup
+- `service_certificates(ca_fingerprint)`: No index — needed for FK lookups after HI-9 fix
+
+The `user_roles` table has a composite PK `(tenant_id, user_id, role_id)`, which works for lookups by `tenant_id` prefix but is suboptimal for queries filtering only by `user_id`.
+
+**Detailed implementation plan:**
+
+1. **Modify the relevant migration** to add indexes (since existing migrations can be modified per project rules):
+
+   In `m20260129_000003_create_rbac.rs`, add after table creation:
+   ```rust
+   // Index for permission lookups by user_id (used on every authenticated request)
+   manager.create_index(
+       Index::create()
+           .name("idx_user_roles_user_id")
+           .table(UserRoles::Table)
+           .col(UserRoles::UserId)
+           .to_owned(),
+   ).await?;
+   ```
+
+   In `m20260130_000009_jwt_refresh_tokens.rs` (or the sessions migration), add:
+   ```rust
+   // Index for active session queries (revoked_at IS NULL)
+   manager.create_index(
+       Index::create()
+           .name("idx_sessions_revoked_at")
+           .table(Sessions::Table)
+           .col(Sessions::RevokedAt)
+           .to_owned(),
+   ).await?;
+   ```
+
+   In `m20260129_000008_create_agent_certificates.rs`, add:
+   ```rust
+   // Index for ca_fingerprint FK lookups (supports HI-9 FK constraint)
+   manager.create_index(
+       Index::create()
+           .name("idx_service_certificates_ca_fingerprint")
+           .table(ServiceCertificates::Table)
+           .col(ServiceCertificates::CaFingerprint)
+           .to_owned(),
+   ).await?;
+   ```
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260129_000003_create_rbac.rs`
+- `crates/core/controller/src/migration/m20260130_000009_jwt_refresh_tokens.rs`
+- `crates/core/controller/src/migration/m20260129_000008_create_agent_certificates.rs`
+
+**Testing:**
+- Migration runs cleanly on fresh database
+- Verify indexes exist via `PRAGMA index_list` (SQLite) or `\di` (PostgreSQL)
+
+---
+
+### FP-LO4: Add expiration to API tokens (#32)
+
+**Addresses:** LO-4 (Low — API tokens valid indefinitely until manually revoked)
+
+**Problem:** The `api_tokens` table has no `expires_at` column. Tokens remain valid forever unless explicitly revoked. If a token is forgotten or its owner leaves the organization, it provides permanent access.
+
+**Current entity (no `expires_at`):**
+```rust
+pub struct Model {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub name: String,
+    pub token_hash: String,
+    pub created_at: OffsetDateTime,
+    pub last_used_at: Option<OffsetDateTime>,
+    pub revoked_at: Option<OffsetDateTime>,
+    // ❌ no expires_at
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Add `expires_at` column** to the `api_tokens` table via migration:
+   ```rust
+   // New migration (or modify existing)
+   manager.alter_table(
+       Table::alter()
+           .table(ApiTokens::Table)
+           .add_column(ColumnDef::new(ApiTokens::ExpiresAt).timestamp_with_time_zone().null())
+           .to_owned(),
+   ).await?;
+   ```
+   `NULL` means "never expires" (backwards compatible with existing tokens).
+
+2. **Update the entity model:**
+   ```rust
+   pub expires_at: Option<OffsetDateTime>,
+   ```
+
+3. **Update token creation API** to accept optional `expires_in_days`:
+   ```rust
+   pub struct CreateApiTokenRequest {
+       pub name: String,
+       pub expires_in_days: Option<u16>,  // None = no expiry
+   }
+   ```
+
+4. **Check expiry during token verification** in `api_token.rs`:
+   ```rust
+   if let Some(expires_at) = token_model.expires_at {
+       if expires_at <= OffsetDateTime::now_utc() {
+           return Err(report!(AuthError::TokenExpired));
+       }
+   }
+   ```
+
+5. **Add `expires_at` to API token list response** so users can see when tokens expire.
+
+**Files to modify:**
+- New migration or modify existing `api_tokens` migration
+- `crates/shared/db/src/entity/api_token.rs` — add field
+- `crates/ui/web-api/src/auth/api_token.rs` — check expiry
+- `crates/ui/web-api/src/routes/api_tokens.rs` — accept `expires_in_days`
+- `crates/shared/web-api-types/src/api_tokens.rs` — update request/response types
+
+**Testing:**
+- Unit test: expired token returns 401
+- Unit test: token with `expires_at = None` remains valid
+- Unit test: token within expiry window works
+
+---
+
+### FP-LO1: Add email validation on registration (#33)
+
+**Addresses:** LO-1 (Low — no email format validation accepts garbage)
+
+**Problem:** The registration handler (`auth.rs:39-188`) accepts any string as an email — empty strings, strings without `@`, and absurdly long strings. This can cause issues with email-based lookups, OIDC auto-linking, and notification features.
+
+**Current code (no email validation):**
+```rust
+pub async fn register(State(state): State<Arc<AppState>>, Json(req): Json<RegisterRequest>) -> Response {
+    // Only password is validated:
+    if req.password.len() < 8 { return error_response(...); }
+    // ❌ No email validation
+    // ...
+    let existing = User::find().filter(user::Column::Email.eq(&req.email)).one(&state.db).await;
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Add basic email validation** (no need for a heavy regex — basic structural check suffices):
+   ```rust
+   let email = req.email.trim().to_lowercase();  // normalize
+   if email.is_empty() || email.len() > 254 {
+       return error_response(StatusCode::BAD_REQUEST, "Invalid email address");
+   }
+   if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+       return error_response(StatusCode::BAD_REQUEST, "Invalid email address");
+   }
+   // Ensure exactly one @ and domain has at least one dot
+   let parts: Vec<&str> = email.splitn(2, '@').collect();
+   if parts.len() != 2 || parts[0].is_empty() || !parts[1].contains('.') {
+       return error_response(StatusCode::BAD_REQUEST, "Invalid email address");
+   }
+   ```
+
+2. **Normalize email before storage** — trim whitespace and lowercase (also fixes LO-5 partially):
+   ```rust
+   let email = req.email.trim().to_lowercase();
+   ```
+
+3. **Apply the same normalization in the login handler** and everywhere email is used for lookup.
+
+4. **Apply in OIDC flow** — normalize the email from OIDC claims before lookup/storage.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/auth.rs` — validate + normalize on register and login
+- `crates/ui/web-api/src/auth/authentication.rs` — normalize in OIDC resolution
+
+**Testing:**
+- Unit test: empty email rejected
+- Unit test: email without `@` rejected
+- Unit test: email > 254 chars rejected
+- Unit test: `User@Example.COM` normalized to `user@example.com`
+- Unit test: valid email like `user@example.com` accepted
+
+---
+
+### FP-LO5: Case-insensitive email handling (#34)
+
+**Addresses:** LO-5 (Low — `User@Example.com` and `user@example.com` treated as different users)
+
+**Problem:** All email lookups use case-sensitive `Column::Email.eq(email)`. Database collation may or may not be case-sensitive depending on the backend (SQLite default is case-sensitive for non-ASCII). Users can register `Admin@Company.com` and `admin@company.com` as separate accounts due to the unique constraint allowing different cases.
+
+**Current code (case-sensitive):**
+```rust
+// Registration:
+User::find().filter(user::Column::Email.eq(&req.email)).one(db).await
+// Login:
+User::find().filter(user::Column::Email.eq(&req.email)).one(db).await
+// OIDC:
+User::find().filter(user::Column::Email.eq(email)).one(db).await
+```
+
+**Detailed implementation plan:**
+
+1. **Normalize to lowercase at all entry points** (complements FP-LO1):
+   - Registration: `let email = req.email.trim().to_lowercase();`
+   - Login: `let email = req.email.trim().to_lowercase();`
+   - OIDC callback: `let email = claims.email().map(|e| e.to_lowercase())`
+
+2. **Add a migration to lowercase all existing emails:**
+   ```rust
+   // For SQLite:
+   db.execute_unprepared("UPDATE users SET email = LOWER(TRIM(email))").await?;
+   // For PostgreSQL:
+   db.execute_unprepared("UPDATE users SET email = LOWER(TRIM(email))").await?;
+   ```
+
+3. **Combined with FP-LO1**, this ensures all emails are stored and compared in lowercase, making the existing case-sensitive unique constraint function correctly.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/auth.rs` — normalize email in register + login
+- `crates/ui/web-api/src/auth/authentication.rs` — normalize email in OIDC flow
+- New migration to lowercase existing data
+
+**Testing:**
+- Unit test: registering `User@Example.com` stores as `user@example.com`
+- Unit test: login with `USER@EXAMPLE.COM` finds `user@example.com`
+- Unit test: OIDC auto-link with different case still finds existing user
+
+---
+
+### FP-LO11: Add unique constraint on available versions (#35)
+
+**Addresses:** LO-11 (Low — duplicate version strings per software item)
+
+**Problem:** The `available_versions` table (migration 015) has no unique constraint on `(software_item_id, version)`. Multiple rows with the same version can be inserted for the same software item, causing duplicate entries in version listings and ambiguity when resolving "latest version."
+
+**Current table:** Has PK on `id`, FK on `software_item_id`, index on `software_item_id`, CHECK constraint on `version OR release_date` — but NO uniqueness on `(software_item_id, version)`.
+
+**Detailed implementation plan:**
+
+1. **Modify migration 015** to add a unique index:
+   ```rust
+   manager.create_index(
+       Index::create()
+           .name("uq_available_versions_item_version")
+           .table(AvailableVersions::Table)
+           .col(AvailableVersions::SoftwareItemId)
+           .col(AvailableVersions::Version)
+           .unique()
+           .to_owned(),
+   ).await?;
+   ```
+
+2. **Update the version upsert logic** (if any) to use `INSERT ... ON CONFLICT` instead of blind insert. When a provider fetches releases and a version already exists, it should update `release_date`/`release_notes`/`extra` rather than creating a duplicate.
+
+3. **Handle the `NULL` version case:** Since `version` is nullable (the CHECK allows `release_date` instead), the unique index should only apply when `version IS NOT NULL`. Use a partial/conditional unique index:
+   ```sql
+   -- SQLite: CREATE UNIQUE INDEX ... WHERE version IS NOT NULL
+   -- PostgreSQL: same syntax
+   ```
+   In SeaORM, this may require a raw SQL migration statement.
+
+**Files to modify:**
+- `crates/core/controller/src/migration/m20260201_000015_create_software_items.rs` — add unique index
+- Version store/provider logic — use upsert instead of insert
+
+**Testing:**
+- Migration runs cleanly
+- Inserting duplicate `(software_item_id, version)` fails with constraint error
+- Upsert correctly updates existing version metadata
 
 The following findings from `crates/shared/wire/CODEREVIEW.md` are confirmed and not duplicated here:
 
