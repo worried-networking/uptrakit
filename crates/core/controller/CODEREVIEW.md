@@ -472,7 +472,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **TOP 15 Priority** — The fifteen most impactful issues have detailed implementation-ready fix plans below (covering all 6 Critical, all 12 High, and the 3 most impactful Medium findings). Remaining 30 issues (14 Medium, 16 Low) do not yet have detailed plans.
+> **TOP 25 Priority** — Twenty-five implementation-ready fix plans below cover all 6 Critical, all 12 High, and 13 of 18 Medium findings. Remaining 20 issues (5 Medium, 16 Low) do not yet have detailed plans. Additionally, 5 issues (HI-3, HI-5, HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
 
 ---
 
@@ -1834,6 +1834,651 @@ async fn authenticate_api_token(state: &AppState, token: &str) -> Result<...> {
 - Unit test: active user's JWT still works
 - Unit test: deleted user (not in DB) returns 401
 - Integration test: deactivate user → immediate JWT rejection (no 15-minute delay)
+
+---
+
+### FP-ME9: Block SSRF in GitHub provider (TOP 10 — #16)
+
+**Addresses:** ME-9 (Medium — SSRF via admin-configurable `api_base_url`)
+
+**Problem:** The GitHub provider's `api_base_url` field (`providers/github/src/config.rs:17-19`) accepts any string. It is used in `format!("{}/repos/{}/{}/releases?per_page=100", api_base_url, owner, repo)` to construct HTTP request URLs. No scheme validation, no hostname validation, and no private-IP blocking exist. An admin can set `api_base_url` to `http://169.254.169.254` (cloud metadata), `http://localhost:3000` (internal services), or any internal endpoint. The `auth_token` (if configured) is sent along with every request.
+
+**Current validation (`config.rs:40-59`):**
+```rust
+pub fn validate(&self) -> Result<()> {
+    if self.owner.is_empty() { return Err(...); }
+    if self.repo.is_empty() { return Err(...); }
+    // ❌ NO validation on api_base_url
+    Ok(())
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Add URL validation to `GitHubConfig::validate()`:**
+   ```rust
+   if let Some(ref url) = self.api_base_url {
+       let parsed = url::Url::parse(url).map_err(|e|
+           report!(GitHubError::Configuration(format!("invalid api_base_url: {e}")))
+       )?;
+
+       // Scheme must be https (or http only for explicit opt-in)
+       if parsed.scheme() != "https" {
+           return Err(report!(GitHubError::Configuration(
+               "api_base_url must use https".to_string()
+           )));
+       }
+
+       // Block private/loopback IPs
+       if let Some(host) = parsed.host_str() {
+           if is_private_host(host) {
+               return Err(report!(GitHubError::Configuration(
+                   "api_base_url must not point to private/loopback addresses".to_string()
+               )));
+           }
+       }
+   }
+   ```
+
+2. **Implement `is_private_host()` helper** (shared across providers):
+   ```rust
+   fn is_private_host(host: &str) -> bool {
+       // Block known private hostnames
+       let lower = host.to_lowercase();
+       if lower == "localhost" || lower.ends_with(".local") || lower.ends_with(".internal") {
+           return true;
+       }
+       // Block private IP ranges
+       if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+           return ip.is_loopback()
+               || ip.is_unspecified()
+               || matches!(ip, std::net::IpAddr::V4(v4) if v4.is_private()
+                   || v4.octets()[0] == 169 && v4.octets()[1] == 254); // link-local
+       }
+       false
+   }
+   ```
+
+3. **Also validate `owner` and `repo`** for path traversal characters:
+   ```rust
+   if self.owner.contains('/') || self.owner.contains("..") {
+       return Err(report!(GitHubError::Configuration("invalid owner".into())));
+   }
+   if self.repo.contains('/') || self.repo.contains("..") {
+       return Err(report!(GitHubError::Configuration("invalid repo".into())));
+   }
+   ```
+
+4. **Apply same validation to Docker Registry provider** (`providers/docker-registry/`) which has a similar `registry_url` field.
+
+**Files to modify:**
+- `crates/providers/github/src/config.rs` — add URL/host validation
+- `crates/providers/github/Cargo.toml` — add `url` dependency if not present
+- Consider a shared `validate_external_url()` in `providers/core/`
+
+**Testing:**
+- Unit test: `https://api.github.com` passes
+- Unit test: `http://169.254.169.254` rejected
+- Unit test: `http://localhost:8080` rejected
+- Unit test: `https://github.example.com` (custom enterprise) passes
+- Unit test: owner/repo with path traversal rejected
+
+---
+
+### FP-ME11: Require ExternalBaseUrl for OIDC (TOP 10 — #17)
+
+**Addresses:** ME-11 (Medium — OIDC redirect to attacker domain via Origin/Host header)
+
+**Problem:** When `ExternalBaseUrl` is not configured, `oidc_auth.rs` constructs the OIDC redirect URL from client-supplied `Origin` or `Host` headers via `base_url_from_headers()`. An attacker can set `Origin: https://attacker.com` and the OIDC callback URL becomes `https://attacker.com/api/v1/auth/oidc/callback`, redirecting the authorization code to the attacker's server.
+
+**Current code (`oidc_auth.rs:1182-1196`):**
+```rust
+fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
+    // Trusts Origin header directly
+    let origin = headers.get("origin").and_then(|v| v.to_str().ok())...;
+    if origin.is_some_and(|s| !s.is_empty()) { return origin; }
+    // Falls back to Host header
+    headers.get("host").and_then(|v| v.to_str().ok())
+        .map(|h| format!("https://{}", h))
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Make `ExternalBaseUrl` required when OIDC is configured.** At OIDC provider creation/activation time, verify `ExternalBaseUrl` is set. Return an error if not:
+   ```rust
+   // In oidc_providers.rs create/update handler:
+   if external_base_url.is_none() {
+       return error_response(
+           StatusCode::BAD_REQUEST,
+           "external_base_url setting must be configured before enabling OIDC providers"
+       );
+   }
+   ```
+
+2. **Remove `base_url_from_headers()` fallback from OIDC flows.** In both `oidc_authorize` and the callback handler, require `ExternalBaseUrl`:
+   ```rust
+   let base_url = match external_base_url {
+       Some(Extension(u)) => u.0,
+       None => {
+           tracing::error!("OIDC flow attempted without ExternalBaseUrl configured");
+           return error_response(
+               StatusCode::INTERNAL_SERVER_ERROR,
+               "Server misconfiguration: external_base_url not set"
+           );
+       }
+   };
+   ```
+
+3. **Keep `base_url_from_headers()` only for non-security-sensitive uses** (if any). If it's only used by OIDC, delete it entirely.
+
+4. **Add a startup warning** if OIDC providers exist but `ExternalBaseUrl` is not configured.
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/oidc_auth.rs` — remove header fallback, require `ExternalBaseUrl`
+- `crates/ui/web-api/src/routes/oidc_providers.rs` — validate `ExternalBaseUrl` on create/activate
+
+**Testing:**
+- Unit test: OIDC authorize without `ExternalBaseUrl` returns 500
+- Unit test: OIDC authorize with `ExternalBaseUrl` constructs correct redirect URL
+- Unit test: attacker-controlled `Origin` header is ignored
+
+---
+
+### FP-ME4: Rate limit fails closed on database error (TOP 10 — #18)
+
+**Addresses:** ME-4 (Medium — rate limiting completely disabled during DB outage)
+
+**Problem:** The rate limit middleware (`middleware/rate_limit.rs:96-99`) catches database errors and allows the request through (fail-open). During a database outage, all rate limiting is silently disabled, allowing unlimited brute-force on auth endpoints.
+
+**Current code:**
+```rust
+Err(e) => {
+    tracing::error!("rate limit check failed: {e}");
+    next.run(req).await  // ← fail-open: allows ALL requests
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Add an in-memory fallback rate limiter** that activates when the DB check fails. Use a simple `DashMap<String, (u32, Instant)>` in `AppState`:
+   ```rust
+   pub struct InMemoryRateLimiter {
+       buckets: DashMap<String, (u32, Instant)>,
+   }
+
+   impl InMemoryRateLimiter {
+       pub fn check(&self, key: &str, max: u32, window_secs: u64) -> RateLimitOutcome {
+           let now = Instant::now();
+           let window = Duration::from_secs(window_secs);
+           let mut entry = self.buckets.entry(key.to_string()).or_insert((0, now));
+           if now.duration_since(entry.1) > window {
+               // Reset window
+               *entry = (1, now);
+               return RateLimitOutcome::Allowed;
+           }
+           if entry.0 >= max {
+               return RateLimitOutcome::Limited { retry_after_secs: /* ... */ };
+           }
+           entry.0 += 1;
+           RateLimitOutcome::Allowed
+       }
+   }
+   ```
+
+2. **Update the middleware error path:**
+   ```rust
+   Err(e) => {
+       tracing::error!("rate limit DB check failed, using in-memory fallback: {e}");
+       match state.fallback_rate_limiter.check(&key, limit.max_requests, limit.window_secs) {
+           RateLimitOutcome::Allowed => next.run(req).await,
+           RateLimitOutcome::Limited { retry_after_secs } => {
+               // Return 429
+           }
+       }
+   }
+   ```
+
+3. **Add periodic cleanup** of stale entries (every 5 minutes, remove entries older than 2× window).
+
+4. **The in-memory limiter is per-instance** (not HA-safe), but that's acceptable as a degraded-mode fallback — it still prevents single-instance brute-force, which is better than no limiting at all.
+
+**Files to modify:**
+- `crates/ui/web-api/src/middleware/rate_limit.rs` — use fallback on error
+- `crates/ui/web-api/src/lib.rs` — add `InMemoryRateLimiter` to `AppState`
+
+**Testing:**
+- Unit test: DB error triggers fallback, requests still rate-limited
+- Unit test: fallback limiter correctly tracks counts and windows
+- Unit test: fallback limiter resets after window expires
+
+---
+
+### FP-ME5: Require permission for device flow approval (TOP 10 — #19)
+
+**Addresses:** ME-5 (Medium — any authenticated user can approve device flows)
+
+**Problem:** The `device_auth_approve()` handler in `routes/device_auth.rs:183-215` only checks that the caller is authenticated. Any user — including those with only `ViewAgents` permission — can approve device enrollment flows. This violates least-privilege.
+
+**Current code:**
+```rust
+pub async fn device_auth_approve(
+    State(state): State<Arc<AppState>>,
+    Extension(auth_user): Extension<AuthenticatedUser>,
+    Json(req): Json<DeviceAuthApproveRequest>,
+) -> Response {
+    // ❌ No permission check — any authenticated user can approve
+    let normalized = req.user_code.replace('-', "").to_uppercase();
+    state.device_flow_store.approve(&normalized, auth_user.user_id).await
+    // ...
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Add permission check at the top of the handler:**
+   ```rust
+   if !auth_user.has_permission(Permission::ManageAgents) {
+       return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+   }
+   ```
+
+2. **This follows the existing pattern** used by every other management endpoint (e.g., `approve_service`, `create_provider_config`, etc.).
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/device_auth.rs` — add permission check
+
+**Testing:**
+- Unit test: user without `ManageAgents` returns 403
+- Unit test: user with `ManageAgents` can approve
+
+---
+
+### FP-ME15: Restrict private key file permissions (TOP 10 — #20)
+
+**Addresses:** ME-15 (Medium — server key files world-readable on permissive systems)
+
+**Problem:** `std::fs::write()` in `pki.rs:713-714` and `server_cert.rs:137-140` writes private key files using the default umask. On systems with a permissive umask (e.g., `0022`), key files are created with mode `0644` — readable by all users.
+
+**Current code (pki.rs:713-714):**
+```rust
+fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
+fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;  // world-readable key!
+```
+
+**Detailed implementation plan:**
+
+1. **Create a `write_private_key()` helper** that sets restrictive permissions:
+   ```rust
+   #[cfg(unix)]
+   fn write_private_key(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+       use std::os::unix::fs::OpenOptionsExt;
+       let mut file = std::fs::OpenOptions::new()
+           .write(true)
+           .create(true)
+           .truncate(true)
+           .mode(0o600)  // owner read/write only
+           .open(path)?;
+       std::io::Write::write_all(&mut file, content.as_bytes())?;
+       Ok(())
+   }
+
+   #[cfg(not(unix))]
+   fn write_private_key(path: &std::path::Path, content: &str) -> std::io::Result<()> {
+       std::fs::write(path, content)
+   }
+   ```
+
+2. **Replace `fs::write()` for key files** in both locations:
+   - `pki.rs:714`: `write_private_key(&key_path, &bundle.key_pem)?`
+   - `server_cert.rs:140`: `write_private_key(&key_path, &key_pem)?`
+
+3. **Cert files can remain `0644`** — they're public. Only key files need restriction.
+
+**Files to modify:**
+- `crates/core/controller/src/pki.rs` — use `write_private_key` for key files
+- `crates/ui/web-api/src/routes/server_cert.rs` — same
+
+**Testing:**
+- Unit test (unix): written key file has mode `0600`
+- Unit test: cert file still writable/readable normally
+
+---
+
+### FP-ME3: Fix TOCTOU race in rate limiter (TOP 10 — #21)
+
+**Addresses:** ME-3 (Medium — concurrent requests bypass rate limit check)
+
+**Problem:** The DB-backed rate limiter in `auth/rate_limit.rs:62-106` uses a read-then-update pattern. Between the `SELECT` (count check) and the `UPDATE` (increment), concurrent requests can both pass the limit check before either increments the counter, allowing `N` extra requests through (where N = concurrent instances).
+
+**Current flow:**
+```
+1. SELECT request_count WHERE key = ?      ← reads 9
+2. if request_count >= limit → block       ← 9 < 10, passes
+3. UPDATE SET request_count = count + 1    ← writes 10
+   (concurrent request also reads 9 at step 1, also passes)
+```
+
+**Detailed implementation plan:**
+
+1. **Use atomic conditional UPDATE** that combines check and increment in one statement:
+   ```rust
+   pub async fn check_rate_limit(&self, key: &str, max_requests: u32, window_secs: u64) -> Result<RateLimitOutcome> {
+       let now = OffsetDateTime::now_utc();
+       let threshold = now - time::Duration::seconds(window_secs as i64);
+
+       // Atomic: increment only if within window AND under limit
+       let result = ApiRateLimit::update_many()
+           .col_expr(
+               api_rate_limit::Column::RequestCount,
+               Expr::col(api_rate_limit::Column::RequestCount).add(1),
+           )
+           .filter(api_rate_limit::Column::Key.eq(key))
+           .filter(api_rate_limit::Column::WindowStart.gte(threshold))
+           .filter(api_rate_limit::Column::RequestCount.lt(max_requests as i32))
+           .exec(&self.db)
+           .await?;
+
+       if result.rows_affected == 1 {
+           return Ok(RateLimitOutcome::Allowed);
+       }
+
+       // Either no row, expired window, or at limit — check which
+       let existing = ApiRateLimit::find_by_id(key).one(&self.db).await?;
+       match existing {
+           Some(row) if row.window_start >= threshold && row.request_count >= max_requests as i32 => {
+               // At limit
+               let retry_after = /* compute */;
+               Ok(RateLimitOutcome::Limited { retry_after_secs: retry_after })
+           }
+           _ => {
+               // No row or expired window — start fresh
+               self.upsert_new_window(key, now, window_secs).await?;
+               Ok(RateLimitOutcome::Allowed)
+           }
+       }
+   }
+   ```
+
+2. **The key insight:** By adding `.filter(RequestCount.lt(max_requests))` to the UPDATE, the DB atomically increments only if under the limit. If two requests race, the first to execute the UPDATE increments to the limit; the second UPDATE affects 0 rows and falls through to the rate-limited path.
+
+**Files to modify:**
+- `crates/ui/web-api/src/auth/rate_limit.rs` — rewrite `check_rate_limit` with atomic conditional update
+
+**Testing:**
+- Unit test: sequential requests correctly count up to limit
+- Concurrent test: spawn N tasks, verify total allowed ≤ limit
+
+---
+
+### FP-ME8: Atomic settings reload (TOP 10 — #22)
+
+**Addresses:** ME-8 (Medium — partially-updated settings visible between lock releases)
+
+**Problem:** `reload_from_db()` in `settings.rs:232-281` acquires and releases individual `RwLock`s for each setting field sequentially. Between lock releases, a reader can observe a mix of old and new values (e.g., new registration mode but old cert lifetime).
+
+**Current code (simplified):**
+```rust
+pub async fn reload_from_db(&self, db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
+    let raw = load_all_settings(db, tenant_id).await?;
+    *self.inner.registration.write().await = RegistrationSettings::from_raw(&raw);
+    // ← Reader here sees new registration but old cert_lifetime
+    *self.inner.agent_cert_lifetime_days.write().await = ...;
+    // ← Reader here sees new registration + cert_lifetime but old network
+    *self.inner.network.write().await = ...;
+    // ...
+}
+```
+
+**Detailed implementation plan:**
+
+1. **Replace individual `RwLock` fields with a single `ArcSwap<SettingsSnapshot>`:**
+   ```rust
+   use arc_swap::ArcSwap;
+
+   pub struct SettingsSnapshot {
+       pub registration: RegistrationSettings,
+       pub authentication: AuthenticationSettings,
+       pub agent_cert_lifetime_days: u16,
+       pub renewal_window_hours: u16,
+       pub network: NetworkSettings,
+       pub mqtt_max_clients_per_tenant: u16,
+   }
+
+   struct Inner {
+       snapshot: ArcSwap<SettingsSnapshot>,
+       version: AtomicI64,
+       global_version: AtomicI64,
+   }
+   ```
+
+2. **Atomic reload:** Build the entire snapshot, then swap in one operation:
+   ```rust
+   pub async fn reload_from_db(&self, db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
+       let raw = load_all_settings(db, tenant_id).await?;
+       let new_snapshot = Arc::new(SettingsSnapshot {
+           registration: RegistrationSettings::from_raw(&raw),
+           authentication: AuthenticationSettings::from_raw(&raw),
+           agent_cert_lifetime_days: /* ... */,
+           renewal_window_hours: /* ... */,
+           network: Self::load_network_settings(&raw),
+           mqtt_max_clients_per_tenant: /* ... */,
+       });
+       self.inner.snapshot.store(new_snapshot);
+       // Version updates remain atomic via AtomicI64
+       // ...
+       Ok(())
+   }
+   ```
+
+3. **Readers use `snapshot.load()`** which returns an `Arc` — always a consistent point-in-time view:
+   ```rust
+   pub async fn agent_cert_lifetime_days(&self) -> u16 {
+       self.inner.snapshot.load().agent_cert_lifetime_days
+   }
+   ```
+
+4. **For individual field writes** (e.g., settings API updating one field), use `rcu()` (read-copy-update):
+   ```rust
+   pub async fn set_agent_cert_lifetime_days(&self, days: u16) {
+       self.inner.snapshot.rcu(|current| {
+           let mut new = (**current).clone();
+           new.agent_cert_lifetime_days = days;
+           Arc::new(new)
+       });
+   }
+   ```
+
+**Files to modify:**
+- `crates/ui/web-api/src/settings.rs` — replace `RwLock` fields with `ArcSwap`
+- `crates/ui/web-api/Cargo.toml` — add `arc-swap` dependency
+- All callers that read settings (transparent change via accessor methods)
+
+**Testing:**
+- Unit test: concurrent reads during reload always see consistent snapshots
+- Unit test: individual field updates are reflected atomically
+
+---
+
+### FP-ME12: Make CRL validity configurable (TOP 10 — #23)
+
+**Addresses:** ME-12 (Medium — 24-hour CRL caching gap for revoked certificates)
+
+**Problem:** `crl_manager.rs:295` hardcodes `next_update: now + Duration::hours(24)`. CRL clients cache the CRL until `next_update`. Revoking a certificate has no effect on clients that already cached the old CRL — they trust the revoked cert for up to 24 hours.
+
+**Current code (`crl_manager.rs:287-295`):**
+```rust
+let params = CertificateRevocationListParams {
+    this_update: now,
+    next_update: now + time::Duration::hours(24),  // ← hardcoded
+    crl_number: SerialNumber::from(crl_number),
+    // ...
+};
+```
+
+**Detailed implementation plan:**
+
+1. **Add `crl_validity_hours` to `CrlManagerConfig`:**
+   ```rust
+   pub struct CrlManagerConfig {
+       // ... existing fields ...
+       pub crl_validity_hours: u16,  // default: 24, minimum: 1
+   }
+   ```
+
+2. **Use the configurable value in `sign_crl()`:**
+   ```rust
+   let params = CertificateRevocationListParams {
+       this_update: now,
+       next_update: now + time::Duration::hours(config.crl_validity_hours as i64),
+       // ...
+   };
+   ```
+
+3. **Expose as a setting** in the settings API so operators can tune it:
+   - Short validity (e.g., 1-4 hours) = faster revocation propagation, more frequent CRL fetches
+   - Long validity (e.g., 24-48 hours) = fewer fetches, slower revocation
+
+4. **Document the trade-off** in the setting description and SECURITY.md.
+
+5. **As a complementary measure**, ensure the CRL rebuild task runs more frequently than the validity period (e.g., every validity/2 hours) so fresh CRLs are always available before the old one expires.
+
+**Files to modify:**
+- `crates/core/controller/src/crl_manager.rs` — accept configurable validity
+- `crates/core/controller/src/main.rs` — pass config value
+- `crates/ui/web-api/src/settings.rs` — add `crl_validity_hours` setting
+
+**Testing:**
+- Unit test: CRL `next_update` matches configured value
+- Unit test: default is 24 hours (backwards compatible)
+
+---
+
+### FP-ME7: Eliminate N+1 query patterns in list endpoints (TOP 10 — #24)
+
+**Addresses:** ME-7 (Medium — up to 2000+ queries per list request)
+
+**Problem:** Three list endpoints issue individual queries per result item:
+
+1. **`list_hosts`** (`hosts.rs:87-91`): `load_host_agents()` per host = 1 + N queries per host
+2. **`list_software_items`** (`software_items.rs:356-374`): `find_active_provider_config()` + `count_linked_hosts()` per item = 2N queries
+3. **`list_update_history`** (`update_history.rs:194-199`): `resolve_host_name()` + `resolve_software_item_name()` per record = 2N queries
+
+With max pagination of 1000 items, this means up to 2000+ individual DB round-trips per request.
+
+**Detailed implementation plan:**
+
+1. **`list_hosts` — batch-load agents with a single JOIN query:**
+   ```rust
+   // Instead of: for h in hosts { load_host_agents(h.id) }
+   // Do: single query to load all agents for all host IDs
+
+   let host_ids: Vec<Uuid> = hosts.iter().map(|h| h.id).collect();
+   let all_agents = Service::find()
+       .inner_join(ServiceHost)
+       .filter(service_host::Column::HostId.is_in(host_ids))
+       .filter(service::Column::TenantId.eq(tenant.tenant_id))
+       .filter(service::Column::DeactivatedAt.is_null())
+       .all(&state.db).await?;
+
+   // Group by host_id
+   let agents_by_host: HashMap<Uuid, Vec<_>> = /* group all_agents by host_id */;
+
+   let items = hosts.into_iter().map(|h| {
+       let agents = agents_by_host.get(&h.id).cloned().unwrap_or_default();
+       host_to_response(h, agents)
+   }).collect();
+   ```
+
+2. **`list_software_items` — batch-load provider configs and host counts:**
+   ```rust
+   // Batch load provider configs
+   let config_ids: Vec<Uuid> = items.iter().map(|i| i.provider_config_id).collect();
+   let configs: HashMap<Uuid, _> = ProviderConfig::find()
+       .filter(provider_config::Column::Id.is_in(config_ids))
+       .all(&state.db).await?
+       .into_iter().map(|c| (c.id, c)).collect();
+
+   // Batch count hosts per software item using GROUP BY
+   let host_counts = /* SELECT software_item_id, COUNT(*) FROM host_software_items
+                        WHERE software_item_id IN (?) GROUP BY software_item_id */;
+   ```
+
+3. **`list_update_history` — batch-load host names and software item names:**
+   ```rust
+   let host_ids: Vec<Uuid> = records.iter().map(|r| r.host_id).collect();
+   let si_ids: Vec<Uuid> = records.iter().map(|r| r.software_item_id).collect();
+
+   let host_names: HashMap<Uuid, String> = Host::find()
+       .filter(host::Column::Id.is_in(host_ids))
+       .all(&state.db).await?
+       .into_iter().map(|h| (h.id, h.hostname)).collect();
+
+   let si_names: HashMap<Uuid, String> = SoftwareItem::find()
+       .filter(software_item::Column::Id.is_in(si_ids))
+       .all(&state.db).await?
+       .into_iter().map(|s| (s.id, s.name)).collect();
+   ```
+
+**Files to modify:**
+- `crates/ui/web-api/src/routes/hosts.rs` — batch agent loading
+- `crates/ui/web-api/src/routes/software_items.rs` — batch config + host count
+- `crates/ui/web-api/src/routes/update_history.rs` — batch name resolution
+
+**Testing:**
+- Existing endpoint tests should pass with same results
+- Performance test: list with 100 items → verify ≤5 queries (vs 200+ before)
+
+---
+
+### FP-ME13: Fix MQTT client count TOCTOU (TOP 10 — #25)
+
+**Addresses:** ME-13 (Medium — concurrent requests can exceed MQTT client limit)
+
+**Problem:** `create_mqtt_client()` in `mqtt_client_store.rs:88-91` uses a count-then-insert pattern. Two concurrent requests can both read `count = max - 1`, both pass the check, and both insert — exceeding the configured maximum by one (or more with higher concurrency).
+
+**Current code:**
+```rust
+let count = count_mqtt_clients(db, tenant_id).await?;    // CHECK
+if count >= u64::from(max_clients) {
+    return Err(report!(MqttClientError::LimitReached(max_clients)));
+}
+// ... build model ...
+model.insert(db).await.context_to()                        // ACT
+```
+
+**Detailed implementation plan:**
+
+1. **Wrap check + insert in a serializable transaction:**
+   ```rust
+   pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mqtt_client::Model> {
+       let txn = params.db.begin_with_config(
+           Some(sea_orm::IsolationLevel::Serializable), None
+       ).await.context_to()?;
+
+       let count = count_mqtt_clients(&txn, params.tenant_id).await?;
+       if count >= u64::from(params.max_clients) {
+           return Err(report!(MqttClientError::LimitReached(params.max_clients)));
+       }
+
+       let model = mqtt_client::ActiveModel { /* ... */ };
+       let result = model.insert(&txn).await.context_to()?;
+
+       txn.commit().await.context_to()?;
+       Ok(result)
+   }
+   ```
+
+2. **Handle serialization conflict:** If two transactions race, the second will fail at commit with a serialization error. Map this to an appropriate error (retry or 409 Conflict).
+
+3. **Alternative (simpler, database-level):** If the `mqtt_leases` table already has a unique constraint on `mqtt_client_id`, a partial unique index on `mqtt_clients(tenant_id)` with a condition `WHERE deactivated_at IS NULL` could enforce limits at the DB level. However, partial unique indexes don't directly enforce count limits — the serializable transaction approach is more reliable.
+
+**Files to modify:**
+- `crates/ui/web-api/src/mqtt_client_store.rs` — wrap in serializable transaction
+
+**Testing:**
+- Concurrent test: spawn N tasks creating clients simultaneously → total never exceeds limit
+- Unit test: count at limit returns `LimitReached` error
 
 ---
 
