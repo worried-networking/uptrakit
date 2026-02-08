@@ -2395,3 +2395,767 @@ Pass it to `OidcUserParams`.
 | `src/routes/oidc_providers.rs` | Add `email_verified_trusted` to provider create/update |
 | Migration | Add `email_verified_trusted` column to `oidc_providers` |
 | `crates/shared/db/src/entity/oidc_provider.rs` | Add `email_verified_trusted` field |
+
+---
+
+## Plan 21: M3 — OIDC Role Sync Non-Atomic (Delete-Then-Insert Without Transaction)
+
+### Problem
+
+`sync_oidc_roles` (`src/auth/authentication.rs:264-282`) deletes all existing `user_role` rows for the user, then inserts the new mapped roles one-by-one. No transaction wraps these operations. A crash between delete and insert leaves the user with zero roles. Concurrent logins can also interfere.
+
+### Plan
+
+**Step 1 — Wrap delete-then-insert in a transaction**
+
+Use SeaORM's `TransactionTrait` to ensure atomicity:
+
+```rust
+pub async fn sync_oidc_roles(
+    db: &DatabaseConnection,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    provider: &oidc_provider::Model,
+    claims: &serde_json::Value,
+) -> Result<()> {
+    // ... existing claim extraction (lines 220-261) ...
+
+    if local_roles.is_empty() {
+        return Ok(());
+    }
+
+    // Atomic delete + insert within a transaction
+    use sea_orm::TransactionTrait;
+    db.transaction::<_, _, crate::auth::AuthError>(|txn| {
+        Box::pin(async move {
+            // Delete existing roles for this user within the tenant
+            UserRole::delete_many()
+                .filter(user_role::Column::TenantId.eq(tenant_id))
+                .filter(user_role::Column::UserId.eq(user_id))
+                .exec(txn)
+                .await
+                .context_to()?;
+
+            // Insert mapped roles
+            let now = OffsetDateTime::now_utc();
+            for local_role in &local_roles {
+                let user_role_model = user_role::ActiveModel {
+                    tenant_id: Set(tenant_id),
+                    user_id: Set(user_id),
+                    role_id: Set(local_role.id),
+                    assigned_at: Set(now),
+                };
+                user_role_model.insert(txn).await.context_to()?;
+            }
+
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|e| match e {
+        sea_orm::TransactionError::Connection(e) => report!(crate::auth::AuthError::from(e)),
+        sea_orm::TransactionError::Transaction(e) => e,
+    })?;
+
+    Ok(())
+}
+```
+
+**Step 2 — Tests**
+
+- Test that roles are correctly replaced after sync.
+- Test that a failure during insert rolls back the delete (user keeps old roles).
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/auth/authentication.rs` | Wrap `sync_oidc_roles` delete+insert in a transaction |
+
+---
+
+## Plan 22: M4 — OCSP 1-Hour Cache Serves Stale Revocation Status
+
+### Problem
+
+`Cache-Control: max-age=3600` on OCSP responses (`src/routes/ocsp.rs:19-26`) means revoked certificates may appear valid to clients caching the response for up to 1 hour after revocation.
+
+### Plan
+
+**Step 1 — Reduce cache TTL to 5 minutes**
+
+Change the `Cache-Control` header from 1 hour to 5 minutes, balancing revocation freshness against OCSP responder load:
+
+```rust
+(header::CACHE_CONTROL, "max-age=300, public"),
+```
+
+**Step 2 — Extract cache TTL as a constant**
+
+```rust
+/// OCSP response cache duration. Shorter values improve revocation freshness
+/// at the cost of higher OCSP responder load.
+const OCSP_CACHE_MAX_AGE_SECS: u32 = 300; // 5 minutes
+```
+
+Build the header value once:
+
+```rust
+let cache_control = format!("max-age={OCSP_CACHE_MAX_AGE_SECS}, public");
+```
+
+**Step 3 — Set `nextUpdate` in the OCSP response itself**
+
+The OCSP response body should also include a `nextUpdate` field matching the cache TTL. This tells relying parties when to re-check, regardless of HTTP caching. Update `build_ocsp_response` in `src/ocsp.rs` to set `next_update = this_update + 300 seconds`.
+
+**Step 4 — Consider making it configurable**
+
+Add an optional `SettingKey::OcspCacheMaxAgeSecs` so administrators can tune the tradeoff. Default to 300.
+
+**Step 5 — Tests**
+
+- Test that OCSP responses include `Cache-Control: max-age=300`.
+- Test that `nextUpdate` in the OCSP response is `thisUpdate + 300s`.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/ocsp.rs` | Reduce `max-age` from 3600 to 300, extract constant |
+| `src/ocsp.rs` | Set `nextUpdate` in OCSP response body |
+
+---
+
+## Plan 23: M5 — Missing Rate Limiting on OIDC Exchange/Link/Complete-Registration
+
+### Problem
+
+The OIDC token exchange (`/api/v1/auth/oidc/exchange`), account link (`/api/v1/auth/oidc/link`), and complete-registration (`/api/v1/auth/oidc/complete-registration`) endpoints accept secret tokens from unauthenticated clients but are not in the `RATE_LIMITS` map in `src/middleware/rate_limit.rs`. The `complete-registration` endpoint uses non-destructive `get()` (not `take()`), allowing unlimited brute-force of the registration token.
+
+### Plan
+
+**Step 1 — Add OIDC endpoints to the rate limit map**
+
+```rust
+static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLock::new(|| {
+    HashMap::from([
+        // ... existing entries ...
+        (
+            "/api/v1/auth/oidc/exchange",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/oidc/link",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/oidc/complete-registration",
+            EndpointRateLimit {
+                max_requests: 5,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+    ])
+});
+```
+
+**Step 2 — Change `complete-registration` to use destructive `take()`**
+
+The `complete-registration` endpoint should consume the registration token on use. If it currently uses `get()`, change to `take()` so the token is invalidated after first use:
+
+```rust
+// Before: non-destructive read allows brute-force
+let pending = state.oidc_registration_store.get(&req.code).await?;
+
+// After: destructive take — token is one-time-use
+let pending = state.oidc_registration_store.take(&req.code).await?;
+```
+
+**Step 3 — Tests**
+
+- Test that OIDC exchange is rate-limited at 10/60s.
+- Test that complete-registration is rate-limited at 5/60s.
+- Test that complete-registration token is consumed after first use.
+- Update the `rate_limited_paths_list` test.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/middleware/rate_limit.rs` | Add OIDC endpoints to `RATE_LIMITS` |
+| `src/routes/oidc_auth.rs` | Change `complete-registration` from `get()` to `take()` |
+
+---
+
+## Plan 24: M6 — MQTT Password Stored in Plaintext
+
+### Problem
+
+MQTT broker credentials are stored in plaintext in the `mqtt_clients` table (`src/mqtt_client_store.rs:104`). Unlike enrollment tokens (which are SHA-256 hashed), the `password` field is stored and transmitted as cleartext.
+
+### Plan
+
+**Step 1 — Encrypt MQTT passwords at rest**
+
+Since MQTT passwords need to be recovered (sent to the MQTT service for broker connections), they cannot be one-way hashed. Use symmetric encryption with a server-side key.
+
+Add an encryption helper using `aes-gcm`:
+
+```rust
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use aes_gcm::aead::{Aead, KeyInit, OsRng};
+
+pub struct FieldEncryptor {
+    cipher: Aes256Gcm,
+}
+
+impl FieldEncryptor {
+    pub fn new(key: &[u8; 32]) -> Self {
+        let key = Key::<Aes256Gcm>::from_slice(key);
+        Self {
+            cipher: Aes256Gcm::new(key),
+        }
+    }
+
+    /// Encrypt a plaintext value. Returns base64-encoded "nonce:ciphertext".
+    pub fn encrypt(&self, plaintext: &str) -> Result<String, aes_gcm::Error> {
+        let nonce_bytes: [u8; 12] = rand::random();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = self.cipher.encrypt(nonce, plaintext.as_bytes())?;
+        let combined = [nonce_bytes.as_slice(), ciphertext.as_slice()].concat();
+        Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &combined,
+        ))
+    }
+
+    /// Decrypt a base64-encoded "nonce+ciphertext" value.
+    pub fn decrypt(&self, encoded: &str) -> Result<String, aes_gcm::Error> {
+        let combined = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            encoded,
+        )
+        .map_err(|_| aes_gcm::Error)?;
+        let (nonce_bytes, ciphertext) = combined.split_at(12);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        let plaintext = self.cipher.decrypt(nonce, ciphertext)?;
+        Ok(String::from_utf8(plaintext).map_err(|_| aes_gcm::Error)?)
+    }
+}
+```
+
+**Step 2 — Store the encryption key in the database**
+
+Similar to the JWT signing key (Plan 12), store a 32-byte encryption key in the `settings` table under `SettingKey::FieldEncryptionKey`. Generate on first use.
+
+**Step 3 — Encrypt on create/update, decrypt on read**
+
+In `create_mqtt_client` and `update_mqtt_client`, encrypt the password before storing:
+
+```rust
+password: Set(password.map(|p| encryptor.encrypt(p).expect("encryption"))),
+```
+
+When sending credentials to the MQTT service, decrypt:
+
+```rust
+let plaintext_password = client.password
+    .as_ref()
+    .map(|p| encryptor.decrypt(p))
+    .transpose()?;
+```
+
+**Step 4 — Migration for existing plaintext passwords**
+
+Add a one-time migration that encrypts all existing plaintext passwords in the `mqtt_clients` table.
+
+**Step 5 — Tests**
+
+- Test round-trip encrypt/decrypt produces the original value.
+- Test that stored values are not plaintext.
+- Test that the MQTT service receives the correct decrypted password.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| New: `src/auth/field_encryption.rs` | `FieldEncryptor` with AES-256-GCM |
+| `src/mqtt_client_store.rs` | Encrypt/decrypt password on store/load |
+| `src/lib.rs` | Add `FieldEncryptor` to `AppState` |
+| `src/settings_store.rs` | Add `FieldEncryptionKey` setting |
+| Migration | Encrypt existing plaintext passwords |
+| `Cargo.toml` | Add `aes-gcm` dependency |
+
+---
+
+## Plan 25: M7 — No Idle Timeout on WebSocket Connections
+
+### Problem
+
+All WebSocket handlers (`agent_ws.rs`, `mqtt_ws.rs`) have no `tokio::time::timeout` branch. Half-open TCP connections (where the remote end disappears without sending a close frame) persist indefinitely, consuming memory and connection registry slots.
+
+### Plan
+
+**Step 1 — Add an idle timeout branch to the select loop**
+
+In both `handle_agent_authenticated` and the MQTT handler loops, add a timeout branch:
+
+```rust
+const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
+
+loop {
+    tokio::select! {
+        msg = stream.next() => {
+            // ... existing message handling ...
+        }
+        push = push_rx.recv() => {
+            // ... existing push handling ...
+        }
+        _ = tokio::time::sleep(WS_IDLE_TIMEOUT) => {
+            tracing::info!(%service_id, "WebSocket idle timeout — disconnecting");
+            let _ = close_with_reason(sink, "idle timeout").await;
+            break;
+        }
+    }
+}
+```
+
+The timeout resets on every loop iteration (any received message or push), so active connections are not affected.
+
+**Step 2 — Use a separate `Interval` for ping expectations**
+
+Instead of a simple sleep that resets each iteration, track the last activity and check against it:
+
+```rust
+let mut last_activity = Instant::now();
+let mut idle_check = tokio::time::interval(Duration::from_secs(60));
+
+loop {
+    tokio::select! {
+        msg = stream.next() => {
+            last_activity = Instant::now();
+            // ... existing handling ...
+        }
+        push = push_rx.recv() => {
+            // ... existing handling ...
+        }
+        _ = idle_check.tick() => {
+            if last_activity.elapsed() > WS_IDLE_TIMEOUT {
+                tracing::info!(%service_id, "WebSocket idle timeout — disconnecting");
+                let _ = close_with_reason(sink, "idle timeout").await;
+                break;
+            }
+        }
+    }
+}
+```
+
+**Step 3 — Apply to all handler loops**
+
+Apply to:
+- `handle_agent_authenticated` in `agent_ws.rs`
+- `run_agent_enrolled_loop` in `agent_ws.rs`
+- `handle_mqtt_authenticated` in `mqtt_ws.rs`
+- `handle_mqtt_enrolled` in `mqtt_ws.rs`
+
+**Step 4 — Extract the constant**
+
+```rust
+/// Idle timeout for WebSocket connections. Connections without activity
+/// (messages or pushes) for this duration are terminated.
+const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+```
+
+Put it in `service_ws.rs` and re-export for both agent and mqtt modules.
+
+**Step 5 — Tests**
+
+- Test that a connection with no messages is closed after the timeout.
+- Test that a connection with periodic pings is NOT closed.
+- Test that the connection registry is cleaned up after idle disconnect.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/service_ws.rs` | Add `WS_IDLE_TIMEOUT` constant |
+| `src/routes/agent_ws.rs` | Add idle timeout branch to both handler loops |
+| `src/routes/mqtt_ws.rs` | Add idle timeout branch to both handler loops |
+
+---
+
+## Plan 26: M8 — Broadcast Holds Read Lock During Async Sends
+
+### Problem
+
+`broadcast` and `broadcast_by_type` (`src/service_connections.rs:125-140`) hold the `RwLock` read guard while iterating and calling `.send().await` on each connection. A slow consumer blocks all registry writes (register/unregister) during the entire broadcast.
+
+### Plan
+
+**Step 1 — Collect senders first, then send without the lock**
+
+Clone the senders while holding the lock, then drop the lock before sending:
+
+```rust
+pub async fn broadcast(&self, msg: ControllerMessage) {
+    let senders: Vec<mpsc::Sender<ControllerMessage>> = {
+        let guard = self.inner.read().await;
+        guard.values().map(|conn| conn.sender.clone()).collect()
+    };
+    // Lock is dropped here — writes are unblocked
+
+    for sender in senders {
+        let _ = sender.send(msg.clone()).await;
+    }
+}
+
+pub async fn broadcast_by_type(&self, service_type: ServiceType, msg: ControllerMessage) {
+    let senders: Vec<mpsc::Sender<ControllerMessage>> = {
+        let guard = self.inner.read().await;
+        guard
+            .values()
+            .filter(|conn| conn.service_type == service_type)
+            .map(|conn| conn.sender.clone())
+            .collect()
+    };
+
+    for sender in senders {
+        let _ = sender.send(msg.clone()).await;
+    }
+}
+```
+
+**Step 2 — Use `try_send` instead of `send` for non-blocking broadcast**
+
+For broadcast, we don't need to wait for each consumer. Use `try_send` which returns immediately:
+
+```rust
+for sender in senders {
+    if sender.try_send(msg.clone()).is_err() {
+        tracing::debug!("broadcast: channel full or closed, skipping");
+    }
+}
+```
+
+This makes broadcast O(N) non-blocking instead of O(N) async-blocking.
+
+**Step 3 — Tests**
+
+- Test that broadcast works even when one consumer is slow.
+- Test that `register_agent` is not blocked during broadcast.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/service_connections.rs` | Collect senders before dropping lock, use `try_send` for broadcast |
+
+---
+
+## Plan 27: M9 — Relaxed Memory Ordering on Settings Version Counters
+
+### Problem
+
+`check_version_and_reload` (`src/settings.rs:294-295`) uses `Ordering::Relaxed` for loading version counters. On ARM/multi-core, relaxed loads can return stale values, causing missed reloads. Two separate non-atomic loads can also produce inconsistent version pairs.
+
+### Plan
+
+**Note:** If Plan 15 (H8) is implemented first, this issue is already fixed as part of that plan (the version counters use `Acquire/Release` ordering). This plan is for the case where H8 is not yet implemented.
+
+**Step 1 — Change loads to `Acquire`, stores to `Release`**
+
+```rust
+// In check_version_and_reload:
+let cached_version = self.inner.version.load(Ordering::Acquire);
+let cached_global_version = self.inner.global_version.load(Ordering::Acquire);
+
+// In reload_from_db:
+self.inner.version.store(version, Ordering::Release);
+self.inner.global_version.store(global_version, Ordering::Release);
+```
+
+`Acquire` on load ensures the reader sees all writes that happened before the corresponding `Release` store.
+
+**Step 2 — Consider reading both counters atomically**
+
+The two separate `load()` calls can produce an inconsistent pair (e.g., new version but old global_version). This can cause spurious reloads but not correctness issues (a reload is idempotent). If this is a concern, pack both counters into a single `AtomicU64`:
+
+```rust
+/// Pack (version: i32, global_version: i32) into a single u64.
+fn pack_versions(version: i64, global_version: i64) -> u64 {
+    ((version as u32 as u64) << 32) | (global_version as u32 as u64)
+}
+fn unpack_versions(packed: u64) -> (i64, i64) {
+    ((packed >> 32) as i32 as i64, (packed & 0xFFFF_FFFF) as i32 as i64)
+}
+```
+
+However, this limits each counter to i32 range. Since version counters are monotonically increasing and rarely exceed ~10^6 in practice, this is acceptable. Alternatively, keep the two separate atomics with `Acquire/Release` — the worst case is a spurious reload which is harmless.
+
+**Recommended:** Just fix the ordering to `Acquire/Release`. The spurious reload from non-atomic pair reads is harmless.
+
+**Step 3 — Tests**
+
+- Verify the ordering constants are correct in the source code.
+- No functional tests needed since this is a correctness/memory-model fix.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/settings.rs` | Change `Ordering::Relaxed` to `Ordering::Acquire` on loads, verify `Release` on stores |
+
+---
+
+## Plan 28: M10 — `cert_signed_by_ca` Only Compares DN, Not Cryptographic Signature
+
+### Problem
+
+`cert_signed_by_ca` (`src/pki_utils.rs:84-98`) only compares the certificate's issuer DN against the CA's subject DN. A certificate with a matching issuer DN but a forged signature passes the check. An attacker with access to create certificates (e.g., their own CA with the same DN) can produce certificates that pass this check.
+
+### Plan
+
+**Step 1 — Add cryptographic signature verification**
+
+Use the CA's public key to verify the certificate's signature:
+
+```rust
+pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
+    let (_, cert_block) = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+        .map_err(|_| report!(PkiUtilError::PemParse))?;
+    let cert = cert_block
+        .parse_x509()
+        .map_err(|_| report!(PkiUtilError::PemParse))?;
+
+    let (_, ca_block) = x509_parser::pem::parse_x509_pem(ca_pem.as_bytes())
+        .map_err(|_| report!(PkiUtilError::PemParse))?;
+    let ca = ca_block
+        .parse_x509()
+        .map_err(|_| report!(PkiUtilError::PemParse))?;
+
+    // Check issuer DN matches subject DN (quick reject)
+    if cert.issuer() != ca.subject() {
+        return Ok(false);
+    }
+
+    // Cryptographically verify the certificate's signature using the CA's public key
+    match cert.verify_signature(Some(ca.public_key())) {
+        Ok(()) => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+```
+
+The `x509_parser` crate's `verify_signature` method performs the actual cryptographic verification.
+
+**Step 2 — Handle algorithm mismatches**
+
+`verify_signature` returns an error if the algorithm is unsupported. Treat unsupported algorithms as verification failure (return `false`) rather than propagating the error:
+
+```rust
+match cert.verify_signature(Some(ca.public_key())) {
+    Ok(()) => Ok(true),
+    Err(x509_parser::error::X509Error::SignatureVerificationError) => Ok(false),
+    Err(e) => {
+        tracing::warn!(error = %e, "certificate signature verification failed unexpectedly");
+        Ok(false)
+    }
+}
+```
+
+**Step 3 — Tests**
+
+- Existing test `cert_signed_by_ca_same_ca` should still pass (valid signature).
+- Existing test `cert_signed_by_ca_different_ca` should still pass (DN mismatch).
+- Add new test: create two CAs with the same DN but different keys, sign a cert with CA1, verify against CA2 — must return `false` (DN matches but signature doesn't).
+
+```rust
+#[test]
+fn cert_signed_by_ca_same_dn_different_key() {
+    // CA1
+    let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let mut ca1_params = rcgen::CertificateParams::default();
+    ca1_params.distinguished_name.push(rcgen::DnType::CommonName, "Same CA");
+    ca1_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let _ca1_cert = ca1_params.self_signed(&key1).unwrap();
+    let issuer1 = rcgen::Issuer::new(ca1_params, key1);
+
+    // Sign cert with CA1
+    let server_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let server_params = rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
+    let server_cert = server_params.signed_by(&server_key, &issuer1).unwrap();
+    let server_pem = server_cert.pem();
+
+    // CA2 with same DN, different key
+    let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let mut ca2_params = rcgen::CertificateParams::default();
+    ca2_params.distinguished_name.push(rcgen::DnType::CommonName, "Same CA");
+    ca2_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca2_cert = ca2_params.self_signed(&key2).unwrap();
+    let ca2_pem = ca2_cert.pem();
+
+    // DN matches, but signature was made by CA1 — must return false
+    assert!(!cert_signed_by_ca(&server_pem, &ca2_pem).unwrap());
+}
+```
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/pki_utils.rs` | Add `verify_signature` call after DN comparison |
+
+---
+
+## Plan 29: M11 — No Max Password Length — Argon2 DoS Vector
+
+### Problem
+
+The `register` handler (`src/routes/auth.rs:48-54`) validates a minimum password length (8 chars) but has no upper bound. An attacker can submit a multi-megabyte password, causing argon2 to consume excessive CPU and memory.
+
+### Plan
+
+**Step 1 — Add a maximum password length constant**
+
+```rust
+const MIN_PASSWORD_LENGTH: usize = 8;
+const MAX_PASSWORD_LENGTH: usize = 1024;
+```
+
+1024 bytes is generous for any reasonable password (including passphrases) while preventing abuse.
+
+**Step 2 — Validate max length in register and login**
+
+In the `register` handler:
+
+```rust
+if req.password.len() < MIN_PASSWORD_LENGTH {
+    return error_response(StatusCode::BAD_REQUEST, "Password must be at least 8 characters");
+}
+if req.password.len() > MAX_PASSWORD_LENGTH {
+    return error_response(StatusCode::BAD_REQUEST, "Password must not exceed 1024 characters");
+}
+```
+
+In the `login` handler, add the same max-length check before calling `verify_password`:
+
+```rust
+if req.password.len() > MAX_PASSWORD_LENGTH {
+    return error_response(StatusCode::UNAUTHORIZED, "Invalid credentials");
+}
+```
+
+Note: The login response intentionally doesn't reveal the specific validation failure (same generic message as wrong password).
+
+**Step 3 — Also check in password change endpoint**
+
+If there's a password change endpoint, apply the same validation.
+
+**Step 4 — Also check OIDC link endpoint**
+
+The `oidc_link` endpoint accepts a password for account linking. Apply the same limit.
+
+**Step 5 — Tests**
+
+- Test that registration with a 2000-char password is rejected with 400.
+- Test that login with a 2000-char password is rejected (not processed by argon2).
+- Test that passwords up to 1024 chars are accepted.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/auth.rs` | Add `MAX_PASSWORD_LENGTH` check to `register` and `login` |
+| `src/routes/oidc_auth.rs` | Add max-length check to `oidc_link` |
+
+---
+
+## Plan 30: M12 — Email Not Normalized
+
+### Problem
+
+The `register` handler (`src/routes/auth.rs:39-82`) uses case-sensitive email comparison. `User@Example.com` and `user@example.com` are treated as different addresses, allowing duplicate registrations for the same logical email. This can also cause OIDC auto-link to fail when email casing differs between the provider and stored value.
+
+### Plan
+
+**Step 1 — Normalize email on input**
+
+Add an `normalize_email` helper:
+
+```rust
+/// Normalize an email address for storage and comparison.
+///
+/// - Trims whitespace
+/// - Lowercases the entire address (RFC 5321 says the local part is
+///   case-sensitive in theory, but in practice all major providers
+///   treat it as case-insensitive)
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+```
+
+**Step 2 — Apply normalization at all entry points**
+
+Normalize emails before any comparison or storage:
+
+In `register`:
+```rust
+let email = normalize_email(&req.email);
+```
+
+In `login`:
+```rust
+let email = normalize_email(&req.email);
+```
+
+In `resolve_oidc_user`:
+```rust
+let email = normalize_email(email);
+```
+
+In `oidc_link`:
+```rust
+let email = normalize_email(&req.email);
+```
+
+**Step 3 — Normalize existing data (migration)**
+
+Add a migration that lowercases all existing `user.email` values:
+
+```sql
+UPDATE users SET email = LOWER(TRIM(email));
+```
+
+**Step 4 — Add a unique index on normalized email**
+
+Ensure the database enforces uniqueness on the normalized email:
+
+```sql
+CREATE UNIQUE INDEX idx_users_email_lower ON users (LOWER(email));
+```
+
+Or, since we always store the normalized form, the existing unique index on `email` is sufficient.
+
+**Step 5 — Tests**
+
+- Test that `normalize_email("User@Example.COM ")` returns `"user@example.com"`.
+- Test that registering with `User@Example.com` after `user@example.com` is rejected as duplicate.
+- Test that OIDC login with `User@example.com` matches stored `user@example.com`.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/auth.rs` | Add `normalize_email`, apply to `register` and `login` |
+| `src/auth/authentication.rs` | Normalize email in `resolve_oidc_user` |
+| `src/routes/oidc_auth.rs` | Normalize email in `oidc_link` |
+| Migration | Lowercase existing emails |
