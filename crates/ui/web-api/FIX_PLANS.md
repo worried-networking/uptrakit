@@ -1,6 +1,6 @@
 # Fix Plans for Code Review Findings
 
-These plans address findings from CODEREVIEW.md, ordered by severity.
+These plans address all 45 findings from CODEREVIEW.md (C1–C7, H1–H11, M1–M17, L1–L10), ordered by severity.
 
 ---
 
@@ -3843,3 +3843,502 @@ const API_TOKEN_LAST_USED_DEBOUNCE_SECS: i64 = 300; // 5 minutes
 | File | Change |
 |------|--------|
 | `src/auth/api_token.rs` | Add debounce logic to `verify_token` |
+
+---
+
+## Plan 41: L6 — Health Endpoint Returns Static "ok"
+
+### Problem
+
+The health endpoint (`src/routes/health.rs:1-5`) returns a static `"ok"` string without checking database connectivity or CA availability. Load balancers and orchestrators routing traffic to an instance that has a broken DB connection or missing CA will serve errors to users until the health probe is replaced by something meaningful.
+
+### Plan
+
+**Step 1 — Accept `AppState` and perform a DB connectivity check**
+
+Replace the static response with a lightweight DB query:
+
+```rust
+use axum::{extract::State, http::StatusCode, response::IntoResponse};
+use std::sync::Arc;
+use crate::AppState;
+
+pub async fn healthz(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Lightweight DB ping — "SELECT 1"
+    let db_ok = state.db.ping().await.is_ok();
+
+    // Check CA is available (snapshot is populated)
+    let ca_ok = state.ca_snapshot.borrow().is_some();
+
+    if db_ok && ca_ok {
+        (StatusCode::OK, "ok")
+    } else {
+        let mut reasons = Vec::new();
+        if !db_ok {
+            reasons.push("database unreachable");
+        }
+        if !ca_ok {
+            reasons.push("CA snapshot not loaded");
+        }
+        tracing::warn!(reasons = ?reasons, "health check failed");
+        (StatusCode::SERVICE_UNAVAILABLE, "unhealthy")
+    }
+}
+```
+
+**Step 2 — Verify `DatabaseConnection::ping` exists**
+
+SeaORM's `DatabaseConnection` may not have a `.ping()` method. If not, use a minimal query:
+
+```rust
+use sea_orm::{ConnectionTrait, Statement, DbBackend};
+
+let db_ok = state.db
+    .execute(Statement::from_string(DbBackend::Sqlite, "SELECT 1"))
+    .await
+    .is_ok();
+```
+
+Adjust `DbBackend` dynamically if needed (or use `state.db.get_database_backend()`).
+
+**Step 3 — Update the route registration**
+
+The route already accepts `State`, but the handler signature must be updated:
+
+```rust
+// Before:
+.route("/healthz", get(healthz))
+
+// After (same route, handler now extracts State):
+.route("/healthz", get(healthz))
+```
+
+No route change needed since Axum infers extractors from the handler signature.
+
+**Step 4 — Add a timeout to prevent health checks from hanging**
+
+Wrap the DB check in a timeout so the health endpoint stays responsive even if the DB is stalled:
+
+```rust
+let db_ok = tokio::time::timeout(
+    std::time::Duration::from_secs(3),
+    state.db.execute(Statement::from_string(
+        state.db.get_database_backend(),
+        "SELECT 1",
+    )),
+)
+.await
+.map(|r| r.is_ok())
+.unwrap_or(false);
+```
+
+**Step 5 — Tests**
+
+- Test that health endpoint returns 200 when DB and CA are available.
+- Test that health endpoint returns 503 when DB is unreachable.
+- Test that health endpoint returns 503 when CA snapshot is `None`.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/health.rs` | Add DB ping and CA check |
+
+---
+
+## Plan 42: L7 — Device Flow `client_name` Not Length-Validated
+
+### Problem
+
+The `device_auth_start` endpoint (`src/routes/device_auth.rs:35-37`) accepts `req.client_name` (an `Option<String>`) from an unauthenticated request and passes it directly to `DeviceFlowStore::create()`, which stores it in the database without any length validation. An attacker can submit a multi-megabyte `client_name`, consuming storage and potentially causing issues during display.
+
+### Plan
+
+**Step 1 — Add a maximum length constant and validate**
+
+```rust
+const MAX_CLIENT_NAME_LENGTH: usize = 256;
+
+pub async fn device_auth_start(
+    State(state): State<Arc<AppState>>,
+    external_base_url: Option<axum::Extension<crate::extract::ExternalBaseUrl>>,
+    headers: HeaderMap,
+    Json(req): Json<DeviceAuthStartRequest>,
+) -> Response {
+    // Validate client_name length
+    if let Some(ref name) = req.client_name {
+        if name.len() > MAX_CLIENT_NAME_LENGTH {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "client_name must not exceed 256 characters",
+            );
+        }
+    }
+
+    let (device_code, user_code) = match state.device_flow_store.create(req.client_name).await {
+        // ... existing code ...
+    };
+    // ...
+}
+```
+
+**Step 2 — Trim the client_name**
+
+Also trim leading/trailing whitespace and reject empty strings after trimming:
+
+```rust
+let client_name = req.client_name
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty());
+
+if let Some(ref name) = client_name {
+    if name.len() > MAX_CLIENT_NAME_LENGTH {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "client_name must not exceed 256 characters",
+        );
+    }
+}
+```
+
+**Step 3 — Tests**
+
+- Test that a `client_name` of 256 chars is accepted.
+- Test that a `client_name` of 257 chars is rejected with 400.
+- Test that a whitespace-only `client_name` is treated as `None`.
+- Test that `client_name` is trimmed.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/device_auth.rs` | Add length validation for `client_name` |
+
+---
+
+## Plan 43: L8 — MQTT Enrolled Loop Has No Push Channel
+
+### Problem
+
+`handle_mqtt_enrolled` (`src/routes/mqtt_ws.rs:353-511`) does not register the service in `ServiceConnectionRegistry` during the pending-approval state. When an admin approves the service via the REST API, `notification_service.send()` tries to push an `Approved` message — but since the MQTT service isn't in the connection registry, the push notification is lost. The service only learns about its approval through polling on the next `Ping`.
+
+### Plan
+
+**Step 1 — Register the MQTT service in the connection registry during enrollment**
+
+```rust
+pub(crate) async fn handle_mqtt_enrolled(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    stream: &mut futures_util::stream::SplitStream<WebSocket>,
+    state: &Arc<AppState>,
+    service_id: uuid::Uuid,
+    mut approved: bool,
+    out_seq: &mut OutgoingSeq,
+    in_seq: &mut IncomingSeq,
+) {
+    // Register in connection registry so push notifications can be delivered
+    let mut push_rx = state
+        .service_connections
+        .register_agent(service_id)
+        .await;
+
+    // Enter operational loop with push channel
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                // ... existing message handling ...
+            }
+            push = push_rx.recv() => {
+                let Some(msg) = push else { break };
+                match &msg {
+                    ControllerMessage::Approved(_) => {
+                        approved = true;
+                    }
+                    ControllerMessage::Rejected(_) => {
+                        if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                            let _ = sink.send(Message::Text(json.into())).await;
+                        }
+                        break;
+                    }
+                    _ => {}
+                }
+                if let Some(json) = serialize_controller_msg(out_seq, msg) {
+                    let _ = sink.send(Message::Text(json.into())).await;
+                }
+            }
+        }
+    }
+
+    // Unregister on disconnect
+    state.service_connections.unregister(&service_id).await;
+    tracing::debug!(%service_id, "enrolled MQTT service disconnected");
+}
+```
+
+**Step 2 — Remove the polling logic from the Ping handler**
+
+The existing polling logic (`lines 390-414`) queries the DB on every ping to check for status changes. With push notifications working, this polling becomes unnecessary:
+
+```rust
+ServiceMessage::Ping(PingPayload { service_ts }) => {
+    let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else {
+        break;
+    };
+    tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
+    // Status changes are now delivered via push — no polling needed.
+}
+```
+
+**Step 3 — Keep the Ping-based polling as a fallback (optional)**
+
+If push notification delivery is not guaranteed (e.g., message queue overflow), retain the polling as a belt-and-suspenders approach but reduce its frequency. Since the push channel handles the common case, the poll is only a safety net.
+
+**Step 4 — Tests**
+
+- Test that approving an MQTT service during enrollment pushes `Approved` to the WebSocket.
+- Test that rejecting an MQTT service during enrollment pushes `Rejected` and disconnects.
+- Test that the service is unregistered from the connection registry on disconnect.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/mqtt_ws.rs` | Register in connection registry during `handle_mqtt_enrolled`, add `tokio::select!` with push channel |
+
+---
+
+## Plan 44: L9 — Deactivation Doesn't Update `status` Column
+
+### Problem
+
+`deactivate_service` (`src/routes/services.rs:389-391`) sets `deactivated_at` but leaves `status` unchanged (typically "approved"). This creates an inconsistency in the audit trail: the service appears "approved" but is actually deactivated. Queries filtering by `status` alone (without checking `deactivated_at`) will include deactivated services.
+
+### Plan
+
+**Step 1 — Set status to `Deactivated` during deactivation**
+
+```rust
+// Before (line 388-391):
+let now = OffsetDateTime::now_utc();
+let mut active: service::ActiveModel = svc.into();
+active.deactivated_at = Set(Some(now));
+active.updated_at = Set(now);
+
+// After:
+let now = OffsetDateTime::now_utc();
+let mut active: service::ActiveModel = svc.into();
+active.status = Set(service::ServiceStatus::Deactivated);
+active.deactivated_at = Set(Some(now));
+active.updated_at = Set(now);
+```
+
+**Step 2 — Verify the `Deactivated` status variant exists**
+
+The `ServiceStatus` enum in the DB entity already has a `Deactivated` variant (confirmed in `services.rs:51` which maps `service::ServiceStatus::Deactivated => ServiceStatus::Deactivated`). No migration needed.
+
+**Step 3 — Audit other deactivation paths**
+
+Check that all deactivation paths also set `status`:
+- `reject_service` (line 316-317): Sets `status = Rejected` and `deactivated_at` — correct.
+- `merge_service` (line 549-552): Deactivates source — should also set `status = Deactivated`.
+- Host deactivation: Check if hosts have a similar issue.
+
+Update `merge_service`:
+
+```rust
+// In merge_service, when deactivating source:
+source_active.status = Set(service::ServiceStatus::Deactivated);
+source_active.enrollment_secret_hash = Set(invalidated_hash);
+source_active.deactivated_at = Set(Some(now));
+source_active.updated_at = Set(now);
+```
+
+**Step 4 — Tests**
+
+- Test that deactivated services have `status = "deactivated"`.
+- Test that `list_services` with `status=deactivated` returns deactivated services.
+- Test that merged (source) services have `status = "deactivated"`.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/services.rs` | Set `status = Deactivated` in `deactivate_service` and `merge_service` |
+
+---
+
+## Plan 45: L10 — N+1 Queries in List Endpoints
+
+### Problem
+
+Several list endpoints perform per-record DB lookups for denormalized data:
+
+1. **`update_history.rs:195-198`** — For each update history record, calls `resolve_host_name()` and `resolve_software_item_name()` individually. With 20 records per page, that's 40 extra DB queries.
+
+2. **`hosts.rs:88-91`** — For each host, calls `load_host_agents()` which itself does a `find_all` + per-link `find_by_id`. With 20 hosts × ~2 agents each, that's ~60 extra queries.
+
+3. **`software_items.rs:357-373`** — For each software item, calls `find_active_provider_config()` and `count_linked_hosts()`. With 20 items, that's 40 extra queries.
+
+### Plan
+
+**Step 1 — Batch-load host names and software item names for update history**
+
+Collect all unique IDs first, batch-load in a single query, then map:
+
+```rust
+// In list_update_history, after fetching records:
+let host_ids: Vec<uuid::Uuid> = records.iter().map(|r| r.host_id).collect::<HashSet<_>>().into_iter().collect();
+let si_ids: Vec<uuid::Uuid> = records.iter().map(|r| r.software_item_id).collect::<HashSet<_>>().into_iter().collect();
+
+let hosts: HashMap<uuid::Uuid, String> = Host::find()
+    .filter(host::Column::Id.is_in(host_ids))
+    .all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|h| (h.id, h.friendly_name))
+    .collect();
+
+let software_items: HashMap<uuid::Uuid, String> = SoftwareItem::find()
+    .filter(software_item::Column::Id.is_in(si_ids))
+    .all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|si| (si.id, si.name))
+    .collect();
+
+let items: Vec<UpdateHistoryResponse> = records
+    .into_iter()
+    .map(|record| {
+        let host_name = hosts.get(&record.host_id).cloned().unwrap_or_else(|| "Unknown Host".to_string());
+        let si_name = software_items.get(&record.software_item_id).cloned().unwrap_or_else(|| "Unknown Software Item".to_string());
+        build_response(record, host_name, si_name)
+    })
+    .collect();
+```
+
+This reduces 2N queries to 2 queries (one for hosts, one for software items).
+
+**Step 2 — Batch-load agents for hosts**
+
+```rust
+// In list_hosts, after fetching hosts:
+let host_ids: Vec<uuid::Uuid> = hosts.iter().map(|h| h.id).collect();
+
+// Load all agent-host links for these hosts in a single query
+let all_links = AgentHost::find()
+    .filter(agent_host::Column::HostId.is_in(host_ids.clone()))
+    .all(&state.db)
+    .await
+    .unwrap_or_default();
+
+// Collect unique agent IDs and batch-load agents
+let agent_ids: Vec<uuid::Uuid> = all_links.iter().map(|l| l.service_id).collect::<HashSet<_>>().into_iter().collect();
+let agents: HashMap<uuid::Uuid, agent::Model> = Agent::find()
+    .filter(agent::Column::Id.is_in(agent_ids))
+    .filter(agent::Column::DeactivatedAt.is_null())
+    .all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|a| (a.id, a))
+    .collect();
+
+// Group links by host_id
+let mut host_agents: HashMap<uuid::Uuid, Vec<HostAgentSummary>> = HashMap::new();
+for link in all_links {
+    if let Some(a) = agents.get(&link.service_id) {
+        host_agents
+            .entry(link.host_id)
+            .or_default()
+            .push(HostAgentSummary {
+                id: a.id.to_string(),
+                friendly_name: a.friendly_name.clone(),
+                status: /* map a.status */,
+            });
+    }
+}
+
+let items: Vec<HostResponse> = hosts
+    .into_iter()
+    .map(|h| {
+        let agents = host_agents.remove(&h.id).unwrap_or_default();
+        host_to_response(h, agents)
+    })
+    .collect();
+```
+
+This reduces ~3N queries to 2 queries (one for links, one for agents).
+
+**Step 3 — Batch-load provider configs and host counts for software items**
+
+```rust
+// In list_software_items, after fetching items:
+let config_ids: Vec<uuid::Uuid> = items.iter().map(|i| i.provider_config_id).collect::<HashSet<_>>().into_iter().collect();
+let item_ids: Vec<uuid::Uuid> = items.iter().map(|i| i.id).collect();
+
+// Batch-load provider configs
+let configs: HashMap<uuid::Uuid, provider_config::Model> = ProviderConfig::find()
+    .filter(provider_config::Column::Id.is_in(config_ids))
+    .filter(provider_config::Column::TenantId.eq(tenant.tenant_id))
+    .filter(provider_config::Column::DeactivatedAt.is_null())
+    .all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|c| (c.id, c))
+    .collect();
+
+// Batch-count linked hosts using GROUP BY
+use sea_orm::{FromQueryResult, QuerySelect};
+
+#[derive(FromQueryResult)]
+struct HostCount {
+    software_item_id: uuid::Uuid,
+    count: i64,
+}
+
+let host_counts: HashMap<uuid::Uuid, u64> = HostSoftwareItem::find()
+    .select_only()
+    .column(host_software_item::Column::SoftwareItemId)
+    .column_as(host_software_item::Column::SoftwareItemId.count(), "count")
+    .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids))
+    .group_by(host_software_item::Column::SoftwareItemId)
+    .into_model::<HostCount>()
+    .all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|hc| (hc.software_item_id, hc.count as u64))
+    .collect();
+
+let response: Vec<SoftwareItemResponse> = items
+    .into_iter()
+    .filter_map(|item| {
+        let config = configs.get(&item.provider_config_id)?;
+        let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
+        Some(build_list_response(item, config, host_count))
+    })
+    .collect();
+```
+
+This reduces 2N queries to 2 queries (one for configs, one aggregated count).
+
+**Step 4 — Remove or deprecate per-record helper functions**
+
+After batch-loading is implemented, the per-record helpers (`resolve_host_name`, `resolve_software_item_name`, `load_host_agents`, `count_linked_hosts`) are no longer used in list endpoints. Keep them for single-record endpoints (e.g., `get_host`, `get_update_history`) or convert those to use the batch approach too.
+
+**Step 5 — Tests**
+
+- Verify that list endpoints return the same response data as before.
+- Verify that items with missing references (e.g., deleted hosts) use fallback names.
+- Verify that the number of DB queries per list request is bounded (use query logging or a test spy).
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/routes/update_history.rs` | Batch-load host names and software item names |
+| `src/routes/hosts.rs` | Batch-load agent links and agent models |
+| `src/routes/software_items.rs` | Batch-load provider configs and host counts with GROUP BY |
