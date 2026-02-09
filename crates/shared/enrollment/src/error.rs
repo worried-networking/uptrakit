@@ -57,6 +57,15 @@ pub enum EnrollmentError {
     #[error("enrollment rejected by controller")]
     EnrollmentRejected,
 
+    #[error("timed out waiting for approval")]
+    ApprovalTimeout,
+
+    #[error("timed out waiting for response")]
+    ResponseTimeout,
+
+    #[error("TCP connection timed out")]
+    ConnectionTimeout,
+
     // ── Identity state ───────────────────────────────────────────────
     #[error("identity not enrolled")]
     NotEnrolled,

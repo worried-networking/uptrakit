@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, LazyLock};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -38,6 +39,11 @@ impl_report_conversion!(sea_orm::DbErr => AgentWsError::Database);
 /// Minimum agent version required for connection.
 const MIN_AGENT_VERSION: &str = "0.0.1";
 
+/// Parsed minimum agent version, validated once at first access.
+static MIN_AGENT_VER: LazyLock<semver::Version> = LazyLock::new(|| {
+    semver::Version::parse(MIN_AGENT_VERSION).expect("MIN_AGENT_VERSION must be valid semver")
+});
+
 /// Maximum size of the `update_history.output` column (1 MB).
 ///
 /// Once the output reaches this limit, further `UpdateOutput` messages are
@@ -62,12 +68,21 @@ pub(crate) async fn handle_agent_authenticated(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
+    // Register first so concurrent outbox events can reach us via push_rx.
+    let mut push_rx = state.service_connections.register_agent(agent_id).await;
+
     // Deliver pending updates for hosts linked to this agent.
+    // Any concurrent outbox events that arrive between registration and
+    // this query are buffered in push_rx (not lost).
     if let Err(e) = deliver_pending_updates(state, agent_id, sink, out_seq).await {
         tracing::error!(error = %e, %agent_id, "failed to deliver pending updates on reconnect");
     }
 
-    let mut push_rx = state.service_connections.register_agent(agent_id).await;
+    // Cache host IDs linked to this agent for update ownership validation.
+    // Refreshed on ReportHostInfo (which may link new hosts).
+    let mut linked_host_ids: HashSet<uuid::Uuid> = load_linked_host_ids(&state.db, agent_id)
+        .await
+        .unwrap_or_default();
 
     loop {
         tokio::select! {
@@ -120,10 +135,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     }
                                 };
 
-                                let min_ver = semver::Version::parse(MIN_AGENT_VERSION)
-                                    .expect("MIN_AGENT_VERSION must be valid semver");
-
-                                if agent_ver < min_ver {
+                                if agent_ver < *MIN_AGENT_VER {
                                     tracing::warn!(
                                         %agent_id,
                                         version = %payload.agent_version,
@@ -170,6 +182,11 @@ pub(crate) async fn handle_agent_authenticated(
                                     agent_model.ip_address.as_deref(),
                                 ).await {
                                     tracing::warn!(error = %e, "failed to link host on ReportHostInfo");
+                                }
+
+                                // Refresh cached host IDs (may have linked a new host).
+                                if let Ok(ids) = load_linked_host_ids(&state.db, agent_id).await {
+                                    linked_host_ids = ids;
                                 }
                             }
                             ServiceMessage::RenewCertificate(payload) => {
@@ -315,19 +332,20 @@ pub(crate) async fn handle_agent_authenticated(
                                     from_version = ?payload.from_version,
                                     "update started"
                                 );
-                                if let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(payload.update_history_id)
-                                        .one(&state.db)
-                                        .await
-                                {
-                                    let mut active: update_history::ActiveModel = record.into();
-                                    active.status = Set(update_history::UpdateStatus::InProgress);
-                                    active.started_at = Set(time::OffsetDateTime::now_utc());
-                                    if payload.from_version.is_some() {
-                                        active.from_version = Set(payload.from_version);
-                                    }
-                                    if let Err(e) = active.update(&state.db).await {
-                                        tracing::warn!(error = %e, "failed to update update_history status");
-                                    }
+                                let record = match validate_update_ownership(
+                                    &state.db, agent_id, payload.update_history_id, &linked_host_ids,
+                                ).await {
+                                    Ok(r) => r,
+                                    Err(_) => continue,
+                                };
+                                let mut active: update_history::ActiveModel = record.into();
+                                active.status = Set(update_history::UpdateStatus::InProgress);
+                                active.started_at = Set(time::OffsetDateTime::now_utc());
+                                if payload.from_version.is_some() {
+                                    active.from_version = Set(payload.from_version);
+                                }
+                                if let Err(e) = active.update(&state.db).await {
+                                    tracing::warn!(error = %e, "failed to update update_history status");
                                 }
                             }
                             ServiceMessage::UpdateOutput(payload) => {
@@ -336,23 +354,24 @@ pub(crate) async fn handle_agent_authenticated(
                                     stream = ?payload.stream,
                                     "update output"
                                 );
-                                if let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(payload.update_history_id)
-                                        .one(&state.db)
-                                        .await
-                                {
-                                    if record.output.len() >= MAX_UPDATE_OUTPUT_BYTES {
-                                        tracing::debug!(
-                                            update_id = %payload.update_history_id,
-                                            output_len = record.output.len(),
-                                            "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
-                                        );
-                                    } else {
-                                        let mut active: update_history::ActiveModel = record.clone().into();
-                                        let new_output = format!("{}{}\n", record.output, payload.output);
-                                        active.output = Set(new_output);
-                                        if let Err(e) = active.update(&state.db).await {
-                                            tracing::warn!(error = %e, "failed to append update output");
-                                        }
+                                let record = match validate_update_ownership(
+                                    &state.db, agent_id, payload.update_history_id, &linked_host_ids,
+                                ).await {
+                                    Ok(r) => r,
+                                    Err(_) => continue,
+                                };
+                                if record.output.len() >= MAX_UPDATE_OUTPUT_BYTES {
+                                    tracing::debug!(
+                                        update_id = %payload.update_history_id,
+                                        output_len = record.output.len(),
+                                        "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
+                                    );
+                                } else {
+                                    let mut active: update_history::ActiveModel = record.clone().into();
+                                    let new_output = format!("{}{}\n", record.output, payload.output);
+                                    active.output = Set(new_output);
+                                    if let Err(e) = active.update(&state.db).await {
+                                        tracing::warn!(error = %e, "failed to append update output");
                                     }
                                 }
                             }
@@ -363,45 +382,46 @@ pub(crate) async fn handle_agent_authenticated(
                                     error = ?payload.error,
                                     "update result"
                                 );
-                                if let Ok(Some(record)) = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(payload.update_history_id)
+                                let record = match validate_update_ownership(
+                                    &state.db, agent_id, payload.update_history_id, &linked_host_ids,
+                                ).await {
+                                    Ok(r) => r,
+                                    Err(_) => continue,
+                                };
+                                let mut active: update_history::ActiveModel = record.clone().into();
+                                active.status = Set(match payload.status {
+                                    UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
+                                    UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
+                                });
+                                active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
+                                if !payload.output.is_empty() {
+                                    // Cap final output at MAX_UPDATE_OUTPUT_BYTES.
+                                    let remaining = MAX_UPDATE_OUTPUT_BYTES.saturating_sub(record.output.len());
+                                    if remaining > 0 {
+                                        let capped = &payload.output[..payload.output.len().min(remaining)];
+                                        let final_output = format!("{}{}", record.output, capped);
+                                        active.output = Set(final_output);
+                                    }
+                                }
+                                if payload.from_version.is_some() {
+                                    active.from_version = Set(payload.from_version);
+                                }
+                                if let Err(e) = active.update(&state.db).await {
+                                    tracing::warn!(error = %e, "failed to update update_history result");
+                                }
+
+                                if payload.status == UpdateFinalStatus::Completed
+                                    && let Some(ref to_version) = payload.to_version
+                                    && let Ok(Some(link)) = uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((record.host_id, record.software_item_id))
                                         .one(&state.db)
                                         .await
                                 {
-                                    let mut active: update_history::ActiveModel = record.clone().into();
-                                    active.status = Set(match payload.status {
-                                        UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
-                                        UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
-                                    });
-                                    active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                    if !payload.output.is_empty() {
-                                        // Cap final output at MAX_UPDATE_OUTPUT_BYTES.
-                                        let remaining = MAX_UPDATE_OUTPUT_BYTES.saturating_sub(record.output.len());
-                                        if remaining > 0 {
-                                            let capped = &payload.output[..payload.output.len().min(remaining)];
-                                            let final_output = format!("{}{}", record.output, capped);
-                                            active.output = Set(final_output);
-                                        }
-                                    }
-                                    if payload.from_version.is_some() {
-                                        active.from_version = Set(payload.from_version);
-                                    }
-                                    if let Err(e) = active.update(&state.db).await {
-                                        tracing::warn!(error = %e, "failed to update update_history result");
-                                    }
-
-                                    if payload.status == UpdateFinalStatus::Completed
-                                        && let Some(ref to_version) = payload.to_version
-                                        && let Ok(Some(link)) = uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((record.host_id, record.software_item_id))
-                                            .one(&state.db)
-                                            .await
-                                    {
-                                        let mut link_active: host_software_item::ActiveModel = link.into();
-                                        link_active.installed_version = Set(Some(to_version.clone()));
-                                        link_active.installed_version_detected_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                        link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                        if let Err(e) = link_active.update(&state.db).await {
-                                            tracing::warn!(error = %e, "failed to update host_software_item installed_version");
-                                        }
+                                    let mut link_active: host_software_item::ActiveModel = link.into();
+                                    link_active.installed_version = Set(Some(to_version.clone()));
+                                    link_active.installed_version_detected_at = Set(Some(time::OffsetDateTime::now_utc()));
+                                    link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
+                                    if let Err(e) = link_active.update(&state.db).await {
+                                        tracing::warn!(error = %e, "failed to update host_software_item installed_version");
                                     }
                                 }
                             }
@@ -831,4 +851,57 @@ async fn deliver_pending_updates(
     }
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Update ownership validation (FP-17)
+// ---------------------------------------------------------------------------
+
+/// Load the set of host IDs linked to the given agent.
+async fn load_linked_host_ids(
+    db: &sea_orm::DatabaseConnection,
+    agent_id: uuid::Uuid,
+) -> AgentWsResult<HashSet<uuid::Uuid>> {
+    let links = agent_host::Entity::find()
+        .filter(agent_host::Column::ServiceId.eq(agent_id))
+        .all(db)
+        .await
+        .context_to::<AgentWsError>()?;
+
+    Ok(links.into_iter().map(|l| l.host_id).collect())
+}
+
+/// Validate that an `update_history` record belongs to a host linked to the
+/// current agent. Returns the record on success, logs a warning and returns
+/// an error if the agent does not own the record.
+async fn validate_update_ownership(
+    db: &sea_orm::DatabaseConnection,
+    agent_id: uuid::Uuid,
+    update_history_id: uuid::Uuid,
+    linked_host_ids: &HashSet<uuid::Uuid>,
+) -> AgentWsResult<update_history::Model> {
+    let record = uptrakit_shared_db::entity::prelude::UpdateHistory::find_by_id(update_history_id)
+        .one(db)
+        .await
+        .context_to::<AgentWsError>()?
+        .ok_or_else(|| {
+            tracing::warn!(
+                %agent_id,
+                update_id = %update_history_id,
+                "update_history record not found"
+            );
+            report!(AgentWsError::WebSocketSend)
+        })?;
+
+    if !linked_host_ids.contains(&record.host_id) {
+        tracing::warn!(
+            %agent_id,
+            update_id = %update_history_id,
+            host_id = %record.host_id,
+            "agent attempted to update record for unlinked host"
+        );
+        return Err(report!(AgentWsError::WebSocketSend));
+    }
+
+    Ok(record)
 }

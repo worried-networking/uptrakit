@@ -6,6 +6,8 @@
 //! - `send_enroll` / `wait_for_approval` / `request_certificate_ws`
 //! - Full `run_enrollment` and `resume_enrollment` orchestrators
 
+use std::time::Duration;
+
 use futures_util::{SinkExt, StreamExt};
 use http::Uri;
 use rootcause::prelude::*;
@@ -21,6 +23,16 @@ use uptrakit_internal_wire::{
 
 use crate::error::{EnrollmentError, Result};
 
+/// Timeout for TCP connection establishment.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Timeout for immediate request-response exchanges (enroll, certificate request).
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Timeout for waiting for approval from the controller.
+/// Approval may require human interaction, so this is generous.
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
 /// Type alias for the WebSocket stream produced by [`connect_ws`].
 pub type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
@@ -35,9 +47,13 @@ pub async fn connect_ws(
     let ws_url = format!("wss://{host}:{port}/api/v1/ws/service");
     tracing::info!(url = %ws_url, "connecting to controller");
 
-    let tcp_stream = tokio::net::TcpStream::connect((host, port))
-        .await
-        .context_to::<EnrollmentError>()?;
+    let tcp_stream = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    .map_err(|_| report!(EnrollmentError::ConnectionTimeout))?
+    .context_to::<EnrollmentError>()?;
 
     let server_name = ServerName::try_from(host.to_string()).context_to::<EnrollmentError>()?;
 
@@ -72,6 +88,8 @@ pub async fn connect_ws(
 }
 
 /// Send Enroll message and read Enrolled response.
+///
+/// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
 pub async fn send_enroll(
     ws: &mut WsStream,
     out_seq: &mut OutgoingSeq,
@@ -86,111 +104,122 @@ pub async fn send_enroll(
 
     tracing::info!("sent Enroll, waiting for Enrolled response");
 
-    loop {
-        let resp = ws
-            .next()
-            .await
-            .ok_or_else(|| report!(EnrollmentError::ReceiveClosed))?
-            .context_to::<EnrollmentError>()?;
+    tokio::time::timeout(RESPONSE_TIMEOUT, async {
+        loop {
+            let resp = ws
+                .next()
+                .await
+                .ok_or_else(|| report!(EnrollmentError::ReceiveClosed))?
+                .context_to::<EnrollmentError>()?;
 
-        match resp {
-            Message::Text(text) => {
-                let envelope: ControllerEnvelope =
-                    serde_json::from_str(&text).context_to::<EnrollmentError>()?;
+            match resp {
+                Message::Text(text) => {
+                    let envelope: ControllerEnvelope =
+                        serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
-                if let Err(e) = in_seq.validate(envelope.seq) {
-                    return Err(report!(EnrollmentError::Enrollment(format!(
-                        "sequence validation failed: {e}"
-                    ))));
-                }
-
-                match envelope.message {
-                    ControllerMessage::Enrolled(payload) => return Ok(payload),
-                    ControllerMessage::Error(err) => {
+                    if let Err(e) = in_seq.validate(envelope.seq) {
                         return Err(report!(EnrollmentError::Enrollment(format!(
-                            "{}: {}",
-                            err.code, err.message
+                            "sequence validation failed: {e}"
                         ))));
                     }
-                    ControllerMessage::ServerRestarting(payload) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting during enrollment");
-                        return Err(report!(EnrollmentError::ReceiveClosed));
-                    }
-                    _ => {
-                        return Err(report!(EnrollmentError::UnexpectedMessage));
+
+                    match envelope.message {
+                        ControllerMessage::Enrolled(payload) => return Ok(payload),
+                        ControllerMessage::Error(err) => {
+                            return Err(report!(EnrollmentError::Enrollment(format!(
+                                "{}: {}",
+                                err.code, err.message
+                            ))));
+                        }
+                        ControllerMessage::ServerRestarting(payload) => {
+                            tracing::info!(reason = %payload.reason, "controller is restarting during enrollment");
+                            return Err(report!(EnrollmentError::ReceiveClosed));
+                        }
+                        _ => {
+                            return Err(report!(EnrollmentError::UnexpectedMessage));
+                        }
                     }
                 }
+                Message::Close(frame) => {
+                    log_close_frame(frame);
+                    return Err(report!(EnrollmentError::ReceiveClosed));
+                }
+                _ => continue,
             }
-            Message::Close(frame) => {
-                log_close_frame(frame);
-                return Err(report!(EnrollmentError::ReceiveClosed));
-            }
-            _ => continue,
         }
-    }
+    })
+    .await
+    .map_err(|_| report!(EnrollmentError::ResponseTimeout))?
 }
 
 /// Wait for Approved/Rejected push from controller.
 ///
 /// Returns `Ok(())` on `Approved`, errors on `Rejected`.
+/// Times out after [`APPROVAL_TIMEOUT`] (30 minutes).
 pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> Result<()> {
     tracing::info!("waiting for approval...");
 
-    loop {
-        let msg = match ws.next().await {
-            Some(Ok(m)) => m,
-            Some(Err(e)) if is_peer_closed(&e) => {
-                tracing::info!("connection closed by controller while waiting for approval");
-                return Err(report!(EnrollmentError::ReceiveClosed));
-            }
-            Some(Err(e)) => return Err(e).context_to::<EnrollmentError>()?,
-            None => return Err(report!(EnrollmentError::ReceiveClosed)),
-        };
-
-        match msg {
-            Message::Text(text) => {
-                let envelope: ControllerEnvelope =
-                    serde_json::from_str(&text).context_to::<EnrollmentError>()?;
-
-                if let Err(e) = in_seq.validate(envelope.seq) {
-                    return Err(report!(EnrollmentError::Enrollment(format!(
-                        "sequence validation failed: {e}"
-                    ))));
+    tokio::time::timeout(APPROVAL_TIMEOUT, async {
+        loop {
+            let msg = match ws.next().await {
+                Some(Ok(m)) => m,
+                Some(Err(e)) if is_peer_closed(&e) => {
+                    tracing::info!("connection closed by controller while waiting for approval");
+                    return Err(report!(EnrollmentError::ReceiveClosed));
                 }
+                Some(Err(e)) => return Err(e).context_to::<EnrollmentError>()?,
+                None => return Err(report!(EnrollmentError::ReceiveClosed)),
+            };
 
-                match envelope.message {
-                    ControllerMessage::Approved(payload) => {
-                        tracing::info!(service_id = %payload.service_id, "enrollment approved");
-                        return Ok(());
-                    }
-                    ControllerMessage::Rejected(payload) => {
-                        tracing::error!(service_id = %payload.service_id, "enrollment rejected");
-                        return Err(report!(EnrollmentError::EnrollmentRejected));
-                    }
-                    ControllerMessage::Pong(_) => continue,
-                    ControllerMessage::Error(err) => {
+            match msg {
+                Message::Text(text) => {
+                    let envelope: ControllerEnvelope =
+                        serde_json::from_str(&text).context_to::<EnrollmentError>()?;
+
+                    if let Err(e) = in_seq.validate(envelope.seq) {
                         return Err(report!(EnrollmentError::Enrollment(format!(
-                            "{}: {}",
-                            err.code, err.message
+                            "sequence validation failed: {e}"
                         ))));
                     }
-                    ControllerMessage::ServerRestarting(payload) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting while waiting for approval");
-                        return Err(report!(EnrollmentError::ReceiveClosed));
+
+                    match envelope.message {
+                        ControllerMessage::Approved(payload) => {
+                            tracing::info!(service_id = %payload.service_id, "enrollment approved");
+                            return Ok(());
+                        }
+                        ControllerMessage::Rejected(payload) => {
+                            tracing::error!(service_id = %payload.service_id, "enrollment rejected");
+                            return Err(report!(EnrollmentError::EnrollmentRejected));
+                        }
+                        ControllerMessage::Pong(_) => continue,
+                        ControllerMessage::Error(err) => {
+                            return Err(report!(EnrollmentError::Enrollment(format!(
+                                "{}: {}",
+                                err.code, err.message
+                            ))));
+                        }
+                        ControllerMessage::ServerRestarting(payload) => {
+                            tracing::info!(reason = %payload.reason, "controller is restarting while waiting for approval");
+                            return Err(report!(EnrollmentError::ReceiveClosed));
+                        }
+                        _ => continue,
                     }
-                    _ => continue,
                 }
+                Message::Close(frame) => {
+                    log_close_frame(frame);
+                    return Err(report!(EnrollmentError::ReceiveClosed));
+                }
+                _ => continue,
             }
-            Message::Close(frame) => {
-                log_close_frame(frame);
-                return Err(report!(EnrollmentError::ReceiveClosed));
-            }
-            _ => continue,
         }
-    }
+    })
+    .await
+    .map_err(|_| report!(EnrollmentError::ApprovalTimeout))?
 }
 
 /// Send `RequestCertificate` with a CSR and read `Certificate` response.
+///
+/// Times out after [`RESPONSE_TIMEOUT`] (60 seconds).
 pub async fn request_certificate_ws(
     ws: &mut WsStream,
     out_seq: &mut OutgoingSeq,
@@ -207,48 +236,52 @@ pub async fn request_certificate_ws(
 
     tracing::info!("sent RequestCertificate, waiting for Certificate response");
 
-    loop {
-        let resp = ws
-            .next()
-            .await
-            .ok_or_else(|| report!(EnrollmentError::ReceiveClosed))?
-            .context_to::<EnrollmentError>()?;
+    tokio::time::timeout(RESPONSE_TIMEOUT, async {
+        loop {
+            let resp = ws
+                .next()
+                .await
+                .ok_or_else(|| report!(EnrollmentError::ReceiveClosed))?
+                .context_to::<EnrollmentError>()?;
 
-        match resp {
-            Message::Text(text) => {
-                let envelope: ControllerEnvelope =
-                    serde_json::from_str(&text).context_to::<EnrollmentError>()?;
+            match resp {
+                Message::Text(text) => {
+                    let envelope: ControllerEnvelope =
+                        serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
-                if let Err(e) = in_seq.validate(envelope.seq) {
-                    return Err(report!(EnrollmentError::Enrollment(format!(
-                        "sequence validation failed: {e}"
-                    ))));
-                }
-
-                match envelope.message {
-                    ControllerMessage::Certificate(payload) => return Ok(payload),
-                    ControllerMessage::Error(err) => {
+                    if let Err(e) = in_seq.validate(envelope.seq) {
                         return Err(report!(EnrollmentError::Enrollment(format!(
-                            "{}: {}",
-                            err.code, err.message
+                            "sequence validation failed: {e}"
                         ))));
                     }
-                    ControllerMessage::ServerRestarting(payload) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting during certificate request");
-                        return Err(report!(EnrollmentError::ReceiveClosed));
-                    }
-                    _ => {
-                        return Err(report!(EnrollmentError::UnexpectedMessage));
+
+                    match envelope.message {
+                        ControllerMessage::Certificate(payload) => return Ok(payload),
+                        ControllerMessage::Error(err) => {
+                            return Err(report!(EnrollmentError::Enrollment(format!(
+                                "{}: {}",
+                                err.code, err.message
+                            ))));
+                        }
+                        ControllerMessage::ServerRestarting(payload) => {
+                            tracing::info!(reason = %payload.reason, "controller is restarting during certificate request");
+                            return Err(report!(EnrollmentError::ReceiveClosed));
+                        }
+                        _ => {
+                            return Err(report!(EnrollmentError::UnexpectedMessage));
+                        }
                     }
                 }
+                Message::Close(frame) => {
+                    log_close_frame(frame);
+                    return Err(report!(EnrollmentError::ReceiveClosed));
+                }
+                _ => continue,
             }
-            Message::Close(frame) => {
-                log_close_frame(frame);
-                return Err(report!(EnrollmentError::ReceiveClosed));
-            }
-            _ => continue,
         }
-    }
+    })
+    .await
+    .map_err(|_| report!(EnrollmentError::ResponseTimeout))?
 }
 
 /// Log a WebSocket close frame.

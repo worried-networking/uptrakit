@@ -317,7 +317,8 @@ mod utc_datetime_millis {
 
     pub fn serialize<S: Serializer>(dt: &UtcDateTime, serializer: S) -> Result<S::Ok, S::Error> {
         let millis = dt.unix_timestamp_nanos() / 1_000_000;
-        serializer.serialize_i64(millis as i64)
+        let millis_i64 = i64::try_from(millis).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_i64(millis_i64)
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(
@@ -2078,5 +2079,61 @@ mod tests {
     fn incoming_seq_default() {
         let mut seq = IncomingSeq::default();
         assert!(seq.validate(1).is_ok());
+    }
+
+    // =========================================================================
+    // Timestamp serialization safety tests
+    // =========================================================================
+
+    #[test]
+    fn utc_datetime_millis_roundtrip_practical_range() {
+        // Verify roundtrip for a practical timestamp (2024-01-28)
+        let dt = UtcDateTime::from_unix_timestamp(1_706_400_000).unwrap();
+        let payload = CertificatePayload {
+            cert_pem: "test".to_string(),
+            not_after: dt,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: CertificatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.not_after, dt);
+    }
+
+    #[test]
+    fn utc_datetime_millis_roundtrip_epoch() {
+        // Verify roundtrip for Unix epoch
+        let dt = UtcDateTime::from_unix_timestamp(0).unwrap();
+        let payload = CertificatePayload {
+            cert_pem: "test".to_string(),
+            not_after: dt,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: CertificatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.not_after, dt);
+    }
+
+    #[test]
+    fn utc_datetime_millis_roundtrip_far_future() {
+        // Verify roundtrip for a far future date (year 9999)
+        let dt = UtcDateTime::from_unix_timestamp(253_402_300_799).unwrap();
+        let payload = CertificatePayload {
+            cert_pem: "test".to_string(),
+            not_after: dt,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: CertificatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.not_after, dt);
+    }
+
+    #[test]
+    fn utc_datetime_millis_roundtrip_negative_timestamp() {
+        // Verify roundtrip for a negative timestamp (before Unix epoch)
+        let dt = UtcDateTime::from_unix_timestamp(-1_000_000).unwrap();
+        let payload = CertificatePayload {
+            cert_pem: "test".to_string(),
+            not_after: dt,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        let deserialized: CertificatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.not_after, dt);
     }
 }

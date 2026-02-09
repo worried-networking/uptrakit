@@ -1185,9 +1185,9 @@ Other crates (`web-api-types`, `db`) keep their own parallel enums; conversion h
 - `VersionCheckResults(VersionCheckResultsPayload)` variant in `ServiceMessage` (agent-specific) — agent response with detected versions or errors
 - `ReportHostInfoPayload` includes `agent_version: String` — agent binary version (from `CARGO_PKG_VERSION`)
 - `ExecuteUpdate(ExecuteUpdatePayload)` variant in `ControllerMessage` — triggers a software update on the agent (boxed to avoid large enum variant)
-- `UpdateStarted(UpdateStartedPayload)` variant in `ServiceMessage` (agent-specific) — agent acknowledges update start with detected from_version
-- `UpdateOutput(UpdateOutputPayload)` variant in `ServiceMessage` (agent-specific) — agent streams update output (stdout, stderr, pre/post-hook, system)
-- `UpdateResult(UpdateResultPayload)` variant in `ServiceMessage` (agent-specific) — agent reports final update status with accumulated output
+- `UpdateStarted(UpdateStartedPayload)` variant in `ServiceMessage` (agent-specific) — agent acknowledges update start with detected from_version. Controller validates that the `update_history_id` belongs to a host linked to the requesting agent before processing.
+- `UpdateOutput(UpdateOutputPayload)` variant in `ServiceMessage` (agent-specific) — agent streams update output (stdout, stderr, pre/post-hook, system). Controller validates ownership before appending output.
+- `UpdateResult(UpdateResultPayload)` variant in `ServiceMessage` (agent-specific) — agent reports final update status with accumulated output. Controller validates ownership before updating status.
 - `Register(MqttRegisterPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service registers with the controller (includes `active_mqtt_clients: Vec<Uuid>`)
 - `ReleaseTenants(MqttReleaseTenantsPayload)` variant in `ServiceMessage` (MQTT-specific) — MQTT service releases MQTT client leases (by `mqtt_client_ids`)
 - `ServerRestarting(ServerRestartingPayload)` variant in `ControllerMessage` — sent during graceful restart to notify services; includes a human-readable `reason` field
@@ -1224,8 +1224,11 @@ The controller enforces several connection-level limits on the WebSocket endpoin
 | Anonymous connection timeout | 30 seconds | Closes unauthenticated connections that don't enroll in time |
 | Approval polling interval | 5 seconds | Rate-limits DB polling for approval status (decoupled from client-controlled pings) |
 | Update output cap | 1 MB | Caps accumulated `UpdateOutput` per update record to prevent unbounded DB growth |
+| Enrollment TCP connect timeout | 30 seconds | Prevents blocking on unreachable controllers during enrollment |
+| Enrollment response timeout | 60 seconds | Prevents blocking on unresponsive controllers during Enroll/RequestCertificate exchanges |
+| Enrollment approval timeout | 30 minutes | Prevents indefinite blocking while waiting for human approval |
 
-These limits are defined as constants in `service_ws.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`), `agent_ws.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), and `mqtt_ws.rs` (`APPROVAL_POLL_INTERVAL`).
+These limits are defined as constants in `service_ws.rs` (`MAX_WS_MESSAGE_SIZE`, `ANONYMOUS_TIMEOUT`), `agent_ws.rs` (`APPROVAL_POLL_INTERVAL`, `MAX_UPDATE_OUTPUT_BYTES`), `mqtt_ws.rs` (`APPROVAL_POLL_INTERVAL`), and `enrollment/src/ws.rs` (`CONNECT_TIMEOUT`, `RESPONSE_TIMEOUT`, `APPROVAL_TIMEOUT`).
 
 ### Agent graceful shutdown
 

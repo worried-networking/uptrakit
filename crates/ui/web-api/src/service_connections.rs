@@ -120,10 +120,16 @@ impl ServiceConnectionRegistry {
     // ---------------------------------------------------------------
 
     /// Push a message to a connected service. Returns `true` if sent.
+    ///
+    /// The lock is released before the async send to prevent holding the
+    /// `RwLock` across an await point.
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
-        let guard = self.inner.read().await;
-        if let Some(conn) = guard.get(service_id) {
-            conn.sender.send(msg).await.is_ok()
+        let sender = {
+            let guard = self.inner.read().await;
+            guard.get(service_id).map(|c| c.sender.clone())
+        };
+        if let Some(sender) = sender {
+            sender.send(msg).await.is_ok()
         } else {
             false
         }
@@ -135,20 +141,33 @@ impl ServiceConnectionRegistry {
     }
 
     /// Broadcast a message to all connected services.
+    ///
+    /// Snapshots the senders under the lock and releases it before sending,
+    /// so a slow consumer cannot block connection management operations.
     pub async fn broadcast(&self, msg: ControllerMessage) {
-        let guard = self.inner.read().await;
-        for conn in guard.values() {
-            let _ = conn.sender.send(msg.clone()).await;
+        let senders: Vec<mpsc::Sender<ControllerMessage>> = {
+            let guard = self.inner.read().await;
+            guard.values().map(|c| c.sender.clone()).collect()
+        };
+        for sender in senders {
+            let _ = sender.send(msg.clone()).await;
         }
     }
 
     /// Broadcast a message to all connected services of a specific type.
+    ///
+    /// Snapshots the senders under the lock and releases it before sending.
     pub async fn broadcast_by_type(&self, service_type: ServiceType, msg: ControllerMessage) {
-        let guard = self.inner.read().await;
-        for conn in guard.values() {
-            if conn.service_type == service_type {
-                let _ = conn.sender.send(msg.clone()).await;
-            }
+        let senders: Vec<mpsc::Sender<ControllerMessage>> = {
+            let guard = self.inner.read().await;
+            guard
+                .values()
+                .filter(|c| c.service_type == service_type)
+                .map(|c| c.sender.clone())
+                .collect()
+        };
+        for sender in senders {
+            let _ = sender.send(msg.clone()).await;
         }
     }
 

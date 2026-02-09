@@ -80,6 +80,16 @@ info:
     - **Approval polling:** The controller polls the database for approval status
       changes at a fixed 5-second interval, independent of client ping frequency.
 
+    ### Client-side Timeouts (enrollment crate)
+
+    - **TCP connect timeout:** 30 seconds. The enrollment client aborts the TCP
+      connection if it cannot be established within 30 seconds.
+    - **Response timeout:** 60 seconds. The `Enroll` and `RequestCertificate`
+      request-response exchanges time out after 60 seconds.
+    - **Approval timeout:** 30 minutes. The `wait_for_approval` loop times out
+      after 30 minutes. The caller (agent/MQTT service) retries the enrollment
+      flow on timeout.
+
 servers:
   controller:
     host: "{host}:{port}"
