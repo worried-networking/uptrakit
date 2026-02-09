@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import type { AuthMethodsResponse } from '$lib/types';
+	import { isValidLogoUrl } from '$lib/utils';
 
 	let email = $state('');
 	let password = $state('');
@@ -32,7 +33,7 @@
 		const oidcCode = params.get('oidc_code');
 		if (oidcCode) {
 			handleOidcCallback(oidcCode)
-				.then(() => goto('/'))
+				.then(() => goto(safeRedirect()))
 				.catch((err) => {
 					error = err instanceof Error ? err.message : 'OIDC login failed';
 				});
@@ -84,12 +85,20 @@
 			});
 	});
 
+	function safeRedirect(): string {
+		const redirect = $page.url.searchParams.get('redirect');
+		if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+			return redirect;
+		}
+		return '/';
+	}
+
 	async function onSubmit(e: SubmitEvent) {
 		e.preventDefault();
 		error = '';
 		try {
 			await handleLogin({ email, password });
-			goto('/');
+			goto(safeRedirect());
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Login failed';
 		}
@@ -111,7 +120,7 @@
 		error = '';
 		try {
 			await handleOidcLink(linkToken, linkPassword);
-			goto('/');
+			goto(safeRedirect());
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Account linking failed';
 		}
@@ -122,7 +131,7 @@
 		error = '';
 		try {
 			await handleOidcCompleteRegistration(registrationCode, registrationTokenInput);
-			goto('/');
+			goto(safeRedirect());
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Registration failed';
 		}
@@ -243,8 +252,8 @@
 					disabled={oidcLoading}
 					onclick={() => onOidcLogin(provider.id)}
 				>
-					{#if provider.logo_url}
-						<img src={provider.logo_url} alt="" class="h-5 w-5" />
+					{#if isValidLogoUrl(provider.logo_url)}
+						<img src={provider.logo_url} alt="" class="h-5 w-5" referrerpolicy="no-referrer" />
 					{/if}
 					{oidcLoading ? 'Redirecting...' : `Login with ${provider.name}`}
 				</button>

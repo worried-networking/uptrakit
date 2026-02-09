@@ -3,6 +3,7 @@
 	import type { SystemAlert } from '$lib/types';
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { user, loading, initialize, handleLogout } from '$lib/auth';
 	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
 	import { getSystemAlerts } from '$lib/api';
@@ -39,6 +40,18 @@
 	onMount(() => {
 		initialize();
 		initTheme();
+	});
+
+	// Centralized auth guard — redirects unauthenticated users on protected routes
+	$effect(() => {
+		if ($loading) return;
+
+		const path = $page.url.pathname;
+		const isPublic = publicRoutes.has(path);
+
+		if (!$user && !isPublic) {
+			goto('/login?redirect=' + encodeURIComponent(path + $page.url.search));
+		}
 	});
 
 	$effect(() => {
@@ -153,7 +166,9 @@
 				{/if}
 
 				<div class="container mx-auto max-w-2xl p-4">
-					{@render children()}
+					{#if $user || publicRoutes.has($page.url.pathname)}
+						{@render children()}
+					{/if}
 				</div>
 			</main>
 		</div>

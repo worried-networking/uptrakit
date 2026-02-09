@@ -112,7 +112,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 		} catch {
 			// Refresh failed — clear token and redirect to login
 			setAccessToken(null);
-			window.location.href = '/login';
+			window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
 			throw new Error('Session expired');
 		} finally {
 			refreshPromise = null;

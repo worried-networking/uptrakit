@@ -44,8 +44,10 @@ uptrakit/
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
-│   │   ├── lib/                        # Shared modules: api client, auth store, types
+│   │   ├── lib/                        # Shared modules: api client, auth store, types, utils
+│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop, ContextMenu
 │   │   └── routes/                     # SvelteKit file-based routes
+│   │       └── settings/               # Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment)
 │   ├── package.json                    # npm scripts: build, check
 │   ├── svelte.config.js                # SvelteKit config (static adapter)
 │   └── vite.config.ts                  # Vite + Tailwind CSS v4 config (dev proxy → controller)

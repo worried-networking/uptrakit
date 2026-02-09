@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { user } from '$lib/auth';
-	import { goto } from '$app/navigation';
 	import { getAgents, approveAgent, rejectAgent, deleteAgent, mergeAgent } from '$lib/api';
 	import type { ServiceResponse } from '$lib/types';
+	import { formatDate } from '$lib/utils';
+	import ContextMenu from '$lib/components/ContextMenu.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 
 	let agents: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -12,12 +15,6 @@
 		$state(null);
 	let mergeSource: { id: string; name: string } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
-
-	$effect(() => {
-		if (!$user) {
-			goto('/login');
-		}
-	});
 
 	$effect(() => {
 		if ($user) {
@@ -105,11 +102,6 @@
 		}
 	}
 
-	function formatDate(date: string | null): string {
-		if (!date) return '—';
-		return new Date(date).toLocaleString();
-	}
-
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
 			closeMenu();
@@ -156,7 +148,7 @@
 					<tr>
 						<td>{agent.friendly_name}</td>
 						<td>{agent.hostname}</td>
-						<td>{agent.ip_address ?? '—'}</td>
+						<td>{agent.ip_address ?? '\u2014'}</td>
 						<td>
 							{#if agent.status === 'pending'}
 								<span class="badge preset-filled-warning-500">Pending</span>
@@ -195,85 +187,65 @@
 	{#if openMenuId}
 		{@const agent = agents.find((a) => a.id === openMenuId)}
 		{#if agent}
-			<div
-				class="card fixed z-50 w-40 overflow-hidden p-0 shadow-xl"
-				style="top: {menuPos.top}px; left: {menuPos.left}px;"
-			>
-				<nav>
-					<ul class="space-y-0.5 p-1">
-						{#if agent.status === 'pending'}
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-									onclick={() => openMergeDialog(agent)}
-								>
-									Merge Into&hellip;
-								</button>
-							</li>
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-									onclick={() => requestConfirm(agent.id, 'approve', agent.friendly_name)}
-								>
-									Approve
-								</button>
-							</li>
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-									onclick={() => requestConfirm(agent.id, 'reject', agent.friendly_name)}
-								>
-									Reject
-								</button>
-							</li>
-						{:else}
-							<li>
-								<button
-									class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-									onclick={() => requestConfirm(agent.id, 'delete', agent.friendly_name)}
-								>
-									Delete
-								</button>
-							</li>
-						{/if}
-					</ul>
-				</nav>
-			</div>
+			<ContextMenu top={menuPos.top} left={menuPos.left}>
+				{#if agent.status === 'pending'}
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+							role="menuitem"
+							onclick={() => openMergeDialog(agent)}
+						>
+							Merge Into&hellip;
+						</button>
+					</li>
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+							role="menuitem"
+							onclick={() => requestConfirm(agent.id, 'approve', agent.friendly_name)}
+						>
+							Approve
+						</button>
+					</li>
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+							role="menuitem"
+							onclick={() => requestConfirm(agent.id, 'reject', agent.friendly_name)}
+						>
+							Reject
+						</button>
+					</li>
+				{:else}
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+							role="menuitem"
+							onclick={() => requestConfirm(agent.id, 'delete', agent.friendly_name)}
+						>
+							Delete
+						</button>
+					</li>
+				{/if}
+			</ContextMenu>
 		{/if}
 	{/if}
 
 	{#if confirmAction}
 		{@const labels = confirmLabels[confirmAction.action]}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-			onclick={(e) => { if (e.target === e.currentTarget) cancelConfirm(); }}
-			onkeydown={(e) => { if (e.key === 'Escape') cancelConfirm(); }}
-		>
-			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
-				<h3 class="h3">{labels.title}</h3>
-				<p>
-					Are you sure you want to {labels.verb}
-					<strong>{confirmAction.name}</strong>?
-				</p>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={cancelConfirm}>Cancel</button>
-					<button class="btn {labels.btnClass}" onclick={executeConfirmed}>
-						{labels.title}
-					</button>
-				</div>
-			</div>
-		</div>
+		<ConfirmDialog
+			title={labels.title}
+			message="Are you sure you want to {labels.verb} <strong>{confirmAction.name}</strong>?"
+			confirmLabel={labels.title}
+			confirmClass={labels.btnClass}
+			onconfirm={executeConfirmed}
+			oncancel={cancelConfirm}
+		/>
 	{/if}
 
 	{#if mergeSource}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-			onclick={(e) => { if (e.target === e.currentTarget) cancelMerge(); }}
-			onkeydown={(e) => { if (e.key === 'Escape') cancelMerge(); }}
-		>
-			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
+		<ModalBackdrop onclose={cancelMerge}>
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl" role="dialog" aria-modal="true">
 				<h3 class="h3">Merge Agent</h3>
 				<p>
 					Merge <strong>{mergeSource.name}</strong> into an existing agent.
@@ -299,6 +271,6 @@
 					</button>
 				</div>
 			</div>
-		</div>
+		</ModalBackdrop>
 	{/if}
 {/if}

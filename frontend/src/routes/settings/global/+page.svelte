@@ -32,9 +32,7 @@
 	const canManageGlobalSettings = $derived($user?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 
 	$effect(() => {
-		if (!$user) {
-			goto('/login');
-		} else if (!canManageGlobalSettings) {
+		if ($user && !canManageGlobalSettings) {
 			goto('/');
 		}
 	});

@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { user } from '$lib/auth';
-	import { goto } from '$app/navigation';
 	import { getHosts, updateHost, deactivateHost } from '$lib/api';
 	import type { HostResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
+	import { formatDate } from '$lib/utils';
+	import ContextMenu from '$lib/components/ContextMenu.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -11,12 +14,6 @@
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
 	let confirmAction: { hostId: string; action: 'deactivate'; name: string } | null = $state(null);
 	let editHost: { id: string; friendlyName: string } | null = $state(null);
-
-	$effect(() => {
-		if (!$user) {
-			goto('/login');
-		}
-	});
 
 	$effect(() => {
 		if ($user) {
@@ -90,11 +87,6 @@
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to deactivate host';
 		}
-	}
-
-	function formatDate(date: string | null): string {
-		if (!date) return '\u2014';
-		return new Date(date).toLocaleString();
 	}
 
 	function handleWindowClick(event: MouseEvent) {
@@ -176,65 +168,42 @@
 	{#if openMenuId}
 		{@const host = hosts.find((h) => h.id === openMenuId)}
 		{#if host}
-			<div
-				class="card fixed z-50 w-40 overflow-hidden p-0 shadow-xl"
-				style="top: {menuPos.top}px; left: {menuPos.left}px;"
-			>
-				<nav>
-					<ul class="space-y-0.5 p-1">
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
-								onclick={() => openEditDialog(host)}
-							>
-								Edit Name
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								onclick={() => requestConfirm(host.id, 'deactivate', host.friendly_name)}
-							>
-								Deactivate
-							</button>
-						</li>
-					</ul>
-				</nav>
-			</div>
+			<ContextMenu top={menuPos.top} left={menuPos.left}>
+				<li>
+					<button
+						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+						role="menuitem"
+						onclick={() => openEditDialog(host)}
+					>
+						Edit Name
+					</button>
+				</li>
+				<li>
+					<button
+						class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
+						role="menuitem"
+						onclick={() => requestConfirm(host.id, 'deactivate', host.friendly_name)}
+					>
+						Deactivate
+					</button>
+				</li>
+			</ContextMenu>
 		{/if}
 	{/if}
 
 	{#if confirmAction}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-			onclick={(e) => { if (e.target === e.currentTarget) cancelConfirm(); }}
-			onkeydown={(e) => { if (e.key === 'Escape') cancelConfirm(); }}
-		>
-			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
-				<h3 class="h3">Deactivate Host</h3>
-				<p>
-					Are you sure you want to deactivate
-					<strong>{confirmAction.name}</strong>?
-				</p>
-				<div class="flex justify-end gap-2">
-					<button class="btn preset-tonal-surface" onclick={cancelConfirm}>Cancel</button>
-					<button class="btn preset-filled-error-500" onclick={executeConfirmed}>
-						Deactivate
-					</button>
-				</div>
-			</div>
-		</div>
+		<ConfirmDialog
+			title="Deactivate Host"
+			message="Are you sure you want to deactivate <strong>{confirmAction.name}</strong>?"
+			confirmLabel="Deactivate"
+			onconfirm={executeConfirmed}
+			oncancel={cancelConfirm}
+		/>
 	{/if}
 
 	{#if editHost}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-			onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }}
-			onkeydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}
-		>
-			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl">
+		<ModalBackdrop onclose={cancelEdit}>
+			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl" role="dialog" aria-modal="true">
 				<h3 class="h3">Edit Host Name</h3>
 				<label class="label">
 					<span>Friendly Name</span>
@@ -247,6 +216,6 @@
 					</button>
 				</div>
 			</div>
-		</div>
+		</ModalBackdrop>
 	{/if}
 {/if}
