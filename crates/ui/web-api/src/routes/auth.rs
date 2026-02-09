@@ -49,11 +49,8 @@ pub async fn register(
     }
 
     // Validate password length
-    if req.password.len() < 8 {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "Password must be at least 8 characters",
-        );
+    if let Some(message) = password::validate_password_length(&req.password) {
+        return error_response(StatusCode::BAD_REQUEST, message);
     }
 
     // Validate registration is allowed
@@ -212,6 +209,11 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
+    }
+
+    // Validate password length early to avoid expensive hashing on absurd inputs
+    if let Some(message) = password::validate_password_length(&req.password) {
+        return error_response(StatusCode::BAD_REQUEST, message);
     }
 
     // Find user by email

@@ -94,7 +94,14 @@ pub fn cert_signed_by_ca(cert_pem: &str, ca_pem: &str) -> Result<bool> {
         .parse_x509()
         .map_err(|_| report!(PkiUtilError::PemParse))?;
 
-    Ok(cert.issuer() == ca.subject())
+    if cert.issuer() != ca.subject() {
+        return Ok(false);
+    }
+
+    match cert.verify_signature(Some(ca.public_key())) {
+        Ok(()) => Ok(true),
+        Err(_) => Ok(false),
+    }
 }
 
 #[cfg(test)]
@@ -104,87 +111,140 @@ mod tests {
     use super::*;
 
     #[test]
-    fn collect_sans_includes_localhost() {
-        let sans = collect_sans(&[]).unwrap();
+    fn collect_sans_includes_localhost() -> Result<()> {
+        let sans = collect_sans(&[]).expect("collect sans");
         assert!(sans.dns_names.contains(&"localhost".to_string()));
+        Ok(())
     }
 
     #[test]
-    fn collect_sans_includes_extra_dns() {
+    fn collect_sans_includes_extra_dns() -> Result<()> {
         let extras = vec!["myhost.example.com".to_string()];
-        let sans = collect_sans(&extras).unwrap();
+        let sans = collect_sans(&extras).expect("collect sans");
         assert!(sans.dns_names.contains(&"myhost.example.com".to_string()));
+        Ok(())
     }
 
     #[test]
-    fn collect_sans_includes_extra_ips() {
+    fn collect_sans_includes_extra_ips() -> Result<()> {
         let extras = vec!["192.168.1.1".to_string(), "::1".to_string()];
-        let sans = collect_sans(&extras).unwrap();
+        let sans = collect_sans(&extras).expect("collect sans");
         assert!(
             sans.ip_addrs
                 .contains(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
         );
         assert!(sans.ip_addrs.contains(&IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        Ok(())
     }
 
     #[test]
-    fn collect_sans_deduplicates_hostname() {
-        let hostname = hostname::get().unwrap().to_string_lossy().to_string();
+    fn collect_sans_deduplicates_hostname() -> Result<()> {
+        let hostname = hostname::get()
+            .expect("hostname")
+            .to_string_lossy()
+            .to_string();
         let extras = vec![hostname.clone()];
-        let sans = collect_sans(&extras).unwrap();
+        let sans = collect_sans(&extras).expect("collect sans");
         let count = sans.dns_names.iter().filter(|n| **n == hostname).count();
         assert_eq!(count, 1);
+        Ok(())
     }
 
     #[test]
-    fn cert_signed_by_ca_same_ca() {
-        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    fn cert_signed_by_ca_same_ca() -> Result<()> {
+        let key_pair =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca key");
         let mut ca_params = rcgen::CertificateParams::default();
         ca_params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test CA");
         ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let ca_cert = ca_params.self_signed(&key_pair).unwrap();
+        let ca_cert = ca_params.self_signed(&key_pair).expect("ca cert");
         let ca_pem = ca_cert.pem();
 
         let issuer = rcgen::Issuer::new(ca_params, key_pair);
-        let server_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-        let server_params = rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
-        let server_cert = server_params.signed_by(&server_key, &issuer).unwrap();
+        let server_key =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("server key");
+        let server_params =
+            rcgen::CertificateParams::new(vec!["localhost".into()]).expect("server params");
+        let server_cert = server_params
+            .signed_by(&server_key, &issuer)
+            .expect("server cert");
         let server_pem = server_cert.pem();
 
-        assert!(cert_signed_by_ca(&server_pem, &ca_pem).unwrap());
+        assert!(cert_signed_by_ca(&server_pem, &ca_pem)?);
+        Ok(())
     }
 
     #[test]
-    fn cert_signed_by_ca_different_ca() {
+    fn cert_signed_by_ca_different_ca() -> Result<()> {
         // Generate CA 1
-        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca1 key");
         let mut ca1_params = rcgen::CertificateParams::default();
         ca1_params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test CA 1");
         ca1_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let _ca1_cert = ca1_params.self_signed(&key1).unwrap();
+        let _ca1_cert = ca1_params.self_signed(&key1).expect("ca1 cert");
 
         let issuer1 = rcgen::Issuer::new(ca1_params, key1);
-        let server_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-        let server_params = rcgen::CertificateParams::new(vec!["localhost".into()]).unwrap();
-        let server_cert = server_params.signed_by(&server_key, &issuer1).unwrap();
+        let server_key =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("server key");
+        let server_params =
+            rcgen::CertificateParams::new(vec!["localhost".into()]).expect("server params");
+        let server_cert = server_params
+            .signed_by(&server_key, &issuer1)
+            .expect("server cert");
         let server_pem = server_cert.pem();
 
         // Generate CA 2
-        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca2 key");
         let mut ca2_params = rcgen::CertificateParams::default();
         ca2_params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test CA 2");
         ca2_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let ca2_cert = ca2_params.self_signed(&key2).unwrap();
+        let ca2_cert = ca2_params.self_signed(&key2).expect("ca2 cert");
         let ca2_pem = ca2_cert.pem();
 
         // Server cert signed by CA1, but checking against CA2
-        assert!(!cert_signed_by_ca(&server_pem, &ca2_pem).unwrap());
+        assert!(!cert_signed_by_ca(&server_pem, &ca2_pem)?);
+        Ok(())
+    }
+
+    #[test]
+    fn cert_signed_by_ca_same_subject_wrong_key() -> Result<()> {
+        let key1 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca1 key");
+        let mut ca1_params = rcgen::CertificateParams::default();
+        ca1_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Shared CA");
+        ca1_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca1_cert = ca1_params.self_signed(&key1).expect("ca1 cert");
+        let ca1_pem = ca1_cert.pem();
+
+        let issuer1 = rcgen::Issuer::new(ca1_params, key1);
+        let server_key =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("server key");
+        let server_params =
+            rcgen::CertificateParams::new(vec!["localhost".into()]).expect("server params");
+        let server_cert = server_params
+            .signed_by(&server_key, &issuer1)
+            .expect("server cert");
+        let server_pem = server_cert.pem();
+
+        let key2 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("ca2 key");
+        let mut ca2_params = rcgen::CertificateParams::default();
+        ca2_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Shared CA");
+        ca2_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca2_cert = ca2_params.self_signed(&key2).expect("ca2 cert");
+        let ca2_pem = ca2_cert.pem();
+
+        assert!(!cert_signed_by_ca(&server_pem, &ca2_pem)?);
+        assert!(cert_signed_by_ca(&server_pem, &ca1_pem)?);
+        Ok(())
     }
 
     #[test]

@@ -70,6 +70,30 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
                 fail_closed: true,
             },
         ),
+        (
+            "/api/v1/auth/oidc/exchange",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/oidc/link",
+            EndpointRateLimit {
+                max_requests: 10,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/oidc/complete-registration",
+            EndpointRateLimit {
+                max_requests: 5,
+                window_secs: 60,
+                fail_closed: true,
+            },
+        ),
     ])
 });
 
@@ -192,6 +216,9 @@ mod tests {
             "/api/v1/auth/device",
             "/api/v1/auth/device/poll",
             "/api/v1/auth/device/approve",
+            "/api/v1/auth/oidc/exchange",
+            "/api/v1/auth/oidc/link",
+            "/api/v1/auth/oidc/complete-registration",
         ];
 
         for path in &expected {

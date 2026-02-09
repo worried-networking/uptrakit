@@ -5,6 +5,19 @@ use argon2::{
 };
 use rootcause::prelude::*;
 
+pub const MIN_PASSWORD_LENGTH: usize = 8;
+pub const MAX_PASSWORD_LENGTH: usize = 1024;
+
+pub fn validate_password_length(password: &str) -> Option<&'static str> {
+    if password.len() < MIN_PASSWORD_LENGTH {
+        return Some("Password must be at least 8 characters");
+    }
+    if password.len() > MAX_PASSWORD_LENGTH {
+        return Some("Password must be at most 1024 characters");
+    }
+    None
+}
+
 /// Hash a password using Argon2id with OWASP-recommended parameters
 ///
 /// Parameters:
@@ -107,5 +120,22 @@ mod tests {
     fn test_verify_invalid_hash_format() {
         let result = verify_password("password", "not-a-valid-hash");
         assert!(result.is_err(), "Should error on invalid hash format");
+    }
+
+    #[test]
+    fn password_length_validation_rejects_too_short() {
+        assert!(validate_password_length("short").is_some());
+    }
+
+    #[test]
+    fn password_length_validation_rejects_too_long() {
+        let too_long = "a".repeat(MAX_PASSWORD_LENGTH + 1);
+        assert!(validate_password_length(&too_long).is_some());
+    }
+
+    #[test]
+    fn password_length_validation_accepts_valid() {
+        let valid = "a".repeat(MIN_PASSWORD_LENGTH);
+        assert!(validate_password_length(&valid).is_none());
     }
 }

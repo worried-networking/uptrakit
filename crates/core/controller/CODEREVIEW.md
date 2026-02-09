@@ -26,7 +26,7 @@ Commit: `b855b6f`
 |----------|-------|------------|
 | **CRITICAL** | 0 | — |
 | **HIGH** | 0 | — |
-| **MEDIUM** | 8 | Race conditions in leases, N+1 queries, SSRF vectors, settings desync, CRL gap |
+| **MEDIUM** | 7 | Race conditions in leases, N+1 queries, settings desync, CRL gap |
 | **LOW** | 16 | Missing validation, minor inconsistencies, defense-in-depth gaps |
 
 ---
@@ -48,12 +48,6 @@ No critical findings remain open.
 **Files:** `web-api/src/routes/hosts.rs:87-91`, `software_items.rs:356-374`, `update_history.rs:194-199`
 
 `list_hosts` issues an individual query per host (up to 1000). Same patterns in software items and update history.
-
-### ME-9: SSRF vector in GitHub provider via `api_base_url`
-
-**File:** `providers/github/src/config.rs:17-19`
-
-User-provided `api_base_url` is directly used in API requests without scheme validation or private IP blocking. Combined with unvalidated `owner`/`repo`, this enables SSRF.
 
 ### ME-10: Docker Registry auth token URL params not URL-encoded
 
@@ -236,94 +230,6 @@ These aspects demonstrate strong engineering practices:
 ## Fix Plans
 
 > **Open Fix Plans** — The remaining fix plans below cover the unresolved findings. Additionally, 1 issue (ME-17) has a fix plan in the wire protocol CODEREVIEW.
-
----
-
-### FP-ME9: Block SSRF in GitHub provider (TOP 10 — #16)
-
-**Addresses:** ME-9 (Medium — SSRF via admin-configurable `api_base_url`)
-
-**Problem:** The GitHub provider's `api_base_url` field (`providers/github/src/config.rs:17-19`) accepts any string. It is used in `format!("{}/repos/{}/{}/releases?per_page=100", api_base_url, owner, repo)` to construct HTTP request URLs. No scheme validation, no hostname validation, and no private-IP blocking exist. An admin can set `api_base_url` to `http://169.254.169.254` (cloud metadata), `http://localhost:3000` (internal services), or any internal endpoint. The `auth_token` (if configured) is sent along with every request.
-
-**Current validation (`config.rs:40-59`):**
-```rust
-pub fn validate(&self) -> Result<()> {
-    if self.owner.is_empty() { return Err(...); }
-    if self.repo.is_empty() { return Err(...); }
-    // ❌ NO validation on api_base_url
-    Ok(())
-}
-```
-
-**Detailed implementation plan:**
-
-1. **Add URL validation to `GitHubConfig::validate()`:**
-   ```rust
-   if let Some(ref url) = self.api_base_url {
-       let parsed = url::Url::parse(url).map_err(|e|
-           report!(GitHubError::Configuration(format!("invalid api_base_url: {e}")))
-       )?;
-
-       // Scheme must be https (or http only for explicit opt-in)
-       if parsed.scheme() != "https" {
-           return Err(report!(GitHubError::Configuration(
-               "api_base_url must use https".to_string()
-           )));
-       }
-
-       // Block private/loopback IPs
-       if let Some(host) = parsed.host_str() {
-           if is_private_host(host) {
-               return Err(report!(GitHubError::Configuration(
-                   "api_base_url must not point to private/loopback addresses".to_string()
-               )));
-           }
-       }
-   }
-   ```
-
-2. **Implement `is_private_host()` helper** (shared across providers):
-   ```rust
-   fn is_private_host(host: &str) -> bool {
-       // Block known private hostnames
-       let lower = host.to_lowercase();
-       if lower == "localhost" || lower.ends_with(".local") || lower.ends_with(".internal") {
-           return true;
-       }
-       // Block private IP ranges
-       if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-           return ip.is_loopback()
-               || ip.is_unspecified()
-               || matches!(ip, std::net::IpAddr::V4(v4) if v4.is_private()
-                   || v4.octets()[0] == 169 && v4.octets()[1] == 254); // link-local
-       }
-       false
-   }
-   ```
-
-3. **Also validate `owner` and `repo`** for path traversal characters:
-   ```rust
-   if self.owner.contains('/') || self.owner.contains("..") {
-       return Err(report!(GitHubError::Configuration("invalid owner".into())));
-   }
-   if self.repo.contains('/') || self.repo.contains("..") {
-       return Err(report!(GitHubError::Configuration("invalid repo".into())));
-   }
-   ```
-
-4. **Apply same validation to Docker Registry provider** (`providers/docker-registry/`) which has a similar `registry_url` field.
-
-**Files to modify:**
-- `crates/providers/github/src/config.rs` — add URL/host validation
-- `crates/providers/github/Cargo.toml` — add `url` dependency if not present
-- Consider a shared `validate_external_url()` in `providers/core/`
-
-**Testing:**
-- Unit test: `https://api.github.com` passes
-- Unit test: `http://169.254.169.254` rejected
-- Unit test: `http://localhost:8080` rejected
-- Unit test: `https://github.example.com` (custom enterprise) passes
-- Unit test: owner/repo with path traversal rejected
 
 ---
 

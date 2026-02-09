@@ -1,5 +1,7 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
+use url::Url;
 
 use crate::error::{GitHubError, Result};
 
@@ -48,6 +50,38 @@ impl GitHubConfig {
                 "repo must not be empty".to_string()
             )));
         }
+        if self.owner.contains('/') || self.owner.contains("..") {
+            return Err(report!(GitHubError::Configuration(
+                "owner must not contain '/' or '..'".to_string()
+            )));
+        }
+        if self.repo.contains('/') || self.repo.contains("..") {
+            return Err(report!(GitHubError::Configuration(
+                "repo must not contain '/' or '..'".to_string()
+            )));
+        }
+        if let Some(ref url) = self.api_base_url {
+            let parsed = Url::parse(url).map_err(|e| {
+                report!(GitHubError::Configuration(format!(
+                    "invalid api_base_url: {e}"
+                )))
+            })?;
+            if parsed.scheme() != "https" {
+                return Err(report!(GitHubError::Configuration(
+                    "api_base_url must use https".to_string()
+                )));
+            }
+            let host = parsed.host_str().ok_or_else(|| {
+                report!(GitHubError::Configuration(
+                    "api_base_url must include a host".to_string()
+                ))
+            })?;
+            if is_private_host(host) {
+                return Err(report!(GitHubError::Configuration(
+                    "api_base_url must not point to private/loopback addresses".to_string()
+                )));
+            }
+        }
         for pattern in &self.asset_patterns {
             regex::Regex::new(pattern).map_err(|e| {
                 report!(GitHubError::InvalidPattern(format!(
@@ -63,6 +97,28 @@ impl GitHubConfig {
         self.api_base_url
             .as_deref()
             .unwrap_or("https://api.github.com")
+    }
+}
+
+fn is_private_host(host: &str) -> bool {
+    let lower = host.to_lowercase();
+    if lower == "localhost"
+        || lower.ends_with(".local")
+        || lower.ends_with(".internal")
+        || lower.ends_with(".localhost")
+    {
+        return true;
+    }
+
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_unspecified()
+                || (v4.octets()[0] == 169 && v4.octets()[1] == 254)
+        }
+        Ok(IpAddr::V6(v6)) => v6.is_loopback() || v6.is_unspecified(),
+        Err(_) => false,
     }
 }
 
@@ -140,6 +196,70 @@ mod tests {
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("invalid regex"));
+    }
+
+    #[test]
+    fn validation_rejects_http_api_base_url() {
+        let config = GitHubConfig {
+            owner: "octocat".to_string(),
+            repo: "hello-world".to_string(),
+            auth_token: None,
+            api_base_url: Some("http://api.github.com".to_string()),
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        let err = config.validate().err();
+        assert!(err.is_some(), "expected validation error");
+        if let Some(err) = err {
+            assert!(err.to_string().contains("https"));
+        }
+    }
+
+    #[test]
+    fn validation_rejects_private_api_base_url() {
+        let config = GitHubConfig {
+            owner: "octocat".to_string(),
+            repo: "hello-world".to_string(),
+            auth_token: None,
+            api_base_url: Some("https://127.0.0.1/api/v3".to_string()),
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        let err = config.validate().err();
+        assert!(err.is_some(), "expected validation error");
+        if let Some(err) = err {
+            assert!(err.to_string().contains("private"));
+        }
+    }
+
+    #[test]
+    fn validation_rejects_owner_with_slash() {
+        let config = GitHubConfig {
+            owner: "octo/cat".to_string(),
+            repo: "hello-world".to_string(),
+            auth_token: None,
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validation_rejects_repo_with_parent_traversal() {
+        let config = GitHubConfig {
+            owner: "octocat".to_string(),
+            repo: "../hello".to_string(),
+            auth_token: None,
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        assert!(config.validate().is_err());
     }
 
     #[test]

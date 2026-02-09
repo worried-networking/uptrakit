@@ -757,33 +757,7 @@ pub async fn oidc_complete_registration(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OidcCompleteRegistrationRequest>,
 ) -> Response {
-    // 1. Peek at pending registration (non-destructive) to validate token first
-    match state
-        .oidc_registration_store
-        .get(&req.registration_code)
-        .await
-    {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "Invalid or expired registration code",
-            );
-        }
-        Err(e) => {
-            tracing::error!("Failed to retrieve pending OIDC registration: {e:?}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    // 2. Validate the registration token BEFORE consuming the entry —
-    //    on failure the pending registration stays in the store so the user can retry
-    let reg_settings = state.settings.registration();
-    if let Err(e) = reg_settings.validate(Some(&req.registration_token)) {
-        return e.into_response();
-    }
-
-    // 3. Token valid — atomically consume the pending registration
+    // 1. Atomically consume the pending registration so the code is one-time use
     let pending = match state
         .oidc_registration_store
         .take(&req.registration_code)
@@ -791,7 +765,6 @@ pub async fn oidc_complete_registration(
     {
         Ok(Some(p)) => p,
         Ok(None) => {
-            // Entry expired or was consumed by a concurrent request between get() and take()
             return error_response(
                 StatusCode::BAD_REQUEST,
                 "Invalid or expired registration code",
@@ -803,7 +776,13 @@ pub async fn oidc_complete_registration(
         }
     };
 
-    // Wrap user creation + first-user check + role assignment in a transaction
+    // 2. Validate the registration token after consuming the entry
+    let reg_settings = state.settings.registration();
+    if let Err(e) = reg_settings.validate(Some(&req.registration_token)) {
+        return e.into_response();
+    }
+
+    // 3. Wrap user creation + first-user check + role assignment in a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
     let txn = match state.db.begin().await {
         Ok(txn) => txn,
@@ -1047,6 +1026,9 @@ pub async fn oidc_link(
 
     // Verify ownership
     let verified = if let Some(ref pwd) = link_req.password {
+        if let Some(message) = password::validate_password_length(pwd) {
+            return error_response(StatusCode::BAD_REQUEST, message);
+        }
         // Password verification
         let user = match User::find_by_id(pending.user_id).one(&state.db).await {
             Ok(Some(u)) => u,

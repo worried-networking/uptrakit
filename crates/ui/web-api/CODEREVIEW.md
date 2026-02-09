@@ -10,42 +10,18 @@
 
 | Severity | Count |
 |----------|-------|
-| Medium | 11 |
+| Medium | 7 |
 | Low | 9 |
 
 ---
 
 ## MEDIUM
 
-### M4. OCSP 1-Hour Cache Serves Stale Revocation Status
-
-**File:** `src/routes/ocsp.rs:19-26`
-
-`Cache-Control: max-age=3600` means revoked certificates may appear valid for up to 1 hour.
-
-### M5. Missing Rate Limiting on OIDC Exchange/Link/Complete-Registration
-
-**File:** `src/middleware/rate_limit.rs:20-58`
-
-These public, unauthenticated endpoints accept secret tokens but aren't rate-limited. The `complete-registration` endpoint uses non-destructive `get()`, allowing unlimited brute-force of the registration token.
-
 ### M7. No Idle Timeout on WebSocket Connections
 
 **Files:** All WS handlers
 
 No `tokio::time::timeout` branch. Half-open TCP connections persist indefinitely.
-
-### M10. `cert_signed_by_ca` Only Compares DN, Not Cryptographic Signature
-
-**File:** `src/pki_utils.rs:84-98`
-
-A certificate with a matching issuer DN but forged signature passes the check.
-
-### M11. No Max Password Length — Argon2 DoS Vector
-
-**File:** `src/routes/auth.rs:48-54`
-
-No upper bound on password length. Multi-MB passwords exhaust resources.
 
 ### M12. Email Not Normalized
 
@@ -165,32 +141,6 @@ Per-record DB lookups for denormalized names.
 
 ---
 
-### Plan 22: M4 — OCSP 1-Hour Cache Serves Stale Revocation Status
-
-**Problem:** `Cache-Control: max-age=3600` on OCSP responses means revoked certificates may appear valid for up to 1 hour.
-
-**Plan:**
-1. Reduce cache TTL to 5 minutes (`max-age=300`).
-2. Extract as `OCSP_CACHE_MAX_AGE_SECS` constant.
-3. Set `nextUpdate` in the OCSP response body to match.
-4. Consider making it configurable via `SettingKey`.
-
-**Files:** `src/routes/ocsp.rs`, `src/ocsp.rs`
-
----
-
-### Plan 23: M5 — Missing Rate Limiting on OIDC Exchange/Link/Complete-Registration
-
-**Problem:** OIDC token exchange, account link, and complete-registration endpoints accept secret tokens but aren't rate-limited. `complete-registration` uses non-destructive `get()`.
-
-**Plan:**
-1. Add OIDC endpoints to `RATE_LIMITS` (10/60s for exchange/link, 5/60s for complete-registration, all fail-closed).
-2. Change `complete-registration` from `get()` to `take()` for one-time-use tokens.
-
-**Files:** `src/middleware/rate_limit.rs`, `src/routes/oidc_auth.rs`
-
----
-
 ### Plan 25: M7 — No Idle Timeout on WebSocket Connections
 
 **Problem:** All WS handlers have no `tokio::time::timeout` branch. Half-open TCP connections persist indefinitely.
@@ -201,30 +151,6 @@ Per-record DB lookups for denormalized names.
 3. Apply to all four handler loops (agent authenticated/enrolled, MQTT authenticated/enrolled).
 
 **Files:** `src/routes/service_ws.rs`, `src/routes/agent_ws.rs`, `src/routes/mqtt_ws.rs`
-
----
-
-### Plan 28: M10 — `cert_signed_by_ca` Only Compares DN, Not Cryptographic Signature
-
-**Problem:** `cert_signed_by_ca` (`src/pki_utils.rs:84-98`) only compares issuer DN. A certificate with matching DN but forged signature passes.
-
-**Plan:**
-1. Add `cert.verify_signature(Some(ca.public_key()))` call after DN comparison.
-2. Treat unsupported algorithms as verification failure.
-
-**Files:** `src/pki_utils.rs`
-
----
-
-### Plan 29: M11 — No Max Password Length — Argon2 DoS Vector
-
-**Problem:** No upper bound on password length. Multi-MB passwords exhaust Argon2 resources.
-
-**Plan:**
-1. Add `MAX_PASSWORD_LENGTH = 1024` constant.
-2. Validate in register, login, and password change endpoints.
-
-**Files:** `src/routes/auth.rs`, `src/routes/oidc_auth.rs`
 
 ---
 

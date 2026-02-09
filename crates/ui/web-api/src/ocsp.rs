@@ -57,6 +57,7 @@ const SHA1_OID: const_oid::ObjectIdentifier =
 /// SHA-256 OID (`2.16.840.1.101.3.4.2.1`).
 const SHA256_OID: const_oid::ObjectIdentifier =
     const_oid::ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+pub const OCSP_CACHE_MAX_AGE_SECS: i64 = 300;
 
 /// Build an OCSP response for the given DER-encoded OCSP request.
 ///
@@ -269,7 +270,8 @@ fn make_ocsp_time(dt: OffsetDateTime) -> OcspGeneralizedTime {
 
 fn build_single_response(cert_id: CertId, status: CertStatus) -> SingleResponse {
     let now = make_ocsp_time(OffsetDateTime::now_utc());
-    let next_update_time = OffsetDateTime::now_utc() + time::Duration::hours(1);
+    let next_update_time =
+        OffsetDateTime::now_utc() + time::Duration::seconds(OCSP_CACHE_MAX_AGE_SECS);
     let next_update = make_ocsp_time(next_update_time);
 
     SingleResponse {

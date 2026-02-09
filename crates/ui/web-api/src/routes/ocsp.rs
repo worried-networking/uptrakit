@@ -16,11 +16,12 @@ pub async fn ocsp_post(State(state): State<Arc<AppState>>, body: Bytes) -> Respo
     let snapshot = state.ca_snapshot.borrow().clone();
     let response_der =
         crate::ocsp::build_ocsp_response(&body, &snapshot, &state.ca_key_store, &state.db).await;
+    let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
 
     (
         [
             (header::CONTENT_TYPE, OCSP_RESPONSE_CONTENT_TYPE),
-            (header::CACHE_CONTROL, "max-age=3600, public"),
+            (header::CACHE_CONTROL, cache_control.as_str()),
         ],
         response_der,
     )
@@ -45,10 +46,11 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
             let err_der =
                 crate::ocsp::build_ocsp_response(b"", &snapshot, &state.ca_key_store, &state.db)
                     .await;
+            let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
             return (
                 [
                     (header::CONTENT_TYPE, OCSP_RESPONSE_CONTENT_TYPE),
-                    (header::CACHE_CONTROL, "max-age=3600, public"),
+                    (header::CACHE_CONTROL, cache_control.as_str()),
                 ],
                 err_der,
             )
@@ -60,11 +62,12 @@ pub async fn ocsp_get(State(state): State<Arc<AppState>>, Path(encoded): Path<St
     let response_der =
         crate::ocsp::build_ocsp_response(&request_der, &snapshot, &state.ca_key_store, &state.db)
             .await;
+    let cache_control = format!("max-age={}, public", crate::ocsp::OCSP_CACHE_MAX_AGE_SECS);
 
     (
         [
             (header::CONTENT_TYPE, OCSP_RESPONSE_CONTENT_TYPE),
-            (header::CACHE_CONTROL, "max-age=3600, public"),
+            (header::CACHE_CONTROL, cache_control.as_str()),
         ],
         response_der,
     )

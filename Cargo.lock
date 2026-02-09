@@ -5038,6 +5038,7 @@ dependencies = [
  "tracing",
  "uptrakit-provider-core",
  "uptrakit-shared-macros",
+ "url",
 ]
 
 [[package]]
