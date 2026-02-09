@@ -153,6 +153,15 @@ channels:
       mqttTenantRevoked:
         $ref: "#/components/messages/mqttTenantRevoked"
 
+  controllerOutbox:
+    address: controller_events
+    description: |
+      Cross-controller outbox channel backed by the `controller_events` table.
+      Not a WebSocket transport; used for controller-to-controller fanout.
+    messages:
+      mqttClientCreated:
+        $ref: "#/components/messages/mqttClientCreated"
+
 operations:
   sendPing:
     action: send
@@ -515,6 +524,29 @@ operations:
       The controller pushes this message when an MQTT client configuration is
       deleted or its lease is revoked. The service should stop the MQTT client
       identified by `mqtt_client_id` and release its resources.
+
+  sendControllerOutboxMqttClientCreated:
+    action: send
+    channel:
+      $ref: "#/channels/controllerOutbox"
+    messages:
+      - $ref: "#/channels/controllerOutbox/messages/mqttClientCreated"
+    summary: Controller writes outbox event for new MQTT client leases
+    description: |
+      When a new MQTT client is created and no local MQTT service is connected,
+      the controller writes an outbox event so another controller instance can
+      lease the client.
+
+  receiveControllerOutboxMqttClientCreated:
+    action: receive
+    channel:
+      $ref: "#/channels/controllerOutbox"
+    messages:
+      - $ref: "#/channels/controllerOutbox/messages/mqttClientCreated"
+    summary: Controller receives outbox event for new MQTT client leases
+    description: |
+      A controller polls the outbox table and consumes this event to attempt
+      leasing the newly created MQTT client to its least busy local instance.
 
 components:
   securitySchemes:
