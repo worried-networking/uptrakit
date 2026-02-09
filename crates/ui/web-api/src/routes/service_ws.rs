@@ -125,6 +125,15 @@ pub(crate) struct CertIdentity {
     pub ca_fingerprint: String,
 }
 
+/// Shared context for authenticated service handlers.
+pub(crate) struct AuthenticatedContext<'a> {
+    pub service_id: uuid::Uuid,
+    pub cert: CertIdentity,
+    pub last_seen_at: Option<time::OffsetDateTime>,
+    pub out_seq: &'a mut OutgoingSeq,
+    pub in_seq: &'a mut IncomingSeq,
+}
+
 /// Connection type determined at WebSocket upgrade time.
 enum ConnectionType {
     /// mTLS client cert present -- authenticated service.
@@ -437,10 +446,21 @@ async fn handle_authenticated(
         ca_fingerprint: cert_record.ca_fingerprint.clone(),
     };
 
+    let previous_last_seen_at = service.last_seen_at;
+    let now = time::OffsetDateTime::now_utc();
+
+    // Record service last seen timestamp.
+    let mut service_active: service_entity::ActiveModel = service.clone().into();
+    service_active.last_seen_at = Set(Some(now));
+    service_active.updated_at = Set(now);
+    if let Err(e) = service_active.update(&state.db).await {
+        tracing::error!(error = %e, "failed to update service last_seen_at");
+    }
+
     // Record certificate usage.
     let mut active: uptrakit_shared_db::entity::service_certificate::ActiveModel =
         cert_record.into();
-    active.last_seen_at = Set(Some(time::OffsetDateTime::now_utc()));
+    active.last_seen_at = Set(Some(now));
     if let Err(e) = active.update(&state.db).await {
         tracing::error!(error = %e, "failed to update certificate last_seen_at");
     }
@@ -467,28 +487,24 @@ async fn handle_authenticated(
     // Dispatch to service-type-specific authenticated handler.
     match service.service_type {
         service_entity::ServiceType::Agent => {
-            super::agent_ws::handle_agent_authenticated(
-                &mut sink,
-                &mut stream,
-                &state,
+            let ctx = AuthenticatedContext {
                 service_id,
-                cert_id,
+                cert: cert_id,
+                last_seen_at: previous_last_seen_at,
                 out_seq,
                 in_seq,
-            )
-            .await;
+            };
+            super::agent_ws::handle_agent_authenticated(&mut sink, &mut stream, &state, ctx).await;
         }
         service_entity::ServiceType::Mqtt => {
-            super::mqtt_ws::handle_mqtt_authenticated(
-                &mut sink,
-                &mut stream,
-                &state,
+            let ctx = AuthenticatedContext {
                 service_id,
-                cert_id,
+                cert: cert_id,
+                last_seen_at: previous_last_seen_at,
                 out_seq,
                 in_seq,
-            )
-            .await;
+            };
+            super::mqtt_ws::handle_mqtt_authenticated(&mut sink, &mut stream, &state, ctx).await;
         }
     }
 }

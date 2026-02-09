@@ -64,11 +64,15 @@ pub(crate) async fn handle_mqtt_authenticated(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
-    service_id: uuid::Uuid,
-    cert: super::service_ws::CertIdentity,
-    out_seq: &mut OutgoingSeq,
-    in_seq: &mut IncomingSeq,
+    ctx: super::service_ws::AuthenticatedContext<'_>,
 ) {
+    let super::service_ws::AuthenticatedContext {
+        service_id,
+        cert,
+        last_seen_at,
+        out_seq,
+        in_seq,
+    } = ctx;
     // Wait for Register message before entering operational loop.
     let (instance_id, max_tenants, active_mqtt_clients) = loop {
         let msg = match stream.next().await {
@@ -185,6 +189,22 @@ pub(crate) async fn handle_mqtt_authenticated(
     }
 
     tracing::info!(%service_id, instance_id = %instance_id, "MQTT service registered");
+
+    let delivered = state
+        .notification_service
+        .deliver_backlog_for_authenticated_service(
+            service_id,
+            uptrakit_shared_db::entity::service::ServiceType::Mqtt,
+            last_seen_at,
+        )
+        .await;
+    if delivered > 0 {
+        tracing::info!(
+            %service_id,
+            delivered,
+            "delivered outbox backlog to MQTT service"
+        );
+    }
 
     // Enter operational loop.
     loop {

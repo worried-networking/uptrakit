@@ -17,6 +17,8 @@ use crate::service_connections::ServiceConnectionRegistry;
 
 /// Maximum number of delivery retries before an event is skipped.
 const MAX_DELIVERY_RETRIES: u8 = 3;
+/// Retention window for controller events before cleanup.
+pub const EVENT_CLEANUP_TTL_HOURS: i64 = 24;
 
 /// Background task that polls the `controller_events` table for events written by
 /// other controller instances and delivers them to locally connected services.
@@ -302,9 +304,9 @@ impl EventPoller {
         }
     }
 
-    /// Delete events older than 1 hour.
+    /// Delete events older than the cleanup TTL.
     async fn cleanup_old_events(&self) {
-        let cutoff = OffsetDateTime::now_utc() - time::Duration::hours(1);
+        let cutoff = OffsetDateTime::now_utc() - time::Duration::hours(EVENT_CLEANUP_TTL_HOURS);
         match controller_event::Entity::delete_many()
             .filter(controller_event::Column::CreatedAt.lt(cutoff))
             .exec(&self.db)

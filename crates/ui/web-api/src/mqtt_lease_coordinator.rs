@@ -5,7 +5,7 @@ use rootcause::prelude::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
-    QueryFilter, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_internal_wire::{
@@ -96,64 +96,74 @@ impl MqttLeaseCoordinator {
                 "failed to start transaction".into(),
             ))?;
 
-        // Find all MQTT clients that already have active leases (by mqtt_client_id)
-        let existing_leases: HashSet<Uuid> = mqtt_lease::Entity::find()
-            .all(&txn)
-            .await
-            .context(LeaseCoordinatorError::Database(
-                "failed to query leases".into(),
-            ))?
-            .into_iter()
-            .map(|l| l.mqtt_client_id)
-            .collect();
-
-        // Get enabled MQTT clients without leases
-        let available_clients: Vec<mqtt_client::Model> = mqtt_client::Entity::find()
-            .filter(mqtt_client::Column::Enabled.eq(true))
-            .all(&txn)
-            .await
-            .context(LeaseCoordinatorError::Database(
-                "failed to query mqtt_clients".into(),
-            ))?
-            .into_iter()
-            .filter(|c| !existing_leases.contains(&c.id))
-            .take(max_to_assign as usize)
-            .collect();
-
-        if available_clients.is_empty() {
-            txn.commit().await.context(LeaseCoordinatorError::Database(
-                "failed to commit transaction".into(),
-            ))?;
-            return Ok(vec![]);
-        }
-
+        let mut offset = 0u64;
         let now = OffsetDateTime::now_utc();
-        let mut assigned_configs = Vec::with_capacity(available_clients.len());
+        let mut assigned_configs = Vec::with_capacity(max_to_assign as usize);
 
-        for client in &available_clients {
-            // Create lease record
-            let lease = mqtt_lease::ActiveModel {
-                id: ActiveValue::Set(Uuid::now_v7()),
-                tenant_id: ActiveValue::Set(client.tenant_id),
-                mqtt_client_id: ActiveValue::Set(client.id),
-                instance_id: ActiveValue::Set(instance_id.to_string()),
-                heartbeat_at: ActiveValue::Set(now),
-                created_at: ActiveValue::Set(now),
-            };
-            lease
-                .insert(&txn)
+        while assigned_configs.len() < max_to_assign as usize {
+            let remaining = (max_to_assign as usize).saturating_sub(assigned_configs.len());
+            let batch_size = std::cmp::min(remaining, 50);
+
+            let available_clients: Vec<mqtt_client::Model> = mqtt_client::Entity::find()
+                .filter(mqtt_client::Column::Enabled.eq(true))
+                .order_by_asc(mqtt_client::Column::Id)
+                .offset(offset)
+                .limit(batch_size as u64)
+                .all(&txn)
                 .await
                 .context(LeaseCoordinatorError::Database(
-                    "failed to insert lease".into(),
+                    "failed to query mqtt_clients".into(),
                 ))?;
 
-            // Track in connection registry
-            self.connections
-                .assign_mqtt_client(&service_id, client.id)
-                .await;
+            if available_clients.is_empty() {
+                break;
+            }
 
-            // Build config for the service
-            assigned_configs.push(model_to_config(client));
+            offset = offset.saturating_add(available_clients.len() as u64);
+
+            for client in &available_clients {
+                let lease = mqtt_lease::ActiveModel {
+                    id: ActiveValue::Set(Uuid::now_v7()),
+                    tenant_id: ActiveValue::Set(client.tenant_id),
+                    mqtt_client_id: ActiveValue::Set(client.id),
+                    instance_id: ActiveValue::Set(instance_id.to_string()),
+                    heartbeat_at: ActiveValue::Set(now),
+                    created_at: ActiveValue::Set(now),
+                };
+
+                let insert_result = mqtt_lease::Entity::insert(lease)
+                    .on_conflict(
+                        OnConflict::column(mqtt_lease::Column::MqttClientId)
+                            .do_nothing()
+                            .to_owned(),
+                    )
+                    .exec(&txn)
+                    .await;
+
+                match insert_result {
+                    Ok(_) => {}
+                    Err(sea_orm::DbErr::RecordNotInserted) => {
+                        continue;
+                    }
+                    Err(e) => {
+                        return Err(report!(LeaseCoordinatorError::Database(format!(
+                            "failed to insert lease: {e}"
+                        ))));
+                    }
+                }
+
+                // Track in connection registry
+                self.connections
+                    .assign_mqtt_client(&service_id, client.id)
+                    .await;
+
+                // Build config for the service
+                assigned_configs.push(model_to_config(client));
+
+                if assigned_configs.len() >= max_to_assign as usize {
+                    break;
+                }
+            }
         }
 
         txn.commit().await.context(LeaseCoordinatorError::Database(
@@ -841,5 +851,47 @@ mod tests {
             .expect("lease");
 
         assert!(matches!(result, LeaseOutcome::AlreadyLeased));
+    }
+
+    #[tokio::test]
+    async fn assign_available_tenants_skips_already_leased_clients()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let db = test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let client_a = seed_client(&db, tenant.id).await;
+        let client_b = seed_client(&db, tenant.id).await;
+
+        let now = OffsetDateTime::now_utc();
+        let existing = mqtt_lease::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            tenant_id: ActiveValue::Set(client_a.tenant_id),
+            mqtt_client_id: ActiveValue::Set(client_a.id),
+            instance_id: ActiveValue::Set("other".to_string()),
+            heartbeat_at: ActiveValue::Set(now),
+            created_at: ActiveValue::Set(now),
+        };
+        existing.insert(&db).await?;
+
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let _ = registry
+            .register_mqtt(service_id, "instance-1".to_string(), 10)
+            .await;
+
+        let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());
+        let configs = match coordinator
+            .assign_available_tenants(service_id, "instance-1", 2)
+            .await
+        {
+            Ok(configs) => configs,
+            Err(e) => return Err(format!("{e}").into()),
+        };
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].mqtt_client_id, client_b.id);
+
+        let leases = mqtt_lease::Entity::find().all(&db).await?;
+        assert_eq!(leases.len(), 2);
+        Ok(())
     }
 }

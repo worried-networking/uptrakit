@@ -63,11 +63,15 @@ pub(crate) async fn handle_agent_authenticated(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     state: &Arc<AppState>,
-    agent_id: uuid::Uuid,
-    cert: super::service_ws::CertIdentity,
-    out_seq: &mut OutgoingSeq,
-    in_seq: &mut IncomingSeq,
+    ctx: super::service_ws::AuthenticatedContext<'_>,
 ) {
+    let super::service_ws::AuthenticatedContext {
+        service_id: agent_id,
+        cert,
+        last_seen_at,
+        out_seq,
+        in_seq,
+    } = ctx;
     // Register first so concurrent outbox events can reach us via push_rx.
     let (mut push_rx, cancel_token) = state.service_connections.register_agent(agent_id).await;
 
@@ -76,6 +80,22 @@ pub(crate) async fn handle_agent_authenticated(
     // this query are buffered in push_rx (not lost).
     if let Err(e) = deliver_pending_updates(state, agent_id, sink, out_seq).await {
         tracing::error!(error = %e, %agent_id, "failed to deliver pending updates on reconnect");
+    }
+
+    let delivered = state
+        .notification_service
+        .deliver_backlog_for_authenticated_service(
+            agent_id,
+            uptrakit_shared_db::entity::service::ServiceType::Agent,
+            last_seen_at,
+        )
+        .await;
+    if delivered > 0 {
+        tracing::info!(
+            %agent_id,
+            delivered,
+            "delivered outbox backlog to agent"
+        );
     }
 
     // Cache host IDs linked to this agent for update ownership validation.
