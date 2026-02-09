@@ -76,18 +76,20 @@
 {#if $user && canManageSettings}
 	<h1 class="h1 mb-6">Settings</h1>
 
-	{#if successMessage}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-			<p>{successMessage}</p>
-		</aside>
-	{/if}
+	<div class="mb-4 min-h-[3.5rem] space-y-2">
+		{#if successMessage}
+			<aside class="rounded-lg p-4 preset-filled-success-500">
+				<p>{successMessage}</p>
+			</aside>
+		{/if}
 
-	{#if errorMessage}
-		<aside class="mb-4 flex items-center justify-between rounded-lg p-4 preset-filled-error-500">
-			<p>{errorMessage}</p>
-			<button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
-		</aside>
-	{/if}
+		{#if errorMessage}
+			<aside class="flex items-center justify-between rounded-lg p-4 preset-filled-error-500">
+				<p>{errorMessage}</p>
+				<button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
+			</aside>
+		{/if}
+	</div>
 
 	{#if loading}
 		<div class="card mb-6 p-8 text-center">
