@@ -670,7 +670,7 @@ In a multi-controller deployment (multiple controller instances behind a load ba
 | `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — send + outbox write |
 | `crates/ui/web-api/src/event_poller.rs` | `EventPoller` — background polling + delivery |
 | `crates/shared/db/src/entity/controller_event.rs` | SeaORM entity |
-| `crates/core/controller/src/migration/m20260207_000021_create_controller_events.rs` | Migration |
+| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | Single consolidated migration |
 
 ### Bulk loading and known-keys registry
 
@@ -726,8 +726,7 @@ The `CrlManager` uses a version-gated 60-second poll on `revocation_version` to 
 
 | File | Purpose |
 | --- | --- |
-| `crates/core/controller/src/migration/m20260207_000022_create_settings_version.rs` | Settings version table migration |
-| `crates/core/controller/src/migration/m20260207_000023_add_revocation_version.rs` | Adds `revocation_version` column |
+| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | Single consolidated migration (includes settings_version + revocation_version) |
 | `crates/shared/db/src/entity/settings_version.rs` | SeaORM entity |
 | `crates/ui/web-api/src/settings_store.rs` | `bump_settings_version()`, `get_settings_versions()`, `bump_revocation_version()`, `get_revocation_version()` |
 | `crates/ui/web-api/src/settings.rs` | `reload_from_db()`, `check_version_and_reload()` |
@@ -1129,7 +1128,7 @@ Unlike the HTTP rate limiter middleware (which fails open), the WebSocket rate l
 - **Store**: `crates/ui/web-api/src/auth/rate_limit.rs` — `RateLimitStore` with sliding-window counter algorithm using atomic upserts.
 - **Middleware**: `crates/ui/web-api/src/middleware/rate_limit.rs` — `rate_limit_auth` middleware with `LazyLock<HashMap>` endpoint config. Fails open on store errors.
 - **Entity**: `crates/shared/db/src/entity/api_rate_limit.rs` — SeaORM entity for the `api_rate_limits` table (columns: `key` TEXT PK, `request_count` INTEGER, `window_start` TIMESTAMP, `expires_at` TIMESTAMP).
-- **Migration**: `crates/core/controller/src/migration/m20260207_000021_create_api_rate_limits.rs`.
+- **Migration**: `crates/core/controller/src/migration/m20260209_000001_initial.rs`.
 - **Cleanup**: expired entries are pruned every 5 minutes by the controller's periodic cleanup task.
 
 ### Response format
@@ -1447,7 +1446,7 @@ Responses include denormalized `host_name` and `software_item_name` fields.
 | File | Purpose |
 |------|---------|
 | `crates/shared/db/src/entity/update_history.rs` | SeaORM entity with `UpdateStatus` enum |
-| `crates/core/controller/src/migration/m20260203_000018_create_update_history.rs` | DB migration |
+| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | DB migration |
 | `crates/shared/web-api-types/src/update_history.rs` | API types (response, query, status enum) |
 | `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |
 

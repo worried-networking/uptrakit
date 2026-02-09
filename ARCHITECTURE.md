@@ -229,7 +229,7 @@ The database supports multi-tenancy via a `tenants` table and `tenant_id` foreig
 
 ### Migrations
 
-SeaORM migrations live alongside the entity definitions. They run automatically on controller startup, creating or updating the schema as needed.
+All database tables are created by a single SeaORM migration (`crates/core/controller/src/migration/m20260209_000001_initial.rs`). Migrations run automatically on controller startup.
 
 ## Provider Architecture
 
