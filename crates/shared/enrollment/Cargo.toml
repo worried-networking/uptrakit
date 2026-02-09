@@ -32,6 +32,7 @@ webpki-roots = { workspace = true }
 x509-parser = { workspace = true }
 uptrakit-directories = { path = "../directories" }
 uptrakit-internal-wire = { path = "../wire" }
+uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

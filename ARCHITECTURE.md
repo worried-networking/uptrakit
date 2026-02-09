@@ -70,6 +70,7 @@ crates/
 │   ├── directories/               # uptrakit-directories (lib) — cross-platform directory management
 │   ├── enrollment/                # uptrakit-enrollment (lib) — shared enrollment, TLS (TofuVerifier), CA, CLI
 │   ├── macros/                    # uptrakit-shared-macros (lib) — shared declarative macros
+│   ├── types/                     # uptrakit-shared-types (lib) — shared value types (SecretString)
 │   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/
@@ -208,7 +209,7 @@ The data model comprises 31 entities in `crates/shared/db/src/entity/`:
 
 `api_rate_limit`, `api_token`, `auth_method`, `available_version`, `controller_event`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `settings_version`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
-The `db::crypto` module provides the `EncryptedString` SeaORM custom type for transparent AES-256-GCM encryption of sensitive columns. Fields using `EncryptedString` are encrypted before write and decrypted after read, with legacy plaintext passthrough for backward compatibility.
+The `db::crypto` module provides the `EncryptedString` SeaORM custom type for transparent AES-256-GCM encryption of sensitive columns. `EncryptedString` wraps `SecretString` (from `uptrakit-shared-types`) to prevent accidental logging of decrypted values. Fields using `EncryptedString` are encrypted before write and decrypted after read, with legacy plaintext passthrough for backward compatibility. `SecretString` is also used directly in wire protocol types for enrollment tokens and MQTT credentials.
 
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `service_host` junction table models the many-to-many relationship between services and hosts, enabling automatic host matching across service re-enrollments and hostname changes.
 

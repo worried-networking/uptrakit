@@ -624,18 +624,21 @@ async fn handle_anonymous(
     match service_type {
         service_entity::ServiceType::Agent => {
             // Register in connection registry.
-            let mut push_rx = state.service_connections.register_agent(service_id).await;
+            let (mut push_rx, cancel_token) =
+                state.service_connections.register_agent(service_id).await;
             super::agent_ws::run_agent_enrolled_loop(
                 &mut sink,
                 &mut stream,
-                &mut push_rx,
+                (&mut push_rx, &cancel_token),
                 &state,
                 service_id,
                 out_seq,
                 in_seq,
             )
             .await;
-            state.service_connections.unregister(&service_id).await;
+            if !cancel_token.is_cancelled() {
+                state.service_connections.unregister(&service_id).await;
+            }
         }
         service_entity::ServiceType::Mqtt => {
             super::mqtt_ws::handle_mqtt_enrolled(
@@ -675,7 +678,7 @@ async fn enroll_agent(
         tenant_id: state.default_tenant_id,
         hostname: &payload.hostname,
         friendly_name: &payload.friendly_name,
-        enrollment_token: payload.enrollment_token.as_deref(),
+        enrollment_token: payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
         ip_address: client_ip,
         host_info: payload.host_info.as_ref(),
     })
@@ -690,7 +693,9 @@ async fn enroll_agent(
             };
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
                 service_id,
-                enrollment_secret: enroll_result.enrollment_secret,
+                enrollment_secret: uptrakit_internal_wire::SecretString::new(
+                    enroll_result.enrollment_secret,
+                ),
                 status: wire_status,
             });
             let json = serialize_controller_msg(out_seq, enrolled_msg)?;
@@ -746,7 +751,7 @@ async fn enroll_mqtt(
         state.default_tenant_id,
         &payload.hostname,
         &payload.friendly_name,
-        payload.enrollment_token.as_deref(),
+        payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
     )
     .await;
 
@@ -761,7 +766,9 @@ async fn enroll_mqtt(
             };
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
                 service_id,
-                enrollment_secret: enroll_result.enrollment_secret,
+                enrollment_secret: uptrakit_internal_wire::SecretString::new(
+                    enroll_result.enrollment_secret,
+                ),
                 status: wire_status,
             });
             let json = serialize_controller_msg(out_seq, enrolled_msg)?;

@@ -37,6 +37,7 @@ uptrakit/
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (SecretString)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared enrollment, TLS (TofuVerifier), CA bootstrap, CLI
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
@@ -271,9 +272,23 @@ The `uptrakit-directories` crate provides helper functions:
 | --- | --- |
 | `crates/shared/directories/src/lib.rs` | Cross-platform directory resolution and secure file/directory operations |
 
-## Encryption at rest
+## Sensitive string handling
 
-Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom type (defined in `crates/shared/db/src/crypto.rs`).
+### SecretString
+
+`SecretString` (defined in `crates/shared/types/src/secret_string.rs`, re-exported by `uptrakit-internal-wire`) is a newtype wrapper that prevents accidental logging of sensitive values:
+
+- `Debug` output: `SecretString(***)`
+- `Display` output: `***REDACTED***`
+- Access the inner value via `.expose_secret()` (returns `&str`)
+- Transparent serde: JSON wire format is unchanged (plain string)
+- Used for: enrollment tokens, enrollment secrets, MQTT credentials in wire types
+
+Wire fields using `SecretString`: `EnrollPayload.enrollment_token`, `EnrolledPayload.enrollment_secret`, `MqttTenantConfig.username`, `MqttTenantConfig.password`.
+
+### Encryption at rest
+
+Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom type (defined in `crates/shared/db/src/crypto.rs`). `EncryptedString` wraps `SecretString` internally, inheriting its debug/display redaction.
 
 ### Master key
 
@@ -601,7 +616,7 @@ In a multi-controller deployment (multiple controller instances behind a load ba
 1. Each controller generates a unique `controller_id` (UUIDv7) at startup (stored in `AppState.controller_id`).
 2. `NotificationService` wraps `ServiceConnectionRegistry` and writes outbox events on every `send()` and `broadcast()` call. MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are delivered locally but **not** written to the outbox to prevent plaintext credential persistence in the database. The MQTT service reconciles its state from the DB on reconnect.
 3. `EventPoller` runs as a background task, polling every 1 second for new events from other controllers (`source_controller_id != self`), using a cursor-based approach (`id > last_seen_id`). The cursor only advances past events that were successfully delivered (or permanently skipped after 3 failed retries), providing at-least-once delivery semantics under backpressure.
-4. Events are routed based on `target_service_id` (specific service) and `target_service_type` (`"agent"`, `"mqtt"`, or `null` for broadcast).
+4. Events are routed based on `target_service_id` (specific service) and `target_service_type` (`ServiceType` enum serialized as `"agent"`, `"mqtt"`, or `null` for broadcast).
 5. Old events (>1 hour) are cleaned up every 5 minutes.
 
 **Design rules:**
@@ -855,7 +870,7 @@ MQTT services use the unified service entity:
 | `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
 | `crates/shared/enrollment/` | `uptrakit-enrollment` crate: shared enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, and CLI args |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
-| `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services |
+| `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services (with `CancellationToken`-based connection deduplication) |
 | `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — cross-controller notification outbox |
 | `crates/ui/web-api/src/event_poller.rs` | `EventPoller` — background poller for cross-controller events |
 | `crates/ui/web-api/src/mqtt_lease_coordinator.rs` | Centralized lease management logic |
@@ -1555,7 +1570,7 @@ Hook output includes clear phase markers for debugging:
 
 | File | Purpose |
 |------|---------|
-| `crates/shared/web-api-types/src/update_hooks.rs` | Hook configuration types (`HookShell`, `PredefinedHook`, `HooksConfig`) |
+| `crates/shared/web-api-types/src/update_hooks.rs` | Hook configuration types (`PredefinedHook`, `HooksConfig`); re-exports `HookShell` from wire crate |
 | `crates/ui/web-api/src/update_hooks.rs` | Hook resolution and merge logic |
 | `crates/core/agent/src/update.rs` | Hook execution with shell wrapper |
 | `crates/shared/wire/asyncapi.yaml` | Wire protocol documentation (includes `hookCommand` schema) |

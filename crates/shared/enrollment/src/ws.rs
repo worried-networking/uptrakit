@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
     CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload, EnrolledPayload,
-    EnrollmentStatus, HostInfo, IncomingSeq, OutgoingSeq, RequestCertificatePayload,
+    EnrollmentStatus, HostInfo, IncomingSeq, OutgoingSeq, RequestCertificatePayload, SecretString,
     ServiceMessage, ServiceType,
 };
 
@@ -354,7 +354,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         EnrollPayload {
             hostname: hostname.to_string(),
             friendly_name: friendly_name.to_string(),
-            enrollment_token: enrollment_token.map(|s| s.to_string()),
+            enrollment_token: enrollment_token.map(|s| SecretString::new(s.to_string())),
             service_type,
             host_info,
         },
@@ -368,7 +368,10 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
     );
 
     identity
-        .save_enrollment(enrolled.service_id, &enrolled.enrollment_secret)
+        .save_enrollment(
+            enrolled.service_id,
+            enrolled.enrollment_secret.expose_secret(),
+        )
         .await?;
     tracing::info!("enrollment state persisted");
 

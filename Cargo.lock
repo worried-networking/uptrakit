@@ -4938,6 +4938,7 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
  "url",
  "uuid",
  "webpki-roots 1.0.6",
@@ -4952,6 +4953,7 @@ dependencies = [
  "serde_json",
  "time",
  "uptrakit-provider-core",
+ "uptrakit-shared-types",
  "uuid",
 ]
 
@@ -5079,6 +5081,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "uptrakit-shared-types",
  "uuid",
 ]
 
@@ -5087,6 +5090,14 @@ name = "uptrakit-shared-macros"
 version = "0.0.1"
 dependencies = [
  "rootcause",
+]
+
+[[package]]
+name = "uptrakit-shared-types"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5153,6 +5164,7 @@ dependencies = [
  "serde_json",
  "strum",
  "thiserror 2.0.18",
+ "uptrakit-internal-wire",
  "utoipa",
 ]
 

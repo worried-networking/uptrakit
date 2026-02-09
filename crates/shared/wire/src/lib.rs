@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 // Re-export provider-core types used directly in wire protocol messages.
 pub use uptrakit_provider_core::{ProviderType, ReleaseAsset, ReleaseInfo};
+// Re-export `SecretString` for callers that need it for secret fields.
+pub use uptrakit_shared_types::SecretString;
 
 /// Enrollment status returned in the `Enrolled` message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,11 +100,36 @@ pub enum HookShell {
 
 impl std::fmt::Display for HookShell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl HookShell {
+    /// Returns the string representation of the shell type.
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Bash => f.write_str("bash"),
-            Self::Sh => f.write_str("sh"),
-            Self::PowerShell => f.write_str("powershell"),
+            Self::Bash => "bash",
+            Self::Sh => "sh",
+            Self::PowerShell => "powershell",
         }
+    }
+
+    /// Parses a string into a `HookShell` variant.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "bash" => Some(Self::Bash),
+            "sh" => Some(Self::Sh),
+            "powershell" => Some(Self::PowerShell),
+            _ => None,
+        }
+    }
+}
+
+impl std::str::FromStr for HookShell {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown shell: {s}"))
     }
 }
 
@@ -249,7 +276,7 @@ pub struct EnrollPayload {
     pub hostname: String,
     pub friendly_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub enrollment_token: Option<String>,
+    pub enrollment_token: Option<SecretString>,
     /// Identifies the type of service enrolling.
     pub service_type: ServiceType,
     /// Host machine information for automatic host matching.
@@ -285,7 +312,7 @@ pub struct ReportHostInfoPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrolledPayload {
     pub service_id: Uuid,
-    pub enrollment_secret: String,
+    pub enrollment_secret: SecretString,
     pub status: EnrollmentStatus,
 }
 
@@ -639,10 +666,10 @@ pub struct MqttTenantConfig {
     pub client_id: String,
     /// Username (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
+    pub username: Option<SecretString>,
     /// Password (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     /// Topic prefix.
     pub topic_prefix: String,
     /// Last update timestamp (for change detection).
@@ -827,7 +854,7 @@ mod tests {
         let msg = ServiceMessage::Enroll(EnrollPayload {
             hostname: "node-1".to_string(),
             friendly_name: "Node One".to_string(),
-            enrollment_token: Some("tok-123".to_string()),
+            enrollment_token: Some(SecretString::new("tok-123".into())),
             service_type: ServiceType::Agent,
             host_info: Some(HostInfo {
                 machine_id: "abc123".to_string(),
@@ -848,7 +875,7 @@ mod tests {
         let msg = ServiceMessage::Enroll(EnrollPayload {
             hostname: "mqtt-service-1".to_string(),
             friendly_name: "MQTT Service Node 1".to_string(),
-            enrollment_token: Some("tok-456".to_string()),
+            enrollment_token: Some(SecretString::new("tok-456".into())),
             service_type: ServiceType::Mqtt,
             host_info: None,
         });
@@ -1184,7 +1211,7 @@ mod tests {
     fn enrolled_serialization_roundtrip() {
         let msg = ControllerMessage::Enrolled(EnrolledPayload {
             service_id: TEST_UUID_1,
-            enrollment_secret: "secret-abc".to_string(),
+            enrollment_secret: SecretString::new("secret-abc".into()),
             status: EnrollmentStatus::Pending,
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -1555,8 +1582,8 @@ mod tests {
                 host: "broker.example.com".to_string(),
                 port: 8883,
                 client_id: "uptrakit".to_string(),
-                username: Some("user".to_string()),
-                password: Some("pass".to_string()),
+                username: Some(SecretString::new("user".into())),
+                password: Some(SecretString::new("pass".into())),
                 topic_prefix: "home/uptrakit".to_string(),
                 updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
             }],

@@ -15,6 +15,7 @@ openapi = ["dep:utoipa"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+uptrakit-internal-wire = { path = "../wire" }
 utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -69,7 +69,7 @@ pub(crate) async fn handle_agent_authenticated(
     in_seq: &mut IncomingSeq,
 ) {
     // Register first so concurrent outbox events can reach us via push_rx.
-    let mut push_rx = state.service_connections.register_agent(agent_id).await;
+    let (mut push_rx, cancel_token) = state.service_connections.register_agent(agent_id).await;
 
     // Deliver pending updates for hosts linked to this agent.
     // Any concurrent outbox events that arrive between registration and
@@ -456,6 +456,12 @@ pub(crate) async fn handle_agent_authenticated(
                     break;
                 }
             }
+            _ = cancel_token.cancelled() => {
+                tracing::info!(%agent_id, "connection superseded by new registration");
+                let _ = close_with_reason(sink, "superseded by new connection").await;
+                // Do NOT unregister — the new connection owns the registry entry.
+                return;
+            }
         }
     }
 
@@ -479,9 +485,20 @@ pub(crate) async fn handle_agent_enrolled(
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
-    let mut push_rx = state.service_connections.register_agent(agent_id).await;
-    run_agent_enrolled_loop(sink, stream, &mut push_rx, state, agent_id, out_seq, in_seq).await;
-    state.service_connections.unregister(&agent_id).await;
+    let (mut push_rx, cancel_token) = state.service_connections.register_agent(agent_id).await;
+    run_agent_enrolled_loop(
+        sink,
+        stream,
+        (&mut push_rx, &cancel_token),
+        state,
+        agent_id,
+        out_seq,
+        in_seq,
+    )
+    .await;
+    if !cancel_token.is_cancelled() {
+        state.service_connections.unregister(&agent_id).await;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -493,15 +510,19 @@ const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_se
 
 /// Shared enrolled loop for agents: handles Ping, RequestCertificate, and
 /// push messages (Approved / Rejected).
+///
+/// The `connection` tuple contains the push-message receiver and cancellation
+/// token returned by `ServiceConnectionRegistry::register_agent()`.
 pub(crate) async fn run_agent_enrolled_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
-    push_rx: &mut mpsc::Receiver<ControllerMessage>,
+    connection: (&mut mpsc::Receiver<ControllerMessage>, &tokio_util::sync::CancellationToken),
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
+    let (push_rx, cancel_token) = connection;
     let mut approved = false;
 
     // Check current status to set initial approved flag.
@@ -708,6 +729,11 @@ pub(crate) async fn run_agent_enrolled_loop(
                         _ => {}
                     }
                 }
+            }
+            _ = cancel_token.cancelled() => {
+                tracing::info!(%agent_id, "enrolled connection superseded by new registration");
+                let _ = close_with_reason(sink, "superseded by new connection").await;
+                return;
             }
         }
     }

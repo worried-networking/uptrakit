@@ -55,6 +55,7 @@ tokio-util = "0.7"
 async-trait = "0.1"
 zeroize = { version = "1", features = ["derive"] }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
+uptrakit-shared-types = { path = "crates/shared/types" }
 
 [profile.release]
 opt-level = 3

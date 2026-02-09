@@ -168,6 +168,18 @@ impl EventPoller {
         new_cursor
     }
 
+    /// Parse a `target_service_type` string from the DB into a wire `ServiceType`.
+    fn parse_service_type(s: &str) -> Option<uptrakit_internal_wire::ServiceType> {
+        match s {
+            "mqtt" => Some(uptrakit_internal_wire::ServiceType::Mqtt),
+            "agent" => Some(uptrakit_internal_wire::ServiceType::Agent),
+            _ => {
+                tracing::warn!(value = %s, "unknown target_service_type in outbox event");
+                None
+            }
+        }
+    }
+
     /// Deliver a single event to the appropriate local service(s).
     ///
     /// Returns `true` if the message was delivered (or the target is not on
@@ -178,7 +190,15 @@ impl EventPoller {
         target_service_type: Option<&str>,
         msg: ControllerMessage,
     ) -> bool {
-        match (target_service_id, target_service_type) {
+        // Controller-targeted events are handled locally (not forwarded to services)
+        if target_service_id.is_none() && target_service_type == Some("controller") {
+            return self.deliver_controller_event(msg).await;
+        }
+
+        match (
+            target_service_id,
+            target_service_type.and_then(Self::parse_service_type),
+        ) {
             // Targeted to a specific service
             (Some(id), _) => {
                 if self.registry.is_connected(&id).await {
@@ -189,18 +209,18 @@ impl EventPoller {
                 }
             }
             // Targeted to MQTT services
-            (None, Some("mqtt")) => self.deliver_mqtt_event(msg).await,
+            (None, Some(uptrakit_internal_wire::ServiceType::Mqtt)) => {
+                self.deliver_mqtt_event(msg).await
+            }
             // Targeted to agent services
-            (None, Some("agent")) => {
+            (None, Some(uptrakit_internal_wire::ServiceType::Agent)) => {
                 self.registry
                     .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::Agent, msg)
                     .await;
                 true
             }
-            // Targeted to controller-only events
-            (None, Some("controller")) => self.deliver_controller_event(msg).await,
-            // Broadcast to all services
-            (None, _) => {
+            // Broadcast to all services (no type filter or unknown type)
+            (None, None) => {
                 self.registry.broadcast(msg).await;
                 true
             }

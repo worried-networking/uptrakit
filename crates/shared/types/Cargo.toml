@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-internal-wire"
+name = "uptrakit-shared-types"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -8,8 +8,6 @@ version.workspace = true
 
 [dependencies]
 serde = { workspace = true }
+
+[dev-dependencies]
 serde_json = { workspace = true }
-time = { workspace = true }
-uuid = { workspace = true }
-uptrakit-provider-core = { path = "../../providers/core" }
-uptrakit-shared-types = { workspace = true }

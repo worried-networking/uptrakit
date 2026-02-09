@@ -17,22 +17,6 @@ Scope: `uptrakit-internal-wire` crate, WebSocket handlers (`service_ws.rs`, `age
 
 ### 1.2 Issues
 
-#### A2. Duplicate broadcast helpers on `ServiceConnectionRegistry`
-
-**Location:** `service_connections.rs:143-158`, `notification_service.rs:51-59`
-
-`broadcast_ca_bundle_updated()` and `broadcast_request_cert_renewal()` exist on both `ServiceConnectionRegistry` and `NotificationService`. The `ServiceConnectionRegistry` variants bypass the outbox, which could lead to missed cross-controller delivery if called directly.
-
-- **Recommendation:** Remove the convenience methods from `ServiceConnectionRegistry` or mark them `pub(crate)` with a clear doc comment that they are local-only. All cross-controller-aware callers should use `NotificationService`.
-
-#### A3. `target_service_type` in `controller_events` is a free-form `String`
-
-**Location:** `notification_service.rs:83`, `event_poller.rs:144,148`
-
-`notification_service.rs` sets `target_service_type: Option<String>` with raw strings like `"agent"` or `"mqtt"`. The `EventPoller` matches on these with string literals. A typo in either site silently drops events.
-
-- **Recommendation:** Use a shared enum or constants for the service type discriminator.
-
 #### A4. `UpdateOutput` messages do a read-modify-write on `update_history.output` per line — PARTIALLY FIXED
 
 **Location:** `agent_ws.rs:333-343`
@@ -54,14 +38,6 @@ Once a WebSocket connection is established (even anonymous), there's no throttli
 
 - **Recommendation:** Add per-connection message rate limiting, or at least rate-limit the approval polling (e.g., check DB at most once every 5 seconds instead of on every ping).
 - **Resolution:** Approval DB polling is now decoupled from client pings via a dedicated `APPROVAL_POLL_INTERVAL` (5 seconds) `tokio::time::interval` in both agent and MQTT enrolled loops. Per-connection message rate limiting remains a future improvement.
-
-#### S7. Enrollment token is transmitted in plaintext in the `EnrollPayload`
-
-**Location:** `wire/src/lib.rs:182-193`
-
-While the connection is TLS-encrypted, the enrollment token appears as a plaintext field in the wire protocol JSON. If any logging or debugging captures the raw message text, the token is exposed.
-
-- **Recommendation:** Document that message-level logging must never log `EnrollPayload` fields (or mask the token in log output).
 
 ---
 
@@ -111,24 +87,6 @@ When Controller A broadcasts a `CaBundleUpdated` message, it sends to all locall
 
 ## 4. Minor / Code Quality
 
-#### M1. `mpsc` channel buffer size is hardcoded to 16
-
-**Location:** `service_connections.rs:56,80`
-
-The push message channel capacity is fixed at 16. If the controller is slow to write to the WebSocket (e.g., network backpressure) and multiple push events arrive rapidly, the channel fills up. Consider making this configurable or documenting the rationale.
-
-#### M2. `get_instance_for_mqtt_client` is O(n)
-
-**Location:** `service_connections.rs:259-267`
-
-Iterates all connections to find which service holds an MQTT client. Could use a reverse index `HashMap<mqtt_client_id, service_id>` for O(1) lookup.
-
-#### M3. `wire_hook_shell` conversion function is mechanical boilerplate
-
-**Location:** `agent_ws.rs:823-837`
-
-Two identical `HookShell` enums exist in `web-api-types` and `wire`. Consider a `From` impl or a single shared definition.
-
 #### M4. `notification_service.rs` tests don't verify outbox writes
 
 **Location:** `notification_service.rs:104-143`
@@ -145,39 +103,19 @@ The wire crate's `Cargo.toml` doesn't configure lints. Relying on workspace-leve
 
 ---
 
-## 5. Additional Findings (Deep Dive)
-
-#### D1. No connection deduplication — stale WebSocket loops on reconnect [IMPORTANT]
-
-**Location:** `service_connections.rs:55-67,74-91`, `agent_ws.rs:64`, `mqtt_ws.rs:122-125`
-
-When `register_agent()` or `register_mqtt()` is called, the new `ServiceConnection` is inserted into the `HashMap` via `.insert()`, which silently replaces the previous entry. However, the old WebSocket handler loop is still running in its `tokio::select!` with a now-orphaned `push_rx` receiver. The old `mpsc::Sender` was dropped when the HashMap entry was replaced, so `push_rx.recv()` will return `None` and the old loop will terminate — but only when it polls the push channel. If the old loop is blocked waiting on `stream.next()` (no WebSocket message arriving), it remains alive until the old TCP connection times out or the client sends a ping.
-
-- **Impact:** During the overlap window, both the old and new handler loops can process incoming messages from their respective WebSocket connections. The old handler's DB writes succeed but its push channel is dead. Slight data inconsistency and wasted resources.
-- **Recommendation:** Before inserting a new entry, close the old push channel explicitly (which terminates the old loop), or track a connection generation to detect stale handlers.
-
----
-
 ## Summary Table
 
 | ID | Category | Severity | Summary | Status |
 |----|----------|----------|---------|--------|
-| A2 | Architecture | Minor | Duplicate broadcast helpers | Open |
-| A3 | Architecture | Minor | Free-form service type string | Open |
 | A4 | Architecture | Important | Read-modify-write per output line | **Partially fixed** |
 | S3 | Security | Important | No WS message rate limiting | **Partially fixed** |
-| S7 | Security | Minor | Enrollment token in plaintext in payload | Open |
 | H1 | HA | Important | Message loss during service migration | Open |
 | H3 | HA | Minor | EventPoller startup cursor assumption | Open |
 | H4 | HA | Important | 1-hour cleanup TTL too aggressive | Open |
 | H5 | HA | Important | MQTT lease TOCTOU gap | Open |
 | H7 | HA | Minor | Broadcast gap during service migration | Open |
-| M1 | Quality | Minor | Hardcoded mpsc buffer size | Open |
-| M2 | Quality | Minor | O(n) MQTT client lookup | Open |
-| M3 | Quality | Minor | Boilerplate HookShell conversion | Open |
 | M4 | Quality | Minor | Tests don't verify outbox writes | Open |
 | M5 | Quality | Minor | No explicit lint config | Open |
-| D1 | Deep Dive | Important | No connection deduplication on reconnect | Open |
 
 ---
 
@@ -185,52 +123,11 @@ When `register_agent()` or `register_mqtt()` is called, the new `ServiceConnecti
 
 | Plan | Addresses | Summary | Status |
 |------|-----------|---------|--------|
-| FP-6 | S6, S5 | Replace `expect()` with `LazyLock`, fix silent timestamp truncation | **DONE** |
 | FP-7 | H4, H1 | Configurable event cleanup TTL, startup reconciliation | |
 | FP-8 | H5 | Atomic lease acquisition with DB-level conflict handling | |
-| FP-9 | A2, A3 | Remove duplicate broadcast helpers, type-safe service type discriminator | |
-| FP-10 | M2, M1, M4 | Reverse index for MQTT lookup, named buffer constant, proper tests | |
-| FP-11 | S7 | Prevent enrollment token and sensitive payloads from leaking into logs | |
 | FP-12 | H3, H7 | EventPoller startup cursor safety and reconnect state reconciliation | |
-| FP-13 | M3 | Unify `HookShell` enum across wire and web-api-types crates | |
 | FP-14 | M5 | Add explicit lint configuration to the wire crate | |
 | FP-15 | H3 | Add wire protocol version negotiation | |
-| FP-16 | D1 | Connection deduplication with generation tracking | |
-| FP-17 | D2 | Validate UpdateHistory ownership against agent | **DONE** |
-| FP-18 | D3 | Reorder register_agent before deliver_pending_updates | **DONE** |
-| FP-19 | D4 | Non-blocking broadcast with sender snapshot | **DONE** |
-| FP-20 | D5 | Add configurable timeout to enrollment client wait_for_approval | **DONE** |
-
-### FP-6. Replace runtime `expect()` and fix silent timestamp truncation — DONE
-
-**Addresses:** S6, S5
-
-**Problem:** `MIN_AGENT_VERSION` is parsed with `.expect()` on every `ReportHostInfo` message, which violates the project rule against `panic!`/`unwrap` outside lock guards. The `utc_datetime_millis` serializer silently truncates `i128` to `i64` with `as`, which could mask bugs for extreme timestamp values.
-
-**Implementation:**
-
-1. **Parsed `MIN_AGENT_VERSION` once using `LazyLock`.**
-   - Added module-level static in `agent_ws.rs`:
-     ```rust
-     static MIN_AGENT_VER: LazyLock<semver::Version> = LazyLock::new(|| {
-         semver::Version::parse(MIN_AGENT_VERSION)
-             .expect("MIN_AGENT_VERSION must be valid semver")
-     });
-     ```
-   - References `*MIN_AGENT_VER` in the handler instead of parsing each time.
-
-2. **Replaced `as i64` with `i64::try_from()` in `utc_datetime_millis::serialize`.**
-   - In `wire/src/lib.rs`, changed to:
-     ```rust
-     let millis_i64 = i64::try_from(millis).map_err(serde::ser::Error::custom)?;
-     serializer.serialize_i64(millis_i64)
-     ```
-
-3. **Added 4 timestamp roundtrip tests** covering practical range, epoch, far future (year 9999), and negative timestamps.
-
-**Files modified:** `agent_ws.rs`, `wire/src/lib.rs`
-
----
 
 ### FP-7. Harden event cleanup TTL and add startup reconciliation
 
@@ -324,126 +221,6 @@ When `register_agent()` or `register_mqtt()` is called, the new `ServiceConnecti
 
 ---
 
-### FP-9. Consolidate broadcast helpers and type-safe service type discriminator
-
-**Addresses:** A2, A3
-
-**Problem:** `broadcast_ca_bundle_updated()` and `broadcast_request_cert_renewal()` exist on both `ServiceConnectionRegistry` (local-only) and `NotificationService` (local + outbox). Callers can accidentally use the local-only version and miss cross-controller delivery. Additionally, `target_service_type` in the outbox is a free-form `String` matched with string literals — a typo silently drops events.
-
-**Plan:**
-
-1. **Remove convenience broadcast methods from `ServiceConnectionRegistry`.**
-   - Delete `broadcast_ca_bundle_updated()` and `broadcast_request_cert_renewal()` from `service_connections.rs`.
-   - All callers should use `NotificationService` for cross-controller-safe broadcasting.
-   - Keep only the generic `broadcast()`, `broadcast_by_type()`, and `send()` on `ServiceConnectionRegistry` — these are the building blocks used by `NotificationService` internally.
-
-2. **Audit all call sites.**
-   - Search the codebase for all calls to `ServiceConnectionRegistry::broadcast_ca_bundle_updated` and `broadcast_request_cert_renewal`.
-   - Replace them with the corresponding `NotificationService` methods.
-   - The only exception is `broadcast_server_restarting_scattered()`, which is intentionally local-only (documented in `AGENTS.md`).
-
-3. **Introduce a `TargetServiceType` enum for outbox events.**
-   - Define in `notification_service.rs` (or a shared location):
-     ```rust
-     #[derive(Debug, Clone, Copy)]
-     enum TargetServiceType {
-         Agent,
-         Mqtt,
-     }
-
-     impl TargetServiceType {
-         fn as_str(self) -> &'static str {
-             match self {
-                 Self::Agent => "agent",
-                 Self::Mqtt => "mqtt",
-             }
-         }
-     }
-     ```
-   - Change `write_outbox_event()` to accept `Option<TargetServiceType>` instead of `Option<&str>`.
-   - Change `EventPoller::deliver_event()` to match on the same enum's string representations, or better yet, parse the string back into the enum with a fallback.
-
-4. **Add a compile-time guarantee.**
-   - Use the enum in all call sites. This means a new service type (e.g., a future "monitor" service) would require updating the enum, making it impossible to introduce a typo.
-
-**Files to modify:**
-- `crates/ui/web-api/src/service_connections.rs` — remove `broadcast_ca_bundle_updated`, `broadcast_request_cert_renewal`
-- `crates/ui/web-api/src/notification_service.rs` — add `TargetServiceType` enum, update `write_outbox_event` signature
-- `crates/ui/web-api/src/event_poller.rs` — parse `target_service_type` string into enum
-- All call sites that use the removed convenience methods (search for `broadcast_ca_bundle_updated`, `broadcast_request_cert_renewal`)
-
-**Testing:**
-- Compile-time: removing the old methods causes build errors at any incorrect call site (the compiler does the work)
-- Unit test: `TargetServiceType::as_str()` round-trips through the event poller's parsing
-- Unit test: unknown `target_service_type` strings in the DB are logged and skipped, not silently dropped
-
----
-
-### FP-10. Improve `ServiceConnectionRegistry` efficiency and test coverage
-
-**Addresses:** M2, M1, M4
-
-**Problem:** `get_instance_for_mqtt_client()` scans all connections (O(n)) to find which service holds an MQTT client. The `mpsc` channel buffer size is hardcoded to 16 with no documentation. `NotificationService` tests don't verify outbox writes because the test DB has no schema.
-
-**Plan:**
-
-1. **Add a reverse index for MQTT client lookups.**
-   - Add a second `HashMap<Uuid, Uuid>` to `ServiceConnectionRegistry` mapping `mqtt_client_id -> service_id`.
-   - Update `assign_mqtt_client()` to insert into the index.
-   - Update `release_mqtt_client()` to remove from the index.
-   - Update `unregister()` to remove all entries for the disconnecting service.
-   - Change `get_instance_for_mqtt_client()` to a single `HashMap::get()` — O(1).
-
-2. **Make the `mpsc` channel buffer size a named constant with documentation.**
-   - Define `const PUSH_CHANNEL_CAPACITY: usize = 32;` at the top of `service_connections.rs`.
-   - Add a doc comment explaining the rationale.
-
-3. **Add proper integration tests for `NotificationService`.**
-   - Create a test helper that sets up an in-memory SQLite DB with migrations applied.
-   - Test `send()`, `broadcast()`, and verify outbox contents.
-
-4. **Add tests for `EventPoller` delivery routing.**
-   - Test targeted delivery, type-filtered delivery, and broadcast.
-
-**Files to modify:**
-- `crates/ui/web-api/src/service_connections.rs` — reverse index, named constant
-- `crates/ui/web-api/src/notification_service.rs` — integration tests with migrated DB
-- `crates/ui/web-api/src/event_poller.rs` — delivery routing tests
-
-**Testing:**
-- Unit test: `get_instance_for_mqtt_client` returns correct result after assign/release/unregister
-- Unit test: reverse index stays consistent after interleaved assign/release operations
-- Integration test: full outbox write + poll + deliver cycle with real DB schema
-
----
-
-### FP-11. Prevent enrollment token and sensitive payloads from leaking into logs
-
-**Addresses:** S7
-
-**Problem:** `EnrollPayload.enrollment_token` contains the raw pre-shared secret. Both are transmitted as plaintext JSON fields over the (TLS-encrypted) WebSocket. If any middleware, debug logging, or error handler captures the raw message text, these secrets are exposed. The `Debug` derive on all payload structs means `tracing::debug!("{:?}", payload)` would print them too.
-
-**Plan:**
-
-1. **Implement a custom `Debug` for sensitive payload structs.**
-   - For `EnrollPayload`, `EnrolledPayload`, and `MqttTenantConfig`, override `Debug` to redact sensitive fields.
-
-2. **Remove the derived `Debug` from affected structs.**
-   - Replace `#[derive(Debug, ...)]` with a manual `Debug` impl for sensitive structs.
-
-3. **Audit all `tracing::*!` calls in WebSocket handlers for raw message logging.**
-
-4. **Add a lint comment in the wire crate** warning that message text must never be logged verbatim.
-
-**Files to modify:**
-- `crates/shared/wire/src/lib.rs` — custom `Debug` impls
-- WebSocket handler files — audit log statements
-
-**Testing:**
-- Unit test: `format!("{:?}", ...)` does not contain secrets for sensitive payloads
-
----
-
 ### FP-12. EventPoller startup cursor safety and reconnect state reconciliation
 
 **Addresses:** H3, H7
@@ -464,24 +241,6 @@ When `register_agent()` or `register_mqtt()` is called, the new `ServiceConnecti
 **Testing:**
 - Unit test: startup cursor is `max_id - 100` (not `max_id`)
 - Unit test: events older than a service's connection time are skipped
-
----
-
-### FP-13. Unify `HookShell` enum across wire and web-api-types crates
-
-**Addresses:** M3
-
-**Problem:** Two identical `HookShell` enums exist — one in `uptrakit-internal-wire` and one in `uptrakit-web-api-types`. The `wire_hook_shell()` conversion function is pure boilerplate.
-
-**Plan:**
-
-1. Re-export the wire crate's `HookShell` from `web-api-types` instead of defining a duplicate.
-2. Remove the `wire_hook_shell()` conversion function.
-
-**Files to modify:**
-- `crates/shared/web-api-types/Cargo.toml` — add wire crate dependency (if missing)
-- `crates/shared/web-api-types/src/update_hooks.rs` — replace local `HookShell` with re-export
-- `crates/ui/web-api/src/routes/agent_ws.rs` — delete `wire_hook_shell()`, use `HookShell` directly
 
 ---
 
@@ -519,117 +278,3 @@ When `register_agent()` or `register_mqtt()` is called, the new `ServiceConnecti
 - `crates/shared/wire/src/lib.rs` — `PROTOCOL_VERSION` constant, new fields
 - `crates/shared/wire/asyncapi.yaml` — document new fields
 - WebSocket handler files — log protocol version
-
----
-
-### FP-16. Connection deduplication with generation tracking
-
-**Addresses:** D1
-
-**Problem:** When a service reconnects, the old WebSocket handler loop continues running until it discovers the broken push channel. During the overlap, both handler loops can process incoming messages.
-
-**Plan:**
-
-1. Add a connection generation counter and `CancellationToken` to `ServiceConnectionRegistry`.
-2. On replacement, cancel the old token for immediate teardown.
-3. Handler loops add `cancel_token.cancelled()` as a `tokio::select!` branch.
-
-**Files to modify:**
-- `crates/ui/web-api/src/service_connections.rs` — generation, `CancellationToken`
-- WebSocket handler files — accept and use `CancellationToken`
-
----
-
-### FP-17. Validate UpdateHistory ownership against the requesting agent — DONE
-
-**Addresses:** D2
-
-**Problem:** When processing `UpdateStarted`, `UpdateOutput`, and `UpdateResult` messages from an authenticated agent, the handler looks up the `update_history` record by `payload.update_history_id` but never verifies that the record belongs to a host linked to the current `agent_id`. A compromised or misbehaving agent could manipulate any update record.
-
-**Implementation:**
-
-1. **Added `validate_update_ownership()` helper function.**
-   - Fetches the `update_history` record and verifies `host_id` is in the agent's linked host set.
-   - Returns `Forbidden` error for unauthorized access attempts.
-
-2. **Added `load_linked_host_ids()` helper function.**
-   - Queries `service_host` table for all host IDs linked to the agent.
-
-3. **Applied validation to all three update message handlers.**
-   - `UpdateStarted`, `UpdateOutput`, `UpdateResult` all call `validate_update_ownership()` before processing.
-
-4. **Cached `linked_host_ids: HashSet<Uuid>` per connection.**
-   - Initialized at connection start, refreshed after `ReportHostInfo` (which may link new hosts).
-
-**Files modified:** `agent_ws.rs`
-
----
-
-### FP-18. Reorder register_agent before deliver_pending_updates — DONE
-
-**Addresses:** D3
-
-**Problem:** In `handle_agent_authenticated()`, `deliver_pending_updates()` was called before `register_agent()`. During the gap, outbox events targeting this agent would fail delivery silently.
-
-**Implementation:**
-
-1. **Swapped the order: `register_agent()` now runs before `deliver_pending_updates()`.**
-   - The agent is registered in the `ServiceConnectionRegistry` first, so any concurrent outbox events are captured by the push channel.
-   - Added comment documenting the ordering rationale.
-
-2. **Duplicate deliveries are handled gracefully.**
-   - The agent already handles duplicate `ExecuteUpdate` messages idempotently.
-
-**Files modified:** `agent_ws.rs`
-
----
-
-### FP-19. Non-blocking broadcast with sender snapshot — DONE
-
-**Addresses:** D4
-
-**Problem:** `broadcast()` and `broadcast_by_type()` held the `RwLock` read guard while iterating connections and calling `sender.send(msg).await`. A slow consumer could hold the lock for an extended time, blocking all write operations and potentially causing deadlock.
-
-**Implementation:**
-
-1. **Refactored `send()` to snapshot sender under lock, release lock, then send.**
-   ```rust
-   let sender = {
-       let guard = self.inner.read().await;
-       guard.get(service_id).map(|c| c.sender.clone())
-   };
-   if let Some(sender) = sender {
-       sender.send(msg).await.is_ok()
-   } else { false }
-   ```
-
-2. **Applied the same pattern to `broadcast()` and `broadcast_by_type()`.**
-   - Snapshot all senders (or filtered senders) under lock, release lock, then iterate and send.
-
-**Files modified:** `service_connections.rs`
-
----
-
-### FP-20. Add configurable timeout to enrollment client wait_for_approval — DONE
-
-**Addresses:** D5
-
-**Problem:** `wait_for_approval()`, `send_enroll()`, `request_certificate_ws()`, and `connect_ws()` all had no timeout. If the controller went down silently or approval never came, the enrollment client would block forever.
-
-**Implementation:**
-
-1. **Added three timeout constants:**
-   - `CONNECT_TIMEOUT` (30s) — TCP connection establishment
-   - `RESPONSE_TIMEOUT` (60s) — immediate request-response exchanges
-   - `APPROVAL_TIMEOUT` (30min) — waiting for human approval
-
-2. **Added three new error variants to `EnrollmentError`:**
-   - `ApprovalTimeout`, `ResponseTimeout`, `ConnectionTimeout`
-
-3. **Wrapped all blocking operations in `tokio::time::timeout()`:**
-   - `connect_ws()`: TCP connect wrapped in `CONNECT_TIMEOUT`
-   - `send_enroll()`: inner loop wrapped in `RESPONSE_TIMEOUT`
-   - `wait_for_approval()`: inner loop wrapped in `APPROVAL_TIMEOUT`
-   - `request_certificate_ws()`: inner loop wrapped in `RESPONSE_TIMEOUT`
-
-**Files modified:** `enrollment/src/ws.rs`, `enrollment/src/error.rs`

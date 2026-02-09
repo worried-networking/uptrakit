@@ -112,7 +112,7 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 
 ## Encryption at Rest
 
-Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom type (`crates/shared/db/src/crypto.rs`).
+Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom type (`crates/shared/db/src/crypto.rs`). `EncryptedString` wraps `SecretString` (from `uptrakit-shared-types`) which redacts values in `Debug` and `Display` output to prevent accidental logging of secrets. `SecretString` is also used in wire protocol types for enrollment tokens and MQTT credentials.
 
 ### Master Key Management
 

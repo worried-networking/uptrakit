@@ -92,42 +92,8 @@ fn validate_hook_path(value: &str, field: &'static str) -> Result<(), HookValida
     Ok(())
 }
 
-/// Shell type for hook execution.
-///
-/// Determines which shell interpreter and fail-early settings are used.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookShell {
-    /// Bash shell with `set -euo pipefail`
-    #[default]
-    Bash,
-    /// POSIX sh with `set -eu`
-    Sh,
-    /// PowerShell with `$ErrorActionPreference = 'Stop'` (future Windows support)
-    #[serde(rename = "powershell")]
-    PowerShell,
-}
-
-impl HookShell {
-    /// Returns the string representation of the shell type.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Bash => "bash",
-            Self::Sh => "sh",
-            Self::PowerShell => "powershell",
-        }
-    }
-
-    /// Parses a string into a HookShell variant.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "bash" => Some(Self::Bash),
-            "sh" => Some(Self::Sh),
-            "powershell" => Some(Self::PowerShell),
-            _ => None,
-        }
-    }
-}
+/// Re-export the canonical `HookShell` type from the wire crate.
+pub use uptrakit_internal_wire::HookShell;
 
 /// Systemd service action - explicit, maps directly to command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

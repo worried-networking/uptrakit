@@ -174,8 +174,14 @@ fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
         host: config.host.clone(),
         port,
         client_id: config.client_id.clone(),
-        username: config.username.clone(),
-        password: config.password.clone(),
+        username: config
+            .username
+            .as_ref()
+            .map(|s| s.expose_secret().to_string()),
+        password: config
+            .password
+            .as_ref()
+            .map(|s| s.expose_secret().to_string()),
         topic_prefix: config.topic_prefix.clone(),
     }
 }
@@ -198,6 +204,7 @@ fn compute_config_hash(config: &MqttTenantConfig) -> u64 {
 mod tests {
     use super::*;
     use time::UtcDateTime;
+    use uptrakit_internal_wire::SecretString;
     use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 
     #[test]
@@ -210,8 +217,8 @@ mod tests {
             host: "broker.example.com".to_string(),
             port: 8883,
             client_id: "my-client".to_string(),
-            username: Some("user".to_string()),
-            password: Some("pass".to_string()),
+            username: Some(SecretString::new("user".into())),
+            password: Some(SecretString::new("pass".into())),
             topic_prefix: "home/uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -224,6 +231,7 @@ mod tests {
         assert_eq!(mqtt_config.client_id, "my-client");
         assert_eq!(mqtt_config.username.as_deref(), Some("user"));
         assert_eq!(mqtt_config.password.as_deref(), Some("pass"));
+        // (These are plain String fields on MqttConfig, extracted from SecretString)
         assert_eq!(mqtt_config.topic_prefix, "home/uptrakit");
     }
 

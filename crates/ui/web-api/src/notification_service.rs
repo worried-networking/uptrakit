@@ -1,8 +1,6 @@
 use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait};
 use time::OffsetDateTime;
-use uptrakit_internal_wire::{
-    CaBundleUpdatedPayload, ControllerMessage, RequestCertRenewalPayload,
-};
+use uptrakit_internal_wire::ControllerMessage;
 use uptrakit_shared_db::entity::controller_event;
 use uuid::Uuid;
 
@@ -59,25 +57,13 @@ impl NotificationService {
         }
     }
 
-    /// Broadcast a CA bundle update to all connected services (local + outbox).
-    pub async fn broadcast_ca_bundle_updated(&self, payload: CaBundleUpdatedPayload) {
-        let msg = ControllerMessage::CaBundleUpdated(payload);
-        self.broadcast(msg).await;
-    }
-
-    /// Broadcast a certificate renewal request to all connected services (local + outbox).
-    pub async fn broadcast_request_cert_renewal(&self, payload: RequestCertRenewalPayload) {
-        let msg = ControllerMessage::RequestCertRenewal(payload);
-        self.broadcast(msg).await;
-    }
-
     /// Write an outbox event for cross-controller delivery.
     ///
     /// This is fire-and-forget: errors are logged but do not fail the caller.
     pub(crate) async fn write_outbox_event(
         &self,
         target_service_id: Option<Uuid>,
-        target_service_type: Option<&str>,
+        target_service_type: Option<uptrakit_internal_wire::ServiceType>,
         msg: &ControllerMessage,
     ) {
         let json = match serde_json::to_string(msg) {
@@ -92,7 +78,7 @@ impl NotificationService {
             id: ActiveValue::NotSet,
             source_controller_id: ActiveValue::Set(self.controller_id),
             target_service_id: ActiveValue::Set(target_service_id),
-            target_service_type: ActiveValue::Set(target_service_type.map(String::from)),
+            target_service_type: ActiveValue::Set(target_service_type.map(|t| t.to_string())),
             message_json: ActiveValue::Set(json),
             created_at: ActiveValue::Set(OffsetDateTime::now_utc()),
         };
@@ -188,8 +174,8 @@ mod tests {
                     host: "localhost".into(),
                     port: 1883,
                     client_id: "test".into(),
-                    username: Some("user".into()),
-                    password: Some("secret".into()),
+                    username: Some(uptrakit_internal_wire::SecretString::new("user".into())),
+                    password: Some(uptrakit_internal_wire::SecretString::new("secret".into())),
                     topic_prefix: "test/".into(),
                     updated_at: time::UtcDateTime::UNIX_EPOCH,
                 },

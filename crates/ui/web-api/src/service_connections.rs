@@ -5,14 +5,21 @@ use std::time::{Duration, Instant};
 use rand::Rng;
 use std::cmp::Ordering;
 use tokio::sync::{RwLock, mpsc};
+use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::ControllerMessage;
 use uptrakit_shared_db::entity::service::ServiceType;
 use uuid::Uuid;
+
+/// Channel buffer size for push messages to connected services.
+const PUSH_CHANNEL_CAPACITY: usize = 32;
 
 /// Per-connection state for a connected service (agent or MQTT).
 struct ServiceConnection {
     /// Channel for pushing messages to the connected service.
     sender: mpsc::Sender<ControllerMessage>,
+    /// Token cancelled when this connection is superseded by a new registration
+    /// for the same `service_id`, signalling the old WebSocket handler to exit.
+    cancel_token: CancellationToken,
     /// Type of service (Agent or Mqtt).
     service_type: ServiceType,
     /// Instance ID provided during registration (MQTT only).
@@ -25,6 +32,23 @@ struct ServiceConnection {
     last_heartbeat: Option<Instant>,
 }
 
+/// Interior state protected by the `RwLock`.
+struct RegistryInner {
+    /// Primary map: service_id → connection state.
+    connections: HashMap<Uuid, ServiceConnection>,
+    /// Reverse index: mqtt_client_id → service_id for O(1) lookup.
+    mqtt_client_index: HashMap<Uuid, Uuid>,
+}
+
+impl RegistryInner {
+    fn new() -> Self {
+        Self {
+            connections: HashMap::new(),
+            mqtt_client_index: HashMap::new(),
+        }
+    }
+}
+
 /// Unified registry of connected services (agents and MQTT service instances).
 ///
 /// The controller registers services when they connect via WebSocket and
@@ -32,7 +56,7 @@ struct ServiceConnection {
 /// `send()` to push messages to connected services in real time.
 #[derive(Clone)]
 pub struct ServiceConnectionRegistry {
-    inner: Arc<RwLock<HashMap<Uuid, ServiceConnection>>>,
+    inner: Arc<RwLock<RegistryInner>>,
 }
 
 /// Snapshot of MQTT service load used for lease selection.
@@ -56,7 +80,7 @@ impl Default for ServiceConnectionRegistry {
 impl ServiceConnectionRegistry {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(HashMap::new())),
+            inner: Arc::new(RwLock::new(RegistryInner::new())),
         }
     }
 
@@ -64,22 +88,36 @@ impl ServiceConnectionRegistry {
     // Registration
     // ---------------------------------------------------------------
 
-    /// Register a connected agent and return a receiver for push messages.
-    pub async fn register_agent(&self, service_id: Uuid) -> mpsc::Receiver<ControllerMessage> {
-        let (tx, rx) = mpsc::channel(16);
+    /// Register a connected agent and return a receiver for push messages
+    /// plus a cancellation token that is triggered if the same `service_id`
+    /// registers again (connection deduplication).
+    pub async fn register_agent(
+        &self,
+        service_id: Uuid,
+    ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
+        let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
+        let cancel_token = CancellationToken::new();
         let conn = ServiceConnection {
             sender: tx,
+            cancel_token: cancel_token.clone(),
             service_type: ServiceType::Agent,
             instance_id: None,
             max_tenants: None,
             assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: None,
         };
-        self.inner.write().await.insert(service_id, conn);
-        rx
+        let mut guard = self.inner.write().await;
+        if let Some(old) = guard.connections.remove(&service_id) {
+            old.cancel_token.cancel();
+            tracing::info!(%service_id, "cancelled superseded agent connection");
+        }
+        guard.connections.insert(service_id, conn);
+        (rx, cancel_token)
     }
 
-    /// Register a connected MQTT service and return a receiver for push messages.
+    /// Register a connected MQTT service and return a receiver for push messages
+    /// plus a cancellation token that is triggered if the same `service_id`
+    /// registers again (connection deduplication).
     ///
     /// The `service_id` is the database ID of the MQTT service. The `instance_id`
     /// and `max_tenants` come from the Register message sent by the service after
@@ -89,18 +127,29 @@ impl ServiceConnectionRegistry {
         service_id: Uuid,
         instance_id: String,
         max_tenants: u32,
-    ) -> mpsc::Receiver<ControllerMessage> {
-        let (tx, rx) = mpsc::channel(16);
+    ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
+        let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
+        let cancel_token = CancellationToken::new();
         let conn = ServiceConnection {
             sender: tx,
+            cancel_token: cancel_token.clone(),
             service_type: ServiceType::Mqtt,
             instance_id: Some(instance_id),
             max_tenants: Some(max_tenants),
             assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: Some(Instant::now()),
         };
-        self.inner.write().await.insert(service_id, conn);
-        rx
+        let mut guard = self.inner.write().await;
+        if let Some(old) = guard.connections.remove(&service_id) {
+            old.cancel_token.cancel();
+            // Clean up reverse index for superseded MQTT connection.
+            for client_id in &old.assigned_mqtt_clients {
+                guard.mqtt_client_index.remove(client_id);
+            }
+            tracing::info!(%service_id, "cancelled superseded MQTT connection");
+        }
+        guard.connections.insert(service_id, conn);
+        (rx, cancel_token)
     }
 
     /// Remove a service from the registry on disconnect.
@@ -108,11 +157,14 @@ impl ServiceConnectionRegistry {
     /// Returns the set of MQTT client IDs that were assigned to this service
     /// (empty for agents), so the lease coordinator can release them.
     pub async fn unregister(&self, service_id: &Uuid) -> Option<HashSet<Uuid>> {
-        self.inner
-            .write()
-            .await
-            .remove(service_id)
-            .map(|c| c.assigned_mqtt_clients)
+        let mut guard = self.inner.write().await;
+        guard.connections.remove(service_id).map(|c| {
+            // Clean up reverse index entries for all MQTT clients assigned to this service.
+            for client_id in &c.assigned_mqtt_clients {
+                guard.mqtt_client_index.remove(client_id);
+            }
+            c.assigned_mqtt_clients
+        })
     }
 
     // ---------------------------------------------------------------
@@ -126,7 +178,7 @@ impl ServiceConnectionRegistry {
     pub async fn send(&self, service_id: &Uuid, msg: ControllerMessage) -> bool {
         let sender = {
             let guard = self.inner.read().await;
-            guard.get(service_id).map(|c| c.sender.clone())
+            guard.connections.get(service_id).map(|c| c.sender.clone())
         };
         if let Some(sender) = sender {
             sender.send(msg).await.is_ok()
@@ -137,7 +189,7 @@ impl ServiceConnectionRegistry {
 
     /// Check whether a service is currently connected.
     pub async fn is_connected(&self, service_id: &Uuid) -> bool {
-        self.inner.read().await.contains_key(service_id)
+        self.inner.read().await.connections.contains_key(service_id)
     }
 
     /// Broadcast a message to all connected services.
@@ -147,7 +199,11 @@ impl ServiceConnectionRegistry {
     pub async fn broadcast(&self, msg: ControllerMessage) {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
             let guard = self.inner.read().await;
-            guard.values().map(|c| c.sender.clone()).collect()
+            guard
+                .connections
+                .values()
+                .map(|c| c.sender.clone())
+                .collect()
         };
         for sender in senders {
             let _ = sender.send(msg.clone()).await;
@@ -161,6 +217,7 @@ impl ServiceConnectionRegistry {
         let senders: Vec<mpsc::Sender<ControllerMessage>> = {
             let guard = self.inner.read().await;
             guard
+                .connections
                 .values()
                 .filter(|c| c.service_type == service_type)
                 .map(|c| c.sender.clone())
@@ -171,27 +228,9 @@ impl ServiceConnectionRegistry {
         }
     }
 
-    /// Broadcast a CA bundle update to all connected services.
-    pub async fn broadcast_ca_bundle_updated(
-        &self,
-        payload: uptrakit_internal_wire::CaBundleUpdatedPayload,
-    ) {
-        let msg = ControllerMessage::CaBundleUpdated(payload);
-        self.broadcast(msg).await;
-    }
-
-    /// Broadcast a certificate renewal request to all connected services.
-    pub async fn broadcast_request_cert_renewal(
-        &self,
-        payload: uptrakit_internal_wire::RequestCertRenewalPayload,
-    ) {
-        let msg = ControllerMessage::RequestCertRenewal(payload);
-        self.broadcast(msg).await;
-    }
-
     /// Get the current number of connected services.
     pub async fn connection_count(&self) -> usize {
-        self.inner.read().await.len()
+        self.inner.read().await.connections.len()
     }
 
     /// Broadcast server restarting notification to all services, scattered over time.
@@ -205,7 +244,7 @@ impl ServiceConnectionRegistry {
         scatter_duration: Duration,
     ) {
         let guard = self.inner.read().await;
-        let service_ids: Vec<Uuid> = guard.keys().copied().collect();
+        let service_ids: Vec<Uuid> = guard.connections.keys().copied().collect();
         let count = service_ids.len();
         drop(guard);
 
@@ -231,7 +270,7 @@ impl ServiceConnectionRegistry {
             tokio::spawn(async move {
                 tokio::time::sleep(delay).await;
                 let guard = inner.read().await;
-                if let Some(conn) = guard.get(&service_id) {
+                if let Some(conn) = guard.connections.get(&service_id) {
                     let _ = conn.sender.send(msg_clone).await;
                 }
             });
@@ -245,7 +284,7 @@ impl ServiceConnectionRegistry {
     /// Record a heartbeat from an MQTT service.
     pub async fn record_heartbeat(&self, service_id: &Uuid) {
         let mut guard = self.inner.write().await;
-        if let Some(conn) = guard.get_mut(service_id) {
+        if let Some(conn) = guard.connections.get_mut(service_id) {
             conn.last_heartbeat = Some(Instant::now());
         }
     }
@@ -255,6 +294,7 @@ impl ServiceConnectionRegistry {
         self.inner
             .read()
             .await
+            .connections
             .get(service_id)
             .and_then(|c| c.instance_id.clone())
     }
@@ -265,8 +305,9 @@ impl ServiceConnectionRegistry {
     /// is not connected.
     pub async fn assign_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: Uuid) -> bool {
         let mut guard = self.inner.write().await;
-        if let Some(conn) = guard.get_mut(service_id) {
+        if let Some(conn) = guard.connections.get_mut(service_id) {
             conn.assigned_mqtt_clients.insert(mqtt_client_id);
+            guard.mqtt_client_index.insert(mqtt_client_id, *service_id);
             true
         } else {
             false
@@ -278,8 +319,12 @@ impl ServiceConnectionRegistry {
     /// Returns `true` if the MQTT client was previously assigned, `false` otherwise.
     pub async fn release_mqtt_client(&self, service_id: &Uuid, mqtt_client_id: &Uuid) -> bool {
         let mut guard = self.inner.write().await;
-        if let Some(conn) = guard.get_mut(service_id) {
-            conn.assigned_mqtt_clients.remove(mqtt_client_id)
+        if let Some(conn) = guard.connections.get_mut(service_id) {
+            let removed = conn.assigned_mqtt_clients.remove(mqtt_client_id);
+            if removed {
+                guard.mqtt_client_index.remove(mqtt_client_id);
+            }
+            removed
         } else {
             false
         }
@@ -288,14 +333,14 @@ impl ServiceConnectionRegistry {
     /// Find which MQTT service instance holds a specific MQTT client.
     ///
     /// Returns the `service_id` of the instance holding this MQTT client, if any.
+    /// Uses a reverse index for O(1) lookup.
     pub async fn get_instance_for_mqtt_client(&self, mqtt_client_id: &Uuid) -> Option<Uuid> {
-        let guard = self.inner.read().await;
-        for (service_id, conn) in guard.iter() {
-            if conn.assigned_mqtt_clients.contains(mqtt_client_id) {
-                return Some(*service_id);
-            }
-        }
-        None
+        self.inner
+            .read()
+            .await
+            .mqtt_client_index
+            .get(mqtt_client_id)
+            .copied()
     }
 
     /// Get the current number of MQTT clients assigned to a service.
@@ -303,6 +348,7 @@ impl ServiceConnectionRegistry {
         self.inner
             .read()
             .await
+            .connections
             .get(service_id)
             .map(|c| c.assigned_mqtt_clients.len())
             .unwrap_or(0)
@@ -316,6 +362,7 @@ impl ServiceConnectionRegistry {
         self.inner
             .read()
             .await
+            .connections
             .get(service_id)
             .and_then(|c| c.max_tenants)
     }
@@ -326,7 +373,7 @@ impl ServiceConnectionRegistry {
     /// Returns `Some(u32::MAX)` if max_tenants is 0 (unlimited).
     pub async fn get_available_capacity(&self, service_id: &Uuid) -> Option<u32> {
         let guard = self.inner.read().await;
-        guard.get(service_id).and_then(|c| {
+        guard.connections.get(service_id).and_then(|c| {
             c.max_tenants.map(|max| {
                 if max == 0 {
                     u32::MAX
@@ -342,6 +389,7 @@ impl ServiceConnectionRegistry {
         self.inner
             .read()
             .await
+            .connections
             .iter()
             .filter_map(|(id, conn)| conn.instance_id.as_ref().map(|iid| (*id, iid.clone())))
             .collect()
@@ -354,6 +402,7 @@ impl ServiceConnectionRegistry {
         let guard = self.inner.read().await;
         let now = Instant::now();
         guard
+            .connections
             .iter()
             .filter_map(|(service_id, conn)| {
                 conn.last_heartbeat.and_then(|hb| {

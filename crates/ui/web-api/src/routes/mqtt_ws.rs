@@ -121,7 +121,7 @@ pub(crate) async fn handle_mqtt_authenticated(
     };
 
     // Register in connection registry.
-    let mut push_rx = state
+    let (mut push_rx, cancel_token) = state
         .service_connections
         .register_mqtt(service_id, instance_id.clone(), max_tenants)
         .await;
@@ -352,6 +352,16 @@ pub(crate) async fn handle_mqtt_authenticated(
                 if sink.send(Message::Text(json.into())).await.is_err() {
                     break;
                 }
+            }
+            _ = cancel_token.cancelled() => {
+                tracing::info!(%service_id, "MQTT connection superseded by new registration");
+                let _ = close_with_reason(sink, "superseded by new connection").await;
+                // Do NOT unregister — the new connection owns the registry entry.
+                // Still release leases since the new connection will re-reconcile.
+                if let Err(e) = lease_coordinator.release_all_for_service(&service_id).await {
+                    tracing::error!(error = %e, "failed to release leases on superseded disconnect");
+                }
+                return;
             }
         }
     }

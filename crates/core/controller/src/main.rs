@@ -971,7 +971,11 @@ async fn run(args: cli::Args) -> Result<()> {
                                     ca_bundle_pem: new_snapshot.bundle_pem.clone(),
                                 };
                                 notifications_for_task
-                                    .broadcast_ca_bundle_updated(ca_payload)
+                                    .broadcast(
+                                        uptrakit_internal_wire::ControllerMessage::CaBundleUpdated(
+                                            ca_payload,
+                                        ),
+                                    )
                                     .await;
 
                                 // Request all services to renew their certificates
@@ -980,7 +984,7 @@ async fn run(args: cli::Args) -> Result<()> {
                                         reason: "CA rotation".to_string(),
                                     };
                                 notifications_for_task
-                                    .broadcast_request_cert_renewal(renewal_payload)
+                                    .broadcast(uptrakit_internal_wire::ControllerMessage::RequestCertRenewal(renewal_payload))
                                     .await;
 
                                 // Publish new snapshot via watch channel

@@ -11,8 +11,8 @@
 | Severity | Count | Fixed |
 |----------|-------|-------|
 | Critical | 7 | 3 |
-| High | 11 | 0 |
-| Medium | 17 | 0 |
+| High | 11 | 3 |
+| Medium | 17 | 1 |
 | Low | 10 | 0 |
 
 ---
@@ -135,13 +135,13 @@ Each controller instance generates its own JWT signing key from its local `data_
 
 **Recommendation:** Use `OpenOptionsExt` with mode `0o600`. Write to temp files then atomically rename.
 
-### H7. Connection Registry Overwrites on Concurrent Reconnect
+### H7. Connection Registry Overwrites on Concurrent Reconnect — FIXED
 
-**File:** `src/service_connections.rs:55-67, 74-91`
+**File:** `src/service_connections.rs`
 
 When a service reconnects before cleanup, `register_agent`/`register_mqtt` unconditionally overwrite via `HashMap::insert`. The old handler's cleanup then removes the **new** connection's entry, leaving the service unable to receive push notifications.
 
-**Recommendation:** Use a generation counter or connection epoch. The `unregister` method should verify the connection being removed matches the one that was registered.
+**Fix:** `register_agent`/`register_mqtt` now return a `CancellationToken` alongside the push-message receiver. On re-registration (same `service_id`), the old connection's token is cancelled, causing the old WebSocket handler to exit immediately via a `cancel_token.cancelled()` branch in `tokio::select!`. The superseded handler closes the WebSocket with reason "superseded by new connection" and does NOT call `unregister`, preserving the new connection's registry entry.
 
 ### H8. Settings Reload Torn Reads — 6 Independent RwLocks Updated Sequentially
 
@@ -159,21 +159,21 @@ Read-then-insert pattern without transaction. Two concurrent inserts for the sam
 
 **Recommendation:** Use SeaORM's `on_conflict` (database-level upsert).
 
-### H10. Update History Operations Not Checked Against Agent Ownership (IDOR)
+### H10. Update History Operations Not Checked Against Agent Ownership (IDOR) — FIXED
 
-**File:** `src/routes/agent_ws.rs:306-389`
+**File:** `src/routes/agent_ws.rs`
 
 `UpdateStarted`, `UpdateOutput`, and `UpdateResult` look up records by `update_history_id` from the message payload without verifying the record belongs to the current agent's host. A compromised agent can tamper with any update record.
 
-**Recommendation:** Validate that the update record's `host_id` belongs to a host linked to the authenticated `service_id`.
+**Fix:** Added `validate_update_ownership()` helper that checks the `update_history` record's `host_id` against the agent's `linked_host_ids` set (loaded at connection start, refreshed on `ReportHostInfo`). All three update message handlers now call this validation before processing. Unauthorized access attempts are logged and rejected.
 
-### H11. Unbounded Update Output Accumulation
+### H11. Unbounded Update Output Accumulation — FIXED
 
-**File:** `src/routes/agent_ws.rs:327-343`
+**File:** `src/routes/agent_ws.rs`
 
 Each `UpdateOutput` message appends to the existing output with `format!("{}{}\n", record.output, payload.output)` — loading the entire existing output from DB, appending, and writing back. No size limit. Quadratic memory growth.
 
-**Recommendation:** Enforce a maximum total size (e.g., 10 MB). Truncate or reject further output messages once the limit is reached.
+**Fix:** Added `MAX_UPDATE_OUTPUT_BYTES` (1 MB) constant. Output accumulation stops once the cap is reached; further `UpdateOutput` messages are silently dropped with a debug log. The `UpdateResult` handler also caps its final output append against the same limit.
 
 ---
 
@@ -221,11 +221,13 @@ Unlike enrollment tokens (hashed), MQTT broker credentials are stored and transm
 
 No `tokio::time::timeout` branch. Half-open TCP connections persist indefinitely.
 
-### M8. Broadcast Holds Read Lock During Async Sends
+### M8. Broadcast Holds Read Lock During Async Sends — FIXED
 
-**File:** `src/service_connections.rs:125-130`
+**File:** `src/service_connections.rs`
 
 A slow consumer blocks all registry writes during broadcast.
+
+**Fix:** `send()`, `broadcast()`, and `broadcast_by_type()` now snapshot senders under the lock and release it before performing async sends. This prevents a slow consumer from blocking connection management operations.
 
 ### M9. Relaxed Memory Ordering on Settings Version Counters
 

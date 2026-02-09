@@ -60,25 +60,16 @@ pub fn resolve_hooks(
             .into_iter()
             .map(|cmd| HookCommand::Shell {
                 command: cmd,
-                shell: wire_hook_shell(shell),
+                shell,
             })
             .collect(),
         post_update_hooks: post
             .into_iter()
             .map(|cmd| HookCommand::Shell {
                 command: cmd,
-                shell: wire_hook_shell(shell),
+                shell,
             })
             .collect(),
-    }
-}
-
-/// Convert a web-api-types HookShell to a wire HookShell.
-fn wire_hook_shell(shell: HookShell) -> uptrakit_internal_wire::HookShell {
-    match shell {
-        HookShell::Bash => uptrakit_internal_wire::HookShell::Bash,
-        HookShell::Sh => uptrakit_internal_wire::HookShell::Sh,
-        HookShell::PowerShell => uptrakit_internal_wire::HookShell::PowerShell,
     }
 }
 
@@ -139,7 +130,7 @@ fn resolve_update_hook_config(config: Option<&UpdateHookConfig>) -> Vec<HookComm
         .iter()
         .map(|cmd| HookCommand::Shell {
             command: cmd.clone(),
-            shell: wire_hook_shell(shell),
+            shell,
         })
         .collect()
 }

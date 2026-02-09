@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use rand::RngCore;
+use uptrakit_shared_types::SecretString;
 
 /// Global master encryption key (32 bytes for AES-256).
 static MASTER_KEY: OnceLock<[u8; 32]> = OnceLock::new();
@@ -104,17 +105,17 @@ fn decrypt_value(stored: &str) -> Result<String, String> {
 /// In memory, holds the plaintext value. On conversion to/from `sea_orm::Value`,
 /// encryption/decryption is applied.
 #[derive(Clone, PartialEq)]
-pub struct EncryptedString(String);
+pub struct EncryptedString(SecretString);
 
 impl EncryptedString {
     /// Create a new `EncryptedString` from a plaintext value.
     pub fn new(plaintext: String) -> Self {
-        Self(plaintext)
+        Self(SecretString::new(plaintext))
     }
 
     /// Expose the plaintext secret.
     pub fn expose_secret(&self) -> &str {
-        &self.0
+        self.0.expose_secret()
     }
 }
 
@@ -139,10 +140,10 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
                 if is_encrypted(&s) {
                     let plaintext =
                         decrypt_value(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
-                    Ok(EncryptedString(plaintext))
+                    Ok(EncryptedString(SecretString::new(plaintext)))
                 } else {
                     // Legacy plaintext — accept as-is
-                    Ok(EncryptedString(s))
+                    Ok(EncryptedString(SecretString::new(s)))
                 }
             }
             _ => Err(sea_orm::sea_query::ValueTypeErr),
@@ -170,17 +171,18 @@ impl sea_orm::sea_query::Nullable for EncryptedString {
 
 impl From<EncryptedString> for sea_orm::Value {
     fn from(val: EncryptedString) -> Self {
+        let plaintext = val.0.into_inner();
         if master_key_available() {
-            match encrypt_value(&val.0) {
+            match encrypt_value(&plaintext) {
                 Ok(encrypted) => sea_orm::Value::String(Some(encrypted)),
                 Err(e) => {
                     tracing::error!(error = %e, "EncryptedString encryption failed, storing plaintext");
-                    sea_orm::Value::String(Some(val.0))
+                    sea_orm::Value::String(Some(plaintext))
                 }
             }
         } else {
             // No master key — store plaintext (should not happen in production)
-            sea_orm::Value::String(Some(val.0))
+            sea_orm::Value::String(Some(plaintext))
         }
     }
 }
@@ -208,10 +210,10 @@ impl sea_orm::TryGetable for EncryptedString {
                     "EncryptedString decryption failed: {e}"
                 )))
             })?;
-            Ok(EncryptedString(plaintext))
+            Ok(EncryptedString(SecretString::new(plaintext)))
         } else {
             // Legacy plaintext — accept as-is
-            Ok(EncryptedString(s))
+            Ok(EncryptedString(SecretString::new(s)))
         }
     }
 }

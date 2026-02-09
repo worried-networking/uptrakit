@@ -10,7 +10,7 @@ use sea_orm::{
 use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_internal_wire::{
     ControllerMessage, MqttTenantAssignmentsPayload, MqttTenantConfig,
-    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, MqttTransport,
+    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, MqttTransport, SecretString,
 };
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
@@ -670,11 +670,14 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         host: client.host.clone(),
         port: client.port as u16,
         client_id: client.client_id.clone(),
-        username: client.username.clone(),
+        username: client
+            .username
+            .as_ref()
+            .map(|u| SecretString::new(u.clone())),
         password: client
             .password
             .as_ref()
-            .map(|p| p.expose_secret().to_string()),
+            .map(|p| SecretString::new(p.expose_secret().to_string())),
         topic_prefix: client.topic_prefix.clone(),
         updated_at: UtcDateTime::from_unix_timestamp(client.updated_at.unix_timestamp())
             .unwrap_or(UtcDateTime::UNIX_EPOCH),
