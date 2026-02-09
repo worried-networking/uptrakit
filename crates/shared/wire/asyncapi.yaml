@@ -144,6 +144,8 @@ channels:
         $ref: "#/components/messages/mqttRegistered"
       mqttReleaseTenants:
         $ref: "#/components/messages/mqttReleaseTenants"
+      mqttClientStatus:
+        $ref: "#/components/messages/mqttClientStatus"
       mqttTenantAssignments:
         $ref: "#/components/messages/mqttTenantAssignments"
       mqttTenantConfigUpdated:
@@ -467,6 +469,17 @@ operations:
       client configurations. The controller will delete the corresponding leases
       and may reassign the released clients to other instances.
 
+  sendMqttClientStatus:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttClientStatus"
+    summary: MQTT service reports MQTT client connection status (MQTT-only)
+    description: |
+      Sent by an MQTT service when a client transitions between connecting,
+      online, or offline. The controller records the latest status for display.
+
   receiveMqttTenantAssignments:
     action: receive
     channel:
@@ -722,6 +735,14 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/mqttReleaseTenantsPayload"
+
+    mqttClientStatus:
+      name: mqtt_client_status
+      title: MQTT Client Status Message
+      summary: MQTT service reports client connection status (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttClientStatusPayload"
 
     mqttTenantAssignments:
       name: tenant_assignments
@@ -1779,6 +1800,40 @@ components:
           description: MQTT client IDs to release
           examples:
             - ["660e8400-e29b-41d4-a716-446655440001"]
+
+    mqttClientStatusPayload:
+      type: object
+      required:
+        - seq
+        - type
+        - mqtt_client_id
+        - status
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: mqtt_client_status
+          description: Message type discriminator
+        mqtt_client_id:
+          type: string
+          description: MQTT client ID reporting status
+          examples:
+            - "660e8400-e29b-41d4-a716-446655440001"
+        status:
+          $ref: "#/components/schemas/mqttClientConnectionStatus"
+          description: Connection status for the MQTT client
+
+    mqttClientConnectionStatus:
+      type: string
+      enum:
+        - online
+        - offline
+        - connecting
+      description: MQTT client connection status
 
     mqttTenantAssignmentsPayload:
       type: object

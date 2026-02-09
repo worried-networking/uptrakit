@@ -630,7 +630,8 @@ pub(crate) async fn run_agent_enrolled_loop(
                             }
                             // MQTT-specific variants are not valid on an agent connection
                             ServiceMessage::Register(_)
-                            | ServiceMessage::ReleaseTenants(_) => {
+                            | ServiceMessage::ReleaseTenants(_)
+                            | ServiceMessage::MqttClientStatus(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {
                                     code: ErrorCode::BadRequest,
                                     message: "message type not supported on agent connections".to_string(),

@@ -29,6 +29,18 @@ impl MigrationTrait for Migration {
                     .col(string_null(MqttClients::Username))
                     .col(string_null(MqttClients::Password))
                     .col(string(MqttClients::TopicPrefix).default("uptrakit"))
+                    .col(
+                        ColumnDef::new(MqttClients::ConnectionStatus)
+                            .string()
+                            .not_null()
+                            .default("offline"),
+                    )
+                    .col(
+                        ColumnDef::new(MqttClients::StatusUpdatedAt)
+                            .timestamp()
+                            .not_null()
+                            .default(Expr::current_timestamp()),
+                    )
                     .col(timestamp(MqttClients::CreatedAt))
                     .col(timestamp(MqttClients::UpdatedAt))
                     .foreign_key(
@@ -76,6 +88,8 @@ pub(super) enum MqttClients {
     Username,
     Password,
     TopicPrefix,
+    ConnectionStatus,
+    StatusUpdatedAt,
     CreatedAt,
     UpdatedAt,
 }

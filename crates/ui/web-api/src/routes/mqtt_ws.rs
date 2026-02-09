@@ -5,12 +5,13 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
     ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
-    MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload,
-    ServiceMessage,
+    MqttClientConnectionStatus as WireMqttClientConnectionStatus, MqttRegisteredPayload,
+    MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
 };
+use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus as ApiMqttClientConnectionStatus;
 
 use rootcause::prelude::*;
 use thiserror::Error;
@@ -20,6 +21,7 @@ use super::service_ws::{
     close_with_reason, deserialize_service_msg, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
+use crate::mqtt_client_store;
 use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
 
 // ---------------------------------------------------------------------------
@@ -232,6 +234,29 @@ pub(crate) async fn handle_mqtt_authenticated(
                                     count = payload.mqtt_client_ids.len(),
                                     "MQTT service released mqtt clients"
                                 );
+                            }
+                            ServiceMessage::MqttClientStatus(payload) => {
+                                let status = match payload.status {
+                                    WireMqttClientConnectionStatus::Online => {
+                                        ApiMqttClientConnectionStatus::Online
+                                    }
+                                    WireMqttClientConnectionStatus::Offline => {
+                                        ApiMqttClientConnectionStatus::Offline
+                                    }
+                                    WireMqttClientConnectionStatus::Connecting => {
+                                        ApiMqttClientConnectionStatus::Connecting
+                                    }
+                                };
+
+                                if let Err(e) = mqtt_client_store::update_mqtt_client_status(
+                                    &state.db,
+                                    payload.mqtt_client_id,
+                                    status,
+                                )
+                                .await
+                                {
+                                    tracing::warn!(error = %e, "failed to update mqtt client status");
+                                }
                             }
                             ServiceMessage::RenewCertificate(payload) => {
                                 // Re-fetch service from DB, verify still approved

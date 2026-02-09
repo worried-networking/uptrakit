@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { user } from '$lib/auth';
 	import { goto } from '$app/navigation';
-	import { onMount, tick } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import {
 		getCombinedSettings,
 		getOidcProviders,
@@ -26,6 +26,7 @@
 	let oidcProvidersRef: OidcProvidersSettings = $state(undefined!);
 	let agentCertificateRef: AgentCertificateSettings = $state(undefined!);
 	let enrollmentTokenRef: EnrollmentTokenSettings = $state(undefined!);
+	let mqttPollHandle: ReturnType<typeof setInterval> | null = $state(null);
 
 	const canManageSettings = $derived($user?.permissions.includes(Permission.ManageSettings) ?? false);
 
@@ -39,6 +40,7 @@
 		if (canManageSettings) {
 			if (refsReady) {
 				loadAllSettings();
+				startMqttPolling();
 			}
 		}
 	});
@@ -47,6 +49,29 @@
 		await tick();
 		refsReady = true;
 	});
+
+	onDestroy(() => {
+		stopMqttPolling();
+	});
+
+	function startMqttPolling() {
+		if (mqttPollHandle) return;
+		mqttPollHandle = setInterval(async () => {
+			try {
+				const clients = await getMqttClients();
+				mqttClientsRef.load(clients);
+			} catch {
+				// Suppress polling errors to avoid notification spam.
+			}
+		}, 10000);
+	}
+
+	function stopMqttPolling() {
+		if (mqttPollHandle) {
+			clearInterval(mqttPollHandle);
+			mqttPollHandle = null;
+		}
+	}
 
 	async function loadAllSettings() {
 		loading = true;

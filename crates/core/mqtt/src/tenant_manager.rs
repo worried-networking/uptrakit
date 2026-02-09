@@ -4,7 +4,9 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use uptrakit_internal_wire::MqttTenantConfig;
 use uuid::Uuid;
 
-use crate::mqtt_client::{MqttConfig, MqttHandle};
+use crate::mqtt_client::{MqttClientStatusEvent, MqttConfig, MqttHandle};
+use tokio::sync::mpsc;
+use uptrakit_internal_wire::MqttClientConnectionStatus;
 
 /// Tracks the cached state for an MQTT client.
 struct ClientState {
@@ -18,12 +20,14 @@ struct ClientState {
 /// updates from the controller via WebSocket messages.
 pub struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
+    status_tx: Option<mpsc::UnboundedSender<MqttClientStatusEvent>>,
 }
 
 impl TenantManager {
-    pub fn new() -> Self {
+    pub fn new(status_tx: Option<mpsc::UnboundedSender<MqttClientStatusEvent>>) -> Self {
         Self {
             clients: HashMap::new(),
+            status_tx,
         }
     }
 
@@ -57,6 +61,7 @@ impl TenantManager {
     pub async fn stop_client(&mut self, mqtt_client_id: &Uuid) {
         if let Some(state) = self.clients.remove(mqtt_client_id) {
             tracing::info!(%mqtt_client_id, "shutting down MQTT client");
+            self.report_status(*mqtt_client_id, MqttClientConnectionStatus::Offline);
             state.handle.shutdown().await;
         }
     }
@@ -76,6 +81,7 @@ impl TenantManager {
                 tracing::info!(%mqtt_client_id, "shutting down MQTT client");
                 state.handle.shutdown().await;
             });
+            self.report_status(mqtt_client_id, MqttClientConnectionStatus::Offline);
         }
 
         while tasks.next().await.is_some() {}
@@ -97,6 +103,7 @@ impl TenantManager {
 
         // Stop existing client if any
         if let Some(state) = self.clients.remove(&mqtt_client_id) {
+            self.report_status(mqtt_client_id, MqttClientConnectionStatus::Offline);
             state.handle.shutdown().await;
         }
 
@@ -104,7 +111,7 @@ impl TenantManager {
         let mqtt_config = build_config_from_wire(&config);
         tracing::info!(%mqtt_client_id, config = ?mqtt_config, "starting MQTT client");
 
-        match crate::mqtt_client::start(mqtt_config).await {
+        match crate::mqtt_client::start(mqtt_config, self.status_tx.clone(), mqtt_client_id).await {
             Ok(handle) => {
                 self.clients.insert(
                     mqtt_client_id,
@@ -116,14 +123,26 @@ impl TenantManager {
             }
             Err(e) => {
                 tracing::warn!(%mqtt_client_id, error = ?e, "MQTT client startup failed");
+                self.report_status(mqtt_client_id, MqttClientConnectionStatus::Offline);
             }
         }
+    }
+
+    fn report_status(&self, mqtt_client_id: Uuid, status: MqttClientConnectionStatus) {
+        let Some(sender) = self.status_tx.as_ref() else {
+            return;
+        };
+
+        let _ = sender.send(MqttClientStatusEvent {
+            mqtt_client_id,
+            status,
+        });
     }
 }
 
 impl Default for TenantManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 

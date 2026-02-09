@@ -14,7 +14,12 @@ use uptrakit_internal_wire::{
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
 
+use crate::mqtt_client_store;
 use crate::service_connections::ServiceConnectionRegistry;
+use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus;
+
+/// Maximum allowed age of an MQTT lease heartbeat before considering it stale.
+pub const MQTT_LEASE_STALE_AFTER: Duration = Duration::from_secs(60);
 
 /// Error type for lease coordinator operations.
 #[derive(Debug, thiserror::Error)]
@@ -173,6 +178,16 @@ impl MqttLeaseCoordinator {
                 .await;
         }
 
+        if let Err(e) = mqtt_client_store::update_mqtt_clients_status(
+            &self.db,
+            mqtt_client_ids,
+            MqttClientConnectionStatus::Offline,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "failed to mark MQTT clients offline after release");
+        }
+
         Ok(())
     }
 
@@ -199,6 +214,17 @@ impl MqttLeaseCoordinator {
                 .context(LeaseCoordinatorError::Database(
                     "failed to delete leases".into(),
                 ))?;
+
+            let client_ids: Vec<Uuid> = mqtt_client_ids.iter().copied().collect();
+            if let Err(e) = mqtt_client_store::update_mqtt_clients_status(
+                &self.db,
+                &client_ids,
+                MqttClientConnectionStatus::Offline,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, "failed to mark MQTT clients offline after disconnect");
+            }
         }
 
         Ok(mqtt_client_ids)
@@ -288,6 +314,16 @@ impl MqttLeaseCoordinator {
             .context(LeaseCoordinatorError::Database(
                 "failed to delete lease".into(),
             ))?;
+
+        if let Err(e) = mqtt_client_store::update_mqtt_client_status(
+            &self.db,
+            mqtt_client_id,
+            MqttClientConnectionStatus::Offline,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "failed to mark MQTT client offline after revoke");
+        }
 
         let msg = ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
             mqtt_client_id,

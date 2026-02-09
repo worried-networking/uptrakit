@@ -4,24 +4,30 @@ use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::mqtt_client_store;
-use crate::mqtt_lease_coordinator::MqttLeaseCoordinator;
+use crate::mqtt_lease_coordinator::{MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use axum::{
     Extension, Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::collections::HashMap;
 use std::sync::Arc;
-use uptrakit_shared_db::entity::mqtt_client;
+use time::OffsetDateTime;
+use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 use uptrakit_web_api_types::mqtt_url::MqttUrl;
 
 pub use uptrakit_web_api_types::settings_mqtt::{
-    CreateMqttClientRequest, MqttClientResponse, MqttLimitResponse, UpdateMqttClientRequest,
-    UpdateMqttLimitRequest,
+    CreateMqttClientRequest, MqttClientConnectionStatus, MqttClientResponse, MqttLimitResponse,
+    UpdateMqttClientRequest, UpdateMqttLimitRequest,
 };
 
-fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
+fn model_to_response(
+    model: &mqtt_client::Model,
+    connection_status: MqttClientConnectionStatus,
+) -> MqttClientResponse {
     let transport = MqttTransport::parse(&model.transport).unwrap_or_default();
     let port = u16::try_from(model.port).unwrap_or(transport.default_port());
     let url = uptrakit_web_api_types::mqtt_url::build_url(transport, &model.host, port);
@@ -37,6 +43,34 @@ fn model_to_response(model: &mqtt_client::Model) -> MqttClientResponse {
         username: model.username.clone(),
         has_password: model.password.is_some(),
         topic_prefix: model.topic_prefix.clone(),
+        connection_status,
+    }
+}
+
+fn parse_connection_status(model: &mqtt_client::Model) -> MqttClientConnectionStatus {
+    MqttClientConnectionStatus::parse(&model.connection_status).unwrap_or_default()
+}
+
+fn resolve_connection_status(
+    model: &mqtt_client::Model,
+    heartbeat_at: Option<OffsetDateTime>,
+) -> MqttClientConnectionStatus {
+    if !model.enabled {
+        return MqttClientConnectionStatus::Offline;
+    }
+
+    let persisted = parse_connection_status(model);
+    let Some(heartbeat_at) = heartbeat_at else {
+        return MqttClientConnectionStatus::Offline;
+    };
+
+    let now = OffsetDateTime::now_utc();
+    let age = now - heartbeat_at;
+    let stale_after = time::Duration::seconds(MQTT_LEASE_STALE_AFTER.as_secs() as i64);
+    if age > stale_after {
+        MqttClientConnectionStatus::Offline
+    } else {
+        persisted
     }
 }
 
@@ -64,7 +98,39 @@ pub async fn list_mqtt_settings(
     let tenant_id = tenant.tenant_id;
     match mqtt_client_store::load_mqtt_clients(&state.db, tenant_id).await {
         Ok(models) => {
-            let responses: Vec<MqttClientResponse> = models.iter().map(model_to_response).collect();
+            let mqtt_client_ids: Vec<uuid::Uuid> = models.iter().map(|m| m.id).collect();
+            let leases: Vec<mqtt_lease::Model> = if mqtt_client_ids.is_empty() {
+                Vec::new()
+            } else {
+                match mqtt_lease::Entity::find()
+                    .filter(mqtt_lease::Column::MqttClientId.is_in(mqtt_client_ids))
+                    .all(&state.db)
+                    .await
+                {
+                    Ok(values) => values,
+                    Err(e) => {
+                        tracing::error!("Failed to load MQTT leases: {e:?}");
+                        return error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error",
+                        );
+                    }
+                }
+            };
+
+            let mut lease_map = HashMap::new();
+            for lease in leases {
+                lease_map.insert(lease.mqtt_client_id, lease.heartbeat_at);
+            }
+
+            let responses: Vec<MqttClientResponse> = models
+                .iter()
+                .map(|model| {
+                    let heartbeat_at = lease_map.get(&model.id).copied();
+                    let status = resolve_connection_status(model, heartbeat_at);
+                    model_to_response(model, status)
+                })
+                .collect();
             (StatusCode::OK, Json(responses)).into_response()
         }
         Err(e) => {
@@ -151,7 +217,10 @@ pub async fn create_mqtt_settings(
     })
     .await
     {
-        Ok(model) => (StatusCode::CREATED, Json(model_to_response(&model))).into_response(),
+        Ok(model) => {
+            let status = resolve_connection_status(&model, None);
+            (StatusCode::CREATED, Json(model_to_response(&model, status))).into_response()
+        }
         Err(e) => {
             if let mqtt_client_store::MqttClientError::LimitReached(max) = e.current_context() {
                 return error_response(
@@ -285,7 +354,22 @@ pub async fn get_mqtt_settings(
 
     match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {
-            (StatusCode::OK, Json(model_to_response(&model))).into_response()
+            let heartbeat_at = match mqtt_lease::Entity::find()
+                .filter(mqtt_lease::Column::MqttClientId.eq(model.id))
+                .one(&state.db)
+                .await
+            {
+                Ok(lease) => lease.map(|l| l.heartbeat_at),
+                Err(e) => {
+                    tracing::error!("Failed to load MQTT lease: {e:?}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+            let status = resolve_connection_status(&model, heartbeat_at);
+            (StatusCode::OK, Json(model_to_response(&model, status))).into_response()
         }
         Ok(Some(_)) => error_response(StatusCode::NOT_FOUND, "Not found"),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Not found"),
@@ -417,7 +501,22 @@ pub async fn update_mqtt_settings(
                 tracing::warn!("Failed to push MQTT config update: {e:?}");
             }
 
-            (StatusCode::OK, Json(model_to_response(&model))).into_response()
+            let heartbeat_at = match mqtt_lease::Entity::find()
+                .filter(mqtt_lease::Column::MqttClientId.eq(model.id))
+                .one(&state.db)
+                .await
+            {
+                Ok(lease) => lease.map(|l| l.heartbeat_at),
+                Err(e) => {
+                    tracing::error!("Failed to load MQTT lease: {e:?}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+            let status = resolve_connection_status(&model, heartbeat_at);
+            (StatusCode::OK, Json(model_to_response(&model, status))).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to update MQTT client: {e:?}");

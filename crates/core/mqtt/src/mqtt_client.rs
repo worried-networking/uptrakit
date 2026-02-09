@@ -4,7 +4,9 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, Transport};
 use thiserror::Error;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use uptrakit_internal_wire::MqttClientConnectionStatus;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 
@@ -92,13 +94,52 @@ pub type Result<T> = std::result::Result<T, Report<MqttError>>;
 
 impl_report_conversion!(rumqttc::ClientError => MqttError::Client);
 
+/// Status event emitted by a running MQTT client.
+#[derive(Debug, Clone)]
+pub struct MqttClientStatusEvent {
+    pub mqtt_client_id: uuid::Uuid,
+    pub status: MqttClientConnectionStatus,
+}
+
+#[derive(Clone)]
+struct MqttClientStatusReporter {
+    mqtt_client_id: uuid::Uuid,
+    sender: mpsc::UnboundedSender<MqttClientStatusEvent>,
+}
+
+impl MqttClientStatusReporter {
+    fn new(
+        mqtt_client_id: uuid::Uuid,
+        sender: mpsc::UnboundedSender<MqttClientStatusEvent>,
+    ) -> Self {
+        Self {
+            mqtt_client_id,
+            sender,
+        }
+    }
+
+    fn report(&self, status: MqttClientConnectionStatus) {
+        let _ = self.sender.send(MqttClientStatusEvent {
+            mqtt_client_id: self.mqtt_client_id,
+            status,
+        });
+    }
+}
+
 /// Connect to the MQTT broker described by `config`.
 ///
 /// Publishes a retained `online` message on every successful connection and
 /// registers an LWT so the broker publishes `offline` on unexpected disconnect.
-pub async fn start(config: MqttConfig) -> Result<MqttHandle> {
+pub async fn start(
+    config: MqttConfig,
+    status_sender: Option<mpsc::UnboundedSender<MqttClientStatusEvent>>,
+    mqtt_client_id: uuid::Uuid,
+) -> Result<MqttHandle> {
     let topic = status_topic(&config.topic_prefix);
     let options = build_mqtt_options(&config);
+    let reporter =
+        status_sender.map(|sender| MqttClientStatusReporter::new(mqtt_client_id, sender));
+    report_status(&reporter, MqttClientConnectionStatus::Connecting);
 
     let (client, event_loop) = AsyncClient::new(options, 10);
     let shutdown_token = CancellationToken::new();
@@ -117,6 +158,7 @@ pub async fn start(config: MqttConfig) -> Result<MqttHandle> {
         task_client,
         task_topic,
         task_token,
+        reporter,
     ));
 
     Ok(MqttHandle {
@@ -168,6 +210,7 @@ async fn run_event_loop(
     client: AsyncClient,
     topic: String,
     shutdown_token: CancellationToken,
+    reporter: Option<MqttClientStatusReporter>,
 ) {
     loop {
         tokio::select! {
@@ -179,6 +222,7 @@ async fn run_event_loop(
                 match poll {
                     Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
                         tracing::info!("MQTT connected");
+                        report_status(&reporter, MqttClientConnectionStatus::Online);
                         if let Err(e) = client
                             .publish(&topic, QoS::AtLeastOnce, true, "online")
                             .await
@@ -189,12 +233,15 @@ async fn run_event_loop(
                     Ok(_) => {}
                     Err(e) => {
                         tracing::warn!("MQTT error: {e}");
+                        report_status(&reporter, MqttClientConnectionStatus::Offline);
                         tokio::select! {
                             _ = shutdown_token.cancelled() => {
                                 tracing::debug!("MQTT event loop shutdown requested");
                                 break;
                             }
-                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                                report_status(&reporter, MqttClientConnectionStatus::Connecting);
+                            }
                         }
                     }
                 }
@@ -226,6 +273,12 @@ async fn shutdown_task(
                 }
             }
         }
+    }
+}
+
+fn report_status(reporter: &Option<MqttClientStatusReporter>, status: MqttClientConnectionStatus) {
+    if let Some(reporter) = reporter {
+        reporter.report(status);
     }
 }
 

@@ -13,8 +13,8 @@ use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uptrakit_enrollment::ServiceIdentityState;
 use uptrakit_internal_wire::{
-    ControllerMessage, DisconnectReason, DisconnectingPayload, MqttRegisterPayload, PingPayload,
-    ServiceMessage, now_millis,
+    ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
+    MqttRegisterPayload, PingPayload, ServiceMessage, now_millis,
 };
 
 use crate::controller_client::ControllerConnection;
@@ -211,7 +211,8 @@ async fn run_authenticated(
     .await
     .context_to::<AppError>()?;
 
-    let mut tenant_mgr = TenantManager::new();
+    let (status_tx, mut status_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tenant_mgr = TenantManager::new(Some(status_tx));
     let ping_interval = Duration::from_secs(args.ping_interval);
     let mut ping_ticker = tokio::time::interval(ping_interval);
 
@@ -262,6 +263,18 @@ async fn run_authenticated(
                         tracing::warn!("connection closed by controller");
                         break;
                     }
+                }
+            }
+            status = status_rx.recv() => {
+                let Some(status) = status else {
+                    tracing::warn!("status channel closed");
+                    break;
+                };
+                if let Err(e) = conn.send(ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
+                    mqtt_client_id: status.mqtt_client_id,
+                    status: status.status,
+                })).await {
+                    tracing::warn!(error = ?e, "failed to send mqtt client status");
                 }
             }
             _ = ping_ticker.tick() => {

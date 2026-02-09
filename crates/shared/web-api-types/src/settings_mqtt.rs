@@ -2,6 +2,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::mqtt_transport::MqttTransport;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum MqttClientConnectionStatus {
+    Online,
+    #[default]
+    Offline,
+    Connecting,
+}
+
+impl MqttClientConnectionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Online => "online",
+            Self::Offline => "offline",
+            Self::Connecting => "connecting",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "online" => Some(Self::Online),
+            "offline" => Some(Self::Offline),
+            "connecting" => Some(Self::Connecting),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MqttLimitResponse {
@@ -27,6 +56,7 @@ pub struct MqttClientResponse {
     pub username: Option<String>,
     pub has_password: bool,
     pub topic_prefix: String,
+    pub connection_status: MqttClientConnectionStatus,
 }
 
 #[derive(Serialize, Deserialize)]

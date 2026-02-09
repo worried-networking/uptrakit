@@ -197,6 +197,7 @@ export interface UpdateNetworkSettings {
 }
 
 export type MqttTransport = 'tcp' | 'tls';
+export type MqttConnectionStatus = 'online' | 'offline' | 'connecting';
 
 export interface MqttClientResponse {
 	id: string;
@@ -209,6 +210,7 @@ export interface MqttClientResponse {
 	username: string | null;
 	has_password: boolean;
 	topic_prefix: string;
+	connection_status: MqttConnectionStatus;
 }
 
 export interface CreateMqttClient {

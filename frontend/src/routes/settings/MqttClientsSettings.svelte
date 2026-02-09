@@ -7,6 +7,7 @@
 	import {
 		type CreateMqttClient,
 		type MqttClientResponse,
+		type MqttConnectionStatus,
 		type UpdateMqttClient
 	} from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -109,6 +110,28 @@
 		mqttDeleteConfirm = { id: client.id, url: client.url };
 	}
 
+	function connectionLabel(status: MqttConnectionStatus): string {
+		switch (status) {
+			case 'online':
+				return 'Online';
+			case 'connecting':
+				return 'Connecting';
+			case 'offline':
+				return 'Offline';
+		}
+	}
+
+	function connectionColor(status: MqttConnectionStatus): string {
+		switch (status) {
+			case 'online':
+				return 'bg-success-500 dark:bg-success-400';
+			case 'connecting':
+				return 'bg-warning-500 dark:bg-warning-400';
+			case 'offline':
+				return 'bg-error-500 dark:bg-error-400';
+		}
+	}
+
 	async function executeDeleteMqtt() {
 		if (!mqttDeleteConfirm) return;
 		const { id } = mqttDeleteConfirm;
@@ -152,6 +175,7 @@
 						<th>URL</th>
 						<th>Client ID</th>
 						<th>Topic Prefix</th>
+						<th>Connection</th>
 						<th>Status</th>
 						<th class="w-48">Actions</th>
 					</tr>
@@ -162,6 +186,18 @@
 							<td>{client.url}</td>
 							<td>{client.client_id}</td>
 							<td>{client.topic_prefix}</td>
+							<td>
+								{#if client.enabled}
+									<span class="inline-flex items-center gap-2">
+										<span
+											class={`h-2.5 w-2.5 rounded-full ${connectionColor(client.connection_status)}`}
+										></span>
+										<span class="text-sm">{connectionLabel(client.connection_status)}</span>
+									</span>
+								{:else}
+									<span class="text-sm text-surface-600 dark:text-surface-400">Disabled</span>
+								{/if}
+							</td>
 							<td>
 								{#if client.enabled}
 									<span class="badge preset-filled-success-500">Enabled</span>

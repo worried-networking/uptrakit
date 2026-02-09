@@ -61,6 +61,25 @@ impl std::fmt::Display for MqttTransport {
     }
 }
 
+/// Connection status reported by the MQTT service for a specific client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MqttClientConnectionStatus {
+    Online,
+    Offline,
+    Connecting,
+}
+
+impl std::fmt::Display for MqttClientConnectionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Online => f.write_str("online"),
+            Self::Offline => f.write_str("offline"),
+            Self::Connecting => f.write_str("connecting"),
+        }
+    }
+}
+
 /// Shell type for hook execution in update payloads.
 ///
 /// Determines which shell interpreter and fail-early settings are used.
@@ -160,6 +179,7 @@ pub enum ServiceMessage {
     // -- MQTT-specific --
     Register(MqttRegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
+    MqttClientStatus(MqttClientStatusPayload),
 }
 
 /// Messages sent from the controller to a service (agent or MQTT).
@@ -580,6 +600,15 @@ pub struct MqttRegisteredPayload {
 pub struct MqttReleaseTenantsPayload {
     /// MQTT client IDs to release.
     pub mqtt_client_ids: Vec<Uuid>,
+}
+
+/// Payload for MQTT client connection status updates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttClientStatusPayload {
+    /// MQTT client UUID (primary identifier from mqtt_clients table).
+    pub mqtt_client_id: Uuid,
+    /// Current connection status.
+    pub status: MqttClientConnectionStatus,
 }
 
 /// Payload for tenant assignments (initial or incremental).
@@ -1106,6 +1135,18 @@ mod tests {
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"release_tenants"#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_client_status_serialization_roundtrip() {
+        let msg = ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
+            mqtt_client_id: TEST_UUID_1,
+            status: MqttClientConnectionStatus::Connecting,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"mqtt_client_status"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1671,6 +1712,20 @@ mod tests {
     #[test]
     fn mqtt_transport_default_is_tcp() {
         assert_eq!(MqttTransport::default(), MqttTransport::Tcp);
+    }
+
+    #[test]
+    fn mqtt_client_status_serde_roundtrip() {
+        for (variant, expected_str) in [
+            (MqttClientConnectionStatus::Online, "online"),
+            (MqttClientConnectionStatus::Offline, "offline"),
+            (MqttClientConnectionStatus::Connecting, "connecting"),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, format!(r#""{expected_str}""#));
+            let deserialized: MqttClientConnectionStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(deserialized, variant);
+        }
     }
 
     #[test]

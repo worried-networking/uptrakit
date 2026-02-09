@@ -7,6 +7,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
 use uptrakit_shared_macros::impl_report_conversion;
+use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -105,6 +106,8 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
             password.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
         ),
         topic_prefix: Set(topic_prefix.to_string()),
+        connection_status: Set(MqttClientConnectionStatus::Offline.as_str().to_string()),
+        status_updated_at: Set(now),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -178,6 +181,55 @@ pub async fn delete_mqtt_client(db: &DatabaseConnection, id: Uuid) -> Result<()>
     let result = MqttClient::delete_by_id(id).exec(db).await.context_to()?;
 
     if result.rows_affected == 0 {
+        return Err(report!(MqttClientError::NotFound));
+    }
+
+    Ok(())
+}
+
+/// Update the connection status for a specific MQTT client.
+pub async fn update_mqtt_client_status(
+    db: &DatabaseConnection,
+    id: Uuid,
+    status: MqttClientConnectionStatus,
+) -> Result<()> {
+    let Some(existing) = MqttClient::find_by_id(id).one(db).await.context_to()? else {
+        return Err(report!(MqttClientError::NotFound));
+    };
+
+    let mut model: mqtt_client::ActiveModel = existing.into();
+    model.connection_status = Set(status.as_str().to_string());
+    model.status_updated_at = Set(OffsetDateTime::now_utc());
+    model.update(db).await.context_to()?;
+
+    Ok(())
+}
+
+/// Update the connection status for multiple MQTT clients.
+pub async fn update_mqtt_clients_status(
+    db: &DatabaseConnection,
+    ids: &[Uuid],
+    status: MqttClientConnectionStatus,
+) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let mut updated = 0usize;
+
+    for id in ids {
+        let Some(existing) = MqttClient::find_by_id(*id).one(db).await.context_to()? else {
+            continue;
+        };
+        let mut model: mqtt_client::ActiveModel = existing.into();
+        model.connection_status = Set(status.as_str().to_string());
+        model.status_updated_at = Set(now);
+        model.update(db).await.context_to()?;
+        updated += 1;
+    }
+
+    if updated == 0 {
         return Err(report!(MqttClientError::NotFound));
     }
 

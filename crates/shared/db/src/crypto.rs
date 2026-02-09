@@ -356,6 +356,8 @@ mod tests {
             username: None,
             password: None,
             topic_prefix: "uptrakit".to_string(),
+            connection_status: "offline".to_string(),
+            status_updated_at: OffsetDateTime::now_utc(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),
         };

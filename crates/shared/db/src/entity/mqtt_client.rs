@@ -15,6 +15,8 @@ pub struct Model {
     pub username: Option<String>,
     pub password: Option<crate::crypto::EncryptedString>,
     pub topic_prefix: String,
+    pub connection_status: String,
+    pub status_updated_at: OffsetDateTime,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }
