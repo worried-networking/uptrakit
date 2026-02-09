@@ -275,14 +275,14 @@ Sensitive credentials stored in the database are encrypted using AES-256-GCM via
 
 ### Master key
 
-A 256-bit master encryption key is **mandatory** for the controller. It can be provided in two ways:
+A 256-bit master encryption key is **mandatory in production** for the controller. It can be provided in two ways:
 
 | Method | Details |
 | --- | --- |
 | `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes) |
 | `--master-key-file` CLI arg | Path to a file containing the 64-character hex key |
 
-`init_master_key()` is called at controller startup. If no key is provided, the controller refuses to start.
+`init_master_key()` is called at controller startup. For development only, the controller can start without a key by passing `--allow-plaintext-secrets` (disables encryption at rest and logs a warning). When the flag is set and a key is provided, a warning is still logged but encryption remains enabled.
 
 ### Encrypted fields
 

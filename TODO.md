@@ -612,7 +612,7 @@ Comprehensive security hardening.
 - [ ] Implement security headers
 - [ ] Add input validation and sanitization
 - [x] Implement secrets management
-  - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory `UPTRAKIT_MASTER_KEY`)
+  - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets` available)
   - [ ] Credential rotation
   - [ ] Vault integration
 - [ ] Add security scanning to CI/CD

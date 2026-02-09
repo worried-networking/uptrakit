@@ -116,7 +116,7 @@ Sensitive credentials stored in the database are encrypted using AES-256-GCM via
 
 ### Master Key Management
 
-A 256-bit master encryption key is mandatory for the controller. Without it, the controller refuses to start.
+A 256-bit master encryption key is mandatory for production use. For development only, the controller can start without a key by passing `--allow-plaintext-secrets`, which disables encryption at rest and logs a warning. If the flag is set while a key is provided, the controller logs a warning and continues with encryption enabled.
 
 | Provisioning method | Details |
 | --- | --- |

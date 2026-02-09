@@ -54,7 +54,7 @@ MQTT broker passwords are:
 
 **Impact:** Database compromise exposes all MQTT broker credentials. Wire-level logging or proxy inspection reveals passwords.
 
-**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) — **Implemented**: All sensitive credentials (`mqtt_clients.password`, `oidc_providers.client_secret`, `ca_certificates.key_pem`) are now encrypted at rest using AES-256-GCM via the `EncryptedString` SeaORM custom type. A mandatory master encryption key (`UPTRAKIT_MASTER_KEY` or `--master-key-file`) is required at controller startup.
+**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) — **Implemented**: All sensitive credentials (`mqtt_clients.password`, `oidc_providers.client_secret`, `ca_certificates.key_pem`) are now encrypted at rest using AES-256-GCM via the `EncryptedString` SeaORM custom type. A master encryption key (`UPTRAKIT_MASTER_KEY` or `--master-key-file`) is required in production; `--allow-plaintext-secrets` permits development-only startup without encryption at rest (warning logged).
 
 ### CR-3: CA private keys in shared `CaSnapshotData` structure — FIXED
 
@@ -657,7 +657,7 @@ A database compromise (SQL injection in a dependency, backup leak, stolen disk) 
 
 2. **Implement encryption module** (`crates/shared/db/src/crypto.rs` or a new shared crate):
    - Algorithm: AES-256-GCM (via the `aes-gcm` crate, already widely audited)
-   - Master key: 32-byte key loaded from `UPTRAKIT_MASTER_KEY` env var or `--master-key-file` path at startup
+  - Master key: 32-byte key loaded from `UPTRAKIT_MASTER_KEY` env var or `--master-key-file` path at startup (production requirement; `--allow-plaintext-secrets` permits dev-only startup without encryption at rest)
    - Format: `ENC:v1:<base64(12-byte-nonce ‖ ciphertext ‖ 16-byte-tag)>`
    - Functions:
      ```rust
@@ -680,7 +680,7 @@ A database compromise (SQL injection in a dependency, backup leak, stolen disk) 
    - Read all rows with plaintext secrets
    - Encrypt each with the master key
    - Update in-place
-   - If `UPTRAKIT_MASTER_KEY` is not set, the migration logs a warning and skips (allowing read-only/dev mode without encryption)
+  - If `UPTRAKIT_MASTER_KEY` is not set and `--allow-plaintext-secrets` is used, the controller logs a warning and runs without encryption at rest (development only)
 
 6. **Update wire protocol:** Ensure `MqttTenantConfig.password` is decrypted before being sent to the MQTT service (the wire message goes over mTLS, so plaintext in-transit is acceptable for the mTLS channel).
 

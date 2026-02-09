@@ -67,46 +67,44 @@ async fn main() -> std::process::ExitCode {
 async fn run(args: cli::Args) -> Result<()> {
     // Initialize master encryption key (required for credential encryption at rest)
     {
-        let key_hex = if let Some(ref key_file) = args.master_key_file {
-            std::fs::read_to_string(key_file)
-                .map_err(|e| {
+        let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
+        let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())
+            .map_err(|e| report!(AppError::Config(e)))?;
+
+        match key_hex {
+            Some(key_hex) => {
+                if args.allow_plaintext_secrets {
+                    tracing::warn!(
+                        "--allow-plaintext-secrets is enabled. This flag is for development only; \
+                        encryption remains enabled because a master key was provided."
+                    );
+                }
+                let key_bytes =
+                    parse_master_key_hex(&key_hex).map_err(|e| report!(AppError::Config(e)))?;
+                uptrakit_shared_db::crypto::init_master_key(key_bytes).map_err(|e| {
                     report!(AppError::Config(format!(
-                        "failed to read --master-key-file {}: {e}",
-                        key_file.display()
+                        "failed to initialize master key: {e}"
                     )))
-                })?
-                .trim()
-                .to_string()
-        } else if let Ok(env_val) = std::env::var("UPTRAKIT_MASTER_KEY") {
-            env_val.trim().to_string()
-        } else {
-            return Err(report!(AppError::Config(
-                "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \
-                 (64-char hex string) or pass --master-key-file <path>"
-                    .into()
-            )));
-        };
-
-        let key_bytes: [u8; 32] = hex::decode(&key_hex)
-            .map_err(|e| {
-                report!(AppError::Config(format!(
-                    "master key must be a 64-character hex string: {e}"
-                )))
-            })?
-            .try_into()
-            .map_err(|v: Vec<u8>| {
-                report!(AppError::Config(format!(
-                    "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
-                    v.len()
-                )))
-            })?;
-
-        uptrakit_shared_db::crypto::init_master_key(key_bytes).map_err(|e| {
-            report!(AppError::Config(format!(
-                "failed to initialize master key: {e}"
-            )))
-        })?;
-        tracing::info!("master encryption key initialized");
+                })?;
+                tracing::info!("master encryption key initialized");
+            }
+            None => {
+                if args.allow_plaintext_secrets {
+                    tracing::warn!(
+                        "master encryption key not set; encryption at rest is disabled. \
+                        This is for development only and is NOT safe for production."
+                    );
+                } else {
+                    return Err(report!(AppError::Config(
+                        "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \
+                         (64-char hex string) or pass --master-key-file <path>. \
+                         For development only, pass --allow-plaintext-secrets to run without \
+                         encryption at rest."
+                            .into()
+                    )));
+                }
+            }
+        }
     }
 
     // Resolve application directories (config and state)
@@ -1251,6 +1249,39 @@ async fn run(args: cli::Args) -> Result<()> {
     Ok(())
 }
 
+fn read_master_key_hex(
+    master_key_file: Option<&std::path::Path>,
+    env_val: Option<&str>,
+) -> std::result::Result<Option<String>, String> {
+    if let Some(key_file) = master_key_file {
+        let contents = std::fs::read_to_string(key_file).map_err(|e| {
+            format!(
+                "failed to read --master-key-file {}: {e}",
+                key_file.display()
+            )
+        })?;
+        return Ok(Some(contents.trim().to_string()));
+    }
+
+    if let Some(env_val) = env_val {
+        return Ok(Some(env_val.trim().to_string()));
+    }
+
+    Ok(None)
+}
+
+fn parse_master_key_hex(key_hex: &str) -> std::result::Result<[u8; 32], String> {
+    let bytes = hex::decode(key_hex)
+        .map_err(|e| format!("master key must be a 64-character hex string: {e}"))?;
+    let key_bytes: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| {
+        format!(
+            "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
+            v.len()
+        )
+    })?;
+    Ok(key_bytes)
+}
+
 // --- Reconciliation helpers ---
 
 /// Wrapper for `&[T]` that implements Display for logging in reconciliation.
@@ -1393,4 +1424,54 @@ fn resolve_static_dir(explicit: Option<PathBuf>) -> Result<Option<PathBuf>> {
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_master_key_hex, read_master_key_hex};
+    use std::io::Write;
+
+    #[test]
+    fn missing_key_returns_none() {
+        let result = read_master_key_hex(None, None);
+        assert!(matches!(result, Ok(None)));
+    }
+
+    #[test]
+    fn env_key_is_trimmed() {
+        let result = read_master_key_hex(None, Some("  deadbeef  "));
+        assert!(matches!(result, Ok(Some(ref value)) if value == "deadbeef"));
+    }
+
+    #[test]
+    fn file_key_is_trimmed() {
+        let file = tempfile::NamedTempFile::new();
+        assert!(file.is_ok());
+        let mut file = match file {
+            Ok(file) => file,
+            Err(_) => return,
+        };
+        assert!(file.write_all(b"  0123  ").is_ok());
+        let result = read_master_key_hex(Some(file.path()), None);
+        assert!(matches!(result, Ok(Some(ref value)) if value == "0123"));
+    }
+
+    #[test]
+    fn parse_master_key_rejects_invalid_hex() {
+        let result = parse_master_key_hex("not-hex");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_master_key_rejects_invalid_length() {
+        let result = parse_master_key_hex("aa");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_master_key_accepts_valid_length() {
+        let key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let result = parse_master_key_hex(key_hex);
+        assert!(matches!(result, Ok(bytes) if bytes.len() == 32));
+    }
 }

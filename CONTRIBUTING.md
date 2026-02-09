@@ -39,7 +39,7 @@ The controller requires a master encryption key for encrypting sensitive databas
 export UPTRAKIT_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-This must be a 64-character hex string (256-bit key). Without it, the controller refuses to start. Alternatively, use `--master-key-file <path>` to point to a file containing the key.
+This must be a 64-character hex string (256-bit key). Alternatively, use `--master-key-file <path>` to point to a file containing the key. For development-only runs, you can pass `--allow-plaintext-secrets` to start without a key (encryption at rest is disabled and a warning is logged).
 
 **Do not use the example key above in production.** Generate a proper key with: `openssl rand -hex 32`
 

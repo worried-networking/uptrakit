@@ -136,6 +136,12 @@ pub struct Args {
     #[arg(long)]
     pub master_key_file: Option<PathBuf>,
 
+    /// Allow the controller to start without a master encryption key.
+    /// Encryption at rest is disabled when no key is provided.
+    /// This flag is for development only and logs a warning when used.
+    #[arg(long)]
+    pub allow_plaintext_secrets: bool,
+
     /// PID of old controller process to take over from.
     /// Sends SIGUSR1 to the old process to initiate graceful shutdown.
     /// Should be used together with --reuseport.
