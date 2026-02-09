@@ -13,6 +13,8 @@ The frontend is a compact, well-structured SvelteKit SPA for the Uptrakit contro
 
 However, the review identifies **28 findings** across 5 categories, including **critical API path mismatches** that would prevent the frontend from functioning against the current backend, **security concerns** around token storage and XSS vectors, and significant **architectural debt** from duplicated patterns across pages.
 
+> **Implementation status**: Fix plans **FP-1 through FP-5** (plus FP-19 and FP-20) have been implemented in commit `f947964`. See individual findings below for details.
+
 ### Severity Distribution
 
 | Severity | Count |
@@ -26,7 +28,7 @@ However, the review identifies **28 findings** across 5 categories, including **
 
 ## Category 1: Critical — API Contract Mismatches
 
-### F-1: Frontend uses `/agents` endpoints but backend serves `/services` (Critical)
+### F-1: Frontend uses `/agents` endpoints but backend serves `/services` (Critical) — FIXED
 
 **Files**: `src/lib/api.ts:194-216`, `src/lib/api.ts:272-282`
 
@@ -52,9 +54,9 @@ But the backend routes (confirmed in `crates/ui/web-api/src/routes/services.rs`)
 
 Every agent-related API call will 404 against the actual backend. The entire Agents page, enrollment token management, and service approval flows are broken.
 
-**Fix plan (FP-1)**: Rename all `/agents` API paths to `/services` in `api.ts`. Update `getAgents()` to pass `?type=agent` filter. The backend `ListServicesQuery` supports `type` and `status` query params.
+**Fix plan (FP-1)**: Rename all `/agents` API paths to `/services` in `api.ts`. Update `getAgents()` to pass `?type=agent` filter. The backend `ListServicesQuery` supports `type` and `status` query params. **IMPLEMENTED** in `api.ts`.
 
-### F-2: `AgentResponse` type does not match `ServiceResponse` from backend (Critical)
+### F-2: `AgentResponse` type does not match `ServiceResponse` from backend (Critical) — FIXED
 
 **File**: `src/lib/types.ts:49-58`
 
@@ -79,29 +81,29 @@ But the backend `ServiceResponse` (per AGENTS.md) includes additional fields:
 
 And the status field is actually `'pending' | 'approved' | 'rejected' | 'deactivated'` (the `deactivated` status is not modeled).
 
-**Fix plan (FP-2)**: Rename to `ServiceResponse`, add missing fields, and update all consuming components. Consider keeping a `type AgentResponse = ServiceResponse` alias during migration.
+**Fix plan (FP-2)**: Rename to `ServiceResponse`, add missing fields, and update all consuming components. Consider keeping a `type AgentResponse = ServiceResponse` alias during migration. **IMPLEMENTED** in `types.ts`, `api.ts`, `agents/+page.svelte`.
 
-### F-3: Agents page does not filter by service type (Critical)
+### F-3: Agents page does not filter by service type (Critical) — FIXED
 
 **File**: `src/routes/agents/+page.svelte:31`, `src/lib/api.ts:194-197`
 
 `getAgents()` calls the list endpoint without a `type=agent` filter. Once the path is fixed to `/services`, this will return both agents AND MQTT services mixed together, which is incorrect for the "Agents" page.
 
-**Fix plan (FP-3)**: Pass `?type=agent` as a default filter in `getAgents()`. Consider adding an MQTT Services page as well.
+**Fix plan (FP-3)**: Pass `?type=agent` as a default filter in `getAgents()`. Consider adding an MQTT Services page as well. **IMPLEMENTED** — folded into FP-1; `getAgents()` always passes `type=agent`.
 
-### F-4: Missing MQTT enrollment token endpoints (Critical)
+### F-4: Missing MQTT enrollment token endpoints (Critical) — FIXED
 
 **File**: `src/lib/api.ts`
 
 The settings page manages agent enrollment tokens but has no support for MQTT enrollment tokens. Per AGENTS.md, MQTT enrollment tokens use `?type=mqtt` on the same `/services/enrollment-token` endpoints. The settings page should distinguish between agent and MQTT enrollment tokens.
 
-**Fix plan (FP-4)**: Add `type` parameter to enrollment token API functions. Add MQTT enrollment token section to the settings page.
+**Fix plan (FP-4)**: Add `type` parameter to enrollment token API functions. Add MQTT enrollment token section to the settings page. **IMPLEMENTED** in `api.ts` and `settings/+page.svelte`.
 
 ---
 
 ## Category 2: Security & Safety
 
-### F-5: JWT tokens stored in `localStorage` — vulnerable to XSS (High)
+### F-5: JWT tokens stored in `localStorage` — vulnerable to XSS (High) — FIXED
 
 **Files**: `src/lib/auth.ts:27-28`, `src/lib/api.ts:53`
 
@@ -109,7 +111,7 @@ Both `access_token` and `refresh_token` are stored in `localStorage`. Any XSS vu
 
 `localStorage` is synchronous, accessible from any script in the same origin, and persists indefinitely. The `refresh_token` is particularly dangerous because it can mint new access tokens.
 
-**Fix plan (FP-5)**: Move `refresh_token` to an `HttpOnly`, `Secure`, `SameSite=Strict` cookie managed by the backend. The `access_token` can remain in memory (not `localStorage`) — store it in a module-level variable that is lost on page refresh. On refresh, the `HttpOnly` cookie silently provides a new access token via the refresh endpoint.
+**Fix plan (FP-5)**: Move `refresh_token` to an `HttpOnly`, `Secure`, `SameSite=Strict` cookie managed by the backend. The `access_token` can remain in memory (not `localStorage`) — store it in a module-level variable that is lost on page refresh. On refresh, the `HttpOnly` cookie silently provides a new access token via the refresh endpoint. **IMPLEMENTED** — backend (`refresh_cookie.rs`, `auth.rs`, `oidc_auth.rs`) sets/reads/clears HttpOnly cookies; frontend (`auth.ts`, `api.ts`) uses in-memory token with `credentials: 'same-origin'`.
 
 ### F-6: OIDC `logo_url` rendered as `<img src>` without sanitization (High)
 
@@ -298,7 +300,7 @@ The API returns a `PaginatedResponse` with `total`, `page`, `per_page`, `total_p
 
 ## Category 4: Type Safety & Correctness
 
-### F-19: `User.permissions` typed as `string[]` instead of `Permission[]` (High)
+### F-19: `User.permissions` typed as `string[]` instead of `Permission[]` (High) — FIXED
 
 **File**: `src/lib/types.ts:19`
 
@@ -316,9 +318,9 @@ $user?.permissions.includes(Permission.ManageSettings)
 
 This works at runtime because `Permission.ManageSettings === 'manage_settings'`, but offers no protection against typos in other parts of the code.
 
-**Fix plan (FP-19)**: Change `permissions: string[]` to `permissions: Permission[]`.
+**Fix plan (FP-19)**: Change `permissions: string[]` to `permissions: Permission[]`. **IMPLEMENTED** in `types.ts` (as part of FP-2).
 
-### F-20: MQTT form uses `Record<string, unknown>` instead of typed interface (High)
+### F-20: MQTT form uses `Record<string, unknown>` instead of typed interface (High) — FIXED
 
 **File**: `src/routes/settings/+page.svelte:210-219`, `228-235`
 
@@ -333,7 +335,7 @@ const res = await updateMqttClient(editingMqttClient.id, data);
 
 The form builds an untyped `Record<string, unknown>` that is passed to `updateMqttClient()` which expects `UpdateMqttClient`. This bypasses TypeScript's type checking entirely.
 
-**Fix plan (FP-20)**: Build a properly typed `UpdateMqttClient` object directly. Use conditional spreading for optional fields.
+**Fix plan (FP-20)**: Build a properly typed `UpdateMqttClient` object directly. Use conditional spreading for optional fields. **IMPLEMENTED** in `settings/+page.svelte` (as part of FP-4).
 
 ### F-21: `refreshPromise` race condition between clear and reuse (Medium)
 
@@ -451,36 +453,36 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 
 ## Fix Plan Summary
 
-| ID | Severity | Effort | Description |
-|----|----------|--------|-------------|
-| FP-1 | Critical | Small | Fix API paths: `/agents` → `/services` |
-| FP-2 | Critical | Small | Align `AgentResponse` type with backend `ServiceResponse` |
-| FP-3 | Critical | Small | Add `?type=agent` filter to service list calls |
-| FP-4 | Critical | Medium | Add MQTT enrollment token support |
-| FP-5 | High | Large | Move refresh token to HttpOnly cookie |
-| FP-6 | High | Small | Validate OIDC logo URLs (https-only) |
-| FP-7 | Medium | Small | Validate redirect parameter, validate device code format |
-| FP-8 | Medium | Small | Add Content Security Policy |
-| FP-9 | Medium | Small | Add copy-to-clipboard for enrollment token |
-| FP-10 | Low | Small | Preserve redirect path on session expiry |
-| FP-11 | High | Medium | Extract settings page into sub-components |
-| FP-12 | High | Medium | Centralize auth guards in layout |
-| FP-13 | High | Medium | Extract shared menu/modal/confirm components |
-| FP-14 | Medium | Small | Create shared notification system |
-| FP-15 | Medium | Small | Use `onMount` for data fetching, not `$effect` |
-| FP-16 | Medium | Small | Add loading states to action buttons |
-| FP-17 | Medium | Medium | Add pagination controls to hosts page |
-| FP-18 | Medium | Medium | Fix agents pagination support |
-| FP-19 | High | Small | Type `User.permissions` as `Permission[]` |
-| FP-20 | High | Small | Use typed interfaces for MQTT form data |
-| FP-21 | Medium | Small | Fix refresh token race condition |
-| FP-22 | Low | Small | Fix 204 response type handling |
-| FP-23 | Low | Small | Remove unused `OidcCompleteRegistrationRequest` or use it |
-| FP-24 | High | Medium | Add ARIA roles to modals |
-| FP-25 | Medium | Medium | Implement focus trapping in modals |
-| FP-26 | Medium | Medium | Use robust menu positioning |
-| FP-27 | Low | Small | Add helpful empty states |
-| FP-28 | Low | Small | Deduplicate theme initialization logic |
+| ID | Severity | Effort | Description | Status |
+|----|----------|--------|-------------|--------|
+| FP-1 | Critical | Small | Fix API paths: `/agents` → `/services` | **Done** |
+| FP-2 | Critical | Small | Align `AgentResponse` type with backend `ServiceResponse` | **Done** |
+| FP-3 | Critical | Small | Add `?type=agent` filter to service list calls | **Done** |
+| FP-4 | Critical | Medium | Add MQTT enrollment token support | **Done** |
+| FP-5 | High | Large | Move refresh token to HttpOnly cookie | **Done** |
+| FP-6 | High | Small | Validate OIDC logo URLs (https-only) | Open |
+| FP-7 | Medium | Small | Validate redirect parameter, validate device code format | Open |
+| FP-8 | Medium | Small | Add Content Security Policy | Open |
+| FP-9 | Medium | Small | Add copy-to-clipboard for enrollment token | Open |
+| FP-10 | Low | Small | Preserve redirect path on session expiry | Open |
+| FP-11 | High | Medium | Extract settings page into sub-components | Open |
+| FP-12 | High | Medium | Centralize auth guards in layout | Open |
+| FP-13 | High | Medium | Extract shared menu/modal/confirm components | Open |
+| FP-14 | Medium | Small | Create shared notification system | Open |
+| FP-15 | Medium | Small | Use `onMount` for data fetching, not `$effect` | Open |
+| FP-16 | Medium | Small | Add loading states to action buttons | Open |
+| FP-17 | Medium | Medium | Add pagination controls to hosts page | Open |
+| FP-18 | Medium | Medium | Fix agents pagination support | Open |
+| FP-19 | High | Small | Type `User.permissions` as `Permission[]` | **Done** |
+| FP-20 | High | Small | Use typed interfaces for MQTT form data | **Done** |
+| FP-21 | Medium | Small | Fix refresh token race condition | Open |
+| FP-22 | Low | Small | Fix 204 response type handling | Open |
+| FP-23 | Low | Small | Remove unused `OidcCompleteRegistrationRequest` or use it | Open |
+| FP-24 | High | Medium | Add ARIA roles to modals | Open |
+| FP-25 | Medium | Medium | Implement focus trapping in modals | Open |
+| FP-26 | Medium | Medium | Use robust menu positioning | Open |
+| FP-27 | Low | Small | Add helpful empty states | Open |
+| FP-28 | Low | Small | Deduplicate theme initialization logic | Open |
 
 ### Recommended Priority Order
 
@@ -512,7 +514,7 @@ The following are implementation-ready plans for the 5 worst findings. Each incl
 
 ---
 
-### DFP-1: Fix API paths — `/agents` → `/services` (F-1, Critical)
+### DFP-1: Fix API paths — `/agents` → `/services` (F-1, Critical) — IMPLEMENTED
 
 **Goal**: Every frontend API call that currently hits `/api/v1/agents/…` must be rewritten to hit `/api/v1/services/…`, matching the backend routes defined in `crates/ui/web-api/src/routes/services.rs`.
 
@@ -644,7 +646,7 @@ Remove `AgentResponse` from the import block and add `ServiceResponse` (once DFP
 
 ---
 
-### DFP-2: Align `AgentResponse` type with backend `ServiceResponse` (F-2, Critical)
+### DFP-2: Align `AgentResponse` type with backend `ServiceResponse` (F-2, Critical) — IMPLEMENTED
 
 **Goal**: Replace the frontend's `AgentResponse` interface with a `ServiceResponse` interface that matches the backend struct defined in `crates/shared/web-api-types/src/services.rs:54-67`.
 
@@ -805,7 +807,7 @@ After:
 
 ---
 
-### DFP-3: Add `?type=agent` filter to service list calls (F-3, Critical)
+### DFP-3: Add `?type=agent` filter to service list calls (F-3, Critical) — IMPLEMENTED
 
 **Goal**: Ensure the Agents page only displays agents (not MQTT services) by always sending `?type=agent` when calling the list endpoint.
 
@@ -852,7 +854,7 @@ Without `type=agent`, the endpoint returns both agents and MQTT services interle
 
 ---
 
-### DFP-4: Add MQTT enrollment token support (F-4, Critical)
+### DFP-4: Add MQTT enrollment token support (F-4, Critical) — IMPLEMENTED
 
 **Goal**: The settings page currently manages a single "Enrollment Token" (implicitly for agents). The backend supports separate enrollment tokens for agents and MQTT services via the `?type=agent|mqtt` query parameter on the same `/services/enrollment-token` endpoints. The settings page must support both.
 
@@ -1003,7 +1005,7 @@ After:
 
 ---
 
-### DFP-5: Move JWT tokens out of `localStorage` (F-5, High)
+### DFP-5: Move JWT tokens out of `localStorage` (F-5, High) — IMPLEMENTED
 
 **Goal**: Eliminate XSS-based token theft by moving the `refresh_token` to an `HttpOnly` cookie (managed by the backend) and keeping the `access_token` only in memory (a module-level variable, not `localStorage`).
 
@@ -1465,7 +1467,7 @@ This prevents the browser from sending a `Referer` header to the logo server, ev
 
 ---
 
-### DFP-7: Type `User.permissions` as `Permission[]` (F-19, High)
+### DFP-7: Type `User.permissions` as `Permission[]` (F-19, High) — IMPLEMENTED
 
 **Goal**: Change `User.permissions` from `string[]` to `Permission[]` so that permission checks are type-safe and typos are caught at compile time.
 
@@ -1539,7 +1541,7 @@ TypeScript allows `Permission[].includes(Permission.X)` — the call is already 
 
 ---
 
-### DFP-8: Use typed interfaces for MQTT form data (F-20, High)
+### DFP-8: Use typed interfaces for MQTT form data (F-20, High) — IMPLEMENTED
 
 **Goal**: Replace `Record<string, unknown>` with properly typed `CreateMqttClient` and `UpdateMqttClient` interfaces in the MQTT client form handler, restoring TypeScript's type checking.
 
