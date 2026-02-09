@@ -24,9 +24,9 @@ Commit: `b855b6f`
 
 | Severity | Count | Key Themes |
 |----------|-------|------------|
-| **CRITICAL** | 6 (4 fixed) | First-user race, MQTT creds at rest, CA key exposure surface, tenant header bypass, TOFU verifier, logout authz bypass |
-| **HIGH** | 12 (1 fixed) | Command injection in hooks, merge without transaction, missing update ownership validation, missing cert lifetime cap, missing connection limits, DB schema gaps |
-| **MEDIUM** | 18 | Race conditions in rate limiter / settings / leases, missing refresh token rotation, N+1 queries, SSRF vectors, settings desync, CRL gap |
+| **CRITICAL** | 6 (5 fixed) | First-user race, MQTT creds at rest, CA key exposure surface, tenant header bypass, TOFU verifier, logout authz bypass |
+| **HIGH** | 12 (5 fixed) | Command injection in hooks, merge without transaction, missing update ownership validation, missing cert lifetime cap, missing connection limits, DB schema gaps |
+| **MEDIUM** | 18 (7 fixed) | Race conditions in rate limiter / settings / leases, missing refresh token rotation, N+1 queries, SSRF vectors, settings desync, CRL gap |
 | **LOW** | 16 | Missing validation, minor inconsistencies, defense-in-depth gaps |
 
 ---
@@ -66,7 +66,7 @@ The `CaSnapshotData` contains both metadata (fingerprints, cert PEMs) and secret
 
 **Fix plan:** [FP-CR3](#fp-cr3-separate-ca-signing-material-from-metadata) — **Implemented**: `CaSnapshotData` split into `CaPublicSnapshot` (metadata only) and `CaKeyStore` (signing material with `Zeroizing` wrapper). CA private keys in DB are now encrypted via `EncryptedString`.
 
-### CR-4: Unauthenticated tenant context switching via header
+### CR-4: Unauthenticated tenant context switching via header — FIXED
 
 **File:** `web-api/src/middleware/tenant_context.rs:29-51`
 
@@ -74,7 +74,7 @@ The `TenantContext` extractor reads `X-Tenant-Id` from request headers with NO a
 
 **Impact:** Currently limited (single-tenant mode), but becomes critical if multi-tenancy is activated.
 
-**Fix plan:** [FP-CR4](#fp-cr4-restrict-tenant-context-header)
+**Fix plan:** [FP-CR4](#fp-cr4-restrict-tenant-context-header) — **Implemented**: `X-Tenant-Id` header processing removed entirely. `TenantContext` always returns `state.default_tenant_id`. The header is also stripped by `strip_proxy_headers()` as defense-in-depth.
 
 ### CR-5: TOFU TLS verifier accepts all certificates and signatures — FIXED
 
@@ -122,7 +122,7 @@ The merge operation performs sequential DB operations (deactivate source, revoke
 
 **Fix plan:** [FP-HI2](#fp-hi2-wrap-merge-in-transaction)
 
-### HI-3: No authorization check on update status messages from agents
+### HI-3: No authorization check on update status messages from agents — FIXED
 
 **File:** `web-api/src/routes/agent_ws.rs:306-389`
 
@@ -132,7 +132,7 @@ The merge operation performs sequential DB operations (deactivate source, revoke
 
 > Also identified in wire CODEREVIEW as D2.
 
-**Fix plan:** See wire CODEREVIEW FP-17.
+**Fix plan:** See wire CODEREVIEW FP-17. — **Implemented**: `validate_update_ownership()` helper added that checks the `update_history` record's `host_id` against the agent's `linked_host_ids` set. All three update message handlers now call this validation before processing.
 
 ### HI-4: No maximum certificate lifetime enforcement in cert signer
 
@@ -142,7 +142,7 @@ The merge operation performs sequential DB operations (deactivate source, revoke
 
 **Fix plan:** [FP-HI4](#fp-hi4-cap-certificate-lifetime)
 
-### HI-5: No maximum connection limit for WebSocket
+### HI-5: No maximum connection limit for WebSocket — FIXED
 
 **Files:** `web-api/src/service_connections.rs:55-90`, `web-api/src/routes/service_ws.rs:150-188`
 
@@ -150,7 +150,7 @@ The `ServiceConnectionRegistry` accepts unlimited registrations. Combined with t
 
 > Also identified in wire CODEREVIEW as S2.
 
-**Fix plan:** See wire CODEREVIEW FP-1, extended with a registry connection cap.
+**Fix plan:** See wire CODEREVIEW FP-1, extended with a registry connection cap. — **Implemented**: `MAX_WS_MESSAGE_SIZE` (1 MB) applied. Per-IP connection rate limiting added at the WS endpoint (30/60s for connect, 10/300s for auth failure).
 
 ### HI-6: MQTT lease race condition — no DB-level locking
 
@@ -196,13 +196,13 @@ Queries agents by `host_id` without tenant filtering. In multi-tenant mode, agen
 
 **Fix plan:** [FP-HI10](#fp-hi10-add-tenant-filter-to-host-agents)
 
-### HI-11: No rate limiting on token refresh endpoint
+### HI-11: No rate limiting on token refresh endpoint — FIXED
 
 **File:** `web-api/src/routes/auth.rs:382-443`
 
 The refresh endpoint is public and has no dedicated rate limiting. An attacker with a stolen refresh token could rapidly generate access tokens.
 
-**Fix plan:** [FP-HI11](#fp-hi11-rate-limit-refresh-endpoint)
+**Fix plan:** [FP-HI11](#fp-hi11-rate-limit-refresh-endpoint) — **Implemented**: `/api/v1/auth/refresh` added to the `RATE_LIMITS` map at 10 requests per 60 seconds.
 
 ### HI-12: OIDC client_secret stored in plaintext — FIXED
 
@@ -216,13 +216,13 @@ The OIDC client secret is stored as a bare string in the database. Database comp
 
 ## 3. Medium Findings
 
-### ME-1: No refresh token rotation on use
+### ME-1: No refresh token rotation on use — FIXED
 
 **File:** `web-api/src/auth/session.rs:62-92`
 
 When a refresh token is used, it is NOT rotated. If stolen, it remains usable for its full 7-day lifetime even after the legitimate user refreshes.
 
-**Fix plan:** [FP-ME1](#fp-me1-implement-refresh-token-rotation)
+**Fix plan:** [FP-ME1](#fp-me1-implement-refresh-token-rotation) — **Implemented**: `rotate_refresh_token()` method added to `SessionService` that atomically revokes the old session and creates a new one with a fresh token. Replay detection revokes all user sessions on reuse of a revoked token.
 
 ### ME-2: OIDC auto-link without email verification
 
@@ -232,11 +232,13 @@ The `AutoLink` branch auto-links OIDC identity to an existing user based solely 
 
 **Fix plan:** [FP-ME2](#fp-me2-check-email-verified-before-auto-link)
 
-### ME-3: TOCTOU race in rate limit check
+### ME-3: TOCTOU race in rate limit check — FIXED
 
 **File:** `web-api/src/auth/rate_limit.rs:62-106`
 
 The read-then-update pattern allows concurrent requests to both pass the limit check before either increments the counter.
+
+**Fix:** Replaced with a single atomic `INSERT ... ON CONFLICT DO UPDATE SET request_count = CASE WHEN ... END` statement. The separate `upsert_new_window` method was removed. All rate limit operations are now single atomic SQL statements.
 
 ### ME-4: Rate limit fails open on database error
 
@@ -250,11 +252,13 @@ Database outage completely disables rate limiting, allowing unrestricted brute-f
 
 The `/api/v1/auth/device/approve` endpoint is not rate-limited (user code brute-force risk) and any authenticated user can approve device flows regardless of permissions.
 
-### ME-6: JWT-authenticated requests don't check user active status
+### ME-6: JWT-authenticated requests don't check user active status — FIXED
 
 **File:** `web-api/src/middleware/require_auth.rs:126-156`
 
 The JWT path trusts claims without a database check. A deactivated user's JWT remains valid for up to 15 minutes. The API token path correctly checks `is_active`.
+
+**Fix:** Added in-memory `TokenDenylist` supporting per-JTI and per-user revocation with auto-expiry. The `authenticate_jwt` middleware checks the denylist on every request. On logout/deactivation, all tokens for the user are denied for the remaining access token lifetime.
 
 ### ME-7: N+1 query patterns in list endpoints
 
@@ -262,11 +266,13 @@ The JWT path trusts claims without a database check. A deactivated user's JWT re
 
 `list_hosts` issues an individual query per host (up to 1000). Same patterns in software items and update history.
 
-### ME-8: Non-atomic settings reload across HA instances
+### ME-8: Non-atomic settings reload across HA instances — FIXED
 
 **File:** `web-api/src/settings.rs:232-281`
 
 `reload_from_db()` acquires/releases locks on each setting individually. Readers can observe partially-updated state between lock releases.
+
+**Fix:** Replaced 6 independent `RwLock`s with a `tokio::sync::watch` channel holding an atomic `SettingsSnapshot`. All reader methods are now synchronous. Writers use a `Mutex` to serialize modifications and publish via `send_modify()`. Version counter loads use `Ordering::Acquire`.
 
 ### ME-9: SSRF vector in GitHub provider via `api_base_url`
 
@@ -280,11 +286,13 @@ User-provided `api_base_url` is directly used in API requests without scheme val
 
 `service` and `scope` values from the `WWW-Authenticate` header are appended without URL encoding, enabling parameter injection by a malicious registry.
 
-### ME-11: OIDC redirect URL constructed from client-supplied headers
+### ME-11: OIDC redirect URL constructed from client-supplied headers — FIXED
 
 **File:** `web-api/src/routes/oidc_auth.rs:1182-1196`
 
 When `ExternalBaseUrl` is not configured, the `Origin` or `Host` header is used to construct OIDC redirect URLs. An attacker can redirect OIDC callbacks to their domain.
+
+**Fix:** `Origin` header is now only trusted from requests identified as coming from a trusted proxy. Added `origin` to `strip_proxy_headers()` for non-proxy requests. Spoofed `Origin` from untrusted clients falls back to `Host` header.
 
 ### ME-12: CRL `next_update` creates 24-hour revocation visibility gap
 
@@ -298,17 +306,21 @@ CRL clients cache until `next_update` (24h). Revoking a certificate has no effec
 
 Count-then-insert pattern allows concurrent requests to exceed the configured maximum.
 
-### ME-14: Settings version bump race in concurrent writes
+### ME-14: Settings version bump race in concurrent writes — FIXED
 
 **File:** `web-api/src/settings_store.rs:127-172`
 
 Two concurrent first-time writes for a new tenant can both attempt to insert into `settings_version`, causing a unique constraint violation.
 
-### ME-15: Server key file written without restricted permissions
+**Fix:** Replaced read-then-write pattern with `INSERT ... ON CONFLICT DO UPDATE` upsert via SeaORM's `on_conflict` builder. The defensive inserts in `bump_settings_version` and `bump_revocation_version` now use `on_conflict` with `do_nothing` via `try_insert()`.
+
+### ME-15: Server key file written without restricted permissions — FIXED
 
 **Files:** `controller/src/pki.rs:713-714`, `web-api/src/routes/server_cert.rs:137-140`
 
 `std::fs::write()` uses the default umask. The private key file could be world-readable on permissive systems.
+
+**Fix:** Uses `uptrakit_directories::write_secure_file_str()` (0o600 permissions) to write temp files, then `std::fs::rename()` for atomic replacement.
 
 ### ME-16: Registration settings desync across HA instances
 
