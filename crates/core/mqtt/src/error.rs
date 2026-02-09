@@ -15,6 +15,9 @@ pub enum AppError {
 
     #[error("directory error: {0}")]
     Directory(#[from] uptrakit_directories::DirectoryError),
+
+    #[error("signal handling error: {0}")]
+    Signal(String),
 }
 
 pub type Result<T> = std::result::Result<T, Report<AppError>>;

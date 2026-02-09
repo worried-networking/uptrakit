@@ -7,6 +7,8 @@ mod tenant_manager;
 use std::time::Duration;
 
 use clap::Parser;
+#[cfg(not(unix))]
+use futures_util::future::pending;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uptrakit_enrollment::ServiceIdentityState;
@@ -216,6 +218,10 @@ async fn run_authenticated(
     // Skip the first immediate tick
     ping_ticker.tick().await;
 
+    #[cfg(unix)]
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .map_err(|e| report!(AppError::Signal(e.to_string())))?;
+
     loop {
         tokio::select! {
             msg = conn.recv() => {
@@ -268,6 +274,19 @@ async fn run_authenticated(
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received shutdown signal");
+                break;
+            }
+            _ = async {
+                #[cfg(unix)]
+                {
+                    sigterm.recv().await;
+                }
+                #[cfg(not(unix))]
+                {
+                    pending::<()>().await;
+                }
+            } => {
+                tracing::info!("received SIGTERM");
                 break;
             }
         }

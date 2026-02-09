@@ -4,6 +4,7 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, Transport};
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 
@@ -47,6 +48,7 @@ pub struct MqttHandle {
     client: AsyncClient,
     topic: String,
     task: tokio::task::JoinHandle<()>,
+    shutdown_token: CancellationToken,
 }
 
 impl MqttHandle {
@@ -58,8 +60,24 @@ impl MqttHandle {
             .publish(&self.topic, QoS::AtLeastOnce, true, "offline")
             .await;
         let _ = self.client.disconnect().await;
-        let _ = self.task.await;
+        let outcome = shutdown_task(self.shutdown_token, self.task).await;
+        match outcome {
+            ShutdownOutcome::Completed => {}
+            ShutdownOutcome::TimedOut => {
+                tracing::warn!("MQTT event loop shutdown timed out; task aborted");
+            }
+            ShutdownOutcome::JoinError => {
+                tracing::warn!("MQTT event loop task ended with join error");
+            }
+        }
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum ShutdownOutcome {
+    Completed,
+    TimedOut,
+    JoinError,
 }
 
 /// Errors returned by [`start`].
@@ -83,6 +101,7 @@ pub async fn start(config: MqttConfig) -> Result<MqttHandle> {
     let options = build_mqtt_options(&config);
 
     let (client, event_loop) = AsyncClient::new(options, 10);
+    let shutdown_token = CancellationToken::new();
 
     // Publish initial online message.
     client
@@ -92,12 +111,19 @@ pub async fn start(config: MqttConfig) -> Result<MqttHandle> {
 
     let task_topic = topic.clone();
     let task_client = client.clone();
-    let task = tokio::spawn(run_event_loop(event_loop, task_client, task_topic));
+    let task_token = shutdown_token.clone();
+    let task = tokio::spawn(run_event_loop(
+        event_loop,
+        task_client,
+        task_topic,
+        task_token,
+    ));
 
     Ok(MqttHandle {
         client,
         topic,
         task,
+        shutdown_token,
     })
 }
 
@@ -137,22 +163,67 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
     opts
 }
 
-async fn run_event_loop(mut event_loop: EventLoop, client: AsyncClient, topic: String) {
+async fn run_event_loop(
+    mut event_loop: EventLoop,
+    client: AsyncClient,
+    topic: String,
+    shutdown_token: CancellationToken,
+) {
     loop {
-        match event_loop.poll().await {
-            Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
-                tracing::info!("MQTT connected");
-                if let Err(e) = client
-                    .publish(&topic, QoS::AtLeastOnce, true, "online")
-                    .await
-                {
-                    tracing::warn!("failed to publish online status: {e}");
+        tokio::select! {
+            _ = shutdown_token.cancelled() => {
+                tracing::debug!("MQTT event loop shutdown requested");
+                break;
+            }
+            poll = event_loop.poll() => {
+                match poll {
+                    Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
+                        tracing::info!("MQTT connected");
+                        if let Err(e) = client
+                            .publish(&topic, QoS::AtLeastOnce, true, "online")
+                            .await
+                        {
+                            tracing::warn!("failed to publish online status: {e}");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!("MQTT error: {e}");
+                        tokio::select! {
+                            _ = shutdown_token.cancelled() => {
+                                tracing::debug!("MQTT event loop shutdown requested");
+                                break;
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                        }
+                    }
                 }
             }
-            Ok(_) => {}
-            Err(e) => {
-                tracing::warn!("MQTT error: {e}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+}
+
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn shutdown_task(
+    shutdown_token: CancellationToken,
+    mut task: tokio::task::JoinHandle<()>,
+) -> ShutdownOutcome {
+    shutdown_token.cancel();
+    match tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut task).await {
+        Ok(Ok(())) => ShutdownOutcome::Completed,
+        Ok(Err(e)) => {
+            tracing::warn!("MQTT event loop task join error: {e}");
+            ShutdownOutcome::JoinError
+        }
+        Err(_) => {
+            task.abort();
+            match task.await {
+                Ok(()) => ShutdownOutcome::TimedOut,
+                Err(e) => {
+                    tracing::warn!("MQTT event loop task abort error: {e}");
+                    ShutdownOutcome::JoinError
+                }
             }
         }
     }
@@ -250,5 +321,26 @@ mod tests {
         };
         // Just verify it doesn't panic
         let _opts = build_mqtt_options(&config);
+    }
+
+    #[tokio::test]
+    async fn shutdown_task_completes_before_timeout() {
+        let token = CancellationToken::new();
+        let handle = tokio::spawn(async {});
+        let outcome = shutdown_task(token, handle).await;
+        assert!(matches!(outcome, ShutdownOutcome::Completed));
+    }
+
+    #[tokio::test]
+    async fn shutdown_task_aborts_on_timeout() {
+        let token = CancellationToken::new();
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        let outcome = shutdown_task(token, handle).await;
+        assert!(matches!(
+            outcome,
+            ShutdownOutcome::TimedOut | ShutdownOutcome::JoinError
+        ));
     }
 }

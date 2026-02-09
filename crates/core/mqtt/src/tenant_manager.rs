@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use uptrakit_internal_wire::MqttTenantConfig;
 use uuid::Uuid;
 
@@ -67,10 +68,17 @@ impl TenantManager {
 
     /// Graceful shutdown: stop all MQTT clients.
     pub async fn shutdown_all(&mut self) {
-        let client_ids: Vec<Uuid> = self.clients.keys().copied().collect();
-        for client_id in &client_ids {
-            self.stop_client(client_id).await;
+        let clients = std::mem::take(&mut self.clients);
+        let mut tasks = FuturesUnordered::new();
+
+        for (mqtt_client_id, state) in clients {
+            tasks.push(async move {
+                tracing::info!(%mqtt_client_id, "shutting down MQTT client");
+                state.handle.shutdown().await;
+            });
         }
+
+        while tasks.next().await.is_some() {}
     }
 
     /// Start or update an MQTT client.
