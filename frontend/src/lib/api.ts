@@ -58,7 +58,7 @@ function authHeaders(): Record<string, string> {
 
 let refreshPromise: Promise<RefreshResponse> | null = null;
 
-async function refreshAccessToken(): Promise<RefreshResponse> {
+export async function refreshAccessToken(): Promise<RefreshResponse> {
 	const res = await fetch(`${BASE}/auth/refresh`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },

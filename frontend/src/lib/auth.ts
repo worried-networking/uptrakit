@@ -17,15 +17,21 @@ export function setAccessToken(token: string | null): void {
 }
 
 export async function initialize() {
-	if (!accessToken) {
-		loading.set(false);
-		return;
-	}
 	try {
+		if (!accessToken) {
+			try {
+				const refreshed = await api.refreshAccessToken();
+				accessToken = refreshed.access_token;
+			} catch {
+				user.set(null);
+				return;
+			}
+		}
 		const u = await api.me();
 		user.set(u);
 	} catch {
 		accessToken = null;
+		user.set(null);
 	} finally {
 		loading.set(false);
 	}
