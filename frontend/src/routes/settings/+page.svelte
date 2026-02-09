@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { user } from '$lib/auth';
 	import { goto } from '$app/navigation';
+	import { onMount, tick } from 'svelte';
 	import {
 		getRegistrationSettings,
 		getAuthenticationSettings,
@@ -20,6 +21,7 @@
 	import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
 
 	let loading: boolean = $state(true);
+	let refsReady: boolean = $state(false);
 
 	let registrationRef: RegistrationSettings = $state(undefined!);
 	let authenticationRef: AuthenticationSettings = $state(undefined!);
@@ -40,8 +42,15 @@
 
 	$effect(() => {
 		if (canManageSettings) {
-			loadAllSettings();
+			if (refsReady) {
+				loadAllSettings();
+			}
 		}
+	});
+
+	onMount(async () => {
+		await tick();
+		refsReady = true;
 	});
 
 	async function loadAllSettings() {
@@ -85,15 +94,17 @@
 	{/if}
 
 	{#if loading}
-		<div class="card p-8 text-center">
+		<div class="card mb-6 p-8 text-center">
 			<p>Loading settings...</p>
 		</div>
-	{:else}
+	{/if}
+
+	<div aria-busy={loading} class:opacity-50={loading}>
 		<RegistrationSettings bind:this={registrationRef} onSuccess={showSuccess} onError={showError} />
 		<AuthenticationSettings bind:this={authenticationRef} onSuccess={showSuccess} onError={showError} />
 		<MqttClientsSettings bind:this={mqttClientsRef} onSuccess={showSuccess} onError={showError} />
 		<OidcProvidersSettings bind:this={oidcProvidersRef} onSuccess={showSuccess} onError={showError} />
 		<AgentCertificateSettings bind:this={agentCertificateRef} onSuccess={showSuccess} onError={showError} />
 		<EnrollmentTokenSettings bind:this={enrollmentTokenRef} onSuccess={showSuccess} onError={showError} />
-	{/if}
+	</div>
 {/if}
