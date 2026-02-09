@@ -1290,7 +1290,7 @@ fn read_master_key_hex(
 }
 
 fn parse_master_key_hex(key_hex: &str) -> std::result::Result<[u8; 32], String> {
-    let bytes = hex::decode(key_hex)
+    let bytes = uptrakit_shared_types::hex::decode(key_hex)
         .map_err(|e| format!("master key must be a 64-character hex string: {e}"))?;
     let key_bytes: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| {
         format!(

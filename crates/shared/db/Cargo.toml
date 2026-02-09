@@ -9,7 +9,6 @@ publish = false
 
 [dependencies]
 aws-lc-rs = { workspace = true }
-hex = { workspace = true }
 rand = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }

@@ -62,7 +62,10 @@ fn encrypt_value(plaintext: &str) -> Result<String, String> {
     output.extend_from_slice(&in_out);
     output.extend_from_slice(tag.as_ref());
 
-    Ok(format!("{ENC_PREFIX}{}", hex::encode(&output)))
+    Ok(format!(
+        "{ENC_PREFIX}{}",
+        uptrakit_shared_types::hex::encode(&output)
+    ))
 }
 
 /// Decrypt a stored encrypted string.
@@ -76,7 +79,8 @@ fn decrypt_value(stored: &str) -> Result<String, String> {
         .strip_prefix(ENC_PREFIX)
         .ok_or("missing ENC:v1: prefix")?;
 
-    let raw = hex::decode(hex_part).map_err(|e| format!("hex decode failed: {e}"))?;
+    let raw = uptrakit_shared_types::hex::decode(hex_part)
+        .map_err(|e| format!("hex decode failed: {e}"))?;
 
     // AES-256-GCM: 12-byte nonce + ciphertext + 16-byte tag
     if raw.len() < 12 + 16 {
@@ -299,11 +303,11 @@ mod tests {
         let encrypted = encrypt_value("sensitive data").unwrap();
         // Tamper with one byte in the hex payload
         let hex_part = encrypted.strip_prefix(ENC_PREFIX).unwrap();
-        let mut raw = hex::decode(hex_part).unwrap();
+        let mut raw = uptrakit_shared_types::hex::decode(hex_part).unwrap();
         if let Some(byte) = raw.last_mut() {
             *byte ^= 0xFF;
         }
-        let tampered = format!("{ENC_PREFIX}{}", hex::encode(&raw));
+        let tampered = format!("{ENC_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
         assert!(decrypt_value(&tampered).is_err());
     }
 

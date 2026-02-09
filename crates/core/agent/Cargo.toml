@@ -9,7 +9,6 @@ version.workspace = true
 [dependencies]
 clap = { workspace = true }
 futures-util = { workspace = true }
-hex = { workspace = true }
 rand = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
@@ -23,6 +22,7 @@ tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uptrakit-enrollment = { path = "../../shared/enrollment" }
+uptrakit-shared-types = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uuid = { workspace = true }
 uptrakit-command = { path = "../../shared/command" }

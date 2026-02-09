@@ -121,7 +121,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
     eprintln!();
 
     // Try to open the URL in the user's browser
-    if let Err(e) = open::that(verification_url) {
+    if let Err(e) = open_url(verification_url) {
         eprintln!("  (Could not open browser automatically: {})", e);
         eprintln!("  Please open the URL above manually.");
         eprintln!();
@@ -474,6 +474,25 @@ fn chrono_date() -> String {
 
 fn is_leap(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+/// Open a URL in the user's default browser.
+fn open_url(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

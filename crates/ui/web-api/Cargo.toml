@@ -47,7 +47,7 @@ utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-axum = "0.2"
 openidconnect = "4"
 url = { workspace = true }
-urlencoding = "2"
+percent-encoding = "2"
 jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs"] }
 axum-server = { workspace = true }
 hostname = { workspace = true }

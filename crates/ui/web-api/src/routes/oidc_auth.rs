@@ -582,7 +582,8 @@ pub async fn oidc_callback(
                     return Redirect::to("/login?error=oidc_internal_error").into_response();
                 }
             };
-            let encoded_email = urlencoding::encode(&email);
+            let encoded_email =
+                percent_encoding::utf8_percent_encode(&email, percent_encoding::NON_ALPHANUMERIC);
             Redirect::to(&format!(
                 "/login?link_required=true&link_token={link_token}&email={encoded_email}"
             ))
@@ -620,7 +621,8 @@ pub async fn oidc_callback(
                     return Redirect::to("/login?error=oidc_internal_error").into_response();
                 }
             };
-            let encoded_email = urlencoding::encode(&email);
+            let encoded_email =
+                percent_encoding::utf8_percent_encode(&email, percent_encoding::NON_ALPHANUMERIC);
             Redirect::to(&format!(
                 "/login?link_required=true&link_token={link_token}&email={encoded_email}&link_provider_id={existing_provider_id}"
             ))

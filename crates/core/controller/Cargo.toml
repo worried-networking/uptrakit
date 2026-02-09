@@ -19,6 +19,7 @@ uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-web-api = { path = "../../ui/web-api" }
 uptrakit-directories = { path = "../../shared/directories" }
+uptrakit-shared-types = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
@@ -42,7 +43,6 @@ sea-orm = { workspace = true }
 sea-orm-migration = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls"] }
 uuid = { workspace = true }
 sha2 = { workspace = true }
-hex = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }

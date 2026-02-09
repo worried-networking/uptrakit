@@ -646,7 +646,7 @@ async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
         Ok(bytes) => {
             let mut hasher = Sha256::new();
             hasher.update(&bytes);
-            hex::encode(hasher.finalize())
+            uptrakit_shared_types::hex::encode(hasher.finalize())
         }
         Err(_) => String::new(),
     }
@@ -784,7 +784,7 @@ mod tests {
         let expected = {
             let mut h = Sha256::new();
             h.update(b"test-ca-content");
-            hex::encode(h.finalize())
+            uptrakit_shared_types::hex::encode(h.finalize())
         };
         assert_eq!(hash, expected);
     }

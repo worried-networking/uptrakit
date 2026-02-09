@@ -772,7 +772,7 @@ pub fn ca_fingerprint(cert_pem: &str) -> Result<String> {
 pub fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
-    hex::encode(hasher.finalize())
+    uptrakit_shared_types::hex::encode(hasher.finalize())
 }
 
 // --- Cert introspection ---

@@ -88,10 +88,12 @@ fn try_info_header(
 ) -> Option<ServiceIdentity> {
     let header_name = header_name?;
     let raw = headers.get(header_name)?.to_str().ok()?;
-    // Traefik uses form-URL-encoding (+ = space); urlencoding only handles
+    // Traefik uses form-URL-encoding (+ = space); percent-encoding only handles
     // percent-encoding, so normalise '+' first.
     let raw_normalised = raw.replace('+', " ");
-    let decoded = urlencoding::decode(&raw_normalised).ok()?;
+    let decoded = percent_encoding::percent_decode_str(&raw_normalised)
+        .decode_utf8()
+        .ok()?;
 
     // Parse semicolon-separated key="value" or key=value pairs
     let fields = parse_info_fields(&decoded);
@@ -105,7 +107,9 @@ fn try_info_header(
 
     // 2. Subject/SerialNumber/Issuer (Traefik, Nginx, HAProxy) — fallback
     if let Some(subject) = fields.get("Subject").or(fields.get("subject")) {
-        let subject_decoded = urlencoding::decode(subject).ok()?;
+        let subject_decoded = percent_encoding::percent_decode_str(subject)
+            .decode_utf8()
+            .ok()?;
         let issuer_raw = fields
             .get("Issuer")
             .or(fields.get("issuer"))
@@ -120,7 +124,9 @@ fn try_info_header(
 
         // Verify issuer CN against known CA CNs
         if let Some(issuer) = issuer_raw {
-            let issuer_decoded = urlencoding::decode(issuer).ok()?;
+            let issuer_decoded = percent_encoding::percent_decode_str(issuer)
+                .decode_utf8()
+                .ok()?;
             if !verify_issuer_cn(&issuer_decoded, state) {
                 tracing::warn!(
                     issuer = %issuer_decoded,
@@ -139,7 +145,9 @@ fn try_info_header(
 
 /// Parse a Cert field value (URL-encoded PEM or base64-DER).
 fn try_parse_cert_field(cert_field: &str, state: &AppState) -> Option<ServiceIdentity> {
-    let cert_decoded = urlencoding::decode(cert_field).ok()?;
+    let cert_decoded = percent_encoding::percent_decode_str(cert_field)
+        .decode_utf8()
+        .ok()?;
 
     // Try PEM first (Envoy sends URL-encoded PEM)
     if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(cert_decoded.as_bytes()) {
@@ -186,7 +194,9 @@ fn try_pem_header(
 ) -> Option<ServiceIdentity> {
     let header_name = header_name?;
     let raw = headers.get(header_name)?.to_str().ok()?;
-    let decoded = urlencoding::decode(raw).ok()?;
+    let decoded = percent_encoding::percent_decode_str(raw)
+        .decode_utf8()
+        .ok()?;
 
     // Try PEM first
     let der = if let Ok((_, pem_block)) = x509_parser::pem::parse_x509_pem(decoded.as_bytes()) {

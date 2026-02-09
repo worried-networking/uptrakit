@@ -31,7 +31,7 @@ pub fn ca_pem_fingerprint(pem_bytes: &[u8]) -> Result<String> {
         )))
     })?;
     let digest = sha2::Sha256::digest(&pem.contents);
-    Ok(hex::encode(digest))
+    Ok(uptrakit_shared_types::hex::encode(digest))
 }
 
 /// Fetch the CA certificate bundle from a controller or PKI endpoint.
