@@ -10,6 +10,7 @@
 		getMqttClients
 	} from '$lib/api';
 	import { Permission } from '$lib/types';
+	import { showSuccess, showError, clearError, getSuccessMessage, getErrorMessage } from '$lib/notifications.svelte';
 
 	import RegistrationSettings from './RegistrationSettings.svelte';
 	import AuthenticationSettings from './AuthenticationSettings.svelte';
@@ -18,8 +19,6 @@
 	import AgentCertificateSettings from './AgentCertificateSettings.svelte';
 	import EnrollmentTokenSettings from './EnrollmentTokenSettings.svelte';
 
-	let successMessage: string | null = $state(null);
-	let errorMessage: string | null = $state(null);
 	let loading: boolean = $state(true);
 
 	let registrationRef: RegistrationSettings = $state(undefined!);
@@ -30,6 +29,8 @@
 	let enrollmentTokenRef: EnrollmentTokenSettings = $state(undefined!);
 
 	const canManageSettings = $derived($user?.permissions.includes(Permission.ManageSettings) ?? false);
+	const successMessage = $derived(getSuccessMessage());
+	const errorMessage = $derived(getErrorMessage());
 
 	$effect(() => {
 		if ($user && !canManageSettings) {
@@ -42,21 +43,6 @@
 			loadAllSettings();
 		}
 	});
-
-	function showSuccess(msg: string) {
-		successMessage = msg;
-		setTimeout(() => {
-			successMessage = null;
-		}, 3000);
-	}
-
-	function showError(msg: string) {
-		errorMessage = msg;
-	}
-
-	function clearError() {
-		errorMessage = null;
-	}
 
 	async function loadAllSettings() {
 		loading = true;

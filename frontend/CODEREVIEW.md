@@ -11,7 +11,7 @@
 
 The frontend is a compact, well-structured SvelteKit SPA for the Uptrakit controller dashboard. It handles authentication (password + OIDC), device authorization, agent/host management, and system settings. The codebase uses modern Svelte 5 runes and Skeleton UI v4 consistently.
 
-The review originally identified **28 findings** across 5 categories. **19 have been fixed** across multiple implementation rounds, including all critical and high severity issues. The remaining **9 findings** are medium and low severity items focused on UX polish, minor refactoring, and edge cases.
+The review originally identified **28 findings** across 5 categories. **24 have been fixed** across multiple implementation rounds, including all critical and high severity issues. The remaining **4 findings** are medium severity items focused on UX polish and scalability.
 
 ### Remaining Severity Distribution
 
@@ -19,20 +19,12 @@ The review originally identified **28 findings** across 5 categories. **19 have 
 |----------|-------|
 | Critical | 0 |
 | High | 0 |
-| Medium | 5 |
-| Low | 4 |
+| Medium | 4 |
+| Low | 0 |
 
 ---
 
 ## Category 2: Architecture & Code Quality
-
-### F-14: Duplicated success/error notification pattern (Medium)
-
-**Files**: `settings/+page.svelte`, `settings/global/+page.svelte`
-
-Both settings pages duplicate `showSuccess()`, `showError()`, `clearError()` with identical `setTimeout` logic.
-
-**Fix plan (FP-14)**: Create a `notifications.ts` store or a `Notifications.svelte` component that manages toast-style notifications globally.
 
 ### F-17: Hosts page does not support pagination controls (Medium)
 
@@ -52,39 +44,7 @@ The agents page loads all agents without pagination. For installations with many
 
 ---
 
-## Category 3: Type Safety & Correctness
-
-### F-22: `204` response cast to generic type `T` (Low)
-
-**File**: `src/lib/api.ts`
-
-```typescript
-if (res.status === 204) return undefined as T;
-```
-
-This is a type lie — the function promises to return `T` but returns `undefined`.
-
-**Fix plan (FP-22)**: Return type should be `Promise<T | void>` for endpoints that may return 204.
-
-### F-23: `OidcCompleteRegistrationRequest` interface defined but never used (Low)
-
-**File**: `src/lib/types.ts`
-
-The interface exists but `oidcCompleteRegistration()` in `api.ts` builds its body inline instead of using it.
-
-**Fix plan (FP-23)**: Either use the interface in the API function signature or remove it.
-
----
-
 ## Category 4: UX & Accessibility
-
-### F-25: No focus management in modals (Medium)
-
-**Files**: All modal implementations (ConfirmDialog, ModalBackdrop, OIDC/MQTT modals)
-
-When a modal opens, focus is not moved to the modal. Keyboard users can tab behind the modal into invisible content. When a modal closes, focus is not returned to the trigger button.
-
-**Fix plan (FP-25)**: Implement focus trapping: on open, move focus to the first focusable element in the modal. On close, restore focus to the trigger.
 
 ### F-26: Context menus are positioned with fixed pixel coordinates (Medium)
 
@@ -94,7 +54,7 @@ The menu is positioned using `fixed` positioning based on `getBoundingClientRect
 
 **Fix plan (FP-26)**: Use the Popover API or a library like Floating UI for robust positioning. At minimum, add viewport boundary checks.
 
-### F-27: No empty-state guidance for new users (Low)
+### F-27: No empty-state guidance for new users (Medium)
 
 **Files**: `agents/+page.svelte`, `hosts/+page.svelte`
 
@@ -102,35 +62,22 @@ Empty states show minimal text like "No agents found." New users get no guidance
 
 **Fix plan (FP-27)**: Add helpful empty states with instructions and links to docs.
 
-### F-28: Theme flash prevention is duplicated (Low)
-
-**Files**: `src/app.html`, `src/lib/theme.ts`
-
-The inline script in `app.html` reads `localStorage` and sets the `dark` class to prevent FOUC. Then `initTheme()` in `theme.ts` does the same thing on mount. The logic is duplicated and could diverge.
-
-**Fix plan (FP-28)**: Keep the inline script for FOUC prevention. In `initTheme()`, only set up the media query listener — skip the initial class toggle since it's already done.
-
 ---
 
 ## Fix Plan Summary
 
 | ID | Severity | Effort | Description | Status |
 |----|----------|--------|-------------|--------|
-| FP-14 | Medium | Small | Create shared notification system | Open |
 | FP-17 | Medium | Medium | Add pagination controls to hosts page | Open |
 | FP-18 | Medium | Medium | Fix agents pagination support | Open |
-| FP-22 | Low | Small | Fix 204 response type handling | Open |
-| FP-23 | Low | Small | Remove unused `OidcCompleteRegistrationRequest` or use it | Open |
-| FP-25 | Medium | Medium | Implement focus trapping in modals | Open |
 | FP-26 | Medium | Medium | Use robust menu positioning | Open |
-| FP-27 | Low | Small | Add helpful empty states | Open |
-| FP-28 | Low | Small | Deduplicate theme initialization logic | Open |
+| FP-27 | Medium | Small | Add helpful empty states | Open |
 
 ### Recommended Priority Order
 
 1. **FP-17, FP-18** — Pagination (scalability)
-2. **FP-25** — Focus trapping (accessibility compliance)
-3. Everything else by severity
+2. **FP-26** — Robust menu positioning (UX)
+3. **FP-27** — Helpful empty states (onboarding)
 
 ---
 
@@ -151,3 +98,6 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 13. **Loading states on actions**: Buttons disabled during API calls with visual feedback to prevent double-submissions.
 14. **Copy-to-clipboard**: Enrollment tokens have one-click copy with temporary confirmation feedback.
 15. **Device code validation**: Client-side format validation before display or API submission.
+16. **Focus trapping**: Modals trap focus within the dialog and restore it on close.
+17. **Type-safe API layer**: Separate `request<T>` and `requestVoid` helpers eliminate type lies for 204 responses.
+18. **Shared notifications**: Centralized notification state avoids duplicated success/error/clear logic across pages.

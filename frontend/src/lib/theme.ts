@@ -26,9 +26,9 @@ export function setThemeMode(mode: ThemeMode) {
 }
 
 export function initTheme() {
-	const mode = getStored();
-	applyTheme(mode);
-
+	// The initial theme is already applied by the inline script in app.html
+	// to prevent FOUC. Here we only set up the media query listener for
+	// system theme changes.
 	const mq = window.matchMedia('(prefers-color-scheme: dark)');
 	mq.addEventListener('change', () => {
 		const current = getStored();

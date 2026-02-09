@@ -98,11 +98,6 @@ export interface UpdateRegistrationSettings {
 	require_token_for_oidc?: boolean;
 }
 
-export interface OidcCompleteRegistrationRequest {
-	registration_code: string;
-	registration_token: string;
-}
-
 export interface AuthenticationSettings {
 	password_auth_enabled: boolean;
 }

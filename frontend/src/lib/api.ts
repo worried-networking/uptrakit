@@ -72,7 +72,11 @@ async function refreshAccessToken(): Promise<RefreshResponse> {
 	return res.json();
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+/**
+ * Performs an authenticated fetch with automatic token refresh on 401.
+ * Returns the raw Response for callers to handle body parsing.
+ */
+async function authenticatedFetch(path: string, options: RequestInit = {}): Promise<Response> {
 	const res = await fetch(`${BASE}${path}`, {
 		credentials: 'same-origin',
 		...options,
@@ -100,7 +104,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 			setAccessToken(refreshed.access_token);
 
 			// Retry original request with new token
-			const retryRes = await fetch(`${BASE}${path}`, {
+			return fetch(`${BASE}${path}`, {
 				credentials: 'same-origin',
 				...options,
 				headers: {
@@ -109,13 +113,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 					...(options.headers as Record<string, string> | undefined)
 				}
 			});
-
-			if (!retryRes.ok) {
-				const message = await extractErrorMessage(retryRes);
-				throw new Error(message);
-			}
-			if (retryRes.status === 204) return undefined as T;
-			return retryRes.json();
 		} catch {
 			// Refresh failed — clear token and redirect to login
 			setAccessToken(null);
@@ -124,12 +121,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 		}
 	}
 
+	return res;
+}
+
+/** Performs an authenticated request and parses the JSON response body. */
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+	const res = await authenticatedFetch(path, options);
 	if (!res.ok) {
 		const message = await extractErrorMessage(res);
 		throw new Error(message);
 	}
-	if (res.status === 204) return undefined as T;
 	return res.json();
+}
+
+/** Performs an authenticated request expecting no response body (204 or empty). */
+async function requestVoid(path: string, options: RequestInit = {}): Promise<void> {
+	const res = await authenticatedFetch(path, options);
+	if (!res.ok) {
+		const message = await extractErrorMessage(res);
+		throw new Error(message);
+	}
 }
 
 export function register(data: RegisterRequest): Promise<AuthResponse> {
@@ -141,7 +152,7 @@ export function login(data: LoginRequest): Promise<AuthResponse> {
 }
 
 export function logout(): Promise<void> {
-	return request('/auth/logout', {
+	return requestVoid('/auth/logout', {
 		method: 'POST',
 		body: JSON.stringify({})
 	});
@@ -316,7 +327,7 @@ export function updateMqttClient(id: string, data: UpdateMqttClient): Promise<Mq
 }
 
 export function deleteMqttClient(id: string): Promise<void> {
-	return request(`/settings/mqtt/${id}`, { method: 'DELETE' });
+	return requestVoid(`/settings/mqtt/${id}`, { method: 'DELETE' });
 }
 
 export function getMqttLimit(): Promise<MqttLimitResponse> {
@@ -348,7 +359,7 @@ export function updateOidcProvider(
 }
 
 export function deleteOidcProvider(id: string): Promise<void> {
-	return request(`/settings/oidc-providers/${id}`, { method: 'DELETE' });
+	return requestVoid(`/settings/oidc-providers/${id}`, { method: 'DELETE' });
 }
 
 export function activateOidcProvider(id: string): Promise<OidcProviderResponse> {

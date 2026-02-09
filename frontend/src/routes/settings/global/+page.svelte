@@ -11,10 +11,7 @@
 		Permission,
 		type SystemAlert
 	} from '$lib/types';
-
-	// --- Global feedback ---
-	let successMessage: string | null = $state(null);
-	let errorMessage: string | null = $state(null);
+	import { showSuccess, showError, clearError, getSuccessMessage, getErrorMessage } from '$lib/notifications.svelte';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -30,6 +27,8 @@
 	let loading: boolean = $state(true);
 
 	const canManageGlobalSettings = $derived($user?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+	const successMessage = $derived(getSuccessMessage());
+	const errorMessage = $derived(getErrorMessage());
 
 	$effect(() => {
 		if ($user && !canManageGlobalSettings) {
@@ -42,21 +41,6 @@
 			loadGlobalSettings();
 		}
 	});
-
-	function showSuccess(msg: string) {
-		successMessage = msg;
-		setTimeout(() => {
-			successMessage = null;
-		}, 3000);
-	}
-
-	function showError(msg: string) {
-		errorMessage = msg;
-	}
-
-	function clearError() {
-		errorMessage = null;
-	}
 
 	async function loadGlobalSettings() {
 		loading = true;
