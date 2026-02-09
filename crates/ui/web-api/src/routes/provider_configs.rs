@@ -80,6 +80,11 @@ pub async fn create_provider_config(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
+    // Validate hook parameters to prevent command injection
+    if let Err(e) = validate_hooks_in_config(&req.config) {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    }
+
     let now = OffsetDateTime::now_utc();
     let model = provider_config::ActiveModel {
         id: Set(generate_uuid()),
@@ -248,6 +253,11 @@ pub async fn update_provider_config(
         if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
             return error_response(StatusCode::BAD_REQUEST, e.to_string());
         }
+
+        // Validate hook parameters to prevent command injection
+        if let Err(e) = validate_hooks_in_config(new_config) {
+            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        }
     }
 
     let now = OffsetDateTime::now_utc();
@@ -340,6 +350,23 @@ async fn find_active_config(
         .await
         .ok()
         .flatten()
+}
+
+/// Validate hooks configuration embedded in a provider config or config_override JSON.
+///
+/// Parses the `"hooks"` key and validates all predefined hook parameters
+/// to reject shell metacharacters.
+pub(crate) fn validate_hooks_in_config(
+    config: &serde_json::Value,
+) -> std::result::Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
+    if let Some(hooks_val) = config.get("hooks")
+        && let Ok(hooks_config) = serde_json::from_value::<
+            uptrakit_web_api_types::update_hooks::HooksConfig,
+        >(hooks_val.clone())
+    {
+        hooks_config.validate()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

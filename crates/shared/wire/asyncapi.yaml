@@ -1417,6 +1417,66 @@ components:
         - **sh**: `set -eu` (exit on error, undefined vars)
         - **powershell**: `$ErrorActionPreference = 'Stop'` (future Windows support)
 
+    hookCommand:
+      oneOf:
+        - type: object
+          title: Shell command
+          required:
+            - Shell
+          properties:
+            Shell:
+              type: object
+              required:
+                - command
+                - shell
+              properties:
+                command:
+                  type: string
+                  description: The shell command to execute
+                  examples:
+                    - "echo 'Starting backup' && backup.sh"
+                shell:
+                  $ref: "#/components/schemas/hookShell"
+                  description: Shell interpreter to use
+          description: |
+            A custom shell command. Executed via the specified shell interpreter
+            with fail-early settings (e.g., `set -euo pipefail` for bash).
+        - type: object
+          title: Exec command
+          required:
+            - Exec
+          properties:
+            Exec:
+              type: object
+              required:
+                - program
+                - args
+              properties:
+                program:
+                  type: string
+                  description: Program to execute directly (no shell interpretation)
+                  examples:
+                    - systemctl
+                    - docker-compose
+                args:
+                  type: array
+                  items:
+                    type: string
+                  description: Arguments to pass to the program
+                  examples:
+                    - ["stop", "myapp"]
+                    - ["-f", "docker-compose.prod.yml", "up", "-d"]
+                working_dir:
+                  type: string
+                  description: Working directory for the command (optional)
+                  examples:
+                    - /opt/myapp
+          description: |
+            A structured command executed directly via the OS (no shell interpretation).
+            Used for predefined hook templates (systemd, docker-compose) to prevent
+            shell injection. The program and arguments are passed directly to the OS
+            exec syscall.
+
     executeUpdatePayload:
       type: object
       required:
@@ -1469,28 +1529,24 @@ components:
         provider_config:
           type: object
           description: Merged provider configuration (base + override)
-        pre_update_commands:
+        pre_update_hooks:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/hookCommand"
           description: |
-            Commands to run before the update. Resolved from structured hooks
-            configuration or legacy format. Each command is wrapped with
-            fail-early shell settings before execution.
+            Hook commands to run before the update. Each item is either a
+            structured exec command (for predefined hooks like systemd/docker-compose)
+            or a shell command (for custom commands). Exec commands are run directly
+            without a shell interpreter; shell commands are wrapped with fail-early
+            settings and executed via the specified shell.
           default: []
-          examples:
-            - ["systemctl stop app"]
-        post_update_commands:
+        post_update_hooks:
           type: array
           items:
-            type: string
+            $ref: "#/components/schemas/hookCommand"
           description: |
-            Commands to run after the update. Resolved from structured hooks
-            configuration or legacy format. Each command is wrapped with
-            fail-early shell settings before execution.
+            Hook commands to run after the update. Same format as pre_update_hooks.
           default: []
-          examples:
-            - ["systemctl start app"]
         release_info:
           $ref: "#/components/schemas/releaseInfo"
           description: Optional release information (for providers that need it)
@@ -1501,12 +1557,6 @@ components:
           default: 300
           examples:
             - 300
-        shell:
-          $ref: "#/components/schemas/hookShell"
-          description: |
-            Shell to use for hook command execution. When not specified,
-            defaults to "bash". The agent wraps each hook command with
-            fail-early settings appropriate for the shell type.
 
     updateStartedPayload:
       type: object

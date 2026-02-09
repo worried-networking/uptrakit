@@ -6,6 +6,91 @@
 //! - Shell selection (bash, sh, powershell)
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Error returned when hook parameter validation fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookValidationError {
+    pub field: &'static str,
+    pub message: String,
+}
+
+impl fmt::Display for HookValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.field, self.message)
+    }
+}
+
+impl std::error::Error for HookValidationError {}
+
+/// Validate a systemd service/unit name.
+///
+/// Allowed: `[a-zA-Z0-9._@:-]+`, max 256 characters.
+fn validate_service_name(name: &str) -> Result<(), HookValidationError> {
+    if name.is_empty() {
+        return Err(HookValidationError {
+            field: "service_name",
+            message: "must not be empty".to_string(),
+        });
+    }
+    if name.len() > 256 {
+        return Err(HookValidationError {
+            field: "service_name",
+            message: "must be at most 256 characters".to_string(),
+        });
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._@:-".contains(c))
+    {
+        return Err(HookValidationError {
+            field: "service_name",
+            message: "contains invalid characters (allowed: a-z, A-Z, 0-9, . _ @ : -)".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Validate a file system path used in hooks.
+///
+/// Allowed: `[a-zA-Z0-9._/ ~-]+`, max 4096 characters, no `..` traversal.
+fn validate_hook_path(value: &str, field: &'static str) -> Result<(), HookValidationError> {
+    if value.is_empty() {
+        return Err(HookValidationError {
+            field,
+            message: "must not be empty".to_string(),
+        });
+    }
+    if value.len() > 4096 {
+        return Err(HookValidationError {
+            field,
+            message: "must be at most 4096 characters".to_string(),
+        });
+    }
+    if value.contains("..") {
+        return Err(HookValidationError {
+            field,
+            message: "must not contain '..' path traversal".to_string(),
+        });
+    }
+    if value.contains('\0') {
+        return Err(HookValidationError {
+            field,
+            message: "must not contain null bytes".to_string(),
+        });
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._/ ~-".contains(c))
+    {
+        return Err(HookValidationError {
+            field,
+            message: "contains invalid characters (allowed: a-z, A-Z, 0-9, . _ / ~ - space)"
+                .to_string(),
+        });
+    }
+    Ok(())
+}
 
 /// Shell type for hook execution.
 ///
@@ -97,6 +182,13 @@ pub struct SystemdServiceHook {
     pub action: SystemdAction,
 }
 
+impl SystemdServiceHook {
+    /// Validate that the service name is safe for command execution.
+    pub fn validate(&self) -> Result<(), HookValidationError> {
+        validate_service_name(&self.service_name)
+    }
+}
+
 /// Predefined docker-compose hook configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DockerComposeHook {
@@ -110,6 +202,19 @@ pub struct DockerComposeHook {
     pub project_dir: Option<String>,
 }
 
+impl DockerComposeHook {
+    /// Validate that paths are safe for command execution.
+    pub fn validate(&self) -> Result<(), HookValidationError> {
+        if let Some(ref compose_file) = self.compose_file {
+            validate_hook_path(compose_file, "compose_file")?;
+        }
+        if let Some(ref project_dir) = self.project_dir {
+            validate_hook_path(project_dir, "project_dir")?;
+        }
+        Ok(())
+    }
+}
+
 /// Predefined hook templates with explicit actions.
 ///
 /// Each variant directly maps to a specific command - no hidden magic.
@@ -120,6 +225,16 @@ pub enum PredefinedHook {
     SystemdService(SystemdServiceHook),
     /// Docker-compose operations (e.g., down/up containers).
     DockerCompose(DockerComposeHook),
+}
+
+impl PredefinedHook {
+    /// Validate that all parameters are safe for command execution.
+    pub fn validate(&self) -> Result<(), HookValidationError> {
+        match self {
+            Self::SystemdService(hook) => hook.validate(),
+            Self::DockerCompose(hook) => hook.validate(),
+        }
+    }
 }
 
 /// Single hook phase configuration (pre_update or post_update).
@@ -150,6 +265,23 @@ pub struct HooksConfig {
     /// Post-update hook configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_update: Option<UpdateHookConfig>,
+}
+
+impl HooksConfig {
+    /// Validate all predefined hooks in this config.
+    pub fn validate(&self) -> Result<(), HookValidationError> {
+        if let Some(ref pre) = self.pre_update
+            && let Some(ref predefined) = pre.predefined
+        {
+            predefined.validate()?;
+        }
+        if let Some(ref post) = self.post_update
+            && let Some(ref predefined) = post.predefined
+        {
+            predefined.validate()?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -454,6 +586,134 @@ mod tests {
         } else {
             panic!("Expected DockerCompose predefined hook");
         }
+    }
+
+    // ── Validation tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn validate_systemd_service_name_valid() {
+        let hook = SystemdServiceHook {
+            service_name: "nginx".to_string(),
+            action: SystemdAction::Restart,
+        };
+        assert!(hook.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_systemd_service_name_with_special_chars() {
+        for name in ["my-app.service", "foo@bar", "my_app:v2", "postgresql-15"] {
+            let hook = SystemdServiceHook {
+                service_name: name.to_string(),
+                action: SystemdAction::Restart,
+            };
+            assert!(hook.validate().is_ok(), "should accept: {name}");
+        }
+    }
+
+    #[test]
+    fn validate_systemd_service_name_rejects_shell_metacharacters() {
+        for name in [
+            "; rm -rf /",
+            "myapp$(whoami)",
+            "myapp`id`",
+            "my|app",
+            "my&app",
+            "my\napp",
+            "my\0app",
+            "my app",
+        ] {
+            let hook = SystemdServiceHook {
+                service_name: name.to_string(),
+                action: SystemdAction::Restart,
+            };
+            assert!(hook.validate().is_err(), "should reject: {name:?}");
+        }
+    }
+
+    #[test]
+    fn validate_systemd_service_name_empty() {
+        let hook = SystemdServiceHook {
+            service_name: String::new(),
+            action: SystemdAction::Stop,
+        };
+        assert!(hook.validate().is_err());
+    }
+
+    #[test]
+    fn validate_docker_compose_paths_valid() {
+        let hook = DockerComposeHook {
+            action: DockerComposeAction::Up,
+            compose_file: Some("docker-compose.prod.yml".to_string()),
+            project_dir: Some("/opt/my-app".to_string()),
+        };
+        assert!(hook.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_docker_compose_path_with_spaces() {
+        let hook = DockerComposeHook {
+            action: DockerComposeAction::Up,
+            compose_file: None,
+            project_dir: Some("/opt/my app".to_string()),
+        };
+        assert!(hook.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_docker_compose_rejects_traversal() {
+        let hook = DockerComposeHook {
+            action: DockerComposeAction::Up,
+            compose_file: None,
+            project_dir: Some("/opt/../etc/shadow".to_string()),
+        };
+        assert!(hook.validate().is_err());
+    }
+
+    #[test]
+    fn validate_docker_compose_rejects_shell_metacharacters() {
+        for path in [
+            "/opt/$(whoami)",
+            "/opt/`id`",
+            "/opt;rm -rf /",
+            "/opt|cat /etc/passwd",
+            "/opt&bg",
+        ] {
+            let hook = DockerComposeHook {
+                action: DockerComposeAction::Up,
+                compose_file: None,
+                project_dir: Some(path.to_string()),
+            };
+            assert!(hook.validate().is_err(), "should reject: {path:?}");
+        }
+    }
+
+    #[test]
+    fn validate_hooks_config_validates_predefined() {
+        let config = HooksConfig {
+            pre_update: Some(UpdateHookConfig {
+                predefined: Some(PredefinedHook::SystemdService(SystemdServiceHook {
+                    service_name: "; rm -rf /".to_string(),
+                    action: SystemdAction::Stop,
+                })),
+                commands: None,
+                shell: None,
+            }),
+            post_update: None,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_hooks_config_ok_with_no_predefined() {
+        let config = HooksConfig {
+            pre_update: Some(UpdateHookConfig {
+                predefined: None,
+                commands: Some(vec!["echo hello".to_string()]),
+                shell: None,
+            }),
+            post_update: None,
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]

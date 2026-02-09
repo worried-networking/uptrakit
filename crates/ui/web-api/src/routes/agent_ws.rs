@@ -798,14 +798,6 @@ async fn deliver_pending_updates(
         let merged_config =
             crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
 
-        let shell = if !resolved_hooks.pre_update_commands.is_empty() {
-            Some(wire_hook_shell(resolved_hooks.pre_update_shell))
-        } else if !resolved_hooks.post_update_commands.is_empty() {
-            Some(wire_hook_shell(resolved_hooks.post_update_shell))
-        } else {
-            None
-        };
-
         let execute_payload = ExecuteUpdatePayload {
             update_history_id: update_record.id,
             software_item_id: item.id,
@@ -814,11 +806,10 @@ async fn deliver_pending_updates(
             to_version: update_record.to_version.clone(),
             provider_type,
             provider_config: merged_config,
-            pre_update_commands: resolved_hooks.pre_update_commands,
-            post_update_commands: resolved_hooks.post_update_commands,
+            pre_update_hooks: resolved_hooks.pre_update_hooks,
+            post_update_hooks: resolved_hooks.post_update_hooks,
             release_info: None,
             timeout_seconds: 300,
-            shell,
         };
 
         let msg = ControllerMessage::ExecuteUpdate(Box::new(execute_payload));
@@ -839,21 +830,4 @@ async fn deliver_pending_updates(
     }
 
     Ok(())
-}
-
-/// Convert a `web-api-types` `HookShell` to the wire protocol `HookShell`.
-pub(crate) fn wire_hook_shell(
-    shell: uptrakit_web_api_types::update_hooks::HookShell,
-) -> uptrakit_internal_wire::HookShell {
-    match shell {
-        uptrakit_web_api_types::update_hooks::HookShell::Bash => {
-            uptrakit_internal_wire::HookShell::Bash
-        }
-        uptrakit_web_api_types::update_hooks::HookShell::Sh => {
-            uptrakit_internal_wire::HookShell::Sh
-        }
-        uptrakit_web_api_types::update_hooks::HookShell::PowerShell => {
-            uptrakit_internal_wire::HookShell::PowerShell
-        }
-    }
 }

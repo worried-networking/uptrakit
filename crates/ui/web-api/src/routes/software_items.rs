@@ -4,6 +4,7 @@ use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
+use crate::routes::provider_configs::validate_hooks_in_config;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -242,14 +243,21 @@ pub async fn create_software_item(
     let package_identifier = req.package_identifier.unwrap_or_default();
 
     // Validate config_override if provided
-    if let Some(ref override_val) = req.config_override
-        && let Err(e) =
+    if let Some(ref override_val) = req.config_override {
+        if let Err(e) =
             validate_config_override(&config.provider_type, &config.config, override_val)
-    {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            format!("config_override validation failed: {e}"),
-        );
+        {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("config_override validation failed: {e}"),
+            );
+        }
+        if let Err(e) = validate_hooks_in_config(override_val) {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("config_override hook validation failed: {e}"),
+            );
+        }
     }
 
     // Check uniqueness: (provider_config_id, package_identifier) among active items
@@ -517,13 +525,21 @@ pub async fn update_software_item(
     // Validate config_override if provided (non-null value means replace, null means clear)
     if let Some(ref override_val) = req.config_override
         && !override_val.is_null()
-        && let Err(e) =
-            validate_config_override(&config.provider_type, &config.config, override_val)
     {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            format!("config_override validation failed: {e}"),
-        );
+        if let Err(e) =
+            validate_config_override(&config.provider_type, &config.config, override_val)
+        {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("config_override validation failed: {e}"),
+            );
+        }
+        if let Err(e) = validate_hooks_in_config(override_val) {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("config_override hook validation failed: {e}"),
+            );
+        }
     }
 
     let now = OffsetDateTime::now_utc();
@@ -1003,19 +1019,6 @@ pub async fn trigger_update(
         }
     };
 
-    // Determine shell type - use pre_update shell if available, otherwise post_update shell
-    let shell = if !resolved_hooks.pre_update_commands.is_empty() {
-        Some(super::agent_ws::wire_hook_shell(
-            resolved_hooks.pre_update_shell,
-        ))
-    } else if !resolved_hooks.post_update_commands.is_empty() {
-        Some(super::agent_ws::wire_hook_shell(
-            resolved_hooks.post_update_shell,
-        ))
-    } else {
-        None
-    };
-
     // 11. Build ExecuteUpdatePayload
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
         update_history_id,
@@ -1025,8 +1028,8 @@ pub async fn trigger_update(
         to_version: req.to_version,
         provider_type,
         provider_config: merged_config,
-        pre_update_commands: resolved_hooks.pre_update_commands,
-        post_update_commands: resolved_hooks.post_update_commands,
+        pre_update_hooks: resolved_hooks.pre_update_hooks,
+        post_update_hooks: resolved_hooks.post_update_hooks,
         release_info: req
             .release_info
             .map(|ri| uptrakit_internal_wire::ReleaseInfo {
@@ -1044,7 +1047,6 @@ pub async fn trigger_update(
                     .collect(),
             }),
         timeout_seconds: 300, // Default timeout
-        shell,
     };
 
     // 12. Check if agent is connected locally and send (also writes outbox for cross-controller delivery)

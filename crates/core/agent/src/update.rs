@@ -24,8 +24,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    ExecuteUpdatePayload, HookShell, OutputStreamType, ProviderType, UpdateFinalStatus,
-    UpdateResultPayload,
+    ExecuteUpdatePayload, HookCommand, HookShell, OutputStreamType, ProviderType,
+    UpdateFinalStatus, UpdateResultPayload,
 };
 
 use crate::error::Error;
@@ -78,7 +78,6 @@ pub async fn execute_update(
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateExecutionResult {
     let update_history_id = payload.update_history_id;
-    let shell = payload.shell.unwrap_or_default();
 
     // Detect current version (from_version)
     let from_version = detect_current_version(&payload).await;
@@ -91,7 +90,7 @@ pub async fn execute_update(
     let timeout_duration = std::time::Duration::from_secs(u64::from(payload.timeout_seconds));
     let execution_result = tokio::time::timeout(timeout_duration, async {
         // Run pre-update hooks
-        if !payload.pre_update_commands.is_empty() {
+        if !payload.pre_update_hooks.is_empty() {
             send_output(
                 &output_tx,
                 "[pre-hook] Starting pre-update hooks...",
@@ -99,17 +98,15 @@ pub async fn execute_update(
             )
             .await;
 
-            for cmd in &payload.pre_update_commands {
+            for hook_cmd in &payload.pre_update_hooks {
                 send_output(
                     &output_tx,
-                    &format!("[pre-hook] Running: {cmd}"),
+                    &format!("[pre-hook] Running: {hook_cmd}"),
                     OutputStreamType::PreHook,
                 )
                 .await;
 
-                match run_command_with_shell(cmd, shell, OutputStreamType::PreHook, &output_tx)
-                    .await
-                {
+                match run_hook_command(hook_cmd, OutputStreamType::PreHook, &output_tx).await {
                     Ok((output, exit_code)) => {
                         accumulated_output.push_str(&output);
                         send_output(
@@ -149,7 +146,7 @@ pub async fn execute_update(
         }
 
         // Run post-update hooks
-        if !payload.post_update_commands.is_empty() {
+        if !payload.post_update_hooks.is_empty() {
             send_output(
                 &output_tx,
                 "[post-hook] Starting post-update hooks...",
@@ -157,17 +154,15 @@ pub async fn execute_update(
             )
             .await;
 
-            for cmd in &payload.post_update_commands {
+            for hook_cmd in &payload.post_update_hooks {
                 send_output(
                     &output_tx,
-                    &format!("[post-hook] Running: {cmd}"),
+                    &format!("[post-hook] Running: {hook_cmd}"),
                     OutputStreamType::PostHook,
                 )
                 .await;
 
-                match run_command_with_shell(cmd, shell, OutputStreamType::PostHook, &output_tx)
-                    .await
-                {
+                match run_hook_command(hook_cmd, OutputStreamType::PostHook, &output_tx).await {
                     Ok((output, exit_code)) => {
                         accumulated_output.push_str(&output);
                         send_output(
@@ -445,6 +440,121 @@ fn get_shell_args(shell: HookShell) -> (&'static str, &'static str) {
     }
 }
 
+/// Execute a `HookCommand`, dispatching to shell or direct exec as appropriate.
+async fn run_hook_command(
+    hook_cmd: &HookCommand,
+    stream_type: OutputStreamType,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+) -> UpdateResult<(String, i32)> {
+    match hook_cmd {
+        HookCommand::Shell { command, shell } => {
+            run_command_with_shell(command, *shell, stream_type, output_tx).await
+        }
+        HookCommand::Exec {
+            program,
+            args,
+            working_dir,
+        } => {
+            run_command_exec(
+                program,
+                args,
+                working_dir.as_deref(),
+                stream_type,
+                output_tx,
+            )
+            .await
+        }
+    }
+}
+
+/// Run a program directly with arguments (no shell interpretation).
+///
+/// Returns the accumulated output and exit code on success.
+async fn run_command_exec(
+    program: &str,
+    args: &[String],
+    working_dir: Option<&str>,
+    stream_type: OutputStreamType,
+    output_tx: &mpsc::Sender<UpdateOutputMessage>,
+) -> UpdateResult<(String, i32)> {
+    let mut cmd = Command::new(program);
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    if let Some(dir) = working_dir {
+        cmd.current_dir(dir);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| report!(UpdateError::CommandSpawn(e)))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| report!(UpdateError::CaptureFailed("stdout".to_string())))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| report!(UpdateError::CaptureFailed("stderr".to_string())))?;
+
+    let mut accumulated = String::new();
+
+    let stdout_reader = BufReader::new(stdout);
+    let stderr_reader = BufReader::new(stderr);
+
+    let output_tx_clone = output_tx.clone();
+    let stdout_handle = tokio::spawn(async move {
+        let mut lines = stdout_reader.lines();
+        let mut output = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = output_tx_clone
+                .send(UpdateOutputMessage {
+                    output: line.clone(),
+                    stream: stream_type,
+                })
+                .await;
+            output.push_str(&line);
+            output.push('\n');
+        }
+        output
+    });
+
+    let output_tx_clone = output_tx.clone();
+    let stderr_handle = tokio::spawn(async move {
+        let mut lines = stderr_reader.lines();
+        let mut output = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = output_tx_clone
+                .send(UpdateOutputMessage {
+                    output: line.clone(),
+                    stream: OutputStreamType::Stderr,
+                })
+                .await;
+            output.push_str(&line);
+            output.push('\n');
+        }
+        output
+    });
+
+    let (stdout_output, stderr_output) = tokio::join!(stdout_handle, stderr_handle);
+
+    accumulated.push_str(&stdout_output.unwrap_or_default());
+    accumulated.push_str(&stderr_output.unwrap_or_default());
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| report!(UpdateError::CommandWait(e)))?;
+
+    let exit_code = status.code().unwrap_or(-1);
+
+    if !status.success() {
+        return Err(report!(UpdateError::CommandFailed(exit_code)));
+    }
+
+    Ok((accumulated, exit_code))
+}
+
 /// Run a command with the specified shell and fail-early settings.
 ///
 /// Returns the accumulated output and exit code on success.
@@ -572,11 +682,10 @@ mod tests {
             to_version: "2.0.0".to_string(),
             provider_type: ProviderType::GithubReleases,
             provider_config: json!({}),
-            pre_update_commands: vec![],
-            post_update_commands: vec![],
+            pre_update_hooks: vec![],
+            post_update_hooks: vec![],
             release_info: None,
             timeout_seconds: 60,
-            shell: None,
         }
     }
 
@@ -655,7 +764,10 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.pre_update_commands = vec!["echo 'pre-hook executed'".to_string()];
+        payload.pre_update_hooks = vec![HookCommand::Shell {
+            command: "echo 'pre-hook executed'".to_string(),
+            shell: HookShell::Bash,
+        }];
         payload.release_info = None;
         payload.provider_config = json!({});
 
@@ -680,7 +792,10 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.pre_update_commands = vec!["exit 1".to_string()];
+        payload.pre_update_hooks = vec![HookCommand::Shell {
+            command: "exit 1".to_string(),
+            shell: HookShell::Bash,
+        }];
 
         let result = execute_update(payload, tx).await;
 
@@ -702,8 +817,10 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
 
         let mut payload = test_payload();
-        payload.shell = Some(HookShell::Sh);
-        payload.pre_update_commands = vec!["echo 'using sh shell'".to_string()];
+        payload.pre_update_hooks = vec![HookCommand::Shell {
+            command: "echo 'using sh shell'".to_string(),
+            shell: HookShell::Sh,
+        }];
 
         let result = execute_update(payload, tx).await;
 

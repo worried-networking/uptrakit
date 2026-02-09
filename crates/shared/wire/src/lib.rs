@@ -87,6 +87,51 @@ impl std::fmt::Display for HookShell {
     }
 }
 
+/// A single hook command to execute on the agent.
+///
+/// Predefined hooks use the `Exec` variant which avoids shell interpretation.
+/// Custom commands use the `Shell` variant which runs through a shell.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HookCommand {
+    /// Execute a command string through a shell interpreter.
+    Shell {
+        command: String,
+        #[serde(default)]
+        shell: HookShell,
+    },
+    /// Execute a program directly with arguments (no shell interpretation).
+    Exec {
+        program: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        working_dir: Option<String>,
+    },
+}
+
+impl fmt::Display for HookCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Shell { command, .. } => write!(f, "{command}"),
+            Self::Exec {
+                program,
+                args,
+                working_dir,
+            } => {
+                if let Some(dir) = working_dir {
+                    write!(f, "(in {dir}) ")?;
+                }
+                write!(f, "{program}")?;
+                for arg in args {
+                    write!(f, " {arg}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// Unix epoch timestamp in milliseconds.
 pub type Timestamp = i64;
 
@@ -438,18 +483,16 @@ pub struct ExecuteUpdatePayload {
     pub provider_type: ProviderType,
     /// Merged provider config (base + override).
     pub provider_config: serde_json::Value,
+    /// Pre-update hook commands to execute before the update.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pre_update_commands: Vec<String>,
+    pub pre_update_hooks: Vec<HookCommand>,
+    /// Post-update hook commands to execute after the update.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub post_update_commands: Vec<String>,
+    pub post_update_hooks: Vec<HookCommand>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_info: Option<ReleaseInfo>,
     #[serde(default = "default_update_timeout")]
     pub timeout_seconds: u32,
-    /// Shell to use for hook execution.
-    /// Default: `HookShell::Bash` when not specified.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shell: Option<HookShell>,
 }
 
 /// Agent -> Controller: Update is starting.
@@ -1303,8 +1346,16 @@ mod tests {
             to_version: "20.10.0".to_string(),
             provider_type: ProviderType::GithubReleases,
             provider_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
-            pre_update_commands: vec!["systemctl stop myapp".to_string()],
-            post_update_commands: vec!["systemctl start myapp".to_string()],
+            pre_update_hooks: vec![HookCommand::Exec {
+                program: "systemctl".to_string(),
+                args: vec!["stop".to_string(), "myapp".to_string()],
+                working_dir: None,
+            }],
+            post_update_hooks: vec![HookCommand::Exec {
+                program: "systemctl".to_string(),
+                args: vec!["start".to_string(), "myapp".to_string()],
+                working_dir: None,
+            }],
             release_info: Some(ReleaseInfo {
                 tag: "v20.10.0".to_string(),
                 release_url: "https://github.com/nodejs/node/releases/tag/v20.10.0".to_string(),
@@ -1316,12 +1367,11 @@ mod tests {
                 }],
             }),
             timeout_seconds: 600,
-            shell: Some(HookShell::Bash),
         }));
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"execute_update"#));
         assert!(json.contains(r#""provider_type":"github_releases"#));
-        assert!(json.contains(r#""shell":"bash"#));
+        assert!(json.contains(r#""exec"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1336,24 +1386,22 @@ mod tests {
             to_version: "7.2.0".to_string(),
             provider_type: ProviderType::ProxmoxHelperScripts,
             provider_config: serde_json::json!({}),
-            pre_update_commands: vec![],
-            post_update_commands: vec![],
+            pre_update_hooks: vec![],
+            post_update_hooks: vec![],
             release_info: None,
             timeout_seconds: 300,
-            shell: None,
         }));
         let json = serde_json::to_string(&msg).unwrap();
         // Empty vectors should be omitted
-        assert!(!json.contains("pre_update_commands"));
-        assert!(!json.contains("post_update_commands"));
+        assert!(!json.contains("pre_update_hooks"));
+        assert!(!json.contains("post_update_hooks"));
         assert!(!json.contains("release_info"));
-        assert!(!json.contains("shell"));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
 
     #[test]
-    fn execute_update_backward_compat_default_timeout() {
+    fn execute_update_default_timeout() {
         let json = r#"{
             "type": "execute_update",
             "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -1367,33 +1415,51 @@ mod tests {
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         if let ControllerMessage::ExecuteUpdate(payload) = msg {
             assert_eq!(payload.timeout_seconds, 300);
-            assert!(payload.pre_update_commands.is_empty());
-            assert!(payload.post_update_commands.is_empty());
-            assert!(payload.shell.is_none());
+            assert!(payload.pre_update_hooks.is_empty());
+            assert!(payload.post_update_hooks.is_empty());
         } else {
             panic!("Expected ExecuteUpdate");
         }
     }
 
     #[test]
-    fn execute_update_with_shell_field() {
-        let json = r#"{
-            "type": "execute_update",
-            "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
-            "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
-            "software_item_name": "Test",
-            "package_identifier": "test",
-            "to_version": "1.0.0",
-            "provider_type": "github_releases",
-            "provider_config": {},
-            "shell": "sh"
-        }"#;
-        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
-        if let ControllerMessage::ExecuteUpdate(payload) = msg {
-            assert_eq!(payload.shell, Some(HookShell::Sh));
-        } else {
-            panic!("Expected ExecuteUpdate");
-        }
+    fn execute_update_with_shell_hook_command() {
+        let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            update_history_id: TEST_UUID_1,
+            software_item_id: TEST_UUID_2,
+            software_item_name: "Test".to_string(),
+            package_identifier: "test".to_string(),
+            to_version: "1.0.0".to_string(),
+            provider_type: ProviderType::GithubReleases,
+            provider_config: serde_json::json!({}),
+            pre_update_hooks: vec![HookCommand::Shell {
+                command: "echo hello".to_string(),
+                shell: HookShell::Sh,
+            }],
+            post_update_hooks: vec![],
+            release_info: None,
+            timeout_seconds: 300,
+        }));
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""shell"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn hook_command_display() {
+        let shell = HookCommand::Shell {
+            command: "echo hello".to_string(),
+            shell: HookShell::Bash,
+        };
+        assert_eq!(shell.to_string(), "echo hello");
+
+        let exec = HookCommand::Exec {
+            program: "systemctl".to_string(),
+            args: vec!["restart".to_string(), "nginx".to_string()],
+            working_dir: Some("/opt".to_string()),
+        };
+        assert_eq!(exec.to_string(), "(in /opt) systemctl restart nginx");
     }
 
     #[test]

@@ -33,7 +33,7 @@ Commit: `b855b6f`
 
 ## 1. Critical Findings
 
-### CR-1: Race condition in first-user owner role assignment
+### CR-1: Race condition in first-user owner role assignment — FIXED
 
 **Files:** `web-api/src/routes/auth.rs:86-136`, `web-api/src/routes/oidc_auth.rs:443-477`
 
@@ -41,7 +41,7 @@ The "first user" check uses `User::find().count()` followed by role assignment w
 
 **Impact:** An attacker can race the first user registration to obtain owner privileges.
 
-**Fix plan:** [FP-CR1](#fp-cr1-atomic-first-user-registration)
+**Fix plan:** [FP-CR1](#fp-cr1-atomic-first-user-registration) — **Implemented**: All three registration paths (password, OIDC callback, OIDC complete-registration) now wrap user creation + first-user check + role assignment in a single database transaction via `handle_first_user_setup()`.
 
 ### CR-2: MQTT passwords stored and transmitted in plaintext
 
@@ -110,7 +110,7 @@ The `logout` route is registered outside the `auth_routes` group (which has `req
 
 **Impact:** Stored command injection executed on remote agents. Requires admin privileges but has unlimited blast radius.
 
-**Fix plan:** [FP-HI1](#fp-hi1-sanitize-hook-parameters)
+**Fix plan:** [FP-HI1](#fp-hi1-sanitize-hook-parameters) — **Implemented**: Two layers of defense: (1) Input validation at API boundary rejects shell metacharacters in hook parameters; (2) Predefined hooks now produce `HookCommand::Exec { program, args }` executed via `Command::new()` without shell interpretation. Custom commands remain shell-executed.
 
 ### HI-2: Service merge operation not wrapped in a transaction
 
@@ -476,7 +476,7 @@ These aspects demonstrate strong engineering practices:
 
 ---
 
-### FP-CR1: Atomic first-user registration (TOP 5 — #1)
+### FP-CR1: Atomic first-user registration (TOP 5 — #1) — IMPLEMENTED
 
 **Addresses:** CR-1 (Critical — privilege escalation via race condition)
 
@@ -539,7 +539,7 @@ Additionally, the password path checks `count == 0` *before* creating the user, 
 
 ---
 
-### FP-HI1: Eliminate command injection in update hooks (TOP 5 — #2)
+### FP-HI1: Eliminate command injection in update hooks (TOP 5 — #2) — IMPLEMENTED
 
 **Addresses:** HI-1 (High — stored RCE on remote agents)
 
