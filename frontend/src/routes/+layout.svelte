@@ -147,25 +147,7 @@
 
 			<!-- Main content -->
 			<main class="flex-1 overflow-auto">
-				<ToastNotifications />
-				{#if visibleAlerts.length > 0}
-					<div class="space-y-2 px-4 pt-2">
-						{#each visibleAlerts as alert (alert.id)}
-							<aside class="flex items-center justify-between rounded-lg p-4 {alert.severity === 'warning' ? 'preset-filled-warning-500' : 'preset-filled-surface-400-600'}">
-								<div>
-									<h3 class="font-bold">{alert.title}</h3>
-									<p>{alert.message}</p>
-								</div>
-								<div class="flex gap-2">
-									{#if alert.action === 'renew_server_certificate'}
-										<a href="/settings/global" class="btn btn-sm preset-filled">Go to Global Settings</a>
-									{/if}
-									<button class="btn btn-sm preset-tonal" onclick={() => dismissAlert(alert.id)}>Dismiss</button>
-								</div>
-							</aside>
-						{/each}
-					</div>
-				{/if}
+				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
 				<div class="container mx-auto max-w-2xl p-4">
 					{#if $user || publicRoutes.has($page.url.pathname)}

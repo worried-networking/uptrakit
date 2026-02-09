@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { clearError, getErrorMessage, getSuccessMessage } from '$lib/notifications.svelte';
+	import type { SystemAlert } from '$lib/types';
+
+	let { alerts, onDismiss }: { alerts: SystemAlert[]; onDismiss: (id: string) => void } = $props();
 
 	const successMessage = $derived(getSuccessMessage());
 	const errorMessage = $derived(getErrorMessage());
@@ -18,4 +21,19 @@
 			<button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
 		</aside>
 	{/if}
+
+	{#each alerts as alert (alert.id)}
+		<aside class="pointer-events-auto flex items-center justify-between gap-4 rounded-lg p-4 shadow-lg {alert.severity === 'warning' ? 'preset-filled-warning-500' : 'preset-filled-surface-400-600'}">
+			<div>
+				<h3 class="font-bold">{alert.title}</h3>
+				<p>{alert.message}</p>
+			</div>
+			<div class="flex gap-2">
+				{#if alert.action === 'renew_server_certificate'}
+					<a href="/settings/global" class="btn btn-sm preset-filled">Go to Global Settings</a>
+				{/if}
+				<button class="btn btn-sm preset-filled" onclick={() => onDismiss(alert.id)}>Dismiss</button>
+			</div>
+		</aside>
+	{/each}
 </div>
