@@ -4,6 +4,10 @@
 		revokeEnrollmentToken
 	} from '$lib/api';
 	import type { EnrollmentTokenStatus } from '$lib/types';
+	import { copyToClipboard } from '$lib/utils';
+
+	let agentCopied: boolean = $state(false);
+	let mqttCopied: boolean = $state(false);
 
 	let {
 		onSuccess,
@@ -86,7 +90,20 @@
 	{#if generatedToken}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
 			<p class="font-bold">Copy it now — it will not be shown again</p>
-			<code class="break-all">{generatedToken}</code>
+			<div class="mt-2 flex items-start gap-2">
+				<code class="flex-1 break-all">{generatedToken}</code>
+				<button
+					class="btn btn-sm preset-tonal flex-shrink-0"
+					onclick={async () => {
+						if (generatedToken && await copyToClipboard(generatedToken)) {
+							agentCopied = true;
+							setTimeout(() => { agentCopied = false; }, 2000);
+						}
+					}}
+				>
+					{agentCopied ? 'Copied!' : 'Copy'}
+				</button>
+			</div>
 		</aside>
 	{/if}
 
@@ -121,7 +138,20 @@
 	{#if mqttGeneratedToken}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
 			<p class="font-bold">Copy it now — it will not be shown again</p>
-			<code class="break-all">{mqttGeneratedToken}</code>
+			<div class="mt-2 flex items-start gap-2">
+				<code class="flex-1 break-all">{mqttGeneratedToken}</code>
+				<button
+					class="btn btn-sm preset-tonal flex-shrink-0"
+					onclick={async () => {
+						if (mqttGeneratedToken && await copyToClipboard(mqttGeneratedToken)) {
+							mqttCopied = true;
+							setTimeout(() => { mqttCopied = false; }, 2000);
+						}
+					}}
+				>
+					{mqttCopied ? 'Copied!' : 'Copy'}
+				</button>
+			</div>
 		</aside>
 	{/if}
 

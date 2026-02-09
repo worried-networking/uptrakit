@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { user, handleLogin, handleOidcLogin, handleOidcCallback, handleOidcLink, handleOidcCompleteRegistration } from '$lib/auth';
 	import { getAuthMethods } from '$lib/api';
 	import { goto } from '$app/navigation';
@@ -74,7 +75,7 @@
 	});
 
 	// Load auth methods on mount
-	$effect(() => {
+	onMount(() => {
 		getAuthMethods()
 			.then((methods) => {
 				authMethods = methods;

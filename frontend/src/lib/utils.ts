@@ -21,3 +21,15 @@ export function formatDate(date: string | null | undefined): string {
 	if (!date) return '\u2014';
 	return new Date(date).toLocaleString();
 }
+
+/**
+ * Copies text to the clipboard. Returns true on success, false on failure.
+ */
+export async function copyToClipboard(text: string): Promise<boolean> {
+	try {
+		await navigator.clipboard.writeText(text);
+		return true;
+	} catch {
+		return false;
+	}
+}

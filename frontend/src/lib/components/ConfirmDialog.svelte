@@ -6,6 +6,7 @@
 		message,
 		confirmLabel,
 		confirmClass = 'preset-filled-error-500',
+		confirmDisabled = false,
 		onconfirm,
 		oncancel
 	}: {
@@ -13,6 +14,7 @@
 		message: string;
 		confirmLabel: string;
 		confirmClass?: string;
+		confirmDisabled?: boolean;
 		onconfirm: () => void;
 		oncancel: () => void;
 	} = $props();
@@ -24,7 +26,7 @@
 		<p>{@html message}</p>
 		<div class="flex justify-end gap-2">
 			<button class="btn preset-tonal-surface" onclick={oncancel}>Cancel</button>
-			<button class="btn {confirmClass}" onclick={onconfirm}>
+			<button class="btn {confirmClass}" disabled={confirmDisabled} onclick={onconfirm}>
 				{confirmLabel}
 			</button>
 		</div>

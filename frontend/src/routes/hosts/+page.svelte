@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { user } from '$lib/auth';
 	import { getHosts, updateHost, deactivateHost } from '$lib/api';
 	import type { HostResponse } from '$lib/types';
@@ -14,12 +15,9 @@
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
 	let confirmAction: { hostId: string; action: 'deactivate'; name: string } | null = $state(null);
 	let editHost: { id: string; friendlyName: string } | null = $state(null);
+	let submitting: boolean = $state(false);
 
-	$effect(() => {
-		if ($user) {
-			loadHosts();
-		}
-	});
+	onMount(loadHosts);
 
 	async function loadHosts() {
 		try {
@@ -64,7 +62,8 @@
 	}
 
 	async function executeEdit() {
-		if (!editHost) return;
+		if (!editHost || submitting) return;
+		submitting = true;
 		try {
 			error = null;
 			const updated = await updateHost(editHost.id, { friendly_name: editHost.friendlyName });
@@ -72,13 +71,16 @@
 			editHost = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update host';
+		} finally {
+			submitting = false;
 		}
 	}
 
 	async function executeConfirmed() {
-		if (!confirmAction) return;
+		if (!confirmAction || submitting) return;
 		const { hostId } = confirmAction;
 		confirmAction = null;
+		submitting = true;
 
 		try {
 			error = null;
@@ -86,6 +88,8 @@
 			hosts = hosts.filter((h) => h.id !== hostId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to deactivate host';
+		} finally {
+			submitting = false;
 		}
 	}
 
@@ -195,7 +199,8 @@
 		<ConfirmDialog
 			title="Deactivate Host"
 			message="Are you sure you want to deactivate <strong>{confirmAction.name}</strong>?"
-			confirmLabel="Deactivate"
+			confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
+			confirmDisabled={submitting}
 			onconfirm={executeConfirmed}
 			oncancel={cancelConfirm}
 		/>
@@ -211,8 +216,8 @@
 				</label>
 				<div class="flex justify-end gap-2">
 					<button class="btn preset-tonal-surface" onclick={cancelEdit}>Cancel</button>
-					<button class="btn preset-filled-primary-500" onclick={executeEdit}>
-						Save
+					<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executeEdit}>
+						{submitting ? 'Saving...' : 'Save'}
 					</button>
 				</div>
 			</div>

@@ -84,11 +84,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 	});
 
 	if (res.status === 401 && getAccessToken()) {
-		// Attempt token refresh, deduplicating concurrent attempts
+		// Attempt token refresh, deduplicating concurrent attempts.
+		// The promise is cleared after it settles (not per-caller) so that
+		// concurrent 401 handlers share a single refresh cycle.
+		if (!refreshPromise) {
+			refreshPromise = refreshAccessToken();
+			refreshPromise.then(
+				() => { refreshPromise = null; },
+				() => { refreshPromise = null; }
+			);
+		}
+
 		try {
-			if (!refreshPromise) {
-				refreshPromise = refreshAccessToken();
-			}
 			const refreshed = await refreshPromise;
 			setAccessToken(refreshed.access_token);
 
@@ -114,8 +121,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 			setAccessToken(null);
 			window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
 			throw new Error('Session expired');
-		} finally {
-			refreshPromise = null;
 		}
 	}
 

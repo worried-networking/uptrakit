@@ -11,7 +11,7 @@
 
 The frontend is a compact, well-structured SvelteKit SPA for the Uptrakit controller dashboard. It handles authentication (password + OIDC), device authorization, agent/host management, and system settings. The codebase uses modern Svelte 5 runes and Skeleton UI v4 consistently.
 
-The review originally identified **28 findings** across 5 categories. **14 have been fixed** across multiple implementation rounds, including all critical and high severity issues. The remaining **14 findings** are medium and low severity items focused on UX polish, minor refactoring, and edge cases.
+The review originally identified **28 findings** across 5 categories. **19 have been fixed** across multiple implementation rounds, including all critical and high severity issues. The remaining **9 findings** are medium and low severity items focused on UX polish, minor refactoring, and edge cases.
 
 ### Remaining Severity Distribution
 
@@ -19,28 +19,8 @@ The review originally identified **28 findings** across 5 categories. **14 have 
 |----------|-------|
 | Critical | 0 |
 | High | 0 |
-| Medium | 10 |
+| Medium | 5 |
 | Low | 4 |
-
----
-
-## Category 1: Security & Safety
-
-### F-7: Device authorization code — redirect parameter not fully validated (Medium)
-
-**File**: `src/routes/device/+page.svelte:63`
-
-The redirect parameter validation (`startsWith('/')` and `!startsWith('//')`) has been implemented on the login page as part of the auth guard centralization. However, the device code format (8 uppercase consonants) is not validated client-side before display or API submission.
-
-**Fix plan (FP-7)**: Validate the device code format client-side (regex: `/^[BCDFGHJKLMNPQRSTVWXYZ]{8}$/`) before displaying or submitting it. Show an error for invalid codes.
-
-### F-9: Registration token displayed in plaintext, no copy-to-clipboard (Medium)
-
-**File**: `src/routes/settings/EnrollmentTokenSettings.svelte`
-
-The enrollment token is displayed as plaintext with only a text warning to copy it. No copy-to-clipboard button is provided.
-
-**Fix plan (FP-9)**: Add a copy-to-clipboard button. Consider masking the token after copy with a "show again" toggle.
 
 ---
 
@@ -53,22 +33,6 @@ The enrollment token is displayed as plaintext with only a text warning to copy 
 Both settings pages duplicate `showSuccess()`, `showError()`, `clearError()` with identical `setTimeout` logic.
 
 **Fix plan (FP-14)**: Create a `notifications.ts` store or a `Notifications.svelte` component that manages toast-style notifications globally.
-
-### F-15: `$effect()` for data loading runs on every reactive dependency change (Medium)
-
-**Files**: `src/routes/login/+page.svelte`, `src/routes/agents/+page.svelte`
-
-The agents page uses `$effect(() => { if ($user) loadAgents(); })` which re-runs every time `$user` changes (e.g., after token refresh), causing unnecessary API calls.
-
-**Fix plan (FP-15)**: Use `onMount()` for one-time data fetching. Use `$effect` only for genuinely reactive logic.
-
-### F-16: No loading states on action buttons (Medium)
-
-**Files**: `agents/+page.svelte`, `hosts/+page.svelte`
-
-Destructive actions (approve, reject, delete, deactivate) have no loading/disabled state while the API call is in flight. Users can double-click and trigger duplicate requests.
-
-**Fix plan (FP-16)**: Add `submitting` state to action handlers and disable buttons during API calls.
 
 ### F-17: Hosts page does not support pagination controls (Medium)
 
@@ -89,14 +53,6 @@ The agents page loads all agents without pagination. For installations with many
 ---
 
 ## Category 3: Type Safety & Correctness
-
-### F-21: `refreshPromise` race condition between clear and reuse (Medium)
-
-**File**: `src/lib/api.ts`
-
-If request A triggers refresh and request B arrives while A is awaiting the retry, B will find `refreshPromise` already set and await it. But A's `finally` block clears `refreshPromise = null` after the first awaiter resolves. If request C arrives between A's `finally` and B's resolution, C will start a new refresh.
-
-**Fix plan (FP-21)**: Only clear `refreshPromise` when the last awaiter has consumed it, or use a more robust mutual-exclusion pattern.
 
 ### F-22: `204` response cast to generic type `T` (Low)
 
@@ -160,14 +116,9 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 
 | ID | Severity | Effort | Description | Status |
 |----|----------|--------|-------------|--------|
-| FP-7 | Medium | Small | Validate device code format | Open |
-| FP-9 | Medium | Small | Add copy-to-clipboard for enrollment token | Open |
 | FP-14 | Medium | Small | Create shared notification system | Open |
-| FP-15 | Medium | Small | Use `onMount` for data fetching, not `$effect` | Open |
-| FP-16 | Medium | Small | Add loading states to action buttons | Open |
 | FP-17 | Medium | Medium | Add pagination controls to hosts page | Open |
 | FP-18 | Medium | Medium | Fix agents pagination support | Open |
-| FP-21 | Medium | Small | Fix refresh token race condition | Open |
 | FP-22 | Low | Small | Fix 204 response type handling | Open |
 | FP-23 | Low | Small | Remove unused `OidcCompleteRegistrationRequest` or use it | Open |
 | FP-25 | Medium | Medium | Implement focus trapping in modals | Open |
@@ -177,10 +128,9 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 
 ### Recommended Priority Order
 
-1. **FP-16** — Loading states on buttons (prevents duplicate submissions)
-2. **FP-17, FP-18** — Pagination (scalability)
-3. **FP-25** — Focus trapping (accessibility compliance)
-4. Everything else by severity
+1. **FP-17, FP-18** — Pagination (scalability)
+2. **FP-25** — Focus trapping (accessibility compliance)
+3. Everything else by severity
 
 ---
 
@@ -188,7 +138,7 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 
 1. **Consistent Svelte 5 usage**: Proper use of `$state`, `$derived`, `$effect`, and `$props` runes throughout.
 2. **Good error handling pattern**: `extractErrorMessage()` gracefully handles JSON and text error responses.
-3. **Token refresh deduplication**: The `refreshPromise` pattern correctly prevents concurrent refresh calls (minor race aside).
+3. **Token refresh deduplication**: The `refreshPromise` pattern correctly prevents concurrent refresh calls with proper cleanup.
 4. **Permission-based UI**: Navigation and action buttons correctly check user permissions.
 5. **Dark mode support**: Clean theme cycling with FOUC prevention.
 6. **OIDC flow completeness**: Account linking, registration with token, device authorization — all covered.
@@ -198,3 +148,6 @@ The inline script in `app.html` reads `localStorage` and sets the `dark` class t
 10. **Shared UI components**: `ConfirmDialog`, `ModalBackdrop`, `ContextMenu` with proper ARIA roles.
 11. **Content Security Policy**: CSP meta tag restricts script/style/image sources.
 12. **Modular settings page**: 6 focused sub-components instead of a monolithic 952-line file.
+13. **Loading states on actions**: Buttons disabled during API calls with visual feedback to prevent double-submissions.
+14. **Copy-to-clipboard**: Enrollment tokens have one-click copy with temporary confirmation feedback.
+15. **Device code validation**: Client-side format validation before display or API submission.

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { user } from '$lib/auth';
 	import { getAgents, approveAgent, rejectAgent, deleteAgent, mergeAgent } from '$lib/api';
 	import type { ServiceResponse } from '$lib/types';
@@ -15,12 +16,9 @@
 		$state(null);
 	let mergeSource: { id: string; name: string } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
+	let submitting: boolean = $state(false);
 
-	$effect(() => {
-		if ($user) {
-			loadAgents();
-		}
-	});
+	onMount(loadAgents);
 
 	async function loadAgents() {
 		try {
@@ -67,8 +65,9 @@
 	}
 
 	async function executeMerge() {
-		if (!mergeSource || !mergeTargetId) return;
+		if (!mergeSource || !mergeTargetId || submitting) return;
 		const sourceId = mergeSource.id;
+		submitting = true;
 		try {
 			error = null;
 			await mergeAgent(mergeTargetId, sourceId);
@@ -77,13 +76,16 @@
 			mergeTargetId = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to merge agent';
+		} finally {
+			submitting = false;
 		}
 	}
 
 	async function executeConfirmed() {
-		if (!confirmAction) return;
+		if (!confirmAction || submitting) return;
 		const { agentId, action } = confirmAction;
 		confirmAction = null;
+		submitting = true;
 
 		try {
 			error = null;
@@ -99,6 +101,8 @@
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : `Failed to ${action} agent`;
+		} finally {
+			submitting = false;
 		}
 	}
 
@@ -236,8 +240,9 @@
 		<ConfirmDialog
 			title={labels.title}
 			message="Are you sure you want to {labels.verb} <strong>{confirmAction.name}</strong>?"
-			confirmLabel={labels.title}
+			confirmLabel={submitting ? 'Processing...' : labels.title}
 			confirmClass={labels.btnClass}
+			confirmDisabled={submitting}
 			onconfirm={executeConfirmed}
 			oncancel={cancelConfirm}
 		/>
@@ -264,10 +269,10 @@
 					<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
 					<button
 						class="btn preset-filled-primary-500"
-						disabled={!mergeTargetId}
+						disabled={!mergeTargetId || submitting}
 						onclick={executeMerge}
 					>
-						Merge
+						{submitting ? 'Merging...' : 'Merge'}
 					</button>
 				</div>
 			</div>

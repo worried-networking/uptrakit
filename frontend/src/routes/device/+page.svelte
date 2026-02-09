@@ -7,7 +7,10 @@
 	let success = $state(false);
 	let approving = $state(false);
 
-	let code = $derived($page.url.searchParams.get('code') || '');
+	const DEVICE_CODE_PATTERN = /^[BCDFGHJKLMNPQRSTVWXYZ]{8}$/;
+	let rawCode = $derived($page.url.searchParams.get('code') || '');
+	let code = $derived(DEVICE_CODE_PATTERN.test(rawCode) ? rawCode : '');
+	let invalidCode = $derived(rawCode !== '' && code === '');
 	let isLoggedIn = $derived(!!$user);
 
 	async function onApprove() {
@@ -33,6 +36,10 @@
 	{:else if success}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
 			<p>CLI session approved! You can close this tab.</p>
+		</aside>
+	{:else if invalidCode}
+		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+			<p>Invalid device code format. Please use the link shown in your CLI.</p>
 		</aside>
 	{:else if !code}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-warning-500">
