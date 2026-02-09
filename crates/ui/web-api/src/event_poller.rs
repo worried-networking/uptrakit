@@ -19,6 +19,8 @@ use crate::service_connections::ServiceConnectionRegistry;
 const MAX_DELIVERY_RETRIES: u8 = 3;
 /// Retention window for controller events before cleanup.
 pub const EVENT_CLEANUP_TTL_HOURS: i64 = 24;
+/// Safety margin to avoid missing events between startup and first poll.
+const STARTUP_CURSOR_SAFETY_MARGIN: i64 = 100;
 
 /// Background task that polls the `controller_events` table for events written by
 /// other controller instances and delivers them to locally connected services.
@@ -47,10 +49,12 @@ impl EventPoller {
     /// Run the event poller until the cancellation token is triggered.
     pub async fn run(mut self, token: CancellationToken) {
         // Initialize cursor to current max ID to avoid replaying old events.
-        let mut last_seen_id = self.fetch_max_id().await;
+        let max_id = self.fetch_max_id().await;
+        let mut last_seen_id = initial_cursor(max_id);
         tracing::info!(
             controller_id = %self.controller_id,
             last_seen_id,
+            max_id,
             "event poller started"
         );
 
@@ -93,6 +97,11 @@ impl EventPoller {
                 0
             }
         }
+    }
+
+    #[cfg(test)]
+    fn initial_cursor_for_test(max_id: i64) -> i64 {
+        initial_cursor(max_id)
     }
 
     /// Poll for new events from other controllers. Returns the updated cursor.
@@ -324,5 +333,25 @@ impl EventPoller {
                 tracing::warn!(error = %e, "failed to clean up old controller events");
             }
         }
+    }
+}
+
+fn initial_cursor(max_id: i64) -> i64 {
+    if max_id > STARTUP_CURSOR_SAFETY_MARGIN {
+        max_id - STARTUP_CURSOR_SAFETY_MARGIN
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_cursor_respects_safety_margin() {
+        assert_eq!(EventPoller::initial_cursor_for_test(150), 50);
+        assert_eq!(EventPoller::initial_cursor_for_test(100), 0);
+        assert_eq!(EventPoller::initial_cursor_for_test(42), 0);
     }
 }

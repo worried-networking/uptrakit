@@ -43,14 +43,6 @@ Once a WebSocket connection is established (even anonymous), there's no throttli
 
 ## 3. High Availability (Multi-Controller)
 
-#### H3. EventPoller startup cursor initialization
-
-**Location:** `event_poller.rs:38`
-
-`fetch_max_id()` initializes the cursor to the current max event ID. Events written between this call and the first `poll_events()` tick (up to 1 second later) by another controller will be caught correctly (polled with `id > last_seen_id`). This is correct behavior but worth noting as a design assumption.
-
----
-
 ## 4. Minor / Code Quality
 
 ## Summary Table
@@ -59,4 +51,3 @@ Once a WebSocket connection is established (even anonymous), there's no throttli
 |----|----------|----------|---------|--------|
 | A4 | Architecture | Important | Read-modify-write per output line | **Partially fixed** |
 | S3 | Security | Important | No WS message rate limiting | **Partially fixed** |
-| H3 | HA | Minor | EventPoller startup cursor assumption | Open |
