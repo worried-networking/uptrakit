@@ -27,10 +27,10 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
-tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-url = "2"
+url = { workspace = true }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-enrollment = { path = "../../shared/enrollment" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
@@ -39,4 +39,4 @@ uuid = { workspace = true }
 webpki-roots = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

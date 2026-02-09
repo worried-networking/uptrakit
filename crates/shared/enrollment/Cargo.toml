@@ -22,7 +22,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
-tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
+tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
@@ -35,4 +35,4 @@ uptrakit-internal-wire = { path = "../wire" }
 uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

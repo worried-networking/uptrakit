@@ -40,8 +40,6 @@ tower = { workspace = true }
 tower-http = { version = "0.6", features = ["trace", "fs"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls"] }
-argon2 = { workspace = true }
-rand = { workspace = true }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
@@ -52,7 +50,7 @@ tokio-util = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 testcontainers = "0.26"
 reqwest = { workspace = true }
 serde = { workspace = true }

@@ -36,13 +36,12 @@ uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-provider-core = { path = "../../providers/core" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
-argon2 = { workspace = true }
+argon2 = { version = "0.5", features = ["std"] }
 rand = { workspace = true }
 client-ip = { version = "0.2", features = ["forwarded-header"] }
 x509-parser = { workspace = true }
 base64 = "0.22"
 sha2 = { workspace = true }
-tower-cookies = "0.11"
 uptrakit-web-api-types = { path = "../../shared/web-api-types", features = ["openapi"] }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-axum = "0.2"
