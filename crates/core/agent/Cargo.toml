@@ -10,6 +10,7 @@ version.workspace = true
 clap = { workspace = true }
 futures-util = { workspace = true }
 hex = { workspace = true }
+rand = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }

@@ -1,3 +1,4 @@
+mod backoff;
 mod cli;
 mod client;
 mod error;
@@ -140,13 +141,16 @@ async fn run(args: &Args) -> error::Result<()> {
         }
     };
 
+    let mut enrollment_backoff =
+        backoff::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     loop {
         match do_enrollment(args, &host, port, &mut identity, &tls_connector).await {
             Ok(()) => break,
             Err(mut e) => {
                 if e.current_context_mut().is_receive_closed() {
-                    tracing::info!("disconnected during enrollment, reconnecting");
-                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    let delay = enrollment_backoff.next_delay();
+                    tracing::info!("disconnected during enrollment, reconnecting in {delay:?}");
+                    tokio::time::sleep(delay).await;
                     // Reload identity in case enrollment partially completed
                     identity.load().await.context_to::<Error>()?;
                     continue;
@@ -218,6 +222,8 @@ async fn run_authenticated_with_reconnect(
     ca_pem: Option<&[u8]>,
     identity: &ServiceIdentityState,
 ) -> error::Result<()> {
+    let mut reconnect_backoff =
+        backoff::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     loop {
         let cert_pem = identity.cert_pem().ok_or_else(|| {
             report!(Error::Enrollment(
@@ -256,13 +262,17 @@ async fn run_authenticated_with_reconnect(
         {
             LoopOutcome::Shutdown => return Ok(()),
             LoopOutcome::Reconnect => {
+                // Certificate rotation is expected; reset backoff and reconnect quickly.
+                reconnect_backoff.reset();
                 tracing::info!("reconnecting with new certificate");
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
             LoopOutcome::Disconnected => {
-                tracing::warn!("disconnected by controller");
-                return Ok(());
+                let delay = reconnect_backoff.next_delay();
+                tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
+                tokio::time::sleep(delay).await;
+                continue;
             }
             LoopOutcome::Restart => {
                 tracing::info!("restart requested, exiting for external restart");

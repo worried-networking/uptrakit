@@ -249,7 +249,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         break LoopOutcome::Disconnected;
                                     }
                                 };
-                                save_renewed_cert(state_dir, &payload, &key_pem)?;
+                                save_renewed_cert(state_dir, &payload, &key_pem).await?;
                                 tracing::info!("renewed certificate saved, reconnecting");
                                 break LoopOutcome::Reconnect;
                             }
@@ -270,7 +270,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
                                 // Check if CA bundle is stale
                                 if !settings.ca_bundle_hash.is_empty() {
-                                    let local_hash = compute_local_ca_hash(config_dir);
+                                    let local_hash = compute_local_ca_hash(config_dir).await;
                                     if local_hash != settings.ca_bundle_hash {
                                         tracing::info!("CA bundle hash mismatch, fetching updated bundle");
                                         let ca_fetch_url = pki_addr.unwrap_or(base_url);
@@ -280,7 +280,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         };
                                         match fetch_ca_certificate(ca_fetch_url, tls_mode).await {
                                             Ok(pem) => {
-                                                if let Err(e) = save_ca_cert_sync(config_dir, &pem) {
+                                                if let Err(e) = save_ca_cert(config_dir, &pem).await {
                                                     tracing::warn!("failed to save updated CA: {e}");
                                                 } else {
                                                     tracing::info!("updated CA bundle saved to disk");
@@ -293,7 +293,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             }
                             ControllerMessage::CaBundleUpdated(payload) => {
                                 tracing::info!("received CA bundle update from controller");
-                                if let Err(e) = save_ca_cert_sync(config_dir, payload.ca_bundle_pem.as_bytes()) {
+                                if let Err(e) = save_ca_cert(config_dir, payload.ca_bundle_pem.as_bytes()).await {
                                     tracing::warn!("failed to save updated CA bundle: {e}");
                                 } else {
                                     tracing::info!("updated CA bundle saved to disk");
@@ -618,9 +618,9 @@ async fn handle_graceful_shutdown(
 }
 
 /// Compute SHA-256 hex hash of the local CA certificate file.
-fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
+async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
     let ca_path = config_dir.join("ca.pem");
-    match std::fs::read(&ca_path) {
+    match tokio::fs::read(&ca_path).await {
         Ok(bytes) => {
             let mut hasher = Sha256::new();
             hasher.update(&bytes);
@@ -639,33 +639,38 @@ fn extract_service_id(identity: &uptrakit_enrollment::ServiceIdentityState) -> S
 }
 
 /// Save renewed cert + key to state directory.
-fn save_renewed_cert(
+async fn save_renewed_cert(
     state_dir: &std::path::Path,
     payload: &CertificatePayload,
     key_pem: &str,
 ) -> Result<()> {
     let cert_path = state_dir.join("service.crt");
     let key_path = state_dir.join("service.key");
-    std::fs::write(&cert_path, &payload.cert_pem).context_to::<Error>()?;
-    set_secure_permissions(&cert_path)?;
-    std::fs::write(&key_path, key_pem).context_to::<Error>()?;
-    set_secure_permissions(&key_path)?;
+    tokio::fs::write(&cert_path, &payload.cert_pem)
+        .await
+        .context_to::<Error>()?;
+    set_secure_permissions(&cert_path).await?;
+    tokio::fs::write(&key_path, key_pem)
+        .await
+        .context_to::<Error>()?;
+    set_secure_permissions(&key_path).await?;
     Ok(())
 }
 
-/// Save CA cert bytes to config directory (sync, for use in authenticated loop).
-fn save_ca_cert_sync(config_dir: &std::path::Path, pem: &[u8]) -> Result<()> {
+/// Save CA cert bytes to config directory.
+async fn save_ca_cert(config_dir: &std::path::Path, pem: &[u8]) -> Result<()> {
     let path = config_dir.join("ca.pem");
-    std::fs::write(&path, pem).context_to::<Error>()?;
-    set_secure_permissions(&path)?;
+    tokio::fs::write(&path, pem).await.context_to::<Error>()?;
+    set_secure_permissions(&path).await?;
     Ok(())
 }
 
-fn set_secure_permissions(path: &std::path::Path) -> Result<()> {
+async fn set_secure_permissions(path: &std::path::Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .await
             .context_to::<Error>()?;
     }
     #[cfg(not(unix))]
@@ -673,4 +678,150 @@ fn set_secure_permissions(path: &std::path::Path) -> Result<()> {
         let _ = path;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uptrakit_internal_wire::now_millis;
+
+    // ── compute_renewal_delay ───────────────────────────────────────────
+
+    #[test]
+    fn renewal_delay_no_cert() {
+        // When no cert_not_after is known, return FAR_FUTURE.
+        let delay = compute_renewal_delay(None, 168);
+        assert_eq!(delay, FAR_FUTURE);
+    }
+
+    #[test]
+    fn renewal_delay_future_cert() {
+        // Cert expires in 30 days, window is 7 days (168h) → delay ≈ 23 days.
+        let thirty_days_ms = 30 * 24 * 3600 * 1000_i64;
+        let not_after = now_millis() + thirty_days_ms;
+        let delay = compute_renewal_delay(Some(not_after), 168);
+        let twenty_three_days = std::time::Duration::from_millis(23 * 24 * 3600 * 1000);
+        // Should be roughly 23 days (±1 second for timing jitter).
+        assert!(delay >= twenty_three_days - std::time::Duration::from_secs(1));
+        assert!(delay <= twenty_three_days + std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn renewal_delay_already_in_window() {
+        // Cert expires in 3 days, window is 168h (7 days) → already past, delay = 0.
+        let three_days_ms = 3 * 24 * 3600 * 1000_i64;
+        let not_after = now_millis() + three_days_ms;
+        let delay = compute_renewal_delay(Some(not_after), 168);
+        assert_eq!(delay, std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn renewal_delay_expired_cert() {
+        // Cert already expired → delay is 0 (clamped via max(0)).
+        let not_after = now_millis() - 1000;
+        let delay = compute_renewal_delay(Some(not_after), 168);
+        assert_eq!(delay, std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn renewal_delay_zero_window() {
+        // Window of 0 hours → renew only at exact expiry time.
+        let one_hour_ms = 3600 * 1000_i64;
+        let not_after = now_millis() + one_hour_ms;
+        let delay = compute_renewal_delay(Some(not_after), 0);
+        // Should be roughly 1 hour.
+        assert!(delay >= std::time::Duration::from_secs(3599));
+        assert!(delay <= std::time::Duration::from_secs(3601));
+    }
+
+    // ── compute_local_ca_hash ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn local_ca_hash_missing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        assert!(hash.is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_valid_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca_path = dir.path().join("ca.pem");
+        tokio::fs::write(&ca_path, b"test-ca-content")
+            .await
+            .expect("write");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        // SHA-256 of "test-ca-content"
+        let expected = {
+            let mut h = Sha256::new();
+            h.update(b"test-ca-content");
+            hex::encode(h.finalize())
+        };
+        assert_eq!(hash, expected);
+    }
+
+    // ── extract_service_id ──────────────────────────────────────────────
+
+    #[test]
+    fn extract_service_id_without_id() {
+        let dir = std::path::Path::new("/tmp/nonexistent-test-dir");
+        let identity = uptrakit_enrollment::ServiceIdentityState::new(dir, dir);
+        // No service.json loaded → service_id is None → returns "unknown"
+        assert_eq!(extract_service_id(&identity), "unknown");
+    }
+
+    #[tokio::test]
+    async fn extract_service_id_with_id() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("service.json");
+        let id = uuid::Uuid::now_v7();
+        let json = serde_json::json!({
+            "service_id": id.to_string(),
+            "enrollment_secret": "test-secret"
+        });
+        tokio::fs::write(&state_path, json.to_string())
+            .await
+            .expect("write");
+        let mut identity = uptrakit_enrollment::ServiceIdentityState::new(dir.path(), dir.path());
+        identity.load().await.expect("load");
+        assert_eq!(extract_service_id(&identity), id.to_string());
+    }
+
+    // ── save_renewed_cert ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn save_renewed_cert_writes_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Construct CertificatePayload via deserialization to avoid direct time dependency.
+        let payload: CertificatePayload = serde_json::from_value(serde_json::json!({
+            "cert_pem": "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----",
+            "not_after": 0
+        }))
+        .expect("deserialize");
+        save_renewed_cert(dir.path(), &payload, "key-pem-data")
+            .await
+            .expect("save");
+        let cert = tokio::fs::read_to_string(dir.path().join("service.crt"))
+            .await
+            .expect("read cert");
+        let key = tokio::fs::read_to_string(dir.path().join("service.key"))
+            .await
+            .expect("read key");
+        assert_eq!(cert, payload.cert_pem);
+        assert_eq!(key, "key-pem-data");
+    }
+
+    // ── save_ca_cert ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn save_ca_cert_writes_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        save_ca_cert(dir.path(), b"ca-pem-data")
+            .await
+            .expect("save");
+        let content = tokio::fs::read_to_string(dir.path().join("ca.pem"))
+            .await
+            .expect("read");
+        assert_eq!(content, "ca-pem-data");
+    }
 }

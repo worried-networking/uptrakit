@@ -30,6 +30,35 @@ use uptrakit_internal_wire::{
 
 use crate::error::Error;
 
+/// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
+const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
+/// Marker appended when output is truncated at the limit.
+const TRUNCATION_MARKER: &str = "\n... [output truncated at 10 MB] ...\n";
+
+/// Escape a string for safe embedding in a shell command.
+///
+/// Wraps the value in single quotes, escaping any embedded single quotes
+/// with the `'\''` idiom (end quote, escaped literal quote, reopen quote).
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Append text to a bounded buffer. Once the buffer reaches `max` bytes,
+/// further text is silently dropped and a single truncation marker is appended.
+fn append_bounded(buffer: &mut String, text: &str, max: usize) {
+    if buffer.len() >= max {
+        return;
+    }
+    let remaining = max - buffer.len();
+    if text.len() <= remaining {
+        buffer.push_str(text);
+    } else {
+        buffer.push_str(&text[..remaining]);
+        buffer.push_str(TRUNCATION_MARKER);
+    }
+}
+
 /// Errors that can occur during update execution.
 #[derive(Debug, ThisError)]
 pub(crate) enum UpdateError {
@@ -108,7 +137,7 @@ pub async fn execute_update(
 
                 match run_hook_command(hook_cmd, OutputStreamType::PreHook, &output_tx).await {
                     Ok((output, exit_code)) => {
-                        accumulated_output.push_str(&output);
+                        append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
                         send_output(
                             &output_tx,
                             &format!("[pre-hook] (exit code {exit_code})"),
@@ -138,7 +167,7 @@ pub async fn execute_update(
 
         match execute_provider_update(&payload, &output_tx).await {
             Ok(output) => {
-                accumulated_output.push_str(&output);
+                append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
             }
             Err(e) => {
                 return Err(Error::UpdateExecution(e.to_string()));
@@ -164,7 +193,7 @@ pub async fn execute_update(
 
                 match run_hook_command(hook_cmd, OutputStreamType::PostHook, &output_tx).await {
                     Ok((output, exit_code)) => {
-                        accumulated_output.push_str(&output);
+                        append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
                         send_output(
                             &output_tx,
                             &format!("[post-hook] (exit code {exit_code})"),
@@ -288,11 +317,15 @@ async fn execute_github_releases_update(
     // Check for install command in provider config
     if let Some(install_cmd) = payload.provider_config.get("install_command") {
         if let Some(cmd_str) = install_cmd.as_str() {
-            // Substitute variables in the command
+            // Substitute variables in the command with shell-escaped values
+            // to prevent injection via untrusted wire-protocol fields.
             let cmd = cmd_str
-                .replace("{version}", &payload.to_version)
-                .replace("{tag}", &release_info.tag)
-                .replace("{package_identifier}", &payload.package_identifier);
+                .replace("{version}", &shell_escape(&payload.to_version))
+                .replace("{tag}", &shell_escape(&release_info.tag))
+                .replace(
+                    "{package_identifier}",
+                    &shell_escape(&payload.package_identifier),
+                );
 
             send_output(
                 output_tx,
@@ -346,16 +379,23 @@ async fn execute_proxmox_helper_scripts_update(
     .await;
     output.push_str(&format!("Running update script from {script_url}\n"));
 
-    // Typically Proxmox helper scripts are run via bash
-    let cmd = format!("bash -c \"$(curl -fsSL {script_url})\" -- --update");
-    match run_command(&cmd, OutputStreamType::Stdout, output_tx).await {
-        Ok(cmd_output) => {
-            output.push_str(&cmd_output);
-        }
-        Err(e) => {
-            return Err(report!(UpdateError::InstallFailed(e.to_string())));
-        }
-    }
+    // Run the helper script via bash, passing the URL as a positional argument
+    // (`$1`) to avoid shell interpretation of the URL string.
+    let (cmd_output, _exit_code) = run_command_exec(
+        "bash",
+        &[
+            "-c".to_string(),
+            "set -euo pipefail\ncurl -fsSL -- \"$1\" | bash -s -- --update".to_string(),
+            "--".to_string(),
+            script_url.to_string(),
+        ],
+        None,
+        OutputStreamType::Stdout,
+        output_tx,
+    )
+    .await
+    .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+    output.push_str(&cmd_output);
 
     Ok(output)
 }
@@ -378,25 +418,29 @@ async fn execute_docker_registry_update(
     .await;
     output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
-    // Pull the new image
-    let pull_cmd = format!("docker pull {image}:{tag}");
-    match run_command(&pull_cmd, OutputStreamType::Stdout, output_tx).await {
-        Ok(cmd_output) => {
-            output.push_str(&cmd_output);
-        }
-        Err(e) => {
-            return Err(report!(UpdateError::InstallFailed(e.to_string())));
-        }
-    }
+    // Pull the new image using direct exec (no shell) to prevent injection
+    // via crafted image names or tag values.
+    let image_ref = format!("{image}:{tag}");
+    let (cmd_output, _exit_code) = run_command_exec(
+        "docker",
+        &["pull".to_string(), image_ref],
+        None,
+        OutputStreamType::Stdout,
+        output_tx,
+    )
+    .await
+    .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+    output.push_str(&cmd_output);
 
     // Check for restart command in provider config
     if let Some(restart_cmd) = payload.provider_config.get("restart_command")
         && let Some(cmd_str) = restart_cmd.as_str()
     {
+        // Shell-escape all substituted values to prevent injection.
         let cmd = cmd_str
-            .replace("{image}", image)
-            .replace("{tag}", tag)
-            .replace("{version}", &payload.to_version);
+            .replace("{image}", &shell_escape(image))
+            .replace("{tag}", &shell_escape(tag))
+            .replace("{version}", &shell_escape(&payload.to_version));
 
         send_output(
             output_tx,
@@ -513,8 +557,11 @@ async fn run_command_exec(
                     stream: stream_type,
                 })
                 .await;
-            output.push_str(&line);
-            output.push('\n');
+            // Cap per-command buffer to prevent OOM from runaway output.
+            if output.len() < MAX_OUTPUT_BYTES {
+                output.push_str(&line);
+                output.push('\n');
+            }
         }
         output
     });
@@ -530,16 +577,30 @@ async fn run_command_exec(
                     stream: OutputStreamType::Stderr,
                 })
                 .await;
-            output.push_str(&line);
-            output.push('\n');
+            if output.len() < MAX_OUTPUT_BYTES {
+                output.push_str(&line);
+                output.push('\n');
+            }
         }
         output
     });
 
     let (stdout_output, stderr_output) = tokio::join!(stdout_handle, stderr_handle);
 
-    accumulated.push_str(&stdout_output.unwrap_or_default());
-    accumulated.push_str(&stderr_output.unwrap_or_default());
+    match stdout_output {
+        Ok(out) => accumulated.push_str(&out),
+        Err(e) => {
+            tracing::error!(error = %e, "stdout reader task failed");
+            accumulated.push_str("[stdout reader failed]\n");
+        }
+    }
+    match stderr_output {
+        Ok(out) => accumulated.push_str(&out),
+        Err(e) => {
+            tracing::error!(error = %e, "stderr reader task failed");
+            accumulated.push_str("[stderr reader failed]\n");
+        }
+    }
 
     let status = child
         .wait()
@@ -601,8 +662,10 @@ async fn run_command_with_shell(
                     stream: stream_type,
                 })
                 .await;
-            output.push_str(&line);
-            output.push('\n');
+            if output.len() < MAX_OUTPUT_BYTES {
+                output.push_str(&line);
+                output.push('\n');
+            }
         }
         output
     });
@@ -618,16 +681,30 @@ async fn run_command_with_shell(
                     stream: OutputStreamType::Stderr,
                 })
                 .await;
-            output.push_str(&line);
-            output.push('\n');
+            if output.len() < MAX_OUTPUT_BYTES {
+                output.push_str(&line);
+                output.push('\n');
+            }
         }
         output
     });
 
     let (stdout_output, stderr_output) = tokio::join!(stdout_handle, stderr_handle);
 
-    accumulated.push_str(&stdout_output.unwrap_or_default());
-    accumulated.push_str(&stderr_output.unwrap_or_default());
+    match stdout_output {
+        Ok(out) => accumulated.push_str(&out),
+        Err(e) => {
+            tracing::error!(error = %e, "stdout reader task failed");
+            accumulated.push_str("[stdout reader failed]\n");
+        }
+    }
+    match stderr_output {
+        Ok(out) => accumulated.push_str(&out),
+        Err(e) => {
+            tracing::error!(error = %e, "stderr reader task failed");
+            accumulated.push_str("[stderr reader failed]\n");
+        }
+    }
 
     let status = child
         .wait()
@@ -875,6 +952,124 @@ mod tests {
         );
 
         // Drain the channel
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    // ── Shell escape tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn shell_escape_plain_string() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_escape_with_single_quotes() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn shell_escape_with_semicolon() {
+        assert_eq!(shell_escape("2.0.0; rm -rf /"), "'2.0.0; rm -rf /'");
+    }
+
+    #[test]
+    fn shell_escape_with_backticks() {
+        assert_eq!(shell_escape("`whoami`"), "'`whoami`'");
+    }
+
+    #[test]
+    fn shell_escape_with_dollar_subshell() {
+        assert_eq!(shell_escape("$(id)"), "'$(id)'");
+    }
+
+    #[test]
+    fn shell_escape_empty_string() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    /// Verify that shell-escaped values prevent command injection.
+    /// Uses `; echo MARKER` as payload — if interpreted, MARKER appears on a
+    /// separate line. With proper escaping, the entire string is a single
+    /// literal argument and MARKER only appears as part of it.
+    #[tokio::test]
+    async fn shell_escape_prevents_injection_in_bash() {
+        let (tx, mut rx) = mpsc::channel(100);
+        // This malicious value would produce two commands if unescaped:
+        //   printf '%s' 2.0.0; echo MARKER
+        // With proper escaping printf receives the literal string.
+        let malicious = "2.0.0'; echo 'MARKER";
+        let cmd = format!("printf '%s' {}", shell_escape(malicious));
+        let result = run_command(&cmd, OutputStreamType::Stdout, &tx).await;
+        assert!(result.is_ok());
+        let output = result.expect("should succeed");
+        // Output should be the literal malicious string (no separate MARKER line).
+        assert_eq!(output.trim(), malicious);
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    // ── Bounded output tests ────────────────────────────────────────────────
+
+    #[test]
+    fn append_bounded_below_limit() {
+        let mut buf = String::new();
+        append_bounded(&mut buf, "hello", 100);
+        assert_eq!(buf, "hello");
+    }
+
+    #[test]
+    fn append_bounded_at_limit_truncates() {
+        let mut buf = String::new();
+        append_bounded(&mut buf, "abcde", 3);
+        assert!(buf.starts_with("abc"));
+        assert!(buf.contains(TRUNCATION_MARKER));
+    }
+
+    #[test]
+    fn append_bounded_already_full_drops() {
+        let mut buf = "x".repeat(100);
+        append_bounded(&mut buf, "more data", 100);
+        // Should not grow beyond 100
+        assert_eq!(buf.len(), 100);
+    }
+
+    #[test]
+    fn append_bounded_exact_fit() {
+        let mut buf = String::new();
+        append_bounded(&mut buf, "abc", 3);
+        assert_eq!(buf, "abc");
+        // Now it's full, next append should be a no-op
+        append_bounded(&mut buf, "d", 3);
+        assert_eq!(buf, "abc");
+    }
+
+    // ── Direct exec tests ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_command_exec_success() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = run_command_exec(
+            "echo",
+            &["hello exec".to_string()],
+            None,
+            OutputStreamType::Stdout,
+            &tx,
+        )
+        .await;
+        assert!(result.is_ok());
+        let (output, exit_code) = result.expect("should succeed");
+        assert!(output.contains("hello exec"));
+        assert_eq!(exit_code, 0);
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn run_command_exec_failure() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = run_command_exec("false", &[], None, OutputStreamType::Stdout, &tx).await;
+        assert!(result.is_err());
         rx.close();
         while rx.recv().await.is_some() {}
     }

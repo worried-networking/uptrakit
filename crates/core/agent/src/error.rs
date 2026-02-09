@@ -59,3 +59,72 @@ impl_report_conversion! {
     tokio_tungstenite::tungstenite::Error => Error::WebSocket,
     serde_json::Error => Error::Json,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_receive_closed_enrollment_error() {
+        let err = Error::Enrollment(EnrollmentError::ReceiveClosed);
+        assert!(err.is_receive_closed());
+    }
+
+    #[test]
+    fn is_receive_closed_other_error() {
+        let err = Error::UpdateExecution("test".to_string());
+        assert!(!err.is_receive_closed());
+    }
+
+    #[test]
+    fn is_receive_closed_io_error() {
+        let err = Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "reset",
+        ));
+        assert!(!err.is_receive_closed());
+    }
+
+    #[test]
+    fn is_cert_expired_enrollment_delegates() {
+        // EnrollmentError::Io wrapping a rustls CertificateExpired should be detected.
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let io_err = std::io::Error::other(rustls_err);
+        let err = Error::Enrollment(EnrollmentError::Io(io_err));
+        assert!(err.is_cert_expired());
+    }
+
+    #[test]
+    fn is_cert_expired_websocket_with_cert_expired_string() {
+        // Error::WebSocket that stringifies to contain "CertificateExpired"
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let io_err = std::io::Error::other(rustls_err);
+        let ws_err = tokio_tungstenite::tungstenite::Error::Io(io_err);
+        let err = Error::WebSocket(ws_err);
+        assert!(err.is_cert_expired());
+    }
+
+    #[test]
+    fn is_cert_expired_unrelated_io_error() {
+        let err = Error::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert!(!err.is_cert_expired());
+    }
+
+    #[test]
+    fn is_cert_expired_unrelated_websocket() {
+        let err = Error::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+        assert!(!err.is_cert_expired());
+    }
+
+    #[test]
+    fn is_cert_expired_update_error() {
+        let err = Error::UpdateExecution("CertificateExpired".to_string());
+        assert!(
+            !err.is_cert_expired(),
+            "should not match CertificateExpired in unrelated variant"
+        );
+    }
+}
