@@ -20,8 +20,8 @@ use openidconnect::{
     reqwest,
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    TransactionTrait,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -406,9 +406,18 @@ pub async fn oidc_callback(
         }
     }
 
-    // Resolve user
+    // Resolve user inside a transaction to prevent the race where two concurrent
+    // OIDC callbacks both see user_count == 1 and both get the owner role.
+    let txn = match state.db.begin().await {
+        Ok(txn) => txn,
+        Err(e) => {
+            tracing::error!("Failed to start OIDC callback transaction: {e}");
+            return Redirect::to("/login?error=oidc_internal_error").into_response();
+        }
+    };
+
     let resolution = match resolve_oidc_user(OidcUserParams {
-        db: &state.db,
+        db: &txn,
         tenant_id: state.default_tenant_id,
         provider_id: flow.provider_id,
         oidc_subject: &sub,
@@ -429,7 +438,7 @@ pub async fn oidc_callback(
     match resolution {
         OidcUserResolution::LinkedUser(user_id) => {
             // Defense-in-depth: verify user is still active before creating session
-            match User::find_by_id(user_id).one(&state.db).await {
+            match User::find_by_id(user_id).one(&txn).await {
                 Ok(Some(user)) if !user.is_active => {
                     return Redirect::to("/login?error=account_deactivated").into_response();
                 }
@@ -445,35 +454,36 @@ pub async fn oidc_callback(
 
             // Sync roles and create session
             let _ = sync_oidc_roles(
-                &state.db,
+                &txn,
                 state.default_tenant_id,
                 user_id,
                 &provider,
                 &additional_claims,
             )
             .await;
+
+            if let Err(e) = txn.commit().await {
+                tracing::error!("Failed to commit OIDC callback transaction: {e}");
+                return Redirect::to("/login?error=oidc_internal_error").into_response();
+            }
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::NewUser(user_id) => {
-            // Check if this is the first user in the system
-            let is_first_user = User::find()
-                .count(&state.db)
-                .await
-                .map(|c| c == 1)
-                .unwrap_or(false);
-
-            if is_first_user {
+            // Atomically check if this is the first user (threshold 1 because the
+            // user was just created by resolve_oidc_user) and handle owner role +
+            // initial setup inside the same transaction.
+            let user_count = User::find().count(&txn).await.unwrap_or(0);
+            if user_count == 1 {
                 // Delete the default 'user' role assigned by resolve_oidc_user
                 let _ = UserRole::delete_many()
                     .filter(user_role::Column::TenantId.eq(state.default_tenant_id))
                     .filter(user_role::Column::UserId.eq(user_id))
-                    .exec(&state.db)
+                    .exec(&txn)
                     .await;
 
                 // Assign owner role
                 if let Err(e) =
-                    super::auth::assign_owner_role(&state.db, state.default_tenant_id, user_id)
-                        .await
+                    super::auth::assign_owner_role(&txn, state.default_tenant_id, user_id).await
                 {
                     tracing::error!("Failed to assign owner role to first OIDC user: {e:?}");
                 }
@@ -483,7 +493,7 @@ pub async fn oidc_callback(
                     .settings
                     .registration_write()
                     .await
-                    .complete_initial_setup(&state.db, state.default_tenant_id)
+                    .complete_initial_setup(&txn, state.default_tenant_id)
                     .await
                 {
                     tracing::error!("Failed to complete initial setup for first OIDC user: {e:?}");
@@ -492,14 +502,20 @@ pub async fn oidc_callback(
                 tracing::info!("first user registered via OIDC, assigned owner role");
             }
 
+            // Sync roles
             let _ = sync_oidc_roles(
-                &state.db,
+                &txn,
                 state.default_tenant_id,
                 user_id,
                 &provider,
                 &additional_claims,
             )
             .await;
+
+            if let Err(e) = txn.commit().await {
+                tracing::error!("Failed to commit OIDC callback transaction: {e}");
+                return Redirect::to("/login?error=oidc_internal_error").into_response();
+            }
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::AutoLink { user_id } => {
@@ -511,21 +527,29 @@ pub async fn oidc_callback(
                 oidc_subject: Set(sub),
                 linked_at: Set(OffsetDateTime::now_utc()),
             };
-            if let Err(e) = link.insert(&state.db).await {
+            if let Err(e) = link.insert(&txn).await {
                 tracing::error!("Failed to auto-link OIDC account: {e}");
                 return Redirect::to("/login?error=oidc_link_failed").into_response();
             }
             let _ = sync_oidc_roles(
-                &state.db,
+                &txn,
                 state.default_tenant_id,
                 user_id,
                 &provider,
                 &additional_claims,
             )
             .await;
+
+            if let Err(e) = txn.commit().await {
+                tracing::error!("Failed to commit OIDC callback transaction: {e}");
+                return Redirect::to("/login?error=oidc_internal_error").into_response();
+            }
             create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
         }
         OidcUserResolution::LinkViaPasswordRequired { user_id } => {
+            // No DB writes needed in this branch, just drop the transaction
+            drop(txn);
+
             // Store pending link and redirect to frontend
             let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
             let link_token_value =
@@ -562,6 +586,9 @@ pub async fn oidc_callback(
             user_id,
             existing_provider_id,
         } => {
+            // No DB writes needed in this branch, just drop the transaction
+            drop(txn);
+
             let mapped_roles = extract_mapped_roles(&provider, &additional_claims);
             let link_token_value =
                 generate_secure_token().unwrap_or_else(|_| generate_uuid().to_string());
@@ -594,9 +621,11 @@ pub async fn oidc_callback(
             .into_response()
         }
         OidcUserResolution::NotAllowed => {
+            drop(txn);
             Redirect::to("/login?error=oidc_no_account").into_response()
         }
         OidcUserResolution::Deactivated => {
+            drop(txn);
             Redirect::to("/login?error=account_deactivated").into_response()
         }
     }
@@ -691,7 +720,12 @@ pub async fn oidc_exchange(
         },
     };
 
-    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response()
 }
 
 /// Complete OIDC registration with a registration token (public).
@@ -759,10 +793,20 @@ pub async fn oidc_complete_registration(
         }
     };
 
+    // Wrap user creation + first-user check + role assignment in a transaction
+    // to prevent the race where two concurrent registrations both see count == 0.
+    let txn = match state.db.begin().await {
+        Ok(txn) => txn,
+        Err(e) => {
+            tracing::error!("Failed to start OIDC complete-registration transaction: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     // 4. Race condition guard: verify user still doesn't exist
     let user_exists = User::find()
         .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&pending.email))
-        .count(&state.db)
+        .count(&txn)
         .await
         .unwrap_or(1)
         > 0;
@@ -789,7 +833,7 @@ pub async fn oidc_complete_registration(
         updated_at: Set(now),
     };
 
-    if let Err(e) = user_model.insert(&state.db).await {
+    if let Err(e) = user_model.insert(&txn).await {
         tracing::error!("Failed to create user during OIDC registration: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -802,46 +846,36 @@ pub async fn oidc_complete_registration(
         oidc_subject: Set(pending.oidc_subject),
         linked_at: Set(now),
     };
-    if let Err(e) = link.insert(&state.db).await {
+    if let Err(e) = link.insert(&txn).await {
         tracing::error!("Failed to create OIDC link during registration: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // 7. Check if this is the first user (just created, so count == 1)
-    let is_first_user = User::find()
-        .count(&state.db)
-        .await
-        .map(|c| c == 1)
-        .unwrap_or(false);
+    // 7. Atomically check if this is the first user (threshold 1 because we just created)
+    //    and assign owner role + complete initial setup inside the same transaction.
+    let is_first_user = match super::auth::handle_first_user_setup(
+        &txn,
+        &state.settings,
+        state.default_tenant_id,
+        user_id,
+        1,
+    )
+    .await
+    {
+        Ok(is_first) => is_first,
+        Err(e) => {
+            tracing::error!(
+                "Failed to handle first-user setup for OIDC complete-registration: {e:?}"
+            );
+            false
+        }
+    };
 
     if is_first_user {
-        // Assign owner role (no default user role was created above)
-        if let Err(e) =
-            super::auth::assign_owner_role(&state.db, state.default_tenant_id, user_id).await
-        {
-            tracing::error!(
-                "Failed to assign owner role to first OIDC user via registration: {e:?}"
-            );
-        }
-
-        // Complete initial setup (close registration, remove token)
-        if let Err(e) = state
-            .settings
-            .registration_write()
-            .await
-            .complete_initial_setup(&state.db, state.default_tenant_id)
-            .await
-        {
-            tracing::error!(
-                "Failed to complete initial setup for first OIDC user via registration: {e:?}"
-            );
-        }
-
         tracing::info!("first user registered via OIDC complete-registration, assigned owner role");
     } else {
         // Assign default user role
-        if let Err(e) =
-            super::auth::assign_user_role(&state.db, state.default_tenant_id, user_id).await
+        if let Err(e) = super::auth::assign_user_role(&txn, state.default_tenant_id, user_id).await
         {
             tracing::error!("Failed to assign default role during OIDC registration: {e:?}");
         }
@@ -850,7 +884,7 @@ pub async fn oidc_complete_registration(
     // 8. Sync OIDC roles using stored mapped_roles
     if !pending.mapped_roles.is_empty()
         && let Some(provider) =
-            find_active_provider(&state.db, state.default_tenant_id, pending.provider_id).await
+            find_active_provider(&txn, state.default_tenant_id, pending.provider_id).await
     {
         let mut fake_claims = serde_json::Map::new();
         if let Some(ref path) = provider.role_claim_path {
@@ -878,13 +912,18 @@ pub async fn oidc_complete_registration(
             );
         }
         let _ = sync_oidc_roles(
-            &state.db,
+            &txn,
             state.default_tenant_id,
             user_id,
             &provider,
             &serde_json::Value::Object(fake_claims),
         )
         .await;
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!("Failed to commit OIDC complete-registration transaction: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // 9. Create session + JWT (same pattern as oidc_exchange)
@@ -949,7 +988,12 @@ pub async fn oidc_complete_registration(
         },
     };
 
-    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response()
 }
 
 /// Link a pending OIDC account (public)
@@ -1147,13 +1191,18 @@ pub async fn oidc_link(
         },
     };
 
-    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response()
 }
 
 // Helper functions
 
 async fn find_active_provider(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     id: uuid::Uuid,
 ) -> Option<oidc_provider::Model> {

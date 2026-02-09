@@ -91,9 +91,7 @@ mod tests {
 
     #[test]
     fn extract_returns_none_without_cookie_header() {
-        let req = HttpRequest::builder()
-            .body(())
-            .expect("valid request");
+        let req = HttpRequest::builder().body(()).expect("valid request");
         assert_eq!(extract_refresh_token_from_cookie(&req), None);
     }
 }

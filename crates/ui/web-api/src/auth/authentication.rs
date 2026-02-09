@@ -2,7 +2,7 @@ use crate::SettingKey;
 use crate::auth::Result;
 use crate::settings_store::{RawSettings, RawSettingsExt, upsert_setting};
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
@@ -35,7 +35,7 @@ impl AuthenticationSettings {
         }
     }
 
-    pub async fn save(&self, db: &DatabaseConnection, tenant_id: uuid::Uuid) -> Result<()> {
+    pub async fn save(&self, db: &impl ConnectionTrait, tenant_id: uuid::Uuid) -> Result<()> {
         upsert_setting(
             db,
             tenant_id,
@@ -68,8 +68,8 @@ pub enum OidcUserResolution {
 }
 
 /// Parameters for [`resolve_oidc_user`].
-pub struct OidcUserParams<'a> {
-    pub db: &'a DatabaseConnection,
+pub struct OidcUserParams<'a, C: ConnectionTrait> {
+    pub db: &'a C,
     pub tenant_id: uuid::Uuid,
     pub provider_id: uuid::Uuid,
     pub oidc_subject: &'a str,
@@ -89,7 +89,9 @@ pub struct OidcUserParams<'a> {
 ///    c. Has password_hash -> `LinkViaPasswordRequired`.
 ///    d. Otherwise -> `AutoLink`.
 /// 3. Not found: auto_create -> create user + link -> `NewUser`. Else -> `NotAllowed`.
-pub async fn resolve_oidc_user(params: OidcUserParams<'_>) -> Result<OidcUserResolution> {
+pub async fn resolve_oidc_user<C: ConnectionTrait>(
+    params: OidcUserParams<'_, C>,
+) -> Result<OidcUserResolution> {
     let OidcUserParams {
         db,
         tenant_id,
@@ -220,7 +222,7 @@ pub async fn resolve_oidc_user(params: OidcUserParams<'_>) -> Result<OidcUserRes
 
 /// Sync OIDC roles for a user based on provider configuration and ID token claims.
 pub async fn sync_oidc_roles(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
     provider: &oidc_provider::Model,

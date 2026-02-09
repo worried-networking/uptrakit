@@ -14,8 +14,8 @@ use axum::{
 };
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    PaginatorTrait, QueryFilter, Set, TransactionTrait,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -75,25 +75,25 @@ pub async fn register(
         }
     };
 
+    // Run user creation + first-user check + role assignment inside a transaction
+    // to prevent the race where two concurrent registrations both see count == 0.
+    let txn = match state.db.begin().await {
+        Ok(txn) => txn,
+        Err(e) => {
+            tracing::error!("Failed to start transaction: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     // Check if user already exists
     let existing = User::find()
         .filter(user::Column::Email.eq(&req.email))
-        .one(&state.db)
+        .one(&txn)
         .await;
 
     if let Ok(Some(_)) = existing {
         return error_response(StatusCode::CONFLICT, "Email already exists");
     }
-
-    // Check if this is the first user
-    let user_count = match User::find().count(&state.db).await {
-        Ok(count) => count,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to count users");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-    let is_first_user = user_count == 0;
 
     // Create user
     let user_id = generate_uuid();
@@ -111,31 +111,32 @@ pub async fn register(
         updated_at: Set(now),
     };
 
-    if let Err(e) = new_user.insert(&state.db).await {
-        tracing::error!("Failed to create user: {}", e);
+    if let Err(e) = new_user.insert(&txn).await {
+        tracing::error!("Failed to create user: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // If first user, assign owner role and complete initial setup
-    if is_first_user {
-        if let Err(e) = assign_owner_role(&state.db, state.default_tenant_id, user_id).await {
-            tracing::error!("Failed to assign owner role to first user: {:?}", e);
-            // Continue anyway - user is created
-        }
-        if let Err(e) = state
-            .settings
-            .registration_write()
-            .await
-            .complete_initial_setup(&state.db, state.default_tenant_id)
+    // Atomically check if this is the first user (threshold 1 because we just inserted)
+    // and assign owner role + complete initial setup inside the same transaction.
+    let is_first_user =
+        match handle_first_user_setup(&txn, &state.settings, state.default_tenant_id, user_id, 1)
             .await
         {
-            tracing::error!("Failed to complete initial registration setup: {:?}", e);
-        }
-    } else {
-        // Non-first users get the 'user' role
-        if let Err(e) = assign_user_role(&state.db, state.default_tenant_id, user_id).await {
-            tracing::error!("Failed to assign user role: {:?}", e);
-        }
+            Ok(is_first) => is_first,
+            Err(e) => {
+                tracing::error!("Failed to handle first-user setup: {e:?}");
+                false
+            }
+        };
+
+    if !is_first_user && let Err(e) = assign_user_role(&txn, state.default_tenant_id, user_id).await
+    {
+        tracing::error!("Failed to assign user role: {e:?}");
+    }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!("Failed to commit registration transaction: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
     // Get user permissions
@@ -188,7 +189,12 @@ pub async fn register(
         },
     };
 
-    (StatusCode::CREATED, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
+    (
+        StatusCode::CREATED,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response()
 }
 
 /// Login with email and password
@@ -296,7 +302,12 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         },
     };
 
-    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response()
 }
 
 /// Logout and revoke refresh token
@@ -309,10 +320,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     ),
     tag = "Authentication"
 )]
-pub async fn logout(
-    State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
-) -> Response {
+pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
     // Extract refresh token: prefer cookie, fall back to JSON body
     let cookie_token = extract_refresh_token_from_cookie(&req);
     let body_token = {
@@ -397,10 +405,7 @@ pub async fn me(
     ),
     tag = "Authentication"
 )]
-pub async fn refresh(
-    State(state): State<Arc<AppState>>,
-    req: axum::extract::Request,
-) -> Response {
+pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
     // Extract refresh token: prefer cookie, fall back to JSON body
     let cookie_token = extract_refresh_token_from_cookie(&req);
     let body_token = {
@@ -482,13 +487,46 @@ pub async fn refresh(
         token_type: "Bearer".to_string(),
     };
 
-    (StatusCode::OK, [(header::SET_COOKIE, cookie)], Json(response)).into_response()
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(response),
+    )
+        .into_response()
+}
+
+/// Atomically handle first-user registration within a transaction.
+///
+/// Counts users, and if `count <= threshold`, assigns the owner role and
+/// completes initial setup (closes registration, clears token).
+/// Returns `Ok(true)` if this was the first user.
+pub async fn handle_first_user_setup(
+    txn: &impl ConnectionTrait,
+    settings: &crate::settings::Settings,
+    tenant_id: uuid::Uuid,
+    user_id: uuid::Uuid,
+    threshold: u64,
+) -> crate::auth::Result<bool> {
+    let user_count = User::find().count(txn).await.context_to()?;
+    if user_count > threshold {
+        return Ok(false);
+    }
+
+    assign_owner_role(txn, tenant_id, user_id).await?;
+
+    settings
+        .registration_write()
+        .await
+        .complete_initial_setup(txn, tenant_id)
+        .await?;
+
+    Ok(true)
 }
 
 // Helper functions
 
 pub async fn assign_owner_role(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {
@@ -514,7 +552,7 @@ pub async fn assign_owner_role(
 }
 
 pub async fn assign_user_role(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
     user_id: uuid::Uuid,
 ) -> crate::auth::Result<()> {

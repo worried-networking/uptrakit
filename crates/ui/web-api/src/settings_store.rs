@@ -4,8 +4,8 @@ use crate::SettingKey;
 use crate::auth::Result;
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter, Set,
-    sea_query::Expr,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ExprTrait,
+    QueryFilter, Set, sea_query::Expr,
 };
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{prelude::*, setting, settings_version};
@@ -48,7 +48,7 @@ pub async fn load_all_settings(db: &DatabaseConnection, tenant_id: Uuid) -> Resu
 }
 
 pub async fn upsert_setting(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: Uuid,
     key: SettingKey,
     value: serde_json::Value,
@@ -84,7 +84,7 @@ pub async fn upsert_setting(
 }
 
 pub async fn load_setting(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: Uuid,
     key: SettingKey,
 ) -> Result<Option<serde_json::Value>> {
@@ -96,7 +96,7 @@ pub async fn load_setting(
 }
 
 pub async fn delete_setting(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: Uuid,
     key: SettingKey,
 ) -> Result<()> {
@@ -125,7 +125,7 @@ pub async fn delete_setting(
 /// If false, increments `version` on the specific tenant's row only.
 /// Non-fatal on failure: callers should log and continue.
 pub async fn bump_settings_version(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     tenant_id: Uuid,
     is_global: bool,
 ) -> Result<()> {
@@ -190,7 +190,7 @@ pub async fn get_settings_versions(db: &DatabaseConnection, tenant_id: Uuid) -> 
 /// Atomically bump the revocation version counter after a certificate revocation.
 ///
 /// Non-fatal on failure: callers should log and continue.
-pub async fn bump_revocation_version(db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
+pub async fn bump_revocation_version(db: &impl ConnectionTrait, tenant_id: Uuid) -> Result<()> {
     let now = OffsetDateTime::now_utc();
 
     let result = SettingsVersion::update_many()

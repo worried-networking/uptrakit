@@ -6,7 +6,7 @@ use crate::settings_store::{
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use rootcause::prelude::*;
-use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, PaginatorTrait};
 use thiserror::Error;
 use uptrakit_shared_db::entity::prelude::*;
 use uuid::Uuid;
@@ -157,7 +157,7 @@ impl RegistrationSettings {
     /// Updates both DB and in-memory state.
     pub async fn complete_initial_setup(
         &mut self,
-        db: &DatabaseConnection,
+        db: &impl ConnectionTrait,
         tenant_id: Uuid,
     ) -> Result<()> {
         // Update DB
