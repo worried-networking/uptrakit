@@ -70,7 +70,7 @@ crates/
 │   ├── directories/               # uptrakit-directories (lib) — cross-platform directory management
 │   ├── enrollment/                # uptrakit-enrollment (lib) — shared enrollment, TLS (TofuVerifier), CA, CLI
 │   ├── macros/                    # uptrakit-shared-macros (lib) — shared declarative macros
-│   ├── types/                     # uptrakit-shared-types (lib) — shared value types (SecretString)
+│   ├── types/                     # uptrakit-shared-types (lib) — shared value types (SecretString, hex encode/decode)
 │   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
 └── ui/

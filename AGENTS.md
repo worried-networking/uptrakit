@@ -37,7 +37,7 @@ uptrakit/
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (SecretString)
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (SecretString, hex encode/decode)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared enrollment, TLS (TofuVerifier), CA bootstrap, CLI
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
