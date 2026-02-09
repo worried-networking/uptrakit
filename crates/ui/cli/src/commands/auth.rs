@@ -54,7 +54,7 @@ pub struct TokenRevokeOutput {
 /// 3. Open verification URL in user's browser
 /// 4. Poll /api/v1/auth/device/poll until authorized/expired
 /// 5. Store server URL + API token locally
-pub async fn login(server_override: Option<&str>) -> Result<()> {
+pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> {
     // Determine server URL
     let config = load_config()?;
     let server = if let Some(s) = server_override {
@@ -78,7 +78,7 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
     let client_name = format!("cli-{host}-{date}");
 
     // Start device authorization flow
-    let client = ApiClient::new(&server, None)?;
+    let client = ApiClient::new(&server, None, insecure)?;
     let start_body = serde_json::json!({ "client_name": client_name });
 
     let (status, body) = client
@@ -130,7 +130,7 @@ pub async fn login(server_override: Option<&str>) -> Result<()> {
     eprintln!("  Waiting for authorization...");
 
     // Poll for completion
-    let poll_client = ApiClient::new(&server, None)?;
+    let poll_client = ApiClient::new(&server, None, insecure)?;
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(expires_in);
 
@@ -214,9 +214,10 @@ pub async fn status(
     server_override: Option<&str>,
     token_override: Option<&str>,
     format: OutputFormat,
+    insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token)?;
+    let client = ApiClient::with_token(&server, &token, insecure)?;
 
     let (status, body) = client.request("GET", "/api/v1/auth/me", None).await?;
 
@@ -270,9 +271,10 @@ pub async fn token_create(
     server_override: Option<&str>,
     token_override: Option<&str>,
     format: OutputFormat,
+    insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token)?;
+    let client = ApiClient::with_token(&server, &token, insecure)?;
 
     let create_body = serde_json::json!({ "name": name });
     let (status, body) = client
@@ -313,9 +315,10 @@ pub async fn token_list(
     server_override: Option<&str>,
     token_override: Option<&str>,
     format: OutputFormat,
+    insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token)?;
+    let client = ApiClient::with_token(&server, &token, insecure)?;
 
     let (status, body) = client
         .request("GET", "/api/v1/auth/api-tokens", None)
@@ -377,9 +380,10 @@ pub async fn token_revoke(
     server_override: Option<&str>,
     token_override: Option<&str>,
     format: OutputFormat,
+    insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token)?;
+    let client = ApiClient::with_token(&server, &token, insecure)?;
 
     let path = format!("/api/v1/auth/api-tokens/{id}");
     let (status, body) = client.request("DELETE", &path, None).await?;

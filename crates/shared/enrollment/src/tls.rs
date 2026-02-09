@@ -109,14 +109,16 @@ pub fn build_system_roots_client_config() -> Result<rustls::ClientConfig> {
     Ok(config)
 }
 
-/// Build a `ClientConfig` that accepts any server certificate (DANGEROUS).
+/// Build a `ClientConfig` for TOFU CA fetch.
 ///
-/// Only use for TOFU CA fetch when no CA is known yet.
-pub fn build_insecure_client_config() -> Result<rustls::ClientConfig> {
+/// Accepts any server certificate (the CA is not known yet) but still
+/// delegates TLS signature verification to the installed crypto provider,
+/// preventing trivial MITM attacks that forge invalid signatures.
+pub fn build_tofu_client_config() -> Result<rustls::ClientConfig> {
     #[derive(Debug)]
-    struct AcceptAnyCert;
+    struct TofuVerifier;
 
-    impl rustls::client::danger::ServerCertVerifier for AcceptAnyCert {
+    impl rustls::client::danger::ServerCertVerifier for TofuVerifier {
         fn verify_server_cert(
             &self,
             _end_entity: &rustls::pki_types::CertificateDer<'_>,
@@ -126,48 +128,57 @@ pub fn build_insecure_client_config() -> Result<rustls::ClientConfig> {
             _now: rustls::pki_types::UnixTime,
         ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error>
         {
+            // During TOFU, we accept any cert chain since the CA is unknown.
+            // Security relies on fingerprint verification after download.
             Ok(rustls::client::danger::ServerCertVerified::assertion())
         }
 
         fn verify_tls12_signature(
             &self,
-            _message: &[u8],
-            _cert: &rustls::pki_types::CertificateDer<'_>,
-            _dss: &rustls::DigitallySignedStruct,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
         ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
         {
-            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+            let provider = rustls::crypto::CryptoProvider::get_default().ok_or(
+                rustls::Error::General("no crypto provider installed".into()),
+            )?;
+            rustls::crypto::verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &provider.signature_verification_algorithms,
+            )
         }
 
         fn verify_tls13_signature(
             &self,
-            _message: &[u8],
-            _cert: &rustls::pki_types::CertificateDer<'_>,
-            _dss: &rustls::DigitallySignedStruct,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
         ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
         {
-            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+            let provider = rustls::crypto::CryptoProvider::get_default().ok_or(
+                rustls::Error::General("no crypto provider installed".into()),
+            )?;
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &provider.signature_verification_algorithms,
+            )
         }
 
         fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-            vec![
-                rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-                rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-                rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
-                rustls::SignatureScheme::ED25519,
-                rustls::SignatureScheme::RSA_PSS_SHA256,
-                rustls::SignatureScheme::RSA_PSS_SHA384,
-                rustls::SignatureScheme::RSA_PSS_SHA512,
-                rustls::SignatureScheme::RSA_PKCS1_SHA256,
-                rustls::SignatureScheme::RSA_PKCS1_SHA384,
-                rustls::SignatureScheme::RSA_PKCS1_SHA512,
-            ]
+            rustls::crypto::CryptoProvider::get_default()
+                .map(|p| p.signature_verification_algorithms.supported_schemes())
+                .unwrap_or_default()
         }
     }
 
     let config = rustls::ClientConfig::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+        .with_custom_certificate_verifier(Arc::new(TofuVerifier))
         .with_no_client_auth();
 
     Ok(config)

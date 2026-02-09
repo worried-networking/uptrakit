@@ -65,9 +65,9 @@ crates/
 │   └── registry/                  # uptrakit-provider-registry (lib) — provider dispatch
 ├── shared/
 │   ├── core/                      # uptrakit-core (lib) — shared domain models
-│   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities & migrations
+│   ├── db/                        # uptrakit-shared-db (lib) — SeaORM entities, migrations & crypto (EncryptedString)
 │   ├── directories/               # uptrakit-directories (lib) — cross-platform directory management
-│   ├── enrollment/                # uptrakit-enrollment (lib) — shared enrollment, TLS, CA, CLI
+│   ├── enrollment/                # uptrakit-enrollment (lib) — shared enrollment, TLS (TofuVerifier), CA, CLI
 │   ├── macros/                    # uptrakit-shared-macros (lib) — shared declarative macros
 │   ├── web-api-types/             # uptrakit-web-api-types (lib) — shared HTTP types
 │   └── wire/                      # uptrakit-internal-wire (lib) — wire protocol
@@ -207,6 +207,8 @@ The data model comprises 31 entities in `crates/shared/db/src/entity/`:
 
 `api_rate_limit`, `api_token`, `auth_method`, `available_version`, `controller_event`, `host`, `host_software_item`, `mqtt_client`, `mqtt_lease`, `oidc_provider`, `pending_account_link`, `pending_device_flow`, `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`, `permission`, `provider_config`, `role`, `role_permission`, `service`, `service_certificate`, `service_host`, `session`, `setting`, `settings_version`, `software_item`, `tenant`, `update_history`, `user`, `user_oidc_link`, `user_role`
 
+The `db::crypto` module provides the `EncryptedString` SeaORM custom type for transparent AES-256-GCM encryption of sensitive columns. Fields using `EncryptedString` are encrypted before write and decrypted after read, with legacy plaintext passthrough for backward compatibility.
+
 The `host` entity represents a physical or virtual machine, identified by a persistent `machine_id` (e.g. `/etc/machine-id` on Linux). The `service_host` junction table models the many-to-many relationship between services and hosts, enabling automatic host matching across service re-enrollments and hostname changes.
 
 The `pending_*` entities store transient auth flow state (device authorization, OIDC login, account linking, token exchange, OIDC registration with token). Persisting these to the database instead of in-memory maps enables controller restarts without losing active flows and supports HA multi-instance deployments with a shared database.
@@ -324,8 +326,9 @@ Updates can be triggered from Home Assistant, the Web UI, or the CLI -- all path
 | **MQTT for Home Assistant** | MQTT auto-discovery is the standard integration mechanism for Home Assistant. Native protocol avoids custom HA add-on complexity. Runs as a separate binary (`uptrakit-mqtt`) that connects to the controller via WebSocket/mTLS (same enrollment model as agents). No direct database access -- the controller pushes tenant configs and manages leases centrally. |
 | **Partitioned CRLs** | Each CA signs a CRL only for its own certificates. Prevents cross-CA revocation confusion during rotation periods. |
 | **HTTPS-only controller** | The controller listens on HTTPS by default. An optional plain HTTP listener (`--pki-http listener`) can be started for PKI-only endpoints (OCSP, CRL, CA cert) when needed by Nginx `ssl_ocsp_responder`. All agent and browser connections use TLS. |
+| **Encryption at rest** | Sensitive credentials (MQTT passwords, OIDC client secrets, CA private keys) are AES-256-GCM encrypted in the database via the `EncryptedString` SeaORM custom type (`db::crypto`). A mandatory master key (`UPTRAKIT_MASTER_KEY` or `--master-key-file`) is required at controller startup. Legacy plaintext values are transparently upgraded on next write. |
 | **Shared enrollment crate** | The `uptrakit-enrollment` crate provides unified service identity management, TLS configuration, CA bootstrap, WebSocket enrollment protocol, and CLI arguments shared by both agent and MQTT service binaries. This eliminates code duplication and ensures consistent enrollment behavior across service types. |
-| **Flexible agent bootstrap** | Both agent and MQTT service support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--pki-addr` fetch, `--tofu` (TOFU via HTTPS), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
+| **Flexible agent bootstrap** | Both agent and MQTT service support four CA bootstrap modes: cached CA from disk, `--ca-cert` file, `--pki-addr` fetch, `--tofu` (TOFU via HTTPS with `TofuVerifier` and optional `--tofu-fingerprint` SHA-256 pinning), or system trust store. A single `--url` flag replaces separate host/port/http-port args. An optional `--pki-addr` allows fetching the CA certificate from a separate PKI endpoint (including plain HTTP). |
 | **Reverse proxy support** | L4 passthrough and L7 TLS termination. Agent identity forwarded via structured info or PEM headers with CA CN verification. Header stripping prevents spoofing from non-proxy clients. Docker integration tests validate all 5 supported proxies (Nginx, Traefik, Caddy, HAProxy, Envoy). |
 | **Zero-downtime graceful restart** | HAProxy-style restart using `SO_REUSEPORT`. New process binds the same port, starts accepting immediately, then signals the old process (SIGUSR1). Old process stops accepting, scatters `ServerRestarting` notifications to agents over 5 seconds to avoid thundering herd, drains existing connections, then exits. Agents may not notice the restart if their connection stays open. |
 | **Agent graceful shutdown** | Agents handle SIGINT/SIGTERM/SIGHUP with graceful shutdown: wait for in-flight updates (configurable timeout), notify controller, close cleanly. SIGHUP returns exit code 0 for systemd restart. Prevents abandoned updates and data loss. |

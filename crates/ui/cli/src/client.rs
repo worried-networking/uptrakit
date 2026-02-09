@@ -8,11 +8,12 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
-    pub fn new(base_url: &str, token: Option<&str>) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .tls_danger_accept_invalid_certs(true)
-            .build()
-            .context_to()?;
+    pub fn new(base_url: &str, token: Option<&str>, insecure: bool) -> Result<Self> {
+        let mut builder = reqwest::Client::builder();
+        if insecure {
+            builder = builder.tls_danger_accept_invalid_certs(true);
+        }
+        let http = builder.build().context_to()?;
 
         Ok(Self {
             http,
@@ -22,8 +23,8 @@ impl ApiClient {
     }
 
     /// Create a client with a specific bearer token (e.g. JWT from login).
-    pub fn with_token(base_url: &str, token: &str) -> Result<Self> {
-        Self::new(base_url, Some(token))
+    pub fn with_token(base_url: &str, token: &str, insecure: bool) -> Result<Self> {
+        Self::new(base_url, Some(token), insecure)
     }
 
     /// Make a request. Returns the response body as a serde_json::Value.

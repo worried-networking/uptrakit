@@ -24,8 +24,8 @@ Commit: `b855b6f`
 
 | Severity | Count | Key Themes |
 |----------|-------|------------|
-| **CRITICAL** | 6 | First-user race, MQTT creds at rest, CA key exposure surface, tenant header bypass, TOFU verifier, logout authz bypass |
-| **HIGH** | 12 | Command injection in hooks, merge without transaction, missing update ownership validation, missing cert lifetime cap, missing connection limits, DB schema gaps |
+| **CRITICAL** | 6 (4 fixed) | First-user race, MQTT creds at rest, CA key exposure surface, tenant header bypass, TOFU verifier, logout authz bypass |
+| **HIGH** | 12 (1 fixed) | Command injection in hooks, merge without transaction, missing update ownership validation, missing cert lifetime cap, missing connection limits, DB schema gaps |
 | **MEDIUM** | 18 | Race conditions in rate limiter / settings / leases, missing refresh token rotation, N+1 queries, SSRF vectors, settings desync, CRL gap |
 | **LOW** | 16 | Missing validation, minor inconsistencies, defense-in-depth gaps |
 
@@ -43,7 +43,7 @@ The "first user" check uses `User::find().count()` followed by role assignment w
 
 **Fix plan:** [FP-CR1](#fp-cr1-atomic-first-user-registration) — **Implemented**: All three registration paths (password, OIDC callback, OIDC complete-registration) now wrap user creation + first-user check + role assignment in a single database transaction via `handle_first_user_setup()`.
 
-### CR-2: MQTT passwords stored and transmitted in plaintext
+### CR-2: MQTT passwords stored and transmitted in plaintext — FIXED
 
 **Files:** `db/src/entity/mqtt_client.rs:16`, `web-api/src/routes/mqtt_ws.rs:491`, `notification_service.rs:71`
 
@@ -54,9 +54,9 @@ MQTT broker passwords are:
 
 **Impact:** Database compromise exposes all MQTT broker credentials. Wire-level logging or proxy inspection reveals passwords.
 
-**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest)
+**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) — **Implemented**: All sensitive credentials (`mqtt_clients.password`, `oidc_providers.client_secret`, `ca_certificates.key_pem`) are now encrypted at rest using AES-256-GCM via the `EncryptedString` SeaORM custom type. A mandatory master encryption key (`UPTRAKIT_MASTER_KEY` or `--master-key-file`) is required at controller startup.
 
-### CR-3: CA private keys in shared `CaSnapshotData` structure
+### CR-3: CA private keys in shared `CaSnapshotData` structure — FIXED
 
 **Files:** `controller/src/pki.rs:216-220`, `web-api/src/lib.rs:50-55`
 
@@ -64,7 +64,7 @@ The `CaSnapshotData` contains both metadata (fingerprints, cert PEMs) and secret
 
 **Impact:** If any API handler accidentally serializes the snapshot, CA private keys leak. Database compromise yields all historical CA private keys.
 
-**Fix plan:** [FP-CR3](#fp-cr3-separate-ca-signing-material-from-metadata)
+**Fix plan:** [FP-CR3](#fp-cr3-separate-ca-signing-material-from-metadata) — **Implemented**: `CaSnapshotData` split into `CaPublicSnapshot` (metadata only) and `CaKeyStore` (signing material with `Zeroizing` wrapper). CA private keys in DB are now encrypted via `EncryptedString`.
 
 ### CR-4: Unauthenticated tenant context switching via header
 
@@ -76,7 +76,7 @@ The `TenantContext` extractor reads `X-Tenant-Id` from request headers with NO a
 
 **Fix plan:** [FP-CR4](#fp-cr4-restrict-tenant-context-header)
 
-### CR-5: TOFU TLS verifier accepts all certificates and signatures
+### CR-5: TOFU TLS verifier accepts all certificates and signatures — FIXED
 
 **File:** `enrollment/src/tls.rs:115-174`
 
@@ -86,7 +86,7 @@ The `AcceptAnyCert` verifier unconditionally returns success for `verify_server_
 
 **Mitigating factors:** `--tofu` is opt-in, conflicts with `--ca-cert` and `--pki-addr`, and is skipped if CA is already cached.
 
-**Fix plan:** [FP-CR5](#fp-cr5-strengthen-tofu-with-fingerprint-pinning)
+**Fix plan:** [FP-CR5](#fp-cr5-strengthen-tofu-with-fingerprint-pinning) — **Implemented**: `AcceptAnyCert` replaced with `TofuVerifier` that delegates TLS signature verification to the installed crypto provider. Added `--tofu-fingerprint` CLI arg for SHA-256 fingerprint pinning. CLI client `--insecure` flag replaces hardcoded `tls_danger_accept_invalid_certs(true)`.
 
 ### CR-6: Logout endpoint accepts unauthenticated requests
 
@@ -204,13 +204,13 @@ The refresh endpoint is public and has no dedicated rate limiting. An attacker w
 
 **Fix plan:** [FP-HI11](#fp-hi11-rate-limit-refresh-endpoint)
 
-### HI-12: OIDC client_secret stored in plaintext
+### HI-12: OIDC client_secret stored in plaintext — FIXED
 
 **File:** `db/src/entity/oidc_provider.rs:71`, `controller/src/main.rs:388`
 
 The OIDC client secret is stored as a bare string in the database. Database compromise exposes all OIDC client secrets.
 
-**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) (combined)
+**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) (combined) — **Implemented**: Addressed by FP-CR2 — OIDC client secrets are now encrypted at rest via `EncryptedString`.
 
 ---
 
@@ -621,7 +621,7 @@ fn resolve_docker_compose_hook(hook: &DockerComposeHook) -> String {
 
 ---
 
-### FP-CR2: Encrypt sensitive credentials at rest (TOP 5 — #3)
+### FP-CR2: Encrypt sensitive credentials at rest (TOP 5 — #3) — IMPLEMENTED
 
 **Addresses:** CR-2 (Critical — MQTT password exposure), HI-12 (High — OIDC secret exposure)
 
@@ -707,7 +707,7 @@ A database compromise (SQL injection in a dependency, backup leak, stolen disk) 
 
 ---
 
-### FP-CR3: Separate CA signing material from metadata (TOP 5 — #4)
+### FP-CR3: Separate CA signing material from metadata (TOP 5 — #4) — IMPLEMENTED
 
 **Addresses:** CR-3 (Critical — CA private key exposure surface)
 
@@ -812,7 +812,7 @@ If any API handler accidentally calls `serde_json::to_string(&snapshot)`, or if 
 
 ---
 
-### FP-CR5: Strengthen TOFU with signature verification and fingerprint pinning (TOP 5 — #5)
+### FP-CR5: Strengthen TOFU with signature verification and fingerprint pinning (TOP 5 — #5) — IMPLEMENTED
 
 **Addresses:** CR-5 (Critical — MITM during enrollment)
 

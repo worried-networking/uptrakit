@@ -92,6 +92,7 @@ async fn run(args: cli::Args) -> Result<()> {
         &mut identity,
         base_url,
         args.common.tofu,
+        args.common.tofu_fingerprint.as_deref(),
         args.common.ca_cert.as_deref(),
         pki_addr,
     )

@@ -23,6 +23,11 @@ pub struct CommonServiceArgs {
     #[arg(long, conflicts_with_all = ["ca_cert", "pki_addr"])]
     pub tofu: bool,
 
+    /// Expected SHA-256 fingerprint of the controller's CA certificate (hex).
+    /// Used during TOFU to verify the fetched CA matches. Requires `--tofu`.
+    #[arg(long, requires = "tofu")]
+    pub tofu_fingerprint: Option<String>,
+
     /// Path to a PEM-encoded CA certificate file.
     #[arg(long)]
     pub ca_cert: Option<PathBuf>,

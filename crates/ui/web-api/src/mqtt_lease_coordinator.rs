@@ -487,7 +487,10 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         port: client.port as u16,
         client_id: client.client_id.clone(),
         username: client.username.clone(),
-        password: client.password.clone(),
+        password: client
+            .password
+            .as_ref()
+            .map(|p| p.expose_secret().to_string()),
         topic_prefix: client.topic_prefix.clone(),
         updated_at: UtcDateTime::from_unix_timestamp(client.updated_at.unix_timestamp())
             .unwrap_or(UtcDateTime::UNIX_EPOCH),

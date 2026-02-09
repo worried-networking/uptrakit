@@ -18,6 +18,10 @@ struct Cli {
     #[arg(long, global = true)]
     token: Option<String>,
 
+    /// Skip TLS certificate verification (insecure, for development only)
+    #[arg(long, global = true)]
+    insecure: bool,
+
     /// Output format
     #[arg(long, short, global = true, default_value_t, value_enum)]
     output: OutputFormat,
@@ -81,12 +85,18 @@ enum TokenCommands {
 async fn main() {
     let cli = Cli::parse();
 
+    let insecure = cli.insecure;
     let result = match cli.command {
         Commands::Auth { command } => match command {
-            AuthCommands::Login => commands::auth::login(cli.server.as_deref()).await,
+            AuthCommands::Login => commands::auth::login(cli.server.as_deref(), insecure).await,
             AuthCommands::Status => {
-                commands::auth::status(cli.server.as_deref(), cli.token.as_deref(), cli.output)
-                    .await
+                commands::auth::status(
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
             }
             AuthCommands::Token { command } => match command {
                 TokenCommands::Create { name } => {
@@ -95,6 +105,7 @@ async fn main() {
                         cli.server.as_deref(),
                         cli.token.as_deref(),
                         cli.output,
+                        insecure,
                     )
                     .await
                 }
@@ -103,6 +114,7 @@ async fn main() {
                         cli.server.as_deref(),
                         cli.token.as_deref(),
                         cli.output,
+                        insecure,
                     )
                     .await
                 }
@@ -112,6 +124,7 @@ async fn main() {
                         cli.server.as_deref(),
                         cli.token.as_deref(),
                         cli.output,
+                        insecure,
                     )
                     .await
                 }
@@ -125,6 +138,7 @@ async fn main() {
                 cli.server.as_deref(),
                 cli.token.as_deref(),
                 cli.output,
+                insecure,
             )
             .await
         }

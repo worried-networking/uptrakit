@@ -130,6 +130,12 @@ pub struct Args {
     #[arg(long)]
     pub reuseport: bool,
 
+    /// Path to a file containing the master encryption key (64-char hex string).
+    /// The key is used for AES-256-GCM encryption of sensitive credentials at rest.
+    /// Alternative: set UPTRAKIT_MASTER_KEY environment variable.
+    #[arg(long)]
+    pub master_key_file: Option<PathBuf>,
+
     /// PID of old controller process to take over from.
     /// Sends SIGUSR1 to the old process to initiate graceful shutdown.
     /// Should be used together with --reuseport.

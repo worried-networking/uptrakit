@@ -611,8 +611,8 @@ Comprehensive security hardening.
 - [x] Add brute force protection
 - [ ] Implement security headers
 - [ ] Add input validation and sanitization
-- [ ] Implement secrets management
-  - [ ] Secure credential storage
+- [x] Implement secrets management
+  - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory `UPTRAKIT_MASTER_KEY`)
   - [ ] Credential rotation
   - [ ] Vault integration
 - [ ] Add security scanning to CI/CD

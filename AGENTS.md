@@ -33,11 +33,11 @@ uptrakit/
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared enrollment, TLS, CA bootstrap, CLI
+│   │   ├── enrollment/                  # uptrakit-enrollment                    (lib)  — shared enrollment, TLS (TofuVerifier), CA bootstrap, CLI
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
@@ -268,6 +268,39 @@ The `uptrakit-directories` crate provides helper functions:
 | --- | --- |
 | `crates/shared/directories/src/lib.rs` | Cross-platform directory resolution and secure file/directory operations |
 
+## Encryption at rest
+
+Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom type (defined in `crates/shared/db/src/crypto.rs`).
+
+### Master key
+
+A 256-bit master encryption key is **mandatory** for the controller. It can be provided in two ways:
+
+| Method | Details |
+| --- | --- |
+| `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes) |
+| `--master-key-file` CLI arg | Path to a file containing the 64-character hex key |
+
+`init_master_key()` is called at controller startup. If no key is provided, the controller refuses to start.
+
+### Encrypted fields
+
+| Table | Column | Description |
+| --- | --- | --- |
+| `mqtt_clients` | `password` | MQTT broker password |
+| `oidc_providers` | `client_secret` | OIDC client secret |
+| `ca_certificates` | `key_pem` | CA private key PEM |
+
+### Ciphertext format
+
+Ciphertext is stored as `"ENC:v1:<hex(nonce || ciphertext || tag)>"`. On read, `EncryptedString` transparently detects legacy plaintext values (no `ENC:v1:` prefix) and passes them through, enabling gradual upgrade of existing data without migration.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/db/src/crypto.rs` | `EncryptedString` type, `init_master_key()`, AES-256-GCM encrypt/decrypt |
+
 ## CLI output formatting
 
 The CLI supports three output formats via the global `--output` / `-o` flag:
@@ -294,6 +327,14 @@ uptrakit-cli auth status -o json             # compact JSON
 uptrakit-cli auth token list --output yaml   # YAML
 uptrakit-cli api GET /api/v1/auth/me -o json # compact JSON for raw API calls
 ```
+
+## CLI TLS options
+
+The CLI client (`crates/ui/cli/src/client.rs`) uses the system trust store by default for TLS verification. The previous hardcoded `tls_danger_accept_invalid_certs(true)` has been removed. An explicit `--insecure` flag is now required to skip TLS certificate verification:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--insecure` | `false` | Skip TLS certificate verification (self-signed certs). Use only for development or initial setup. |
 
 ## Device authorization flow (CLI login)
 
@@ -452,7 +493,7 @@ Most CLI arguments are reconciled with DB-persisted values at startup. The recon
 | `--pki-addr` | `network.pki_addr` | `null` | Yes (requires CA rotation) |
 | `--https-addr` | `network.https_addr` | `[::]:8443` | No (restart) |
 
-**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--reuseport`, `--takeover-from`, `--shutdown-timeout-secs`.
+**Not DB-managed** (bootstrap/infrastructure): `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`, `--ca-key`, `--static-dir`, `--reuseport`, `--takeover-from`, `--shutdown-timeout-secs`, `--master-key-file`.
 
 ### OIDC provider bootstrap
 
@@ -736,7 +777,8 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 | Flag | Env var | Default | Description |
 | --- | --- | --- | --- |
 | `--url` | | (required) | Controller URL (e.g., `https://controller:8443`). Port defaults to 443. |
-| `--tofu` | | `false` | Trust the controller's TLS certificate on first connection (TOFU). Conflicts with `--ca-cert` and `--pki-addr`. |
+| `--tofu` | | `false` | Trust the controller's TLS certificate on first connection (TOFU) with signature verification via `TofuVerifier`. Conflicts with `--ca-cert` and `--pki-addr`. |
+| `--tofu-fingerprint` | | | SHA-256 fingerprint for TOFU verification (hex-encoded, with or without colons). Requires `--tofu`. When set, the fetched CA certificate's fingerprint is compared against this value before trusting it. |
 | `--ca-cert` | | | Path to a PEM-encoded CA certificate file |
 | `--pki-addr` | | | Optional URL for PKI endpoints (CA certificate, OCSP). Supports `http://` and `https://`. |
 | `--config-dir` | `UPTRAKIT_CONFIG_DIR` | platform-specific | Config directory for CA certificate |
@@ -753,7 +795,7 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 | `--ping-interval` | `15` | Ping interval in seconds |
 
 **Connection lifecycle (shared with agent via `uptrakit-enrollment`):**
-1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU → system trust (via `uptrakit_enrollment::ca::bootstrap_ca`)
+1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU (with optional `--tofu-fingerprint` SHA-256 pinning) → system trust (via `uptrakit_enrollment::ca::bootstrap_ca`)
 2. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`, hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret (saved to state dir) (via `uptrakit_enrollment::ws::run_enrollment`)
 3. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate (saved to state dir) (via `uptrakit_enrollment::ws::resume_enrollment`)
 4. **Authenticated operation**: Reconnect with mTLS, send `Register`, receive `TenantAssignments`, run MQTT clients
@@ -808,7 +850,7 @@ MQTT services use the unified service entity:
 | `crates/shared/db/src/entity/service_certificate.rs` | SeaORM entity for service certificates |
 | `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
 | `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
-| `crates/shared/enrollment/` | `uptrakit-enrollment` crate: shared enrollment, identity, TLS, CA bootstrap, WebSocket protocol, and CLI args |
+| `crates/shared/enrollment/` | `uptrakit-enrollment` crate: shared enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, and CLI args |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
 | `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services |
 | `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — cross-controller notification outbox |

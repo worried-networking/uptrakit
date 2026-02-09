@@ -31,6 +31,18 @@ Install `cargo-deny` for dependency checks:
 cargo install cargo-deny
 ```
 
+### Master encryption key
+
+The controller requires a master encryption key for encrypting sensitive database fields. Set a test key for development:
+
+```sh
+export UPTRAKIT_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+```
+
+This must be a 64-character hex string (256-bit key). Without it, the controller refuses to start. Alternatively, use `--master-key-file <path>` to point to a file containing the key.
+
+**Do not use the example key above in production.** Generate a proper key with: `openssl rand -hex 32`
+
 ### Backend (Rust)
 
 #### Build

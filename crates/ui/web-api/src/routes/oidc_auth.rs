@@ -156,7 +156,9 @@ pub async fn oidc_authorize(
     let client = CoreClient::from_provider_metadata(
         provider_metadata,
         ClientId::new(provider.client_id.clone()),
-        Some(ClientSecret::new(provider.client_secret.clone())),
+        Some(ClientSecret::new(
+            provider.client_secret.expose_secret().to_string(),
+        )),
     );
     let client = client.set_redirect_uri(redirect_url);
 
@@ -285,7 +287,9 @@ pub async fn oidc_callback(
     let client = CoreClient::from_provider_metadata(
         provider_metadata,
         ClientId::new(provider.client_id.clone()),
-        Some(ClientSecret::new(provider.client_secret.clone())),
+        Some(ClientSecret::new(
+            provider.client_secret.expose_secret().to_string(),
+        )),
     );
     let client = client.set_redirect_uri(redirect_url.clone());
 

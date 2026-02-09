@@ -4907,6 +4907,7 @@ version = "0.0.1"
 dependencies = [
  "clap",
  "futures-util",
+ "hex",
  "hostname",
  "http",
  "rcgen",
@@ -4915,6 +4916,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "time",
@@ -5054,6 +5056,9 @@ dependencies = [
 name = "uptrakit-shared-db"
 version = "0.0.1"
 dependencies = [
+ "aws-lc-rs",
+ "hex",
+ "rand 0.9.2",
  "sea-orm",
  "serde",
  "serde_json",

@@ -30,7 +30,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
         logo_url: m.logo_url,
         issuer_url: m.issuer_url,
         client_id: m.client_id,
-        has_client_secret: !m.client_secret.is_empty(),
+        has_client_secret: !m.client_secret.expose_secret().is_empty(),
         scopes: m.scopes,
         auto_create_users: m.auto_create_users,
         role_claim_path: m.role_claim_path,
@@ -100,7 +100,9 @@ pub async fn create_provider(
         logo_url: Set(req.logo_url),
         issuer_url: Set(req.issuer_url),
         client_id: Set(req.client_id),
-        client_secret: Set(req.client_secret),
+        client_secret: Set(uptrakit_shared_db::crypto::EncryptedString::new(
+            req.client_secret,
+        )),
         scopes: Set(req.scopes),
         auto_create_users: Set(req.auto_create_users),
         role_claim_path: Set(req.role_claim_path),
@@ -268,7 +270,9 @@ pub async fn update_provider(
         model.client_id = Set(client_id);
     }
     if let Some(client_secret) = req.client_secret {
-        model.client_secret = Set(client_secret);
+        model.client_secret = Set(uptrakit_shared_db::crypto::EncryptedString::new(
+            client_secret,
+        ));
     }
     if let Some(scopes) = req.scopes {
         model.scopes = Set(scopes);
@@ -390,7 +394,7 @@ pub async fn activate_provider(
     // Validate config completeness
     if provider.issuer_url.is_empty()
         || provider.client_id.is_empty()
-        || provider.client_secret.is_empty()
+        || provider.client_secret.expose_secret().is_empty()
     {
         return error_response(StatusCode::CONFLICT, "Provider configuration is incomplete");
     }

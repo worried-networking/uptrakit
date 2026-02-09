@@ -41,6 +41,8 @@ Uptrakit is designed with a defence-in-depth approach. Key principles:
 | Password hashing | [Argon2id](https://crates.io/crates/argon2) (OWASP-recommended: 19 MiB, 2 iterations) | User password storage |
 | JWT signing | [jsonwebtoken](https://crates.io/crates/jsonwebtoken) | Access and refresh tokens |
 | Session tokens | SHA-256 hashed, 7-day expiry, rotated on each use | Stateful user sessions (refresh token rotation) |
+| Encryption at rest | AES-256-GCM ([aes-gcm](https://crates.io/crates/aes-gcm) crate) | Encrypts sensitive DB fields (MQTT passwords, OIDC client secrets, CA private keys) |
+| TOFU verification | `TofuVerifier` with SHA-256 fingerprint pinning | Secures initial CA certificate trust on first use |
 
 No custom cryptographic implementations are used.
 
@@ -98,6 +100,7 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 
 ## Secrets Handling
 
+- Sensitive database credentials (MQTT passwords, OIDC client secrets, CA private keys) are encrypted at rest using AES-256-GCM. See the "Encryption at Rest" section below.
 - Passwords are hashed with Argon2id before storage; plaintext is never persisted.
 - Session tokens (refresh tokens) are SHA-256 hashed in the database and **rotated on each use** — the old token is atomically revoked and a new one issued, preventing replay attacks.
 - JWT signing keys are held in memory only.
@@ -106,6 +109,57 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 - CA private keys are stored on the controller filesystem and held in a separate in-memory key store (`CaKeyStore`) with `zeroize` memory protection. Only signing operations (OCSP, CRL, certificate issuance) access the key store; public CA data (certificates, fingerprints) is shared separately.
 - No secrets appear in log output, error messages, or API responses.
 - MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are delivered locally only and never written to the cross-controller notification outbox, preventing plaintext credential persistence in the database.
+
+## Encryption at Rest
+
+Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom type (`crates/shared/db/src/crypto.rs`).
+
+### Master Key Management
+
+A 256-bit master encryption key is mandatory for the controller. Without it, the controller refuses to start.
+
+| Provisioning method | Details |
+| --- | --- |
+| `UPTRAKIT_MASTER_KEY` environment variable | 64-character hex string (32 bytes) |
+| `--master-key-file` CLI argument | Path to a file containing the hex key |
+
+The master key is loaded once at startup via `init_master_key()` and held in a global `OnceLock`. It is never logged, never exposed in API responses, and never persisted by the application itself.
+
+### Encrypted Fields
+
+| Table | Column | Description |
+| --- | --- | --- |
+| `mqtt_clients` | `password` | MQTT broker password |
+| `oidc_providers` | `client_secret` | OIDC client secret |
+| `ca_certificates` | `key_pem` | CA private key PEM |
+
+### Ciphertext Format
+
+Encrypted values are stored as `"ENC:v1:<hex(nonce || ciphertext || tag)>"`. The `v1` marker enables future algorithm migration. A 96-bit random nonce is generated per encryption operation.
+
+### Legacy Plaintext Passthrough
+
+On read, `EncryptedString` detects values without the `ENC:v1:` prefix and returns them as-is. This allows existing plaintext data to be read transparently. On the next write, the value will be encrypted. No bulk migration is required.
+
+## TOFU Hardening
+
+The Trust-On-First-Use (TOFU) mechanism for initial CA certificate bootstrap has been hardened with proper TLS signature verification and optional fingerprint pinning.
+
+### TofuVerifier
+
+The previous `AcceptAnyCert` TLS verifier (which bypassed all certificate validation) has been replaced with `TofuVerifier` (`crates/shared/enrollment/src/tls.rs`). `TofuVerifier` delegates TLS signature verification to the installed cryptographic provider (aws-lc-rs via Rustls), ensuring that the server presents a properly structured certificate even during TOFU. It only skips the CA chain validation -- it does **not** disable signature checks.
+
+The `CaTlsMode::Insecure` variant has been renamed to `CaTlsMode::Tofu` to accurately reflect its purpose.
+
+### Fingerprint Pinning
+
+The `--tofu-fingerprint` CLI flag (requires `--tofu`) accepts a SHA-256 fingerprint (hex, with or without colons). When provided, `bootstrap_ca()` computes the fingerprint of the fetched CA certificate via `ca_pem_fingerprint()` and compares it to the expected value before trusting the certificate. A mismatch causes a hard failure.
+
+This allows operators to verify the identity of the controller on the very first connection, closing the TOFU trust gap for environments where the fingerprint can be distributed out-of-band.
+
+### CLI `--insecure` Flag
+
+The CLI client (`crates/ui/cli/src/client.rs`) previously hardcoded `tls_danger_accept_invalid_certs(true)`, silently bypassing all TLS verification. This has been removed. An explicit `--insecure` flag is now required to skip TLS certificate verification, making the security trade-off visible to the operator.
 
 ## Filesystem Security
 

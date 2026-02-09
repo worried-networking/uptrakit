@@ -13,7 +13,7 @@ pub struct Model {
     pub port: i32,
     pub client_id: String,
     pub username: Option<String>,
-    pub password: Option<String>,
+    pub password: Option<crate::crypto::EncryptedString>,
     pub topic_prefix: String,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

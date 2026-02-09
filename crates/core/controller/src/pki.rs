@@ -283,7 +283,9 @@ pub async fn load_or_init_managed_ca(
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(fingerprint.clone()),
         cert_pem: Set(bundle.cert_pem.clone()),
-        key_pem: Set(bundle.key_pem.clone()),
+        key_pem: Set(uptrakit_shared_db::crypto::EncryptedString::new(
+            bundle.key_pem.clone(),
+        )),
         not_before: Set(not_before),
         not_after: Set(not_after),
         activated_at: Set(now),
@@ -414,7 +416,9 @@ pub async fn rotate_managed_ca(
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(new_fp.clone()),
         cert_pem: Set(new_ca.cert_pem.clone()),
-        key_pem: Set(new_ca.key_pem.clone()),
+        key_pem: Set(uptrakit_shared_db::crypto::EncryptedString::new(
+            new_ca.key_pem.clone(),
+        )),
         not_before: Set(not_before),
         not_after: Set(not_after),
         activated_at: Set(now),
@@ -518,11 +522,12 @@ fn load_ca(cert_path: &Path, key_path: &Path) -> Result<CaBundle> {
 }
 
 fn bundle_from_model(model: ca_certificate::Model) -> Result<CaBundle> {
-    let key_pair = KeyPair::from_pem(&model.key_pem).context_to::<PkiError>()?;
+    let key_pem_str = model.key_pem.expose_secret().to_string();
+    let key_pair = KeyPair::from_pem(&key_pem_str).context_to::<PkiError>()?;
     let issuer = Issuer::from_ca_cert_pem(&model.cert_pem, key_pair).context_to::<PkiError>()?;
     Ok(CaBundle {
         cert_pem: model.cert_pem,
-        key_pem: model.key_pem,
+        key_pem: key_pem_str,
         issuer,
     })
 }
@@ -1407,6 +1412,9 @@ mod tests {
     async fn managed_ca_init_and_rotation() -> std::result::Result<(), String> {
         use sea_orm::{ColumnTrait, ConnectOptions, Database, EntityTrait, QueryFilter};
         use uptrakit_shared_db::entity::tenant;
+
+        // EncryptedString requires a master key for DB writes
+        let _ = uptrakit_shared_db::crypto::init_master_key([0x42u8; 32]);
 
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.map_err(|e| e.to_string())?;

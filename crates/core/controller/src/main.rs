@@ -65,6 +65,50 @@ async fn main() -> std::process::ExitCode {
 }
 
 async fn run(args: cli::Args) -> Result<()> {
+    // Initialize master encryption key (required for credential encryption at rest)
+    {
+        let key_hex = if let Some(ref key_file) = args.master_key_file {
+            std::fs::read_to_string(key_file)
+                .map_err(|e| {
+                    report!(AppError::Config(format!(
+                        "failed to read --master-key-file {}: {e}",
+                        key_file.display()
+                    )))
+                })?
+                .trim()
+                .to_string()
+        } else if let Ok(env_val) = std::env::var("UPTRAKIT_MASTER_KEY") {
+            env_val.trim().to_string()
+        } else {
+            return Err(report!(AppError::Config(
+                "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \
+                 (64-char hex string) or pass --master-key-file <path>"
+                    .into()
+            )));
+        };
+
+        let key_bytes: [u8; 32] = hex::decode(&key_hex)
+            .map_err(|e| {
+                report!(AppError::Config(format!(
+                    "master key must be a 64-character hex string: {e}"
+                )))
+            })?
+            .try_into()
+            .map_err(|v: Vec<u8>| {
+                report!(AppError::Config(format!(
+                    "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
+                    v.len()
+                )))
+            })?;
+
+        uptrakit_shared_db::crypto::init_master_key(key_bytes).map_err(|e| {
+            report!(AppError::Config(format!(
+                "failed to initialize master key: {e}"
+            )))
+        })?;
+        tracing::info!("master encryption key initialized");
+    }
+
     // Resolve application directories (config and state)
     let app_dirs = args.resolve_dirs().map_err(|e| {
         report!(AppError::Config(format!(
@@ -385,7 +429,9 @@ async fn run(args: cli::Args) -> Result<()> {
                         logo_url: Set(None),
                         issuer_url: Set(issuer_url.to_string()),
                         client_id: Set(client_id.to_string()),
-                        client_secret: Set(client_secret.to_string()),
+                        client_secret: Set(uptrakit_shared_db::crypto::EncryptedString::new(
+                            client_secret.to_string(),
+                        )),
                         scopes: Set(scopes.to_string()),
                         auto_create_users: Set(true),
                         role_claim_path: Set(None),
@@ -411,7 +457,9 @@ async fn run(args: cli::Args) -> Result<()> {
                     let mut model = existing_provider.into_active_model();
                     model.issuer_url = Set(issuer_url.to_string());
                     model.client_id = Set(client_id.to_string());
-                    model.client_secret = Set(client_secret.to_string());
+                    model.client_secret = Set(uptrakit_shared_db::crypto::EncryptedString::new(
+                        client_secret.to_string(),
+                    ));
                     model.is_active = Set(true);
                     model.updated_at = Set(OffsetDateTime::now_utc());
                     model.update(&db_conn).await.context(AppError::Database)?;

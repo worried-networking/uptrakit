@@ -101,7 +101,9 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         port: Set(i32::from(port)),
         client_id: Set(client_id.to_string()),
         username: Set(username.map(String::from)),
-        password: Set(password.map(String::from)),
+        password: Set(
+            password.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+        ),
         topic_prefix: Set(topic_prefix.to_string()),
         created_at: Set(now),
         updated_at: Set(now),
@@ -160,7 +162,8 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
         model.username = Set(v.map(String::from));
     }
     if let Some(v) = password {
-        model.password = Set(v.map(String::from));
+        model.password =
+            Set(v.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string())));
     }
     if let Some(v) = topic_prefix {
         model.topic_prefix = Set(v.to_string());

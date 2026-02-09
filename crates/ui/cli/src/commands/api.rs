@@ -13,6 +13,7 @@ pub async fn execute(
     server_override: Option<&str>,
     token_override: Option<&str>,
     format: OutputFormat,
+    insecure: bool,
 ) -> Result<()> {
     let config = load_config()?;
     let creds = load_credentials()?;
@@ -27,7 +28,7 @@ pub async fn execute(
         .or(creds.token)
         .ok_or_else(|| report!(CliError::NotLoggedIn))?;
 
-    let client = ApiClient::with_token(&server, &token)?;
+    let client = ApiClient::with_token(&server, &token, insecure)?;
 
     let body = match data {
         Some(json_str) => Some(
