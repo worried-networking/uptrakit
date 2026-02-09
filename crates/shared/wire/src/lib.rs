@@ -550,6 +550,16 @@ pub struct DisconnectingPayload {
     pub active_mqtt_clients: Vec<Uuid>,
 }
 
+impl DisconnectingPayload {
+    /// Create a `DisconnectingPayload` for non-MQTT services (agents).
+    pub fn new(reason: DisconnectReason) -> Self {
+        Self {
+            reason,
+            active_mqtt_clients: Vec::new(),
+        }
+    }
+}
+
 // =============================================================================
 // MQTT Service Specific Payloads
 // =============================================================================

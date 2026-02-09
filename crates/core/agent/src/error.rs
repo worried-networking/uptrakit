@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_enrollment::EnrollmentError;
+use uptrakit_enrollment::{EnrollmentError, is_rustls_cert_expired};
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
@@ -44,8 +44,10 @@ impl Error {
     pub fn is_cert_expired(&self) -> bool {
         match self {
             Error::Enrollment(e) => e.is_cert_expired(),
-            Error::WebSocket(e) => e.to_string().contains("CertificateExpired"),
-            Error::Io(e) => e.to_string().contains("CertificateExpired"),
+            Error::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err)) => {
+                is_rustls_cert_expired(io_err)
+            }
+            Error::Io(io_err) => is_rustls_cert_expired(io_err),
             _ => false,
         }
     }
@@ -95,8 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn is_cert_expired_websocket_with_cert_expired_string() {
-        // Error::WebSocket that stringifies to contain "CertificateExpired"
+    fn is_cert_expired_websocket_wrapping_rustls() {
         let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
         let ws_err = tokio_tungstenite::tungstenite::Error::Io(io_err);

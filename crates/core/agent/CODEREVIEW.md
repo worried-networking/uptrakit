@@ -26,50 +26,12 @@ Plus shared crates: `wire`, `enrollment`, `directories`, `provider-registry`, `p
 
 | # | Severity | Category | Issue | Status |
 |---|----------|----------|-------|--------|
-| 5 | Low | Performance | Sequential version checks | Open |
-| 6 | Low | Maintenance | String-based error detection | Open |
 | 8 | Medium | Architecture | Duplicate update dispatch (provider trait vs hardcoded) | Open |
-| 9 | Low | Cleanup | Unused direct dependencies (`serde`, `provider-core`) | Open |
 | 11a | Low | Completeness | `detect_current_version` is a no-op | Open |
-| 11b | Low | Safety | `extract_service_id` silently falls back to "unknown" | Open |
-| 11c | Low | Design | Agent sends empty MQTT-specific field | Open |
 
 ---
 
 ## Detailed Findings
-
-### 5. Sequential Version Checks
-
-**Severity: Low** | Performance concern.
-
-In `client.rs:328`:
-
-```rust
-for assignment in &payload.assignments {
-    // ...
-    let (installed_version, error) = crate::version_check::check_version(...).await;
-    results.push(...);
-}
-```
-
-Version checks are executed sequentially. For a large number of software items, this could take a long time. Since each check is independent, they could be run concurrently with a bounded concurrency limit (e.g., `futures::stream::iter(...).buffer_unordered(8)`). However, since all current provider local implementations are stubs returning `Ok(None)` immediately, this is a low priority concern for now.
-
----
-
-### 6. Fragile String-Based Error Detection
-
-**Severity: Low** | Maintenance risk.
-
-In `error.rs:47-48`:
-
-```rust
-Error::WebSocket(e) => e.to_string().contains("CertificateExpired"),
-Error::Io(e) => e.to_string().contains("CertificateExpired"),
-```
-
-This relies on the exact string representation of rustls errors, which could change across library versions. A more robust approach would pattern-match on the underlying rustls error types.
-
----
 
 ### 8. Duplicate Update Dispatch Architecture
 
@@ -88,20 +50,7 @@ This means the provider abstraction (which the version check path uses via `Prov
 
 ---
 
-### 9. Unnecessary Direct Dependencies
-
-**Severity: Low** | Cleanup.
-
-In `Cargo.toml`:
-
-- `serde = { workspace = true }` - No `Serialize`/`Deserialize` derives or direct serde usage in any agent source file. Only `serde_json` is used.
-- `uptrakit-provider-core = { path = "../../providers/core" }` - Not imported in any agent source file. The agent uses `uptrakit-provider-registry` (which re-exports what's needed) and `uptrakit-internal-wire` (which re-exports `ProviderType`).
-
----
-
-### 11. Minor Issues
-
-#### 11a. `detect_current_version` is a no-op (update.rs:247-251)
+### 11a. `detect_current_version` is a no-op (update.rs)
 
 ```rust
 async fn detect_current_version(_payload: &ExecuteUpdatePayload) -> Option<String> {
@@ -111,25 +60,6 @@ async fn detect_current_version(_payload: &ExecuteUpdatePayload) -> Option<Strin
 ```
 
 Both `from_version` and `to_version` detection always return `None`, making `UpdateResultPayload.from_version` and `.to_version` useless. This is acknowledged with a TODO.
-
-#### 11b. `extract_service_id` fallback (client.rs:638)
-
-```rust
-.unwrap_or_else(|| "unknown".to_string())
-```
-
-If called when service_id is `None`, the CSR common name becomes "unknown", which could cause certificate issuance issues. This should be an error rather than a silent fallback, since it's only called during certificate renewal when the identity should always have a service_id.
-
-#### 11c. `active_mqtt_clients: vec![]` hardcoded (client.rs:607)
-
-```rust
-let disconnecting_msg = ServiceMessage::Disconnecting(DisconnectingPayload {
-    reason: disconnect_reason,
-    active_mqtt_clients: vec![],
-});
-```
-
-This is correct for the agent (it has no MQTT clients), but the payload structure coupling is a minor smell. The wire protocol requires agents to send an empty vec for an MQTT-specific field.
 
 ---
 
@@ -150,6 +80,11 @@ This is correct for the agent (it has no MQTT clients), but the payload structur
 - Bounded output accumulation (10 MB cap) to prevent OOM
 - Explicit logging of swallowed task panics in stdout/stderr readers
 - Comprehensive test coverage for `client.rs` and `error.rs`
+- Robust TLS error detection via structured downcast (no string matching)
+- Concurrent version checks with bounded parallelism (`buffer_unordered(8)`)
+- `extract_service_id` returns error instead of silent "unknown" fallback
+- `DisconnectingPayload::new()` decouples MQTT-specific fields from agent
+- Minimal dependency footprint (unused `serde` and `provider-core` removed)
 
 ---
 
@@ -224,218 +159,6 @@ This is correct for the agent (it has no MQTT clients), but the payload structur
 
 ---
 
-### Fix Plan 7: Robust TLS Error Detection (Finding #6)
-
-**Goal**: Replace fragile `e.to_string().contains("CertificateExpired")` with structured error matching.
-
-**Problem**: Both `crates/shared/enrollment/src/error.rs:85-91` and `crates/core/agent/src/error.rs:44-51` detect certificate expiry by stringifying errors and searching for the substring `"CertificateExpired"`. This is:
-- Fragile: the string representation could change across `rustls` or `tungstenite` versions.
-- Slow: allocates a String and performs a substring search on every error check.
-- Incorrect if the string appears in a different context (e.g., an error message mentioning `CertificateExpired` as a diagnostic).
-
-**Root cause chain**: When the TLS handshake fails with a `CertificateExpired` alert:
-1. `rustls` produces `rustls::Error::AlertReceived(AlertDescription::CertificateExpired)`
-2. This is wrapped in `std::io::Error` (custom kind)
-3. `tungstenite` wraps it in `tungstenite::Error::Io(io_err)`
-
-**Changes**:
-
-1. **Add a helper function** in `crates/shared/enrollment/src/error.rs` that downcasts through the error chain:
-   ```rust
-   /// Check if an `std::io::Error` wraps a rustls `CertificateExpired` alert.
-   fn is_rustls_cert_expired(io_err: &std::io::Error) -> bool {
-       // rustls wraps its errors as io::Error via io::Error::new(io::ErrorKind::*, rustls_err)
-       if let Some(inner) = io_err.get_ref() {
-           if let Some(rustls_err) = inner.downcast_ref::<rustls::Error>() {
-               return matches!(
-                   rustls_err,
-                   rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired)
-               );
-           }
-       }
-       false
-   }
-   ```
-
-2. **Update `EnrollmentError::is_cert_expired`** to use the structured check:
-   ```rust
-   pub fn is_cert_expired(&self) -> bool {
-       match self {
-           EnrollmentError::Rustls(rustls::Error::AlertReceived(
-               rustls::AlertDescription::CertificateExpired,
-           )) => true,
-           EnrollmentError::WebSocket(tungstenite::Error::Io(io_err)) => {
-               is_rustls_cert_expired(io_err)
-           }
-           EnrollmentError::Io(io_err) => is_rustls_cert_expired(io_err),
-           _ => false,
-       }
-   }
-   ```
-
-3. **Update agent's `Error::is_cert_expired`** to delegate properly:
-   ```rust
-   pub fn is_cert_expired(&self) -> bool {
-       match self {
-           Error::Enrollment(e) => e.is_cert_expired(),
-           Error::WebSocket(tungstenite::Error::Io(io_err)) => {
-               is_rustls_cert_expired(io_err)
-           }
-           Error::Io(io_err) => is_rustls_cert_expired(io_err),
-           _ => false,
-       }
-   }
-   ```
-   Import or duplicate the `is_rustls_cert_expired` helper. Since both crates need it, add it as a `pub fn` in the enrollment crate and import it in the agent.
-
-4. **Add tests** covering:
-   - Construct a `rustls::Error::AlertReceived(CertificateExpired)`, wrap it in `io::Error`, wrap that in `tungstenite::Error::Io`, wrap that in `EnrollmentError::WebSocket` -- verify `is_cert_expired()` returns `true`.
-   - Same chain with a different alert (e.g., `HandshakeFailure`) -- verify `false`.
-   - A plain `io::Error` (not wrapping rustls) -- verify `false`.
-   - `EnrollmentError::Rustls(AlertReceived(CertificateExpired))` -- verify `true`.
-
-**Files modified**: `crates/shared/enrollment/src/error.rs`, `crates/core/agent/src/error.rs`
-
----
-
-### Fix Plan 9: Remove Unused Direct Dependencies (Finding #9)
-
-**Goal**: Clean up `Cargo.toml` to remove dependencies not directly used by agent source code.
-
-**Problem**: Two dependencies are listed but never imported in agent source files:
-- `serde = { workspace = true }` -- no `#[derive(Serialize, Deserialize)]` or `use serde::*` in any agent `.rs` file. The agent only uses `serde_json` for serialization/deserialization of wire protocol types (which are defined in the `wire` crate, not in the agent).
-- `uptrakit-provider-core = { path = "../../providers/core" }` -- no `use uptrakit_provider_core::*` anywhere. The agent uses `uptrakit-provider-registry` (which re-exports `Provider`, `ProviderType`, etc.) and `uptrakit-internal-wire` (which re-exports `ProviderType`).
-
-**Verification steps before removal**:
-
-1. **`serde`**: Run `grep -r "use serde" crates/core/agent/src/` and `grep -r "Serialize\|Deserialize" crates/core/agent/src/` to confirm zero direct usage. Then remove and verify `cargo check -p uptrakit-agent` passes.
-
-2. **`uptrakit-provider-core`**: Run `grep -r "uptrakit_provider_core" crates/core/agent/src/` to confirm zero direct imports. Then remove and verify `cargo check -p uptrakit-agent` passes.
-
-**Changes**:
-
-1. **Remove from `Cargo.toml`**:
-   ```diff
-   -serde = { workspace = true }
-   -uptrakit-provider-core = { path = "../../providers/core" }
-   ```
-
-2. **Run quality gates**:
-   ```sh
-   cargo check -p uptrakit-agent --all-features
-   cargo clippy -p uptrakit-agent --all-targets --all-features -- -D warnings
-   cargo test -p uptrakit-agent --all-features
-   ```
-
-**Files modified**: `Cargo.toml`
-
----
-
-### Fix Plan 10: Fail on Missing Service ID During Renewal (Finding #11b)
-
-**Goal**: Replace the silent `"unknown"` fallback in `extract_service_id` with an explicit error, since a missing service ID during certificate renewal is a logic error that should not silently produce an invalid CSR.
-
-**Problem**: In `client.rs:634-639`:
-```rust
-fn extract_service_id(identity: &uptrakit_enrollment::ServiceIdentityState) -> String {
-    identity
-        .service_id()
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-```
-
-This function is called in exactly two places -- both during certificate renewal (`renewal_sleep` branch at line 189 and `RequestCertRenewal` handler at line 304). At these points in the lifecycle, the agent is in the authenticated mTLS loop, meaning it **must** have a valid service ID (it was assigned during enrollment and is required to reach this state). If `service_id()` returns `None`, something is fundamentally broken.
-
-Generating a CSR with common name `"unknown"` would:
-- Produce a certificate that doesn't match the agent's identity
-- Potentially be rejected by the controller's certificate signing logic
-- Cause confusing failures later when the mismatched cert is used
-
-**Changes**:
-
-1. **Change `extract_service_id` to return `Result<String>`**:
-   ```rust
-   fn extract_service_id(
-       identity: &uptrakit_enrollment::ServiceIdentityState,
-   ) -> Result<String> {
-       identity
-           .service_id()
-           .map(|id| id.to_string())
-           .ok_or_else(|| report!(Error::Enrollment(
-               uptrakit_enrollment::EnrollmentError::NotEnrolled
-           )))
-   }
-   ```
-
-2. **Update call site at renewal timer** (line ~189-191):
-   ```rust
-   let client_id_str = match extract_service_id(identity) {
-       Ok(id) => id,
-       Err(e) => {
-           tracing::error!(error = %e, "cannot renew certificate: no service ID");
-           break LoopOutcome::Disconnected;
-       }
-   };
-   ```
-
-3. **Update call site at `RequestCertRenewal`** (line ~304) -- same pattern, already has an error branch that breaks to `Disconnected`.
-
-4. **Add a test** confirming the function returns an error when identity has no service_id.
-
-**Files modified**: `src/client.rs`
-
----
-
-### Fix Plan 11 — Concurrent Version Checks (Finding #5)
-
-**Goal**: Replace the serial `for` loop in `check_versions` with concurrent execution so that slow providers don't block the entire batch.
-
-**Approach**:
-
-1. **Refactor `check_versions` in `src/version_check.rs`** to use `futures::stream::iter` + `buffer_unordered`:
-   ```rust
-   use futures_util::stream::{self, StreamExt};
-
-   pub async fn check_versions(
-       configs: &[SoftwareConfig],
-       registry: &ProviderRegistry,
-   ) -> Vec<VersionCheckResult> {
-       stream::iter(configs)
-           .map(|config| async move {
-               let result = check_version(config, registry).await;
-               (config.clone(), result)
-           })
-           .buffer_unordered(8) // up to 8 checks in parallel
-           .collect::<Vec<_>>()
-           .await
-           .into_iter()
-           .map(|(config, result)| match result {
-               Ok(version) => VersionCheckResult {
-                   software_id: config.software_id,
-                   installed_version: version,
-                   error: None,
-               },
-               Err(e) => VersionCheckResult {
-                   software_id: config.software_id,
-                   installed_version: None,
-                   error: Some(e.to_string()),
-               },
-           })
-           .collect()
-   }
-   ```
-
-2. **Add `futures-util` dependency** to `crates/core/agent/Cargo.toml` (if not already present).
-
-3. **Add tests** verifying that:
-   - Multiple configs are checked concurrently (mock provider with artificial delay).
-   - Individual failures are isolated and don't abort other checks.
-
-**Files modified**: `src/version_check.rs`, `Cargo.toml`
-
----
-
 ### Fix Plan 12 — Implement `detect_current_version` via Provider Registry (Finding #11a)
 
 **Goal**: Replace the no-op `detect_current_version` stub with a real delegation to the provider registry's `check_version` function.
@@ -469,40 +192,3 @@ Generating a CSR with common name `"unknown"` would:
 4. **Add a test** with a mock provider that returns a known version, verifying it flows through correctly.
 
 **Files modified**: `src/update.rs`
-
----
-
-### Fix Plan 13 — Decouple MQTT-specific Field from Agent's Disconnecting Message (Finding #11c)
-
-**Goal**: Remove the requirement for the agent to populate `active_mqtt_clients: vec![]` when it has nothing to do with MQTT.
-
-**Approach**:
-
-1. **In `crates/shared/wire/src/lib.rs`**, add a convenience constructor to `DisconnectingPayload`:
-   ```rust
-   impl DisconnectingPayload {
-       /// Create a `DisconnectingPayload` for non-MQTT services (agents).
-       pub fn new(reason: String) -> Self {
-           Self {
-               reason,
-               active_mqtt_clients: Vec::new(),
-           }
-       }
-   }
-   ```
-
-2. **In `src/client.rs`** (agent crate), replace the manual struct literal:
-   ```rust
-   // Before:
-   ServiceMessage::Disconnecting(DisconnectingPayload {
-       reason: "graceful shutdown".into(),
-       active_mqtt_clients: vec![],
-   })
-
-   // After:
-   ServiceMessage::Disconnecting(DisconnectingPayload::new("graceful shutdown".into()))
-   ```
-
-3. **Long-term consideration** (out of scope for this fix): refactor `DisconnectingPayload` into an enum or use `#[serde(default)]` so MQTT-specific data is in a separate variant. This fix plan addresses the immediate coupling with a minimal, non-breaking change.
-
-**Files modified**: `crates/shared/wire/src/lib.rs`, `src/client.rs`

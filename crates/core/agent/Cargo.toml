@@ -14,7 +14,6 @@ rand = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
@@ -26,7 +25,6 @@ tracing-subscriber = { workspace = true }
 uptrakit-enrollment = { path = "../../shared/enrollment" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uuid = { workspace = true }
-uptrakit-provider-core = { path = "../../providers/core" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
 
 [dev-dependencies]

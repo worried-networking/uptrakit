@@ -186,7 +186,13 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
             }
             _ = &mut renewal_sleep => {
                 tracing::info!("renewal window reached, requesting certificate renewal");
-                let client_id_str = extract_service_id(identity);
+                let client_id_str = match extract_service_id(identity) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        tracing::error!(error = %e, "cannot renew certificate: no service ID");
+                        break LoopOutcome::Disconnected;
+                    }
+                };
                 let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)
                     .context_to::<Error>()?;
                 pending_renewal_key = Some(key_pem);
@@ -301,7 +307,13 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             }
                             ControllerMessage::RequestCertRenewal(payload) => {
                                 tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
-                                let client_id_str = extract_service_id(identity);
+                                let client_id_str = match extract_service_id(identity) {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "cannot renew certificate: no service ID");
+                                        break LoopOutcome::Disconnected;
+                                    }
+                                };
                                 let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str).context_to::<Error>() {
                                     Ok(pair) => pair,
                                     Err(e) => {
@@ -324,25 +336,29 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             }
                             ControllerMessage::CheckVersions(payload) => {
                                 tracing::info!(count = payload.assignments.len(), "received CheckVersions request");
-                                let mut results = Vec::with_capacity(payload.assignments.len());
-                                for assignment in &payload.assignments {
-                                    tracing::debug!(
-                                        software_item_id = %assignment.software_item_id,
-                                        name = %assignment.name,
-                                        provider_type = %assignment.provider_type,
-                                        "checking version"
-                                    );
-                                    let (installed_version, error) = crate::version_check::check_version(
-                                        assignment.provider_type.clone(),
-                                        &assignment.package_identifier,
-                                        &assignment.config,
-                                    ).await;
-                                    results.push(VersionCheckResult {
-                                        software_item_id: assignment.software_item_id,
-                                        installed_version,
-                                        error,
-                                    });
-                                }
+                                use futures_util::stream::{self, StreamExt};
+                                let results: Vec<VersionCheckResult> = stream::iter(&payload.assignments)
+                                    .map(|assignment| async move {
+                                        tracing::debug!(
+                                            software_item_id = %assignment.software_item_id,
+                                            name = %assignment.name,
+                                            provider_type = %assignment.provider_type,
+                                            "checking version"
+                                        );
+                                        let (installed_version, error) = crate::version_check::check_version(
+                                            assignment.provider_type.clone(),
+                                            &assignment.package_identifier,
+                                            &assignment.config,
+                                        ).await;
+                                        VersionCheckResult {
+                                            software_item_id: assignment.software_item_id,
+                                            installed_version,
+                                            error,
+                                        }
+                                    })
+                                    .buffer_unordered(8)
+                                    .collect()
+                                    .await;
                                 let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
                                     results,
                                 });
@@ -602,10 +618,8 @@ async fn handle_graceful_shutdown(
     }
 
     // Send Disconnecting message to controller
-    let disconnecting_msg = ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: disconnect_reason,
-        active_mqtt_clients: vec![],
-    });
+    let disconnecting_msg =
+        ServiceMessage::Disconnecting(DisconnectingPayload::new(disconnect_reason));
     if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(disconnecting_msg)) {
         if let Err(e) = ws_stream.send(Message::Text(json.into())).await {
             tracing::debug!(error = %e, "failed to send Disconnecting message");
@@ -631,11 +645,18 @@ async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
 }
 
 /// Extract the service_id string from the identity state.
-fn extract_service_id(identity: &uptrakit_enrollment::ServiceIdentityState) -> String {
+///
+/// Returns an error if the identity has no service ID, since this is only
+/// called during certificate renewal when the identity must be enrolled.
+fn extract_service_id(identity: &uptrakit_enrollment::ServiceIdentityState) -> Result<String> {
     identity
         .service_id()
         .map(|id| id.to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+        .ok_or_else(|| {
+            report!(Error::Enrollment(
+                uptrakit_enrollment::EnrollmentError::NotEnrolled
+            ))
+        })
 }
 
 /// Save renewed cert + key to state directory.
@@ -763,11 +784,11 @@ mod tests {
     // ── extract_service_id ──────────────────────────────────────────────
 
     #[test]
-    fn extract_service_id_without_id() {
+    fn extract_service_id_without_id_returns_error() {
         let dir = std::path::Path::new("/tmp/nonexistent-test-dir");
         let identity = uptrakit_enrollment::ServiceIdentityState::new(dir, dir);
-        // No service.json loaded → service_id is None → returns "unknown"
-        assert_eq!(extract_service_id(&identity), "unknown");
+        // No service.json loaded → service_id is None → returns error
+        assert!(extract_service_id(&identity).is_err());
     }
 
     #[tokio::test]
@@ -784,7 +805,10 @@ mod tests {
             .expect("write");
         let mut identity = uptrakit_enrollment::ServiceIdentityState::new(dir.path(), dir.path());
         identity.load().await.expect("load");
-        assert_eq!(extract_service_id(&identity), id.to_string());
+        assert_eq!(
+            extract_service_id(&identity).expect("should have id"),
+            id.to_string()
+        );
     }
 
     // ── save_renewed_cert ───────────────────────────────────────────────
