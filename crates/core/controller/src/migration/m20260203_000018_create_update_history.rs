@@ -28,6 +28,12 @@ impl MigrationTrait for Migration {
                     .col(string(UpdateHistory::ToVersion))
                     .col(string(UpdateHistory::Status))
                     .col(ColumnDef::new(UpdateHistory::Output).text().not_null())
+                    .col(
+                        ColumnDef::new(UpdateHistory::OutputBytes)
+                            .big_integer()
+                            .not_null()
+                            .default(0),
+                    )
                     .col(string(UpdateHistory::InitiatedBy))
                     .col(timestamp(UpdateHistory::StartedAt))
                     .col(timestamp_null(UpdateHistory::CompletedAt))
@@ -116,6 +122,7 @@ enum UpdateHistory {
     ToVersion,
     Status,
     Output,
+    OutputBytes,
     InitiatedBy,
     StartedAt,
     CompletedAt,

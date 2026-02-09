@@ -27,6 +27,7 @@ pub mod settings_version;
 pub mod software_item;
 pub mod tenant;
 pub mod update_history;
+pub mod update_output_line;
 pub mod user;
 pub mod user_oidc_link;
 pub mod user_role;

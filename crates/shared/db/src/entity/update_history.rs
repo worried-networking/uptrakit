@@ -26,6 +26,7 @@ pub struct Model {
     pub status: UpdateStatus,
     #[sea_orm(column_type = "Text")]
     pub output: String,
+    pub output_bytes: i64,
     pub initiated_by: String,
     pub started_at: OffsetDateTime,
     pub completed_at: Option<OffsetDateTime>,

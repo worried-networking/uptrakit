@@ -13,7 +13,7 @@ use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
 use std::sync::Arc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use uptrakit_shared_db::entity::{host, prelude::*, update_history};
+use uptrakit_shared_db::entity::{host, prelude::*, update_history, update_output_line};
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::update_history::{
@@ -35,10 +35,13 @@ fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
     }
 }
 
+const UPDATE_OUTPUT_BYTES_CAP: usize = 1_048_576;
+
 fn build_response(
-    record: update_history::Model,
+    record: &update_history::Model,
     host_name: String,
     software_item_name: String,
+    output: String,
 ) -> UpdateHistoryResponse {
     UpdateHistoryResponse {
         id: record.id.to_string(),
@@ -46,15 +49,43 @@ fn build_response(
         host_name,
         software_item_id: record.software_item_id.to_string(),
         software_item_name,
-        from_version: record.from_version,
-        to_version: record.to_version,
+        from_version: record.from_version.clone(),
+        to_version: record.to_version.clone(),
         status: db_status_to_api(&record.status),
-        output: record.output,
-        initiated_by: record.initiated_by,
+        output,
+        initiated_by: record.initiated_by.clone(),
         started_at: format_rfc3339(record.started_at),
         completed_at: record.completed_at.map(format_rfc3339),
         created_at: format_rfc3339(record.created_at),
     }
+}
+
+async fn load_output_lines(
+    db: &sea_orm::DatabaseConnection,
+    update_history_id: uuid::Uuid,
+) -> Result<String, sea_orm::DbErr> {
+    let lines = update_output_line::Entity::find()
+        .filter(update_output_line::Column::UpdateHistoryId.eq(update_history_id))
+        .order_by_asc(update_output_line::Column::CreatedAt)
+        .order_by_asc(update_output_line::Column::Id)
+        .all(db)
+        .await?;
+
+    let mut output = String::new();
+    for line in lines {
+        if output.len() >= UPDATE_OUTPUT_BYTES_CAP {
+            break;
+        }
+        let remaining = UPDATE_OUTPUT_BYTES_CAP.saturating_sub(output.len());
+        if line.output.len() <= remaining {
+            output.push_str(&line.output);
+        } else {
+            output.push_str(&line.output[..remaining]);
+            break;
+        }
+    }
+
+    Ok(output)
 }
 
 /// Collect all host IDs belonging to a tenant (for tenant scoping).
@@ -195,7 +226,12 @@ pub async fn list_update_history(
     for record in records {
         let host_name = resolve_host_name(&state.db, record.host_id).await;
         let si_name = resolve_software_item_name(&state.db, record.software_item_id).await;
-        items.push(build_response(record, host_name, si_name));
+        items.push(build_response(
+            &record,
+            host_name,
+            si_name,
+            record.output.clone(),
+        ));
     }
 
     (
@@ -262,7 +298,18 @@ pub async fn get_update_history(
     };
 
     let si_name = resolve_software_item_name(&state.db, record.software_item_id).await;
-    let resp = build_response(record, host.friendly_name, si_name);
+    let output = if record.output.is_empty() {
+        match load_output_lines(&state.db, record.id).await {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load update output lines");
+                String::new()
+            }
+        }
+    } else {
+        record.output.clone()
+    };
+    let resp = build_response(&record, host.friendly_name, si_name, output);
     (StatusCode::OK, Json(resp)).into_response()
 }
 
@@ -281,13 +328,19 @@ mod tests {
             to_version: "2.0.0".to_string(),
             status: update_history::UpdateStatus::Completed,
             output: "Update completed successfully".to_string(),
+            output_bytes: 28,
             initiated_by: "user-123".to_string(),
             started_at: now,
             completed_at: Some(now),
             created_at: now,
         };
 
-        let resp = build_response(record, "Web Server".to_string(), "Node.js".to_string());
+        let resp = build_response(
+            &record,
+            "Web Server".to_string(),
+            "Node.js".to_string(),
+            "Update completed successfully".to_string(),
+        );
 
         assert_eq!(resp.host_name, "Web Server");
         assert_eq!(resp.software_item_name, "Node.js");
@@ -310,13 +363,19 @@ mod tests {
             to_version: "3.0.0".to_string(),
             status: update_history::UpdateStatus::Failed,
             output: "Error: package not found".to_string(),
+            output_bytes: 25,
             initiated_by: "scheduler".to_string(),
             started_at: now,
             completed_at: Some(now),
             created_at: now,
         };
 
-        let resp = build_response(record, "DB Server".to_string(), "PostgreSQL".to_string());
+        let resp = build_response(
+            &record,
+            "DB Server".to_string(),
+            "PostgreSQL".to_string(),
+            "Error: package not found".to_string(),
+        );
 
         assert_eq!(resp.host_name, "DB Server");
         assert_eq!(resp.software_item_name, "PostgreSQL");
@@ -338,13 +397,19 @@ mod tests {
             to_version: "1.1.0".to_string(),
             status: update_history::UpdateStatus::Pending,
             output: String::new(),
+            output_bytes: 0,
             initiated_by: "mqtt".to_string(),
             started_at: now,
             completed_at: None,
             created_at: now,
         };
 
-        let resp = build_response(record, "App Host".to_string(), "Redis".to_string());
+        let resp = build_response(
+            &record,
+            "App Host".to_string(),
+            "Redis".to_string(),
+            String::new(),
+        );
 
         assert_eq!(resp.status, UpdateStatus::Pending);
         assert!(resp.completed_at.is_none());

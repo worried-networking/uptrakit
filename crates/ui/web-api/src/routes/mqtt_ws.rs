@@ -18,7 +18,8 @@ use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use super::service_ws::{
-    close_with_reason, deserialize_service_msg, send_pong, serialize_controller_msg,
+    MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW, close_with_reason,
+    deserialize_service_msg, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
 use crate::mqtt_client_store;
@@ -73,6 +74,7 @@ pub(crate) async fn handle_mqtt_authenticated(
         out_seq,
         in_seq,
     } = ctx;
+    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
     // Wait for Register message before entering operational loop.
     let (instance_id, max_tenants, active_mqtt_clients) = loop {
         let msg = match stream.next().await {
@@ -83,6 +85,11 @@ pub(crate) async fn handle_mqtt_authenticated(
             }
             None => return,
         };
+
+        if !rate_limiter.allow() {
+            let _ = close_with_reason(sink, "rate limit exceeded").await;
+            return;
+        }
 
         match msg {
             Message::Text(text) => {
@@ -226,6 +233,10 @@ pub(crate) async fn handle_mqtt_authenticated(
                         break;
                     }
                 };
+                if !rate_limiter.allow() {
+                    let _ = close_with_reason(sink, "rate limit exceeded").await;
+                    break;
+                }
                 match msg {
                     Message::Text(text) => {
                         let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
@@ -425,6 +436,7 @@ pub(crate) async fn handle_mqtt_enrolled(
 ) {
     let mut approval_poll = tokio::time::interval(APPROVAL_POLL_INTERVAL);
     approval_poll.tick().await; // skip immediate first tick
+    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
     loop {
         tokio::select! {
@@ -437,6 +449,10 @@ pub(crate) async fn handle_mqtt_enrolled(
                         break;
                     }
                 };
+                if !rate_limiter.allow() {
+                    let _ = close_with_reason(sink, "rate limit exceeded").await;
+                    break;
+                }
 
                 match msg {
                     Message::Text(text) => {

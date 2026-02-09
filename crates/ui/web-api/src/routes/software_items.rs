@@ -989,6 +989,7 @@ pub async fn trigger_update(
         to_version: Set(req.to_version.clone()),
         status: Set(update_history::UpdateStatus::Pending),
         output: Set(String::new()),
+        output_bytes: Set(0),
         initiated_by: Set(user.user_id.to_string()),
         started_at: Set(now),
         completed_at: Set(None),

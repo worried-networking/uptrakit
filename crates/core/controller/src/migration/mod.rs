@@ -28,6 +28,7 @@ mod m20260207_000022_create_settings_version;
 mod m20260207_000023_add_revocation_version;
 mod m20260207_000024_create_controller_events;
 mod m20260207_000025_create_ca_certificates;
+mod m20260209_000026_create_update_output_lines;
 
 pub struct Migrator;
 
@@ -60,6 +61,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260207_000023_add_revocation_version::Migration),
             Box::new(m20260207_000024_create_controller_events::Migration),
             Box::new(m20260207_000025_create_ca_certificates::Migration),
+            Box::new(m20260209_000026_create_update_output_lines::Migration),
         ]
     }
 }

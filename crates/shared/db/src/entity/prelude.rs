@@ -39,6 +39,7 @@ pub use super::tenant::{Entity as Tenant, Model as TenantModel};
 pub use super::update_history::{
     Entity as UpdateHistory, Model as UpdateHistoryModel, UpdateStatus,
 };
+pub use super::update_output_line::{Entity as UpdateOutputLine, Model as UpdateOutputLineModel};
 pub use super::user::{Entity as User, Model as UserModel};
 pub use super::user_oidc_link::{Entity as UserOidcLink, Model as UserOidcLinkModel};
 pub use super::user_role::{Entity as UserRole, Model as UserRoleModel};

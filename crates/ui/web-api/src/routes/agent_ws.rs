@@ -19,10 +19,15 @@ use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use super::service_ws::{
-    close_with_reason, deserialize_service_msg, send_pong, serialize_controller_msg,
+    MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW, close_with_reason,
+    deserialize_service_msg, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
 use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
+use sea_orm::sea_query::{Expr, ExprTrait};
+use uptrakit_internal_wire::OutputStreamType;
+use uptrakit_shared_db::entity::update_output_line;
+use uptrakit_shared_db::entity::update_output_line::Entity as UpdateOutputLine;
 
 #[derive(Debug, Error)]
 enum AgentWsError {
@@ -104,6 +109,8 @@ pub(crate) async fn handle_agent_authenticated(
         .await
         .unwrap_or_default();
 
+    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+
     loop {
         tokio::select! {
             msg = stream.next() => {
@@ -115,6 +122,10 @@ pub(crate) async fn handle_agent_authenticated(
                         break;
                     }
                 };
+                if !rate_limiter.allow() {
+                    let _ = close_with_reason(sink, "rate limit exceeded").await;
+                    break;
+                }
                 match msg {
                     Message::Text(text) => {
                         let agent_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
@@ -372,8 +383,20 @@ pub(crate) async fn handle_agent_authenticated(
                                 if payload.from_version.is_some() {
                                     active.from_version = Set(payload.from_version);
                                 }
+                                active.output = Set(String::new());
+                                active.output_bytes = Set(0);
                                 if let Err(e) = active.update(&state.db).await {
                                     tracing::warn!(error = %e, "failed to update update_history status");
+                                }
+                                if let Err(e) = UpdateOutputLine::delete_many()
+                                    .filter(
+                                        update_output_line::Column::UpdateHistoryId
+                                            .eq(payload.update_history_id),
+                                    )
+                                    .exec(&state.db)
+                                    .await
+                                {
+                                    tracing::warn!(error = %e, "failed to clear update output lines");
                                 }
                             }
                             ServiceMessage::UpdateOutput(payload) => {
@@ -382,25 +405,55 @@ pub(crate) async fn handle_agent_authenticated(
                                     stream = ?payload.stream,
                                     "update output"
                                 );
-                                let record = match validate_update_ownership(
+                                if validate_update_ownership(
                                     &state.db, agent_id, payload.update_history_id, &linked_host_ids,
-                                ).await {
-                                    Ok(r) => r,
-                                    Err(_) => continue,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    continue;
+                                }
+
+                                let output_line = format!("{}\n", payload.output);
+                                let line_len = output_line.len() as i64;
+                                let updated = update_history::Entity::update_many()
+                                    .col_expr(
+                                        update_history::Column::OutputBytes,
+                                        Expr::col(update_history::Column::OutputBytes).add(line_len),
+                                    )
+                                    .filter(update_history::Column::Id.eq(payload.update_history_id))
+                                    .filter(
+                                        update_history::Column::OutputBytes
+                                            .lt(MAX_UPDATE_OUTPUT_BYTES as i64),
+                                    )
+                                    .exec(&state.db)
+                                    .await;
+
+                                let Ok(updated) = updated else {
+                                    tracing::warn!(
+                                        update_id = %payload.update_history_id,
+                                        "failed to update output bytes"
+                                    );
+                                    continue;
                                 };
-                                if record.output.len() >= MAX_UPDATE_OUTPUT_BYTES {
+
+                                if updated.rows_affected == 0 {
                                     tracing::debug!(
                                         update_id = %payload.update_history_id,
-                                        output_len = record.output.len(),
                                         "update output exceeded {MAX_UPDATE_OUTPUT_BYTES} byte cap, dropping"
                                     );
-                                } else {
-                                    let mut active: update_history::ActiveModel = record.clone().into();
-                                    let new_output = format!("{}{}\n", record.output, payload.output);
-                                    active.output = Set(new_output);
-                                    if let Err(e) = active.update(&state.db).await {
-                                        tracing::warn!(error = %e, "failed to append update output");
-                                    }
+                                    continue;
+                                }
+
+                                let line = update_output_line::ActiveModel {
+                                    id: Set(uuid::Uuid::now_v7()),
+                                    update_history_id: Set(payload.update_history_id),
+                                    stream: Set(output_stream_label(payload.stream).to_string()),
+                                    output: Set(output_line),
+                                    created_at: Set(time::OffsetDateTime::now_utc()),
+                                };
+                                if let Err(e) = UpdateOutputLine::insert(line).exec(&state.db).await {
+                                    tracing::warn!(error = %e, "failed to insert update output line");
                                 }
                             }
                             ServiceMessage::UpdateResult(payload) => {
@@ -422,20 +475,29 @@ pub(crate) async fn handle_agent_authenticated(
                                     UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
                                 });
                                 active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                if !payload.output.is_empty() {
-                                    // Cap final output at MAX_UPDATE_OUTPUT_BYTES.
-                                    let remaining = MAX_UPDATE_OUTPUT_BYTES.saturating_sub(record.output.len());
-                                    if remaining > 0 {
-                                        let capped = &payload.output[..payload.output.len().min(remaining)];
-                                        let final_output = format!("{}{}", record.output, capped);
-                                        active.output = Set(final_output);
-                                    }
-                                }
+                                let capped_output = if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
+                                    payload.output[..MAX_UPDATE_OUTPUT_BYTES].to_string()
+                                } else {
+                                    payload.output
+                                };
+                                active.output = Set(capped_output.clone());
+                                active.output_bytes = Set(capped_output.len() as i64);
                                 if payload.from_version.is_some() {
                                     active.from_version = Set(payload.from_version);
                                 }
                                 if let Err(e) = active.update(&state.db).await {
                                     tracing::warn!(error = %e, "failed to update update_history result");
+                                }
+
+                                if let Err(e) = UpdateOutputLine::delete_many()
+                                    .filter(
+                                        update_output_line::Column::UpdateHistoryId
+                                            .eq(payload.update_history_id),
+                                    )
+                                    .exec(&state.db)
+                                    .await
+                                {
+                                    tracing::warn!(error = %e, "failed to clear update output lines");
                                 }
 
                                 if payload.status == UpdateFinalStatus::Completed
@@ -555,6 +617,7 @@ pub(crate) async fn run_agent_enrolled_loop(
 ) {
     let (push_rx, cancel_token) = connection;
     let mut approved = false;
+    let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
 
     // Check current status to set initial approved flag.
     if let Ok(Some(agent)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
@@ -581,6 +644,10 @@ pub(crate) async fn run_agent_enrolled_loop(
                         break;
                     }
                 };
+                if !rate_limiter.allow() {
+                    let _ = close_with_reason(sink, "rate limit exceeded").await;
+                    break;
+                }
 
                 match msg {
                     Message::Text(text) => {
@@ -767,6 +834,16 @@ pub(crate) async fn run_agent_enrolled_loop(
                 return;
             }
         }
+    }
+}
+
+fn output_stream_label(stream: OutputStreamType) -> &'static str {
+    match stream {
+        OutputStreamType::Stdout => "stdout",
+        OutputStreamType::Stderr => "stderr",
+        OutputStreamType::PreHook => "pre_hook",
+        OutputStreamType::PostHook => "post_hook",
+        OutputStreamType::System => "system",
     }
 }
 

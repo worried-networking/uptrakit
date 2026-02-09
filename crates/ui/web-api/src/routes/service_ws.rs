@@ -22,6 +22,50 @@ use uptrakit_shared_macros::impl_report_conversion;
 use crate::AppState;
 use crate::extract::{ClientIp, ServiceIdentity};
 
+/// Maximum number of incoming WebSocket messages per connection per second.
+pub(crate) const WS_MESSAGE_RATE_LIMIT: u32 = 50;
+/// Window for WebSocket message rate limiting.
+pub(crate) const WS_MESSAGE_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Fixed-window rate limiter for WebSocket message processing.
+pub(crate) struct MessageRateLimiter {
+    window_start: std::time::Instant,
+    window: std::time::Duration,
+    max_per_window: u32,
+    count: u32,
+}
+
+impl MessageRateLimiter {
+    pub(crate) fn new(window: std::time::Duration, max_per_window: u32) -> Self {
+        Self {
+            window_start: std::time::Instant::now(),
+            window,
+            max_per_window,
+            count: 0,
+        }
+    }
+
+    pub(crate) fn allow(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.window_start) >= self.window {
+            self.window_start = now;
+            self.count = 0;
+        }
+
+        if self.count < self.max_per_window {
+            self.count = self.count.saturating_add(1);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(test)]
+    fn set_window_start(&mut self, start: std::time::Instant) {
+        self.window_start = start;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
@@ -882,5 +926,22 @@ async fn enroll_mqtt(
             }
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_rate_limiter_enforces_window() {
+        let mut limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, 2);
+        assert!(limiter.allow());
+        assert!(limiter.allow());
+        assert!(!limiter.allow());
+
+        let reset_time = std::time::Instant::now() - WS_MESSAGE_RATE_WINDOW;
+        limiter.set_window_start(reset_time);
+        assert!(limiter.allow());
     }
 }
