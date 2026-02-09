@@ -5,7 +5,7 @@ use time::UtcDateTime;
 use uuid::Uuid;
 
 // Re-export provider-core types used directly in wire protocol messages.
-pub use uptrakit_provider_core::{ProviderType, ReleaseAsset};
+pub use uptrakit_provider_core::{ProviderType, ReleaseAsset, ReleaseInfo};
 
 /// Enrollment status returned in the `Enrolled` message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -461,15 +461,6 @@ pub enum UpdateFinalStatus {
 /// Default timeout for update execution in seconds.
 fn default_update_timeout() -> u32 {
     300
-}
-
-/// Simplified release info sent to agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReleaseInfo {
-    pub tag: String,
-    pub release_url: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub assets: Vec<ReleaseAsset>,
 }
 
 /// Controller -> Agent: Trigger an update.

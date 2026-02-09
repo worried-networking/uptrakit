@@ -4814,6 +4814,7 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-enrollment",
  "uptrakit-internal-wire",
+ "uptrakit-provider-core",
  "uptrakit-provider-registry",
  "uptrakit-shared-macros",
  "uuid",
@@ -5027,6 +5028,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "rootcause",
+ "serde_json",
  "tokio",
  "uptrakit-provider-core",
 ]

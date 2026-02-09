@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use rootcause::prelude::*;
+use tokio::sync::mpsc;
 
 use crate::error::{ProviderError, Result};
-use crate::types::{DiscoveredSoftware, ProviderCapability, UpstreamRelease};
+use crate::types::{
+    DiscoveredSoftware, ProviderCapability, UpdateContext, UpdateOutputLine, UpstreamRelease,
+};
 use crate::version::Version;
 
 /// Empty capabilities slice for providers that have no special capabilities.
@@ -46,10 +49,17 @@ pub trait Provider: Send + Sync {
         )))
     }
 
-    /// Execute an update to the specified release (local operation).
+    /// Execute an update with full context (local operation).
+    ///
+    /// Providers implement this to perform the actual update. Output is streamed
+    /// through the provided channel. Returns the accumulated output on success.
     ///
     /// Default implementation returns an error indicating the operation is not supported.
-    async fn execute_update(&self, _release: &UpstreamRelease) -> Result<()> {
+    async fn execute_update(
+        &self,
+        _ctx: &UpdateContext,
+        _output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> Result<String> {
         Err(report!(ProviderError::Configuration(
             "execute_update not supported by this provider".to_string()
         )))
@@ -125,16 +135,14 @@ mod tests {
     #[tokio::test]
     async fn default_execute_update_returns_error() {
         let provider = StubProvider;
-        let release = UpstreamRelease {
-            version: Version::new("1.0.0"),
-            tag: "v1.0.0".to_string(),
-            is_prerelease: false,
-            release_url: "https://example.com".to_string(),
-            release_notes: None,
-            published_at: None,
-            assets: vec![],
+        let (tx, _rx) = mpsc::channel(10);
+        let ctx = UpdateContext {
+            to_version: "1.0.0".to_string(),
+            package_identifier: "test".to_string(),
+            provider_config: serde_json::json!({}),
+            release_info: None,
         };
-        let result = provider.execute_update(&release).await;
+        let result = provider.execute_update(&ctx, &tx).await;
         assert!(result.is_err());
     }
 

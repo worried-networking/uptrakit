@@ -12,6 +12,27 @@ pub enum ProviderError {
 
     #[error("serialization error: {0}")]
     Serialization(String),
+
+    #[error("missing provider config field: {0}")]
+    MissingConfig(String),
+
+    #[error("no release info provided")]
+    MissingReleaseInfo,
+
+    #[error("command spawn failed: {0}")]
+    CommandSpawn(#[source] std::io::Error),
+
+    #[error("failed to capture {0}")]
+    CaptureFailed(String),
+
+    #[error("command exited with code {0}")]
+    CommandFailed(i32),
+
+    #[error("command execution failed: {0}")]
+    CommandWait(#[source] std::io::Error),
+
+    #[error("install command failed: {0}")]
+    InstallFailed(String),
 }
 
 /// Result type alias for provider operations.

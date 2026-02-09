@@ -63,6 +63,60 @@ pub struct ReleaseAsset {
     pub content_type: Option<String>,
 }
 
+/// Simplified release info for update execution context.
+///
+/// Contains the minimal release metadata needed by providers to execute updates.
+/// Defined in provider-core to avoid circular dependency (wire re-exports it).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseInfo {
+    pub tag: String,
+    pub release_url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<ReleaseAsset>,
+}
+
+/// Context for executing a software update on the local system.
+///
+/// Carries all the information a provider needs to perform an update,
+/// without requiring the provider to depend on the wire protocol crate.
+#[derive(Clone, Debug)]
+pub struct UpdateContext {
+    /// Target version to update to.
+    pub to_version: String,
+    /// Provider-specific package identifier.
+    pub package_identifier: String,
+    /// Provider-specific configuration (merged base + override).
+    pub provider_config: serde_json::Value,
+    /// Release info from the controller, if available.
+    pub release_info: Option<ReleaseInfo>,
+}
+
+/// A single line of output from a provider update execution.
+pub struct UpdateOutputLine {
+    /// The text content of the output line.
+    pub text: String,
+    /// Which output stream this line came from.
+    pub stream: UpdateOutputStream,
+}
+
+/// Output stream type for provider update execution.
+///
+/// Only includes streams that providers produce directly. Agent-level
+/// streams (PreHook, PostHook, System) remain in the agent crate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateOutputStream {
+    Stdout,
+    Stderr,
+}
+
+/// Shell type for command execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellType {
+    Bash,
+    Sh,
+    PowerShell,
+}
+
 /// Metadata for an upstream software release.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpstreamRelease {
@@ -264,6 +318,48 @@ mod tests {
 
         let deserialized: ProviderCapability = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, cap);
+    }
+
+    #[test]
+    fn release_info_serialization_roundtrip() {
+        let info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com/release".to_string(),
+            assets: vec![ReleaseAsset {
+                name: "app.tar.gz".to_string(),
+                download_url: "https://example.com/app.tar.gz".to_string(),
+                size: Some(1024),
+                content_type: None,
+            }],
+        };
+        let json = serde_json::to_string(&info).expect("serialize");
+        let deserialized: ReleaseInfo = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn release_info_empty_assets_omitted() {
+        let info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com/release".to_string(),
+            assets: vec![],
+        };
+        let json = serde_json::to_string(&info).expect("serialize");
+        assert!(!json.contains("assets"));
+        let deserialized: ReleaseInfo = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn update_output_stream_variants() {
+        assert_ne!(UpdateOutputStream::Stdout, UpdateOutputStream::Stderr);
+    }
+
+    #[test]
+    fn shell_type_variants() {
+        assert_ne!(ShellType::Bash, ShellType::Sh);
+        assert_ne!(ShellType::Bash, ShellType::PowerShell);
+        assert_ne!(ShellType::Sh, ShellType::PowerShell);
     }
 
     #[test]

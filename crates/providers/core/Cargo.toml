@@ -16,6 +16,4 @@ rootcause = { workspace = true }
 tracing = { workspace = true }
 semver = { workspace = true }
 async-trait = { workspace = true }
-
-[dev-dependencies]
 tokio = { workspace = true }

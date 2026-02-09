@@ -242,7 +242,7 @@ Providers define how software items are tracked and updated. Each provider split
 
 | Provider | Path | Description |
 | --- | --- | --- |
-| Provider Core | `crates/providers/core/` | Shared `Provider` trait and `ProviderCapability` enum |
+| Provider Core | `crates/providers/core/` | Shared `Provider` trait, `ProviderCapability` enum, and `command` module for shell execution |
 | Provider Registry | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | GitHub Releases | `crates/providers/github/` | Tracks GitHub release metadata; agent installs from artifacts |
 | Docker Registry | `crates/providers/docker-registry/` | Tracks container image tags from OCI/Docker registries |
@@ -253,7 +253,9 @@ The **Provider Registry** crate (`uptrakit-provider-registry`) centralizes all p
 - Validating provider configuration before storage
 - Masking and restoring secrets in config JSON for API responses
 
-The agent and web-api crates import only the registry — not individual provider crates — eliminating scattered string-based provider matching.
+The agent and web-api crates import only the registry — not individual provider crates — eliminating scattered string-based provider matching. Both version detection and update execution are dispatched through the Provider Registry, keeping all provider routing logic in one place.
+
+The **Provider Core** crate (`uptrakit-provider-core`) provides the `command` module with safe shell execution utilities used by all providers: `shell_escape()`, `run_command_exec()`, `run_command_with_shell()`, and `run_command()`. These enforce bounded output accumulation (10 MB cap), fail-early shell settings (`set -euo pipefail` for bash), and streaming output via channels.
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 
