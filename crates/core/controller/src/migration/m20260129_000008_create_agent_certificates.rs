@@ -44,7 +44,18 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_service_certificates_service_id")
                             .from(ServiceCertificates::Table, ServiceCertificates::ServiceId)
-                            .to(Services::Table, Services::Id),
+                            .to(Services::Table, Services::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_service_certificates_ca_fingerprint")
+                            .from(
+                                ServiceCertificates::Table,
+                                ServiceCertificates::CaFingerprint,
+                            )
+                            .to(CaCertificates::Table, CaCertificates::Fingerprint)
+                            .on_delete(ForeignKeyAction::Restrict),
                     )
                     .to_owned(),
             )
@@ -72,7 +83,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum ServiceCertificates {
+pub enum ServiceCertificates {
     Table,
     CaFingerprint,
     ServiceId,
@@ -83,4 +94,10 @@ enum ServiceCertificates {
     RevocationReason,
     CreatedAt,
     LastSeenAt,
+}
+
+#[derive(DeriveIden)]
+enum CaCertificates {
+    Table,
+    Fingerprint,
 }

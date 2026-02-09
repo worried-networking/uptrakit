@@ -316,10 +316,17 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     request_body = LogoutRequest,
     responses(
         (status = 204, description = "Logout successful"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Token does not belong to this user")
     ),
-    tag = "Authentication"
+    tag = "Authentication",
+    security(("bearer_token" = []))
 )]
-pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Request) -> Response {
+pub async fn logout(
+    State(state): State<Arc<AppState>>,
+    axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
+    req: axum::extract::Request,
+) -> Response {
     // Extract refresh token: prefer cookie, fall back to JSON body
     let cookie_token = extract_refresh_token_from_cookie(&req);
     let body_token = {
@@ -337,8 +344,12 @@ pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Requ
     if let Some(token) = &refresh_token {
         let session_service = SessionService::new(state.db.clone());
 
-        // Verify the token to get the user_id before revoking (best-effort)
+        // Verify the token to get the user_id before revoking
         if let Ok(verified) = session_service.verify_refresh_token(token).await {
+            if verified.user_id != auth_user.user_id {
+                return error_response(StatusCode::FORBIDDEN, "Token does not belong to this user");
+            }
+
             // Deny all current access tokens for this user
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
             state
@@ -357,6 +368,265 @@ pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Requ
 
     let cookie = clear_refresh_token_cookie();
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        Database::connect(opt).await.expect("test db")
+    }
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let db = test_db().await;
+
+        db.execute_unprepared(
+            "CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                first_name TEXT NOT NULL,
+                last_name TEXT NOT NULL,
+                password_hash TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                deactivated_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .await
+        .unwrap();
+
+        db.execute_unprepared(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                refresh_token_hash TEXT UNIQUE NOT NULL,
+                auth_method TEXT NOT NULL,
+                oidc_provider_id TEXT,
+                token_type TEXT NOT NULL DEFAULT 'refresh_token',
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                revoked_at INTEGER,
+                user_agent TEXT,
+                ip_address TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )",
+        )
+        .await
+        .unwrap();
+
+        let now = OffsetDateTime::now_utc();
+        let user = user::ActiveModel {
+            id: Set(generate_uuid()),
+            email: Set("test@example.com".to_string()),
+            first_name: Set("Test".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        user.insert(&db).await.unwrap();
+
+        db
+    }
+
+    async fn test_state(db: DatabaseConnection) -> Arc<AppState> {
+        use crate::auth::registration::{RegistrationMode, RegistrationSettings};
+        use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
+        use crate::settings::Settings;
+
+        struct NoopCertSigner;
+        #[async_trait::async_trait]
+        impl AgentCertSigner for NoopCertSigner {
+            async fn sign_agent_csr(
+                &self,
+                _: &str,
+                _: &uuid::Uuid,
+                _: time::Duration,
+            ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>>
+            {
+                Err(rootcause::Report::new(CertSignerError::Signing(
+                    "noop signer".to_string(),
+                )))
+            }
+
+            fn active_ca_fingerprint(&self) -> String {
+                "0".repeat(64)
+            }
+        }
+
+        let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
+        let snapshot_data = crate::ca_snapshot::CaPublicSnapshot {
+            active_cert_pem: ca_pem.to_string(),
+            active_fingerprint: "0".repeat(64),
+            previous_cert_pem: None,
+            previous_fingerprint: None,
+            trusted_cas: vec![crate::ca_snapshot::TrustedCaPublic {
+                cert_pem: ca_pem.to_string(),
+                fingerprint: "0".repeat(64),
+                not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            }],
+            trusted_ca_cns: Vec::new(),
+            bundle_pem: ca_pem.to_string(),
+            bundle_hash: "0".repeat(64),
+            managed: true,
+            active_not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            pki_addr: None,
+        };
+        let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+        let ca_key_store: crate::CaKeyStoreRef =
+            Arc::new(tokio::sync::RwLock::new(crate::ca_snapshot::CaKeyStore {
+                active_key_pem: zeroize::Zeroizing::new(String::new()),
+                previous_key_pem: None,
+                trusted_ca_keys: vec![],
+            }));
+
+        let rustls_cfg = {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .unwrap()
+                .self_signed(&key_pair)
+                .unwrap();
+            let server_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap(),
+                )
+                .unwrap();
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+        };
+
+        let notification_service = crate::notification_service::NotificationService::new(
+            db.clone(),
+            crate::service_connections::ServiceConnectionRegistry::new(),
+            uuid::Uuid::nil(),
+        );
+
+        Arc::new(AppState {
+            ca_snapshot: ca_rx,
+            ca_key_store,
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                db.clone(),
+            ),
+            oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
+                db.clone(),
+            ),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+            db,
+            default_tenant_id: uuid::Uuid::nil(),
+            settings: Settings::new(
+                RegistrationSettings {
+                    mode: RegistrationMode::Open,
+                    token_hash: None,
+                    require_token_for_oidc: false,
+                },
+                7,
+            ),
+            cert_signer: Arc::new(NoopCertSigner),
+            service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
+            revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+            jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                b"test-secret-for-logout-tests",
+            )),
+            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_config: rustls_cfg,
+            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            controller_id: uuid::Uuid::nil(),
+            notification_service,
+            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+        })
+    }
+
+    #[tokio::test]
+    async fn logout_revokes_own_token() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+        let user_id = User::find().one(&db).await.unwrap().unwrap().id;
+        let session_service = SessionService::new(db.clone());
+        let token = session_service
+            .create_refresh_token(user_id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        let auth_user = AuthenticatedUser {
+            user_id,
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ViewAgents],
+        };
+
+        let req = Request::builder()
+            .uri("/api/v1/auth/logout")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "refresh_token": token }).to_string(),
+            ))
+            .unwrap();
+
+        let response = logout(State(state), axum::Extension(auth_user), req).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let verified = session_service.verify_refresh_token(&token).await;
+        assert!(verified.is_err());
+    }
+
+    #[tokio::test]
+    async fn logout_rejects_other_user_token() {
+        let db = setup_test_db().await;
+        let state = test_state(db.clone()).await;
+
+        let now = OffsetDateTime::now_utc();
+        let other_user = user::ActiveModel {
+            id: Set(generate_uuid()),
+            email: Set("other@example.com".to_string()),
+            first_name: Set("Other".to_string()),
+            last_name: Set("User".to_string()),
+            password_hash: Set(None),
+            is_active: Set(true),
+            deactivated_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let other_user = other_user.insert(&db).await.unwrap();
+
+        let session_service = SessionService::new(db.clone());
+        let token = session_service
+            .create_refresh_token(other_user.id, AuthMethod::Password, None, None)
+            .await
+            .unwrap();
+
+        let auth_user = AuthenticatedUser {
+            user_id: User::find().one(&db).await.unwrap().unwrap().id,
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ViewAgents],
+        };
+
+        let req = Request::builder()
+            .uri("/api/v1/auth/logout")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({ "refresh_token": token }).to_string(),
+            ))
+            .unwrap();
+
+        let response = logout(State(state), axum::Extension(auth_user), req).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let verified = session_service.verify_refresh_token(&token).await;
+        assert!(verified.is_ok());
+    }
 }
 
 /// Get current user information

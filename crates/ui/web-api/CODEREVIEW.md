@@ -11,7 +11,7 @@
 | Severity | Count |
 |----------|-------|
 | Medium | 13 |
-| Low | 10 |
+| Low | 9 |
 
 ---
 
@@ -104,12 +104,6 @@ If the CA uses RSA or P-384, OCSP signing fails entirely.
 **File:** `src/routes/auth.rs:221-223`
 
 "User is deactivated" (403) vs "Invalid credentials" (401) reveals account status.
-
-### L2. Logout Is Unauthenticated
-
-**File:** `src/routes/auth.rs:307-321`
-
-Anyone with a refresh token can revoke it without proving identity.
 
 ### L3. Bearer Token Prefix Is Case-Sensitive
 
@@ -357,19 +351,6 @@ Per-record DB lookups for denormalized names.
 2. Add constant-time dummy hash for non-existent users.
 
 **Files:** `src/routes/auth.rs`
-
----
-
-### Plan 37: L2 — Logout Is Unauthenticated
-
-**Problem:** Anyone with a refresh token can revoke it without proving identity.
-
-**Plan:**
-1. Move logout route into `auth_routes` (require_auth middleware).
-2. Add `AuthenticatedUser` extraction and ownership verification.
-3. Add `verify_refresh_token_owner` to `SessionService`.
-
-**Files:** `src/routes/auth.rs`, `src/auth/session.rs`, router setup
 
 ---
 

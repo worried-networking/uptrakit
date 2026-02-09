@@ -14,7 +14,8 @@ use axum::{
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, sea_query::Expr,
+    QuerySelect, Set, TransactionTrait,
+    sea_query::{Expr, OnConflict},
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -477,11 +478,20 @@ pub async fn merge_service(
         return error_response(StatusCode::BAD_REQUEST, "Cannot merge service into itself");
     }
 
+    let txn = match state.db.begin().await {
+        Ok(txn) => txn,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     // Find target service (must be approved, not deactivated, agent type)
     let target = match Service::find_by_id(target_uuid)
+        .lock_exclusive()
         .filter(service::Column::TenantId.eq(tenant.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(&txn)
         .await
     {
         Ok(Some(s)) => s,
@@ -512,9 +522,10 @@ pub async fn merge_service(
 
     // Find source service (must be pending, not deactivated, agent type)
     let source = match Service::find_by_id(source_uuid)
+        .lock_exclusive()
         .filter(service::Column::TenantId.eq(tenant.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(&txn)
         .await
     {
         Ok(Some(s)) => s,
@@ -551,7 +562,7 @@ pub async fn merge_service(
     source_active.deactivated_at = Set(Some(now));
     source_active.updated_at = Set(now);
 
-    if let Err(e) = source_active.update(&state.db).await {
+    if let Err(e) = source_active.update(&txn).await {
         tracing::error!("Failed to deactivate source service: {}", e);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -569,19 +580,20 @@ pub async fn merge_service(
             )
             .filter(service_certificate::Column::ServiceId.eq(svc_uuid))
             .filter(service_certificate::Column::RevokedAt.is_null())
-            .exec(&state.db)
+            .exec(&txn)
             .await
         {
             tracing::error!("Failed to revoke {label} service certificates: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
 
     if let Err(e) =
-        crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await
+        crate::settings_store::bump_revocation_version(&txn, state.default_tenant_id).await
     {
-        tracing::warn!(error = ?e, "failed to bump revocation version counter");
+        tracing::error!(error = ?e, "failed to bump revocation version counter");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
-    state.revocation_notify.notify_one();
 
     // Copy source's enrollment_secret_hash to target
     let mut target_active: service::ActiveModel = target.into();
@@ -591,7 +603,7 @@ pub async fn merge_service(
     target_active.ip_address = Set(source_ip_address);
     target_active.updated_at = Set(now);
 
-    let updated_target = match target_active.update(&state.db).await {
+    let updated_target = match target_active.update(&txn).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to update target service: {}", e);
@@ -600,27 +612,47 @@ pub async fn merge_service(
     };
 
     // Copy source service's host links to target (INSERT ON CONFLICT DO NOTHING)
-    if let Ok(source_links) = ServiceHost::find()
+    let source_links = match ServiceHost::find()
         .filter(service_host::Column::ServiceId.eq(source_uuid))
-        .all(&state.db)
+        .all(&txn)
         .await
     {
-        for link in source_links {
-            let existing = ServiceHost::find_by_id((target_uuid, link.host_id))
-                .one(&state.db)
-                .await;
-            if matches!(existing, Ok(None)) {
-                let new_link = service_host::ActiveModel {
-                    service_id: Set(target_uuid),
-                    host_id: Set(link.host_id),
-                    linked_at: Set(now),
-                };
-                if let Err(e) = new_link.insert(&state.db).await {
-                    tracing::warn!("failed to copy host link during merge: {}", e);
-                }
-            }
+        Ok(links) => links,
+        Err(e) => {
+            tracing::error!("Failed to load source host links: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    for link in source_links {
+        let new_link = service_host::ActiveModel {
+            service_id: Set(target_uuid),
+            host_id: Set(link.host_id),
+            linked_at: Set(now),
+        };
+        if let Err(e) = ServiceHost::insert(new_link)
+            .on_conflict(
+                OnConflict::columns([
+                    service_host::Column::ServiceId,
+                    service_host::Column::HostId,
+                ])
+                .do_nothing()
+                .to_owned(),
+            )
+            .exec(&txn)
+            .await
+        {
+            tracing::error!("Failed to copy host link during merge: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     }
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!("Failed to commit merge transaction: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    }
+
+    state.revocation_notify.notify_one();
 
     // Terminate source's WebSocket connection
     state.service_connections.unregister(&source_uuid).await;
@@ -739,6 +771,250 @@ pub async fn revoke_enrollment_token(
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::registration::{RegistrationMode, RegistrationSettings};
+    use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
+    use crate::settings::Settings;
+    use axum::Json;
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+    use uptrakit_shared_db::entity::prelude::AuthMethod;
+
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        Database::connect(opt).await.expect("test db")
+    }
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let db = test_db().await;
+
+        db.execute_unprepared(
+            "CREATE TABLE services (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                friendly_name TEXT NOT NULL,
+                ip_address TEXT,
+                status TEXT NOT NULL,
+                enrollment_secret_hash TEXT NOT NULL UNIQUE,
+                client_version TEXT,
+                last_seen_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deactivated_at INTEGER
+            )",
+        )
+        .await
+        .unwrap();
+
+        db.execute_unprepared(
+            "CREATE TABLE service_hosts (
+                service_id TEXT NOT NULL,
+                host_id TEXT NOT NULL,
+                linked_at INTEGER NOT NULL,
+                PRIMARY KEY (service_id, host_id)
+            )",
+        )
+        .await
+        .unwrap();
+
+        db.execute_unprepared(
+            "CREATE TABLE settings_version (
+                tenant_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL,
+                global_version INTEGER NOT NULL,
+                revocation_version INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .await
+        .unwrap();
+
+        db
+    }
+
+    async fn test_state(db: DatabaseConnection, tenant_id: uuid::Uuid) -> Arc<AppState> {
+        struct NoopCertSigner;
+        #[async_trait::async_trait]
+        impl AgentCertSigner for NoopCertSigner {
+            async fn sign_agent_csr(
+                &self,
+                _: &str,
+                _: &uuid::Uuid,
+                _: time::Duration,
+            ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>>
+            {
+                Err(rootcause::Report::new(CertSignerError::Signing(
+                    "noop signer".to_string(),
+                )))
+            }
+            fn active_ca_fingerprint(&self) -> String {
+                "0".repeat(64)
+            }
+        }
+
+        let ca_pem = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n";
+        let snapshot_data = crate::ca_snapshot::CaPublicSnapshot {
+            active_cert_pem: ca_pem.to_string(),
+            active_fingerprint: "0".repeat(64),
+            previous_cert_pem: None,
+            previous_fingerprint: None,
+            trusted_cas: vec![crate::ca_snapshot::TrustedCaPublic {
+                cert_pem: ca_pem.to_string(),
+                fingerprint: "0".repeat(64),
+                not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            }],
+            trusted_ca_cns: Vec::new(),
+            bundle_pem: ca_pem.to_string(),
+            bundle_hash: "0".repeat(64),
+            managed: true,
+            active_not_after: time::OffsetDateTime::now_utc() + time::Duration::days(365),
+            pki_addr: None,
+        };
+        let (_ca_tx, ca_rx) = tokio::sync::watch::channel(snapshot_data);
+        let ca_key_store: crate::CaKeyStoreRef =
+            Arc::new(tokio::sync::RwLock::new(crate::ca_snapshot::CaKeyStore {
+                active_key_pem: zeroize::Zeroizing::new(String::new()),
+                previous_key_pem: None,
+                trusted_ca_keys: vec![],
+            }));
+
+        let rustls_cfg = {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+            let cert = rcgen::CertificateParams::new(vec!["localhost".into()])
+                .unwrap()
+                .self_signed(&key_pair)
+                .unwrap();
+            let server_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(cert.der().to_vec())],
+                    rustls::pki_types::PrivateKeyDer::try_from(key_pair.serialize_der()).unwrap(),
+                )
+                .unwrap();
+            axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config))
+        };
+
+        let notification_service = crate::notification_service::NotificationService::new(
+            db.clone(),
+            crate::service_connections::ServiceConnectionRegistry::new(),
+            uuid::Uuid::nil(),
+        );
+
+        Arc::new(AppState {
+            ca_snapshot: ca_rx,
+            ca_key_store,
+            oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+            account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
+            oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
+                db.clone(),
+            ),
+            oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
+                db.clone(),
+            ),
+            device_flow_store: crate::auth::device_flow::DeviceFlowStore::new(db.clone()),
+            rate_limit_store: crate::auth::rate_limit::RateLimitStore::new(db.clone()),
+            db,
+            default_tenant_id: tenant_id,
+            settings: Settings::new(
+                RegistrationSettings {
+                    mode: RegistrationMode::Open,
+                    token_hash: None,
+                    require_token_for_oidc: false,
+                },
+                7,
+            ),
+            cert_signer: Arc::new(NoopCertSigner),
+            service_connections: crate::service_connections::ServiceConnectionRegistry::new(),
+            revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+            jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
+                b"test-secret-for-service-merge-tests",
+            )),
+            pki_path: std::path::PathBuf::from("/tmp/test-pki"),
+            rustls_config: rustls_cfg,
+            crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
+            ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
+            controller_id: uuid::Uuid::nil(),
+            notification_service,
+            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+        })
+    }
+
+    #[tokio::test]
+    async fn merge_service_rolls_back_on_failure() {
+        let db = setup_test_db().await;
+        let tenant_id = uuid::Uuid::now_v7();
+        let state = test_state(db.clone(), tenant_id).await;
+
+        let now = OffsetDateTime::now_utc();
+        let target = service::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            service_type: Set(service::ServiceType::Agent),
+            hostname: Set("target-host".to_string()),
+            friendly_name: Set("Target".to_string()),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set("target-hash".to_string()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        let target = target.insert(&db).await.unwrap();
+
+        let source = service::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            tenant_id: Set(tenant_id),
+            service_type: Set(service::ServiceType::Agent),
+            hostname: Set("source-host".to_string()),
+            friendly_name: Set("Source".to_string()),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Pending),
+            enrollment_secret_hash: Set("source-hash".to_string()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        let source = source.insert(&db).await.unwrap();
+
+        let auth_user = AuthenticatedUser {
+            user_id: uuid::Uuid::now_v7(),
+            auth_method: AuthMethod::Password,
+            permissions: vec![Permission::ManageAgents],
+        };
+
+        let response = merge_service(
+            State(state),
+            TenantContext { tenant_id },
+            axum::Extension(auth_user),
+            Path(target.id.to_string()),
+            Json(MergeAgentRequest {
+                source_id: source.id.to_string(),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let source_after = Service::find_by_id(source.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(source_after.deactivated_at.is_none());
+        assert_eq!(source_after.enrollment_secret_hash, "source-hash");
+    }
 }
 
 /// Check if an enrollment token is configured

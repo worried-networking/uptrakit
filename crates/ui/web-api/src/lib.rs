@@ -428,6 +428,7 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
     let auth_routes = OpenApiRouter::new()
+        .routes(routes!(routes::auth::logout))
         .routes(routes!(routes::auth::me))
         .routes(routes!(
             routes::api_tokens::create_api_token,
@@ -517,7 +518,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let (api_router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(routes::auth::register))
         .routes(routes!(routes::auth::login))
-        .routes(routes!(routes::auth::logout))
         .routes(routes!(routes::auth::refresh))
         .routes(routes!(routes::oidc_auth::auth_methods))
         .routes(routes!(routes::oidc_auth::oidc_authorize))

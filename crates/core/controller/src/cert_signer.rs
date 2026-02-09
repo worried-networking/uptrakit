@@ -15,6 +15,9 @@ pub struct RcgenAgentCertSigner {
     ca_key_store: uptrakit_web_api::CaKeyStoreRef,
 }
 
+/// Maximum certificate lifetime: 2 years (730 days).
+const MAX_CERT_LIFETIME: time::Duration = time::Duration::days(730);
+
 impl RcgenAgentCertSigner {
     pub fn new(
         ca_rx: watch::Receiver<CaSnapshot>,
@@ -49,6 +52,7 @@ impl AgentCertSigner for RcgenAgentCertSigner {
             &issuer,
             agent_id,
             lifetime,
+            snapshot.active_not_after,
             snapshot.pki_addr.as_deref(),
         )
     }
@@ -63,6 +67,7 @@ fn sign_agent_csr(
     issuer: &Issuer<'_, KeyPair>,
     agent_id: &Uuid,
     lifetime: time::Duration,
+    ca_not_after: OffsetDateTime,
     pki_addr: Option<&str>,
 ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
     // Parse and validate CSR signature
@@ -101,7 +106,27 @@ fn sign_agent_csr(
     }
 
     // Build new CertificateParams with controller-controlled values
-    let not_after = OffsetDateTime::now_utc() + lifetime;
+    let capped = lifetime.min(MAX_CERT_LIFETIME);
+    if lifetime > MAX_CERT_LIFETIME {
+        tracing::warn!(
+            agent_id = %agent_id,
+            requested_days = lifetime.whole_days(),
+            capped_days = MAX_CERT_LIFETIME.whole_days(),
+            "Certificate lifetime capped to maximum allowed value"
+        );
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let mut not_after = now + capped;
+    if not_after > ca_not_after {
+        not_after = ca_not_after;
+    }
+
+    if not_after <= now {
+        return Err(report!(CertSignerError::Signing(
+            "CA certificate is expired or too close to expiry".to_string()
+        )));
+    }
 
     let mut params = CertificateParams::default();
     params
@@ -114,7 +139,7 @@ fn sign_agent_csr(
     params
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ClientAuth);
-    params.not_before = OffsetDateTime::now_utc();
+    params.not_before = now;
     params.not_after = not_after;
 
     if let Some(url) = pki_addr {
@@ -218,6 +243,24 @@ mod tests {
 
         // Verify it's not a CA
         assert!(!cert.is_ca());
+    }
+
+    #[tokio::test]
+    async fn agent_csr_lifetime_is_capped() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (signer, _tx) = make_test_signer();
+        let agent_id = Uuid::now_v7();
+        let csr_pem = generate_test_csr(&agent_id.to_string());
+
+        let bundle = signer
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(1000))
+            .await
+            .unwrap();
+
+        let now = UtcDateTime::now();
+        assert!(bundle.not_after > now + time::Duration::days(728));
+        assert!(bundle.not_after < now + time::Duration::days(732));
     }
 
     #[tokio::test]

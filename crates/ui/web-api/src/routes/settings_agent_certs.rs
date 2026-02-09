@@ -16,6 +16,8 @@ pub use uptrakit_web_api_types::settings_agent_certs::{
     AgentCertificateSettingsResponse, UpdateAgentCertificateSettingsRequest,
 };
 
+const MAX_AGENT_CERT_LIFETIME_DAYS: u16 = 730;
+
 /// Get agent certificate settings
 #[utoipa::path(
     get,
@@ -71,6 +73,12 @@ pub async fn update_agent_certificate_settings(
             return error_response(
                 StatusCode::BAD_REQUEST,
                 "Certificate lifetime must be at least 1 day",
+            );
+        }
+        if days > MAX_AGENT_CERT_LIFETIME_DAYS {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "Certificate lifetime must not exceed 730 days",
             );
         }
         if let Err(e) = upsert_setting(

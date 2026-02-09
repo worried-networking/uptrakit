@@ -86,7 +86,7 @@ pub async fn list_hosts(
 
     let mut items = Vec::with_capacity(hosts.len());
     for h in hosts {
-        let agents = load_host_agents(&state.db, h.id).await;
+        let agents = load_host_agents(&state.db, h.id, tenant.tenant_id).await;
         items.push(host_to_response(h, agents));
     }
 
@@ -142,7 +142,7 @@ pub async fn get_host(
         }
     };
 
-    let agents = load_host_agents(&state.db, host_id).await;
+    let agents = load_host_agents(&state.db, host_id, tenant.tenant_id).await;
     (StatusCode::OK, Json(host_to_response(host_model, agents))).into_response()
 }
 
@@ -207,7 +207,7 @@ pub async fn update_host(
         }
     };
 
-    let agents = load_host_agents(&state.db, host_id).await;
+    let agents = load_host_agents(&state.db, host_id, tenant.tenant_id).await;
     (StatusCode::OK, Json(host_to_response(updated, agents))).into_response()
 }
 
@@ -301,6 +301,7 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
 async fn load_host_agents(
     db: &sea_orm::DatabaseConnection,
     host_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
 ) -> Vec<HostAgentSummary> {
     let links = match AgentHost::find()
         .filter(agent_host::Column::HostId.eq(host_id))
@@ -314,26 +315,146 @@ async fn load_host_agents(
         }
     };
 
-    let mut summaries = Vec::with_capacity(links.len());
-    for link in links {
-        if let Ok(Some(a)) = Agent::find_by_id(link.service_id)
-            .filter(agent::Column::DeactivatedAt.is_null())
-            .one(db)
-            .await
-        {
-            let status = match a.status {
+    let service_ids: Vec<uuid::Uuid> = links.into_iter().map(|link| link.service_id).collect();
+    if service_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let agents = match Agent::find()
+        .filter(agent::Column::Id.is_in(service_ids))
+        .filter(agent::Column::TenantId.eq(tenant_id))
+        .filter(agent::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+    {
+        Ok(agents) => agents,
+        Err(e) => {
+            tracing::warn!("Failed to load host agents: {}", e);
+            return Vec::new();
+        }
+    };
+
+    agents
+        .into_iter()
+        .map(|agent| HostAgentSummary {
+            id: agent.id.to_string(),
+            friendly_name: agent.friendly_name,
+            status: match agent.status {
                 agent::ServiceStatus::Pending => ServiceStatus::Pending,
                 agent::ServiceStatus::Approved => ServiceStatus::Approved,
                 agent::ServiceStatus::Rejected => ServiceStatus::Rejected,
                 agent::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
-            };
-            summaries.push(HostAgentSummary {
-                id: a.id.to_string(),
-                friendly_name: a.friendly_name,
-                status,
-            });
-        }
+            },
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+    use uptrakit_shared_db::entity::{service, service_host};
+
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        Database::connect(opt).await.expect("test db")
     }
 
-    summaries
+    async fn setup_test_db() -> DatabaseConnection {
+        let db = test_db().await;
+
+        db.execute_unprepared(
+            "CREATE TABLE services (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                friendly_name TEXT NOT NULL,
+                ip_address TEXT,
+                status TEXT NOT NULL,
+                enrollment_secret_hash TEXT NOT NULL,
+                client_version TEXT,
+                last_seen_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deactivated_at INTEGER
+            )",
+        )
+        .await
+        .unwrap();
+
+        db.execute_unprepared(
+            "CREATE TABLE service_hosts (
+                service_id TEXT NOT NULL,
+                host_id TEXT NOT NULL,
+                linked_at INTEGER NOT NULL,
+                PRIMARY KEY (service_id, host_id)
+            )",
+        )
+        .await
+        .unwrap();
+
+        db
+    }
+
+    #[tokio::test]
+    async fn load_host_agents_filters_by_tenant() {
+        let db = setup_test_db().await;
+        let now = OffsetDateTime::now_utc();
+        let host_id = uuid::Uuid::now_v7();
+        let tenant_a = uuid::Uuid::now_v7();
+        let tenant_b = uuid::Uuid::now_v7();
+
+        let service_a = service::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            tenant_id: Set(tenant_a),
+            service_type: Set(service::ServiceType::Agent),
+            hostname: Set("host-a".to_string()),
+            friendly_name: Set("Agent A".to_string()),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set("hash-a".to_string()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        let service_a = service_a.insert(&db).await.unwrap();
+
+        let service_b = service::ActiveModel {
+            id: Set(uuid::Uuid::now_v7()),
+            tenant_id: Set(tenant_b),
+            service_type: Set(service::ServiceType::Agent),
+            hostname: Set("host-b".to_string()),
+            friendly_name: Set("Agent B".to_string()),
+            ip_address: Set(None),
+            status: Set(service::ServiceStatus::Approved),
+            enrollment_secret_hash: Set("hash-b".to_string()),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        };
+        let service_b = service_b.insert(&db).await.unwrap();
+
+        let link_a = service_host::ActiveModel {
+            service_id: Set(service_a.id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        };
+        link_a.insert(&db).await.unwrap();
+
+        let link_b = service_host::ActiveModel {
+            service_id: Set(service_b.id),
+            host_id: Set(host_id),
+            linked_at: Set(now),
+        };
+        link_b.insert(&db).await.unwrap();
+
+        let agents = load_host_agents(&db, host_id, tenant_a).await;
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].friendly_name, "Agent A");
+    }
 }
