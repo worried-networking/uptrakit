@@ -207,28 +207,27 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 	return res.json();
 }
 
-export function getAgents(status?: string, page?: number, perPage?: number): Promise<PaginatedResponse<ServiceResponse>> {
+export function getServices(status?: string, page?: number, perPage?: number): Promise<PaginatedResponse<ServiceResponse>> {
 	const params = new URLSearchParams();
-	params.set('type', 'agent');
 	if (status) params.set('status', status);
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
 	return request(`/services?${params.toString()}`);
 }
 
-export function approveAgent(id: string): Promise<ServiceResponse> {
+export function approveService(id: string): Promise<ServiceResponse> {
 	return request(`/services/${id}/approve`, { method: 'POST' });
 }
 
-export function rejectAgent(id: string): Promise<ServiceResponse> {
+export function rejectService(id: string): Promise<ServiceResponse> {
 	return request(`/services/${id}/reject`, { method: 'POST' });
 }
 
-export function deleteAgent(id: string): Promise<MessageResponse> {
+export function deleteService(id: string): Promise<MessageResponse> {
 	return request(`/services/${id}`, { method: 'DELETE' });
 }
 
-export function mergeAgent(targetId: string, sourceId: string): Promise<ServiceResponse> {
+export function mergeService(targetId: string, sourceId: string): Promise<ServiceResponse> {
 	return request(`/services/${targetId}/merge`, {
 		method: 'POST',
 		body: JSON.stringify({ source_id: sourceId })

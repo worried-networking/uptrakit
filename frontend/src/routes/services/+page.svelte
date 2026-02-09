@@ -1,37 +1,45 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { user } from '$lib/auth';
-	import { getAgents, approveAgent, rejectAgent, deleteAgent, mergeAgent } from '$lib/api';
-	import type { ServiceResponse } from '$lib/types';
+	import { getServices, approveService, rejectService, deleteService, mergeService } from '$lib/api';
+	import type { ServiceResponse, ServiceType } from '$lib/types';
+	import { Permission } from '$lib/types';
 	import { formatDate } from '$lib/utils';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 
-	let agents: ServiceResponse[] = $state([]);
+	let services: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
-	let confirmAction: { agentId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null =
+	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null =
 		$state(null);
-	let mergeSource: { id: string; name: string } | null = $state(null);
+	let mergeSource: { id: string; name: string; type: ServiceType } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
+	let typeFilter: 'all' | ServiceType = $state('all');
 
-	onMount(() => loadAgents(1));
+	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
 
-	async function loadAgents(page: number) {
+	const filteredServices = $derived(
+		typeFilter === 'all' ? services : services.filter((service) => service.service_type === typeFilter)
+	);
+
+	onMount(() => loadServices(1));
+
+	async function loadServices(page: number) {
 		try {
 			error = null;
-			const result = await getAgents(undefined, page);
-			agents = result.items;
+			const result = await getServices(undefined, page);
+			services = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load agents';
+			error = e instanceof Error ? e.message : 'Failed to load services';
 		}
 	}
 
@@ -49,18 +57,23 @@
 		openMenuId = null;
 	}
 
-	function requestConfirm(agentId: string, action: 'approve' | 'reject' | 'delete', name: string) {
+	function setFilter(filter: 'all' | ServiceType) {
+		typeFilter = filter;
 		closeMenu();
-		confirmAction = { agentId, action, name };
+	}
+
+	function requestConfirm(serviceId: string, action: 'approve' | 'reject' | 'delete', name: string) {
+		closeMenu();
+		confirmAction = { serviceId, action, name };
 	}
 
 	function cancelConfirm() {
 		confirmAction = null;
 	}
 
-	function openMergeDialog(agent: ServiceResponse) {
+	function openMergeDialog(service: ServiceResponse) {
 		closeMenu();
-		mergeSource = { id: agent.id, name: agent.friendly_name };
+		mergeSource = { id: service.id, name: service.friendly_name, type: service.service_type };
 		mergeTargetId = null;
 	}
 
@@ -75,12 +88,12 @@
 		submitting = true;
 		try {
 			error = null;
-			await mergeAgent(mergeTargetId, sourceId);
-			agents = agents.filter((a) => a.id !== sourceId);
+			await mergeService(mergeTargetId, sourceId);
+			services = services.filter((service) => service.id !== sourceId);
 			mergeSource = null;
 			mergeTargetId = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to merge agent';
+			error = e instanceof Error ? e.message : 'Failed to merge service';
 		} finally {
 			submitting = false;
 		}
@@ -88,24 +101,24 @@
 
 	async function executeConfirmed() {
 		if (!confirmAction || submitting) return;
-		const { agentId, action } = confirmAction;
+		const { serviceId, action } = confirmAction;
 		confirmAction = null;
 		submitting = true;
 
 		try {
 			error = null;
 			if (action === 'approve') {
-				const updated = await approveAgent(agentId);
-				agents = agents.map((a) => (a.id === agentId ? updated : a));
+				const updated = await approveService(serviceId);
+				services = services.map((service) => (service.id === serviceId ? updated : service));
 			} else if (action === 'reject') {
-				await rejectAgent(agentId);
-				agents = agents.filter((a) => a.id !== agentId);
+				await rejectService(serviceId);
+				services = services.filter((service) => service.id !== serviceId);
 			} else if (action === 'delete') {
-				await deleteAgent(agentId);
-				agents = agents.filter((a) => a.id !== agentId);
+				await deleteService(serviceId);
+				services = services.filter((service) => service.id !== serviceId);
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : `Failed to ${action} agent`;
+			error = e instanceof Error ? e.message : `Failed to ${action} service`;
 		} finally {
 			submitting = false;
 		}
@@ -118,10 +131,14 @@
 	}
 
 	const confirmLabels = {
-		approve: { title: 'Approve Agent', verb: 'approve', btnClass: 'preset-filled-success-500' },
-		reject: { title: 'Reject Agent', verb: 'reject', btnClass: 'preset-filled-error-500' },
-		delete: { title: 'Delete Agent', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
+		approve: { title: 'Approve Service', verb: 'approve', btnClass: 'preset-filled-success-500' },
+		reject: { title: 'Reject Service', verb: 'reject', btnClass: 'preset-filled-error-500' },
+		delete: { title: 'Delete Service', verb: 'permanently delete', btnClass: 'preset-filled-error-500' }
 	} as const;
+
+	function formatServiceType(serviceType: ServiceType): string {
+		return serviceType === 'agent' ? 'Agent' : 'MQTT Service';
+	}
 </script>
 
 <svelte:window onclick={handleWindowClick} onkeydown={(e) => {
@@ -132,7 +149,28 @@
 }} />
 
 {#if $user}
-	<h1 class="h1 mb-6">Agents</h1>
+	<h1 class="h1 mb-4">Services</h1>
+
+	<div class="mb-6 flex flex-wrap gap-2">
+		<button
+			class="btn btn-sm {typeFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('all')}
+		>
+			All Services
+		</button>
+		<button
+			class="btn btn-sm {typeFilter === 'agent' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('agent')}
+		>
+			Agents
+		</button>
+		<button
+			class="btn btn-sm {typeFilter === 'mqtt' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('mqtt')}
+		>
+			MQTT Services
+		</button>
+	</div>
 
 	{#if error}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
@@ -145,51 +183,59 @@
 			<thead>
 				<tr>
 					<th>Name</th>
+					<th>Type</th>
 					<th>Hostname</th>
 					<th>IP</th>
 					<th>Status</th>
 					<th>Last Seen</th>
-					<th class="w-20"></th>
+					{#if canManage}
+						<th class="w-20"></th>
+					{/if}
 				</tr>
 			</thead>
 			<tbody>
-				{#each agents as agent (agent.id)}
+				{#each filteredServices as service (service.id)}
 					<tr>
-						<td>{agent.friendly_name}</td>
-						<td>{agent.hostname}</td>
-						<td>{agent.ip_address ?? '\u2014'}</td>
+						<td>{service.friendly_name}</td>
 						<td>
-							{#if agent.status === 'pending'}
+							<span class="badge preset-tonal">{formatServiceType(service.service_type)}</span>
+						</td>
+						<td>{service.hostname}</td>
+						<td>{service.ip_address ?? '\u2014'}</td>
+						<td>
+							{#if service.status === 'pending'}
 								<span class="badge preset-filled-warning-500">Pending</span>
-							{:else if agent.status === 'approved'}
+							{:else if service.status === 'approved'}
 								<span class="badge preset-filled-success-500">Approved</span>
-							{:else if agent.status === 'deactivated'}
+							{:else if service.status === 'deactivated'}
 								<span class="badge preset-tonal">Deactivated</span>
 							{:else}
 								<span class="badge preset-filled-error-500">Rejected</span>
 							{/if}
 						</td>
-						<td>{formatDate(agent.last_seen_at)}</td>
-						<td>
-							<div class="actions-menu">
-								<button
-									class="btn btn-sm preset-tonal"
-									onclick={(e) => {
-										e.stopPropagation();
-										toggleMenu(agent.id, e.currentTarget);
-									}}
-								>
-									&#8943;
-								</button>
-							</div>
-						</td>
+						<td>{formatDate(service.last_seen_at)}</td>
+						{#if canManage}
+							<td>
+								<div class="actions-menu">
+									<button
+										class="btn btn-sm preset-tonal"
+										onclick={(e) => {
+											e.stopPropagation();
+											toggleMenu(service.id, e.currentTarget);
+										}}
+									>
+										&#8943;
+									</button>
+								</div>
+							</td>
+						{/if}
 					</tr>
 				{:else}
 					<tr>
-						<td colspan="6" class="text-center py-8">
-							<p class="text-lg font-medium">No agents registered yet</p>
+						<td colspan={canManage ? 7 : 6} class="text-center py-8">
+							<p class="text-lg font-medium">No services registered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
-								Agents connect automatically when you run the Uptrakit agent on a host using an enrollment token.
+								Agents and MQTT services appear here when they enroll with the controller.
 							</p>
 						</td>
 					</tr>
@@ -198,18 +244,18 @@
 		</table>
 	</div>
 
-	<Pagination {currentPage} {totalPages} onPageChange={loadAgents} />
+	<Pagination {currentPage} {totalPages} onPageChange={loadServices} />
 
 	{#if openMenuId}
-		{@const agent = agents.find((a) => a.id === openMenuId)}
-		{#if agent}
+		{@const service = services.find((s) => s.id === openMenuId)}
+		{#if service}
 			<ContextMenu top={menuPos.top} left={menuPos.left}>
-				{#if agent.status === 'pending'}
+				{#if service.status === 'pending'}
 					<li>
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
-							onclick={() => openMergeDialog(agent)}
+							onclick={() => openMergeDialog(service)}
 						>
 							Merge Into&hellip;
 						</button>
@@ -218,7 +264,7 @@
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
-							onclick={() => requestConfirm(agent.id, 'approve', agent.friendly_name)}
+							onclick={() => requestConfirm(service.id, 'approve', service.friendly_name)}
 						>
 							Approve
 						</button>
@@ -227,7 +273,7 @@
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
-							onclick={() => requestConfirm(agent.id, 'reject', agent.friendly_name)}
+							onclick={() => requestConfirm(service.id, 'reject', service.friendly_name)}
 						>
 							Reject
 						</button>
@@ -237,7 +283,7 @@
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
-							onclick={() => requestConfirm(agent.id, 'delete', agent.friendly_name)}
+							onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
 						>
 							Delete
 						</button>
@@ -263,16 +309,16 @@
 	{#if mergeSource}
 		<ModalBackdrop onclose={cancelMerge}>
 			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl" role="dialog" aria-modal="true">
-				<h3 class="h3">Merge Agent</h3>
+				<h3 class="h3">Merge Service</h3>
 				<p>
-					Merge <strong>{mergeSource.name}</strong> into an existing agent.
-					The source agent's enrollment will be transferred to the target, preserving the target's history.
+					Merge <strong>{mergeSource.name}</strong> into an existing service.
+					The source service's enrollment will be transferred to the target, preserving the target's history.
 				</p>
 				<label class="label">
-					<span>Select target agent</span>
+					<span>Select target service</span>
 					<select class="select" bind:value={mergeTargetId}>
-						<option value={null}>-- Select an agent --</option>
-						{#each agents.filter((a) => a.status === 'approved' && a.id !== mergeSource?.id) as target (target.id)}
+						<option value={null}>-- Select a service --</option>
+						{#each services.filter((s) => s.status === 'approved' && s.service_type === mergeSource?.type && s.id !== mergeSource?.id) as target (target.id)}
 							<option value={target.id}>{target.friendly_name} ({target.hostname})</option>
 						{/each}
 					</select>
