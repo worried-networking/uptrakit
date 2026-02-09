@@ -233,6 +233,7 @@ pub struct AppState {
         routes::oidc_providers::deactivate_provider,
         routes::settings::get_registration_settings,
         routes::settings::update_registration_settings,
+        routes::settings_combined::get_combined_settings,
         routes::settings_auth::get_authentication_settings,
         routes::settings_auth::update_authentication_settings,
         routes::services::list_services,
@@ -306,6 +307,8 @@ pub struct AppState {
             routes::settings::UpdateRegistrationSettingsRequest,
             routes::settings_auth::AuthenticationSettingsResponse,
             routes::settings_auth::UpdateAuthenticationSettingsRequest,
+            uptrakit_web_api_types::settings_combined::CombinedSettingsResponse,
+            uptrakit_web_api_types::settings_combined::EnrollmentTokenStatusesResponse,
             auth::registration::RegistrationMode,
             routes::services::ServiceType,
             routes::services::ServiceStatus,
@@ -433,6 +436,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings::get_registration_settings,
             routes::settings::update_registration_settings
         ))
+        .routes(routes!(routes::settings_combined::get_combined_settings))
         .routes(routes!(
             routes::settings_auth::get_authentication_settings,
             routes::settings_auth::update_authentication_settings

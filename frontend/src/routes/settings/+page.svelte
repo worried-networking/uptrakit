@@ -3,10 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount, tick } from 'svelte';
 	import {
-		getRegistrationSettings,
-		getAuthenticationSettings,
-		getAgentCertificateSettings,
-		getEnrollmentTokenStatus,
+		getCombinedSettings,
 		getOidcProviders,
 		getMqttClients
 	} from '$lib/api';
@@ -56,22 +53,21 @@
 	async function loadAllSettings() {
 		loading = true;
 		const results = await Promise.allSettled([
-			getRegistrationSettings(),
-			getAuthenticationSettings(),
-			getAgentCertificateSettings(),
-			getEnrollmentTokenStatus('agent'),
+			getCombinedSettings(),
 			getOidcProviders(),
-			getMqttClients(),
-			getEnrollmentTokenStatus('mqtt')
+			getMqttClients()
 		]);
 
-		if (results[0].status === 'fulfilled') registrationRef.load(results[0].value);
-		if (results[1].status === 'fulfilled') authenticationRef.load(results[1].value);
-		if (results[2].status === 'fulfilled') agentCertificateRef.load(results[2].value);
-		if (results[3].status === 'fulfilled') enrollmentTokenRef.loadAgent(results[3].value);
-		if (results[4].status === 'fulfilled') oidcProvidersRef.load(results[4].value);
-		if (results[5].status === 'fulfilled') mqttClientsRef.load(results[5].value);
-		if (results[6].status === 'fulfilled') enrollmentTokenRef.loadMqtt(results[6].value);
+		if (results[0].status === 'fulfilled') {
+			const combined = results[0].value;
+			registrationRef.load(combined.registration);
+			authenticationRef.load(combined.authentication);
+			agentCertificateRef.load(combined.agent_certificates);
+			enrollmentTokenRef.loadAgent(combined.enrollment_tokens.agent);
+			enrollmentTokenRef.loadMqtt(combined.enrollment_tokens.mqtt);
+		}
+		if (results[1].status === 'fulfilled') oidcProvidersRef.load(results[1].value);
+		if (results[2].status === 'fulfilled') mqttClientsRef.load(results[2].value);
 
 		loading = false;
 	}

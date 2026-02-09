@@ -4,6 +4,7 @@ import type {
 	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
+	CombinedSettingsResponse,
 	CreateOidcProviderRequest,
 	EnrollmentTokenResponse,
 	EnrollmentTokenStatus,
@@ -292,6 +293,10 @@ export function getEnrollmentTokenStatus(
 	type: 'agent' | 'mqtt' = 'agent'
 ): Promise<EnrollmentTokenStatus> {
 	return request(`/services/enrollment-token/status?type=${type}`);
+}
+
+export function getCombinedSettings(): Promise<CombinedSettingsResponse> {
+	return request('/settings');
 }
 
 export function createEnrollmentToken(

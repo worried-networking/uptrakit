@@ -120,6 +120,18 @@ export interface EnrollmentTokenStatus {
 	configured: boolean;
 }
 
+export interface EnrollmentTokenStatusesResponse {
+	agent: EnrollmentTokenStatus;
+	mqtt: EnrollmentTokenStatus;
+}
+
+export interface CombinedSettingsResponse {
+	registration: RegistrationSettings;
+	authentication: AuthenticationSettings;
+	agent_certificates: AgentCertificateSettings;
+	enrollment_tokens: EnrollmentTokenStatusesResponse;
+}
+
 export interface EnrollmentTokenResponse {
 	token: string;
 }
