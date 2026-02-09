@@ -205,6 +205,7 @@ pub enum ControllerMessage {
     TenantAssignments(MqttTenantAssignmentsPayload),
     TenantConfigUpdated(MqttTenantConfigUpdatedPayload),
     TenantRevoked(MqttTenantRevokedPayload),
+    MqttClientCreated(MqttClientCreatedPayload),
 }
 
 /// Payload for ping messages.
@@ -662,6 +663,13 @@ pub struct MqttTenantRevokedPayload {
     pub mqtt_client_id: Uuid,
     /// Reason for revocation.
     pub reason: String,
+}
+
+/// Payload for controller outbox events when a new MQTT client is created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttClientCreatedPayload {
+    /// MQTT client UUID to lease.
+    pub mqtt_client_id: Uuid,
 }
 
 // =============================================================================
@@ -1591,6 +1599,17 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"tenant_revoked"#));
         assert!(json.contains(r#""reason":"mqtt client disabled"#));
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn mqtt_client_created_serialization_roundtrip() {
+        let msg = ControllerMessage::MqttClientCreated(MqttClientCreatedPayload {
+            mqtt_client_id: TEST_UUID_2,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"mqtt_client_created"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }

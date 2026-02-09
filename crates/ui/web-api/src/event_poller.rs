@@ -6,10 +6,13 @@ use sea_orm::{
 };
 use time::OffsetDateTime;
 use tokio_util::sync::CancellationToken;
-use uptrakit_internal_wire::{ControllerMessage, MqttTenantRevokedPayload};
+use uptrakit_internal_wire::{
+    ControllerMessage, MqttClientCreatedPayload, MqttTenantRevokedPayload,
+};
 use uptrakit_shared_db::entity::controller_event;
 use uuid::Uuid;
 
+use crate::mqtt_lease_coordinator::{LeaseCoordinatorError, MqttLeaseCoordinator};
 use crate::service_connections::ServiceConnectionRegistry;
 
 /// Maximum number of delivery retries before an event is skipped.
@@ -194,6 +197,8 @@ impl EventPoller {
                     .await;
                 true
             }
+            // Targeted to controller-only events
+            (None, Some("controller")) => self.deliver_controller_event(msg).await,
             // Broadcast to all services
             (None, _) => {
                 self.registry.broadcast(msg).await;
@@ -248,6 +253,32 @@ impl EventPoller {
                     .await;
                 true
             }
+        }
+    }
+
+    async fn deliver_controller_event(&self, msg: ControllerMessage) -> bool {
+        match msg {
+            ControllerMessage::MqttClientCreated(MqttClientCreatedPayload { mqtt_client_id }) => {
+                let coordinator = MqttLeaseCoordinator::new(self.db.clone(), self.registry.clone());
+                match coordinator.lease_client_by_id(mqtt_client_id).await {
+                    Ok(_) => true,
+                    Err(e) => {
+                        if matches!(
+                            e.current_context(),
+                            LeaseCoordinatorError::MqttClientNotFound(_)
+                        ) {
+                            return true;
+                        }
+                        tracing::warn!(
+                            error = %e,
+                            %mqtt_client_id,
+                            "failed to lease MQTT client from outbox event"
+                        );
+                        false
+                    }
+                }
+            }
+            _ => true,
         }
     }
 

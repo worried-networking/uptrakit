@@ -768,6 +768,14 @@ components:
       payload:
         $ref: "#/components/schemas/mqttTenantRevokedPayload"
 
+    mqttClientCreated:
+      name: mqtt_client_created
+      title: MQTT Client Created Message
+      summary: Controller outbox event for new MQTT client leases
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttClientCreatedPayload"
+
   schemas:
     pingPayload:
       type: object
@@ -1974,3 +1982,20 @@ components:
           description: Human-readable reason for the revocation
           examples:
             - MQTT client configuration deleted
+
+    mqttClientCreatedPayload:
+      type: object
+      required:
+        - type
+        - mqtt_client_id
+      properties:
+        type:
+          type: string
+          const: mqtt_client_created
+          description: Message type discriminator
+        mqtt_client_id:
+          type: string
+          format: uuid
+          description: MQTT client UUID to lease
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440002

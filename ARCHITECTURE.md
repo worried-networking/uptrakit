@@ -302,6 +302,8 @@ MQTT is handled by a separate `uptrakit-mqtt` binary (`crates/core/mqtt/`) that 
 
 Multiple MQTT service instances can run simultaneously. The controller manages centralized lease coordination:
 - Instances register with a `max_tenants` capacity (0 = unlimited)
+- New MQTT client configs are leased immediately to the least busy connected instance
+- If no local MQTT service is connected, the controller writes an outbox event so another controller can lease it
 - Unclaimed MQTT clients are assigned on registration (one lease per MQTT client config, keyed by `mqtt_client_id`)
 - Leases are tracked in the `mqtt_leases` table (controller-managed, not directly accessed by MQTT services)
 - On instance disconnect, its leases are released (no automatic redistribution)

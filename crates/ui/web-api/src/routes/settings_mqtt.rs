@@ -4,7 +4,7 @@ use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
 use crate::mqtt_client_store;
-use crate::mqtt_lease_coordinator::{MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
+use crate::mqtt_lease_coordinator::{LeaseOutcome, MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -15,6 +15,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_internal_wire::{ControllerMessage, MqttClientCreatedPayload};
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 use uptrakit_web_api_types::mqtt_url::MqttUrl;
@@ -219,6 +220,46 @@ pub async fn create_mqtt_settings(
     {
         Ok(model) => {
             let status = resolve_connection_status(&model, None);
+            let lease_coordinator =
+                MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+            match lease_coordinator
+                .lease_new_client_to_least_busy(&model)
+                .await
+            {
+                Ok(LeaseOutcome::Leased { service_id }) => {
+                    tracing::info!(
+                        mqtt_client_id = %model.id,
+                        %service_id,
+                        "leased new MQTT client to local service"
+                    );
+                }
+                Ok(LeaseOutcome::NoLocalService) => {
+                    let msg = ControllerMessage::MqttClientCreated(MqttClientCreatedPayload {
+                        mqtt_client_id: model.id,
+                    });
+                    state
+                        .notification_service
+                        .write_outbox_event(None, Some("controller"), &msg)
+                        .await;
+                    tracing::info!(
+                        mqtt_client_id = %model.id,
+                        "no local MQTT service available; queued outbox lease event"
+                    );
+                }
+                Ok(LeaseOutcome::AlreadyLeased) => {
+                    tracing::debug!(
+                        mqtt_client_id = %model.id,
+                        "MQTT client already leased; skipping immediate assignment"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        mqtt_client_id = %model.id,
+                        "failed to lease new MQTT client"
+                    );
+                }
+            }
             (StatusCode::CREATED, Json(model_to_response(&model, status))).into_response()
         }
         Err(e) => {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
+use std::cmp::Ordering;
 use tokio::sync::{RwLock, mpsc};
 use uptrakit_internal_wire::ControllerMessage;
 use uptrakit_shared_db::entity::service::ServiceType;
@@ -32,6 +33,18 @@ struct ServiceConnection {
 #[derive(Clone)]
 pub struct ServiceConnectionRegistry {
     inner: Arc<RwLock<HashMap<Uuid, ServiceConnection>>>,
+}
+
+/// Snapshot of MQTT service load used for lease selection.
+#[derive(Clone, Debug)]
+pub struct MqttServiceLoad {
+    pub service_id: Uuid,
+    pub instance_id: String,
+    pub assigned_count: usize,
+    pub max_tenants: u32,
+    pub available_capacity: u32,
+    pub utilization_numerator: u32,
+    pub utilization_denominator: u32,
 }
 
 impl Default for ServiceConnectionRegistry {
@@ -334,5 +347,110 @@ impl ServiceConnectionRegistry {
                 })
             })
             .collect()
+    }
+
+    /// List MQTT service load information, sorted from least busy to most busy.
+    pub async fn list_mqtt_service_loads(&self) -> Vec<MqttServiceLoad> {
+        let guard = self.inner.read().await;
+        let mut loads = Vec::new();
+
+        for (service_id, conn) in guard.iter() {
+            if conn.service_type != ServiceType::Mqtt {
+                continue;
+            }
+
+            let Some(instance_id) = conn.instance_id.clone() else {
+                continue;
+            };
+            let max_tenants = conn.max_tenants.unwrap_or(0);
+            let assigned_count = conn.assigned_mqtt_clients.len();
+
+            if max_tenants > 0 && assigned_count >= max_tenants as usize {
+                continue;
+            }
+
+            let (utilization_numerator, utilization_denominator, available_capacity) =
+                if max_tenants == 0 {
+                    (0, 1, u32::MAX)
+                } else {
+                    (
+                        assigned_count as u32,
+                        max_tenants,
+                        max_tenants.saturating_sub(assigned_count as u32),
+                    )
+                };
+
+            loads.push(MqttServiceLoad {
+                service_id: *service_id,
+                instance_id,
+                assigned_count,
+                max_tenants,
+                available_capacity,
+                utilization_numerator,
+                utilization_denominator,
+            });
+        }
+
+        loads.sort_by(compare_mqtt_service_load);
+        loads
+    }
+}
+
+fn compare_mqtt_service_load(a: &MqttServiceLoad, b: &MqttServiceLoad) -> Ordering {
+    let left = u128::from(a.utilization_numerator) * u128::from(b.utilization_denominator);
+    let right = u128::from(b.utilization_numerator) * u128::from(a.utilization_denominator);
+
+    match left.cmp(&right) {
+        Ordering::Equal => match a.assigned_count.cmp(&b.assigned_count) {
+            Ordering::Equal => a.service_id.as_bytes().cmp(b.service_id.as_bytes()),
+            other => other,
+        },
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn least_busy_prefers_lower_utilization_ratio() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc_a = Uuid::now_v7();
+        let svc_b = Uuid::now_v7();
+
+        let _ = registry.register_mqtt(svc_a, "a".to_string(), 4).await;
+        let _ = registry.register_mqtt(svc_b, "b".to_string(), 2).await;
+
+        let _ = registry.assign_mqtt_client(&svc_a, Uuid::now_v7()).await;
+        let _ = registry.assign_mqtt_client(&svc_b, Uuid::now_v7()).await;
+
+        let loads = registry.list_mqtt_service_loads().await;
+        let selected = loads.first().map(|l| l.service_id);
+        assert_eq!(selected, Some(svc_a));
+    }
+
+    #[tokio::test]
+    async fn least_busy_tiebreaks_by_assigned_count() {
+        let registry = ServiceConnectionRegistry::new();
+        let svc_unlimited = Uuid::now_v7();
+        let svc_idle = Uuid::now_v7();
+
+        let _ = registry
+            .register_mqtt(svc_unlimited, "unlimited".to_string(), 0)
+            .await;
+        let _ = registry
+            .register_mqtt(svc_idle, "idle".to_string(), 10)
+            .await;
+
+        for _ in 0..3 {
+            let _ = registry
+                .assign_mqtt_client(&svc_unlimited, Uuid::now_v7())
+                .await;
+        }
+
+        let loads = registry.list_mqtt_service_loads().await;
+        let selected = loads.first().map(|l| l.service_id);
+        assert_eq!(selected, Some(svc_idle));
     }
 }

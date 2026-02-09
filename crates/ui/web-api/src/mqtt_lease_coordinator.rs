@@ -2,20 +2,21 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use rootcause::prelude::*;
+use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel,
     QueryFilter, TransactionTrait,
 };
 use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_internal_wire::{
-    ControllerMessage, MqttTenantConfig, MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload,
-    MqttTransport,
+    ControllerMessage, MqttTenantAssignmentsPayload, MqttTenantConfig,
+    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, MqttTransport,
 };
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
 
 use crate::mqtt_client_store;
-use crate::service_connections::ServiceConnectionRegistry;
+use crate::service_connections::{MqttServiceLoad, ServiceConnectionRegistry};
 use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus;
 
 /// Maximum allowed age of an MQTT lease heartbeat before considering it stale.
@@ -33,6 +34,14 @@ pub enum LeaseCoordinatorError {
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<LeaseCoordinatorError>>;
+
+/// Outcome when attempting to lease an MQTT client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeaseOutcome {
+    Leased { service_id: Uuid },
+    NoLocalService,
+    AlreadyLeased,
+}
 
 /// Centralized coordinator for MQTT client leases.
 ///
@@ -152,6 +161,51 @@ impl MqttLeaseCoordinator {
         ))?;
 
         Ok(assigned_configs)
+    }
+
+    /// Attempt to lease a newly created MQTT client to the least busy local service.
+    pub async fn lease_new_client_to_least_busy(
+        &self,
+        client: &mqtt_client::Model,
+    ) -> Result<LeaseOutcome> {
+        if !client.enabled {
+            return Ok(LeaseOutcome::NoLocalService);
+        }
+
+        let candidates = self.connections.list_mqtt_service_loads().await;
+        if candidates.is_empty() {
+            return Ok(LeaseOutcome::NoLocalService);
+        }
+
+        for candidate in candidates {
+            match self.try_lease_to_service(client, &candidate).await {
+                Ok(LeaseOutcome::Leased { service_id }) => {
+                    return Ok(LeaseOutcome::Leased { service_id });
+                }
+                Ok(LeaseOutcome::AlreadyLeased) => {
+                    return Ok(LeaseOutcome::AlreadyLeased);
+                }
+                Ok(LeaseOutcome::NoLocalService) => {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(LeaseOutcome::NoLocalService)
+    }
+
+    /// Attempt to lease a client by ID (used by outbox events).
+    pub async fn lease_client_by_id(&self, mqtt_client_id: Uuid) -> Result<LeaseOutcome> {
+        let client = mqtt_client::Entity::find_by_id(mqtt_client_id)
+            .one(&self.db)
+            .await
+            .context(LeaseCoordinatorError::Database(
+                "failed to query mqtt_client".into(),
+            ))?
+            .ok_or_else(|| report!(LeaseCoordinatorError::MqttClientNotFound(mqtt_client_id)))?;
+
+        self.lease_new_client_to_least_busy(&client).await
     }
 
     /// Release specific MQTT clients from a service.
@@ -512,6 +566,100 @@ impl MqttLeaseCoordinator {
     }
 }
 
+impl MqttLeaseCoordinator {
+    async fn try_lease_to_service(
+        &self,
+        client: &mqtt_client::Model,
+        candidate: &MqttServiceLoad,
+    ) -> Result<LeaseOutcome> {
+        let now = OffsetDateTime::now_utc();
+        let lease = mqtt_lease::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            tenant_id: ActiveValue::Set(client.tenant_id),
+            mqtt_client_id: ActiveValue::Set(client.id),
+            instance_id: ActiveValue::Set(candidate.instance_id.clone()),
+            heartbeat_at: ActiveValue::Set(now),
+            created_at: ActiveValue::Set(now),
+        };
+
+        match mqtt_lease::Entity::insert(lease)
+            .on_conflict(
+                OnConflict::column(mqtt_lease::Column::MqttClientId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(&self.db)
+            .await
+        {
+            Ok(_) => {}
+            Err(sea_orm::DbErr::RecordNotInserted) => {
+                return Ok(LeaseOutcome::AlreadyLeased);
+            }
+            Err(e) => {
+                return Err(report!(LeaseCoordinatorError::Database(format!(
+                    "failed to insert lease: {e}"
+                ))));
+            }
+        }
+
+        let lease = mqtt_lease::Entity::find()
+            .filter(mqtt_lease::Column::MqttClientId.eq(client.id))
+            .one(&self.db)
+            .await
+            .context(LeaseCoordinatorError::Database(
+                "failed to load lease after insert".into(),
+            ))?;
+        let Some(lease) = lease else {
+            return Err(report!(LeaseCoordinatorError::Database(
+                "lease missing after insert".into(),
+            )));
+        };
+
+        if lease.instance_id != candidate.instance_id {
+            return Ok(LeaseOutcome::AlreadyLeased);
+        }
+
+        if !self
+            .connections
+            .assign_mqtt_client(&candidate.service_id, client.id)
+            .await
+        {
+            self.rollback_lease(client.id, &candidate.instance_id)
+                .await?;
+            return Ok(LeaseOutcome::NoLocalService);
+        }
+
+        let msg = ControllerMessage::TenantAssignments(MqttTenantAssignmentsPayload {
+            tenants: vec![model_to_config(client)],
+        });
+
+        if !self.connections.send(&candidate.service_id, msg).await {
+            self.connections
+                .release_mqtt_client(&candidate.service_id, &client.id)
+                .await;
+            self.rollback_lease(client.id, &candidate.instance_id)
+                .await?;
+            return Ok(LeaseOutcome::NoLocalService);
+        }
+
+        Ok(LeaseOutcome::Leased {
+            service_id: candidate.service_id,
+        })
+    }
+
+    async fn rollback_lease(&self, mqtt_client_id: Uuid, instance_id: &str) -> Result<()> {
+        mqtt_lease::Entity::delete_many()
+            .filter(mqtt_lease::Column::MqttClientId.eq(mqtt_client_id))
+            .filter(mqtt_lease::Column::InstanceId.eq(instance_id))
+            .exec(&self.db)
+            .await
+            .context(LeaseCoordinatorError::Database(
+                "failed to delete lease".into(),
+            ))?;
+        Ok(())
+    }
+}
+
 /// Convert mqtt_client model to MqttTenantConfig wire type.
 fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
     MqttTenantConfig {
@@ -538,5 +686,157 @@ fn wire_mqtt_transport(transport: &str) -> MqttTransport {
     match transport {
         "tls" => MqttTransport::Tls,
         _ => MqttTransport::Tcp,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::sea_query::Index;
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
+    };
+    use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
+
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+
+        let schema = Schema::new(db.get_database_backend());
+        let stmt = schema.create_table_from_entity(tenant::Entity);
+        db.execute(&stmt).await.expect("create tenants table");
+        let stmt = schema.create_table_from_entity(mqtt_client::Entity);
+        db.execute(&stmt).await.expect("create mqtt_clients table");
+        let stmt = schema.create_table_from_entity(mqtt_lease::Entity);
+        db.execute(&stmt).await.expect("create mqtt_leases table");
+        let stmt = Index::create()
+            .name("uq_mqtt_leases_mqtt_client_id")
+            .table(mqtt_lease::Entity)
+            .col(mqtt_lease::Column::MqttClientId)
+            .unique()
+            .to_owned();
+        db.execute(&stmt).await.expect("create mqtt_leases index");
+
+        db
+    }
+
+    async fn seed_tenant(db: &DatabaseConnection) -> tenant::Model {
+        let now = OffsetDateTime::now_utc();
+        let model = tenant::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            name: ActiveValue::Set("Default".to_string()),
+            slug: ActiveValue::Set("default".to_string()),
+            is_default: ActiveValue::Set(true),
+            created_at: ActiveValue::Set(now),
+            updated_at: ActiveValue::Set(now),
+            deactivated_at: ActiveValue::Set(None),
+        };
+        model.insert(db).await.expect("insert tenant")
+    }
+
+    async fn seed_client(db: &DatabaseConnection, tenant_id: Uuid) -> mqtt_client::Model {
+        let now = OffsetDateTime::now_utc();
+        let model = mqtt_client::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            tenant_id: ActiveValue::Set(tenant_id),
+            enabled: ActiveValue::Set(true),
+            transport: ActiveValue::Set("tcp".to_string()),
+            host: ActiveValue::Set("broker.local".to_string()),
+            port: ActiveValue::Set(1883),
+            client_id: ActiveValue::Set("uptrakit-controller".to_string()),
+            username: ActiveValue::Set(None),
+            password: ActiveValue::Set(None),
+            topic_prefix: ActiveValue::Set("uptrakit".to_string()),
+            connection_status: ActiveValue::Set(
+                MqttClientConnectionStatus::Offline.as_str().to_string(),
+            ),
+            status_updated_at: ActiveValue::Set(now),
+            created_at: ActiveValue::Set(now),
+            updated_at: ActiveValue::Set(now),
+        };
+        model.insert(db).await.expect("insert mqtt client")
+    }
+
+    #[tokio::test]
+    async fn lease_new_client_to_local_service() {
+        let db = test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let client = seed_client(&db, tenant.id).await;
+
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let _rx = registry
+            .register_mqtt(service_id, "instance-1".to_string(), 10)
+            .await;
+
+        let coordinator = MqttLeaseCoordinator::new(db.clone(), registry.clone());
+        let result = coordinator
+            .lease_new_client_to_least_busy(&client)
+            .await
+            .expect("lease");
+
+        assert!(matches!(result, LeaseOutcome::Leased { .. }));
+
+        let lease = mqtt_lease::Entity::find()
+            .one(&db)
+            .await
+            .expect("find lease")
+            .expect("lease row");
+        assert_eq!(lease.mqtt_client_id, client.id);
+        assert_eq!(registry.assigned_mqtt_client_count(&service_id).await, 1);
+    }
+
+    #[tokio::test]
+    async fn lease_new_client_without_local_service() {
+        let db = test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let client = seed_client(&db, tenant.id).await;
+
+        let registry = ServiceConnectionRegistry::new();
+        let coordinator = MqttLeaseCoordinator::new(db.clone(), registry);
+        let result = coordinator
+            .lease_new_client_to_least_busy(&client)
+            .await
+            .expect("lease");
+
+        assert!(matches!(result, LeaseOutcome::NoLocalService));
+
+        let lease = mqtt_lease::Entity::find()
+            .one(&db)
+            .await
+            .expect("find lease");
+        assert!(lease.is_none());
+    }
+
+    #[tokio::test]
+    async fn lease_new_client_already_leased() {
+        let db = test_db().await;
+        let tenant = seed_tenant(&db).await;
+        let client = seed_client(&db, tenant.id).await;
+
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let _ = registry
+            .register_mqtt(service_id, "instance-1".to_string(), 10)
+            .await;
+
+        let now = OffsetDateTime::now_utc();
+        let existing = mqtt_lease::ActiveModel {
+            id: ActiveValue::Set(Uuid::now_v7()),
+            tenant_id: ActiveValue::Set(client.tenant_id),
+            mqtt_client_id: ActiveValue::Set(client.id),
+            instance_id: ActiveValue::Set("other".to_string()),
+            heartbeat_at: ActiveValue::Set(now),
+            created_at: ActiveValue::Set(now),
+        };
+        existing.insert(&db).await.expect("insert lease");
+
+        let coordinator = MqttLeaseCoordinator::new(db, registry);
+        let result = coordinator
+            .lease_new_client_to_least_busy(&client)
+            .await
+            .expect("lease");
+
+        assert!(matches!(result, LeaseOutcome::AlreadyLeased));
     }
 }
