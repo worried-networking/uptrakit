@@ -86,7 +86,7 @@ impl AppDirs {
         config_override: Option<&Path>,
         state_override: Option<&Path>,
     ) -> Result<Self> {
-        let proj_dirs = ProjectDirs::from("io", "uptrakit", app_name)
+        let proj_dirs = ProjectDirs::from("org", "uptrakit", app_name)
             .ok_or_else(|| report!(DirectoryError::NoProjectDirs))?;
 
         let config = match config_override {
