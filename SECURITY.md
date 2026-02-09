@@ -104,7 +104,8 @@ For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).
 - Sensitive database credentials (MQTT passwords, OIDC client secrets, CA private keys) are encrypted at rest using AES-256-GCM. See the "Encryption at Rest" section below.
 - Passwords are hashed with Argon2id before storage; plaintext is never persisted.
 - Session tokens (refresh tokens) are SHA-256 hashed in the database and **rotated on each use** — the old token is atomically revoked and a new one issued, preventing replay attacks.
-- JWT signing keys are held in memory only.
+- JWT signing keys are stored in the database settings table (base64-encoded, global scope) so all HA instances share the same key. Existing file-based keys are automatically migrated on startup. The key is loaded into memory at startup and never exposed in API responses or logs.
+- JWT access tokens are checked against an in-memory denylist on every request. On logout, all tokens for the user are denied for the remaining token lifetime (15 min). The denylist supports per-JTI and per-user revocation with automatic expiry-based cleanup.
 - Refresh tokens are stored in `HttpOnly; Secure; SameSite=Strict` cookies scoped to `/api/v1/auth`, preventing JavaScript access (XSS-resistant). Access tokens are held in-memory only and never written to localStorage or sessionStorage.
 - Agent and MQTT service private keys are generated and stored locally on each agent/service; they never leave the host.
 - CA private keys are stored on the controller filesystem and held in a separate in-memory key store (`CaKeyStore`) with `zeroize` memory protection. Only signing operations (OCSP, CRL, certificate issuance) access the key store; public CA data (certificates, fingerprints) is shared separately.
@@ -172,7 +173,7 @@ All sensitive files and directories are created with secure permissions:
 | Files | Owner rw only | 0o600 | Private keys, certificates, database, configuration |
 
 The `uptrakit-directories` crate provides helper functions (`create_secure_dir`, `write_secure_file`) that enforce these permissions on Unix systems. This applies to:
-- Controller: external CA / TLS cert files (if configured), database files (including managed CA history), JWT key files
+- Controller: external CA / TLS cert files (if configured), database files (including managed CA history and JWT signing key)
 - Agent/MQTT Service: State directories, private keys, certificates, CA certificate
 
 ## Dependency Security

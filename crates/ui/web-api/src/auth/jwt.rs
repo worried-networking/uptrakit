@@ -9,7 +9,7 @@ use super::permissions::Permission;
 use super::token::generate_uuid;
 use super::{AuthError, Result};
 
-const ACCESS_TOKEN_EXPIRY_SECS: i64 = 900; // 15 minutes
+pub const ACCESS_TOKEN_EXPIRY_SECS: i64 = 900; // 15 minutes
 const KEY_FILE_NAME: &str = "jwt_signing.key";
 const KEY_LENGTH: usize = 64;
 

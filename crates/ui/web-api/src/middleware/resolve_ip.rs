@@ -23,7 +23,7 @@ pub async fn resolve_ip(
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| canonicalize(c.0.ip()));
 
-    let network = state.settings.network().await;
+    let network = state.settings.network();
     let (client_ip, proxy_ip) = resolve_client_ip(
         peer_ip,
         req.headers(),
@@ -242,6 +242,7 @@ mod tests {
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             controller_id: uuid::Uuid::nil(),
             notification_service,
+            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
         })
     }
 

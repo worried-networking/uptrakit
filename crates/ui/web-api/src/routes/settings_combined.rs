@@ -59,20 +59,20 @@ pub async fn get_combined_settings(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let reg = state.settings.registration().await;
+    let reg = state.settings.registration();
     let registration = RegistrationSettingsResponse {
         mode: reg.mode,
         require_token_for_oidc: reg.require_token_for_oidc,
     };
 
-    let auth_settings = state.settings.authentication().await;
+    let auth_settings = state.settings.authentication();
     let authentication = AuthenticationSettingsResponse {
         password_auth_enabled: auth_settings.password_auth_enabled,
     };
 
     let agent_certificates = AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days().await,
-        renewal_window_hours: state.settings.renewal_window_hours().await,
+        lifetime_days: state.settings.agent_cert_lifetime_days(),
+        renewal_window_hours: state.settings.renewal_window_hours(),
     };
 
     let agent_configured = matches!(

@@ -37,8 +37,8 @@ pub async fn get_agent_certificate_settings(
     }
 
     let response = AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days().await,
-        renewal_window_hours: state.settings.renewal_window_hours().await,
+        lifetime_days: state.settings.agent_cert_lifetime_days(),
+        renewal_window_hours: state.settings.renewal_window_hours(),
     };
     (StatusCode::OK, Json(response)).into_response()
 }
@@ -109,8 +109,8 @@ pub async fn update_agent_certificate_settings(
     }
 
     let response = AgentCertificateSettingsResponse {
-        lifetime_days: state.settings.agent_cert_lifetime_days().await,
-        renewal_window_hours: state.settings.renewal_window_hours().await,
+        lifetime_days: state.settings.agent_cert_lifetime_days(),
+        renewal_window_hours: state.settings.renewal_window_hours(),
     };
     (StatusCode::OK, Json(response)).into_response()
 }

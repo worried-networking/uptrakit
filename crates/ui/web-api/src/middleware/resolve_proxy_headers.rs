@@ -27,7 +27,7 @@ pub async fn resolve_proxy_headers(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let network = state.settings.network().await;
+    let network = state.settings.network();
     let from_trusted_proxy = req.extensions().get::<ProxyIp>().is_some();
     let has_mtls_identity = req.extensions().get::<ServiceIdentity>().is_some();
 

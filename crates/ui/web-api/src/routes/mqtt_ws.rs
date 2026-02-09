@@ -675,7 +675,7 @@ async fn do_sign_mqtt_service_csr(
     service: mqtt_service::Model,
     csr_pem: &str,
 ) -> MqttWsResult<crate::cert_signer::SignedCertBundle> {
-    let validity_days = settings.agent_cert_lifetime_days().await;
+    let validity_days = settings.agent_cert_lifetime_days();
     let validity = time::Duration::days(validity_days as i64);
 
     let ca_fp = cert_signer.active_ca_fingerprint();

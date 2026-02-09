@@ -287,7 +287,7 @@ pub(crate) async fn do_sign_csr(
         )));
     }
 
-    let lifetime = time::Duration::days(i64::from(settings.agent_cert_lifetime_days().await));
+    let lifetime = time::Duration::days(i64::from(settings.agent_cert_lifetime_days()));
 
     let ca_fp = cert_signer.active_ca_fingerprint();
 

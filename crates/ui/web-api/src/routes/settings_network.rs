@@ -38,7 +38,7 @@ pub async fn get_network_settings(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let network = state.settings.network().await;
+    let network = state.settings.network();
     let response = NetworkSettingsResponse {
         trusted_proxies: network
             .trusted_proxies
@@ -232,7 +232,7 @@ pub async fn update_network_settings(
         };
 
         // Check if the value actually changed
-        let current = state.settings.pki_addr().await;
+        let current = state.settings.pki_addr();
         if current != value {
             pki_addr_changed = true;
         }
@@ -280,7 +280,7 @@ pub async fn update_network_settings(
         state.settings.set_https_addr(addr).await;
     }
 
-    let network = state.settings.network().await;
+    let network = state.settings.network();
     let warning = if pki_addr_changed {
         Some(
             "Changing the PKI address requires CA rotation. All agent certificates will need \

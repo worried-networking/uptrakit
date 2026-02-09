@@ -703,11 +703,21 @@ async fn run(args: cli::Args) -> Result<()> {
         Arc::clone(&ca_key_store),
     ));
 
-    // Initialize JWT signing key (state directory)
-    let jwt_manager =
-        uptrakit_web_api::auth::jwt::JwtManager::load_or_generate(app_dirs.state_dir())
-            .context(AppError::Config("JWT initialization failed".into()))?;
-    tracing::info!("JWT signing key initialized");
+    // Migrate file-based JWT key to DB if it exists (backwards compatibility)
+    uptrakit_web_api::settings_store::migrate_file_jwt_key(
+        &db_conn,
+        default_tenant_id,
+        app_dirs.state_dir(),
+    )
+    .await
+    .context(AppError::Config("JWT key migration failed".into()))?;
+    // Load or generate JWT signing key from DB (HA-safe: all instances share the same key)
+    let jwt_secret =
+        uptrakit_web_api::settings_store::load_or_generate_jwt_key(&db_conn, default_tenant_id)
+            .await
+            .context(AppError::Config("JWT key initialization failed".into()))?;
+    let jwt_manager = uptrakit_web_api::auth::jwt::JwtManager::from_secret(&jwt_secret);
+    tracing::info!("JWT signing key initialized from database");
 
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
     let account_link_store =
@@ -729,6 +739,8 @@ async fn run(args: cli::Args) -> Result<()> {
         service_connections.clone(),
         controller_id,
     );
+
+    let token_denylist = Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new());
 
     let app_state = Arc::new(AppState {
         ca_snapshot: ca_rx,
@@ -752,6 +764,7 @@ async fn run(args: cli::Args) -> Result<()> {
         default_tenant_id,
         controller_id,
         notification_service: notification_service.clone(),
+        token_denylist: Arc::clone(&token_denylist),
     });
 
     // Spawn periodic cleanup for auth state stores (every 5 minutes)
@@ -767,6 +780,7 @@ async fn run(args: cli::Args) -> Result<()> {
                     oidc_registration_store.cleanup_expired().await;
                     device_flow_store.cleanup_expired().await;
                     rate_limit_store.cleanup_expired().await;
+                    token_denylist.purge_expired().await;
                 }
                 _ = oidc_cleanup_token.cancelled() => {
                     tracing::debug!("auth state cleanup task shutting down");
@@ -853,7 +867,7 @@ async fn run(args: cli::Args) -> Result<()> {
                     }
                 };
 
-                let pki_addr = settings_for_task.pki_addr().await;
+                let pki_addr = settings_for_task.pki_addr();
                 let (snapshot, new_key_store) = match state.to_snapshot(pki_addr) {
                     Ok(s) => s,
                     Err(e) => {
@@ -931,7 +945,7 @@ async fn run(args: cli::Args) -> Result<()> {
                     tracing::info!("CA rotation triggered via API");
                 }
 
-                let current_pki_addr = settings_for_rotation.pki_addr().await;
+                let current_pki_addr = settings_for_rotation.pki_addr();
                 let snapshot = ca_tx_for_task.borrow().clone();
                 let expected_fp = snapshot.active_fingerprint.clone();
 
@@ -1080,7 +1094,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 // Drop the key store lock before proceeding with I/O
                 drop(key_store);
 
-                let extra_sans = app_state_for_task.settings.extra_sans().await;
+                let extra_sans = app_state_for_task.settings.extra_sans();
                 match pki::renew_server_cert(&pki_for_task, &ca_bundle, &extra_sans) {
                     Ok(new_cert) => {
                         // Update CRL manager's server cert

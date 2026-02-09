@@ -446,7 +446,7 @@ async fn handle_authenticated(
     }
 
     // Send ServiceSettings on connect.
-    let renewal_window_hours = state.settings.renewal_window_hours().await;
+    let renewal_window_hours = state.settings.renewal_window_hours();
     let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
     let shutdown_timeout = match service.service_type {
         service_entity::ServiceType::Agent => Some(120),

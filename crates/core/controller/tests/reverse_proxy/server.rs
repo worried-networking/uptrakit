@@ -213,6 +213,7 @@ async fn build_state(
         default_tenant_id: uuid::Uuid::nil(),
         controller_id,
         notification_service,
+        token_denylist: Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new()),
     })
 }
 

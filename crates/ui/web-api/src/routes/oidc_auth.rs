@@ -53,7 +53,7 @@ pub struct OidcCallbackParams {
     tag = "Authentication"
 )]
 pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
-    let auth_settings = state.settings.authentication().await;
+    let auth_settings = state.settings.authentication();
 
     let providers = OidcProvider::find()
         .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
@@ -79,7 +79,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
         .map(|c| c == 0)
         .unwrap_or(false);
 
-    let reg_settings = state.settings.registration().await;
+    let reg_settings = state.settings.registration();
     let registration_token_required = reg_settings.needs_token_for_oidc(setup_required);
 
     let response = AuthMethodsResponse {
@@ -350,7 +350,7 @@ pub async fn oidc_callback(
 
     // Pre-check: if registration mode is Invite and auto_create is enabled,
     // check whether this would create a new user requiring a registration token.
-    let reg_settings = state.settings.registration().await;
+    let reg_settings = state.settings.registration();
     if reg_settings.mode == RegistrationMode::Invite && provider.auto_create_users {
         // Check if an OIDC link already exists for this subject
         let has_link = UserOidcLink::find()
@@ -493,15 +493,14 @@ pub async fn oidc_callback(
                 }
 
                 // Complete initial setup (close registration, remove token)
-                if let Err(e) = state
-                    .settings
-                    .registration_write()
-                    .await
+                let mut reg = state.settings.registration();
+                if let Err(e) = reg
                     .complete_initial_setup(&txn, state.default_tenant_id)
                     .await
                 {
                     tracing::error!("Failed to complete initial setup for first OIDC user: {e:?}");
                 }
+                state.settings.set_registration(reg).await;
 
                 tracing::info!("first user registered via OIDC, assigned owner role");
             }
@@ -772,7 +771,7 @@ pub async fn oidc_complete_registration(
 
     // 2. Validate the registration token BEFORE consuming the entry —
     //    on failure the pending registration stays in the store so the user can retry
-    let reg_settings = state.settings.registration().await;
+    let reg_settings = state.settings.registration();
     if let Err(e) = reg_settings.validate(Some(&req.registration_token)) {
         return e.into_response();
     }

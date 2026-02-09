@@ -44,7 +44,7 @@ pub async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Response {
     // Check if password auth is enabled
-    if !state.settings.authentication().await.password_auth_enabled {
+    if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
     }
 
@@ -60,7 +60,6 @@ pub async fn register(
     if let Err(e) = state
         .settings
         .registration()
-        .await
         .validate(req.registration_token.as_deref())
     {
         return e.into_response();
@@ -211,7 +210,7 @@ pub async fn register(
 )]
 pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequest>) -> Response {
     // Check if password auth is enabled
-    if !state.settings.authentication().await.password_auth_enabled {
+    if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
     }
 
@@ -337,6 +336,20 @@ pub async fn logout(State(state): State<Arc<AppState>>, req: axum::extract::Requ
 
     if let Some(token) = &refresh_token {
         let session_service = SessionService::new(state.db.clone());
+
+        // Verify the token to get the user_id before revoking (best-effort)
+        if let Ok(verified) = session_service.verify_refresh_token(token).await {
+            // Deny all current access tokens for this user
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            state
+                .token_denylist
+                .deny_user(
+                    verified.user_id,
+                    now + crate::auth::jwt::ACCESS_TOKEN_EXPIRY_SECS,
+                )
+                .await;
+        }
+
         if let Err(e) = session_service.revoke_refresh_token(token).await {
             tracing::error!("Failed to revoke refresh token: {:?}", e);
         }
@@ -514,11 +527,9 @@ pub async fn handle_first_user_setup(
 
     assign_owner_role(txn, tenant_id, user_id).await?;
 
-    settings
-        .registration_write()
-        .await
-        .complete_initial_setup(txn, tenant_id)
-        .await?;
+    let mut reg = settings.registration();
+    reg.complete_initial_setup(txn, tenant_id).await?;
+    settings.set_registration(reg).await;
 
     Ok(true)
 }

@@ -196,6 +196,8 @@ pub struct AppState {
     pub controller_id: uuid::Uuid,
     /// Cross-controller notification service for push message delivery via outbox pattern.
     pub notification_service: NotificationService,
+    /// In-memory denylist for immediate JWT access token revocation.
+    pub token_denylist: Arc<auth::token_denylist::TokenDenylist>,
 }
 
 /// OpenAPI documentation
@@ -734,6 +736,7 @@ mod tests {
             default_tenant_id: uuid::Uuid::nil(),
             controller_id,
             notification_service,
+            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
             db,
         })
     }

@@ -1,15 +1,19 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::SettingKey;
-use crate::auth::Result;
+use crate::auth::{AuthError, Result};
+use base64::Engine;
 use rootcause::prelude::*;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ExprTrait,
-    QueryFilter, Set, sea_query::Expr,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter, Set,
+    sea_query::{Expr, OnConflict},
 };
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{prelude::*, setting, settings_version};
 use uuid::Uuid;
+
+const JWT_KEY_LENGTH: usize = 64;
 
 /// All settings from the DB, keyed by setting name.
 pub type RawSettings = HashMap<String, serde_json::Value>;
@@ -55,25 +59,23 @@ pub async fn upsert_setting(
 ) -> Result<()> {
     let now = OffsetDateTime::now_utc();
     let db_key = key.as_str();
-    let existing = Setting::find_by_id((tenant_id, db_key.to_string()))
-        .one(db)
+
+    let model = setting::ActiveModel {
+        tenant_id: Set(tenant_id),
+        key: Set(db_key.to_string()),
+        value: Set(value),
+        updated_at: Set(now),
+    };
+
+    Setting::insert(model)
+        .on_conflict(
+            OnConflict::columns([setting::Column::TenantId, setting::Column::Key])
+                .update_columns([setting::Column::Value, setting::Column::UpdatedAt])
+                .to_owned(),
+        )
+        .exec(db)
         .await
         .context_to()?;
-
-    if let Some(existing) = existing {
-        let mut model: setting::ActiveModel = existing.into();
-        model.value = Set(value);
-        model.updated_at = Set(now);
-        model.update(db).await.context_to()?;
-    } else {
-        let model = setting::ActiveModel {
-            tenant_id: Set(tenant_id),
-            key: Set(db_key.to_string()),
-            value: Set(value),
-            updated_at: Set(now),
-        };
-        model.insert(db).await.context_to()?;
-    }
 
     // Bump the version counter (non-fatal on failure)
     if let Err(e) = bump_settings_version(db, tenant_id, key.is_global()).await {
@@ -155,7 +157,8 @@ pub async fn bump_settings_version(
             .await
             .context_to()?;
 
-        // Defensive: if the row didn't exist (tenant created after migration), insert it
+        // Defensive: if the row didn't exist (tenant created after migration), insert it.
+        // Use on_conflict(do_nothing) to avoid racing with a concurrent insert.
         if result.rows_affected == 0 {
             let model = settings_version::ActiveModel {
                 tenant_id: Set(tenant_id),
@@ -164,7 +167,16 @@ pub async fn bump_settings_version(
                 revocation_version: Set(0),
                 updated_at: Set(now),
             };
-            model.insert(db).await.context_to()?;
+            SettingsVersion::insert(model)
+                .on_conflict(
+                    OnConflict::column(settings_version::Column::TenantId)
+                        .do_nothing()
+                        .to_owned(),
+                )
+                .try_insert()
+                .exec(db)
+                .await
+                .context_to()?;
         }
     }
 
@@ -204,7 +216,8 @@ pub async fn bump_revocation_version(db: &impl ConnectionTrait, tenant_id: Uuid)
         .await
         .context_to()?;
 
-    // Defensive: if the row didn't exist (tenant created after migration), insert it
+    // Defensive: if the row didn't exist (tenant created after migration), insert it.
+    // Use on_conflict(do_nothing) to avoid racing with a concurrent insert.
     if result.rows_affected == 0 {
         let model = settings_version::ActiveModel {
             tenant_id: Set(tenant_id),
@@ -213,7 +226,16 @@ pub async fn bump_revocation_version(db: &impl ConnectionTrait, tenant_id: Uuid)
             revocation_version: Set(1),
             updated_at: Set(now),
         };
-        model.insert(db).await.context_to()?;
+        SettingsVersion::insert(model)
+            .on_conflict(
+                OnConflict::column(settings_version::Column::TenantId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .try_insert()
+            .exec(db)
+            .await
+            .context_to()?;
     }
 
     Ok(())
@@ -232,4 +254,97 @@ pub async fn get_revocation_version(db: &DatabaseConnection, tenant_id: Uuid) ->
         Some(model) => Ok(model.revocation_version),
         None => Ok(0),
     }
+}
+
+/// Load or generate the JWT signing key from the database.
+///
+/// If a key already exists in the DB, returns it. Otherwise generates a new
+/// 64-byte random key, stores it via upsert, and re-reads to handle races
+/// (another instance may have stored a different key concurrently).
+///
+/// This ensures all controller instances in an HA deployment share the same
+/// JWT signing key.
+pub async fn load_or_generate_jwt_key(db: &DatabaseConnection, tenant_id: Uuid) -> Result<Vec<u8>> {
+    let b64_engine = base64::engine::general_purpose::STANDARD;
+
+    // Try loading existing key from DB
+    if let Some(value) = load_setting(db, tenant_id, SettingKey::JwtSigningKey).await?
+        && let Some(b64) = value.as_str()
+    {
+        return b64_engine.decode(b64).map_err(|e| {
+            report!(AuthError::Internal(format!(
+                "failed to decode JWT signing key from database: {e}"
+            )))
+        });
+    }
+
+    // Generate new random key
+    let mut bytes = vec![0u8; JWT_KEY_LENGTH];
+    rand::Rng::fill(&mut rand::rng(), &mut bytes[..]);
+    let b64 = b64_engine.encode(&bytes);
+
+    // Store with upsert (race-safe: another instance may store concurrently)
+    upsert_setting(
+        db,
+        tenant_id,
+        SettingKey::JwtSigningKey,
+        serde_json::json!(b64),
+    )
+    .await?;
+
+    // Re-read to get the canonical value (in case another instance won the race)
+    if let Some(value) = load_setting(db, tenant_id, SettingKey::JwtSigningKey).await?
+        && let Some(stored_b64) = value.as_str()
+    {
+        return b64_engine.decode(stored_b64).map_err(|e| {
+            report!(AuthError::Internal(format!(
+                "failed to decode JWT signing key after store: {e}"
+            )))
+        });
+    }
+
+    // Fallback: use the key we generated (should not normally reach here)
+    Ok(bytes)
+}
+
+/// Migrate a file-based JWT signing key to the database.
+///
+/// If `{data_dir}/jwt_signing.key` exists and the DB does not yet have a key,
+/// reads the file and stores it in the settings table. Returns `true` if a
+/// migration was performed.
+pub async fn migrate_file_jwt_key(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    data_dir: &Path,
+) -> Result<bool> {
+    let key_path = data_dir.join("jwt_signing.key");
+    if !key_path.exists() {
+        return Ok(false);
+    }
+
+    // Check if DB already has a key — don't overwrite it
+    if load_setting(db, tenant_id, SettingKey::JwtSigningKey)
+        .await?
+        .is_some()
+    {
+        return Ok(false);
+    }
+
+    let bytes = std::fs::read(&key_path).map_err(|e| {
+        report!(AuthError::Internal(format!(
+            "failed to read JWT signing key file: {e}"
+        )))
+    })?;
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    upsert_setting(
+        db,
+        tenant_id,
+        SettingKey::JwtSigningKey,
+        serde_json::json!(b64),
+    )
+    .await?;
+
+    tracing::info!("migrated JWT signing key from file to database");
+    Ok(true)
 }

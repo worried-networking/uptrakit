@@ -11,5 +11,6 @@ pub mod refresh_cookie;
 pub mod registration;
 pub mod session;
 pub mod token;
+pub mod token_denylist;
 
 pub use error::{AuthError, Result};

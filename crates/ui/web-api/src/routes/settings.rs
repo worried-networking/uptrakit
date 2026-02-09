@@ -35,7 +35,7 @@ pub async fn get_registration_settings(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let reg = state.settings.registration().await;
+    let reg = state.settings.registration();
     let response = RegistrationSettingsResponse {
         mode: reg.mode,
         require_token_for_oidc: reg.require_token_for_oidc,
@@ -75,10 +75,8 @@ pub async fn update_registration_settings(
         );
     }
 
-    if let Err(e) = state
-        .settings
-        .registration_write()
-        .await
+    let mut reg = state.settings.registration();
+    if let Err(e) = reg
         .update(
             &state.db,
             state.default_tenant_id,
@@ -91,8 +89,9 @@ pub async fn update_registration_settings(
         tracing::error!("Failed to update registration settings: {:?}", e);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+    state.settings.set_registration(reg).await;
 
-    let reg = state.settings.registration().await;
+    let reg = state.settings.registration();
     let response = RegistrationSettingsResponse {
         mode: reg.mode,
         require_token_for_oidc: reg.require_token_for_oidc,

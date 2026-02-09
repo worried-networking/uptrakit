@@ -54,8 +54,8 @@ pub async fn require_auth(
             Err(e) => return e.into_response(),
         }
     } else {
-        // JWT path: stateless validation
-        match authenticate_jwt(&state, &token) {
+        // JWT path: stateless validation + denylist check
+        match authenticate_jwt(&state, &token).await {
             Ok(user) => user,
             Err(e) => return e.into_response(),
         }
@@ -122,8 +122,8 @@ async fn authenticate_api_token(
     })
 }
 
-/// Authenticate using a JWT access token (stateless, no DB call).
-fn authenticate_jwt(
+/// Authenticate using a JWT access token (stateless validation + denylist check).
+async fn authenticate_jwt(
     state: &AppState,
     token: &str,
 ) -> std::result::Result<AuthenticatedUser, AuthFailure> {
@@ -134,6 +134,15 @@ fn authenticate_jwt(
 
     let user_id = uuid::Uuid::parse_str(&claims.sub)
         .map_err(|_| AuthFailure::Unauthorized("Invalid token subject\n"))?;
+
+    // Check token denylist (immediate revocation on logout / deactivation)
+    if state
+        .token_denylist
+        .is_denied(&claims.jti, &user_id, claims.iat)
+        .await
+    {
+        return Err(AuthFailure::Unauthorized("Token has been revoked\n"));
+    }
 
     let auth_method = if claims.auth_method == "oidc" {
         let provider_id = claims
@@ -289,6 +298,7 @@ mod tests {
             ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
             controller_id: uuid::Uuid::nil(),
             notification_service,
+            token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
         })
     }
 

@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ipnet::IpNet;
 use sea_orm::DatabaseConnection;
-use tokio::sync::{RwLock, RwLockWriteGuard};
 use uuid::Uuid;
 
 use crate::SettingKey;
@@ -59,22 +58,32 @@ impl Default for NetworkSettings {
     }
 }
 
+/// Immutable snapshot of all settings. Published atomically via a watch channel
+/// so readers never see a mix of old and new values.
+#[derive(Clone, Debug)]
+pub struct SettingsSnapshot {
+    pub registration: RegistrationSettings,
+    pub authentication: AuthenticationSettings,
+    pub agent_cert_lifetime_days: u16,
+    pub renewal_window_hours: u16,
+    pub network: NetworkSettings,
+    pub mqtt_max_clients_per_tenant: u16,
+}
+
 #[derive(Clone)]
 pub struct Settings {
     inner: Arc<Inner>,
 }
 
 struct Inner {
-    registration: RwLock<RegistrationSettings>,
-    authentication: RwLock<AuthenticationSettings>,
-    agent_cert_lifetime_days: RwLock<u16>,
-    renewal_window_hours: RwLock<u16>,
-    network: RwLock<NetworkSettings>,
-    mqtt_max_clients_per_tenant: RwLock<u16>,
+    snapshot_tx: tokio::sync::watch::Sender<SettingsSnapshot>,
+    snapshot_rx: tokio::sync::watch::Receiver<SettingsSnapshot>,
     /// Per-tenant settings version counter (for cross-instance invalidation).
     version: AtomicI64,
     /// Global settings version counter (for cross-instance invalidation).
     global_version: AtomicI64,
+    /// Serialises writes so that concurrent set_* calls don't clobber each other.
+    write_mutex: tokio::sync::Mutex<()>,
 }
 
 impl Settings {
@@ -93,16 +102,22 @@ impl Settings {
         agent_cert_lifetime_days: u16,
         renewal_window_hours: u16,
     ) -> Self {
+        let snapshot = SettingsSnapshot {
+            registration,
+            authentication: AuthenticationSettings::default(),
+            agent_cert_lifetime_days,
+            renewal_window_hours,
+            network: NetworkSettings::default(),
+            mqtt_max_clients_per_tenant: DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT,
+        };
+        let (tx, rx) = tokio::sync::watch::channel(snapshot);
         Self {
             inner: Arc::new(Inner {
-                registration: RwLock::new(registration),
-                authentication: RwLock::new(AuthenticationSettings::default()),
-                agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
-                renewal_window_hours: RwLock::new(renewal_window_hours),
-                network: RwLock::new(NetworkSettings::default()),
-                mqtt_max_clients_per_tenant: RwLock::new(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT),
+                snapshot_tx: tx,
+                snapshot_rx: rx,
                 version: AtomicI64::new(0),
                 global_version: AtomicI64::new(0),
+                write_mutex: tokio::sync::Mutex::new(()),
             }),
         }
     }
@@ -143,16 +158,22 @@ impl Settings {
         let (version, global_version) =
             crate::settings_store::get_settings_versions(db, tenant_id).await?;
 
+        let snapshot = SettingsSnapshot {
+            registration,
+            authentication,
+            agent_cert_lifetime_days,
+            renewal_window_hours,
+            network,
+            mqtt_max_clients_per_tenant,
+        };
+        let (tx, rx) = tokio::sync::watch::channel(snapshot);
         let settings = Self {
             inner: Arc::new(Inner {
-                registration: RwLock::new(registration),
-                authentication: RwLock::new(authentication),
-                agent_cert_lifetime_days: RwLock::new(agent_cert_lifetime_days),
-                renewal_window_hours: RwLock::new(renewal_window_hours),
-                network: RwLock::new(network),
-                mqtt_max_clients_per_tenant: RwLock::new(mqtt_max_clients_per_tenant),
+                snapshot_tx: tx,
+                snapshot_rx: rx,
                 version: AtomicI64::new(version),
                 global_version: AtomicI64::new(global_version),
+                write_mutex: tokio::sync::Mutex::new(()),
             }),
         };
 
@@ -226,7 +247,7 @@ impl Settings {
         }
     }
 
-    /// Reload all settings from the database and update cached version counters.
+    /// Reload all settings from the database and publish atomically.
     ///
     /// Used by the periodic settings check when a version mismatch is detected.
     pub async fn reload_from_db(
@@ -236,38 +257,36 @@ impl Settings {
     ) -> auth::Result<()> {
         let raw = crate::settings_store::load_all_settings(db, tenant_id).await?;
 
-        // Update registration settings
         let registration = RegistrationSettings::from_raw(&raw);
-        *self.inner.registration.write().await = registration;
-
-        // Update authentication settings
         let authentication = AuthenticationSettings::from_raw(&raw);
-        *self.inner.authentication.write().await = authentication;
 
-        // Update agent cert lifetime
         let agent_cert_lifetime_days = raw
             .get_setting(SettingKey::AgentCertLifetimeDays)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_AGENT_CERT_LIFETIME_DAYS);
-        *self.inner.agent_cert_lifetime_days.write().await = agent_cert_lifetime_days;
 
-        // Update renewal window
         let renewal_window_hours = raw
             .get_setting(SettingKey::AgentCertRenewalWindowHours)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_RENEWAL_WINDOW_HOURS);
-        *self.inner.renewal_window_hours.write().await = renewal_window_hours;
 
-        // Update network settings
         let network = Self::load_network_settings(&raw);
-        *self.inner.network.write().await = network;
 
-        // Update MQTT max clients
         let mqtt_max_clients_per_tenant = raw
             .get_setting(SettingKey::MqttMaxClientsPerTenant)
             .and_then(|v| v.as_u64()?.try_into().ok())
             .unwrap_or(DEFAULT_MQTT_MAX_CLIENTS_PER_TENANT);
-        *self.inner.mqtt_max_clients_per_tenant.write().await = mqtt_max_clients_per_tenant;
+
+        // Publish complete snapshot atomically
+        let _guard = self.inner.write_mutex.lock().await;
+        let _ = self.inner.snapshot_tx.send(SettingsSnapshot {
+            registration,
+            authentication,
+            agent_cert_lifetime_days,
+            renewal_window_hours,
+            network,
+            mqtt_max_clients_per_tenant,
+        });
 
         // Update cached version counters
         let (version, global_version) =
@@ -291,8 +310,8 @@ impl Settings {
         let (db_version, db_global_version) =
             crate::settings_store::get_settings_versions(db, tenant_id).await?;
 
-        let cached_version = self.inner.version.load(Ordering::Relaxed);
-        let cached_global_version = self.inner.global_version.load(Ordering::Relaxed);
+        let cached_version = self.inner.version.load(Ordering::Acquire);
+        let cached_global_version = self.inner.global_version.load(Ordering::Acquire);
 
         if db_version == cached_version && db_global_version == cached_global_version {
             return Ok(false);
@@ -302,161 +321,209 @@ impl Settings {
         Ok(true)
     }
 
-    // --- Registration ---
+    // --- Snapshot access (synchronous) ---
 
-    /// Read registration settings (acquires read lock, returns clone).
-    pub async fn registration(&self) -> RegistrationSettings {
-        self.inner.registration.read().await.clone()
+    /// Read the full settings snapshot.
+    pub fn snapshot(&self) -> SettingsSnapshot {
+        self.inner.snapshot_rx.borrow().clone()
     }
 
-    /// Acquire write access to registration settings.
-    pub async fn registration_write(&self) -> RwLockWriteGuard<'_, RegistrationSettings> {
-        self.inner.registration.write().await
+    // --- Registration ---
+
+    /// Read registration settings (synchronous, no lock contention).
+    pub fn registration(&self) -> RegistrationSettings {
+        self.inner.snapshot_rx.borrow().registration.clone()
+    }
+
+    /// Replace registration settings (acquires write mutex for atomic publish).
+    pub async fn set_registration(&self, reg: RegistrationSettings) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.registration = reg);
     }
 
     // --- Authentication ---
 
-    /// Read authentication settings (acquires read lock, returns clone).
-    pub async fn authentication(&self) -> AuthenticationSettings {
-        self.inner.authentication.read().await.clone()
+    /// Read authentication settings (synchronous, no lock contention).
+    pub fn authentication(&self) -> AuthenticationSettings {
+        self.inner.snapshot_rx.borrow().authentication.clone()
     }
 
-    /// Acquire write access to authentication settings.
-    pub async fn authentication_write(&self) -> RwLockWriteGuard<'_, AuthenticationSettings> {
-        self.inner.authentication.write().await
+    /// Replace authentication settings (acquires write mutex for atomic publish).
+    pub async fn set_authentication(&self, auth: AuthenticationSettings) {
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.authentication = auth);
     }
 
     // --- Agent certificates ---
 
-    /// Read the agent certificate lifetime in days.
-    pub async fn agent_cert_lifetime_days(&self) -> u16 {
-        *self.inner.agent_cert_lifetime_days.read().await
+    /// Read the agent certificate lifetime in days (synchronous).
+    pub fn agent_cert_lifetime_days(&self) -> u16 {
+        self.inner.snapshot_rx.borrow().agent_cert_lifetime_days
     }
 
     /// Update the agent certificate lifetime in days.
     pub async fn set_agent_cert_lifetime_days(&self, days: u16) {
-        *self.inner.agent_cert_lifetime_days.write().await = days;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.agent_cert_lifetime_days = days);
     }
 
-    /// Read the certificate renewal window in hours.
-    pub async fn renewal_window_hours(&self) -> u16 {
-        *self.inner.renewal_window_hours.read().await
+    /// Read the certificate renewal window in hours (synchronous).
+    pub fn renewal_window_hours(&self) -> u16 {
+        self.inner.snapshot_rx.borrow().renewal_window_hours
     }
 
     /// Update the certificate renewal window in hours.
     pub async fn set_renewal_window_hours(&self, hours: u16) {
-        *self.inner.renewal_window_hours.write().await = hours;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.renewal_window_hours = hours);
     }
 
     // --- Network settings ---
 
-    /// Read the full network settings snapshot.
-    pub async fn network(&self) -> NetworkSettings {
-        self.inner.network.read().await.clone()
+    /// Read the full network settings snapshot (synchronous).
+    pub fn network(&self) -> NetworkSettings {
+        self.inner.snapshot_rx.borrow().network.clone()
     }
 
-    /// Read trusted proxies.
-    pub async fn trusted_proxies(&self) -> Vec<IpNet> {
-        self.inner.network.read().await.trusted_proxies.clone()
+    /// Read trusted proxies (synchronous).
+    pub fn trusted_proxies(&self) -> Vec<IpNet> {
+        self.inner
+            .snapshot_rx
+            .borrow()
+            .network
+            .trusted_proxies
+            .clone()
     }
 
-    /// Read real IP header name.
-    pub async fn real_ip_header(&self) -> String {
-        self.inner.network.read().await.real_ip_header.clone()
+    /// Read real IP header name (synchronous).
+    pub fn real_ip_header(&self) -> String {
+        self.inner
+            .snapshot_rx
+            .borrow()
+            .network
+            .real_ip_header
+            .clone()
     }
 
-    /// Read extra SANs.
-    pub async fn extra_sans(&self) -> Vec<String> {
-        self.inner.network.read().await.extra_sans.clone()
+    /// Read extra SANs (synchronous).
+    pub fn extra_sans(&self) -> Vec<String> {
+        self.inner.snapshot_rx.borrow().network.extra_sans.clone()
     }
 
-    /// Read the HTTPS listen address.
-    pub async fn https_addr(&self) -> SocketAddr {
-        self.inner.network.read().await.https_addr
+    /// Read the HTTPS listen address (synchronous).
+    pub fn https_addr(&self) -> SocketAddr {
+        self.inner.snapshot_rx.borrow().network.https_addr
     }
 
     /// Replace all network settings.
     pub async fn set_network(&self, net: NetworkSettings) {
-        *self.inner.network.write().await = net;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.network = net);
     }
 
     /// Update only trusted proxies.
     pub async fn set_trusted_proxies(&self, proxies: Vec<IpNet>) {
-        self.inner.network.write().await.trusted_proxies = proxies;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.network.trusted_proxies = proxies);
     }
 
     /// Update only real IP header.
     pub async fn set_real_ip_header(&self, header: String) {
-        self.inner.network.write().await.real_ip_header = header;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.network.real_ip_header = header);
     }
 
     /// Update only extra SANs.
     pub async fn set_extra_sans(&self, sans: Vec<String>) {
-        self.inner.network.write().await.extra_sans = sans;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.network.extra_sans = sans);
     }
 
     /// Update only HTTPS listen address.
     pub async fn set_https_addr(&self, addr: SocketAddr) {
-        self.inner.network.write().await.https_addr = addr;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.network.https_addr = addr);
     }
 
-    /// Read forwarded client cert info header name.
-    pub async fn forwarded_client_cert_info_header(&self) -> Option<String> {
+    /// Read forwarded client cert info header name (synchronous).
+    pub fn forwarded_client_cert_info_header(&self) -> Option<String> {
         self.inner
+            .snapshot_rx
+            .borrow()
             .network
-            .read()
-            .await
             .forwarded_client_cert_info_header
             .clone()
     }
 
     /// Update forwarded client cert info header name.
     pub async fn set_forwarded_client_cert_info_header(&self, header: Option<String>) {
+        let _guard = self.inner.write_mutex.lock().await;
         self.inner
-            .network
-            .write()
-            .await
-            .forwarded_client_cert_info_header = header;
+            .snapshot_tx
+            .send_modify(|snap| snap.network.forwarded_client_cert_info_header = header);
     }
 
-    /// Read forwarded client cert PEM header name.
-    pub async fn forwarded_client_cert_pem_header(&self) -> Option<String> {
+    /// Read forwarded client cert PEM header name (synchronous).
+    pub fn forwarded_client_cert_pem_header(&self) -> Option<String> {
         self.inner
+            .snapshot_rx
+            .borrow()
             .network
-            .read()
-            .await
             .forwarded_client_cert_pem_header
             .clone()
     }
 
     /// Update forwarded client cert PEM header name.
     pub async fn set_forwarded_client_cert_pem_header(&self, header: Option<String>) {
+        let _guard = self.inner.write_mutex.lock().await;
         self.inner
-            .network
-            .write()
-            .await
-            .forwarded_client_cert_pem_header = header;
+            .snapshot_tx
+            .send_modify(|snap| snap.network.forwarded_client_cert_pem_header = header);
     }
 
-    /// Read the backend URL.
-    pub async fn pki_addr(&self) -> Option<String> {
-        self.inner.network.read().await.pki_addr.clone()
+    /// Read the backend URL (synchronous).
+    pub fn pki_addr(&self) -> Option<String> {
+        self.inner.snapshot_rx.borrow().network.pki_addr.clone()
     }
 
     /// Update the backend URL.
     pub async fn set_pki_addr(&self, url: Option<String>) {
-        self.inner.network.write().await.pki_addr = url;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.network.pki_addr = url);
     }
 
     // --- MQTT settings ---
 
-    /// Read the maximum number of MQTT clients per tenant.
-    pub async fn mqtt_max_clients_per_tenant(&self) -> u16 {
-        *self.inner.mqtt_max_clients_per_tenant.read().await
+    /// Read the maximum number of MQTT clients per tenant (synchronous).
+    pub fn mqtt_max_clients_per_tenant(&self) -> u16 {
+        self.inner.snapshot_rx.borrow().mqtt_max_clients_per_tenant
     }
 
     /// Update the maximum number of MQTT clients per tenant.
     pub async fn set_mqtt_max_clients_per_tenant(&self, max: u16) {
-        *self.inner.mqtt_max_clients_per_tenant.write().await = max;
+        let _guard = self.inner.write_mutex.lock().await;
+        self.inner
+            .snapshot_tx
+            .send_modify(|snap| snap.mqtt_max_clients_per_tenant = max);
     }
 }

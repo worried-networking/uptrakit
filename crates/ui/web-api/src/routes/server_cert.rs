@@ -104,7 +104,7 @@ async fn renew_server_certificate_inner(
         .map_err(|e| report!(RenewCertError::CaIssuer(e.to_string())))?;
 
     // Generate new server cert
-    let extra_sans: Vec<String> = state.settings.extra_sans().await;
+    let extra_sans: Vec<String> = state.settings.extra_sans();
     let sans: SanCollection = pki_utils::collect_sans(&extra_sans)
         .map_err(|e| report!(RenewCertError::SanCollection(e.to_string())))?;
 

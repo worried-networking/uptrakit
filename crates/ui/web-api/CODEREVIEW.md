@@ -11,8 +11,8 @@
 | Severity | Count | Fixed |
 |----------|-------|-------|
 | Critical | 7 | 7 |
-| High | 11 | 7 |
-| Medium | 17 | 1 |
+| High | 11 | 11 |
+| Medium | 17 | 2 |
 | Low | 10 | 0 |
 
 ---
@@ -105,7 +105,7 @@ Non-atomic read-then-act: `User::find().count()` -> `insert()` -> `assign_owner_
 
 **Fix:** Registration wrapped in a database transaction (`auth.rs:78-140`). The user count check and insert are performed atomically within the same transaction, preventing concurrent first-user races.
 
-### H2. JWT Access Tokens Cannot Be Revoked (15-Minute Window)
+### H2. JWT Access Tokens Cannot Be Revoked (15-Minute Window) — FIXED
 
 **Files:** `src/middleware/require_auth.rs:126-156`, `src/auth/jwt.rs:109-118`
 
@@ -113,13 +113,17 @@ JWT tokens are validated statelessly — no DB lookup, no revocation check, no `
 
 **Recommendation:** Either add a short-lived token denylist (checked on each request), reduce token lifetime to ~1-2 minutes, or add a DB-backed `is_active` check on critical endpoints.
 
-### H3. JWT Signing Key Divergence in HA Deployments
+**Fix:** Added in-memory `TokenDenylist` (`src/auth/token_denylist.rs`) supporting per-JTI and per-user revocation with auto-expiry. The `authenticate_jwt` middleware checks the denylist on every request. On logout, all tokens for the user are denied for the remaining access token lifetime (15 min). Periodic purge task cleans expired entries. Known limitation: denylist is per-instance; cross-instance revocation relies on token expiry (HA DB sync deferred).
+
+### H3. JWT Signing Key Divergence in HA Deployments — FIXED
 
 **File:** `src/auth/jwt.rs:38-73`
 
 Each controller instance generates its own JWT signing key from its local `data_dir`. If instances don't share the same state directory, tokens issued by instance A are rejected by instance B.
 
 **Recommendation:** Document as a deployment requirement: all HA instances must share the same state directory (or use a shared key management system). Consider adding a health check that detects key mismatch.
+
+**Fix:** JWT signing key is now stored in the database settings table (key: `auth.jwt_signing_key`, base64-encoded). All HA instances share the same key via the DB. On startup, the controller migrates any existing file-based key (`jwt_signing.key`) to the DB, then loads or generates the key from the DB with race-safe upsert. The file-based `JwtManager::load_or_generate` is retained for tests only.
 
 ### H4. Tenant Isolation Bypass via X-Tenant-Id Header — FIXED
 
@@ -159,7 +163,7 @@ When a service reconnects before cleanup, `register_agent`/`register_mqtt` uncon
 
 **Fix:** `register_agent`/`register_mqtt` now return a `CancellationToken` alongside the push-message receiver. On re-registration (same `service_id`), the old connection's token is cancelled, causing the old WebSocket handler to exit immediately via a `cancel_token.cancelled()` branch in `tokio::select!`. The superseded handler closes the WebSocket with reason "superseded by new connection" and does NOT call `unregister`, preserving the new connection's registry entry.
 
-### H8. Settings Reload Torn Reads — 6 Independent RwLocks Updated Sequentially
+### H8. Settings Reload Torn Reads — 6 Independent RwLocks Updated Sequentially — FIXED
 
 **File:** `src/settings.rs:232-281`
 
@@ -167,13 +171,17 @@ When a service reconnects before cleanup, `register_agent`/`register_mqtt` uncon
 
 **Recommendation:** Use a single `RwLock<AllSettings>` struct or a `tokio::sync::watch` channel for atomic swaps.
 
-### H9. TOCTOU in `upsert_setting` — Concurrent Upserts Can Conflict
+**Fix:** Replaced 6 independent `RwLock`s with a `tokio::sync::watch` channel holding an atomic `SettingsSnapshot`. All reader methods are now synchronous (no `.await`). Writers use a `tokio::sync::Mutex` to serialize modifications and publish via `send_modify()`. `reload_from_db` builds a complete snapshot and publishes atomically. Version counter loads use `Ordering::Acquire` (was `Relaxed`).
+
+### H9. TOCTOU in `upsert_setting` — Concurrent Upserts Can Conflict — FIXED
 
 **File:** `src/settings_store.rs:50-84`
 
 Read-then-insert pattern without transaction. Two concurrent inserts for the same key produce a unique constraint violation. Same pattern exists in `bump_settings_version` and `bump_revocation_version`.
 
 **Recommendation:** Use SeaORM's `on_conflict` (database-level upsert).
+
+**Fix:** Replaced read-then-write in `upsert_setting` with `INSERT ... ON CONFLICT DO UPDATE` via SeaORM's `on_conflict` builder. Fixed defensive inserts in `bump_settings_version` and `bump_revocation_version` to use `on_conflict` with `do_nothing` via `try_insert()`. All upserts are now single atomic SQL statements.
 
 ### H10. Update History Operations Not Checked Against Agent Ownership (IDOR) — FIXED
 
@@ -245,11 +253,13 @@ A slow consumer blocks all registry writes during broadcast.
 
 **Fix:** `send()`, `broadcast()`, and `broadcast_by_type()` now snapshot senders under the lock and release it before performing async sends. This prevents a slow consumer from blocking connection management operations.
 
-### M9. Relaxed Memory Ordering on Settings Version Counters
+### M9. Relaxed Memory Ordering on Settings Version Counters — FIXED (via H8)
 
 **File:** `src/settings.rs:294-295`
 
 `Ordering::Relaxed` loads can return stale values on ARM/multi-core, causing missed reloads. Two separate non-atomic loads can also produce inconsistent version pairs.
+
+**Fix:** Addressed as part of H8. Version counter loads now use `Ordering::Acquire` (matching `Release` stores). The watch channel pattern eliminates inconsistent version pairs.
 
 ### M10. `cert_signed_by_ca` Only Compares DN, Not Cryptographic Signature
 

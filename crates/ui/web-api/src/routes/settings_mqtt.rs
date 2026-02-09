@@ -167,7 +167,7 @@ pub async fn create_mqtt_settings(
     }
 
     let tenant_id = tenant.tenant_id;
-    let max_clients = state.settings.mqtt_max_clients_per_tenant().await;
+    let max_clients = state.settings.mqtt_max_clients_per_tenant();
 
     // Resolve connection parameters from URL or individual fields
     let (transport, host, port) = if let Some(ref url_str) = req.url {
@@ -295,7 +295,7 @@ pub async fn get_mqtt_limit(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let max = state.settings.mqtt_max_clients_per_tenant().await;
+    let max = state.settings.mqtt_max_clients_per_tenant();
     (
         StatusCode::OK,
         Json(MqttLimitResponse {
