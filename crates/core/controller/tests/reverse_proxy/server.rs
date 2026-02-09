@@ -85,14 +85,17 @@ pub struct IdentityResponse {
 
 struct NoopCertSigner;
 
+#[async_trait::async_trait]
 impl AgentCertSigner for NoopCertSigner {
-    fn sign_agent_csr(
+    async fn sign_agent_csr(
         &self,
         _: &str,
         _: &uuid::Uuid,
         _: ::time::Duration,
     ) -> std::result::Result<SignedCertBundle, rootcause::Report<CertSignerError>> {
-        unimplemented!("not used in integration tests")
+        Err(rootcause::Report::new(CertSignerError::Signing(
+            "noop signer".to_string(),
+        )))
     }
 
     fn active_ca_fingerprint(&self) -> String {

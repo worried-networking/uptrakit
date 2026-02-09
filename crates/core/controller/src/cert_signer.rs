@@ -27,17 +27,20 @@ impl RcgenAgentCertSigner {
     }
 }
 
+#[async_trait::async_trait]
 impl AgentCertSigner for RcgenAgentCertSigner {
-    fn sign_agent_csr(
+    async fn sign_agent_csr(
         &self,
         csr_pem: &str,
         agent_id: &Uuid,
         lifetime: time::Duration,
     ) -> std::result::Result<SignedCertBundle, Report<CertSignerError>> {
         let snapshot = self.ca_rx.borrow().clone();
-        // Block on reading the key store (this is a synchronous trait method)
-        let key_store = self.ca_key_store.blocking_read();
-        let key_pair = KeyPair::from_pem(&key_store.active_key_pem)
+        let key_pem = {
+            let key_store = self.ca_key_store.read().await;
+            key_store.active_key_pem.clone()
+        };
+        let key_pair = KeyPair::from_pem(&key_pem)
             .map_err(|e| report!(CertSignerError::CaKeyParse(e.to_string())))?;
         let issuer = Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, key_pair)
             .map_err(|e| report!(CertSignerError::CaIssuer(e.to_string())))?;
@@ -175,8 +178,8 @@ mod tests {
         csr.pem().unwrap()
     }
 
-    #[test]
-    fn agent_csr_signed_by_ca() {
+    #[tokio::test]
+    async fn agent_csr_signed_by_ca() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (signer, _tx) = make_test_signer();
@@ -185,6 +188,7 @@ mod tests {
         let csr_pem = generate_test_csr(&agent_id.to_string());
         let bundle = signer
             .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7))
+            .await
             .unwrap();
 
         assert!(bundle.cert_pem.contains("BEGIN CERTIFICATE"));
@@ -216,8 +220,8 @@ mod tests {
         assert!(!cert.is_ca());
     }
 
-    #[test]
-    fn cn_parses_as_uuid() {
+    #[tokio::test]
+    async fn cn_parses_as_uuid() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (signer, _tx) = make_test_signer();
@@ -226,6 +230,7 @@ mod tests {
         let csr_pem = generate_test_csr(&agent_id.to_string());
         let bundle = signer
             .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(30))
+            .await
             .unwrap();
 
         let (_, pem_block) = x509_parser::pem::parse_x509_pem(bundle.cert_pem.as_bytes()).unwrap();
@@ -241,8 +246,8 @@ mod tests {
         assert_eq!(parsed, agent_id);
     }
 
-    #[test]
-    fn csr_cn_mismatch_rejected() {
+    #[tokio::test]
+    async fn csr_cn_mismatch_rejected() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (signer, _tx) = make_test_signer();
@@ -251,7 +256,9 @@ mod tests {
         let wrong_id = Uuid::now_v7();
         let csr_pem = generate_test_csr(&wrong_id.to_string());
 
-        let result = signer.sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7));
+        let result = signer
+            .sign_agent_csr(&csr_pem, &agent_id, time::Duration::days(7))
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         let msg = err.current_context().to_string();
@@ -261,14 +268,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn invalid_csr_rejected() {
+    #[tokio::test]
+    async fn invalid_csr_rejected() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let (signer, _tx) = make_test_signer();
 
         let agent_id = Uuid::now_v7();
-        let result = signer.sign_agent_csr("not-a-csr", &agent_id, time::Duration::days(7));
+        let result = signer
+            .sign_agent_csr("not-a-csr", &agent_id, time::Duration::days(7))
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         let msg = err.current_context().to_string();

@@ -16,6 +16,7 @@ db-mysql = ["sea-orm/sqlx-mysql"]
 
 [dependencies]
 axum = { workspace = true }
+async-trait = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
 ipnet = { workspace = true }

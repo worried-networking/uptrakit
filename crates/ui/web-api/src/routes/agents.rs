@@ -293,6 +293,7 @@ pub(crate) async fn do_sign_csr(
 
     let bundle = cert_signer
         .sign_agent_csr(csr_pem, &agent.id, lifetime)
+        .await
         .map_err(|e| {
             tracing::error!("Failed to sign agent certificate: {e}");
             report!(AgentRouteError::CertSigning)

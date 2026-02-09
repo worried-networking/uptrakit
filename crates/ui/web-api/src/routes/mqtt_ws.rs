@@ -647,6 +647,7 @@ async fn do_sign_mqtt_service_csr(
 
     let bundle = cert_signer
         .sign_agent_csr(csr_pem, &service.id, validity)
+        .await
         .map_err(|e| report!(MqttWsError::Certificate(format!("failed to sign CSR: {e}"))))?;
 
     record_mqtt_service_certificate(db, service.id, &bundle.cert_pem, &ca_fp).await?;

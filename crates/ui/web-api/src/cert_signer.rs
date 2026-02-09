@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use rootcause::prelude::*;
 use thiserror::Error;
 
@@ -25,8 +26,9 @@ pub struct SignedCertBundle {
     pub not_after: time::UtcDateTime,
 }
 
+#[async_trait]
 pub trait AgentCertSigner: Send + Sync + 'static {
-    fn sign_agent_csr(
+    async fn sign_agent_csr(
         &self,
         csr_pem: &str,
         agent_id: &uuid::Uuid,

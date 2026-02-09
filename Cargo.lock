@@ -4853,6 +4853,7 @@ name = "uptrakit-controller"
 version = "0.0.1"
 dependencies = [
  "argon2",
+ "async-trait",
  "aws-lc-rs",
  "axum",
  "axum-server",
@@ -5092,6 +5093,7 @@ name = "uptrakit-web-api"
 version = "0.0.1"
 dependencies = [
  "argon2",
+ "async-trait",
  "aws-lc-rs",
  "axum",
  "axum-server",
