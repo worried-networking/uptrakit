@@ -35,8 +35,8 @@ impl fmt::Debug for MqttConfig {
             .field("host", &self.host)
             .field("port", &self.port)
             .field("client_id", &self.client_id)
-            .field("username", &self.username)
-            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .field("username", &"[REDACTED]")
+            .field("password", &"[REDACTED]")
             .field("topic_prefix", &self.topic_prefix)
             .finish()
     }
@@ -336,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn password_redacted_in_debug() {
+    fn credentials_redacted_in_debug() {
         let config = MqttConfig {
             password: Some("super-secret-password".into()),
             username: Some("user".into()),
@@ -345,12 +345,52 @@ mod tests {
 
         let debug_str = format!("{config:?}");
         assert!(
-            !debug_str.contains("super-secret-password"),
+            !debug_str.contains("password: \"super-secret-password\""),
             "password should not appear in debug output"
         );
         assert!(
-            debug_str.contains("[REDACTED]"),
-            "debug output should show [REDACTED]"
+            !debug_str.contains("username: \"user\""),
+            "username should not appear in debug output"
+        );
+        assert!(
+            debug_str.contains("username: \"[REDACTED]\""),
+            "debug output should show redacted username"
+        );
+        assert!(
+            debug_str.contains("password: \"[REDACTED]\""),
+            "debug output should show redacted password"
+        );
+        assert!(
+            !debug_str.contains("username: None"),
+            "username should not show None in debug output"
+        );
+        assert!(
+            !debug_str.contains("password: None"),
+            "password should not show None in debug output"
+        );
+
+        let none_config = MqttConfig {
+            password: None,
+            username: None,
+            ..tcp_config()
+        };
+
+        let none_debug = format!("{none_config:?}");
+        assert!(
+            none_debug.contains("username: \"[REDACTED]\""),
+            "debug output should show redacted username when None"
+        );
+        assert!(
+            none_debug.contains("password: \"[REDACTED]\""),
+            "debug output should show redacted password when None"
+        );
+        assert!(
+            !none_debug.contains("username: None"),
+            "username should not show None in debug output"
+        );
+        assert!(
+            !none_debug.contains("password: None"),
+            "password should not show None in debug output"
         );
     }
 
