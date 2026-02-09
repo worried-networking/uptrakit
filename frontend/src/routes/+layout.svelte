@@ -8,6 +8,7 @@
 	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
 	import { getSystemAlerts } from '$lib/api';
 	import { Permission } from '$lib/types';
+	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
 
 	let { children }: { children: Snippet } = $props();
@@ -146,6 +147,7 @@
 
 			<!-- Main content -->
 			<main class="flex-1 overflow-auto">
+				<ToastNotifications />
 				{#if visibleAlerts.length > 0}
 					<div class="space-y-2 px-4 pt-2">
 						{#each visibleAlerts as alert (alert.id)}

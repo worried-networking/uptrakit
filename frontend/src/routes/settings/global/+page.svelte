@@ -11,7 +11,7 @@
 		Permission,
 		type SystemAlert
 	} from '$lib/types';
-	import { showSuccess, showError, clearError, getSuccessMessage, getErrorMessage } from '$lib/notifications.svelte';
+	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -27,8 +27,6 @@
 	let loading: boolean = $state(true);
 
 	const canManageGlobalSettings = $derived($user?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
-	const successMessage = $derived(getSuccessMessage());
-	const errorMessage = $derived(getErrorMessage());
 
 	$effect(() => {
 		if ($user && !canManageGlobalSettings) {
@@ -111,21 +109,6 @@
 
 {#if $user && canManageGlobalSettings}
 	<h1 class="h1 mb-6">Global Settings</h1>
-
-	<div class="mb-4 min-h-[3.5rem] space-y-2">
-		{#if successMessage}
-			<aside class="rounded-lg p-4 preset-filled-success-500">
-				<p>{successMessage}</p>
-			</aside>
-		{/if}
-
-		{#if errorMessage}
-			<aside class="flex items-center justify-between rounded-lg p-4 preset-filled-error-500">
-				<p>{errorMessage}</p>
-				<button class="btn btn-sm preset-filled" onclick={clearError}>Dismiss</button>
-			</aside>
-		{/if}
-	</div>
 
 	{#if loading}
 		<div class="card p-8 text-center">
