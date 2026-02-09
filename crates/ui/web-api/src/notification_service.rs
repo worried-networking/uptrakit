@@ -63,7 +63,7 @@ impl NotificationService {
     pub(crate) async fn write_outbox_event(
         &self,
         target_service_id: Option<Uuid>,
-        target_service_type: Option<uptrakit_internal_wire::ServiceType>,
+        target_service_type: Option<&str>,
         msg: &ControllerMessage,
     ) {
         let json = match serde_json::to_string(msg) {
@@ -79,6 +79,7 @@ impl NotificationService {
             source_controller_id: ActiveValue::Set(self.controller_id),
             target_service_id: ActiveValue::Set(target_service_id),
             target_service_type: ActiveValue::Set(target_service_type.map(|t| t.to_string())),
+
             message_json: ActiveValue::Set(json),
             created_at: ActiveValue::Set(OffsetDateTime::now_utc()),
         };

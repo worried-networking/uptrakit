@@ -422,7 +422,7 @@ impl ServiceConnectionRegistry {
         let guard = self.inner.read().await;
         let mut loads = Vec::new();
 
-        for (service_id, conn) in guard.iter() {
+        for (service_id, conn) in guard.connections.iter() {
             if conn.service_type != ServiceType::Mqtt {
                 continue;
             }
