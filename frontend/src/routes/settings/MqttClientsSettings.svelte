@@ -175,7 +175,6 @@
 						<th>URL</th>
 						<th>Client ID</th>
 						<th>Topic Prefix</th>
-						<th>Connection</th>
 						<th>Status</th>
 						<th class="w-48">Actions</th>
 					</tr>
@@ -188,21 +187,24 @@
 							<td>{client.topic_prefix}</td>
 							<td>
 								{#if client.enabled}
+									{@const connectionText = connectionLabel(client.connection_status)}
 									<span class="inline-flex items-center gap-2">
 										<span
 											class={`h-2.5 w-2.5 rounded-full ${connectionColor(client.connection_status)}`}
+											title={connectionText}
+											aria-label={connectionText}
 										></span>
-										<span class="text-sm">{connectionLabel(client.connection_status)}</span>
+										<span class="badge preset-filled-success-500">Enabled</span>
 									</span>
 								{:else}
-									<span class="text-sm text-surface-600 dark:text-surface-400">Disabled</span>
-								{/if}
-							</td>
-							<td>
-								{#if client.enabled}
-									<span class="badge preset-filled-success-500">Enabled</span>
-								{:else}
-									<span class="badge preset-tonal">Disabled</span>
+									<span class="inline-flex items-center gap-2">
+										<span
+											class="h-2.5 w-2.5 rounded-full bg-surface-400 dark:bg-surface-600"
+											title="Disabled"
+											aria-label="Disabled"
+										></span>
+										<span class="badge preset-tonal">Disabled</span>
+									</span>
 								{/if}
 							</td>
 							<td>
