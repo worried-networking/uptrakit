@@ -64,6 +64,8 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 
 ## Quality gates (must pass before committing)
 
+If your changes are confined to the frontend, you do not need to run the Rust `cargo` checks. If your changes are confined to Rust/backend crates, you do not need to run the frontend `npm` checks. For mixed changes, run both sections.
+
 ### Backend (Rust)
 
 ```sh
