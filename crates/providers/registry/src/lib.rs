@@ -38,4 +38,4 @@ pub use error::{RegistryError, Result};
 pub use registry::ProviderRegistry;
 
 // Re-export commonly used types from provider-core
-pub use uptrakit_provider_core::{Provider, ProviderCapability, ProviderType};
+pub use uptrakit_provider_core::{Provider, ProviderCapability, ProviderType, UpdateContext};

@@ -19,12 +19,12 @@
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
+use uptrakit_command::{ShellType, UpdateOutputLine, UpdateOutputStream};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, HookShell, OutputStreamType, UpdateFinalStatus,
     UpdateResultPayload,
 };
-use uptrakit_provider_core::{ShellType, UpdateContext, UpdateOutputLine, UpdateOutputStream};
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_provider_registry::{ProviderRegistry, UpdateContext};
 
 use crate::error::Error;
 
@@ -271,14 +271,7 @@ async fn execute_provider_update(
         to_version: payload.to_version.clone(),
         package_identifier: payload.package_identifier.clone(),
         provider_config: payload.provider_config.clone(),
-        release_info: payload
-            .release_info
-            .as_ref()
-            .map(|ri| uptrakit_provider_core::ReleaseInfo {
-                tag: ri.tag.clone(),
-                release_url: ri.release_url.clone(),
-                assets: ri.assets.clone(),
-            }),
+        release_info: payload.release_info.clone(),
     };
 
     // Bridge provider output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
@@ -311,7 +304,7 @@ async fn execute_provider_update(
     result
 }
 
-/// Map a wire `HookShell` to a provider-core `ShellType`.
+/// Map a wire `HookShell` to a command `ShellType`.
 fn hook_shell_to_shell_type(shell: HookShell) -> ShellType {
     match shell {
         HookShell::Bash => ShellType::Bash,
@@ -347,7 +340,7 @@ async fn run_hook_command(
 
     let result = match hook_cmd {
         HookCommand::Shell { command, shell } => {
-            uptrakit_provider_core::command::run_command_with_shell(
+            uptrakit_command::run_command_with_shell(
                 command,
                 hook_shell_to_shell_type(*shell),
                 &provider_tx,
@@ -359,13 +352,8 @@ async fn run_hook_command(
             args,
             working_dir,
         } => {
-            uptrakit_provider_core::command::run_command_exec(
-                program,
-                args,
-                working_dir.as_deref(),
-                &provider_tx,
-            )
-            .await
+            uptrakit_command::run_command_exec(program, args, working_dir.as_deref(), &provider_tx)
+                .await
         }
     };
 

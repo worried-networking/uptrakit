@@ -26,12 +26,13 @@ uptrakit/
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
-│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions + command execution
+│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions (delegates command execution to uptrakit-command)
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
+│   │   ├── command/                    # uptrakit-command                       (lib)  — shell command execution (shell_escape, run_command_*)
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
@@ -1275,7 +1276,7 @@ The controller can request installed version detection from agents:
 - `package_identifier`: Provider-specific identifier
 - `config`: Provider configuration as JSON
 
-**Local Providers**: Each provider crate implements a local `Provider` struct with `detect_installed_version()` (currently returns `Ok(None)` — stub) and `execute_update()` containing provider-specific update logic. Both version detection and update execution are dispatched through the Provider Registry (`ProviderRegistry::create_local_provider()`). The agent's `version_check.rs` handles version detection; `update.rs` handles update execution via `execute_provider_update()`. Command execution utilities (`shell_escape`, `run_command_exec`, `run_command_with_shell`, `run_command`) live in `provider_core::command`.
+**Local Providers**: Each provider crate implements a local `Provider` struct with `detect_installed_version()` (currently returns `Ok(None)` — stub) and `execute_update()` containing provider-specific update logic. Both version detection and update execution are dispatched through the Provider Registry (`ProviderRegistry::create_local_provider()`). The agent's `version_check.rs` handles version detection; `update.rs` handles update execution via `execute_provider_update()`. Command execution utilities (`shell_escape`, `run_command_exec`, `run_command_with_shell`, `run_command`) live in the `uptrakit-command` crate; provider-core re-exports them with `ProviderError` conversion.
 
 ### Agent host info collection
 
@@ -1620,7 +1621,8 @@ Provider crates:
 
 | Crate | Path | Purpose |
 | --- | --- | --- |
-| `uptrakit-provider-core` | `crates/providers/core/` | Shared provider trait (`Provider`), abstractions, and `command` module for shell execution |
+| `uptrakit-command` | `crates/shared/command/` | Shell command execution (`shell_escape`, `run_command_*`), `ShellType`, `UpdateOutputLine`, `UpdateOutputStream` |
+| `uptrakit-provider-core` | `crates/providers/core/` | Shared provider trait (`Provider`), abstractions; `command` module delegates to `uptrakit-command` with `ProviderError` conversion |
 | `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: controller tracks container image tags via semver filtering or digest change detection |
 | `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: controller fetches release metadata; agent installs from artifacts |
@@ -1632,7 +1634,7 @@ The **Provider Registry** crate centralizes all provider operations:
 - `ProviderRegistry::validate_config()` — validates provider configuration JSON
 - `ProviderRegistry::mask_secrets()` / `restore_secrets()` — handles secret masking for API responses
 
-The agent and web-api crates import only `uptrakit-provider-registry` — not individual provider crates. This eliminates scattered string-based provider matching and keeps all dispatch logic in one place.
+The agent crate imports `uptrakit-command` for shell execution and `uptrakit-provider-registry` for provider dispatch — it does not depend on `uptrakit-provider-core` directly. The web-api crate imports only `uptrakit-provider-registry`. This eliminates scattered string-based provider matching and keeps all dispatch logic in one place.
 
 The update step can always be overridden by a custom shell script, regardless of provider.
 

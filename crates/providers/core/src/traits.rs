@@ -3,10 +3,9 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 
 use crate::error::{ProviderError, Result};
-use crate::types::{
-    DiscoveredSoftware, ProviderCapability, UpdateContext, UpdateOutputLine, UpstreamRelease,
-};
+use crate::types::{DiscoveredSoftware, ProviderCapability, UpdateContext, UpstreamRelease};
 use crate::version::Version;
+use uptrakit_command::UpdateOutputLine;
 
 /// Empty capabilities slice for providers that have no special capabilities.
 const NO_CAPABILITIES: &[ProviderCapability] = &[];

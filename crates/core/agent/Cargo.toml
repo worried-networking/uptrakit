@@ -25,7 +25,7 @@ tracing-subscriber = { workspace = true }
 uptrakit-enrollment = { path = "../../shared/enrollment" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uuid = { workspace = true }
-uptrakit-provider-core = { path = "../../providers/core" }
+uptrakit-command = { path = "../../shared/command" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
 
 [dev-dependencies]

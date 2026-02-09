@@ -1,0 +1,14 @@
+[package]
+name = "uptrakit-command"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+thiserror = { workspace = true }
+rootcause = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }

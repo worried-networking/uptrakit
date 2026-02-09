@@ -4812,9 +4812,9 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "uptrakit-command",
  "uptrakit-enrollment",
  "uptrakit-internal-wire",
- "uptrakit-provider-core",
  "uptrakit-provider-registry",
  "uptrakit-shared-macros",
  "uuid",
@@ -4836,6 +4836,16 @@ dependencies = [
  "tokio",
  "uptrakit-shared-macros",
  "uptrakit-web-api-types",
+]
+
+[[package]]
+name = "uptrakit-command"
+version = "0.0.1"
+dependencies = [
+ "rootcause",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4985,6 +4995,8 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "uptrakit-command",
+ "uptrakit-shared-macros",
 ]
 
 [[package]]

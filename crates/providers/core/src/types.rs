@@ -91,32 +91,6 @@ pub struct UpdateContext {
     pub release_info: Option<ReleaseInfo>,
 }
 
-/// A single line of output from a provider update execution.
-pub struct UpdateOutputLine {
-    /// The text content of the output line.
-    pub text: String,
-    /// Which output stream this line came from.
-    pub stream: UpdateOutputStream,
-}
-
-/// Output stream type for provider update execution.
-///
-/// Only includes streams that providers produce directly. Agent-level
-/// streams (PreHook, PostHook, System) remain in the agent crate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UpdateOutputStream {
-    Stdout,
-    Stderr,
-}
-
-/// Shell type for command execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShellType {
-    Bash,
-    Sh,
-    PowerShell,
-}
-
 /// Metadata for an upstream software release.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpstreamRelease {
@@ -348,18 +322,6 @@ mod tests {
         assert!(!json.contains("assets"));
         let deserialized: ReleaseInfo = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, info);
-    }
-
-    #[test]
-    fn update_output_stream_variants() {
-        assert_ne!(UpdateOutputStream::Stdout, UpdateOutputStream::Stderr);
-    }
-
-    #[test]
-    fn shell_type_variants() {
-        assert_ne!(ShellType::Bash, ShellType::Sh);
-        assert_ne!(ShellType::Bash, ShellType::PowerShell);
-        assert_ne!(ShellType::Sh, ShellType::PowerShell);
     }
 
     #[test]
