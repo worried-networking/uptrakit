@@ -17,7 +17,7 @@ Scope: `uptrakit-internal-wire` crate, WebSocket handlers (`service_ws.rs`, `age
 
 ### 1.2 Issues
 
-#### A1. MQTT password travels through the notification outbox in plaintext [CRITICAL]
+#### A1. MQTT password travels through the notification outbox in plaintext [CRITICAL] — FIXED (FP-2)
 
 **Location:** `notification_service.rs:71`, `MqttTenantConfig` in `wire/src/lib.rs:549-576`
 
@@ -25,6 +25,7 @@ Scope: `uptrakit-internal-wire` crate, WebSocket handlers (`service_ws.rs`, `age
 
 - **Impact:** MQTT broker credentials are persisted in plaintext in the DB outbox, readable by any DB admin or backup process, and retained for up to 1 hour.
 - **Recommendation:** Strip or encrypt sensitive fields before outbox serialization. See [fix plan FP-2](#fp-2-strip-mqtt-credentials-from-outbox-events).
+- **Resolution:** MQTT credential-bearing messages (`TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`) are now filtered by `is_mqtt_tenant_message()` in `NotificationService` and never written to the outbox. `MqttLeaseCoordinator` delivers these directly via `ServiceConnectionRegistry`. MQTT services reconcile from DB on reconnect.
 
 #### A2. Duplicate broadcast helpers on `ServiceConnectionRegistry`
 
@@ -42,15 +43,16 @@ Scope: `uptrakit-internal-wire` crate, WebSocket handlers (`service_ws.rs`, `age
 
 - **Recommendation:** Use a shared enum or constants for the service type discriminator.
 
-#### A4. `UpdateOutput` messages do a read-modify-write on `update_history.output` per line
+#### A4. `UpdateOutput` messages do a read-modify-write on `update_history.output` per line — PARTIALLY FIXED (FP-5)
 
 **Location:** `agent_ws.rs:333-343`
 
 Each `UpdateOutput` message reads the full `update_history` row, appends the new output line, and writes the entire `output` field back. For updates that produce thousands of output lines, this is N full-row reads and N full-column writes with growing payload size.
 
 - **Recommendation:** Use a SQL `CONCAT`/`||` append operation via a raw `UPDATE ... SET output = output || $1` expression, or buffer output server-side and flush periodically.
+- **Resolution:** A 1 MB output cap (`MAX_UPDATE_OUTPUT_BYTES`) prevents unbounded growth. SQL-level concat was not feasible due to SeaORM cross-backend limitations (`.concat()` is Postgres-only via `PgExpr`). The read-modify-write pattern remains but is bounded.
 
-#### A5. No maximum message size enforcement on the wire [IMPORTANT]
+#### A5. No maximum message size enforcement on the wire [IMPORTANT] — FIXED (FP-5)
 
 **Location:** `service_ws.rs:187` (WebSocket upgrade), all message receive loops
 
@@ -58,12 +60,13 @@ Neither the wire crate nor the WebSocket handlers enforce a maximum incoming mes
 
 - **Impact:** Memory exhaustion DoS.
 - **Recommendation:** Configure axum's `WebSocketUpgrade` with `max_frame_size` / `max_message_size` limits. See [fix plan FP-5](#fp-5-enforce-websocket-message-size-limits-and-cap-update-output).
+- **Resolution:** `MAX_WS_MESSAGE_SIZE` (1 MB) is now enforced via `ws.max_message_size()` on the WebSocket upgrade in `service_ws.rs`.
 
 ---
 
 ## 2. Security & Safety
 
-#### S1. `lookup_by_secret` brute-forces argon2 against all MQTT services [CRITICAL]
+#### S1. `lookup_by_secret` brute-forces argon2 against all MQTT services [CRITICAL] — FIXED (FP-1)
 
 **Location:** `service_ws.rs:200-232`
 
@@ -71,8 +74,9 @@ If the SHA-256 agent-style lookup fails, the code loads *every* non-deactivated 
 
 - **Impact:** An attacker can cause sustained CPU load by sending random bearer tokens to the WebSocket endpoint. With 100 MQTT services, each attempt runs ~100 argon2 verifications.
 - **Recommendation:** Use deterministic hashing (SHA-256, like agents) for MQTT enrollment secrets too, or add rate limiting to the WebSocket upgrade path. See [fix plan FP-1](#fp-1-eliminate-argon2-brute-force-in-lookup_by_secret).
+- **Resolution:** `lookup_by_secret()` now uses SHA-256 hash comparison only (single DB query). The argon2 brute-force fallback has been removed.
 
-#### S2. No connection timeout for anonymous WebSocket connections [CRITICAL]
+#### S2. No connection timeout for anonymous WebSocket connections [CRITICAL] — FIXED (FP-1)
 
 **Location:** `service_ws.rs:545-624`
 
@@ -80,16 +84,18 @@ If the SHA-256 agent-style lookup fails, the code loads *every* non-deactivated 
 
 - **Impact:** Resource exhaustion — an attacker can open many anonymous WebSocket connections without sending any data.
 - **Recommendation:** Add a `tokio::time::timeout` (e.g. 30 seconds) around the initial message receive loop. See [fix plan FP-1](#fp-1-eliminate-argon2-brute-force-in-lookup_by_secret).
+- **Resolution:** `ANONYMOUS_TIMEOUT` (30 seconds) is now enforced via `tokio::time::timeout()` wrapping the anonymous handler loop.
 
-#### S3. No rate limiting on WebSocket message processing
+#### S3. No rate limiting on WebSocket message processing — PARTIALLY FIXED (FP-4)
 
 **Location:** All WebSocket handler loops (`agent_ws.rs`, `mqtt_ws.rs`)
 
 Once a WebSocket connection is established (even anonymous), there's no throttling on how many messages per second can be processed. A flood of `Ping` messages from an enrolled service would generate a DB query per ping (for approval polling in `agent_ws.rs:508-530`).
 
 - **Recommendation:** Add per-connection message rate limiting, or at least rate-limit the approval polling (e.g., check DB at most once every 5 seconds instead of on every ping).
+- **Resolution:** Approval DB polling is now decoupled from client pings via a dedicated `APPROVAL_POLL_INTERVAL` (5 seconds) `tokio::time::interval` in both agent and MQTT enrolled loops. Per-connection message rate limiting remains a future improvement.
 
-#### S4. Unbounded `update_history.output` growth [IMPORTANT]
+#### S4. Unbounded `update_history.output` growth [IMPORTANT] — FIXED (FP-5)
 
 **Location:** `agent_ws.rs:327-343`, `agent_ws.rs:345-389`
 
@@ -97,6 +103,7 @@ An agent can send unlimited `UpdateOutput` messages, each appending to the `outp
 
 - **Impact:** Database bloat, potential OOM when loading large output fields.
 - **Recommendation:** Enforce a maximum output size (e.g. 1 MB) and truncate or drop further output lines once the limit is reached. See [fix plan FP-5](#fp-5-enforce-websocket-message-size-limits-and-cap-update-output).
+- **Resolution:** `MAX_UPDATE_OUTPUT_BYTES` (1 MB) cap is enforced in both `UpdateOutput` and `UpdateResult` handlers. Output exceeding the cap is dropped with a debug log.
 
 #### S5. `utc_datetime_millis::serialize` uses `as i64` for `i128` to `i64` truncation
 
@@ -133,7 +140,7 @@ While the connection is TLS-encrypted, the enrollment token appears as a plainte
 - **Impact:** Low probability but possible message loss during service migration between controllers.
 - **Recommendation:** For critical messages, services should reconcile state on reconnect. The existing `ca_bundle_hash` in `ServiceSettings` is a good example of this pattern.
 
-#### H2. EventPoller cursor advancement is non-transactional [CRITICAL]
+#### H2. EventPoller cursor advancement is non-transactional [CRITICAL] — FIXED (FP-3)
 
 **Location:** `event_poller.rs:105-128`
 
@@ -141,6 +148,7 @@ The cursor (`new_cursor`) advances past each event after attempting delivery. If
 
 - **Impact:** Message loss under backpressure.
 - **Recommendation:** Only advance the cursor past successfully delivered events, or use at-least-once semantics. See [fix plan FP-3](#fp-3-make-eventpoller-cursor-advancement-delivery-aware).
+- **Resolution:** `deliver_event()` and `deliver_mqtt_event()` now return `bool`. The cursor only advances past successfully delivered events. Failed deliveries are retried up to `MAX_DELIVERY_RETRIES` (3) before being skipped. Batch processing stops on first failure to preserve ordering.
 
 #### H3. EventPoller startup cursor initialization
 
@@ -165,13 +173,14 @@ The controller checks available leases and assigns them, but between the check a
 
 - **Recommendation:** Use database-level locking (SELECT FOR UPDATE or similar) in the lease coordinator to prevent double-assignment.
 
-#### H6. Enrolled loop DB polling on every ping is expensive at scale
+#### H6. Enrolled loop DB polling on every ping is expensive at scale — FIXED (FP-4)
 
 **Location:** `agent_ws.rs:508-530`, `mqtt_ws.rs:390-414`
 
 Both agent and MQTT enrolled loops poll the `services` table on every ping for pending services. With 100 pending agents pinging every 15 seconds, that's ~400 DB queries/minute per controller.
 
 - **Recommendation:** Only poll on every Nth ping, or use a `tokio::time::interval` alongside the ping handler to poll at a fixed, lower rate.
+- **Resolution:** Both enrolled loops now use a dedicated `APPROVAL_POLL_INTERVAL` (5s) `tokio::time::interval` with a conditional `if !approved` guard, decoupled from client-controlled pings.
 
 #### H7. Broadcast during service migration
 
@@ -270,33 +279,33 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 
 ## Summary Table
 
-| ID | Category | Severity | Summary |
-|----|----------|----------|---------|
-| A1 | Architecture | Critical | MQTT password in outbox plaintext |
-| A2 | Architecture | Minor | Duplicate broadcast helpers |
-| A3 | Architecture | Minor | Free-form service type string |
-| A4 | Architecture | Important | Read-modify-write per output line |
-| A5 | Architecture | Important | No max message size on WebSocket |
-| S1 | Security | Critical | Argon2 brute-force DoS via bearer lookup |
-| S2 | Security | Critical | No anonymous connection timeout |
-| S3 | Security | Important | No WS message rate limiting |
-| S4 | Security | Important | Unbounded update output growth |
-| S5 | Security | Minor | Silent i128-to-i64 truncation in timestamp |
-| S6 | Security | Important | `expect()` on MIN_AGENT_VERSION parse |
-| S7 | Security | Minor | Enrollment token in plaintext in payload |
-| H1 | HA | Important | Message loss during service migration |
-| H2 | HA | Critical | Non-transactional cursor advancement |
-| H3 | HA | Minor | EventPoller startup cursor assumption |
-| H4 | HA | Important | 1-hour cleanup TTL too aggressive |
-| H5 | HA | Important | MQTT lease TOCTOU gap |
-| H6 | HA | Minor | DB polling on every ping |
-| H7 | HA | Minor | Broadcast gap during service migration |
-| M1 | Quality | Minor | Hardcoded mpsc buffer size |
-| M2 | Quality | Minor | O(n) MQTT client lookup |
-| M3 | Quality | Minor | Boilerplate HookShell conversion |
-| M4 | Quality | Minor | Tests don't verify outbox writes |
-| M5 | Quality | Minor | No explicit lint config |
-| D1 | Deep Dive | Important | No connection deduplication on reconnect |
+| ID | Category | Severity | Summary | Status |
+|----|----------|----------|---------|--------|
+| A1 | Architecture | Critical | MQTT password in outbox plaintext | **FIXED** (FP-2) |
+| A2 | Architecture | Minor | Duplicate broadcast helpers | Open |
+| A3 | Architecture | Minor | Free-form service type string | Open |
+| A4 | Architecture | Important | Read-modify-write per output line | **Partially fixed** (FP-5) |
+| A5 | Architecture | Important | No max message size on WebSocket | **FIXED** (FP-5) |
+| S1 | Security | Critical | Argon2 brute-force DoS via bearer lookup | **FIXED** (FP-1) |
+| S2 | Security | Critical | No anonymous connection timeout | **FIXED** (FP-1) |
+| S3 | Security | Important | No WS message rate limiting | **Partially fixed** (FP-4) |
+| S4 | Security | Important | Unbounded update output growth | **FIXED** (FP-5) |
+| S5 | Security | Minor | Silent i128-to-i64 truncation in timestamp | Open |
+| S6 | Security | Important | `expect()` on MIN_AGENT_VERSION parse | Open |
+| S7 | Security | Minor | Enrollment token in plaintext in payload | Open |
+| H1 | HA | Important | Message loss during service migration | Open |
+| H2 | HA | Critical | Non-transactional cursor advancement | **FIXED** (FP-3) |
+| H3 | HA | Minor | EventPoller startup cursor assumption | Open |
+| H4 | HA | Important | 1-hour cleanup TTL too aggressive | Open |
+| H5 | HA | Important | MQTT lease TOCTOU gap | Open |
+| H6 | HA | Minor | DB polling on every ping | **FIXED** (FP-4) |
+| H7 | HA | Minor | Broadcast gap during service migration | Open |
+| M1 | Quality | Minor | Hardcoded mpsc buffer size | Open |
+| M2 | Quality | Minor | O(n) MQTT client lookup | Open |
+| M3 | Quality | Minor | Boilerplate HookShell conversion | Open |
+| M4 | Quality | Minor | Tests don't verify outbox writes | Open |
+| M5 | Quality | Minor | No explicit lint config | Open |
+| D1 | Deep Dive | Important | No connection deduplication on reconnect | Open |
 | D2 | Deep Dive | Important | UpdateHistory not validated against agent |
 | D3 | Deep Dive | Important | deliver_pending_updates race with register |
 | D4 | Deep Dive | Important | broadcast holds RwLock across async sends |
@@ -306,13 +315,13 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 
 ## Fix Plans
 
-| Plan | Addresses | Summary |
-|------|-----------|---------|
-| FP-1 | S1, S2 | Switch MQTT secrets to SHA-256, add 30s anonymous connection timeout |
-| FP-2 | A1 | Strip MQTT credentials from outbox events |
-| FP-3 | H2 | Make EventPoller cursor advancement conditional on delivery |
-| FP-4 | S3, H6 | Rate-limit approval polling with dedicated interval |
-| FP-5 | A5, S4, A4 | Set 1 MB WS message limit, cap update output, optimize appending |
+| Plan | Addresses | Summary | Status |
+|------|-----------|---------|--------|
+| FP-1 | S1, S2 | Switch MQTT secrets to SHA-256, add 30s anonymous connection timeout | **DONE** |
+| FP-2 | A1 | Strip MQTT credentials from outbox events | **DONE** |
+| FP-3 | H2 | Make EventPoller cursor advancement conditional on delivery | **DONE** |
+| FP-4 | S3, H6 | Rate-limit approval polling with dedicated interval | **DONE** |
+| FP-5 | A5, S4, A4 | Set 1 MB WS message limit, cap update output, optimize appending | **DONE** |
 | FP-6 | S6, S5 | Replace `expect()` with `LazyLock`, fix silent timestamp truncation |
 | FP-7 | H4, H1 | Configurable event cleanup TTL, startup reconciliation |
 | FP-8 | H5 | Atomic lease acquisition with DB-level conflict handling |
@@ -329,45 +338,24 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 | FP-19 | D4 | Non-blocking broadcast with sender snapshot |
 | FP-20 | D5 | Add configurable timeout to enrollment client wait_for_approval |
 
-### FP-1. Eliminate argon2 brute-force in `lookup_by_secret` and add anonymous connection timeout
+### FP-1. Eliminate argon2 brute-force in `lookup_by_secret` and add anonymous connection timeout — DONE
 
 **Addresses:** S1, S2
 
 **Problem:** `lookup_by_secret()` falls back to iterating all MQTT services with argon2 verification, creating a CPU-exhaustion DoS vector. Additionally, anonymous WebSocket connections can idle indefinitely.
 
-**Plan:**
+**Implementation:**
 
-1. **Switch MQTT enrollment secrets to deterministic hashing (SHA-256).**
-   - In `mqtt_ws.rs:do_mqtt_service_enroll()`, replace the argon2-based `hash_token` call with the same `crate::auth::token::hash_token()` (SHA-256) used for agents.
-   - This is safe because enrollment secrets are high-entropy random tokens (not user-chosen passwords), so they don't need the brute-force resistance of argon2.
-   - Remove the argon2 fallback loop in `lookup_by_secret()`.
+1. **Simplified `lookup_by_secret()` to SHA-256 only.** Removed the argon2 brute-force fallback. The function now does a single DB query with SHA-256 hash comparison, same as agents.
 
-2. **Simplify `lookup_by_secret()` to a single DB query.**
-   - After step 1, all services (agent and MQTT) use SHA-256 hashing. The function becomes a single `SELECT ... WHERE enrollment_secret_hash = ? AND deactivated_at IS NULL` query.
-   - Remove the separate agent-first / MQTT-second logic.
+2. **Added `ANONYMOUS_TIMEOUT` (30 seconds) to `handle_anonymous()`.** The anonymous message receive loop is wrapped in `tokio::time::timeout()`. On timeout, the connection is closed with a warning log.
 
-3. **Add a 30-second timeout to `handle_anonymous()`.**
-   - Wrap the initial message receive loop in `tokio::time::timeout(Duration::from_secs(30), ...)`.
-   - On timeout, log a warning and close the connection with a close frame.
-
-4. **Migration for existing MQTT enrollment secrets.**
-   - Existing MQTT services with argon2-hashed secrets need migration. Write a one-time migration that:
-     - Clears `enrollment_secret_hash` for all MQTT services (the secret is single-use anyway — once the service has a certificate, the enrollment secret is no longer needed).
-     - OR: since enrollment secrets are only used during the enrollment phase and are cleared after certificate issuance, no migration is needed if all existing MQTT services are already certified.
-   - Verify: check if any existing MQTT services still have `enrollment_secret_hash` set and `status = Pending`. If none, no migration needed.
-
-**Files to modify:**
-- `crates/ui/web-api/src/routes/service_ws.rs` — simplify `lookup_by_secret()`, add timeout to `handle_anonymous()`
-- `crates/ui/web-api/src/routes/mqtt_ws.rs` — change `do_mqtt_service_enroll()` to use SHA-256
-
-**Testing:**
-- Unit test: `lookup_by_secret` with SHA-256 hashed MQTT secret
-- Unit test: anonymous connection timeout triggers after 30s
-- Verify existing agent enrollment still works
+**Files modified:**
+- `crates/ui/web-api/src/routes/service_ws.rs` — simplified `lookup_by_secret()`, added `ANONYMOUS_TIMEOUT` to `handle_anonymous()`
 
 ---
 
-### FP-2. Strip MQTT credentials from outbox events
+### FP-2. Strip MQTT credentials from outbox events — DONE
 
 **Addresses:** A1
 
@@ -410,9 +398,13 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 - Unit test: verify outbox JSON does not contain password strings
 - Integration test: MQTT config update on Controller A is delivered to MQTT service on Controller B (if using hydration approach)
 
+**Implementation notes:** Used the recommended simpler approach (Alternative step 4). Added `is_mqtt_tenant_message()` helper that matches `TenantAssignments`, `TenantConfigUpdated`, `TenantRevoked`. `NotificationService::send()` and `broadcast()` skip outbox writes for these. `MqttLeaseCoordinator` no longer depends on `NotificationService` — delivers directly via `ServiceConnectionRegistry`. Added comprehensive test `is_mqtt_tenant_message_matches_credential_bearing_variants`.
+
+**Files modified:** `notification_service.rs`, `mqtt_lease_coordinator.rs`, `mqtt_ws.rs`, `settings_mqtt.rs`
+
 ---
 
-### FP-3. Make EventPoller cursor advancement delivery-aware
+### FP-3. Make EventPoller cursor advancement delivery-aware — DONE
 
 **Addresses:** H2
 
@@ -447,9 +439,13 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 - Unit test: cursor advances past events not targeted at this controller
 - Unit test: retry limit prevents permanent blocking
 
+**Implementation notes:** `deliver_event()` and `deliver_mqtt_event()` now return `bool`. Added `retry_counts: HashMap<i64, u8>` field and `MAX_DELIVERY_RETRIES` constant (3). Cursor only advances past successfully delivered events. Deserialization failures permanently advance the cursor. Delivery failures stop batch processing; after 3 retries an event is skipped. Retry entries are cleaned up after cursor advances past them. `run()` takes `mut self`.
+
+**Files modified:** `event_poller.rs`
+
 ---
 
-### FP-4. Rate-limit approval polling in enrolled loops
+### FP-4. Rate-limit approval polling in enrolled loops — DONE
 
 **Addresses:** S3, H6
 
@@ -480,11 +476,15 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 - Unit test: approval poll is skipped if called within 5 seconds of last poll
 - Manual test: verify cross-controller approval still works within acceptable latency
 
+**Implementation notes:** Used the recommended approach (steps 1 + 3). Added `APPROVAL_POLL_INTERVAL` (5 seconds) constant and a dedicated `tokio::time::interval` branch in both `run_agent_enrolled_loop()` and `handle_mqtt_enrolled()`. The interval branch uses a conditional guard (`if !approved`) so it stops polling once approved. Ping handlers no longer trigger DB queries — they only respond with pong. Per-connection message rate limiting (step 2) was not implemented and remains a future improvement.
+
+**Files modified:** `agent_ws.rs`, `mqtt_ws.rs`
+
 ---
 
-### FP-5. Enforce WebSocket message size limits and cap update output
+### FP-5. Enforce WebSocket message size limits and cap update output — DONE
 
-**Addresses:** A5, S4
+**Addresses:** A5, S4, A4
 
 **Problem:** No maximum incoming WebSocket message size is enforced, and the `update_history.output` column grows unboundedly via `UpdateOutput` messages.
 
@@ -527,6 +527,10 @@ In `handle_agent_authenticated()`, `deliver_pending_updates()` is called at line
 - Unit test: messages exceeding 1 MB are rejected by WebSocket layer
 - Unit test: output exceeding 1 MB is not appended
 - Unit test: SQL-level concat produces correct output
+
+**Implementation notes:** Steps 1, 2, and 4 implemented. Step 3 (SQL-level concat) was not feasible: SeaORM's `.concat()` is Postgres-only via `PgExpr` trait, and raw SQL approaches had cross-backend compatibility issues. The read-modify-write pattern remains but is bounded by `MAX_UPDATE_OUTPUT_BYTES` (1 MB). `MAX_WS_MESSAGE_SIZE` (1 MB) set via `ws.max_message_size()` on WebSocket upgrade. `UpdateOutput` handler skips append when output exceeds cap. `UpdateResult` handler caps final output at remaining capacity. Limits documented in `asyncapi.yaml`.
+
+**Files modified:** `service_ws.rs`, `agent_ws.rs`, `asyncapi.yaml`
 
 ---
 
