@@ -47,7 +47,7 @@
 
 <div
 	bind:this={menuEl}
-	class="card fixed z-50 w-40 overflow-hidden p-0 shadow-xl"
+	class="card fixed z-50 w-40 overflow-hidden bg-surface-50 dark:bg-surface-900 p-0 shadow-xl"
 	class:invisible={!visible}
 	style="top: {adjustedTop}px; left: {adjustedLeft}px;"
 	role="menu"
