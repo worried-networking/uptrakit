@@ -8,18 +8,18 @@
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| Critical | 7 |
-| High | 11 |
-| Medium | 17 |
-| Low | 10 |
+| Severity | Count | Fixed |
+|----------|-------|-------|
+| Critical | 7 | 3 |
+| High | 11 | 0 |
+| Medium | 17 | 0 |
+| Low | 10 | 0 |
 
 ---
 
 ## CRITICAL
 
-### C1. CA Private Key Material Exposed via `Debug` and Cloned Into Every Handler
+### C1. CA Private Key Material Exposed via `Debug` and Cloned Into Every Handler — FIXED
 
 **Files:** `src/lib.rs:52-76`, `src/ocsp.rs:84-93`, `src/routes/ocsp.rs:43`
 
@@ -29,7 +29,9 @@ There is also no zeroization of key material on drop (`src/ocsp.rs:368-394`, `sr
 
 **Recommendation:** (a) Replace `#[derive(Debug)]` with a manual impl that redacts key fields. (b) Move private keys into a separate non-`Clone` `Arc<RwLock<KeyStore>>` accessed only by the OCSP signer and cert signer. (c) Use `zeroize::Zeroizing<String>` for all key material.
 
-### C2. Deactivated Users Can Authenticate via OIDC LinkedUser Path
+**Fix:** `CaSnapshotData` split into `CaPublicSnapshot` (watch channel, Clone+Debug, no keys) and `CaKeyStore` (`Arc<RwLock>`, non-Clone, custom Debug that redacts all keys). All key material wrapped in `zeroize::Zeroizing<String>`. Only OCSP responder, CRL manager, cert signer, and server cert renewal access the key store. 15 files updated across web-api and controller crates.
+
+### C2. Deactivated Users Can Authenticate via OIDC LinkedUser Path — FIXED
 
 **Files:** `src/auth/authentication.rs:104-113`, `src/routes/oidc_auth.rs:428-439`
 
@@ -37,13 +39,17 @@ There is also no zeroization of key material on drop (`src/ocsp.rs:368-394`, `sr
 
 **Recommendation:** Add `is_active` check before returning `LinkedUser`, or check it in the callback handler before creating a session.
 
-### C3. No Refresh Token Rotation on Use
+**Fix:** `resolve_oidc_user` now loads the linked user and checks `is_active` before returning `LinkedUser`, returning `Deactivated` for inactive users and falling through to email lookup for orphaned links. Defense-in-depth check also added in the OIDC callback handler's `LinkedUser` arm.
+
+### C3. No Refresh Token Rotation on Use — FIXED
 
 **File:** `src/routes/auth.rs:382-443`
 
 The `refresh` endpoint issues a new access token but does **not** rotate the refresh token. The same refresh token remains valid for its full 7-day lifetime. A stolen refresh token provides persistent access for the entire window.
 
 **Recommendation:** Issue a new refresh token on each refresh, invalidating the old one atomically.
+
+**Fix:** Added `rotate_refresh_token` method to `SessionService` that atomically revokes the old session and creates a new one with a fresh token. The refresh handler now returns both a new access token and the rotated refresh token. Frontend stores the rotated token. 5 new tests cover rotation, revocation, and replay detection.
 
 ### C4. Rate Limiter TOCTOU — Check and Increment Are Not Atomic
 
