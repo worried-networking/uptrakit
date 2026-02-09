@@ -217,7 +217,7 @@ These are non-negotiable design constraints. Do not violate them.
 6. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials.
 7. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally — only high-level summaries are retained for display.
 8. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host never run concurrently.
-9. **No raw SQL.** Use the structures and methods provided by Sea ORM eveywhere.
+9. **No raw SQL.** Use the structures and methods provided by Sea ORM everywhere. **Approved exception:** The rate limiter (`crates/ui/web-api/src/auth/rate_limit.rs`) uses `sea_orm::Statement::from_sql_and_values()` for an atomic `INSERT ... ON CONFLICT DO UPDATE SET ... CASE WHEN` upsert, because SeaORM's `on_conflict` builder doesn't support conditional expressions. The statement is fully parameterized (no injection risk).
 10. **Cover new logic with tests.** Cover success and failure paths.
 11. **Document everything.**  Any code change must be properly documented either in the code, or in the separate documentation. Any changes to the agent-controller wire protocol must be documented in `crates/shared/wire/asyncapi.yaml`.
 12. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead code removal.
@@ -1086,6 +1086,17 @@ Database-backed per-IP rate limiting protects public authentication endpoints fr
 | `POST /api/v1/auth/device/poll` | 12 req/min/IP | `/api/v1/auth/device/poll:{ip}` |
 
 Endpoints **not** rate-limited: logout (requires valid refresh token), device/approve (requires auth), OIDC (external IdP interaction), all authenticated endpoints (require valid JWT/API token).
+
+### WebSocket rate limiting
+
+The `/api/v1/ws/service` WebSocket endpoint has its own per-IP rate limiting, applied **before** the WebSocket upgrade:
+
+| Key format | Limit | Trigger | Fail mode |
+| --- | --- | --- | --- |
+| `ws_connect:{ip}` | 30 req/60s | Every connection attempt | Fail-closed (503 on DB error) |
+| `ws_auth_fail:{ip}` | 10 req/300s | After failed bearer lookup | Fail-closed (503 on DB error) |
+
+Unlike the HTTP rate limiter middleware (which fails open), the WebSocket rate limiter **fails closed** on DB errors. This prevents bypass under database pressure. The check is in `service_ws()` in `crates/ui/web-api/src/routes/service_ws.rs`.
 
 ### Implementation
 

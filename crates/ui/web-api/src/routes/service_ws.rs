@@ -147,6 +147,9 @@ enum ConnectionType {
 /// Determines the connection type (Authenticated / Enrolled / Anonymous) and,
 /// once the `service_type` is known, dispatches to the appropriate
 /// service-specific handler in [`super::agent_ws`] or [`super::mqtt_ws`].
+///
+/// Per-IP rate limiting is applied before the WebSocket upgrade to prevent
+/// connection floods and brute-force bearer secret guessing.
 pub async fn service_ws(
     State(state): State<Arc<AppState>>,
     identity: Option<Extension<ServiceIdentity>>,
@@ -154,6 +157,33 @@ pub async fn service_ws(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    use crate::auth::rate_limit::RateLimitOutcome;
+
+    // Per-IP connection rate limit: 30 attempts per 60 seconds.
+    // Fail-closed on DB error to prevent bypass under load.
+    if let Some(Extension(ClientIp(ref ip))) = client_ip {
+        let key = format!("ws_connect:{ip}");
+        match state.rate_limit_store.check_rate_limit(&key, 30, 60).await {
+            Ok(RateLimitOutcome::Limited { retry_after_secs }) => {
+                tracing::warn!(%ip, "WS connection rate limited");
+                return (
+                    axum::http::StatusCode::TOO_MANY_REQUESTS,
+                    format!("Too many connection attempts. Retry after {retry_after_secs}s"),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "WS rate limiter error — rejecting (fail-closed)");
+                return (
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "Service temporarily unavailable".to_string(),
+                )
+                    .into_response();
+            }
+            Ok(RateLimitOutcome::Allowed) => {}
+        }
+    }
+
     let conn_type = if let Some(Extension(ref id)) = identity {
         tracing::info!(service_id = %id.service_id, "service WS upgrade (mTLS)");
         ConnectionType::Authenticated {
@@ -172,6 +202,38 @@ pub async fn service_ws(
                 ConnectionType::Enrolled(service.id)
             }
             Err(e) => {
+                // Per-IP auth failure rate limit: 10 failures per 300 seconds.
+                if let Some(Extension(ClientIp(ref ip))) = client_ip {
+                    let fail_key = format!("ws_auth_fail:{ip}");
+                    match state
+                        .rate_limit_store
+                        .check_rate_limit(&fail_key, 10, 300)
+                        .await
+                    {
+                        Ok(RateLimitOutcome::Limited { retry_after_secs }) => {
+                            tracing::warn!(%ip, "WS bearer auth failure rate limited");
+                            return (
+                                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                                format!(
+                                    "Too many failed auth attempts. Retry after {retry_after_secs}s"
+                                ),
+                            )
+                                .into_response();
+                        }
+                        Err(rate_err) => {
+                            tracing::error!(
+                                error = %rate_err,
+                                "WS auth-fail rate limiter error — rejecting (fail-closed)"
+                            );
+                            return (
+                                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                                "Service temporarily unavailable".to_string(),
+                            )
+                                .into_response();
+                        }
+                        Ok(RateLimitOutcome::Allowed) => {}
+                    }
+                }
                 let msg = e.to_string();
                 tracing::warn!("bearer auth failed: {msg}");
                 return (axum::http::StatusCode::UNAUTHORIZED, msg).into_response();

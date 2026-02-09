@@ -134,11 +134,25 @@ async fn renew_server_certificate_inner(
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
-    // Write to disk
+    // Write to disk with secure permissions (0o600) and atomic rename to
+    // prevent world-readable keys and mismatched cert/key on crash.
     let cert_path = state.pki_path.join("server.crt");
     let key_path = state.pki_path.join("server.key");
-    std::fs::write(&cert_path, &cert_pem).context_to::<RenewCertError>()?;
-    std::fs::write(&key_path, &key_pem).context_to::<RenewCertError>()?;
+    let cert_tmp = state.pki_path.join("server.crt.tmp");
+    let key_tmp = state.pki_path.join("server.key.tmp");
+
+    uptrakit_directories::write_secure_file_str(&key_tmp, &key_pem).map_err(|e| {
+        report!(RenewCertError::CertWrite(std::io::Error::other(
+            e.to_string()
+        )))
+    })?;
+    uptrakit_directories::write_secure_file_str(&cert_tmp, &cert_pem).map_err(|e| {
+        report!(RenewCertError::CertWrite(std::io::Error::other(
+            e.to_string()
+        )))
+    })?;
+    std::fs::rename(&key_tmp, &key_path).context_to::<RenewCertError>()?;
+    std::fs::rename(&cert_tmp, &cert_path).context_to::<RenewCertError>()?;
 
     // Hot-reload TLS config
     let server_config =

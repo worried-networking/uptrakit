@@ -516,7 +516,10 @@ const APPROVAL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_se
 pub(crate) async fn run_agent_enrolled_loop(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
-    connection: (&mut mpsc::Receiver<ControllerMessage>, &tokio_util::sync::CancellationToken),
+    connection: (
+        &mut mpsc::Receiver<ControllerMessage>,
+        &tokio_util::sync::CancellationToken,
+    ),
     state: &Arc<AppState>,
     agent_id: uuid::Uuid,
     out_seq: &mut OutgoingSeq,

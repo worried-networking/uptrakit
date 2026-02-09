@@ -10,8 +10,8 @@
 
 | Severity | Count | Fixed |
 |----------|-------|-------|
-| Critical | 7 | 3 |
-| High | 11 | 3 |
+| Critical | 7 | 7 |
+| High | 11 | 7 |
 | Medium | 17 | 1 |
 | Low | 10 | 0 |
 
@@ -51,7 +51,7 @@ The `refresh` endpoint issues a new access token but does **not** rotate the ref
 
 **Fix:** Added `rotate_refresh_token` method to `SessionService` that atomically revokes the old session and creates a new one with a fresh token. The refresh handler now returns both a new access token and the rotated refresh token. Frontend stores the rotated token. 5 new tests cover rotation, revocation, and replay detection.
 
-### C4. Rate Limiter TOCTOU — Check and Increment Are Not Atomic
+### C4. Rate Limiter TOCTOU — Check and Increment Are Not Atomic — FIXED
 
 **File:** `src/auth/rate_limit.rs:62-99`
 
@@ -59,7 +59,9 @@ The `refresh` endpoint issues a new access token but does **not** rotate the ref
 
 **Recommendation:** Replace with a single atomic SQL statement: `INSERT ... ON CONFLICT DO UPDATE SET request_count = CASE WHEN window_start < threshold THEN 1 ELSE request_count + 1 END ... RETURNING request_count`.
 
-### C5. Shell Injection via Unsanitized Hook Parameters
+**Fix:** Replaced with a single atomic `INSERT ... ON CONFLICT DO UPDATE SET request_count = CASE WHEN ... END` statement using `sea_orm::Statement::from_sql_and_values()`. Supports SQLite, PostgreSQL, and MySQL backends. Removed the separate `upsert_new_window` method. After the atomic upsert, reads back the current count to decide the outcome. Raw SQL is required because SeaORM's `on_conflict` builder doesn't support CASE WHEN expressions; the statement is fully parameterized (no injection risk).
+
+### C5. Shell Injection via Unsanitized Hook Parameters — FIXED
 
 **File:** `src/update_hooks.rs:138-171`
 
@@ -67,7 +69,9 @@ The `refresh` endpoint issues a new access token but does **not** rotate the ref
 
 **Recommendation:** (a) Validate predefined hook fields against strict patterns (alphanumeric + hyphen/underscore for service names, validated paths for directories). (b) For custom commands, document the security boundary clearly and consider a separate permission.
 
-### C6. No WebSocket Message Size Limits
+**Fix:** Predefined hooks use `HookCommand::Exec` (direct exec, no shell) instead of shell command strings. Input validation at the API boundary via `validate_hooks_in_config()` in `provider_configs.rs` and `software_items.rs` rejects shell metacharacters in service names, paths, and compose files.
+
+### C6. No WebSocket Message Size Limits — FIXED
 
 **File:** `src/routes/service_ws.rs:187`
 
@@ -75,7 +79,9 @@ The `refresh` endpoint issues a new access token but does **not** rotate the ref
 
 **Recommendation:** Call `.max_message_size(some_reasonable_limit)` on the upgrade (e.g., 256 KB or 1 MB).
 
-### C7. No Rate Limiting on WebSocket Endpoint + Argon2 Brute-Force Amplification
+**Fix:** `MAX_WS_MESSAGE_SIZE = 1_048_576` (1 MB) applied to `.max_message_size()` on the WebSocket upgrade. The largest legitimate wire message (`ExecuteUpdate` with provider config) is well under 100 KB.
+
+### C7. No Rate Limiting on WebSocket Endpoint + Argon2 Brute-Force Amplification — FIXED
 
 **Files:** `src/routes/service_ws.rs:200-232`, `src/middleware/rate_limit.rs:20-58`
 
@@ -83,17 +89,21 @@ The `/api/v1/ws/service` endpoint is not rate-limited and accepts anonymous conn
 
 **Recommendation:** Add per-IP connection rate limiting for WebSocket upgrades. For the bearer lookup, index enrollment secrets by SHA-256 prefix to eliminate the O(N) argon2 scan.
 
+**Fix:** Per-IP connection rate limiting added at the top of `service_ws()` (before WS upgrade): `ws_connect:{ip}` key, 30 requests per 60 seconds, fail-closed on DB error. After failed bearer lookup: `ws_auth_fail:{ip}` key, 10 per 300 seconds, also fail-closed. The Argon2 concern is moot — `lookup_by_secret` already uses SHA-256 hashing exclusively.
+
 ---
 
 ## HIGH
 
-### H1. First-User Registration Race Condition
+### H1. First-User Registration Race Condition — FIXED
 
 **File:** `src/routes/auth.rs:86-136`
 
 Non-atomic read-then-act: `User::find().count()` -> `insert()` -> `assign_owner_role()`. Two concurrent requests during initial setup can both observe zero users and both get the `owner` role. Same race exists in the OIDC path (`src/routes/oidc_auth.rs:443-447`).
 
 **Recommendation:** Wrap in a serializable transaction or use `INSERT ... WHERE NOT EXISTS`.
+
+**Fix:** Registration wrapped in a database transaction (`auth.rs:78-140`). The user count check and insert are performed atomically within the same transaction, preventing concurrent first-user races.
 
 ### H2. JWT Access Tokens Cannot Be Revoked (15-Minute Window)
 
@@ -111,7 +121,7 @@ Each controller instance generates its own JWT signing key from its local `data_
 
 **Recommendation:** Document as a deployment requirement: all HA instances must share the same state directory (or use a shared key management system). Consider adding a health check that detects key mismatch.
 
-### H4. Tenant Isolation Bypass via X-Tenant-Id Header
+### H4. Tenant Isolation Bypass via X-Tenant-Id Header — FIXED
 
 **File:** `src/middleware/tenant_context.rs:29-51`
 
@@ -119,7 +129,9 @@ Each controller instance generates its own JWT signing key from its local `data_
 
 **Recommendation:** Either remove the header processing entirely (since multi-tenancy is "future work"), or gate it behind user-tenant authorization.
 
-### H5. Origin Header Trusted from Untrusted Clients
+**Fix:** Removed `X-Tenant-Id` header processing entirely. `TenantContext` always returns `state.default_tenant_id`. Added `x-tenant-id` to `strip_proxy_headers()` as defense-in-depth. TODO comment left for future multi-tenancy requirements (must verify user-tenant access).
+
+### H5. Origin Header Trusted from Untrusted Clients — FIXED
 
 **File:** `src/middleware/resolve_proxy_headers.rs:274-284`
 
@@ -127,13 +139,17 @@ Each controller instance generates its own JWT signing key from its local `data_
 
 **Recommendation:** Only trust `Origin` from trusted proxies, or validate it against a configured allowlist.
 
-### H6. Server Private Key Written Without Restricted Permissions + Non-Atomic Write
+**Fix:** `Origin` header is now only used inside the `if from_trusted_proxy` block. Added `origin` to `strip_proxy_headers()` for non-proxy requests. Tests updated: Origin from untrusted clients falls back to Host header; spoofing test confirms `Origin: https://evil.com` is ignored for non-proxy requests.
+
+### H6. Server Private Key Written Without Restricted Permissions + Non-Atomic Write — FIXED
 
 **File:** `src/routes/server_cert.rs:138-147`
 
 `std::fs::write()` creates files with default umask permissions (typically 0644). The `server.key` file is world-readable. The cert and key are written in two separate calls — a crash between them produces a mismatched pair.
 
 **Recommendation:** Use `OpenOptionsExt` with mode `0o600`. Write to temp files then atomically rename.
+
+**Fix:** Uses `uptrakit_directories::write_secure_file_str()` (0o600 permissions) to write temp files, then `std::fs::rename()` for atomic replacement. Key is written to `server.key.tmp` and cert to `server.crt.tmp` before atomic rename to final paths, preventing mismatched cert/key pairs on crash.
 
 ### H7. Connection Registry Overwrites on Concurrent Reconnect — FIXED
 
@@ -356,7 +372,7 @@ Per-record DB lookups for denormalized names.
 - **OIDC security:** PKCE with S256, CSRF state tokens, nonce validation, database-backed stores (HA-safe)
 - **Sequence number validation:** Strict monotonic replay protection on the wire protocol
 - **Proxy header stripping:** `X-Forwarded-*` and cert headers stripped from non-proxy clients
-- **SeaORM parameterized queries:** No raw SQL, preventing injection
+- **SeaORM parameterized queries:** Parameterized queries throughout, preventing injection (rate limiter uses raw SQL via `Statement::from_sql_and_values()` for atomic upsert — fully parameterized)
 - **Permission model:** Consistent `has_permission()` checks on all protected endpoints
 - **Rate limit architecture:** Database-backed sliding window (correct for HA)
 - **Wire protocol design:** Strongly typed enums, comprehensive test coverage (230+ tests), AsyncAPI documentation

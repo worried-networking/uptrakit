@@ -1,8 +1,5 @@
 use rootcause::prelude::*;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter, Set,
-    sea_query::OnConflict,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{api_rate_limit, prelude::ApiRateLimit};
@@ -47,6 +44,9 @@ impl RateLimitStore {
     /// - `max_requests`: maximum number of requests allowed in the window.
     /// - `window_secs`: window duration in seconds.
     ///
+    /// Uses a single atomic SQL upsert to avoid TOCTOU races: the counter is
+    /// incremented (or reset) in one statement, then read back to decide.
+    ///
     /// Returns `Allowed` if the request is within the limit, or `Limited`
     /// with a `retry_after_secs` value if the limit has been exceeded.
     pub async fn check_rate_limit(
@@ -58,85 +58,84 @@ impl RateLimitStore {
         let now = OffsetDateTime::now_utc();
         let window = time::Duration::seconds(window_secs);
         let threshold = now - window;
+        let expires_at = now + time::Duration::seconds(window_secs * 2);
 
-        // Look up existing row
-        let existing = ApiRateLimit::find_by_id(key)
+        // Atomic upsert: INSERT or UPDATE in a single statement.
+        // If the row doesn't exist: insert with count=1.
+        // If the row exists with a valid window (window_start >= threshold): increment.
+        // If the row exists with an expired window: reset to count=1 with new timestamps.
+        //
+        // Raw SQL is required because SeaORM's on_conflict builder doesn't
+        // support CASE WHEN expressions. The statement is fully parameterized.
+        let backend = self.db.get_database_backend();
+        let sql = match backend {
+            sea_orm::DatabaseBackend::MySql => {
+                r#"INSERT INTO api_rate_limits (`key`, request_count, window_start, expires_at)
+                   VALUES (?, 1, ?, ?)
+                   ON DUPLICATE KEY UPDATE
+                     request_count = CASE
+                       WHEN window_start >= ? THEN request_count + 1
+                       ELSE 1
+                     END,
+                     window_start = CASE
+                       WHEN window_start >= ? THEN window_start
+                       ELSE VALUES(window_start)
+                     END,
+                     expires_at = VALUES(expires_at)"#
+            }
+            // SQLite and PostgreSQL both use $N positional params and ON CONFLICT
+            _ => {
+                r#"INSERT INTO api_rate_limits ("key", request_count, window_start, expires_at)
+                   VALUES ($1, 1, $2, $3)
+                   ON CONFLICT ("key") DO UPDATE SET
+                     request_count = CASE
+                       WHEN api_rate_limits.window_start >= $4 THEN api_rate_limits.request_count + 1
+                       ELSE 1
+                     END,
+                     window_start = CASE
+                       WHEN api_rate_limits.window_start >= $4 THEN api_rate_limits.window_start
+                       ELSE excluded.window_start
+                     END,
+                     expires_at = excluded.expires_at"#
+            }
+        };
+
+        let params = match backend {
+            sea_orm::DatabaseBackend::MySql => {
+                // MySQL uses ? placeholders; threshold is repeated for both CASE WHEN clauses.
+                vec![
+                    key.into(),
+                    now.into(),
+                    expires_at.into(),
+                    threshold.into(),
+                    threshold.into(),
+                ]
+            }
+            _ => {
+                vec![key.into(), now.into(), expires_at.into(), threshold.into()]
+            }
+        };
+
+        let stmt = sea_orm::Statement::from_sql_and_values(backend, sql, params);
+        self.db.execute_raw(stmt).await.context_to()?;
+
+        // Read back the current count to decide the outcome.
+        let row = ApiRateLimit::find_by_id(key)
             .one(&self.db)
             .await
             .context_to()?;
 
-        match existing {
-            Some(row) if row.window_start >= threshold => {
-                // Within current window
-                if row.request_count >= max_requests {
-                    // Rate limited — compute retry_after
-                    let window_end = row.window_start + window;
-                    let remaining = window_end - now;
-                    let retry_after = Ord::max(remaining.whole_seconds(), 1) as u64;
-                    return Ok(RateLimitOutcome::Limited {
-                        retry_after_secs: retry_after,
-                    });
-                }
-
-                // Atomic increment: only if window_start hasn't been reset
-                // by another instance in the meantime.
-                let result = ApiRateLimit::update_many()
-                    .col_expr(
-                        api_rate_limit::Column::RequestCount,
-                        sea_orm::sea_query::Expr::col(api_rate_limit::Column::RequestCount).add(1),
-                    )
-                    .filter(api_rate_limit::Column::Key.eq(key))
-                    .filter(api_rate_limit::Column::WindowStart.gte(threshold))
-                    .exec(&self.db)
-                    .await
-                    .context_to()?;
-
-                if result.rows_affected == 0 {
-                    // Window was reset by another instance — start fresh
-                    self.upsert_new_window(key, now, window_secs).await?;
-                }
-
-                Ok(RateLimitOutcome::Allowed)
+        match row {
+            Some(row) if row.request_count > max_requests => {
+                let window_end = row.window_start + window;
+                let remaining = window_end - now;
+                let retry_after = Ord::max(remaining.whole_seconds(), 1) as u64;
+                Ok(RateLimitOutcome::Limited {
+                    retry_after_secs: retry_after,
+                })
             }
-            _ => {
-                // No row or window expired — start a new window
-                self.upsert_new_window(key, now, window_secs).await?;
-                Ok(RateLimitOutcome::Allowed)
-            }
+            _ => Ok(RateLimitOutcome::Allowed),
         }
-    }
-
-    /// Upsert a new window: insert or reset the counter.
-    async fn upsert_new_window(
-        &self,
-        key: &str,
-        now: OffsetDateTime,
-        window_secs: i64,
-    ) -> Result<()> {
-        let expires_at = now + time::Duration::seconds(window_secs * 2);
-
-        let model = api_rate_limit::ActiveModel {
-            key: Set(key.to_string()),
-            request_count: Set(1),
-            window_start: Set(now),
-            expires_at: Set(expires_at),
-        };
-
-        ApiRateLimit::insert(model)
-            .on_conflict(
-                OnConflict::column(api_rate_limit::Column::Key)
-                    .update_columns([
-                        api_rate_limit::Column::RequestCount,
-                        api_rate_limit::Column::WindowStart,
-                        api_rate_limit::Column::ExpiresAt,
-                    ])
-                    .to_owned(),
-            )
-            .exec(&self.db)
-            .await
-            .context_to()?;
-
-        Ok(())
     }
 
     /// Remove expired rate limit entries. Fire-and-forget.
@@ -158,6 +157,7 @@ mod tests {
     use super::*;
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
+        Set,
     };
 
     async fn test_db() -> DatabaseConnection {

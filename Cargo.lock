@@ -5138,6 +5138,7 @@ dependencies = [
  "tower",
  "tower-cookies",
  "tracing",
+ "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-provider-core",
  "uptrakit-provider-registry",

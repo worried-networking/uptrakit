@@ -11,8 +11,16 @@ use crate::AppState;
 
 /// Resolved tenant for the current request.
 ///
-/// In single-tenant mode the default tenant is always used. When multi-tenancy
-/// is enabled the `X-Tenant-Id` header selects the tenant (future work).
+/// Always returns the default tenant. Multi-tenancy is future work.
+///
+/// TODO: When multi-tenancy is enabled, re-add X-Tenant-Id header processing
+/// with these requirements:
+/// 1. Only accept X-Tenant-Id from authenticated users
+/// 2. Verify the user has access to the requested tenant via a user_tenant
+///    mapping table
+/// 3. Reject with 403 if the user doesn't have access
+/// 4. Strip X-Tenant-Id header from non-proxy requests (already done in
+///    resolve_proxy_headers.rs)
 #[derive(Clone, Debug)]
 pub struct TenantContext {
     pub tenant_id: Uuid,
@@ -22,36 +30,9 @@ impl FromRequestParts<Arc<AppState>> for TenantContext {
     type Rejection = (StatusCode, Json<ErrorResponse>);
 
     async fn from_request_parts(
-        parts: &mut Parts,
+        _parts: &mut Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, Self::Rejection> {
-        // Check for X-Tenant-Id header
-        if let Some(header_val) = parts.headers.get("x-tenant-id") {
-            let header_str = header_val.to_str().map_err(|_| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "X-Tenant-Id header is not valid UTF-8".to_string(),
-                        code: None,
-                    }),
-                )
-            })?;
-
-            if !header_str.is_empty() {
-                let tenant_id = header_str.parse::<Uuid>().map_err(|_| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(ErrorResponse {
-                            error: "X-Tenant-Id header is not a valid UUID".to_string(),
-                            code: None,
-                        }),
-                    )
-                })?;
-                return Ok(TenantContext { tenant_id });
-            }
-        }
-
-        // Fallback to default tenant
         Ok(TenantContext {
             tenant_id: state.default_tenant_id,
         })

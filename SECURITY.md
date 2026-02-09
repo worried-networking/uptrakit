@@ -29,6 +29,7 @@ Uptrakit is designed with a defence-in-depth approach. Key principles:
 - **No automatic updates.** The scheduler triggers version *checks* only. All update execution requires explicit user action via the Web UI, CLI, or Home Assistant.
 - **Sudo allowlists.** Privileged operations on agents are constrained to specific commands granted `NOPASSWD` sudo access. No blanket root access.
 - **No shell injection.** Any path that constructs or executes shell commands validates inputs. Custom scripts are treated as untrusted input.
+- **Rate limiting.** All public authentication endpoints and WebSocket connections are rate-limited per IP via a database-backed sliding-window counter. The rate limiter uses atomic SQL upserts to prevent TOCTOU bypasses in HA deployments. WebSocket rate limiting fails closed (rejects on DB error) to prevent bypass under database pressure.
 - **No secrets in logs.** Tokens, passwords, API keys, and other credentials are never logged.
 
 ## Cryptographic Details
@@ -93,7 +94,7 @@ When the controller is behind a reverse proxy, agent identity is extracted from 
 
 - **Trusted proxies required**: Only requests from IP addresses listed in `--trusted-proxy` / `network.trusted_proxies` are trusted for forwarded headers. Requests from untrusted sources have all cert-related and proxy headers stripped.
 - **CA CN verification**: The issuer CN in forwarded certificates is verified against known CA common names (active CA and non-expired previous CA). Mismatched issuers are rejected.
-- **Header stripping**: `X-Forwarded-Proto`, `X-Forwarded-Host`, and configured cert headers are removed from non-proxy requests to prevent spoofing.
+- **Header stripping**: `X-Forwarded-Proto`, `X-Forwarded-Host`, `Origin`, `X-Tenant-Id`, and configured cert headers are removed from non-proxy requests to prevent spoofing.
 - **PEM and info header support**: Both structured info headers (Traefik, Nginx, HAProxy) and raw PEM headers (Caddy, Envoy) are supported, with info preferred when both are available.
 
 For deployment guides, see [docs/reverse-proxy/](docs/reverse-proxy/).

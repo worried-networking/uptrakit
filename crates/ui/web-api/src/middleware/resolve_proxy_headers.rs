@@ -262,29 +262,34 @@ fn strip_proxy_headers(
     }
     headers.remove("x-forwarded-proto");
     headers.remove("x-forwarded-host");
+    headers.remove("x-tenant-id");
+    headers.remove("origin");
 }
 
 /// Resolve the external base URL from headers.
 ///
-/// Priority:
-/// 1. `Origin` header (includes protocol)
+/// Priority (trusted proxy only for 1-3):
+/// 1. `Origin` header (includes protocol) — trusted proxy only
 /// 2. `X-Forwarded-Proto` + `X-Forwarded-Host` (trusted proxy only)
 /// 3. `X-Forwarded-Proto` + `Host` (trusted proxy only)
 /// 4. `Host` header with `https://`
+///
+/// The `Origin` header is only trusted from proxied requests to prevent
+/// an attacker from redirecting OIDC flows via `Origin: https://evil.com`.
 fn resolve_external_base_url(headers: &HeaderMap, from_trusted_proxy: bool) -> Option<String> {
-    // 1. Origin header
-    let origin = headers
-        .get("origin")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim_end_matches('/'));
-    if let Some(o) = origin
-        && !o.is_empty()
-    {
-        return Some(o.to_string());
-    }
-
-    // 2. X-Forwarded-Proto + X-Forwarded-Host (trusted proxy only)
     if from_trusted_proxy {
+        // 1. Origin header (trusted proxy only)
+        let origin = headers
+            .get("origin")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim_end_matches('/'));
+        if let Some(o) = origin
+            && !o.is_empty()
+        {
+            return Some(o.to_string());
+        }
+
+        // 2. X-Forwarded-Proto + X-Forwarded-Host
         let proto = headers
             .get("x-forwarded-proto")
             .and_then(|v| v.to_str().ok());
@@ -349,6 +354,8 @@ mod tests {
         headers.insert("X-Custom-Pem", HeaderValue::from_static("val"));
         headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
         headers.insert("x-forwarded-host", HeaderValue::from_static("example.com"));
+        headers.insert("x-tenant-id", HeaderValue::from_static("some-uuid"));
+        headers.insert("origin", HeaderValue::from_static("https://evil.com"));
         headers.insert("host", HeaderValue::from_static("internal"));
 
         strip_proxy_headers(&mut headers, Some("X-Custom-Info"), Some("X-Custom-Pem"));
@@ -357,6 +364,8 @@ mod tests {
         assert!(headers.get("X-Custom-Pem").is_none());
         assert!(headers.get("x-forwarded-proto").is_none());
         assert!(headers.get("x-forwarded-host").is_none());
+        assert!(headers.get("x-tenant-id").is_none());
+        assert!(headers.get("origin").is_none());
         // Host header should not be stripped
         assert!(headers.get("host").is_some());
     }
@@ -373,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn external_base_url_from_origin() {
+    fn external_base_url_origin_only_from_trusted_proxy() {
         let mut headers = HeaderMap::new();
         headers.insert(
             "origin",
@@ -381,8 +390,24 @@ mod tests {
         );
         headers.insert("host", HeaderValue::from_static("internal:8443"));
 
+        // Non-proxy: Origin ignored, falls back to Host
         let url = resolve_external_base_url(&headers, false);
+        assert_eq!(url, Some("https://internal:8443".to_string()));
+
+        // Trusted proxy: Origin used
+        let url = resolve_external_base_url(&headers, true);
         assert_eq!(url, Some("https://app.example.com".to_string()));
+    }
+
+    #[test]
+    fn external_base_url_origin_spoofing_blocked() {
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", HeaderValue::from_static("https://evil.com"));
+        headers.insert("host", HeaderValue::from_static("legit.example.com:8443"));
+
+        // Untrusted client — Origin is ignored
+        let url = resolve_external_base_url(&headers, false);
+        assert_eq!(url, Some("https://legit.example.com:8443".to_string()));
     }
 
     #[test]
