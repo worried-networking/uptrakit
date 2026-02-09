@@ -48,13 +48,11 @@ impl EventPoller {
 
     /// Run the event poller until the cancellation token is triggered.
     pub async fn run(mut self, token: CancellationToken) {
-        // Initialize cursor to current max ID to avoid replaying old events.
-        let max_id = self.fetch_max_id().await;
-        let mut last_seen_id = initial_cursor(max_id);
+        // Initialize cursor with a safety margin to avoid missing events on restart.
+        let mut last_seen_id = self.fetch_max_id().await;
         tracing::info!(
             controller_id = %self.controller_id,
             last_seen_id,
-            max_id,
             "event poller started"
         );
 
@@ -90,18 +88,13 @@ impl EventPoller {
             .one(&self.db)
             .await
         {
-            Ok(Some(max_id)) => max_id,
+            Ok(Some(max_id)) => max_id.saturating_sub(STARTUP_CURSOR_SAFETY_MARGIN),
             Ok(None) => 0,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to fetch max event ID, starting from 0");
                 0
             }
         }
-    }
-
-    #[cfg(test)]
-    fn initial_cursor_for_test(max_id: i64) -> i64 {
-        initial_cursor(max_id)
     }
 
     /// Poll for new events from other controllers. Returns the updated cursor.
@@ -129,6 +122,19 @@ impl EventPoller {
 
         for event in events {
             let event_id = event.id;
+
+            if let Some(service_id) = event.target_service_id
+                && let Some(connected_at) = self.registry.connected_at(&service_id).await
+                && event.created_at < connected_at
+            {
+                tracing::debug!(
+                    event_id,
+                    %service_id,
+                    "skipping stale event created before service connected"
+                );
+                new_cursor = event_id;
+                continue;
+            }
 
             let msg: ControllerMessage = match serde_json::from_str(&event.message_json) {
                 Ok(m) => m,
@@ -336,22 +342,72 @@ impl EventPoller {
     }
 }
 
-fn initial_cursor(max_id: i64) -> i64 {
-    if max_id > STARTUP_CURSOR_SAFETY_MARGIN {
-        max_id - STARTUP_CURSOR_SAFETY_MARGIN
-    } else {
-        0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
+        Set,
+    };
+    use uptrakit_shared_db::entity::controller_event;
 
-    #[test]
-    fn initial_cursor_respects_safety_margin() {
-        assert_eq!(EventPoller::initial_cursor_for_test(150), 50);
-        assert_eq!(EventPoller::initial_cursor_for_test(100), 0);
-        assert_eq!(EventPoller::initial_cursor_for_test(42), 0);
+    async fn test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        Database::connect(opt).await.expect("test db")
+    }
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let db = test_db().await;
+        let schema = Schema::new(db.get_database_backend());
+        let stmt = schema.create_table_from_entity(controller_event::Entity);
+        db.execute(&stmt)
+            .await
+            .expect("create controller_events table");
+        db
+    }
+
+    #[tokio::test]
+    async fn fetch_max_id_uses_safety_margin() {
+        let db = setup_test_db().await;
+        let now = OffsetDateTime::now_utc();
+        for _ in 0..150 {
+            let event = controller_event::ActiveModel {
+                source_controller_id: Set(Uuid::now_v7()),
+                target_service_id: Set(None),
+                target_service_type: Set(Some("agent".to_string())),
+                message_json: Set("{\"type\":\"ping\"}".to_string()),
+                created_at: Set(now),
+                ..Default::default()
+            };
+            let _ = event.insert(&db).await;
+        }
+
+        let poller = EventPoller::new(db, ServiceConnectionRegistry::new(), Uuid::now_v7());
+        let cursor = poller.fetch_max_id().await;
+        assert_eq!(cursor, 50);
+    }
+
+    #[tokio::test]
+    async fn skips_events_older_than_connection() {
+        let db = setup_test_db().await;
+        let registry = ServiceConnectionRegistry::new();
+        let service_id = Uuid::now_v7();
+        let (mut rx, _token) = registry.register_agent(service_id).await;
+
+        let old_time = OffsetDateTime::now_utc() - time::Duration::seconds(30);
+        let event = controller_event::ActiveModel {
+            source_controller_id: Set(Uuid::now_v7()),
+            target_service_id: Set(Some(service_id)),
+            target_service_type: Set(Some("agent".to_string())),
+            message_json: Set("{\"type\":\"ping\"}".to_string()),
+            created_at: Set(old_time),
+            ..Default::default()
+        };
+        let event = event.insert(&db).await.expect("insert event");
+
+        let mut poller = EventPoller::new(db, registry, Uuid::now_v7());
+        let cursor = poller.poll_events(0).await;
+        assert_eq!(cursor, event.id);
+        assert!(rx.try_recv().is_err());
     }
 }

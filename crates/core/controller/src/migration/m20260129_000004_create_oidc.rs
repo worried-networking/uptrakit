@@ -30,6 +30,12 @@ impl MigrationTrait for Migration {
                     .col(string(OidcProviders::ClientSecret))
                     .col(string(OidcProviders::Scopes))
                     .col(boolean(OidcProviders::AutoCreateUsers))
+                    .col(
+                        ColumnDef::new(OidcProviders::EmailVerifiedTrusted)
+                            .boolean()
+                            .not_null()
+                            .default(false),
+                    )
                     .col(string_null(OidcProviders::RoleClaimPath))
                     .col(ColumnDef::new(OidcProviders::RoleMapping).json().not_null())
                     .col(boolean(OidcProviders::IsActive))
@@ -185,6 +191,7 @@ enum OidcProviders {
     ClientSecret,
     Scopes,
     AutoCreateUsers,
+    EmailVerifiedTrusted,
     RoleClaimPath,
     RoleMapping,
     IsActive,

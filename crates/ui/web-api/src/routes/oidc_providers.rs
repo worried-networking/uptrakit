@@ -33,6 +33,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
         has_client_secret: !m.client_secret.expose_secret().is_empty(),
         scopes: m.scopes,
         auto_create_users: m.auto_create_users,
+        email_verified_trusted: m.email_verified_trusted,
         role_claim_path: m.role_claim_path,
         role_mapping: m.role_mapping.0,
         is_active: m.is_active,
@@ -105,6 +106,7 @@ pub async fn create_provider(
         )),
         scopes: Set(req.scopes),
         auto_create_users: Set(req.auto_create_users),
+        email_verified_trusted: Set(req.email_verified_trusted),
         role_claim_path: Set(req.role_claim_path),
         role_mapping: Set(RoleMapping(req.role_mapping)),
         is_active: Set(false),
@@ -279,6 +281,9 @@ pub async fn update_provider(
     }
     if let Some(auto_create_users) = req.auto_create_users {
         model.auto_create_users = Set(auto_create_users);
+    }
+    if let Some(email_verified_trusted) = req.email_verified_trusted {
+        model.email_verified_trusted = Set(email_verified_trusted);
     }
     if let Some(role_claim_path) = req.role_claim_path {
         model.role_claim_path = Set(Some(role_claim_path));

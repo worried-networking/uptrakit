@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use rand::Rng;
 use std::cmp::Ordering;
+use time::OffsetDateTime;
 use tokio::sync::{RwLock, mpsc};
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::ControllerMessage;
@@ -30,6 +31,8 @@ struct ServiceConnection {
     assigned_mqtt_clients: HashSet<Uuid>,
     /// Timestamp of last heartbeat received (MQTT only).
     last_heartbeat: Option<Instant>,
+    /// Timestamp when the connection was registered.
+    connected_at: OffsetDateTime,
 }
 
 /// Interior state protected by the `RwLock`.
@@ -105,6 +108,7 @@ impl ServiceConnectionRegistry {
             max_tenants: None,
             assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: None,
+            connected_at: OffsetDateTime::now_utc(),
         };
         let mut guard = self.inner.write().await;
         if let Some(old) = guard.connections.remove(&service_id) {
@@ -138,6 +142,7 @@ impl ServiceConnectionRegistry {
             max_tenants: Some(max_tenants),
             assigned_mqtt_clients: HashSet::new(),
             last_heartbeat: Some(Instant::now()),
+            connected_at: OffsetDateTime::now_utc(),
         };
         let mut guard = self.inner.write().await;
         if let Some(old) = guard.connections.remove(&service_id) {
@@ -190,6 +195,16 @@ impl ServiceConnectionRegistry {
     /// Check whether a service is currently connected.
     pub async fn is_connected(&self, service_id: &Uuid) -> bool {
         self.inner.read().await.connections.contains_key(service_id)
+    }
+
+    /// Get the connection time for a service, if connected.
+    pub async fn connected_at(&self, service_id: &Uuid) -> Option<OffsetDateTime> {
+        self.inner
+            .read()
+            .await
+            .connections
+            .get(service_id)
+            .map(|c| c.connected_at)
     }
 
     /// Broadcast a message to all connected services.

@@ -10,24 +10,12 @@
 
 | Severity | Count |
 |----------|-------|
-| Medium | 13 |
+| Medium | 11 |
 | Low | 9 |
 
 ---
 
 ## MEDIUM
-
-### M1. Rate Limiter Fails Open on DB Errors
-
-**File:** `src/middleware/rate_limit.rs:96-100`
-
-When the DB check fails, requests pass through. An attacker inducing DB pressure disables all rate limiting.
-
-### M2. OIDC AutoLink Bypasses Account Ownership Verification
-
-**File:** `src/auth/authentication.rs:147-159`
-
-When a user has no password and no other OIDC link, `AutoLink` fires without email ownership proof. Risk depends on OIDC provider email verification.
 
 ### M4. OCSP 1-Hour Cache Serves Stale Revocation Status
 
@@ -174,34 +162,6 @@ Per-record DB lookups for denormalized names.
 ## Fix Plans
 
 > Fix plans for open findings, ordered by severity.
-
----
-
-### Plan 19: M1 — Rate Limiter Fails Open on DB Errors
-
-**Problem:** `rate_limit_auth` middleware (`src/middleware/rate_limit.rs:96-100`) catches DB errors and allows the request through (fail-open). An attacker inducing DB pressure disables all rate limiting.
-
-**Plan:**
-1. Add configurable `fail_closed` flag per endpoint category in `EndpointRateLimit`.
-2. Set `fail_closed: true` for security-critical endpoints (login, register), `false` for others.
-3. Add an in-memory fallback rate limiter using `Mutex<HashMap<String, (u32, Instant)>>` for fail-closed endpoints.
-4. Add periodic cleanup for fallback counters.
-
-**Files:** `src/middleware/rate_limit.rs`
-
----
-
-### Plan 20: M2 — OIDC AutoLink Bypasses Account Ownership Verification
-
-**Problem:** `resolve_oidc_user` returns `AutoLink` when a user has no password and no other active OIDC link, without proof of email ownership. Risk depends on OIDC provider email verification.
-
-**Plan:**
-1. Add `email_verified` and `provider_trusts_email` to `OidcUserParams`.
-2. Guard `AutoLink` on `email_verified == Some(true)` and `provider_trusts_email == true`.
-3. Add `email_verified_trusted` flag to OIDC provider entity/config.
-4. Extract `email_verified` from ID token claims.
-
-**Files:** `src/auth/authentication.rs`, `src/routes/oidc_auth.rs`, `src/routes/oidc_providers.rs`, migration, `crates/shared/db/src/entity/oidc_provider.rs`
 
 ---
 

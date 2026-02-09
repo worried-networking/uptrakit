@@ -25,8 +25,8 @@ Commit: `b855b6f`
 | Severity | Count | Key Themes |
 |----------|-------|------------|
 | **CRITICAL** | 0 | — |
-| **HIGH** | 2 | MQTT lease race, EventPoller cursor gap |
-| **MEDIUM** | 11 | Race conditions in leases, OIDC auto-link, N+1 queries, SSRF vectors, settings desync, CRL gap |
+| **HIGH** | 0 | — |
+| **MEDIUM** | 8 | Race conditions in leases, N+1 queries, SSRF vectors, settings desync, CRL gap |
 | **LOW** | 16 | Missing validation, minor inconsistencies, defense-in-depth gaps |
 
 ---
@@ -39,49 +39,9 @@ No critical findings remain open.
 
 ## 2. High Findings
 
-### HI-6: MQTT lease race condition — no DB-level locking
-
-**File:** `web-api/src/mqtt_lease_coordinator.rs:82-155`
-
-Lease assignment uses application-level filtering without `SELECT FOR UPDATE` or unique constraint enforcement. Two controllers can simultaneously assign the same MQTT client to different services.
-
-> Also identified in wire CODEREVIEW as H5.
-
-**Fix plan:** See wire CODEREVIEW FP-8.
-
-### HI-7: EventPoller cursor gap can cause missed events
-
-**File:** `web-api/src/event_poller.rs:37-38`
-
-The poller initializes `last_seen_id` to the current max ID. Events written between initialization and the first poll, or during a crash/restart window, may be permanently skipped.
-
-> Also identified in wire CODEREVIEW as H2 and H3.
-
-**Fix plan:** See wire CODEREVIEW FP-3, FP-12.
-
 ---
 
 ## 3. Medium Findings
-
-### ME-2: OIDC auto-link without email verification
-
-**File:** `web-api/src/auth/authentication.rs:156-159`
-
-The `AutoLink` branch auto-links OIDC identity to an existing user based solely on email match. If the OIDC provider doesn't verify email addresses, this enables account takeover.
-
-**Fix plan:** [FP-ME2](#fp-me2-check-email-verified-before-auto-link)
-
-### ME-4: Rate limit fails open on database error
-
-**File:** `web-api/src/middleware/rate_limit.rs:96-99`
-
-Database outage completely disables rate limiting, allowing unrestricted brute-force attacks on auth endpoints.
-
-### ME-5: Device flow approval lacks rate limiting and permission check
-
-**Files:** `web-api/src/routes/device_auth.rs:183-215`, `middleware/rate_limit.rs:20-58`
-
-The `/api/v1/auth/device/approve` endpoint is not rate-limited (user code brute-force risk) and any authenticated user can approve device flows regardless of permissions.
 
 ### ME-7: N+1 query patterns in list endpoints
 
@@ -275,101 +235,7 @@ These aspects demonstrate strong engineering practices:
 
 ## Fix Plans
 
-> **Open Fix Plans** — The remaining fix plans below cover the unresolved findings. Additionally, 3 issues (HI-6, HI-7, ME-17) have fix plans in the wire protocol CODEREVIEW.
-
----
-
-### FP-ME2: Check email_verified before OIDC auto-link (TOP 5 — #14)
-
-**Addresses:** ME-2 (Medium — account takeover via unverified email)
-
-**Problem:** The `resolve_oidc_user()` function in `web-api/src/auth/authentication.rs:82-210` auto-links an OIDC identity to an existing user based solely on email match. The `email_verified` claim from the OIDC provider is never checked. If an OIDC provider doesn't verify email addresses (or an attacker controls a provider), they can claim any email and hijack the corresponding account.
-
-**Current auto-link decision flow (`authentication.rs:115-159`):**
-```rust
-// Check for existing user by email
-if let Some(found_user) = User::find()
-    .filter(user::Column::Email.eq(email))
-    .one(db).await?
-{
-    if !found_user.is_active { return Ok(Deactivated); }
-    // Check for existing OIDC links...
-    if has_other_oidc_link { return Ok(LinkViaOidcRequired { ... }); }
-    // Check for password...
-    if found_user.password_hash.is_some() { return Ok(LinkViaPasswordRequired { ... }); }
-    // ❌ Auto-link WITHOUT checking email_verified
-    return Ok(AutoLink { user_id: found_user.id });
-}
-```
-
-**Available but unused data:** The `openidconnect` crate's `StandardClaims` provides `email_verified()` which returns `Option<bool>`. The callback handler in `oidc_auth.rs` already extracts `claims.email()` but never calls `claims.email_verified()`.
-
-**Detailed implementation plan:**
-
-1. **Add `email_verified` to `OidcUserParams`:**
-   ```rust
-   pub struct OidcUserParams<'a> {
-       pub db: &'a DatabaseConnection,
-       pub tenant_id: Uuid,
-       pub provider_id: Uuid,
-       pub oidc_subject: &'a str,
-       pub email: &'a str,
-       pub first_name: Option<&'a str>,
-       pub last_name: Option<&'a str>,
-       pub auto_create: bool,
-       pub email_verified: Option<bool>,  // ← ADD
-   }
-   ```
-
-2. **Extract `email_verified` in the OIDC callback handler** (`oidc_auth.rs`, around lines 292-344):
-   ```rust
-   let email_verified = claims.email_verified();
-   ```
-   Pass it through to `resolve_oidc_user()` via `OidcUserParams`.
-
-3. **Gate auto-link on verified email** (`authentication.rs`, around line 156):
-   ```rust
-   // Only auto-link if the OIDC provider asserts the email is verified
-   if params.email_verified == Some(true) {
-       return Ok(OidcUserResolution::AutoLink { user_id: found_user.id });
-   }
-
-   // Email not verified (false or absent) — require explicit linking
-   if found_user.password_hash.is_some() {
-       return Ok(OidcUserResolution::LinkViaPasswordRequired {
-           user_id: found_user.id,
-       });
-   }
-
-   // No password and unverified email — cannot auto-link safely
-   // Return a new resolution variant that tells the UI to prompt manual verification
-   return Ok(OidcUserResolution::LinkViaPasswordRequired {
-       user_id: found_user.id,
-   });
-   ```
-
-4. **Log when auto-link is blocked for unverified email** (defense observability):
-   ```rust
-   tracing::info!(
-       email = %params.email,
-       provider_id = %params.provider_id,
-       email_verified = ?params.email_verified,
-       "OIDC auto-link blocked: email not verified by provider"
-   );
-   ```
-
-5. **Consider a per-provider trust setting** (optional, future enhancement):
-   Some internal IdPs (e.g., Keycloak, Authentik) are trusted to always verify emails. Add an optional `trust_email_without_verification: bool` flag to the `oidc_providers` table/config. When `true`, auto-link proceeds regardless of the `email_verified` claim.
-
-**Files to modify:**
-- `crates/ui/web-api/src/auth/authentication.rs` — add `email_verified` param, gate auto-link
-- `crates/ui/web-api/src/routes/oidc_auth.rs` — extract `email_verified` from claims, pass to resolver
-
-**Testing:**
-- Unit test: `email_verified = Some(true)` → auto-link succeeds
-- Unit test: `email_verified = Some(false)` → auto-link blocked, returns `LinkViaPasswordRequired`
-- Unit test: `email_verified = None` → auto-link blocked (absent is untrusted)
-- Unit test: new user creation still works regardless of `email_verified` (only affects auto-link)
+> **Open Fix Plans** — The remaining fix plans below cover the unresolved findings. Additionally, 1 issue (ME-17) has a fix plan in the wire protocol CODEREVIEW.
 
 ---
 
@@ -1842,8 +1708,8 @@ The following findings from `crates/shared/wire/CODEREVIEW.md` are confirmed and
 | S1 (Argon2 brute-force) | — | Confirmed, fix in wire FP-1 |
 | S2 (Anonymous timeout) | HI-5 | Fixed (wire FP-1 + connection cap) |
 | S4 (Unbounded output) | HI-3 | Fixed (wire FP-17 + ownership validation) |
-| H2 (Cursor advancement) | HI-7 | Confirmed, fix in wire FP-3 |
-| H5 (Lease TOCTOU) | HI-6 | Confirmed, fix in wire FP-8 |
+| H2 (Cursor advancement) | HI-7 | Fixed |
+| H5 (Lease TOCTOU) | HI-6 | Fixed |
 | D1 (Connection dedup) | — | Confirmed, fix in wire FP-16 |
 | D2 (Update ownership) | HI-3 | Fixed (wire FP-17) |
 | D3 (Register order) | — | Confirmed, fix in wire FP-18 |

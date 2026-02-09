@@ -84,8 +84,8 @@ impl MqttLeaseCoordinator {
             return Ok(vec![]);
         }
 
-        // Calculate how many to assign (min of requested, available, and actual unclaimed)
-        let max_to_assign = std::cmp::min(requested_count, available);
+        // Calculate how many to assign (min of requested and available capacity)
+        let max_to_assign = std::cmp::min(requested_count, available) as usize;
 
         // Start a transaction
         let txn = self
@@ -96,32 +96,39 @@ impl MqttLeaseCoordinator {
                 "failed to start transaction".into(),
             ))?;
 
-        let mut offset = 0u64;
+        if max_to_assign == 0 {
+            txn.commit().await.context(LeaseCoordinatorError::Database(
+                "failed to commit transaction".into(),
+            ))?;
+            return Ok(vec![]);
+        }
+
         let now = OffsetDateTime::now_utc();
-        let mut assigned_configs = Vec::with_capacity(max_to_assign as usize);
+        let mut assigned_clients = Vec::new();
+        let mut offset = 0u64;
 
-        while assigned_configs.len() < max_to_assign as usize {
-            let remaining = (max_to_assign as usize).saturating_sub(assigned_configs.len());
-            let batch_size = std::cmp::min(remaining, 50);
-
-            let available_clients: Vec<mqtt_client::Model> = mqtt_client::Entity::find()
+        while assigned_clients.len() < max_to_assign {
+            let batch = mqtt_client::Entity::find()
                 .filter(mqtt_client::Column::Enabled.eq(true))
-                .order_by_asc(mqtt_client::Column::Id)
+                .order_by_asc(mqtt_client::Column::CreatedAt)
                 .offset(offset)
-                .limit(batch_size as u64)
+                .limit(100)
                 .all(&txn)
                 .await
                 .context(LeaseCoordinatorError::Database(
                     "failed to query mqtt_clients".into(),
                 ))?;
 
-            if available_clients.is_empty() {
+            if batch.is_empty() {
                 break;
             }
 
-            offset = offset.saturating_add(available_clients.len() as u64);
+            let batch_len = batch.len();
+            for client in batch {
+                if assigned_clients.len() >= max_to_assign {
+                    break;
+                }
 
-            for client in &available_clients {
                 let lease = mqtt_lease::ActiveModel {
                     id: ActiveValue::Set(Uuid::now_v7()),
                     tenant_id: ActiveValue::Set(client.tenant_id),
@@ -131,17 +138,18 @@ impl MqttLeaseCoordinator {
                     created_at: ActiveValue::Set(now),
                 };
 
-                let insert_result = mqtt_lease::Entity::insert(lease)
+                match mqtt_lease::Entity::insert(lease)
                     .on_conflict(
                         OnConflict::column(mqtt_lease::Column::MqttClientId)
                             .do_nothing()
                             .to_owned(),
                     )
                     .exec(&txn)
-                    .await;
-
-                match insert_result {
-                    Ok(_) => {}
+                    .await
+                {
+                    Ok(_) => {
+                        assigned_clients.push(client);
+                    }
                     Err(sea_orm::DbErr::RecordNotInserted) => {
                         continue;
                     }
@@ -151,24 +159,29 @@ impl MqttLeaseCoordinator {
                         ))));
                     }
                 }
-
-                // Track in connection registry
-                self.connections
-                    .assign_mqtt_client(&service_id, client.id)
-                    .await;
-
-                // Build config for the service
-                assigned_configs.push(model_to_config(client));
-
-                if assigned_configs.len() >= max_to_assign as usize {
-                    break;
-                }
             }
+
+            offset = offset.saturating_add(batch_len as u64);
         }
 
         txn.commit().await.context(LeaseCoordinatorError::Database(
             "failed to commit transaction".into(),
         ))?;
+
+        let mut assigned_configs = Vec::with_capacity(assigned_clients.len());
+        for client in &assigned_clients {
+            if !self
+                .connections
+                .assign_mqtt_client(&service_id, client.id)
+                .await
+            {
+                if let Err(e) = self.rollback_lease(client.id, instance_id).await {
+                    tracing::error!(error = %e, "failed to rollback lease after disconnect");
+                }
+                continue;
+            }
+            assigned_configs.push(model_to_config(client));
+        }
 
         Ok(assigned_configs)
     }

@@ -59,6 +59,8 @@ pub enum OidcUserResolution {
     LinkViaPasswordRequired { user_id: uuid::Uuid },
     /// OIDC-only user matched by email, no link for this provider -> auto-link.
     AutoLink { user_id: uuid::Uuid },
+    /// Email is not verified or provider does not trust email verification.
+    EmailNotVerified,
     /// New user created with link.
     NewUser(uuid::Uuid),
     /// Not found and auto-create disabled.
@@ -77,6 +79,8 @@ pub struct OidcUserParams<'a, C: ConnectionTrait> {
     pub first_name: Option<&'a str>,
     pub last_name: Option<&'a str>,
     pub auto_create: bool,
+    pub email_verified: Option<bool>,
+    pub provider_trusts_email: bool,
 }
 
 /// Resolve an OIDC-authenticated user.
@@ -101,6 +105,8 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
         first_name,
         last_name,
         auto_create,
+        email_verified,
+        provider_trusts_email,
     } = params;
     // 1. Check for existing link
     let existing_link = UserOidcLink::find()
@@ -164,7 +170,11 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
             });
         }
 
-        // 2d. Auto-link
+        // 2d. Auto-link (only if email is verified and provider is trusted)
+        if !provider_trusts_email || email_verified != Some(true) {
+            return Ok(OidcUserResolution::EmailNotVerified);
+        }
+
         return Ok(OidcUserResolution::AutoLink {
             user_id: found_user.id,
         });

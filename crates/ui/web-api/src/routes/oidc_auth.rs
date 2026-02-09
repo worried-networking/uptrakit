@@ -332,6 +332,7 @@ pub async fn oidc_callback(
     // Extract standard claims
     let sub = claims.subject().to_string();
     let email = claims.email().map(|e| e.to_string()).unwrap_or_default();
+    let email_verified = claims.email_verified();
     let first_name = claims
         .given_name()
         .and_then(|n| n.get(None))
@@ -429,6 +430,8 @@ pub async fn oidc_callback(
         first_name: first_name.as_deref(),
         last_name: last_name.as_deref(),
         auto_create: provider.auto_create_users,
+        email_verified,
+        provider_trusts_email: provider.email_verified_trusted,
     })
     .await
     {
@@ -626,6 +629,10 @@ pub async fn oidc_callback(
         OidcUserResolution::NotAllowed => {
             drop(txn);
             Redirect::to("/login?error=oidc_no_account").into_response()
+        }
+        OidcUserResolution::EmailNotVerified => {
+            drop(txn);
+            Redirect::to("/login?error=oidc_email_unverified").into_response()
         }
         OidcUserResolution::Deactivated => {
             drop(txn);

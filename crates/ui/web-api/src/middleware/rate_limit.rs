@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -15,6 +17,7 @@ use crate::extract::ClientIp;
 struct EndpointRateLimit {
     max_requests: i32,
     window_secs: i64,
+    fail_closed: bool,
 }
 
 static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLock::new(|| {
@@ -24,6 +27,7 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
+                fail_closed: true,
             },
         ),
         (
@@ -31,6 +35,7 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
+                fail_closed: true,
             },
         ),
         (
@@ -38,6 +43,7 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
+                fail_closed: true,
             },
         ),
         (
@@ -45,6 +51,7 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
+                fail_closed: true,
             },
         ),
         (
@@ -52,10 +59,67 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
             EndpointRateLimit {
                 max_requests: 12,
                 window_secs: 60,
+                fail_closed: true,
+            },
+        ),
+        (
+            "/api/v1/auth/device/approve",
+            EndpointRateLimit {
+                max_requests: 5,
+                window_secs: 60,
+                fail_closed: true,
             },
         ),
     ])
 });
+
+struct LocalRateLimitEntry {
+    count: u32,
+    window_start: Instant,
+    last_seen: Instant,
+}
+
+static FALLBACK_LIMITS: LazyLock<Mutex<HashMap<String, LocalRateLimitEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn check_local_fallback(key: &str, max_requests: i32, window_secs: i64) -> RateLimitOutcome {
+    let now = Instant::now();
+    let window = Duration::from_secs(window_secs as u64);
+    let max = max_requests.max(0) as u32;
+    let mut guard = FALLBACK_LIMITS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if let Some(entry) = guard.get_mut(key) {
+        if now.duration_since(entry.window_start) >= window {
+            entry.window_start = now;
+            entry.count = 0;
+        }
+        entry.count = entry.count.saturating_add(1);
+        entry.last_seen = now;
+        if entry.count > max {
+            let elapsed = now.duration_since(entry.window_start);
+            let retry_after = window.saturating_sub(elapsed).as_secs().max(1);
+            return RateLimitOutcome::Limited {
+                retry_after_secs: retry_after,
+            };
+        }
+    } else {
+        guard.insert(
+            key.to_string(),
+            LocalRateLimitEntry {
+                count: 1,
+                window_start: now,
+                last_seen: now,
+            },
+        );
+    }
+
+    let cutoff = now.checked_sub(window.saturating_mul(2)).unwrap_or(now);
+    guard.retain(|_, entry| entry.last_seen >= cutoff);
+
+    RateLimitOutcome::Allowed
+}
 
 /// Middleware that enforces per-IP rate limits on public authentication
 /// endpoints. Non-rate-limited paths pass through immediately.
@@ -95,8 +159,22 @@ pub async fn rate_limit_auth(
         }
         Err(e) => {
             tracing::error!("rate limit check failed: {e}");
-            // Fail open: allow the request if the rate limiter is broken.
-            next.run(req).await
+            if limit.fail_closed {
+                match check_local_fallback(&key, limit.max_requests, limit.window_secs) {
+                    RateLimitOutcome::Allowed => next.run(req).await,
+                    RateLimitOutcome::Limited { retry_after_secs } => {
+                        let mut resp = error_response(
+                            StatusCode::TOO_MANY_REQUESTS,
+                            "Too many requests, please try again later",
+                        );
+                        resp.headers_mut()
+                            .insert("retry-after", http::HeaderValue::from(retry_after_secs));
+                        resp
+                    }
+                }
+            } else {
+                next.run(req).await
+            }
         }
     }
 }
@@ -113,6 +191,7 @@ mod tests {
             "/api/v1/auth/refresh",
             "/api/v1/auth/device",
             "/api/v1/auth/device/poll",
+            "/api/v1/auth/device/approve",
         ];
 
         for path in &expected {
@@ -134,7 +213,6 @@ mod tests {
         let paths = [
             "/api/v1/auth/logout",
             "/api/v1/auth/me",
-            "/api/v1/auth/device/approve",
             "/healthz",
             "/api/v1/services",
         ];
@@ -158,5 +236,21 @@ mod tests {
             poll_limit.max_requests > login_limit.max_requests,
             "device/poll should have a higher limit than login"
         );
+    }
+
+    #[test]
+    fn local_fallback_enforces_limits() {
+        let key = "test:127.0.0.1";
+        let _ = FALLBACK_LIMITS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(key);
+
+        let limit = check_local_fallback(key, 2, 60);
+        assert!(matches!(limit, RateLimitOutcome::Allowed));
+        let limit = check_local_fallback(key, 2, 60);
+        assert!(matches!(limit, RateLimitOutcome::Allowed));
+        let limit = check_local_fallback(key, 2, 60);
+        assert!(matches!(limit, RateLimitOutcome::Limited { .. }));
     }
 }

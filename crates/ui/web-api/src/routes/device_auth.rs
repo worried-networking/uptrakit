@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::auth::api_token::ApiTokenService;
 use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
+use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use axum::http::HeaderMap;
@@ -174,6 +175,7 @@ pub async fn device_auth_poll(
     responses(
         (status = 200, description = "Device authorized", body = DeviceAuthApproveResponse),
         (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
         (status = 404, description = "Device flow not found"),
         (status = 409, description = "Already authorized")
     ),
@@ -185,6 +187,10 @@ pub async fn device_auth_approve(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<DeviceAuthApproveRequest>,
 ) -> Response {
+    if !auth_user.has_permission(Permission::ViewAgents) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
     let normalized = req.user_code.replace('-', "").to_uppercase();
 
     match state
