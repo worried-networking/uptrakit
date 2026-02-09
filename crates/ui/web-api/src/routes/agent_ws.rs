@@ -131,6 +131,14 @@ pub(crate) async fn handle_agent_authenticated(
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
                             }
                             ServiceMessage::ReportHostInfo(payload) => {
+                                if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
+                                    tracing::warn!(
+                                        %agent_id,
+                                        reported = payload.protocol_version,
+                                        expected = uptrakit_internal_wire::PROTOCOL_VERSION,
+                                        "agent protocol version mismatch"
+                                    );
+                                }
                                 // Check agent version
                                 let agent_ver = match semver::Version::parse(&payload.agent_version) {
                                     Ok(v) => v,

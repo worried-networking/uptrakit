@@ -475,6 +475,7 @@ async fn handle_authenticated(
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
         ca_bundle_hash,
+        protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
         shutdown_timeout_seconds: shutdown_timeout,
     });
     let Some(json) = serialize_controller_msg(out_seq, settings_msg) else {

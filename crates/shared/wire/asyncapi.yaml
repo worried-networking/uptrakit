@@ -1127,6 +1127,7 @@ components:
         - type
         - host_info
         - agent_version
+        - protocol_version
       properties:
         seq:
           type: integer
@@ -1146,6 +1147,11 @@ components:
           examples:
             - "0.0.1"
             - "1.2.3"
+        protocol_version:
+          type: integer
+          format: int32
+          description: Wire protocol version reported by the agent
+          default: 1
 
     renewCertificatePayload:
       type: object
@@ -1180,6 +1186,7 @@ components:
         - seq
         - type
         - renewal_window_hours
+        - protocol_version
       properties:
         seq:
           type: integer
@@ -1207,6 +1214,11 @@ components:
           default: ""
           examples:
             - abc123def456
+        protocol_version:
+          type: integer
+          format: int32
+          description: Wire protocol version used by the controller
+          default: 1
         shutdown_timeout_seconds:
           type: integer
           format: int32
@@ -1772,6 +1784,7 @@ components:
         - seq
         - type
         - instance_id
+        - protocol_version
       properties:
         seq:
           type: integer
@@ -1804,6 +1817,11 @@ components:
             Omitted when empty (empty array is the default).
           examples:
             - ["660e8400-e29b-41d4-a716-446655440001"]
+        protocol_version:
+          type: integer
+          format: int32
+          description: Wire protocol version reported by the MQTT service
+          default: 1
 
     mqttRegisteredPayload:
       type: object

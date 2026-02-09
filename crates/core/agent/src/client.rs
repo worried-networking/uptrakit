@@ -90,6 +90,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     let report_msg = ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
         host_info,
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
     });
     let report_json =
         serde_json::to_string(&out_seq.wrap_service(report_msg)).context_to::<Error>()?;
@@ -265,6 +266,13 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                     shutdown_timeout = ?settings.shutdown_timeout_seconds,
                                     "received service settings"
                                 );
+                                if settings.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
+                                    tracing::warn!(
+                                        reported = settings.protocol_version,
+                                        expected = uptrakit_internal_wire::PROTOCOL_VERSION,
+                                        "controller protocol version mismatch"
+                                    );
+                                }
                                 shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
                                 renewal_sleep.as_mut().reset(
                                     tokio::time::Instant::now()

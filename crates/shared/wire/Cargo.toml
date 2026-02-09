@@ -13,3 +13,9 @@ time = { workspace = true }
 uuid = { workspace = true }
 uptrakit-provider-core = { path = "../../providers/core" }
 uptrakit-shared-types = { workspace = true }
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+all = "deny"

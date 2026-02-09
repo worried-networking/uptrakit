@@ -207,6 +207,7 @@ async fn run_authenticated(
         instance_id: instance_id.to_string(),
         max_tenants: args.max_tenants,
         active_mqtt_clients: vec![], // Empty on fresh start
+        protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
     }))
     .await
     .context_to::<AppError>()?;

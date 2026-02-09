@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 use uuid::Uuid;
 
+/// Current wire protocol version for service-controller communication.
+pub const PROTOCOL_VERSION: u16 = 1;
+
 // Re-export provider-core types used directly in wire protocol messages.
 pub use uptrakit_provider_core::{ProviderType, ReleaseAsset, ReleaseInfo};
 // Re-export `SecretString` for callers that need it for secret fields.
@@ -306,6 +309,9 @@ pub struct ReportHostInfoPayload {
     pub host_info: HostInfo,
     /// Agent binary version (e.g., "0.0.1").
     pub agent_version: String,
+    /// Wire protocol version reported by the agent.
+    #[serde(default = "protocol_version_default")]
+    pub protocol_version: u16,
 }
 
 /// Payload for enrollment confirmation.
@@ -410,6 +416,9 @@ pub struct ServiceSettingsPayload {
     pub renewal_window_hours: u16,
     #[serde(default)]
     pub ca_bundle_hash: String,
+    /// Wire protocol version used by the controller.
+    #[serde(default = "protocol_version_default")]
+    pub protocol_version: u16,
     /// Maximum time in seconds to wait for in-flight operations during shutdown.
     /// Present for agents, absent for MQTT services.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -615,6 +624,13 @@ pub struct MqttRegisterPayload {
     /// Currently active MQTT client IDs (for reconnect reconciliation).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_mqtt_clients: Vec<Uuid>,
+    /// Wire protocol version reported by the MQTT service.
+    #[serde(default = "protocol_version_default")]
+    pub protocol_version: u16,
+}
+
+const fn protocol_version_default() -> u16 {
+    PROTOCOL_VERSION
 }
 
 /// Payload for registration acknowledgment.
@@ -949,6 +965,7 @@ mod tests {
                 architecture: Some("x86_64".to_string()),
             },
             agent_version: "0.0.1".to_string(),
+            protocol_version: PROTOCOL_VERSION,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"report_host_info"#));
@@ -1142,6 +1159,7 @@ mod tests {
             instance_id: "mqtt-node1-01936a1e".to_string(),
             max_tenants: 10,
             active_mqtt_clients: vec![TEST_UUID_1, TEST_UUID_2],
+            protocol_version: PROTOCOL_VERSION,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"register"#));
@@ -1157,6 +1175,7 @@ mod tests {
             instance_id: "mqtt-node2-01936a1e".to_string(),
             max_tenants: 0,
             active_mqtt_clients: vec![],
+            protocol_version: PROTOCOL_VERSION,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("active_mqtt_clients"));
@@ -1284,12 +1303,13 @@ mod tests {
         let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123".to_string(),
+            protocol_version: PROTOCOL_VERSION,
             shutdown_timeout_seconds: Some(120),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","shutdown_timeout_seconds":120}"#
+            r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","protocol_version":1,"shutdown_timeout_seconds":120}"#
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -1300,6 +1320,7 @@ mod tests {
         let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123def".to_string(),
+            protocol_version: PROTOCOL_VERSION,
             shutdown_timeout_seconds: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
@@ -1319,6 +1340,7 @@ mod tests {
             ControllerMessage::ServiceSettings(ServiceSettingsPayload {
                 renewal_window_hours: 12,
                 ca_bundle_hash: "def456".to_string(),
+                protocol_version: PROTOCOL_VERSION,
                 shutdown_timeout_seconds: Some(60),
             })
         );
@@ -1334,6 +1356,7 @@ mod tests {
             ControllerMessage::ServiceSettings(ServiceSettingsPayload {
                 renewal_window_hours: 6,
                 ca_bundle_hash: String::new(),
+                protocol_version: PROTOCOL_VERSION,
                 shutdown_timeout_seconds: None,
             })
         );
@@ -1349,6 +1372,7 @@ mod tests {
             ControllerMessage::ServiceSettings(ServiceSettingsPayload {
                 renewal_window_hours: 6,
                 ca_bundle_hash: "abc".to_string(),
+                protocol_version: PROTOCOL_VERSION,
                 shutdown_timeout_seconds: None,
             })
         );

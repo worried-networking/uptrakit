@@ -96,6 +96,14 @@ pub(crate) async fn handle_mqtt_authenticated(
 
                 match service_msg {
                     ServiceMessage::Register(payload) => {
+                        if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
+                            tracing::warn!(
+                                %service_id,
+                                reported = payload.protocol_version,
+                                expected = uptrakit_internal_wire::PROTOCOL_VERSION,
+                                "MQTT service protocol version mismatch"
+                            );
+                        }
                         break (
                             payload.instance_id,
                             payload.max_tenants,

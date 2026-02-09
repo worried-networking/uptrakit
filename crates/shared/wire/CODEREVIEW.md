@@ -53,14 +53,6 @@ Once a WebSocket connection is established (even anonymous), there's no throttli
 
 ## 4. Minor / Code Quality
 
-#### M5. No explicit lint configuration in the wire crate
-
-**Location:** `wire/Cargo.toml`
-
-The wire crate's `Cargo.toml` doesn't configure lints. Relying on workspace-level clippy is fine, but making it explicit prevents accidental regressions.
-
----
-
 ## Summary Table
 
 | ID | Category | Severity | Summary | Status |
@@ -68,48 +60,3 @@ The wire crate's `Cargo.toml` doesn't configure lints. Relying on workspace-leve
 | A4 | Architecture | Important | Read-modify-write per output line | **Partially fixed** |
 | S3 | Security | Important | No WS message rate limiting | **Partially fixed** |
 | H3 | HA | Minor | EventPoller startup cursor assumption | Open |
-| M5 | Quality | Minor | No explicit lint config | Open |
-
----
-
-## Fix Plans
-
-| Plan | Addresses | Summary | Status |
-|------|-----------|---------|--------|
-| FP-14 | M5 | Add explicit lint configuration to the wire crate | |
-| FP-15 | H3 | Add wire protocol version negotiation | |
-
-### FP-14. Add explicit lint configuration to the wire crate
-
-**Addresses:** M5
-
-**Problem:** The wire crate's `Cargo.toml` has no `[lints]` section. Making it explicit prevents accidental regressions.
-
-**Plan:**
-
-1. Add `[lints] workspace = true` or crate-local lints to the wire crate's `Cargo.toml`.
-2. Fix any new warnings surfaced by stricter lints.
-
-**Files to modify:**
-- `crates/shared/wire/Cargo.toml` — add `[lints]` section
-- `crates/shared/wire/src/lib.rs` — fix any new warnings
-
----
-
-### FP-15. Add wire protocol version negotiation
-
-**Addresses:** H3 (related), forward-looking architectural improvement
-
-**Problem:** The wire protocol has no version negotiation mechanism. Unknown message `type` values cause deserialization failures.
-
-**Plan:**
-
-1. Add `protocol_version` field to `ReportHostInfoPayload`, `MqttRegisterPayload`, and `ServiceSettingsPayload`.
-2. Define a `PROTOCOL_VERSION` constant in the wire crate.
-3. Log version mismatches on the controller side (informational, not enforcement).
-4. Update `asyncapi.yaml`.
-
-**Files to modify:**
-- `crates/shared/wire/src/lib.rs` — `PROTOCOL_VERSION` constant, new fields
-- `crates/shared/wire/asyncapi.yaml` — document new fields
-- WebSocket handler files — log protocol version
