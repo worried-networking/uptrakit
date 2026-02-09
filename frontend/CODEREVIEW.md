@@ -11,73 +11,28 @@
 
 The frontend is a compact, well-structured SvelteKit SPA for the Uptrakit controller dashboard. It handles authentication (password + OIDC), device authorization, agent/host management, and system settings. The codebase uses modern Svelte 5 runes and Skeleton UI v4 consistently.
 
-The review originally identified **28 findings** across 5 categories. **24 have been fixed** across multiple implementation rounds, including all critical and high severity issues. The remaining **4 findings** are medium severity items focused on UX polish and scalability.
+The review identified **28 findings** across 5 categories. **All 28 have been fixed** across multiple implementation rounds, including all critical, high, and medium severity items.
 
-### Remaining Severity Distribution
+### Final Severity Distribution
 
-| Severity | Count |
-|----------|-------|
-| Critical | 0 |
-| High | 0 |
-| Medium | 4 |
-| Low | 0 |
-
----
-
-## Category 2: Architecture & Code Quality
-
-### F-17: Hosts page does not support pagination controls (Medium)
-
-**File**: `src/routes/hosts/+page.svelte`
-
-The API returns a `PaginatedResponse` with `total`, `page`, `per_page`, `total_pages`, but the hosts page only extracts `items` and never renders pagination controls.
-
-**Fix plan (FP-17)**: Add page navigation controls. Track `currentPage` and `totalPages` state. Call `getHosts(page, perPage)` when page changes.
-
-### F-18: Agents page uses flat list without pagination (Medium)
-
-**File**: `src/routes/agents/+page.svelte`
-
-The agents page loads all agents without pagination. For installations with many agents, this could be slow.
-
-**Fix plan (FP-18)**: Add pagination controls to the agents page, matching the `PaginatedResponse<ServiceResponse>` type already in use.
+| Severity | Found | Fixed |
+|----------|-------|-------|
+| Critical | 3 | 3 |
+| High | 6 | 6 |
+| Medium | 14 | 14 |
+| Low | 5 | 5 |
+| **Total** | **28** | **28** |
 
 ---
 
-## Category 4: UX & Accessibility
+## All Findings — Resolved
 
-### F-26: Context menus are positioned with fixed pixel coordinates (Medium)
+All fix plans (FP-1 through FP-28) have been implemented. Key improvements include:
 
-**Files**: `src/lib/components/ContextMenu.svelte`
-
-The menu is positioned using `fixed` positioning based on `getBoundingClientRect()`. This breaks when the page is scrolled, the menu overflows the viewport, or the window is resized.
-
-**Fix plan (FP-26)**: Use the Popover API or a library like Floating UI for robust positioning. At minimum, add viewport boundary checks.
-
-### F-27: No empty-state guidance for new users (Medium)
-
-**Files**: `agents/+page.svelte`, `hosts/+page.svelte`
-
-Empty states show minimal text like "No agents found." New users get no guidance on how to add agents or hosts.
-
-**Fix plan (FP-27)**: Add helpful empty states with instructions and links to docs.
-
----
-
-## Fix Plan Summary
-
-| ID | Severity | Effort | Description | Status |
-|----|----------|--------|-------------|--------|
-| FP-17 | Medium | Medium | Add pagination controls to hosts page | Open |
-| FP-18 | Medium | Medium | Fix agents pagination support | Open |
-| FP-26 | Medium | Medium | Use robust menu positioning | Open |
-| FP-27 | Medium | Small | Add helpful empty states | Open |
-
-### Recommended Priority Order
-
-1. **FP-17, FP-18** — Pagination (scalability)
-2. **FP-26** — Robust menu positioning (UX)
-3. **FP-27** — Helpful empty states (onboarding)
+- **Security**: CSP hardening, autocomplete attributes, input validation, command injection prevention, race condition fixes
+- **Architecture**: Extracted shared `authenticatedFetch`/`request<T>`/`requestVoid` API helpers, centralized notification state, removed dead code
+- **UX & Accessibility**: Focus-trapped modals, viewport-aware context menus, copy-to-clipboard for tokens, helpful empty states, pagination for agents and hosts
+- **Reliability**: Proper `onMount` for data loading, token refresh race condition fix, theme initialization cleanup
 
 ---
 
@@ -92,12 +47,15 @@ Empty states show minimal text like "No agents found." New users get no guidance
 7. **Proper autocomplete hints**: Login/register forms use correct `autocomplete` attributes for password managers.
 8. **Static adapter**: Correct choice for embedding in the controller binary.
 9. **Centralized auth guards**: Single auth guard in layout prevents missing guards on new pages.
-10. **Shared UI components**: `ConfirmDialog`, `ModalBackdrop`, `ContextMenu` with proper ARIA roles.
+10. **Shared UI components**: `ConfirmDialog`, `ModalBackdrop`, `ContextMenu`, `Pagination` with proper ARIA roles.
 11. **Content Security Policy**: CSP meta tag restricts script/style/image sources.
-12. **Modular settings page**: 6 focused sub-components instead of a monolithic 952-line file.
+12. **Modular settings page**: 6 focused sub-components instead of a monolithic file.
 13. **Loading states on actions**: Buttons disabled during API calls with visual feedback to prevent double-submissions.
 14. **Copy-to-clipboard**: Enrollment tokens have one-click copy with temporary confirmation feedback.
 15. **Device code validation**: Client-side format validation before display or API submission.
 16. **Focus trapping**: Modals trap focus within the dialog and restore it on close.
 17. **Type-safe API layer**: Separate `request<T>` and `requestVoid` helpers eliminate type lies for 204 responses.
 18. **Shared notifications**: Centralized notification state avoids duplicated success/error/clear logic across pages.
+19. **Pagination**: Both agents and hosts pages support server-side pagination with shared `Pagination` component.
+20. **Viewport-aware menus**: Context menus clamp to viewport boundaries with invisible-until-ready pattern.
+21. **Helpful empty states**: Empty agent/host tables provide onboarding guidance instead of bare "not found" text.

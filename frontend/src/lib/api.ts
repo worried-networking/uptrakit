@@ -206,10 +206,12 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 	return res.json();
 }
 
-export function getAgents(status?: string): Promise<PaginatedResponse<ServiceResponse>> {
+export function getAgents(status?: string, page?: number, perPage?: number): Promise<PaginatedResponse<ServiceResponse>> {
 	const params = new URLSearchParams();
 	params.set('type', 'agent');
 	if (status) params.set('status', status);
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
 	return request(`/services?${params.toString()}`);
 }
 

@@ -7,6 +7,7 @@
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 
 	let agents: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -17,14 +18,18 @@
 	let mergeSource: { id: string; name: string } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
 	let submitting: boolean = $state(false);
+	let currentPage: number = $state(1);
+	let totalPages: number = $state(1);
 
-	onMount(loadAgents);
+	onMount(() => loadAgents(1));
 
-	async function loadAgents() {
+	async function loadAgents(page: number) {
 		try {
 			error = null;
-			const result = await getAgents();
+			const result = await getAgents(undefined, page);
 			agents = result.items;
+			currentPage = result.page;
+			totalPages = result.total_pages;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load agents';
 		}
@@ -181,12 +186,19 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan="6" class="text-center">No agents found.</td>
+						<td colspan="6" class="text-center py-8">
+							<p class="text-lg font-medium">No agents registered yet</p>
+							<p class="mt-1 text-sm text-surface-500">
+								Agents connect automatically when you run the Uptrakit agent on a host using an enrollment token.
+							</p>
+						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	</div>
+
+	<Pagination {currentPage} {totalPages} onPageChange={loadAgents} />
 
 	{#if openMenuId}
 		{@const agent = agents.find((a) => a.id === openMenuId)}

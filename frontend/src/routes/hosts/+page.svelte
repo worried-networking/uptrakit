@@ -8,6 +8,7 @@
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import Pagination from '$lib/components/Pagination.svelte';
 
 	let hosts: HostResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -16,14 +17,18 @@
 	let confirmAction: { hostId: string; action: 'deactivate'; name: string } | null = $state(null);
 	let editHost: { id: string; friendlyName: string } | null = $state(null);
 	let submitting: boolean = $state(false);
+	let currentPage: number = $state(1);
+	let totalPages: number = $state(1);
 
-	onMount(loadHosts);
+	onMount(() => loadHosts(1));
 
-	async function loadHosts() {
+	async function loadHosts(page: number) {
 		try {
 			error = null;
-			const result = await getHosts();
+			const result = await getHosts(page);
 			hosts = result.items;
+			currentPage = result.page;
+			totalPages = result.total_pages;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load hosts';
 		}
@@ -162,12 +167,19 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={canManage ? 8 : 7} class="text-center">No hosts found.</td>
+						<td colspan={canManage ? 8 : 7} class="text-center py-8">
+							<p class="text-lg font-medium">No hosts discovered yet</p>
+							<p class="mt-1 text-sm text-surface-500">
+								Hosts appear here automatically when an approved agent reports from a new machine.
+							</p>
+						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	</div>
+
+	<Pagination {currentPage} {totalPages} onPageChange={loadHosts} />
 
 	{#if openMenuId}
 		{@const host = hosts.find((h) => h.id === openMenuId)}
