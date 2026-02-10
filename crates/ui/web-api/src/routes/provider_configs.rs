@@ -30,7 +30,7 @@ fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigRes
         id: m.id.to_string(),
         name: m.name,
         provider_type: m.provider_type.clone(),
-        config: ProviderRegistry::mask_secrets_str(&m.provider_type, &m.config),
+        config: ProviderRegistry::mask_config_secrets_str(&m.provider_type, &m.config),
         enabled: m.enabled,
         created_at: m
             .created_at
@@ -248,7 +248,7 @@ pub async fn update_provider_config(
     // Validate new config if provided
     if let Some(ref mut new_config) = req.config.clone() {
         // Restore masked secrets from existing config
-        ProviderRegistry::restore_secrets_str(&provider_type, new_config, &existing.config);
+        ProviderRegistry::restore_config_secrets_str(&provider_type, new_config, &existing.config);
 
         if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
             return error_response(StatusCode::BAD_REQUEST, e.to_string());
@@ -271,7 +271,11 @@ pub async fn update_provider_config(
     }
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being saved
-        ProviderRegistry::restore_secrets_str(&provider_type, &mut config, model.config.as_ref());
+        ProviderRegistry::restore_config_secrets_str(
+            &provider_type,
+            &mut config,
+            model.config.as_ref(),
+        );
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
@@ -383,37 +387,38 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_secret123"
         });
-        let masked = ProviderRegistry::mask_secrets_str("github_releases", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("github_releases", &config);
         assert_eq!(masked["auth_token"], SECRET_MASK);
         assert_eq!(masked["owner"], "octocat");
     }
 
     #[test]
-    fn mask_preserves_null_token() {
+    fn mask_null_token_becomes_masked() {
         let config = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world",
             "auth_token": null
         });
-        let masked = ProviderRegistry::mask_secrets_str("github_releases", &config);
-        assert!(masked["auth_token"].is_null());
+        let masked = ProviderRegistry::mask_config_secrets_str("github_releases", &config);
+        // with_secrets_masked always sets auth_token to "***"
+        assert_eq!(masked["auth_token"], SECRET_MASK);
     }
 
     #[test]
-    fn mask_without_token_field() {
+    fn mask_without_token_field_adds_masked() {
         let config = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let masked = ProviderRegistry::mask_secrets_str("github_releases", &config);
-        // No auth_token field should be added
-        assert!(masked.get("auth_token").is_none());
+        let masked = ProviderRegistry::mask_config_secrets_str("github_releases", &config);
+        // with_secrets_masked always adds auth_token as "***"
+        assert_eq!(masked["auth_token"], SECRET_MASK);
     }
 
     #[test]
     fn mask_unknown_provider_type() {
         let config = serde_json::json!({"key": "value"});
-        let masked = ProviderRegistry::mask_secrets_str("unknown_type", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("unknown_type", &config);
         assert_eq!(masked, config);
     }
 
@@ -429,7 +434,7 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_real_token"
         });
-        ProviderRegistry::restore_secrets_str("github_releases", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("github_releases", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
@@ -445,7 +450,7 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_old_token"
         });
-        ProviderRegistry::restore_secrets_str("github_releases", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("github_releases", &mut incoming, &existing);
         assert_eq!(incoming["auth_token"], "ghp_new_token");
     }
 
@@ -493,7 +498,7 @@ mod tests {
                 "password": "secret123"
             }
         });
-        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
         assert_eq!(masked["auth"]["password"], SECRET_MASK);
         assert_eq!(masked["auth"]["username"], "user");
     }
@@ -507,7 +512,7 @@ mod tests {
                 "token": "ghcr_token_secret"
             }
         });
-        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
         assert_eq!(masked["auth"]["token"], SECRET_MASK);
     }
 
@@ -516,7 +521,8 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
+        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
+        // None auth stays absent (serialized with skip_serializing_if)
         assert!(masked.get("auth").is_none());
     }
 
@@ -526,8 +532,9 @@ mod tests {
             "image": "nginx",
             "auth": null
         });
-        let masked = ProviderRegistry::mask_secrets_str("docker_registry", &config);
-        assert!(masked["auth"].is_null());
+        let masked = ProviderRegistry::mask_config_secrets_str("docker_registry", &config);
+        // JSON null deserializes to None, which stays absent after masking
+        assert!(masked.get("auth").is_none());
     }
 
     #[test]
@@ -548,7 +555,7 @@ mod tests {
                 "password": "real_password"
             }
         });
-        ProviderRegistry::restore_secrets_str("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("docker_registry", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "real_password");
     }
 
@@ -568,7 +575,7 @@ mod tests {
                 "token": "real_token"
             }
         });
-        ProviderRegistry::restore_secrets_str("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("docker_registry", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["token"], "real_token");
     }
 
@@ -590,7 +597,7 @@ mod tests {
                 "password": "old_password"
             }
         });
-        ProviderRegistry::restore_secrets_str("docker_registry", &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets_str("docker_registry", &mut incoming, &existing);
         assert_eq!(incoming["auth"]["password"], "new_password");
     }
 
