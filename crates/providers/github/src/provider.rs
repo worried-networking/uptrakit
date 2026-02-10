@@ -3,8 +3,13 @@ use regex::Regex;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio::sync::mpsc;
 
-use uptrakit_provider_core::{Provider, ReleaseAsset, UpstreamRelease, Version};
+use uptrakit_provider_core::command::{run_command, send_output, shell_escape};
+use uptrakit_provider_core::{
+    Provider, ProviderError, ReleaseAsset, UpdateContext, UpdateOutputLine, UpdateOutputStream,
+    UpstreamRelease, Version,
+};
 
 use crate::api_types::{GitHubApiError, GitHubRelease};
 use crate::config::GitHubConfig;
@@ -19,14 +24,18 @@ pub struct GitHubProvider {
     client: reqwest::Client,
     config: GitHubConfig,
     asset_filters: Vec<Regex>,
+    /// Package identifier (owner/repo).
+    package_identifier: String,
 }
 
 impl GitHubProvider {
     /// Create a new `GitHubProvider` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
-    pub fn new(config: GitHubConfig) -> Result<Self> {
-        config.validate()?;
+    pub fn new(config: GitHubConfig, package_identifier: String) -> Result<Self> {
+        config
+            .validate()
+            .map_err(|e| report!(GitHubError::Configuration(e.to_string())))?;
 
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -72,11 +81,11 @@ impl GitHubProvider {
                 })
             })
             .collect::<Result<_>>()?;
-
         Ok(Self {
             client,
             config,
             asset_filters,
+            package_identifier,
         })
     }
 
@@ -179,9 +188,9 @@ impl Provider for GitHubProvider {
         tracing::debug!(url = %url, "fetching GitHub releases");
 
         let response = self.client.get(&url).send().await.map_err(|e| {
-            report!(uptrakit_provider_core::ProviderError::Configuration(
-                format!("HTTP request failed: {e}")
-            ))
+            report!(ProviderError::Configuration(format!(
+                "HTTP request failed: {e}"
+            )))
         })?;
 
         let status = response.status();
@@ -205,11 +214,9 @@ impl Provider for GitHubProvider {
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("unknown")
                         .to_string();
-                    return Err(report!(
-                        uptrakit_provider_core::ProviderError::Configuration(format!(
-                            "GitHub API rate limit exceeded (resets at {reset_at})"
-                        ))
-                    ));
+                    return Err(report!(ProviderError::Configuration(format!(
+                        "GitHub API rate limit exceeded (resets at {reset_at})"
+                    ))));
                 }
             }
 
@@ -218,17 +225,15 @@ impl Provider for GitHubProvider {
                 .map(|e| e.message)
                 .unwrap_or(body);
 
-            return Err(report!(
-                uptrakit_provider_core::ProviderError::Configuration(format!(
-                    "GitHub API error: {status_code} {message}"
-                ))
-            ));
+            return Err(report!(ProviderError::Configuration(format!(
+                "GitHub API error: {status_code} {message}"
+            ))));
         }
 
         let releases: Vec<GitHubRelease> = response.json().await.map_err(|e| {
-            report!(uptrakit_provider_core::ProviderError::Serialization(
-                format!("failed to parse GitHub API response: {e}")
-            ))
+            report!(ProviderError::Serialization(format!(
+                "failed to parse GitHub API response: {e}"
+            )))
         })?;
 
         let upstream_releases: Vec<UpstreamRelease> = releases
@@ -244,12 +249,82 @@ impl Provider for GitHubProvider {
 
         Ok(upstream_releases)
     }
+
+    async fn detect_installed_version(&self) -> uptrakit_provider_core::Result<Option<Version>> {
+        Ok(None)
+    }
+
+    async fn execute_update(
+        &self,
+        ctx: &UpdateContext,
+        output_tx: &mpsc::Sender<UpdateOutputLine>,
+    ) -> uptrakit_provider_core::Result<String> {
+        let mut output = String::new();
+
+        let release_info = ctx
+            .release_info
+            .as_ref()
+            .ok_or_else(|| report!(ProviderError::MissingReleaseInfo))?;
+
+        send_output(
+            output_tx,
+            &format!(
+                "Downloading release {} from {}",
+                release_info.tag, release_info.release_url
+            ),
+            UpdateOutputStream::Stdout,
+        )
+        .await;
+        output.push_str(&format!(
+            "Downloading release {} from {}\n",
+            release_info.tag, release_info.release_url
+        ));
+
+        if let Some(install_cmd) = ctx.provider_config.get("install_command") {
+            if let Some(cmd_str) = install_cmd.as_str() {
+                let cmd = cmd_str
+                    .replace("{version}", &shell_escape(&ctx.to_version))
+                    .replace("{tag}", &shell_escape(&release_info.tag))
+                    .replace(
+                        "{package_identifier}",
+                        &shell_escape(&ctx.package_identifier),
+                    );
+
+                send_output(
+                    output_tx,
+                    &format!("Running install command: {cmd}"),
+                    UpdateOutputStream::Stdout,
+                )
+                    .await;
+
+                match run_command(&cmd, output_tx).await {
+                    Ok(cmd_output) => {
+                        output.push_str(&cmd_output);
+                    }
+                    Err(e) => {
+                        return Err(report!(ProviderError::InstallFailed(e.to_string())));
+                    }
+                }
+            }
+        } else {
+            send_output(
+                output_tx,
+                "No install_command configured, skipping automated installation",
+                UpdateOutputStream::Stdout,
+            )
+                .await;
+            output.push_str("No install_command configured, skipping automated installation\n");
+        }
+
+        Ok(output)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
+    use tokio::sync::mpsc;
 
     fn test_config() -> GitHubConfig {
         GitHubConfig {
@@ -264,7 +339,7 @@ mod tests {
     }
 
     fn test_provider() -> GitHubProvider {
-        GitHubProvider::new(test_config()).expect("valid config")
+        GitHubProvider::new(test_config(), "octocat/hello-world".to_string()).expect("valid config")
     }
 
     fn make_release(tag: &str, draft: bool, prerelease: bool) -> GitHubRelease {
@@ -309,7 +384,8 @@ mod tests {
     fn include_prerelease_when_configured() {
         let mut config = test_config();
         config.include_prereleases = true;
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider =
+            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = provider.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
@@ -336,7 +412,8 @@ mod tests {
     fn custom_tag_prefix() {
         let mut config = test_config();
         config.tag_strip_prefix = "release-".to_string();
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider =
+            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = provider.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
@@ -346,7 +423,8 @@ mod tests {
     fn asset_filtering() {
         let mut config = test_config();
         config.asset_patterns = vec![r".*\.tar\.gz$".to_string()];
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider =
+            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -428,7 +506,8 @@ mod tests {
     fn url_construction_custom_base() {
         let mut config = test_config();
         config.api_base_url = Some("https://ghe.corp.com/api/v3".to_string());
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider =
+            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
         let url = provider.releases_url();
         assert_eq!(
             url,
@@ -475,6 +554,56 @@ mod tests {
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
         };
-        assert!(GitHubProvider::new(config).is_err());
+        assert!(
+            GitHubProvider::new(config, "octocat/hello-world".to_string()).is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn detect_installed_version_returns_none() {
+        let provider = test_provider();
+        let result = provider.detect_installed_version().await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_update_missing_release_info_returns_error() {
+        let provider = test_provider();
+        let (tx, _rx) = mpsc::channel(100);
+        let ctx = UpdateContext {
+            to_version: "1.0.0".to_string(),
+            package_identifier: "octocat/hello-world".to_string(),
+            provider_config: serde_json::json!({}),
+            release_info: None,
+        };
+        let result = provider.execute_update(&ctx, &tx).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err.current_context(), ProviderError::MissingReleaseInfo),
+            "Expected MissingReleaseInfo, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_update_no_install_command_succeeds() {
+        let provider = test_provider();
+        let (tx, mut rx) = mpsc::channel(100);
+        let ctx = UpdateContext {
+            to_version: "1.0.0".to_string(),
+            package_identifier: "octocat/hello-world".to_string(),
+            provider_config: serde_json::json!({}),
+            release_info: Some(uptrakit_provider_core::ReleaseInfo {
+                tag: "v1.0.0".to_string(),
+                release_url: "https://example.com".to_string(),
+                assets: vec![],
+            }),
+        };
+        let result = provider.execute_update(&ctx, &tx).await;
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.contains("No install_command configured"));
+        rx.close();
+        while rx.recv().await.is_some() {}
     }
 }

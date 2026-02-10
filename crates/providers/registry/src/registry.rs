@@ -4,7 +4,7 @@ use uptrakit_provider_core::{Provider, ProviderType};
 use uptrakit_provider_docker_registry::{
     DockerRegistryConfig, DockerRegistryLocalProvider, DockerRegistryProvider,
 };
-use uptrakit_provider_github::{GitHubConfig, GitHubLocalProvider, GitHubProvider};
+use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 use uptrakit_provider_proxmox_helper_scripts::ProxmoxHelperScriptsLocalProvider;
 
 use crate::error::{RegistryError, Result};
@@ -40,7 +40,8 @@ impl ProviderRegistry {
                 let github_config: GitHubConfig =
                     serde_json::from_value(config.clone()).context_to()?;
                 let provider =
-                    GitHubLocalProvider::new(github_config, package_identifier.to_string());
+                    GitHubProvider::new(github_config, package_identifier.to_string())
+                        .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::DockerRegistry => {
@@ -73,7 +74,7 @@ impl ProviderRegistry {
             ProviderType::GithubReleases => {
                 let github_config: GitHubConfig =
                     serde_json::from_value(config.clone()).context_to()?;
-                let provider = GitHubProvider::new(github_config)
+                let provider = GitHubProvider::new(github_config, "".to_string()) // package_identifier not needed for remote
                     .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
