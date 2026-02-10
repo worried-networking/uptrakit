@@ -13,7 +13,9 @@ import type {
 	MessageResponse,
 	MqttClientResponse,
 	MqttLimitResponse,
+	ProviderConfigResponse,
 	CreateMqttClient,
+	CreateSoftwareItemRequest,
 	NetworkSettings,
 	OidcLinkRequest,
 	OidcProviderResponse,
@@ -23,6 +25,7 @@ import type {
 	RegistrationSettings,
 	RenewServerCertResponse,
 	ServiceResponse,
+	SoftwareItemResponse,
 	SystemAlertsResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
@@ -395,4 +398,37 @@ export function getSystemAlerts(): Promise<SystemAlertsResponse> {
 
 export function renewServerCertificate(): Promise<RenewServerCertResponse> {
 	return request('/settings/renew-server-certificate', { method: 'POST' });
+}
+
+// --- Software Items ---
+
+export function getProviderConfigs(
+	page?: number,
+	perPage?: number
+): Promise<PaginatedResponse<ProviderConfigResponse>> {
+	const params = new URLSearchParams();
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
+	const query = params.toString();
+	return request(`/provider-configs${query ? `?${query}` : ''}`);
+}
+
+export function getSoftwareItems(
+	page?: number,
+	perPage?: number
+): Promise<PaginatedResponse<SoftwareItemResponse>> {
+	const params = new URLSearchParams();
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
+	const query = params.toString();
+	return request(`/software-items${query ? `?${query}` : ''}`);
+}
+
+export function createSoftwareItem(
+	data: CreateSoftwareItemRequest
+): Promise<SoftwareItemResponse> {
+	return request('/software-items', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
 }

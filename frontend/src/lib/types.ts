@@ -280,6 +280,39 @@ export interface PaginatedResponse<T> {
 	total_pages: number;
 }
 
+export interface ProviderConfigResponse {
+	id: string;
+	name: string;
+	provider_type: string;
+	config: Record<string, unknown>;
+	enabled: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface CreateSoftwareItemRequest {
+	name: string;
+	provider_config_id: string;
+	package_identifier?: string;
+	config_override?: Record<string, unknown> | null;
+	enabled?: boolean;
+}
+
+export interface SoftwareItemResponse {
+	id: string;
+	name: string;
+	provider_config_id: string;
+	provider_config_name: string;
+	provider_type: string;
+	package_identifier: string;
+	config_override: Record<string, unknown> | null;
+	enabled: boolean;
+	last_checked_at: string | null;
+	host_count: number;
+	created_at: string;
+	updated_at: string;
+}
+
 export interface UpdateOidcProviderRequest {
 	name?: string;
 	slug?: string;

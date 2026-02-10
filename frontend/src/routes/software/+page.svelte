@@ -1,0 +1,263 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { user } from '$lib/auth';
+	import { getSoftwareItems, getProviderConfigs, createSoftwareItem } from '$lib/api';
+	import { showError, showSuccess, clearError } from '$lib/notifications.svelte';
+	import { formatDate } from '$lib/utils';
+	import Pagination from '$lib/components/Pagination.svelte';
+	import type { ProviderConfigResponse, SoftwareItemResponse } from '$lib/types';
+	import { Permission } from '$lib/types';
+
+	let items: SoftwareItemResponse[] = $state([]);
+	let providerConfigs: ProviderConfigResponse[] = $state([]);
+	let error: string | null = $state(null);
+	let configError: string | null = $state(null);
+	let currentPage: number = $state(1);
+	let totalPages: number = $state(1);
+	let loading: boolean = $state(false);
+	let submitting: boolean = $state(false);
+
+	let name: string = $state('');
+	let providerConfigId: string = $state('');
+	let packageIdentifier: string = $state('');
+	let enabled: boolean = $state(true);
+	let configOverrideText: string = $state('');
+
+	const canView = $derived($user?.permissions.includes(Permission.ViewSettings) ?? false);
+	const canManage = $derived($user?.permissions.includes(Permission.ManageSettings) ?? false);
+
+	const homebrewConfigs = $derived(
+		providerConfigs.filter((config) => config.provider_type === 'homebrew')
+	);
+
+	onMount(() => {
+		if (canView) {
+			loadAll(1);
+		}
+	});
+
+	async function loadAll(page: number) {
+		loading = true;
+		try {
+			error = null;
+			const [itemsResult, configsResult] = await Promise.all([
+				getSoftwareItems(page),
+				getProviderConfigs(1, 500)
+			]);
+			items = itemsResult.items;
+			currentPage = itemsResult.page;
+			totalPages = itemsResult.total_pages;
+			providerConfigs = configsResult.items;
+			if (!providerConfigId) {
+				const preferred = configsResult.items.find((config) => config.provider_type === 'homebrew');
+				providerConfigId = preferred?.id ?? configsResult.items[0]?.id ?? '';
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to load software items';
+		} finally {
+			loading = false;
+		}
+	}
+
+	function parseConfigOverride(): Record<string, unknown> | null {
+		if (!configOverrideText.trim()) return null;
+		try {
+			const parsed = JSON.parse(configOverrideText);
+			if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+				throw new Error('Config override must be a JSON object.');
+			}
+			configError = null;
+			return parsed as Record<string, unknown>;
+		} catch (e) {
+			configError = e instanceof Error ? e.message : 'Invalid JSON.';
+			return null;
+		}
+	}
+
+	async function submitSoftware() {
+		if (!canManage || submitting) return;
+		const trimmedName = name.trim();
+		const trimmedPackage = packageIdentifier.trim();
+		if (!trimmedName) {
+			error = 'Name is required.';
+			showError(error);
+			return;
+		}
+		if (!providerConfigId) {
+			error = 'Provider config is required.';
+			showError(error);
+			return;
+		}
+
+		const overrideValue = parseConfigOverride();
+		if (configOverrideText.trim() && !overrideValue) {
+			showError(configError ?? 'Invalid config override JSON.');
+			return;
+		}
+
+		submitting = true;
+		try {
+			error = null;
+			clearError();
+			await createSoftwareItem({
+				name: trimmedName,
+				provider_config_id: providerConfigId,
+				package_identifier: trimmedPackage || undefined,
+				config_override: overrideValue ?? undefined,
+				enabled
+			});
+			showSuccess('Software item registered.');
+			name = '';
+			packageIdentifier = '';
+			configOverrideText = '';
+			enabled = true;
+			await loadAll(1);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to register software item';
+			showError(error);
+		} finally {
+			submitting = false;
+		}
+	}
+</script>
+
+{#if $user}
+	<h1 class="h1 mb-4">Software</h1>
+
+	{#if !canView}
+		<aside class="rounded-lg p-4 preset-filled-error-500">
+			<p>You do not have permission to view software items.</p>
+		</aside>
+	{:else}
+		{#if canManage}
+			<section class="mb-6">
+				<div class="card space-y-4 p-6">
+					<div>
+						<h2 class="h3">Register Software</h2>
+						<p class="text-sm text-surface-500">
+							Choose a provider config and register a package for tracking. Updates are still manual.
+						</p>
+					</div>
+
+					{#if providerConfigs.length === 0}
+						<aside class="rounded-lg p-4 preset-filled-warning-500">
+							<p>No provider configs are available. Create one before registering software.</p>
+						</aside>
+					{:else}
+						<div class="grid gap-4 md:grid-cols-2">
+							<label class="label">
+								<span>Name</span>
+								<input class="input" bind:value={name} placeholder="Firefox" />
+							</label>
+							<label class="label">
+								<span>Provider config</span>
+								<select class="select" bind:value={providerConfigId}>
+									{#each providerConfigs as config (config.id)}
+										<option value={config.id}>
+											{config.name} ({config.provider_type})
+										</option>
+									{/each}
+								</select>
+							</label>
+							<label class="label">
+								<span>Package identifier</span>
+								<input class="input" bind:value={packageIdentifier} placeholder="firefox" />
+							</label>
+							<label class="label">
+								<span>Enabled</span>
+								<div class="flex items-center gap-2">
+									<input type="checkbox" class="checkbox" bind:checked={enabled} />
+									<span class="text-sm">Track updates for this item</span>
+								</div>
+							</label>
+						</div>
+						<label class="label">
+							<span>Config override (JSON, optional)</span>
+							<textarea
+								class="textarea"
+								rows="4"
+								bind:value={configOverrideText}
+								placeholder={'{"asset_patterns": [".*linux"]}'}
+							></textarea>
+						</label>
+						{#if configError}
+							<p class="text-sm text-error-500">{configError}</p>
+						{/if}
+						{#if homebrewConfigs.length > 0}
+							<p class="text-xs text-surface-500">
+								Homebrew package identifiers should be formula or cask names (e.g. "wget", "homebrew/cask/firefox").
+							</p>
+						{/if}
+						<div class="flex justify-end">
+							<button
+								class="btn preset-filled-primary-500"
+								disabled={submitting || providerConfigs.length === 0}
+								onclick={submitSoftware}
+							>
+								{submitting ? 'Registering...' : 'Register Software'}
+							</button>
+						</div>
+					{/if}
+				</div>
+			</section>
+		{/if}
+
+		{#if error}
+			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
+				<p>{error}</p>
+			</aside>
+		{/if}
+
+		<div class="table-wrap">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Provider</th>
+						<th>Package</th>
+						<th>Status</th>
+						<th>Hosts</th>
+						<th>Last Checked</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#if loading}
+						<tr>
+							<td colspan="6" class="py-6 text-center">Loading...</td>
+						</tr>
+					{:else}
+						{#each items as item (item.id)}
+							<tr>
+								<td>{item.name}</td>
+								<td>
+									<span class="badge preset-tonal">{item.provider_config_name}</span>
+								</td>
+								<td>{item.package_identifier || '\u2014'}</td>
+								<td>
+									{#if item.enabled}
+										<span class="badge preset-filled-success-500">Enabled</span>
+									{:else}
+										<span class="badge preset-tonal">Disabled</span>
+									{/if}
+								</td>
+								<td>{item.host_count}</td>
+								<td>{formatDate(item.last_checked_at)}</td>
+							</tr>
+						{:else}
+							<tr>
+								<td colspan="6" class="py-8 text-center">
+									<p class="text-lg font-medium">No software registered yet</p>
+									<p class="mt-1 text-sm text-surface-500">
+										Register a package to start tracking.
+									</p>
+								</td>
+							</tr>
+						{/each}
+					{/if}
+				</tbody>
+			</table>
+		</div>
+
+		<Pagination {currentPage} {totalPages} onPageChange={loadAll} />
+	{/if}
+{/if}

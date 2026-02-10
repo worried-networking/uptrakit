@@ -66,6 +66,7 @@
 	const allNavItems = [
 		{ href: '/', label: 'Home' },
 		{ href: '/services', label: 'Services' },
+		{ href: '/software', label: 'Software', permission: Permission.ViewSettings },
 		{ href: '/hosts', label: 'Hosts' },
 		{ href: '/settings', label: 'Settings', permission: Permission.ViewSettings },
 		{ href: '/settings/global', label: 'Global Settings', permission: Permission.ManageGlobalSettings }

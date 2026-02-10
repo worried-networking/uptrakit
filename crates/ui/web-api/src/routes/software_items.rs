@@ -82,6 +82,46 @@ fn build_detail_response(
     }
 }
 
+fn validate_homebrew_package_identifier(value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("package_identifier must not be empty".to_string());
+    }
+    if value != trimmed {
+        return Err(
+            "package_identifier must not include leading or trailing whitespace".to_string(),
+        );
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err("package_identifier must not contain whitespace".to_string());
+    }
+    if value.len() > 200 {
+        return Err("package_identifier is too long".to_string());
+    }
+
+    for ch in value.chars() {
+        let valid = ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '@' | '+' | '/');
+        if !valid {
+            return Err(format!(
+                "package_identifier contains invalid character: {ch}"
+            ));
+        }
+    }
+
+    if value.split('/').any(|segment| segment.is_empty()) {
+        return Err("package_identifier contains an empty segment".to_string());
+    }
+
+    if value
+        .split('/')
+        .any(|segment| segment == "." || segment == "..")
+    {
+        return Err("package_identifier contains invalid segment".to_string());
+    }
+
+    Ok(())
+}
+
 /// Find a non-deactivated software item by ID, scoped to a tenant.
 async fn find_active_item(
     db: &sea_orm::DatabaseConnection,
@@ -241,6 +281,11 @@ pub async fn create_software_item(
         };
 
     let package_identifier = req.package_identifier.unwrap_or_default();
+    if config.provider_type == "homebrew"
+        && let Err(e) = validate_homebrew_package_identifier(&package_identifier)
+    {
+        return error_response(StatusCode::BAD_REQUEST, e);
+    }
 
     // Validate config_override if provided
     if let Some(ref override_val) = req.config_override {
@@ -1259,5 +1304,47 @@ mod tests {
             result.unwrap_err(),
             ConfigOverrideError::NotAnObject
         ));
+    }
+
+    #[test]
+    fn validate_homebrew_package_identifier_accepts_valid() {
+        let cases = [
+            "wget",
+            "node@18",
+            "homebrew/cask/firefox",
+            "custom-tap/tool",
+            "pkg.name",
+            "pkg_name",
+            "pkg+name",
+        ];
+
+        for case in cases {
+            assert!(
+                validate_homebrew_package_identifier(case).is_ok(),
+                "expected valid: {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_homebrew_package_identifier_rejects_invalid() {
+        let cases = [
+            "",
+            " ",
+            " leading",
+            "trailing ",
+            "has space",
+            "tap//pkg",
+            "tap/../pkg",
+            "tap/./pkg",
+            "pkg$",
+        ];
+
+        for case in cases {
+            assert!(
+                validate_homebrew_package_identifier(case).is_err(),
+                "expected invalid: {case}"
+            );
+        }
     }
 }
