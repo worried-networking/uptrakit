@@ -88,10 +88,10 @@ impl RegistryAuth {
         // Apply credentials
         match &self.auth_config {
             Some(DockerAuth::Basic { username, password }) => {
-                request = request.basic_auth(username, Some(password));
+                request = request.basic_auth(username, Some(password.expose_secret()));
             }
             Some(DockerAuth::Bearer { token }) => {
-                request = request.bearer_auth(token);
+                request = request.bearer_auth(token.expose_secret());
             }
             None => {}
         }

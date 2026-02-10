@@ -1,7 +1,11 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
+use uptrakit_provider_core::SecretString;
 
 use crate::error::{DockerRegistryError, Result};
+
+/// Sentinel value used to indicate a masked secret in API responses.
+const SECRET_MASK: &str = "***";
 
 /// Tracking mode for the Docker Registry provider.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,9 +23,12 @@ pub enum TrackingMode {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DockerAuth {
     /// HTTP Basic authentication.
-    Basic { username: String, password: String },
+    Basic {
+        username: String,
+        password: SecretString,
+    },
     /// Bearer token authentication.
-    Bearer { token: String },
+    Bearer { token: SecretString },
 }
 
 /// Configuration for the Docker Registry provider.
@@ -122,6 +129,66 @@ impl DockerRegistryConfig {
     /// The tag to track in digest mode.
     pub fn resolved_tracked_tag(&self) -> &str {
         self.tracked_tag.as_deref().unwrap_or("latest")
+    }
+
+    /// Return a copy with secret fields masked for API responses.
+    ///
+    /// `None` auth stays `None`. When auth is present, password/token fields
+    /// are replaced with the mask sentinel.
+    pub fn with_secrets_masked(&self) -> Self {
+        let mut masked = self.clone();
+        masked.auth = masked.auth.map(|a| match a {
+            DockerAuth::Basic { username, .. } => DockerAuth::Basic {
+                username,
+                password: SecretString::new(SECRET_MASK.to_string()),
+            },
+            DockerAuth::Bearer { .. } => DockerAuth::Bearer {
+                token: SecretString::new(SECRET_MASK.to_string()),
+            },
+        });
+        masked
+    }
+
+    /// Restore masked secrets from an existing config (for PUT updates).
+    ///
+    /// If the incoming auth credentials contain the mask sentinel, take
+    /// the value from `existing`.
+    pub fn restore_secrets_from(&mut self, existing: &Self) {
+        let Some(existing_auth) = &existing.auth else {
+            return;
+        };
+        let Some(incoming_auth) = &mut self.auth else {
+            return;
+        };
+        match (incoming_auth, existing_auth) {
+            (
+                DockerAuth::Basic {
+                    password: incoming_pw,
+                    ..
+                },
+                DockerAuth::Basic {
+                    password: existing_pw,
+                    ..
+                },
+            ) => {
+                if incoming_pw.expose_secret() == SECRET_MASK {
+                    *incoming_pw = existing_pw.clone();
+                }
+            }
+            (
+                DockerAuth::Bearer {
+                    token: incoming_token,
+                },
+                DockerAuth::Bearer {
+                    token: existing_token,
+                },
+            ) => {
+                if incoming_token.expose_secret() == SECRET_MASK {
+                    *incoming_token = existing_token.clone();
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Best-effort web URL for the image.
@@ -494,7 +561,7 @@ mod tests {
             registry: Some("ghcr.io".to_string()),
             auth: Some(DockerAuth::Basic {
                 username: "user".to_string(),
-                password: "pass".to_string(),
+                password: SecretString::new("pass".to_string()),
             }),
             tracking_mode: TrackingMode::DigestTracking,
             tag_patterns: vec![r"^\d+".to_string()],
@@ -535,7 +602,7 @@ mod tests {
     fn auth_basic_serialization() {
         let auth = DockerAuth::Basic {
             username: "user".to_string(),
-            password: "pass".to_string(),
+            password: SecretString::new("pass".to_string()),
         };
         let json = serde_json::to_string(&auth).expect("serialize");
         assert!(json.contains(r#""type":"basic""#));
@@ -544,7 +611,7 @@ mod tests {
         match deserialized {
             DockerAuth::Basic { username, password } => {
                 assert_eq!(username, "user");
-                assert_eq!(password, "pass");
+                assert_eq!(password.expose_secret(), "pass");
             }
             _ => panic!("expected Basic auth"),
         }
@@ -553,16 +620,173 @@ mod tests {
     #[test]
     fn auth_bearer_serialization() {
         let auth = DockerAuth::Bearer {
-            token: "my-token".to_string(),
+            token: SecretString::new("my-token".to_string()),
         };
         let json = serde_json::to_string(&auth).expect("serialize");
         assert!(json.contains(r#""type":"bearer""#));
         let deserialized: DockerAuth = serde_json::from_str(&json).expect("deserialize");
         match deserialized {
             DockerAuth::Bearer { token } => {
-                assert_eq!(token, "my-token");
+                assert_eq!(token.expose_secret(), "my-token");
             }
             _ => panic!("expected Bearer auth"),
+        }
+    }
+
+    #[test]
+    fn with_secrets_masked_basic_auth() {
+        let config = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: Some(DockerAuth::Basic {
+                username: "user".to_string(),
+                password: SecretString::new("secret123".to_string()),
+            }),
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        let masked = config.with_secrets_masked();
+        match masked.auth.unwrap() {
+            DockerAuth::Basic { username, password } => {
+                assert_eq!(username, "user");
+                assert_eq!(password.expose_secret(), SECRET_MASK);
+            }
+            _ => panic!("expected Basic auth"),
+        }
+    }
+
+    #[test]
+    fn with_secrets_masked_bearer_auth() {
+        let config = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: Some(DockerAuth::Bearer {
+                token: SecretString::new("ghcr_token".to_string()),
+            }),
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        let masked = config.with_secrets_masked();
+        match masked.auth.unwrap() {
+            DockerAuth::Bearer { token } => {
+                assert_eq!(token.expose_secret(), SECRET_MASK);
+            }
+            _ => panic!("expected Bearer auth"),
+        }
+    }
+
+    #[test]
+    fn with_secrets_masked_no_auth_stays_none() {
+        let config = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: None,
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        let masked = config.with_secrets_masked();
+        assert!(masked.auth.is_none());
+    }
+
+    #[test]
+    fn restore_secrets_from_basic_password() {
+        let existing = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: Some(DockerAuth::Basic {
+                username: "user".to_string(),
+                password: SecretString::new("real_password".to_string()),
+            }),
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        let mut incoming = existing.with_secrets_masked();
+        incoming.restore_secrets_from(&existing);
+        match incoming.auth.unwrap() {
+            DockerAuth::Basic { password, .. } => {
+                assert_eq!(password.expose_secret(), "real_password");
+            }
+            _ => panic!("expected Basic auth"),
+        }
+    }
+
+    #[test]
+    fn restore_secrets_from_bearer_token() {
+        let existing = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: Some(DockerAuth::Bearer {
+                token: SecretString::new("real_token".to_string()),
+            }),
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        let mut incoming = existing.with_secrets_masked();
+        incoming.restore_secrets_from(&existing);
+        match incoming.auth.unwrap() {
+            DockerAuth::Bearer { token } => {
+                assert_eq!(token.expose_secret(), "real_token");
+            }
+            _ => panic!("expected Bearer auth"),
+        }
+    }
+
+    #[test]
+    fn restore_secrets_from_keeps_new_password() {
+        let existing = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: Some(DockerAuth::Basic {
+                username: "user".to_string(),
+                password: SecretString::new("old_password".to_string()),
+            }),
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        let mut incoming = DockerRegistryConfig {
+            image: "nginx".to_string(),
+            registry: None,
+            auth: Some(DockerAuth::Basic {
+                username: "user".to_string(),
+                password: SecretString::new("new_password".to_string()),
+            }),
+            tracking_mode: TrackingMode::SemverTags,
+            tag_patterns: vec![],
+            tag_strip_prefix: "v".to_string(),
+            include_prereleases: false,
+            tracked_tag: None,
+            page_size: 1000,
+        };
+        incoming.restore_secrets_from(&existing);
+        match incoming.auth.unwrap() {
+            DockerAuth::Basic { password, .. } => {
+                assert_eq!(password.expose_secret(), "new_password");
+            }
+            _ => panic!("expected Basic auth"),
         }
     }
 

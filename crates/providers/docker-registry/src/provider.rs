@@ -90,9 +90,9 @@ impl Provider for DockerRegistryProvider {
         match self.config.tracking_mode {
             TrackingMode::SemverTags => {
                 let tags = self.registry_client.list_tags().await.map_err(|e| {
-                    report!(ProviderError::Configuration(
-                        format!("failed to list tags: {e}")
-                    ))
+                    report!(ProviderError::Configuration(format!(
+                        "failed to list tags: {e}"
+                    )))
                 })?;
 
                 let releases = self.tags_to_releases(tags);
@@ -110,9 +110,9 @@ impl Provider for DockerRegistryProvider {
                     .get_manifest_digest(tag)
                     .await
                     .map_err(|e| {
-                        report!(ProviderError::Configuration(
-                            format!("failed to get manifest digest: {e}")
-                        ))
+                        report!(ProviderError::Configuration(format!(
+                            "failed to get manifest digest: {e}"
+                        )))
                     })?;
 
                 let release_url = self.config.image_web_url(tag);
