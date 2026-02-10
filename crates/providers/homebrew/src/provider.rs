@@ -3,7 +3,7 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_provider_core::command::{run_command_exec, send_output};
 use uptrakit_provider_core::{
-    DiscoveredSoftware, Provider, ProviderCapability, ProviderError, Result, UpdateContext,
+    DiscoveredSoftware, Provider, ProviderCapability, ProviderError, ReleaseInfo, Result,
     UpdateOutputLine, UpdateOutputStream, UpstreamRelease, Version,
 };
 
@@ -141,6 +141,15 @@ impl HomebrewProvider {
     fn is_cask(&self) -> bool {
         self.config.package_type == HomebrewPackageType::Cask
     }
+
+    fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
+        if package_identifier.trim().is_empty() {
+            return Err(report!(ProviderError::Configuration(
+                "package_identifier must not be empty".to_string()
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -207,112 +216,16 @@ impl Provider for HomebrewProvider {
         Ok(Self::parse_installed_packages(&json, self.is_cask()))
     }
 
-    async fn detect_installed_version(&self) -> Result<Option<Version>> {
-        // detect_installed_version requires a package_identifier which is not
-        // available at the provider level. The agent calls this via
-        // check_version() which provides the config including the package
-        // identifier. For Homebrew, the package_identifier is passed via the
-        // provider config at runtime. This default returns None.
-        Ok(None)
-    }
-
-    async fn fetch_releases(&self) -> Result<Vec<UpstreamRelease>> {
-        // fetch_releases also requires a package_identifier. For Homebrew,
-        // the agent calls this after creating a per-item provider. This
-        // default returns an empty vec.
-        Ok(vec![])
-    }
-
-    async fn execute_update(
-        &self,
-        ctx: &UpdateContext,
-        output_tx: &mpsc::Sender<UpdateOutputLine>,
-    ) -> Result<String> {
-        let pkg = &ctx.package_identifier;
-        let mut output = String::new();
-
-        let action = if self.is_cask() {
-            format!("brew upgrade --cask {pkg}")
-        } else {
-            format!("brew upgrade {pkg}")
-        };
-
-        send_output(
-            output_tx,
-            &format!("Running: {action}"),
-            UpdateOutputStream::Stdout,
-        )
-        .await;
-        output.push_str(&format!("Running: {action}\n"));
-
-        let args: Vec<String> = if self.is_cask() {
-            vec!["upgrade".to_string(), "--cask".to_string(), pkg.to_string()]
-        } else {
-            vec!["upgrade".to_string(), pkg.to_string()]
-        };
-
-        let (cmd_output, _exit_code) = run_command_exec("brew", &args, None, output_tx)
-            .await
-            .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output);
-
-        Ok(output)
-    }
-}
-
-/// A package-specific Homebrew provider that knows the package identifier.
-///
-/// Created by the agent for per-item version checks and release fetches.
-pub struct HomebrewPackageProvider {
-    config: HomebrewConfig,
-    package_identifier: String,
-}
-
-impl HomebrewPackageProvider {
-    /// Create a new package-specific Homebrew provider.
-    pub fn new(config: HomebrewConfig, package_identifier: String) -> Self {
-        Self {
-            config,
-            package_identifier,
-        }
-    }
-
-    fn is_cask(&self) -> bool {
-        self.config.package_type == HomebrewPackageType::Cask
-    }
-}
-
-#[async_trait]
-impl Provider for HomebrewPackageProvider {
-    fn capabilities(&self) -> &'static [ProviderCapability] {
-        &[
-            ProviderCapability::DiscoverLocalSoftware,
-            ProviderCapability::RefreshPackageIndex,
-        ]
-    }
-
-    async fn refresh_package_index(&self) -> Result<()> {
-        let (tx, _rx) = mpsc::channel(1);
-        let (_output, exit_code) = run_command_exec("brew", &["update".to_string()], None, &tx)
-            .await
-            .map_err(|e| {
-                report!(ProviderError::ProviderInternal(format!(
-                    "brew update failed: {e}"
-                )))
-            })?;
-
-        if exit_code != 0 {
-            return Err(report!(ProviderError::CommandFailed(exit_code)));
-        }
-        Ok(())
-    }
-
-    async fn detect_installed_version(&self) -> Result<Option<Version>> {
-        let pkg = &self.package_identifier;
+    async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
+        self.require_package_identifier(package_identifier)?;
         let (tx, _rx) = mpsc::channel(1);
         let (output, exit_code) = run_command_exec(
             "brew",
-            &["info".to_string(), "--json=v2".to_string(), pkg.to_string()],
+            &[
+                "info".to_string(),
+                "--json=v2".to_string(),
+                package_identifier.to_string(),
+            ],
             None,
             &tx,
         )
@@ -334,17 +247,21 @@ impl Provider for HomebrewPackageProvider {
         })?;
 
         Ok(
-            HomebrewProvider::parse_installed_version(&json, pkg, self.is_cask())
+            Self::parse_installed_version(&json, package_identifier, self.is_cask())
                 .map(|v| Version::new(&v)),
         )
     }
 
-    async fn fetch_releases(&self) -> Result<Vec<UpstreamRelease>> {
-        let pkg = &self.package_identifier;
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
+        self.require_package_identifier(package_identifier)?;
         let (tx, _rx) = mpsc::channel(1);
         let (output, exit_code) = run_command_exec(
             "brew",
-            &["info".to_string(), "--json=v2".to_string(), pkg.to_string()],
+            &[
+                "info".to_string(),
+                "--json=v2".to_string(),
+                package_identifier.to_string(),
+            ],
             None,
             &tx,
         )
@@ -365,7 +282,8 @@ impl Provider for HomebrewPackageProvider {
             )))
         })?;
 
-        let Some(version_str) = HomebrewProvider::parse_latest_version(&json, pkg, self.is_cask())
+        let Some(version_str) =
+            Self::parse_latest_version(&json, package_identifier, self.is_cask())
         else {
             return Ok(vec![]);
         };
@@ -399,11 +317,29 @@ impl Provider for HomebrewPackageProvider {
 
     async fn execute_update(
         &self,
-        ctx: &UpdateContext,
+        package_identifier: &str,
+        _to_version: &str,
+        _provider_config: &serde_json::Value,
+        _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
-        let pkg = &ctx.package_identifier;
+        self.require_package_identifier(package_identifier)?;
+        let pkg = package_identifier;
         let mut output = String::new();
+
+        let action = if self.is_cask() {
+            format!("brew upgrade --cask {pkg}")
+        } else {
+            format!("brew upgrade {pkg}")
+        };
+
+        send_output(
+            output_tx,
+            &format!("Running: {action}"),
+            UpdateOutputStream::Stdout,
+        )
+        .await;
+        output.push_str(&format!("Running: {action}\n"));
 
         let args: Vec<String> = if self.is_cask() {
             vec!["upgrade".to_string(), "--cask".to_string(), pkg.to_string()]
@@ -644,24 +580,17 @@ mod tests {
         assert_eq!(provider.capabilities().len(), 2);
     }
 
-    #[test]
-    fn homebrew_package_provider_capabilities() {
-        let provider = HomebrewPackageProvider::new(HomebrewConfig::default(), "wget".to_string());
-        assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
-        assert!(provider.has_capability(ProviderCapability::RefreshPackageIndex));
+    #[tokio::test]
+    async fn homebrew_provider_detect_installed_empty_identifier_fails() {
+        let provider = HomebrewProvider::new(HomebrewConfig::default());
+        let result = provider.detect_installed_version("").await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn homebrew_provider_detect_installed_returns_none() {
+    async fn homebrew_provider_fetch_releases_empty_identifier_fails() {
         let provider = HomebrewProvider::new(HomebrewConfig::default());
-        let result = provider.detect_installed_version().await.unwrap();
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn homebrew_provider_fetch_releases_returns_empty() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default());
-        let result = provider.fetch_releases().await.unwrap();
-        assert!(result.is_empty());
+        let result = provider.fetch_releases("").await;
+        assert!(result.is_err());
     }
 }

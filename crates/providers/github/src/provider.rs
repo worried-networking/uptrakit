@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use uptrakit_provider_core::command::{run_command, send_output, shell_escape};
 use uptrakit_provider_core::{
-    Provider, ProviderError, ReleaseAsset, UpdateContext, UpdateOutputLine, UpdateOutputStream,
+    Provider, ProviderError, ReleaseAsset, ReleaseInfo, UpdateOutputLine, UpdateOutputStream,
     UpstreamRelease, Version,
 };
 
@@ -181,7 +181,10 @@ impl GitHubProvider {
 
 #[async_trait]
 impl Provider for GitHubProvider {
-    async fn fetch_releases(&self) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
+    async fn fetch_releases(
+        &self,
+        _package_identifier: &str,
+    ) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         let url = self.releases_url();
         tracing::debug!(url = %url, "fetching GitHub releases");
 
@@ -248,21 +251,25 @@ impl Provider for GitHubProvider {
         Ok(upstream_releases)
     }
 
-    async fn detect_installed_version(&self) -> uptrakit_provider_core::Result<Option<Version>> {
+    async fn detect_installed_version(
+        &self,
+        _package_identifier: &str,
+    ) -> uptrakit_provider_core::Result<Option<Version>> {
         Ok(None)
     }
 
     async fn execute_update(
         &self,
-        ctx: &UpdateContext,
+        package_identifier: &str,
+        to_version: &str,
+        provider_config: &serde_json::Value,
+        release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_provider_core::Result<String> {
         let mut output = String::new();
 
-        let release_info = ctx
-            .release_info
-            .as_ref()
-            .ok_or_else(|| report!(ProviderError::MissingReleaseInfo))?;
+        let release_info =
+            release_info.ok_or_else(|| report!(ProviderError::MissingReleaseInfo))?;
 
         send_output(
             output_tx,
@@ -278,15 +285,12 @@ impl Provider for GitHubProvider {
             release_info.tag, release_info.release_url
         ));
 
-        if let Some(install_cmd) = ctx.provider_config.get("install_command") {
+        if let Some(install_cmd) = provider_config.get("install_command") {
             if let Some(cmd_str) = install_cmd.as_str() {
                 let cmd = cmd_str
-                    .replace("{version}", &shell_escape(&ctx.to_version))
+                    .replace("{version}", &shell_escape(to_version))
                     .replace("{tag}", &shell_escape(&release_info.tag))
-                    .replace(
-                        "{package_identifier}",
-                        &shell_escape(&ctx.package_identifier),
-                    );
+                    .replace("{package_identifier}", &shell_escape(package_identifier));
 
                 send_output(
                     output_tx,
@@ -555,7 +559,7 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
         let provider = test_provider();
-        let result = provider.detect_installed_version().await.unwrap();
+        let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -563,13 +567,15 @@ mod tests {
     async fn execute_update_missing_release_info_returns_error() {
         let provider = test_provider();
         let (tx, _rx) = mpsc::channel(100);
-        let ctx = UpdateContext {
-            to_version: "1.0.0".to_string(),
-            package_identifier: "octocat/hello-world".to_string(),
-            provider_config: serde_json::json!({}),
-            release_info: None,
-        };
-        let result = provider.execute_update(&ctx, &tx).await;
+        let result = provider
+            .execute_update(
+                "octocat/hello-world",
+                "1.0.0",
+                &serde_json::json!({}),
+                None,
+                &tx,
+            )
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -582,17 +588,20 @@ mod tests {
     async fn execute_update_no_install_command_succeeds() {
         let provider = test_provider();
         let (tx, mut rx) = mpsc::channel(100);
-        let ctx = UpdateContext {
-            to_version: "1.0.0".to_string(),
-            package_identifier: "octocat/hello-world".to_string(),
-            provider_config: serde_json::json!({}),
-            release_info: Some(uptrakit_provider_core::ReleaseInfo {
-                tag: "v1.0.0".to_string(),
-                release_url: "https://example.com".to_string(),
-                assets: vec![],
-            }),
+        let release_info = ReleaseInfo {
+            tag: "v1.0.0".to_string(),
+            release_url: "https://example.com".to_string(),
+            assets: vec![],
         };
-        let result = provider.execute_update(&ctx, &tx).await;
+        let result = provider
+            .execute_update(
+                "octocat/hello-world",
+                "1.0.0",
+                &serde_json::json!({}),
+                Some(&release_info),
+                &tx,
+            )
+            .await;
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("No install_command configured"));

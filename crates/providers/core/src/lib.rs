@@ -8,7 +8,7 @@ pub mod version;
 pub use error::{ProviderError, Result};
 pub use traits::Provider;
 pub use types::{
-    DiscoveredSoftware, ProviderCapability, ProviderType, ReleaseAsset, ReleaseInfo, UpdateContext,
+    DiscoveredSoftware, ProviderCapability, ProviderType, ReleaseAsset, ReleaseInfo,
     UpstreamRelease,
 };
 pub use version::Version;

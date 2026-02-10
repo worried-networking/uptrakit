@@ -378,6 +378,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         let outcome = crate::version_check::check_version(
                                             assignment.provider_type.clone(),
                                             &assignment.config,
+                                            &assignment.package_identifier,
                                         ).await;
                                         VersionCheckResult {
                                             software_item_id: assignment.software_item_id,

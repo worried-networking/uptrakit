@@ -3,7 +3,7 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_provider_core::command::{run_command_exec, send_output};
 use uptrakit_provider_core::{
-    Provider, ProviderCapability, ProviderError, Result, UpdateContext, UpdateOutputLine,
+    Provider, ProviderCapability, ProviderError, ReleaseInfo, Result, UpdateOutputLine,
     UpdateOutputStream, Version,
 };
 
@@ -31,19 +31,21 @@ impl Provider for ProxmoxHelperScriptsProvider {
         &[ProviderCapability::DiscoverLocalSoftware]
     }
 
-    async fn detect_installed_version(&self) -> Result<Option<Version>> {
+    async fn detect_installed_version(&self, _package_identifier: &str) -> Result<Option<Version>> {
         Ok(None)
     }
 
     async fn execute_update(
         &self,
-        ctx: &UpdateContext,
+        _package_identifier: &str,
+        _to_version: &str,
+        provider_config: &serde_json::Value,
+        _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         let mut output = String::new();
 
-        let script_url = ctx
-            .provider_config
+        let script_url = provider_config
             .get("script_url")
             .and_then(|v| v.as_str())
             .ok_or_else(|| report!(ProviderError::MissingConfig("script_url".to_string())))?;
@@ -84,7 +86,7 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
         let provider = ProxmoxHelperScriptsProvider::new();
-        let result = provider.detect_installed_version().await.unwrap();
+        let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -92,13 +94,9 @@ mod tests {
     async fn execute_update_missing_script_url_returns_error() {
         let provider = ProxmoxHelperScriptsProvider::new();
         let (tx, _rx) = mpsc::channel(100);
-        let ctx = UpdateContext {
-            to_version: "1.0.0".to_string(),
-            package_identifier: "test-script".to_string(),
-            provider_config: serde_json::json!({}),
-            release_info: None,
-        };
-        let result = provider.execute_update(&ctx, &tx).await;
+        let result = provider
+            .execute_update("test-script", "1.0.0", &serde_json::json!({}), None, &tx)
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(

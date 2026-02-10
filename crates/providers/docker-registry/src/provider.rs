@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use uptrakit_provider_core::command::{run_command, run_command_exec, send_output, shell_escape};
 use uptrakit_provider_core::{
-    Provider, ProviderError, UpdateContext, UpdateOutputLine, UpdateOutputStream, UpstreamRelease,
+    Provider, ProviderError, ReleaseInfo, UpdateOutputLine, UpdateOutputStream, UpstreamRelease,
     Version,
 };
 
@@ -86,7 +86,10 @@ impl DockerRegistryProvider {
 
 #[async_trait]
 impl Provider for DockerRegistryProvider {
-    async fn fetch_releases(&self) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
+    async fn fetch_releases(
+        &self,
+        _package_identifier: &str,
+    ) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         match self.config.tracking_mode {
             TrackingMode::SemverTags => {
                 let tags = self.registry_client.list_tags().await.map_err(|e| {
@@ -137,19 +140,25 @@ impl Provider for DockerRegistryProvider {
         }
     }
 
-    async fn detect_installed_version(&self) -> uptrakit_provider_core::Result<Option<Version>> {
+    async fn detect_installed_version(
+        &self,
+        _package_identifier: &str,
+    ) -> uptrakit_provider_core::Result<Option<Version>> {
         Ok(None)
     }
 
     async fn execute_update(
         &self,
-        ctx: &UpdateContext,
+        package_identifier: &str,
+        to_version: &str,
+        provider_config: &serde_json::Value,
+        _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_provider_core::Result<String> {
         let mut output = String::new();
 
-        let image = &ctx.package_identifier;
-        let tag = &ctx.to_version;
+        let image = package_identifier;
+        let tag = to_version;
 
         send_output(
             output_tx,
@@ -169,13 +178,13 @@ impl Provider for DockerRegistryProvider {
         output.push_str(&cmd_output);
 
         // Check for restart command in provider config
-        if let Some(restart_cmd) = ctx.provider_config.get("restart_command")
+        if let Some(restart_cmd) = provider_config.get("restart_command")
             && let Some(cmd_str) = restart_cmd.as_str()
         {
             let cmd = cmd_str
                 .replace("{image}", &shell_escape(image))
                 .replace("{tag}", &shell_escape(tag))
-                .replace("{version}", &shell_escape(&ctx.to_version));
+                .replace("{version}", &shell_escape(to_version));
 
             send_output(
                 output_tx,
@@ -332,7 +341,7 @@ mod tests {
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
         let provider = DockerRegistryProvider::new(test_config()).expect("valid config");
-        let result = provider.detect_installed_version().await.unwrap();
+        let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }
 
@@ -348,13 +357,9 @@ mod tests {
 
         let provider = DockerRegistryProvider::new(test_config()).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let ctx = UpdateContext {
-            to_version: "latest".to_string(),
-            package_identifier: "hello-world".to_string(),
-            provider_config: serde_json::json!({}),
-            release_info: None,
-        };
-        let _result = provider.execute_update(&ctx, &tx).await;
+        let _result = provider
+            .execute_update("hello-world", "latest", &serde_json::json!({}), None, &tx)
+            .await;
         rx.close();
         while rx.recv().await.is_some() {}
     }

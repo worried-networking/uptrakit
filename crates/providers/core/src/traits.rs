@@ -3,7 +3,7 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 
 use crate::error::{ProviderError, Result};
-use crate::types::{DiscoveredSoftware, ProviderCapability, UpdateContext, UpstreamRelease};
+use crate::types::{DiscoveredSoftware, ProviderCapability, ReleaseInfo, UpstreamRelease};
 use crate::version::Version;
 use uptrakit_command::UpdateOutputLine;
 
@@ -33,7 +33,7 @@ pub trait Provider: Send + Sync {
     /// Fetch available releases from the upstream source (remote operation).
     ///
     /// Default implementation returns an error indicating the operation is not supported.
-    async fn fetch_releases(&self) -> Result<Vec<UpstreamRelease>> {
+    async fn fetch_releases(&self, _package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         Err(report!(ProviderError::Configuration(
             "fetch_releases not supported by this provider".to_string()
         )))
@@ -42,7 +42,7 @@ pub trait Provider: Send + Sync {
     /// Detect the currently installed version (local operation).
     ///
     /// Default implementation returns an error indicating the operation is not supported.
-    async fn detect_installed_version(&self) -> Result<Option<Version>> {
+    async fn detect_installed_version(&self, _package_identifier: &str) -> Result<Option<Version>> {
         Err(report!(ProviderError::Configuration(
             "detect_installed_version not supported by this provider".to_string()
         )))
@@ -56,7 +56,10 @@ pub trait Provider: Send + Sync {
     /// Default implementation returns an error indicating the operation is not supported.
     async fn execute_update(
         &self,
-        _ctx: &UpdateContext,
+        _package_identifier: &str,
+        _to_version: &str,
+        _provider_config: &serde_json::Value,
+        _release_info: Option<&ReleaseInfo>,
         _output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         Err(report!(ProviderError::Configuration(
@@ -120,14 +123,14 @@ mod tests {
     #[tokio::test]
     async fn default_fetch_releases_returns_error() {
         let provider = StubProvider;
-        let result = provider.fetch_releases().await;
+        let result = provider.fetch_releases("example").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn default_detect_installed_version_returns_error() {
         let provider = StubProvider;
-        let result = provider.detect_installed_version().await;
+        let result = provider.detect_installed_version("example").await;
         assert!(result.is_err());
     }
 
@@ -135,13 +138,9 @@ mod tests {
     async fn default_execute_update_returns_error() {
         let provider = StubProvider;
         let (tx, _rx) = mpsc::channel(10);
-        let ctx = UpdateContext {
-            to_version: "1.0.0".to_string(),
-            package_identifier: "test".to_string(),
-            provider_config: serde_json::json!({}),
-            release_info: None,
-        };
-        let result = provider.execute_update(&ctx, &tx).await;
+        let result = provider
+            .execute_update("test", "1.0.0", &serde_json::json!({}), None, &tx)
+            .await;
         assert!(result.is_err());
     }
 

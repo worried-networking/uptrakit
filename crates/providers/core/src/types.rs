@@ -77,22 +77,6 @@ pub struct ReleaseInfo {
     pub assets: Vec<ReleaseAsset>,
 }
 
-/// Context for executing a software update on the local system.
-///
-/// Carries all the information a provider needs to perform an update,
-/// without requiring the provider to depend on the wire protocol crate.
-#[derive(Clone, Debug)]
-pub struct UpdateContext {
-    /// Target version to update to.
-    pub to_version: String,
-    /// Provider-specific package identifier.
-    pub package_identifier: String,
-    /// Provider-specific configuration (merged base + override).
-    pub provider_config: serde_json::Value,
-    /// Release info from the controller, if available.
-    pub release_info: Option<ReleaseInfo>,
-}
-
 /// Metadata for an upstream software release.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpstreamRelease {

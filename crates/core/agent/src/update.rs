@@ -24,7 +24,7 @@ use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, HookShell, OutputStreamType, UpdateFinalStatus,
     UpdateResultPayload,
 };
-use uptrakit_provider_registry::{ProviderRegistry, UpdateContext};
+use uptrakit_provider_registry::ProviderRegistry;
 
 use crate::error::Error;
 
@@ -242,6 +242,7 @@ async fn detect_current_version(payload: &ExecuteUpdatePayload) -> Option<String
     let outcome = crate::version_check::check_version(
         payload.provider_type.clone(),
         &payload.provider_config,
+        &payload.package_identifier,
     )
     .await;
     if let Some(e) = outcome.error {
@@ -263,13 +264,6 @@ async fn execute_provider_update(
         ProviderRegistry::create_provider(payload.provider_type.clone(), &payload.provider_config)
             .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
-    let ctx = UpdateContext {
-        to_version: payload.to_version.clone(),
-        package_identifier: payload.package_identifier.clone(),
-        provider_config: payload.provider_config.clone(),
-        release_info: payload.release_info.clone(),
-    };
-
     // Bridge provider output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
     let (provider_tx, mut provider_rx) = mpsc::channel::<UpdateOutputLine>(100);
     let bridge_output_tx = output_tx.clone();
@@ -289,7 +283,13 @@ async fn execute_provider_update(
     });
 
     let result = provider
-        .execute_update(&ctx, &provider_tx)
+        .execute_update(
+            &payload.package_identifier,
+            &payload.to_version,
+            &payload.provider_config,
+            payload.release_info.as_ref(),
+            &provider_tx,
+        )
         .await
         .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())));
 

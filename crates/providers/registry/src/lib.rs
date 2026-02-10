@@ -26,7 +26,7 @@
 //! )?;
 //!
 //! // Detect installed version
-//! let version = provider.detect_installed_version().await?;
+//! let version = provider.detect_installed_version("example").await?;
 //! ```
 
 pub mod error;
@@ -36,4 +36,4 @@ pub use error::{RegistryError, Result};
 pub use registry::ProviderRegistry;
 
 // Re-export commonly used types from provider-core
-pub use uptrakit_provider_core::{Provider, ProviderCapability, ProviderType, UpdateContext};
+pub use uptrakit_provider_core::{Provider, ProviderCapability, ProviderType};
