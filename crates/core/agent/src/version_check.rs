@@ -6,10 +6,9 @@ use uptrakit_provider_registry::ProviderRegistry;
 /// Returns `(installed_version, error)` where exactly one is `Some`.
 pub async fn check_version(
     provider_type: ProviderType,
-    package_identifier: &str,
     config: &serde_json::Value,
 ) -> (Option<String>, Option<String>) {
-    match ProviderRegistry::create_local_provider(provider_type, package_identifier, config) {
+    match ProviderRegistry::create_provider(provider_type, config) {
         Ok(provider) => match provider.detect_installed_version().await {
             Ok(Some(version)) => (Some(version.to_string()), None),
             Ok(None) => (None, None),
@@ -29,8 +28,7 @@ mod tests {
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let (version, error) =
-            check_version(ProviderType::GithubReleases, "octocat/hello-world", &config).await;
+        let (version, error) = check_version(ProviderType::GithubReleases, &config).await;
         // Stub implementation returns None for installed_version
         assert!(version.is_none());
         assert!(error.is_none());
@@ -41,24 +39,15 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let (version, error) = check_version(
-            ProviderType::DockerRegistry,
-            "nginx:latest",
-            &config,
-        )
-        .await;
+        let (version, error) = check_version(ProviderType::DockerRegistry, &config).await;
         assert!(version.is_none());
         assert!(error.is_none());
     }
 
     #[tokio::test]
     async fn check_version_proxmox_stub_returns_none() {
-        let (version, error) = check_version(
-            ProviderType::ProxmoxHelperScripts,
-            "test-script",
-            &serde_json::json!({}),
-        )
-        .await;
+        let (version, error) =
+            check_version(ProviderType::ProxmoxHelperScripts, &serde_json::json!({})).await;
         assert!(version.is_none());
         assert!(error.is_none());
     }
@@ -68,7 +57,7 @@ mod tests {
         let config = serde_json::json!({
             "invalid": "config"
         });
-        let (version, error) = check_version(ProviderType::GithubReleases, "test", &config).await;
+        let (version, error) = check_version(ProviderType::GithubReleases, &config).await;
         assert!(version.is_none());
         assert!(error.is_some());
         assert!(error.unwrap().contains("failed to parse"));

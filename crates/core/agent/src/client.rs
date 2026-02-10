@@ -355,7 +355,6 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         );
                                         let (installed_version, error) = crate::version_check::check_version(
                                             assignment.provider_type.clone(),
-                                            &assignment.package_identifier,
                                             &assignment.config,
                                         ).await;
                                         VersionCheckResult {

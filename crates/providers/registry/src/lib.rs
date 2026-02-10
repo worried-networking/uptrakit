@@ -2,7 +2,7 @@
 //!
 //! This crate provides a centralized registry for provider operations:
 //!
-//! - **Provider creation**: Create local and remote provider instances from configuration
+//! - **Provider creation**: Create provider instances from configuration
 //! - **Configuration validation**: Validate provider-specific configuration JSON
 //! - **Secret management**: Mask and restore sensitive fields in configuration
 //!
@@ -19,10 +19,9 @@
 //! });
 //! ProviderRegistry::validate_config(ProviderType::GithubReleases, &config)?;
 //!
-//! // Create a local provider
-//! let provider = ProviderRegistry::create_local_provider(
+//! // Create a provider
+//! let provider = ProviderRegistry::create_provider(
 //!     ProviderType::GithubReleases,
-//!     "octocat/hello-world",
 //!     &config,
 //! )?;
 //!
@@ -32,7 +31,6 @@
 
 pub mod error;
 pub mod registry;
-pub mod secrets;
 
 pub use error::{RegistryError, Result};
 pub use registry::ProviderRegistry;

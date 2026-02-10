@@ -6,31 +6,28 @@ use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 use uptrakit_provider_proxmox_helper_scripts::ProxmoxHelperScriptsProvider;
 
 use crate::error::{RegistryError, Result};
-use crate::secrets;
 
 /// Provider registry for creating and validating providers.
 ///
 /// This struct provides a centralized API for:
-/// - Creating local and remote provider instances
+/// - Creating provider instances from type and config
 /// - Validating provider configuration
 /// - Masking and restoring secrets in configuration
 pub struct ProviderRegistry;
 
 impl ProviderRegistry {
-    /// Create a local provider instance from provider type and config.
+    /// Create a provider instance from provider type and config.
     ///
     /// # Arguments
     ///
     /// * `provider_type` - The type of provider to create
-    /// * `package_identifier` - Provider-specific package identifier
     /// * `config` - Provider configuration as JSON
     ///
     /// # Returns
     ///
     /// A boxed `Provider` trait object on success, or a `RegistryError` on failure.
-    pub fn create_local_provider(
+    pub fn create_provider(
         provider_type: ProviderType,
-        package_identifier: &str,
         config: &serde_json::Value,
     ) -> Result<Box<dyn Provider>> {
         match provider_type {
@@ -38,7 +35,7 @@ impl ProviderRegistry {
                 let github_config: GitHubConfig =
                     serde_json::from_value(config.clone()).context_to()?;
                 let provider = GitHubProvider::new(github_config)
-                        .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::DockerRegistry => {
@@ -51,44 +48,6 @@ impl ProviderRegistry {
             ProviderType::ProxmoxHelperScripts => {
                 let provider = ProxmoxHelperScriptsProvider::new();
                 Ok(Box::new(provider))
-            }
-        }
-    }
-
-    /// Create a remote provider instance from provider type and config.
-    ///
-    /// # Arguments
-    ///
-    /// * `provider_type` - The type of provider to create
-    /// * `config` - Provider configuration as JSON
-    ///
-    /// # Returns
-    ///
-    /// A boxed `Provider` trait object on success, or a `RegistryError` on failure.
-    pub fn create_remote_provider(
-        provider_type: ProviderType,
-        config: &serde_json::Value,
-    ) -> Result<Box<dyn Provider>> {
-        match provider_type {
-            ProviderType::GithubReleases => {
-                let github_config: GitHubConfig =
-                    serde_json::from_value(config.clone()).context_to()?;
-                let provider = GitHubProvider::new(github_config)
-                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
-                Ok(Box::new(provider))
-            }
-            ProviderType::DockerRegistry => {
-                let docker_config: DockerRegistryConfig =
-                    serde_json::from_value(config.clone()).context_to()?;
-                let provider = DockerRegistryProvider::new(docker_config)
-                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
-                Ok(Box::new(provider))
-            }
-            ProviderType::ProxmoxHelperScripts => {
-                // Proxmox Helper Scripts doesn't have a remote provider - it's local-only
-                Err(report!(RegistryError::ConfigValidation(
-                    "proxmox_helper_scripts does not support remote operations".to_string()
-                )))
             }
         }
     }
@@ -155,53 +114,88 @@ impl ProviderRegistry {
 
     /// Mask secrets in provider configuration JSON for API responses.
     ///
-    /// Replaces sensitive fields (tokens, passwords) with a sentinel value.
-    ///
-    /// # Arguments
-    ///
-    /// * `provider_type` - The type of provider
-    /// * `config` - Provider configuration as JSON
-    ///
-    /// # Returns
-    ///
-    /// A new JSON value with sensitive fields masked.
-    pub fn mask_secrets(
+    /// Deserializes config, calls the typed `with_secrets_masked()` method, and
+    /// serializes back. Unknown provider types are returned unchanged.
+    pub fn mask_config_secrets(
         provider_type: ProviderType,
         config: &serde_json::Value,
     ) -> serde_json::Value {
-        secrets::mask_secrets(&provider_type.to_string(), config)
+        match provider_type {
+            ProviderType::GithubReleases => {
+                let Ok(cfg) = serde_json::from_value::<GitHubConfig>(config.clone()) else {
+                    return config.clone();
+                };
+                serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
+            }
+            ProviderType::DockerRegistry => {
+                let Ok(cfg) = serde_json::from_value::<DockerRegistryConfig>(config.clone()) else {
+                    return config.clone();
+                };
+                serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
+            }
+            ProviderType::ProxmoxHelperScripts => config.clone(),
+        }
     }
 
     /// Mask secrets in provider configuration JSON (string type version).
-    pub fn mask_secrets_str(provider_type: &str, config: &serde_json::Value) -> serde_json::Value {
-        secrets::mask_secrets(provider_type, config)
+    pub fn mask_config_secrets_str(
+        provider_type: &str,
+        config: &serde_json::Value,
+    ) -> serde_json::Value {
+        let Some(pt) = Self::parse_provider_type(provider_type) else {
+            return config.clone();
+        };
+        Self::mask_config_secrets(pt, config)
     }
 
     /// Restore masked secrets from existing configuration.
     ///
-    /// When the incoming config contains the mask sentinel value, the corresponding
-    /// value from the existing config is restored.
-    ///
-    /// # Arguments
-    ///
-    /// * `provider_type` - The type of provider
-    /// * `incoming` - Incoming configuration (modified in place)
-    /// * `existing` - Existing configuration with real secrets
-    pub fn restore_secrets(
+    /// Deserializes both incoming and existing configs, calls the typed
+    /// `restore_secrets_from()` method, and writes back to `incoming`.
+    pub fn restore_config_secrets(
         provider_type: ProviderType,
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     ) {
-        secrets::restore_secrets(&provider_type.to_string(), incoming, existing)
+        match provider_type {
+            ProviderType::GithubReleases => {
+                let (Ok(mut inc), Ok(ex)) = (
+                    serde_json::from_value::<GitHubConfig>(incoming.clone()),
+                    serde_json::from_value::<GitHubConfig>(existing.clone()),
+                ) else {
+                    return;
+                };
+                inc.restore_secrets_from(&ex);
+                if let Ok(v) = serde_json::to_value(&inc) {
+                    *incoming = v;
+                }
+            }
+            ProviderType::DockerRegistry => {
+                let (Ok(mut inc), Ok(ex)) = (
+                    serde_json::from_value::<DockerRegistryConfig>(incoming.clone()),
+                    serde_json::from_value::<DockerRegistryConfig>(existing.clone()),
+                ) else {
+                    return;
+                };
+                inc.restore_secrets_from(&ex);
+                if let Ok(v) = serde_json::to_value(&inc) {
+                    *incoming = v;
+                }
+            }
+            ProviderType::ProxmoxHelperScripts => {}
+        }
     }
 
     /// Restore masked secrets from existing configuration (string type version).
-    pub fn restore_secrets_str(
+    pub fn restore_config_secrets_str(
         provider_type: &str,
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     ) {
-        secrets::restore_secrets(provider_type, incoming, existing)
+        let Some(pt) = Self::parse_provider_type(provider_type) else {
+            return;
+        };
+        Self::restore_config_secrets(pt, incoming, existing)
     }
 
     /// Parse a provider type string into a `ProviderType` enum.
@@ -299,81 +293,57 @@ mod tests {
         assert!(err_msg.contains("unknown provider type"));
     }
 
-    #[tokio::test]
-    async fn create_local_provider_github() {
+    #[test]
+    fn create_provider_github() {
         let config = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let provider =
-            ProviderRegistry::create_local_provider(ProviderType::GithubReleases, "test", &config);
+        let provider = ProviderRegistry::create_provider(ProviderType::GithubReleases, &config);
         assert!(provider.is_ok());
     }
 
-    #[tokio::test]
-    async fn create_local_provider_docker() {
+    #[test]
+    fn create_provider_docker() {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let provider =
-            ProviderRegistry::create_local_provider(ProviderType::DockerRegistry, "nginx", &config);
-        assert!(provider.is_ok());
-    }
-
-    #[tokio::test]
-    async fn create_local_provider_proxmox() {
-        let config = serde_json::json!({});
-        let provider = ProviderRegistry::create_local_provider(
-            ProviderType::ProxmoxHelperScripts,
-            "test-script",
-            &config,
-        );
+        let provider = ProviderRegistry::create_provider(ProviderType::DockerRegistry, &config);
         assert!(provider.is_ok());
     }
 
     #[test]
-    fn create_remote_provider_github() {
-        let config = serde_json::json!({
-            "owner": "octocat",
-            "repo": "hello-world"
-        });
-        let provider =
-            ProviderRegistry::create_remote_provider(ProviderType::GithubReleases, &config);
-        assert!(provider.is_ok());
-    }
-
-    #[test]
-    fn create_remote_provider_docker() {
-        let config = serde_json::json!({
-            "image": "nginx"
-        });
-        let provider =
-            ProviderRegistry::create_remote_provider(ProviderType::DockerRegistry, &config);
-        assert!(provider.is_ok());
-    }
-
-    #[test]
-    fn create_remote_provider_proxmox_fails() {
+    fn create_provider_proxmox() {
         let config = serde_json::json!({});
         let provider =
-            ProviderRegistry::create_remote_provider(ProviderType::ProxmoxHelperScripts, &config);
-        assert!(provider.is_err());
+            ProviderRegistry::create_provider(ProviderType::ProxmoxHelperScripts, &config);
+        assert!(provider.is_ok());
     }
 
     #[test]
-    fn mask_secrets_github() {
+    fn mask_config_secrets_github() {
         let config = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world",
             "auth_token": "ghp_secret"
         });
-        let masked = ProviderRegistry::mask_secrets(ProviderType::GithubReleases, &config);
+        let masked = ProviderRegistry::mask_config_secrets(ProviderType::GithubReleases, &config);
         assert_eq!(masked["auth_token"], "***");
         assert_eq!(masked["owner"], "octocat");
     }
 
     #[test]
-    fn restore_secrets_github() {
+    fn mask_config_secrets_github_always_shows_field() {
+        let config = serde_json::json!({
+            "owner": "octocat",
+            "repo": "hello-world"
+        });
+        let masked = ProviderRegistry::mask_config_secrets(ProviderType::GithubReleases, &config);
+        assert_eq!(masked["auth_token"], "***");
+    }
+
+    #[test]
+    fn restore_config_secrets_github() {
         let mut incoming = serde_json::json!({
             "owner": "octocat",
             "repo": "hello-world",
@@ -384,7 +354,11 @@ mod tests {
             "repo": "hello-world",
             "auth_token": "ghp_real_token"
         });
-        ProviderRegistry::restore_secrets(ProviderType::GithubReleases, &mut incoming, &existing);
+        ProviderRegistry::restore_config_secrets(
+            ProviderType::GithubReleases,
+            &mut incoming,
+            &existing,
+        );
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 }

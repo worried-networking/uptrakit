@@ -241,7 +241,6 @@ pub async fn execute_update(
 async fn detect_current_version(payload: &ExecuteUpdatePayload) -> Option<String> {
     let (installed_version, error) = crate::version_check::check_version(
         payload.provider_type.clone(),
-        &payload.package_identifier,
         &payload.provider_config,
     )
     .await;
@@ -260,12 +259,9 @@ async fn execute_provider_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateResult<String> {
-    let provider = ProviderRegistry::create_local_provider(
-        payload.provider_type.clone(),
-        &payload.package_identifier,
-        &payload.provider_config,
-    )
-    .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+    let provider =
+        ProviderRegistry::create_provider(payload.provider_type.clone(), &payload.provider_config)
+            .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
     let ctx = UpdateContext {
         to_version: payload.to_version.clone(),
