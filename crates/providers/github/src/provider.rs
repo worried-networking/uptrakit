@@ -46,7 +46,7 @@ impl GitHubProvider {
         );
 
         if let Some(ref token) = config.auth_token {
-            let value = format!("Bearer {token}");
+            let value = format!("Bearer {}", token.expose_secret());
             let header_value = reqwest::header::HeaderValue::from_str(&value).map_err(|e| {
                 report!(GitHubError::Configuration(format!(
                     "invalid auth token header value: {e}"
@@ -86,7 +86,6 @@ impl GitHubProvider {
             asset_filters,
         })
     }
-
 
     /// Build the releases API URL.
     fn releases_url(&self) -> String {
@@ -294,7 +293,7 @@ impl Provider for GitHubProvider {
                     &format!("Running install command: {cmd}"),
                     UpdateOutputStream::Stdout,
                 )
-                    .await;
+                .await;
 
                 match run_command(&cmd, output_tx).await {
                     Ok(cmd_output) => {
@@ -311,7 +310,7 @@ impl Provider for GitHubProvider {
                 "No install_command configured, skipping automated installation",
                 UpdateOutputStream::Stdout,
             )
-                .await;
+            .await;
             output.push_str("No install_command configured, skipping automated installation\n");
         }
 
@@ -383,8 +382,7 @@ mod tests {
     fn include_prerelease_when_configured() {
         let mut config = test_config();
         config.include_prereleases = true;
-        let provider =
-            GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = provider.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
@@ -411,8 +409,7 @@ mod tests {
     fn custom_tag_prefix() {
         let mut config = test_config();
         config.tag_strip_prefix = "release-".to_string();
-        let provider =
-            GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = provider.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
@@ -422,8 +419,7 @@ mod tests {
     fn asset_filtering() {
         let mut config = test_config();
         config.asset_patterns = vec![r".*\.tar\.gz$".to_string()];
-        let provider =
-            GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config).expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -505,8 +501,7 @@ mod tests {
     fn url_construction_custom_base() {
         let mut config = test_config();
         config.api_base_url = Some("https://ghe.corp.com/api/v3".to_string());
-        let provider =
-            GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config).expect("valid config");
         let url = provider.releases_url();
         assert_eq!(
             url,
@@ -554,9 +549,7 @@ mod tests {
             tag_strip_prefix: config.tag_strip_prefix,
             asset_patterns: config.asset_patterns,
         };
-        assert!(
-            GitHubProvider::new(config).is_err()
-        );
+        assert!(GitHubProvider::new(config).is_err());
     }
 
     #[tokio::test]

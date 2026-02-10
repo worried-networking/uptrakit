@@ -1,9 +1,13 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use uptrakit_provider_core::SecretString;
 use url::Url;
 
 use crate::error::{GitHubError, Result};
+
+/// Sentinel value used to indicate a masked secret in API responses.
+const SECRET_MASK: &str = "***";
 
 /// Configuration for the GitHub Releases provider.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,7 +18,7 @@ pub struct GitHubConfig {
     pub repo: String,
     /// Optional personal access token for authentication (increases rate limits).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_token: Option<String>,
+    pub auth_token: Option<SecretString>,
     /// Optional custom API base URL (for GitHub Enterprise).
     /// Defaults to `https://api.github.com` when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,6 +101,26 @@ impl GitHubConfig {
         self.api_base_url
             .as_deref()
             .unwrap_or("https://api.github.com")
+    }
+
+    /// Return a copy with secret fields masked for API responses.
+    ///
+    /// Unset secrets become `Some("***")` so the field always appears in JSON.
+    pub fn with_secrets_masked(&self) -> Self {
+        let mut masked = self.clone();
+        masked.auth_token = Some(SecretString::new(SECRET_MASK.to_string()));
+        masked
+    }
+
+    /// Restore masked secrets from an existing config (for PUT updates).
+    ///
+    /// If `auth_token` is the mask sentinel, take the value from `existing`.
+    pub fn restore_secrets_from(&mut self, existing: &Self) {
+        if let Some(ref token) = self.auth_token
+            && token.expose_secret() == SECRET_MASK
+        {
+            self.auth_token = existing.auth_token.clone();
+        }
     }
 }
 
@@ -281,7 +305,7 @@ mod tests {
         let config = GitHubConfig {
             owner: "owner".to_string(),
             repo: "repo".to_string(),
-            auth_token: Some("ghp_test".to_string()),
+            auth_token: Some(SecretString::new("ghp_test".to_string())),
             api_base_url: Some("https://ghe.corp.com/api/v3".to_string()),
             include_prereleases: true,
             tag_strip_prefix: "release-".to_string(),
@@ -296,6 +320,80 @@ mod tests {
         assert_eq!(deserialized.include_prereleases, config.include_prereleases);
         assert_eq!(deserialized.tag_strip_prefix, config.tag_strip_prefix);
         assert_eq!(deserialized.asset_patterns, config.asset_patterns);
+    }
+
+    #[test]
+    fn with_secrets_masked_always_shows_auth_token() {
+        let config = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: None,
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        let masked = config.with_secrets_masked();
+        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
+    }
+
+    #[test]
+    fn with_secrets_masked_replaces_real_token() {
+        let config = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: Some(SecretString::new("ghp_real".to_string())),
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        let masked = config.with_secrets_masked();
+        assert_eq!(masked.auth_token.unwrap().expose_secret(), SECRET_MASK);
+        assert_eq!(masked.owner, "o");
+    }
+
+    #[test]
+    fn restore_secrets_from_restores_masked_token() {
+        let existing = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: Some(SecretString::new("ghp_real_token".to_string())),
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        let mut incoming = existing.with_secrets_masked();
+        incoming.restore_secrets_from(&existing);
+        assert_eq!(
+            incoming.auth_token.unwrap().expose_secret(),
+            "ghp_real_token"
+        );
+    }
+
+    #[test]
+    fn restore_secrets_from_keeps_new_token() {
+        let existing = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: Some(SecretString::new("ghp_old".to_string())),
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        let mut incoming = GitHubConfig {
+            owner: "o".to_string(),
+            repo: "r".to_string(),
+            auth_token: Some(SecretString::new("ghp_new".to_string())),
+            api_base_url: None,
+            include_prereleases: false,
+            tag_strip_prefix: "v".to_string(),
+            asset_patterns: vec![],
+        };
+        incoming.restore_secrets_from(&existing);
+        assert_eq!(incoming.auth_token.unwrap().expose_secret(), "ghp_new");
     }
 
     #[test]
