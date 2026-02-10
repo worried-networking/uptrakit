@@ -12,6 +12,12 @@ use uptrakit_provider_core::{
 /// Executes updates by running the helper script via `curl | bash`.
 pub struct ProxmoxHelperScriptsProvider;
 
+impl Default for ProxmoxHelperScriptsProvider {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl ProxmoxHelperScriptsProvider {
     /// Create a new Proxmox Helper Scripts provider.
     pub fn new() -> Self {

@@ -1,3 +1,3 @@
-pub mod local_provider;
+pub mod provider;
 
-pub use local_provider::ProxmoxHelperScriptsProvider;
+pub use provider::ProxmoxHelperScriptsProvider;
