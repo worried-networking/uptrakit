@@ -19,3 +19,4 @@ async-trait = { workspace = true }
 tokio = { workspace = true }
 uptrakit-command = { path = "../../shared/command" }
 uptrakit-shared-macros = { workspace = true }
+uptrakit-shared-types = { path = "../../shared/types" }
