@@ -11,7 +11,8 @@ use uptrakit_internal_wire::{
     ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    host_software_item, provider_config, service_host as agent_host, software_item, update_history,
+    available_version, host_software_item, provider_config, service_host as agent_host,
+    software_item, update_history,
 };
 
 use rootcause::prelude::*;
@@ -322,46 +323,58 @@ pub(crate) async fn handle_agent_authenticated(
                                         continue;
                                     }
 
-                                    let Some(ref installed_version) = result.installed_version else {
-                                        continue;
-                                    };
-
                                     let software_item_id = result.software_item_id;
 
-                                    for &host_id in &host_ids {
-                                        match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
-                                            .one(&state.db)
-                                            .await
-                                        {
-                                            Ok(Some(existing)) => {
-                                                let mut active: uptrakit_shared_db::entity::host_software_item::ActiveModel = existing.into();
-                                                active.installed_version = Set(Some(installed_version.clone()));
-                                                active.installed_version_detected_at = Set(Some(now));
-                                                if let Err(e) = active.update(&state.db).await {
+                                    // Update installed version on host_software_item records
+                                    if let Some(ref installed_version) = result.installed_version {
+                                        for &host_id in &host_ids {
+                                            match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
+                                                .one(&state.db)
+                                                .await
+                                            {
+                                                Ok(Some(existing)) => {
+                                                    let mut active: uptrakit_shared_db::entity::host_software_item::ActiveModel = existing.into();
+                                                    active.installed_version = Set(Some(installed_version.clone()));
+                                                    active.installed_version_detected_at = Set(Some(now));
+                                                    if let Err(e) = active.update(&state.db).await {
+                                                        tracing::warn!(
+                                                            error = %e,
+                                                            host_id = %host_id,
+                                                            software_item_id = %software_item_id,
+                                                            "failed to update host_software_item"
+                                                        );
+                                                    }
+                                                }
+                                                Ok(None) => {
+                                                    tracing::debug!(
+                                                        host_id = %host_id,
+                                                        software_item_id = %software_item_id,
+                                                        "no host_software_item record found, skipping"
+                                                    );
+                                                }
+                                                Err(e) => {
                                                     tracing::warn!(
                                                         error = %e,
                                                         host_id = %host_id,
                                                         software_item_id = %software_item_id,
-                                                        "failed to update host_software_item"
+                                                        "failed to look up host_software_item"
                                                     );
                                                 }
                                             }
-                                            Ok(None) => {
-                                                tracing::debug!(
-                                                    host_id = %host_id,
-                                                    software_item_id = %software_item_id,
-                                                    "no host_software_item record found, skipping"
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    error = %e,
-                                                    host_id = %host_id,
-                                                    software_item_id = %software_item_id,
-                                                    "failed to look up host_software_item"
-                                                );
-                                            }
                                         }
+                                    }
+
+                                    // If the agent reported a latest_version (agent-side
+                                    // resolution, e.g. Homebrew), upsert an available_version
+                                    // record for this software item.
+                                    if let Some(ref latest_version) = result.latest_version {
+                                        upsert_available_version(
+                                            &state.db,
+                                            software_item_id,
+                                            latest_version,
+                                            now,
+                                        )
+                                        .await;
                                     }
                                 }
                             }
@@ -1038,4 +1051,80 @@ async fn validate_update_ownership(
     }
 
     Ok(record)
+}
+
+/// Upsert an `available_version` record for a software item.
+///
+/// If an existing record with the same version already exists for this software
+/// item, its `updated_at` timestamp is refreshed. Otherwise, old records for
+/// this software item are deleted and a new one is inserted.
+async fn upsert_available_version(
+    db: &sea_orm::DatabaseConnection,
+    software_item_id: uuid::Uuid,
+    version: &str,
+    now: time::OffsetDateTime,
+) {
+    // Check if a record with this version already exists.
+    let existing = available_version::Entity::find()
+        .filter(available_version::Column::SoftwareItemId.eq(software_item_id))
+        .filter(available_version::Column::Version.eq(version))
+        .one(db)
+        .await;
+
+    match existing {
+        Ok(Some(record)) => {
+            // Version already recorded — just refresh the timestamp.
+            let mut active: available_version::ActiveModel = record.into();
+            active.updated_at = Set(now);
+            if let Err(e) = active.update(db).await {
+                tracing::warn!(
+                    error = %e,
+                    software_item_id = %software_item_id,
+                    version,
+                    "failed to update available_version timestamp"
+                );
+            }
+        }
+        Ok(None) => {
+            // Delete any previous available_version records for this item
+            // and insert the new one.
+            if let Err(e) = available_version::Entity::delete_many()
+                .filter(available_version::Column::SoftwareItemId.eq(software_item_id))
+                .exec(db)
+                .await
+            {
+                tracing::warn!(
+                    error = %e,
+                    software_item_id = %software_item_id,
+                    "failed to delete old available_version records"
+                );
+            }
+
+            let record = available_version::ActiveModel {
+                id: Set(uuid::Uuid::now_v7()),
+                software_item_id: Set(software_item_id),
+                version: Set(Some(version.to_string())),
+                release_date: Set(None),
+                release_notes: Set(None),
+                extra: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            };
+            if let Err(e) = available_version::Entity::insert(record).exec(db).await {
+                tracing::warn!(
+                    error = %e,
+                    software_item_id = %software_item_id,
+                    version,
+                    "failed to insert available_version"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                software_item_id = %software_item_id,
+                "failed to query available_version"
+            );
+        }
+    }
 }

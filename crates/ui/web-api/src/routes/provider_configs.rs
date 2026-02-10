@@ -483,7 +483,30 @@ mod tests {
         assert!(ProviderRegistry::parse_provider_type("github_releases").is_some());
         assert!(ProviderRegistry::parse_provider_type("proxmox_helper_scripts").is_some());
         assert!(ProviderRegistry::parse_provider_type("docker_registry").is_some());
+        assert!(ProviderRegistry::parse_provider_type("homebrew").is_some());
         assert!(ProviderRegistry::parse_provider_type("unknown").is_none());
+    }
+
+    // --- Homebrew provider tests ---
+
+    #[test]
+    fn validate_valid_homebrew_config() {
+        let config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config_str("homebrew", &config).is_ok());
+    }
+
+    #[test]
+    fn validate_homebrew_config_with_cask() {
+        let config = serde_json::json!({"package_type": "cask"});
+        assert!(ProviderRegistry::validate_config_str("homebrew", &config).is_ok());
+    }
+
+    #[test]
+    fn mask_homebrew_config_unchanged() {
+        let config = serde_json::json!({"package_type": "formula"});
+        let masked = ProviderRegistry::mask_config_secrets_str("homebrew", &config);
+        // No secrets to mask — config returned unchanged
+        assert_eq!(masked, config);
     }
 
     // --- Docker Registry provider tests ---

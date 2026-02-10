@@ -239,19 +239,19 @@ pub async fn execute_update(
 
 /// Detect the current version of a software item by delegating to the provider registry.
 async fn detect_current_version(payload: &ExecuteUpdatePayload) -> Option<String> {
-    let (installed_version, error) = crate::version_check::check_version(
+    let outcome = crate::version_check::check_version(
         payload.provider_type.clone(),
         &payload.provider_config,
     )
     .await;
-    if let Some(e) = error {
+    if let Some(e) = outcome.error {
         tracing::warn!(
             software_item = %payload.software_item_name,
             error = %e,
             "failed to detect current version"
         );
     }
-    installed_version
+    outcome.installed_version
 }
 
 /// Execute the provider-specific update logic by dispatching through the Provider Registry.

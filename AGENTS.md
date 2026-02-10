@@ -29,6 +29,7 @@ uptrakit/
 │   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions (delegates command execution to uptrakit-command)
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
+│   │   ├── homebrew/                    # uptrakit-provider-homebrew              (lib)  — Homebrew formulae/cask provider
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
@@ -238,7 +239,7 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Updates are never automatic.** The scheduler triggers version *checks* only. Update execution requires explicit user action (via UI, CLI, or MQTT/Home Assistant).
 2. **Agents initiate outbound-only connections.** Agents connect to the controller via secure WebSocket (`/api/v1/ws/service`). They never listen on any port or accept inbound connections.
 3. **Agents run unprivileged.** They run as a dedicated user (e.g. `uptrakit`). Only specific update commands are granted `NOPASSWD` sudo access.
-4. **Provider split.** Remote (upstream version resolution) logic runs on the controller. Local (installed version detection + update execution) logic runs on the agent. Keep this boundary clear.
+4. **Provider split.** Most providers resolve upstream versions on the controller and installed versions on the agent. Providers with a local package index (e.g. Homebrew) resolve both on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. Keep this boundary clear.
 5. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are treated as untrusted input.
 6. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials.
 7. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally — only high-level summaries are retained for display.
@@ -1322,13 +1323,13 @@ The controller can request installed version detection from agents:
 
 1. **Controller → Agent**: `CheckVersions(CheckVersionsPayload)` containing a list of `VersionCheckAssignment` items
 2. **Agent processes**: For each assignment, the agent dispatches to the appropriate `Provider` based on `provider_type`
-3. **Agent → Controller**: `VersionCheckResults(VersionCheckResultsPayload)` containing results with optional `installed_version` or `error`
-4. **Controller stores**: Updates `host_software_items.installed_version` and `installed_version_detected_at` for successful results
+3. **Agent → Controller**: `VersionCheckResults(VersionCheckResultsPayload)` containing results with optional `installed_version`, `latest_version`, or `error`
+4. **Controller stores**: Updates `host_software_items.installed_version` and `installed_version_detected_at` for successful results. If `latest_version` is present (agent-side providers like Homebrew), upserts an `available_version` record for the software item
 
 **VersionCheckAssignment fields:**
 - `software_item_id`: UUID of the software item
 - `name`: Display name for logging
-- `provider_type`: Provider discriminator (`github_releases`, `docker_registry`, `proxmox_helper_scripts`)
+- `provider_type`: Provider discriminator (`github_releases`, `docker_registry`, `proxmox_helper_scripts`, `homebrew`)
 - `package_identifier`: Provider-specific identifier
 - `config`: Provider configuration as JSON
 
@@ -1669,7 +1670,7 @@ Each software item is associated with a provider. A provider defines:
 
 | Concern | Runs on | Responsibility |
 | --- | --- | --- |
-| Remote/upstream version | Controller | Fetch latest version metadata (version string, release URL, changelog URL, publish timestamp, channel, notes) |
+| Remote/upstream version | Controller or Agent | Fetch latest version metadata. Most providers (GitHub, Docker) resolve on the controller. Providers with a local package index (Homebrew) resolve on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult` |
 | Local/installed version | Agent | Detect currently installed version |
 | Update execution | Agent | Run the update (via sudo-allowlisted commands or custom script) |
 
@@ -1682,6 +1683,7 @@ Provider crates:
 | `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
 | `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: controller tracks container image tags via semver filtering or digest change detection |
 | `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: controller fetches release metadata; agent installs from artifacts |
+| `uptrakit-provider-homebrew` | `crates/providers/homebrew/` | Homebrew: agent-side formula/cask version tracking and updates on macOS |
 | `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE Helper-Scripts: agent auto-discovers and manages helper-script-installed apps |
 
 The **Provider Registry** crate centralizes all provider operations:
@@ -1702,7 +1704,7 @@ The `ProviderCapability` enum defines optional features a provider may support:
 | `DiscoverLocalSoftware` | `discover_software()` | Enumerate software the provider can manage on the local system |
 | `RefreshPackageIndex` | `refresh_package_index()` | Refresh/sync the local package database from remote sources (e.g. `apt update`) |
 
-No existing provider implements `RefreshPackageIndex` yet; it is available as a foundation for future providers (e.g. apt, homebrew).
+The Homebrew provider implements both `DiscoverLocalSoftware` and `RefreshPackageIndex`. When the agent processes `CheckVersions` assignments, it deduplicates provider types and calls `refresh_package_index()` once per type that supports the capability before checking individual items. Providers with `RefreshPackageIndex` also report `latest_version` in `VersionCheckResult` by calling `fetch_releases()` after detecting the installed version.
 
 ### Software discovery
 
@@ -1776,6 +1778,34 @@ Tracks container image tags from OCI/Docker registries. Supports Docker Hub, GHC
 
 **Secret masking:** `auth.password` and `auth.token` fields are replaced with `"***"` in GET responses. On PUT, masked values are restored from the existing DB record.
 
+### Homebrew provider (`uptrakit-provider-homebrew`)
+
+Tracks Homebrew formulae and casks on macOS. Unlike GitHub and Docker Registry providers, Homebrew resolves both installed and latest versions **on the agent** using the local Homebrew package index. No secrets are required.
+
+**Config fields (`HomebrewConfig`):**
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `package_type` | String | No | `"formula"` | `"formula"` (CLI tools, libraries) or `"cask"` (macOS GUI applications) |
+
+**Capabilities:** `DiscoverLocalSoftware`, `RefreshPackageIndex`
+
+**Behaviour:**
+
+- `refresh_package_index()`: Runs `brew update` to sync the local index with remote taps
+- `discover_software()`: Runs `brew info --installed --json=v2` and parses all installed formulae or casks (depending on `package_type`)
+- `detect_installed_version()`: Runs `brew info --json=v2 <package_identifier>` and extracts the installed version
+- `fetch_releases()`: Runs `brew info --json=v2 <package_identifier>` and extracts the latest available version as a single `UpstreamRelease`. For casks, the special `"latest"` version marker is filtered out (returns empty)
+- `execute_update()`: Runs `brew upgrade <pkg>` (formula) or `brew upgrade --cask <pkg>` (cask) with output streaming
+
+**Agent-side latest version flow:** When the agent receives a `CheckVersions` request:
+1. Package indexes are refreshed once per provider type that supports `RefreshPackageIndex` (deduplicated)
+2. For each Homebrew assignment, `detect_installed_version()` and `fetch_releases()` are both called
+3. The `latest_version` field in `VersionCheckResult` is populated from `fetch_releases()`
+4. The controller upserts an `available_version` record when `latest_version` is present
+
+**No secrets** — config masking and restoration are no-ops.
+
 ### Provider configuration management
 
 Provider-specific configurations are stored in the `provider_configs` table and managed via CRUD API endpoints:
@@ -1792,7 +1822,7 @@ Provider-specific configurations are stored in the `provider_configs` table and 
 
 **Secret masking:** `auth_token` fields in config JSON are replaced with `"***"` in GET responses. On PUT, if `auth_token` is `"***"`, the existing value from the DB is preserved.
 
-**Supported provider types:** `github_releases`, `docker_registry`.
+**Supported provider types:** `github_releases`, `docker_registry`, `proxmox_helper_scripts`, `homebrew`.
 
 When adding or changing a provider, document in the same PR:
 

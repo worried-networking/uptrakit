@@ -1356,6 +1356,7 @@ components:
             - github_releases
             - docker_registry
             - proxmox_helper_scripts
+            - homebrew
         package_identifier:
           type: string
           description: Package identifier for the provider
@@ -1404,6 +1405,14 @@ components:
           description: Detected installed version, if any
           examples:
             - "2.53.0"
+        latest_version:
+          type: string
+          description: >
+            Latest available version from the local package index, if the
+            provider supports agent-side release fetching (e.g. Homebrew).
+            Omitted when the provider resolves latest versions on the controller.
+          examples:
+            - "2.54.0"
         error:
           type: string
           description: Error message if detection failed
@@ -1416,6 +1425,7 @@ components:
         - github_releases
         - proxmox_helper_scripts
         - docker_registry
+        - homebrew
       description: Provider type for update execution
 
     outputStreamType:

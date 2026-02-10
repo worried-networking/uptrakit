@@ -489,6 +489,11 @@ pub struct VersionCheckResult {
     /// Detected installed version, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_version: Option<String>,
+    /// Latest available version from the package index, if resolved locally
+    /// by the agent (e.g., Homebrew). Absent for providers whose latest
+    /// version is resolved on the controller side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
     /// Error message if detection failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -981,11 +986,13 @@ mod tests {
                 VersionCheckResult {
                     software_item_id: TEST_UUID_1,
                     installed_version: Some("1.2.3".to_string()),
+                    latest_version: None,
                     error: None,
                 },
                 VersionCheckResult {
                     software_item_id: TEST_UUID_2,
                     installed_version: None,
+                    latest_version: None,
                     error: Some("detection failed".to_string()),
                 },
             ],
@@ -995,8 +1002,49 @@ mod tests {
         assert!(json.contains(r#""installed_version":"1.2.3"#));
         // installed_version should be omitted when None
         assert!(!json.contains(r#""installed_version":null"#));
+        // latest_version should be omitted when None
+        assert!(!json.contains(r#""latest_version"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn version_check_result_with_latest_version() {
+        let msg = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
+            results: vec![VersionCheckResult {
+                software_item_id: TEST_UUID_1,
+                installed_version: Some("1.24.4".to_string()),
+                latest_version: Some("1.24.5".to_string()),
+                error: None,
+            }],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""latest_version":"1.24.5"#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn version_check_result_backward_compat_no_latest_version() {
+        // Messages from older agents that don't include latest_version
+        // should still deserialize correctly.
+        let json = serde_json::json!({
+            "type": "version_check_results",
+            "results": [{
+                "software_item_id": TEST_UUID_1.to_string(),
+                "installed_version": "1.0.0"
+            }]
+        });
+        let msg: ServiceMessage = serde_json::from_value(json).unwrap();
+        if let ServiceMessage::VersionCheckResults(payload) = msg {
+            assert_eq!(
+                payload.results[0].installed_version,
+                Some("1.0.0".to_string())
+            );
+            assert_eq!(payload.results[0].latest_version, None);
+        } else {
+            panic!("expected VersionCheckResults");
+        }
     }
 
     #[test]

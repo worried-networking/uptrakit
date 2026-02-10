@@ -444,7 +444,7 @@ Expanding the provider system with more integrations.
 - [ ] Add Flatpak provider
 - [ ] Add Snap provider
 - [ ] Add AppImage provider
-- [ ] Add Homebrew provider (macOS)
+- [x] Add Homebrew provider (macOS)
 - [ ] Add Chocolatey provider (Windows)
 
 ### Provider Framework

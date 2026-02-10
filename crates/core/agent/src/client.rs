@@ -344,6 +344,28 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             }
                             ControllerMessage::CheckVersions(payload) => {
                                 tracing::info!(count = payload.assignments.len(), "received CheckVersions request");
+
+                                // Pre-refresh package indexes for provider types that support it.
+                                // Deduplicate by provider type so we only refresh once per type.
+                                {
+                                    let mut refreshed_types = std::collections::HashSet::new();
+                                    for assignment in &payload.assignments {
+                                        if refreshed_types.contains(&assignment.provider_type) {
+                                            continue;
+                                        }
+                                        if let Ok(provider) = uptrakit_provider_registry::ProviderRegistry::create_provider(
+                                            assignment.provider_type.clone(),
+                                            &assignment.config,
+                                        ) && provider.has_capability(uptrakit_provider_registry::ProviderCapability::RefreshPackageIndex) {
+                                            tracing::info!(provider_type = %assignment.provider_type, "refreshing package index");
+                                            if let Err(e) = provider.refresh_package_index().await {
+                                                tracing::warn!(provider_type = %assignment.provider_type, error = %e, "failed to refresh package index");
+                                            }
+                                            refreshed_types.insert(assignment.provider_type.clone());
+                                        }
+                                    }
+                                }
+
                                 use futures_util::stream::{self, StreamExt};
                                 let results: Vec<VersionCheckResult> = stream::iter(&payload.assignments)
                                     .map(|assignment| async move {
@@ -353,14 +375,15 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                             provider_type = %assignment.provider_type,
                                             "checking version"
                                         );
-                                        let (installed_version, error) = crate::version_check::check_version(
+                                        let outcome = crate::version_check::check_version(
                                             assignment.provider_type.clone(),
                                             &assignment.config,
                                         ).await;
                                         VersionCheckResult {
                                             software_item_id: assignment.software_item_id,
-                                            installed_version,
-                                            error,
+                                            installed_version: outcome.installed_version,
+                                            latest_version: outcome.latest_version,
+                                            error: outcome.error,
                                         }
                                     })
                                     .buffer_unordered(8)

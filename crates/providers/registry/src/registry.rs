@@ -3,6 +3,7 @@ use rootcause::prelude::*;
 use uptrakit_provider_core::{Provider, ProviderType};
 use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
+use uptrakit_provider_homebrew::{HomebrewConfig, HomebrewProvider};
 use uptrakit_provider_proxmox_helper_scripts::ProxmoxHelperScriptsProvider;
 
 use crate::error::{RegistryError, Result};
@@ -49,6 +50,12 @@ impl ProviderRegistry {
                 let provider = ProxmoxHelperScriptsProvider::new();
                 Ok(Box::new(provider))
             }
+            ProviderType::Homebrew => {
+                let homebrew_config: HomebrewConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                let provider = HomebrewProvider::new(homebrew_config);
+                Ok(Box::new(provider))
+            }
         }
     }
 
@@ -82,6 +89,14 @@ impl ProviderRegistry {
             }
             ProviderType::ProxmoxHelperScripts => {
                 // No validation yet for this provider type
+                Ok(())
+            }
+            ProviderType::Homebrew => {
+                let homebrew_config: HomebrewConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                homebrew_config
+                    .validate()
+                    .map_err(|e| report!(RegistryError::ConfigValidation(e)))?;
                 Ok(())
             }
         }
@@ -134,6 +149,8 @@ impl ProviderRegistry {
                 serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
             }
             ProviderType::ProxmoxHelperScripts => config.clone(),
+            // Homebrew has no secrets to mask
+            ProviderType::Homebrew => config.clone(),
         }
     }
 
@@ -183,6 +200,8 @@ impl ProviderRegistry {
                 }
             }
             ProviderType::ProxmoxHelperScripts => {}
+            // Homebrew has no secrets to restore
+            ProviderType::Homebrew => {}
         }
     }
 
@@ -229,6 +248,10 @@ mod tests {
         assert_eq!(
             ProviderRegistry::parse_provider_type("proxmox_helper_scripts"),
             Some(ProviderType::ProxmoxHelperScripts)
+        );
+        assert_eq!(
+            ProviderRegistry::parse_provider_type("homebrew"),
+            Some(ProviderType::Homebrew)
         );
         assert!(ProviderRegistry::parse_provider_type("unknown").is_none());
     }
@@ -318,6 +341,59 @@ mod tests {
         let provider =
             ProviderRegistry::create_provider(ProviderType::ProxmoxHelperScripts, &config);
         assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn create_provider_homebrew() {
+        let config = serde_json::json!({});
+        let provider = ProviderRegistry::create_provider(ProviderType::Homebrew, &config);
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn create_provider_homebrew_cask() {
+        let config = serde_json::json!({"package_type": "cask"});
+        let provider = ProviderRegistry::create_provider(ProviderType::Homebrew, &config);
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn validate_homebrew_config() {
+        let config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config(ProviderType::Homebrew, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_homebrew_config_cask() {
+        let config = serde_json::json!({"package_type": "cask"});
+        assert!(ProviderRegistry::validate_config(ProviderType::Homebrew, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_homebrew_config_invalid_package_type() {
+        let config = serde_json::json!({"package_type": "invalid"});
+        assert!(ProviderRegistry::validate_config(ProviderType::Homebrew, &config).is_err());
+    }
+
+    #[test]
+    fn homebrew_provider_capabilities() {
+        let config = serde_json::json!({});
+        let provider = ProviderRegistry::create_provider(ProviderType::Homebrew, &config).unwrap();
+        assert!(
+            provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::RefreshPackageIndex)
+        );
+    }
+
+    #[test]
+    fn mask_config_secrets_homebrew() {
+        let config = serde_json::json!({"package_type": "formula"});
+        let masked = ProviderRegistry::mask_config_secrets(ProviderType::Homebrew, &config);
+        assert_eq!(masked, config);
     }
 
     #[test]

@@ -1,20 +1,68 @@
 use uptrakit_internal_wire::ProviderType;
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_provider_registry::{ProviderCapability, ProviderRegistry};
 
-/// Check the installed version for a software item.
+/// Result of a version check for a single software item.
+pub struct VersionCheckOutcome {
+    /// Detected installed version, if any.
+    pub installed_version: Option<String>,
+    /// Latest available version from the local package index, if the provider
+    /// supports agent-side release fetching.
+    pub latest_version: Option<String>,
+    /// Error message if detection failed.
+    pub error: Option<String>,
+}
+
+/// Check the installed version (and optionally the latest version) for a
+/// software item.
 ///
-/// Returns `(installed_version, error)` where exactly one is `Some`.
+/// If the provider supports `RefreshPackageIndex`, the latest available version
+/// is also fetched via `fetch_releases()`. For providers that resolve latest
+/// versions on the controller side, `latest_version` will be `None`.
 pub async fn check_version(
     provider_type: ProviderType,
     config: &serde_json::Value,
-) -> (Option<String>, Option<String>) {
-    match ProviderRegistry::create_provider(provider_type, config) {
-        Ok(provider) => match provider.detect_installed_version().await {
-            Ok(Some(version)) => (Some(version.to_string()), None),
-            Ok(None) => (None, None),
-            Err(e) => (None, Some(format!("detection failed: {e}"))),
-        },
-        Err(e) => (None, Some(e.to_string())),
+) -> VersionCheckOutcome {
+    let provider = match ProviderRegistry::create_provider(provider_type, config) {
+        Ok(p) => p,
+        Err(e) => {
+            return VersionCheckOutcome {
+                installed_version: None,
+                latest_version: None,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+
+    let installed_version = match provider.detect_installed_version().await {
+        Ok(Some(version)) => Some(version.to_string()),
+        Ok(None) => None,
+        Err(e) => {
+            return VersionCheckOutcome {
+                installed_version: None,
+                latest_version: None,
+                error: Some(format!("detection failed: {e}")),
+            };
+        }
+    };
+
+    // For providers that can resolve latest versions locally (e.g., Homebrew),
+    // also fetch the latest available version from the package index.
+    let latest_version = if provider.has_capability(ProviderCapability::RefreshPackageIndex) {
+        match provider.fetch_releases().await {
+            Ok(releases) => releases.first().map(|r| r.version.to_string()),
+            Err(e) => {
+                tracing::debug!(error = %e, "failed to fetch latest version from provider");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    VersionCheckOutcome {
+        installed_version,
+        latest_version,
+        error: None,
     }
 }
 
@@ -28,10 +76,11 @@ mod tests {
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let (version, error) = check_version(ProviderType::GithubReleases, &config).await;
+        let outcome = check_version(ProviderType::GithubReleases, &config).await;
         // Stub implementation returns None for installed_version
-        assert!(version.is_none());
-        assert!(error.is_none());
+        assert!(outcome.installed_version.is_none());
+        assert!(outcome.latest_version.is_none());
+        assert!(outcome.error.is_none());
     }
 
     #[tokio::test]
@@ -39,17 +88,19 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let (version, error) = check_version(ProviderType::DockerRegistry, &config).await;
-        assert!(version.is_none());
-        assert!(error.is_none());
+        let outcome = check_version(ProviderType::DockerRegistry, &config).await;
+        assert!(outcome.installed_version.is_none());
+        assert!(outcome.latest_version.is_none());
+        assert!(outcome.error.is_none());
     }
 
     #[tokio::test]
     async fn check_version_proxmox_stub_returns_none() {
-        let (version, error) =
+        let outcome =
             check_version(ProviderType::ProxmoxHelperScripts, &serde_json::json!({})).await;
-        assert!(version.is_none());
-        assert!(error.is_none());
+        assert!(outcome.installed_version.is_none());
+        assert!(outcome.latest_version.is_none());
+        assert!(outcome.error.is_none());
     }
 
     #[tokio::test]
@@ -57,9 +108,21 @@ mod tests {
         let config = serde_json::json!({
             "invalid": "config"
         });
-        let (version, error) = check_version(ProviderType::GithubReleases, &config).await;
-        assert!(version.is_none());
-        assert!(error.is_some());
-        assert!(error.unwrap().contains("failed to parse"));
+        let outcome = check_version(ProviderType::GithubReleases, &config).await;
+        assert!(outcome.installed_version.is_none());
+        assert!(outcome.error.is_some());
+        assert!(outcome.error.unwrap().contains("failed to parse"));
+    }
+
+    #[tokio::test]
+    async fn check_version_homebrew_default_returns_none() {
+        // The base HomebrewProvider returns None for detect_installed_version
+        // and empty vec for fetch_releases (no package_identifier available)
+        let config = serde_json::json!({});
+        let outcome = check_version(ProviderType::Homebrew, &config).await;
+        assert!(outcome.installed_version.is_none());
+        // fetch_releases returns empty vec, so latest_version is None
+        assert!(outcome.latest_version.is_none());
+        assert!(outcome.error.is_none());
     }
 }

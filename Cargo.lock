@@ -4976,6 +4976,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-provider-homebrew"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-provider-core",
+ "uptrakit-shared-macros",
+]
+
+[[package]]
 name = "uptrakit-provider-proxmox-helper-scripts"
 version = "0.0.1"
 dependencies = [
@@ -4999,6 +5014,7 @@ dependencies = [
  "uptrakit-provider-core",
  "uptrakit-provider-docker-registry",
  "uptrakit-provider-github",
+ "uptrakit-provider-homebrew",
  "uptrakit-provider-proxmox-helper-scripts",
  "uptrakit-shared-macros",
 ]

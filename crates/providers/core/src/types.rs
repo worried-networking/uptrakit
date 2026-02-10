@@ -30,12 +30,13 @@ pub struct DiscoveredSoftware {
 }
 
 /// Supported provider types.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderType {
     GithubReleases,
     ProxmoxHelperScripts,
     DockerRegistry,
+    Homebrew,
 }
 
 impl fmt::Display for ProviderType {
@@ -44,6 +45,7 @@ impl fmt::Display for ProviderType {
             Self::GithubReleases => write!(f, "github_releases"),
             Self::ProxmoxHelperScripts => write!(f, "proxmox_helper_scripts"),
             Self::DockerRegistry => write!(f, "docker_registry"),
+            Self::Homebrew => write!(f, "homebrew"),
         }
     }
 }
@@ -148,6 +150,16 @@ mod tests {
     }
 
     #[test]
+    fn provider_type_homebrew_serialization() {
+        let hb = ProviderType::Homebrew;
+        let json = serde_json::to_string(&hb).expect("serialize");
+        assert_eq!(json, r#""homebrew""#);
+
+        let deserialized: ProviderType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, hb);
+    }
+
+    #[test]
     fn provider_type_display() {
         assert_eq!(ProviderType::GithubReleases.to_string(), "github_releases");
         assert_eq!(
@@ -155,6 +167,7 @@ mod tests {
             "proxmox_helper_scripts"
         );
         assert_eq!(ProviderType::DockerRegistry.to_string(), "docker_registry");
+        assert_eq!(ProviderType::Homebrew.to_string(), "homebrew");
     }
 
     #[test]
