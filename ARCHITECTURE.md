@@ -7,7 +7,7 @@ Uptrakit is an agent-based update tracking toolkit for self-hosted Linux environ
 ```text
 ┌──────────────┐         HTTPS/WSS (Rustls)           ┌──────────────────────┐
 │              │◄──────────────────────────────────── │  Agent (host A)      │
-│              │         outbound-only mTLS           │  local providers     │
+│              │         outbound-only mTLS           │  providers           │
 │              │                                      │  sudo allowlists     │
 │  Controller  │◄──────────────────────────────────── └──────────────────────┘
 │              │
@@ -233,12 +233,12 @@ All database tables are created by a single SeaORM migration (`crates/core/contr
 
 ## Provider Architecture
 
-Providers define how software items are tracked and updated. Each provider splits into two sides:
+Providers define how software items are tracked and updated. Each provider implements a unified `Provider` trait covering all capabilities:
 
-| Concern | Runs on | Responsibility |
+| Capability | Runs on | Responsibility |
 | --- | --- | --- |
-| Remote/upstream version | Controller | Fetch latest version metadata from upstream sources |
-| Local/installed version | Agent | Detect currently installed version on the host |
+| Upstream version | Controller | Fetch latest version metadata from upstream sources |
+| Installed version | Agent | Detect currently installed version on the host |
 | Software discovery | Agent | Enumerate software the provider can manage on the local system (optional, default returns empty list) |
 | Update execution | Agent | Run the update via sudo-allowlisted commands or custom scripts |
 
@@ -247,15 +247,15 @@ Providers define how software items are tracked and updated. Each provider split
 | Provider | Path | Description |
 | --- | --- | --- |
 | Provider Core | `crates/providers/core/` | Shared `Provider` trait, `ProviderCapability` enum, and `command` wrappers (delegates to `uptrakit-command`) |
-| Provider Registry | `crates/providers/registry/` | Centralized provider dispatch, config validation, and secret management |
+| Provider Registry | `crates/providers/registry/` | Centralized provider dispatch, config validation, and typed secret masking |
 | GitHub Releases | `crates/providers/github/` | Tracks GitHub release metadata; agent installs from artifacts |
 | Docker Registry | `crates/providers/docker-registry/` | Tracks container image tags from OCI/Docker registries |
 | Proxmox Helper-Scripts | `crates/providers/proxmox-helper-scripts/` | Auto-discovers and manages PVE helper-script-installed apps |
 
 The **Provider Registry** crate (`uptrakit-provider-registry`) centralizes all provider-related operations:
-- Creating local and remote `Provider` instances from `ProviderType` and config JSON
+- Creating `Provider` instances from `ProviderType` and config JSON via `create_provider()`
 - Validating provider configuration before storage
-- Masking and restoring secrets in config JSON for API responses
+- Typed secret masking and restoration in config JSON for API responses via `mask_config_secrets()` / `restore_config_secrets()`
 
 The agent and web-api crates import only the registry — not individual provider crates — eliminating scattered string-based provider matching. Both version detection and update execution are dispatched through the Provider Registry, keeping all provider routing logic in one place.
 
