@@ -306,6 +306,22 @@ mod tests {
     }
 
     #[test]
+    fn create_software_item_request_inline_config_default_enabled() -> Result<(), serde_json::Error>
+    {
+        let json = serde_json::json!({
+            "name": "Node.js",
+            "provider_config": {
+                "name": "GitHub Releases",
+                "provider_type": "github_releases",
+                "config": {}
+            }
+        });
+        let req: CreateSoftwareItemRequest = serde_json::from_value(json)?;
+        assert!(req.enabled);
+        Ok(())
+    }
+
+    #[test]
     fn create_provider_config_request_default_enabled() {
         let json = serde_json::json!({
             "name": "GitHub Releases",

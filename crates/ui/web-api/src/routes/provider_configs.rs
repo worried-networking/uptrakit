@@ -25,6 +25,28 @@ pub use uptrakit_web_api_types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
 };
 
+pub(crate) fn validate_provider_config_request(
+    req: &CreateProviderConfigRequest,
+) -> Result<(), String> {
+    if req.name.is_empty() {
+        return Err("name must not be empty".to_string());
+    }
+
+    if ProviderRegistry::parse_provider_type(&req.provider_type).is_none() {
+        return Err(format!("unknown provider_type: {}", req.provider_type));
+    }
+
+    if let Err(e) = ProviderRegistry::validate_config_str(&req.provider_type, &req.config) {
+        return Err(e.to_string());
+    }
+
+    if let Err(e) = validate_hooks_in_config(&req.config) {
+        return Err(e.to_string());
+    }
+
+    Ok(())
+}
+
 fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigResponse {
     ProviderConfigResponse {
         id: m.id.to_string(),
@@ -65,24 +87,8 @@ pub async fn create_provider_config(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    if req.name.is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
-    }
-
-    if ProviderRegistry::parse_provider_type(&req.provider_type).is_none() {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            format!("unknown provider_type: {}", req.provider_type),
-        );
-    }
-
-    if let Err(e) = ProviderRegistry::validate_config_str(&req.provider_type, &req.config) {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
-    }
-
-    // Validate hook parameters to prevent command injection
-    if let Err(e) = validate_hooks_in_config(&req.config) {
-        return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    if let Err(e) = validate_provider_config_request(&req) {
+        return error_response(StatusCode::BAD_REQUEST, e);
     }
 
     let now = OffsetDateTime::now_utc();

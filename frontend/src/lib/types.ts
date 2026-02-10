@@ -290,9 +290,17 @@ export interface ProviderConfigResponse {
 	updated_at: string;
 }
 
+export interface CreateProviderConfigRequest {
+	name: string;
+	provider_type: string;
+	config: Record<string, unknown>;
+	enabled?: boolean;
+}
+
 export interface CreateSoftwareItemRequest {
 	name: string;
-	provider_config_id: string;
+	provider_config_id?: string;
+	provider_config?: CreateProviderConfigRequest;
 	package_identifier?: string;
 	config_override?: Record<string, unknown> | null;
 	enabled?: boolean;

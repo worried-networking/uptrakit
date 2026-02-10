@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::provider_configs::CreateProviderConfigRequest;
+
 pub fn default_enabled() -> bool {
     true
 }
@@ -10,7 +12,9 @@ pub struct CreateSoftwareItemRequest {
     /// Display name (e.g. "Node.js").
     pub name: String,
     /// UUID of the provider config to use.
-    pub provider_config_id: String,
+    pub provider_config_id: Option<String>,
+    /// Inline provider config to create (mutually exclusive with provider_config_id).
+    pub provider_config: Option<CreateProviderConfigRequest>,
     /// Provider-specific identifier within the source. Defaults to "" if omitted.
     pub package_identifier: Option<String>,
     /// Provider-specific overrides merged onto the base ProviderConfig at resolution time.

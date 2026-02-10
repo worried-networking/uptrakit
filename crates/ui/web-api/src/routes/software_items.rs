@@ -4,7 +4,7 @@ use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 use crate::middleware::tenant_context::TenantContext;
-use crate::routes::provider_configs::validate_hooks_in_config;
+use crate::routes::provider_configs::{validate_hooks_in_config, validate_provider_config_request};
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -12,8 +12,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -138,11 +138,14 @@ async fn find_active_item(
 }
 
 /// Find a non-deactivated provider config by ID, scoped to a tenant.
-async fn find_active_provider_config(
-    db: &sea_orm::DatabaseConnection,
+async fn find_active_provider_config<C>(
+    db: &C,
     tenant_id: uuid::Uuid,
     id: uuid::Uuid,
-) -> Option<provider_config::Model> {
+) -> Option<provider_config::Model>
+where
+    C: ConnectionTrait,
+{
     ProviderConfig::find_by_id(id)
         .filter(provider_config::Column::TenantId.eq(tenant_id))
         .filter(provider_config::Column::DeactivatedAt.is_null())
@@ -211,6 +214,18 @@ enum ConfigOverrideError {
     ProviderValidation(String),
 }
 
+fn validate_provider_config_selection(
+    provider_config_id: Option<&str>,
+    provider_config: bool,
+) -> Result<(), &'static str> {
+    match (provider_config_id.is_some(), provider_config) {
+        (true, false) => Ok(()),
+        (false, true) => Ok(()),
+        (true, true) => Err("Provide either provider_config_id or provider_config, not both"),
+        (false, false) => Err("provider_config_id or provider_config is required"),
+    }
+}
+
 /// Validate `config_override` by merging it with the base provider config and running
 /// provider-specific validation.
 fn validate_config_override(
@@ -262,23 +277,87 @@ pub async fn create_software_item(
         return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
     }
 
-    let provider_config_id = match uuid::Uuid::parse_str(&req.provider_config_id) {
-        Ok(id) => id,
-        Err(_) => {
-            return error_response(StatusCode::BAD_REQUEST, "Invalid provider_config_id UUID");
+    if let Err(e) = validate_provider_config_selection(
+        req.provider_config_id.as_deref(),
+        req.provider_config.is_some(),
+    ) {
+        return error_response(StatusCode::BAD_REQUEST, e);
+    }
+
+    let txn = match state.db.begin().await {
+        Ok(txn) => txn,
+        Err(e) => {
+            tracing::error!("Failed to begin software item transaction: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
-    let config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, provider_config_id).await {
-            Some(c) => c,
-            None => {
-                return error_response(
-                    StatusCode::BAD_REQUEST,
-                    "provider_config_id does not reference an active provider config",
-                );
+    let (provider_config_id, config) = match (
+        req.provider_config_id.as_deref(),
+        req.provider_config.as_ref(),
+    ) {
+        (Some(id), None) => {
+            let provider_config_id = match uuid::Uuid::parse_str(id) {
+                Ok(id) => id,
+                Err(_) => {
+                    return error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Invalid provider_config_id UUID",
+                    );
+                }
+            };
+            let config =
+                match find_active_provider_config(&txn, tenant.tenant_id, provider_config_id).await
+                {
+                    Some(c) => c,
+                    None => {
+                        return error_response(
+                            StatusCode::BAD_REQUEST,
+                            "provider_config_id does not reference an active provider config",
+                        );
+                    }
+                };
+            (provider_config_id, config)
+        }
+        (None, Some(inline)) => {
+            if let Err(e) = validate_provider_config_request(inline) {
+                return error_response(StatusCode::BAD_REQUEST, e);
             }
-        };
+
+            let now = OffsetDateTime::now_utc();
+            let provider_config_id = generate_uuid();
+            let model = provider_config::ActiveModel {
+                id: Set(provider_config_id),
+                tenant_id: Set(tenant.tenant_id),
+                name: Set(inline.name.clone()),
+                provider_type: Set(inline.provider_type.clone()),
+                config: Set(inline.config.clone()),
+                enabled: Set(inline.enabled),
+                created_at: Set(now),
+                updated_at: Set(now),
+                deactivated_at: Set(None),
+            };
+
+            let inserted = match model.insert(&txn).await {
+                Ok(inserted) => inserted,
+                Err(e) => {
+                    tracing::error!("Failed to create provider config inline: {e}");
+                    return error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Internal server error",
+                    );
+                }
+            };
+
+            (provider_config_id, inserted)
+        }
+        _ => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "provider_config_id or provider_config is required",
+            );
+        }
+    };
 
     let package_identifier = req.package_identifier.unwrap_or_default();
     if config.provider_type == "homebrew"
@@ -310,7 +389,7 @@ pub async fn create_software_item(
         .filter(software_item::Column::ProviderConfigId.eq(provider_config_id))
         .filter(software_item::Column::PackageIdentifier.eq(&package_identifier))
         .filter(software_item::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(&txn)
         .await;
 
     match duplicate {
@@ -342,16 +421,21 @@ pub async fn create_software_item(
         deactivated_at: Set(None),
     };
 
-    match model.insert(&state.db).await {
-        Ok(inserted) => {
-            let resp = build_list_response(inserted, &config, 0);
-            (StatusCode::CREATED, Json(resp)).into_response()
-        }
+    let inserted = match model.insert(&txn).await {
+        Ok(inserted) => inserted,
         Err(e) => {
             tracing::error!("Failed to create software item: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+    };
+
+    if let Err(e) = txn.commit().await {
+        tracing::error!("Failed to commit software item transaction: {e}");
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
+
+    let resp = build_list_response(inserted, &config, 0);
+    (StatusCode::CREATED, Json(resp)).into_response()
 }
 
 /// List all active software items (with host count).
@@ -1324,6 +1408,18 @@ mod tests {
                 "expected valid: {case}"
             );
         }
+    }
+
+    #[test]
+    fn validate_provider_config_selection_requires_one() {
+        assert!(validate_provider_config_selection(None, false).is_err());
+        assert!(validate_provider_config_selection(Some("id"), true).is_err());
+    }
+
+    #[test]
+    fn validate_provider_config_selection_accepts_one() {
+        assert!(validate_provider_config_selection(Some("id"), false).is_ok());
+        assert!(validate_provider_config_selection(None, true).is_ok());
     }
 
     #[test]
