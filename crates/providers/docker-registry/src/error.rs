@@ -38,7 +38,8 @@ pub enum DockerRegistryError {
 pub type Result<T> = std::result::Result<T, Report<DockerRegistryError>>;
 
 impl_report_conversion!(reqwest::Error => DockerRegistryError, |e| DockerRegistryError::Request(e.to_string()));
-impl_report_conversion!(ProviderError => DockerRegistryError, |e| DockerRegistryError::Provider(e.to_string()));
+impl_report_conversion!(ProviderError => DockerRegistryError, |e| DockerRegistryError::Configuration(e.to_string()));
+impl_report_conversion!(DockerRegistryError => ProviderError, |e| ProviderError::ProviderInternal(e.to_string()));
 
 #[cfg(test)]
 mod tests {

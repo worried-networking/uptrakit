@@ -32,4 +32,5 @@ pub enum GitHubError {
 pub type Result<T> = std::result::Result<T, Report<GitHubError>>;
 
 impl_report_conversion!(reqwest::Error => GitHubError, |e| GitHubError::Request(e.to_string()));
-impl_report_conversion!(ProviderError => GitHubError, |e| GitHubError::Provider(e.to_string()));
+impl_report_conversion!(ProviderError => GitHubError, |e| GitHubError::Configuration(e.to_string()));
+impl_report_conversion!(GitHubError => ProviderError, |e| ProviderError::ProviderInternal(e.to_string()));

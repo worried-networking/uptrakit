@@ -33,6 +33,9 @@ pub enum ProviderError {
 
     #[error("install command failed: {0}")]
     InstallFailed(String),
+
+    #[error("provider internal error: {0}")]
+    ProviderInternal(String),
 }
 
 /// Result type alias for provider operations.

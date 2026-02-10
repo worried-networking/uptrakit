@@ -7,23 +7,20 @@ use uptrakit_provider_core::{
     UpdateOutputStream, Version,
 };
 
-/// Local provider for Proxmox Helper Scripts.
+/// Provider for Proxmox Helper Scripts.
 ///
 /// Executes updates by running the helper script via `curl | bash`.
-pub struct ProxmoxHelperScriptsLocalProvider {
-    /// Package identifier (script name).
-    pub package_identifier: String,
-}
+pub struct ProxmoxHelperScriptsProvider;
 
-impl ProxmoxHelperScriptsLocalProvider {
-    /// Create a new Proxmox Helper Scripts local provider.
-    pub fn new(package_identifier: String) -> Self {
-        Self { package_identifier }
+impl ProxmoxHelperScriptsProvider {
+    /// Create a new Proxmox Helper Scripts provider.
+    pub fn new() -> Self {
+        Self
     }
 }
 
 #[async_trait]
-impl Provider for ProxmoxHelperScriptsLocalProvider {
+impl Provider for ProxmoxHelperScriptsProvider {
     fn capabilities(&self) -> &'static [ProviderCapability] {
         &[ProviderCapability::DiscoverLocalSoftware]
     }
@@ -80,14 +77,14 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
-        let provider = ProxmoxHelperScriptsLocalProvider::new("test-script".to_string());
+        let provider = ProxmoxHelperScriptsProvider::new();
         let result = provider.detect_installed_version().await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn execute_update_missing_script_url_returns_error() {
-        let provider = ProxmoxHelperScriptsLocalProvider::new("test-script".to_string());
+        let provider = ProxmoxHelperScriptsProvider::new();
         let (tx, _rx) = mpsc::channel(100);
         let ctx = UpdateContext {
             to_version: "1.0.0".to_string(),

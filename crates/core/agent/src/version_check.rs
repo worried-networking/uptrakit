@@ -38,10 +38,13 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_docker_stub_returns_none() {
+        let config = serde_json::json!({
+            "image": "nginx"
+        });
         let (version, error) = check_version(
             ProviderType::DockerRegistry,
             "nginx:latest",
-            &serde_json::json!({}),
+            &config,
         )
         .await;
         assert!(version.is_none());

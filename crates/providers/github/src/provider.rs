@@ -24,15 +24,13 @@ pub struct GitHubProvider {
     client: reqwest::Client,
     config: GitHubConfig,
     asset_filters: Vec<Regex>,
-    /// Package identifier (owner/repo).
-    package_identifier: String,
 }
 
 impl GitHubProvider {
     /// Create a new `GitHubProvider` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
-    pub fn new(config: GitHubConfig, package_identifier: String) -> Result<Self> {
+    pub fn new(config: GitHubConfig) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(GitHubError::Configuration(e.to_string())))?;
@@ -81,13 +79,14 @@ impl GitHubProvider {
                 })
             })
             .collect::<Result<_>>()?;
+
         Ok(Self {
             client,
             config,
             asset_filters,
-            package_identifier,
         })
     }
+
 
     /// Build the releases API URL.
     fn releases_url(&self) -> String {
@@ -339,7 +338,7 @@ mod tests {
     }
 
     fn test_provider() -> GitHubProvider {
-        GitHubProvider::new(test_config(), "octocat/hello-world".to_string()).expect("valid config")
+        GitHubProvider::new(test_config()).expect("valid config")
     }
 
     fn make_release(tag: &str, draft: bool, prerelease: bool) -> GitHubRelease {
@@ -385,7 +384,7 @@ mod tests {
         let mut config = test_config();
         config.include_prereleases = true;
         let provider =
-            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
+            GitHubProvider::new(config).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = provider.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
@@ -413,7 +412,7 @@ mod tests {
         let mut config = test_config();
         config.tag_strip_prefix = "release-".to_string();
         let provider =
-            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
+            GitHubProvider::new(config).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = provider.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
@@ -424,7 +423,7 @@ mod tests {
         let mut config = test_config();
         config.asset_patterns = vec![r".*\.tar\.gz$".to_string()];
         let provider =
-            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
+            GitHubProvider::new(config).expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -507,7 +506,7 @@ mod tests {
         let mut config = test_config();
         config.api_base_url = Some("https://ghe.corp.com/api/v3".to_string());
         let provider =
-            GitHubProvider::new(config, "octocat/hello-world".to_string()).expect("valid config");
+            GitHubProvider::new(config).expect("valid config");
         let url = provider.releases_url();
         assert_eq!(
             url,
@@ -545,17 +544,18 @@ mod tests {
 
     #[test]
     fn provider_creation_fails_with_invalid_config() {
+        let config = test_config();
         let config = GitHubConfig {
             owner: String::new(),
             repo: "test".to_string(),
-            auth_token: None,
-            api_base_url: None,
-            include_prereleases: false,
-            tag_strip_prefix: "v".to_string(),
-            asset_patterns: vec![],
+            auth_token: config.auth_token,
+            api_base_url: config.api_base_url,
+            include_prereleases: config.include_prereleases,
+            tag_strip_prefix: config.tag_strip_prefix,
+            asset_patterns: config.asset_patterns,
         };
         assert!(
-            GitHubProvider::new(config, "octocat/hello-world".to_string()).is_err()
+            GitHubProvider::new(config).is_err()
         );
     }
 

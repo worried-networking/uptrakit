@@ -1,11 +1,9 @@
 use rootcause::prelude::*;
 
 use uptrakit_provider_core::{Provider, ProviderType};
-use uptrakit_provider_docker_registry::{
-    DockerRegistryConfig, DockerRegistryLocalProvider, DockerRegistryProvider,
-};
+use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
-use uptrakit_provider_proxmox_helper_scripts::ProxmoxHelperScriptsLocalProvider;
+use uptrakit_provider_proxmox_helper_scripts::ProxmoxHelperScriptsProvider;
 
 use crate::error::{RegistryError, Result};
 use crate::secrets;
@@ -39,18 +37,19 @@ impl ProviderRegistry {
             ProviderType::GithubReleases => {
                 let github_config: GitHubConfig =
                     serde_json::from_value(config.clone()).context_to()?;
-                let provider =
-                    GitHubProvider::new(github_config, package_identifier.to_string())
+                let provider = GitHubProvider::new(github_config)
                         .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::DockerRegistry => {
-                let provider = DockerRegistryLocalProvider::new();
+                let docker_config: DockerRegistryConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                let provider = DockerRegistryProvider::new(docker_config)
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::ProxmoxHelperScripts => {
-                let provider =
-                    ProxmoxHelperScriptsLocalProvider::new(package_identifier.to_string());
+                let provider = ProxmoxHelperScriptsProvider::new();
                 Ok(Box::new(provider))
             }
         }
@@ -74,7 +73,7 @@ impl ProviderRegistry {
             ProviderType::GithubReleases => {
                 let github_config: GitHubConfig =
                     serde_json::from_value(config.clone()).context_to()?;
-                let provider = GitHubProvider::new(github_config, "".to_string()) // package_identifier not needed for remote
+                let provider = GitHubProvider::new(github_config)
                     .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
@@ -313,7 +312,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_local_provider_docker() {
-        let config = serde_json::json!({});
+        let config = serde_json::json!({
+            "image": "nginx"
+        });
         let provider =
             ProviderRegistry::create_local_provider(ProviderType::DockerRegistry, "nginx", &config);
         assert!(provider.is_ok());
