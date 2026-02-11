@@ -58,6 +58,10 @@ Licensed under either of
 
 at your option.
 
+## AI Disclosure
+
+The initial codebase for this project was significantly shaped by AI (Claude Code, Codex, Gemini) under heavy human supervision and constant code reviews. While efforts were made to ensure quality and correctness, the project has not undergone a formal 3rd-party security audit. As with any software published online, use at your own risk.
+
 ## Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted

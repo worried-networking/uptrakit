@@ -186,6 +186,18 @@ Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error construct
   - **Repeated serialization** (e.g. WebSocket handlers): extract a helper function that returns `Option<String>` and logs on failure, then use `let Some(json) = helper(&msg) else { break/return; };` at each call site.
   - **`From` trait impls** (which cannot return `Result`): use `match` with a safe default value.
 
+## Responsible AI Use Guidelines
+
+This project leverages AI tools, including CodeRabbit for pull request analysis, to enhance productivity and code quality. When contributing, please adhere to the following guidelines for responsible AI use:
+
+-   **AI as an Assistant, Not an Authority:** Treat AI-generated suggestions, code snippets, or analyses as recommendations. Always critically review and understand any AI output before incorporating it. Your judgment and expertise are paramount.
+-   **No Sensitive Information:** Do not input any sensitive project information, credentials, or private data into public AI tools. Ensure that any AI interaction complies with data privacy and security policies.
+-   **Maintain Code Ownership:** While AI can generate code, you are ultimately responsible for the correctness, security, and maintainability of any code you commit, regardless of its origin.
+-   **Explain AI-Assisted Changes:** If a significant portion of your contribution was AI-generated or heavily AI-assisted, consider briefly mentioning this in your pull request description. This helps reviewers understand the context and scrutiny applied.
+-   **Leverage AI for Learning:** Use AI tools to learn new patterns, understand complex concepts, and explore alternative solutions.
+-   **Review AI Feedback:** Pay attention to feedback from AI tools like CodeRabbit. Use it to improve your code, identify potential issues, and refine your understanding of best practices.
+-   **Bias Awareness:** Be mindful that AI models can sometimes reflect biases present in their training data. Critically evaluate AI suggestions for fairness and inclusivity, especially in areas like naming conventions or user-facing text.
+
 ## Pull requests
 
 ### Before opening a PR
