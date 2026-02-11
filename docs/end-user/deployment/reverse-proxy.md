@@ -38,13 +38,13 @@ Run the controller with the corresponding flags or set the values via the UI/API
 
 Structured headers are semicolon-separated `key="value"` pairs, for example:
 
-```
+```text
 Subject="CN=<agent-uuid>,O=Uptrakit";Issuer="CN=Uptrakit Internal CA";SerialNumber="01:ab:cd:ef"
 ```
 
 Envoy's XFCC header uses comma-separated pairs and is also supported:
 
-```
+```text
 Subject="CN=<agent-uuid>",Cert="<url-encoded-PEM>"
 ```
 

@@ -35,18 +35,18 @@ Contribution guidelines and project conventions:
 
 ### Core overviews
 
-- `ARCHITECTURE.md` — condensed architecture overview
-- `SECURITY.md` — high-level security stance and disclosure/reporting policy
-- `CONTRIBUTING.md` — quick contributor overview
-- `docs/README.md` — catalogue listing all audience-focused documents
-- `TODO.md` — roadmap and planned work
+- [ARCHITECTURE.md](ARCHITECTURE.md) — condensed architecture overview
+- [SECURITY.md](SECURITY.md) — high-level security stance and disclosure/reporting policy
+- [CONTRIBUTING.md](CONTRIBUTING.md) — quick contributor overview
+- [docs/README.md](docs/README.md) — catalogue listing all audience-focused documents
+- [TODO.md](TODO.md) — roadmap and planned work
 
 ### Audience docs
 
-- `docs/end-user/*.md` — end-user documentation
-- `docs/api/*.md` — HTTP API and Wire protocol documentation
-- `docs/security/*.md` — detailed security description
-- `docs/development/*.md` — setup, testing, coding standards, PR process, dependency rules, provider expectations, and AI guidance
+- [docs/end-user/](docs/end-user/) — end-user documentation
+- [docs/api/](docs/api/) — HTTP API and Wire protocol documentation
+- [docs/security/](docs/security/) — detailed security description
+- [docs/development/](docs/development/) — setup, testing, coding standards, PR process, dependency rules, provider expectations, and AI guidance
 
 ## License
 

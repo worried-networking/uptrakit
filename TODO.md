@@ -753,7 +753,7 @@ Making the system usable and maintainable.
 
 ### Contributor Documentation
 
-- [x] Write CONTRIBUTING.md
+- [x] Write [CONTRIBUTING.md](CONTRIBUTING.md)
 - [x] Document development setup
 - [x] Create architecture documentation
 - [ ] Document testing strategy

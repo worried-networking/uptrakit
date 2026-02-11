@@ -31,4 +31,4 @@ Not DB-managed: `--data-dir`, `--db-url`, `--tls-cert`, `--tls-key`, `--ca-cert`
 
 ## Security Notes
 
-For security-sensitive changes to settings, consult `docs/security/secure-development.md` and ensure permission checks guard the update endpoints.
+For security-sensitive changes to settings, consult [docs/security/secure-development.md](../security/secure-development.md) and ensure permission checks guard the update endpoints.

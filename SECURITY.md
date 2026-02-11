@@ -12,13 +12,13 @@ Report vulnerabilities via GitHub's [Report a vulnerability](https://github.com/
 - Secrets are encrypted at rest, never logged, and sensitive endpoints are rate limited.
 
 ## Detailed guidance
-- PKI, certificates, and revocation flows: `docs/security/pki-certificates.md`
-- Authentication and permissions: `docs/security/auth-and-authorization.md`
-- Secrets, encryption, and master key handling: `docs/security/secrets-and-encryption.md`
-- Reverse proxy security: `docs/security/reverse-proxy/index.md`
-- TOFU & TLS hardening: `docs/security/tofu-tls.md`
-- Filesystem/dependency hardening: `docs/security/filesystem-dependency-security.md`
-- Secure development practices: `docs/security/secure-development.md`
+- PKI, certificates, and revocation flows: [docs/security/pki-certificates.md](docs/security/pki-certificates.md)
+- Authentication and permissions: [docs/security/auth-and-authorization.md](docs/security/auth-and-authorization.md)
+- Secrets, encryption, and master key handling: [docs/security/secrets-and-encryption.md](docs/security/secrets-and-encryption.md)
+- Reverse proxy security: [docs/security/reverse-proxy/index.md](docs/security/reverse-proxy/index.md)
+- TOFU & TLS hardening: [docs/security/tofu-tls.md](docs/security/tofu-tls.md)
+- Filesystem/dependency hardening: [docs/security/filesystem-dependency-security.md](docs/security/filesystem-dependency-security.md)
+- Secure development practices: [docs/security/secure-development.md](docs/security/secure-development.md)
 
 ## Disclosure policy
 We follow coordinated disclosure and release fixes promptly after verification. Reporters receive credit in release notes unless anonymity is requested.

@@ -25,7 +25,7 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 - GET/PUT `/api/v1/settings/authentication`
 - GET/PUT `/api/v1/settings/service-certificates`
 
-Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in `docs/api/settings-runtime.md`. Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
+Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in [docs/api/settings-runtime.md](settings-runtime.md). Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
 
 ## Services and Software Items
 

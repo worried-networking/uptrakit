@@ -1,4 +1,4 @@
-# AGENTS.md — AI Agent Guide for Uptrakit
+# AGENTS — AI Agent Guide for Uptrakit
 
 This file provides structured context for AI coding agents working on the Uptrakit codebase. Read this first before making any changes.
 
@@ -17,11 +17,11 @@ For full project context, see [README.md](README.md). For contribution rules, se
 
 ## Documentation split
 
-- **End-user docs** (`docs/end-user/`): overview, manual update workflow, Home Assistant/MQTT integration, and deployment map (including `docs/end-user/deployment/reverse-proxy.md`).
-- **API & protocol docs** (`docs/api/`): AsyncAPI/wire protocol (`wire-protocol.md`), REST API endpoints (`http-web-api.md`), settings reconciliation (`settings-runtime.md`), auth flows (`auth-flows.md`), and service/tenant operations (`services-operations.md`).
+- **End-user docs** ([`docs/end-user/`](docs/end-user/)): overview, manual update workflow, Home Assistant/MQTT integration, and deployment map (including [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)).
+- **API & protocol docs** ([`docs/api/`](docs/api/)): AsyncAPI/wire protocol ([wire-protocol.md](docs/api/wire-protocol.md)), REST API endpoints ([http-web-api.md](docs/api/http-web-api.md)), settings reconciliation ([settings-runtime.md](docs/api/settings-runtime.md)), auth flows ([auth-flows.md](docs/api/auth-flows.md)), and service/tenant operations ([services-operations.md](docs/api/services-operations.md)).
 - **Security docs** (`docs/security/`): architecture, cryptography, PKI/certificates, auth/permissions, secrets/encryption, reverse proxy security, TOFU/TLS, filesystem/dependency hardening, and secure development guidance.
 - **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, provider guidelines, and AI usage expectations.
-- **Deployment guides**: reverse proxy deployment and per-proxy guides now live under `docs/end-user/deployment/` and `docs/security/reverse-proxy/`. Human documentation must link into those files rather than `AGENTS.md`.
+- **Deployment guides**: reverse proxy deployment and per-proxy guides now live under [`docs/end-user/deployment/`](docs/end-user/deployment/) and [`docs/security/reverse-proxy/`](docs/security/reverse-proxy/). Human documentation must link into those files rather than [AGENTS.md](AGENTS.md).
 
 ## Codebase layout
 
@@ -65,9 +65,9 @@ uptrakit/
 ├── .github/
 │   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend check + build
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
-├── CONTRIBUTING.md
-├── README.md
-└── AGENTS.md                           # This file
+├── CONTRIBUTING
+├── README
+└── AGENTS                              # This file
 ```
 
 All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.

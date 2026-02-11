@@ -21,4 +21,4 @@
 
 ## Update Hooks
 
-Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in `docs/development/provider-guidelines.md`.
+Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in [docs/development/provider-guidelines.md](../development/provider-guidelines.md).
