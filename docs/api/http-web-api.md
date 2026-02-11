@@ -52,3 +52,154 @@ Software items link to `provider_config`s and host associations via `host_softwa
 - `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires `ManageSettings`).
 
 Update history records each attempt (`status`: `pending`, `in_progress`, `completed`, `failed`) and stores the full command output for auditing.
+
+## API Error Responses - Detailed
+
+All web API error responses use a consistent JSON format defined by `ErrorResponse`
+(`crates/shared/web-api-types/src/error.rs`):
+
+```json
+{
+  "error": "Human-readable error message",
+  "code": "optional_machine_readable_code"
+}
+```
+
+The `code` field is optional (`#[serde(skip_serializing_if = "Option::is_none")]`) and used only where a
+machine-readable code adds value (e.g. `"not_found"` for the 404 fallback, `"agent_version_too_old"` for version
+checks).
+
+### Helper functions
+
+`crates/ui/web-api/src/error_response.rs` provides two helpers:
+
+- `error_response(status, message) -> Response` — most common case, no code field
+- `error_response_with_code(status, message, code) -> Response` — includes a machine-readable code
+
+All route handlers, middleware rejections, and custom `IntoResponse` impls use these helpers instead of constructing raw
+tuples.
+
+### Convention
+
+- **Do**: `error_response(StatusCode::BAD_REQUEST, "Invalid input")`
+- **Do not**: `(StatusCode::BAD_REQUEST, "Invalid input").into_response()`
+- **Do not**: construct `Json(serde_json::json!({"error": "..."}))` manually
+- The 404 fallback uses `error_response_with_code` for the JSON path; the HTML path returns a plain-text "Not Found".
+- WebSocket endpoints (`service_ws.rs`) are excluded — they use protocol-level error handling, not JSON responses.
+
+### Frontend integration
+
+The frontend (`frontend/src/lib/api.ts`) uses `extractErrorMessage(res)` to parse error responses. It tries to parse
+JSON and extract the `error` field; falls back to the raw response text if parsing fails. The `ErrorResponse` TypeScript
+interface is defined in `frontend/src/lib/types.ts`.
+
+## API Rate Limiting - Detailed
+
+Database-backed per-IP rate limiting protects public authentication endpoints from brute-force attacks, credential
+stuffing, and abuse. All rate limit state is in the `api_rate_limits` table, making it HA-safe across multiple
+controller instances.
+
+### Rate-limited endpoints
+
+| Endpoint | Limit | Key format |
+| --- | --- | --- |
+| `POST /api/v1/auth/login` | 10 req/min/IP | `/api/v1/auth/login:{ip}` |
+| `POST /api/v1/auth/register` | 10 req/min/IP | `/api/v1/auth/register:{ip}` |
+| `POST /api/v1/auth/refresh` | 10 req/min/IP | `/api/v1/auth/refresh:{ip}` |
+| `POST /api/v1/auth/device` | 10 req/min/IP | `/api/v1/auth/device:{ip}` |
+| `POST /api/v1/auth/device/poll` | 12 req/min/IP | `/api/v1/auth/device/poll:{ip}` |
+
+Endpoints **not** rate-limited: logout (requires valid refresh token), device/approve (requires auth), OIDC (external
+IdP interaction), all authenticated endpoints (require valid JWT/API token).
+
+### WebSocket rate limiting
+
+The `/api/v1/ws/service` WebSocket endpoint has its own per-IP rate limiting, applied **before** the WebSocket upgrade:
+
+| Key format | Limit | Trigger | Fail mode |
+| --- | --- | --- | --- |
+| `ws_connect:{ip}` | 30 req/60s | Every connection attempt | Fail-closed (503 on DB error) |
+| `ws_auth_fail:{ip}` | 10 req/300s | After failed bearer lookup | Fail-closed (503 on DB error) |
+
+Unlike the HTTP rate limiter middleware (which fails open), the WebSocket rate limiter **fails closed** on DB errors.
+This prevents bypass under database pressure. The check is in `service_ws()` in
+`crates/ui/web-api/src/routes/service_ws.rs`.
+
+### Implementation
+
+- **Store**: `crates/ui/web-api/src/auth/rate_limit.rs` — `RateLimitStore` with sliding-window counter algorithm using
+  atomic upserts.
+- **Middleware**: `crates/ui/web-api/src/middleware/rate_limit.rs` — `rate_limit_auth` middleware with
+  `LazyLock<HashMap>` endpoint config. Fails open on store errors.
+- **Entity**: `crates/shared/db/src/entity/api_rate_limit.rs` — SeaORM entity for the `api_rate_limits` table (columns:
+  `key` TEXT PK, `request_count` INTEGER, `window_start` TIMESTAMP, `expires_at` TIMESTAMP).
+- **Migration**: `crates/core/controller/src/migration/m20260209_000001_initial.rs`.
+- **Cleanup**: expired entries are pruned every 5 minutes by the controller's periodic cleanup task.
+
+### Response format
+
+When rate-limited, the API returns HTTP 429 with a JSON `ErrorResponse` body and a `Retry-After` header:
+
+```json
+{ "error": "Too many requests, please try again later" }
+```
+
+### Adding a new rate-limited endpoint
+
+1. Add an entry to the `RATE_LIMITS` HashMap in `crates/ui/web-api/src/middleware/rate_limit.rs`.
+1. Update the table in this section.
+
+## Pagination - Detailed
+
+All list endpoints that can grow unboundedly use server-side pagination with a consistent response envelope. Shared
+types are defined in `crates/shared/web-api-types/src/pagination.rs`.
+
+### Query parameters
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `page` | u64 | 1 | Page number (1-indexed) |
+| `per_page` | u64 | 20 | Items per page (clamped to 1–1000) |
+
+### Response envelope
+
+All paginated endpoints return a `PaginatedResponse<T>`:
+
+```json
+{
+  "items": [...],
+  "total": 42,
+  "page": 1,
+  "per_page": 20,
+  "total_pages": 3
+}
+```
+
+### Paginated endpoints
+
+| Endpoint | Query struct | Notes |
+| --- | --- | --- |
+| `GET /api/v1/services` | `ListServicesQuery` (includes `page`/`per_page`) | Filterable by `type`, `status` |
+| `GET /api/v1/hosts` | `PaginationParams` | |
+| `GET /api/v1/software-items` | `PaginationParams` | |
+| `GET /api/v1/update-history` | `UpdateHistoryQuery` (includes `page`/`per_page`) | Filterable by `host_id`, `software_item_id`, `status` |
+| `GET /api/v1/provider-configs` | `PaginationParams` | |
+
+### Endpoints NOT paginated (already bounded)
+
+| Endpoint | Reason |
+| --- | --- |
+| `GET /api/v1/settings/mqtt` | Bounded by `MqttMaxClientsPerTenant` (default 10) |
+| `GET /api/v1/auth/api-tokens` | Per-user, typically small |
+
+### Adding pagination to a new endpoint
+
+For endpoints with an existing query struct, add `page: Option<u64>` and `per_page: Option<u64>` fields directly
+(serde_urlencoded does not support `#[serde(flatten)]`) and provide a `pagination()` helper method. For endpoints
+without an existing query struct, use `Query<PaginationParams>` as a new extractor.
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/web-api-types/src/pagination.rs` | `PaginationParams`, `ResolvedPagination`, `PaginatedResponse<T>` |

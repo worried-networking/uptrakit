@@ -1,6 +1,6 @@
 # Authentication Flows
 
-## Device Authorization (CLI)
+## Device Authorization (CLI) - Overview
 
 1. `POST /api/v1/auth/device` with optional `client_name` → returns `device_code`, `user_code`, `verification_url`, `expires_in` (600s), `interval`
    (5s).
@@ -8,6 +8,41 @@
 3. User logs in via browser (password or OIDC) and approves the request (`POST /api/v1/auth/device/approve`).
 4. CLI polls `POST /api/v1/auth/device/poll` every `interval` seconds until approval; response contains access token and refresh token.
 5. On approval, the flow is removed from the DB to prevent reuse.
+
+## Device Authorization (CLI) - Detailed Flow
+
+The CLI uses an RFC 8628-style device authorization flow instead of password-based login. This allows the CLI to
+authenticate even when password auth is disabled (OIDC-only environments).
+
+### Flow
+
+1. CLI calls `POST /api/v1/auth/device` with an optional `client_name`. Returns `device_code`, `user_code`,
+   `verification_url`, `expires_in` (600s), and `interval` (5s).
+1. CLI opens `verification_url` in the user's browser and displays the `user_code`.
+1. User logs in via the browser (password or OIDC) and approves the device code at `/device?code=XXXX-XXXX`.
+1. CLI polls `POST /api/v1/auth/device/poll` with the `device_code` every `interval` seconds.
+1. On approval, the poll response contains an API token. The CLI stores it locally.
+
+### Endpoints
+
+| Endpoint | Auth | Purpose |
+| --- | --- | --- |
+| `POST /api/v1/auth/device` | Public | Start device flow, get device code + user code |
+| `POST /api/v1/auth/device/poll` | Public | Poll for authorization status |
+| `POST /api/v1/auth/device/approve` | Bearer (JWT or API token) | Approve a device code (browser-side) |
+
+### Security
+
+- **Device code**: 32-byte crypto random (base64url), unguessable.
+- **User code**: 8 uppercase consonants from a 20-char alphabet (avoids vowels to prevent offensive words), ~34.5 bits
+  entropy, formatted `XXXX-XXXX`.
+- **Rate limiting**: all public auth endpoints (including device/poll) are rate-limited via the unified
+  `api_rate_limits` DB table; see the "API rate limiting" section below.
+- **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.
+- **10-minute expiry**: flows auto-expire; cleanup runs every 5 minutes alongside OIDC state cleanup.
+- **Database-backed store**: all pending device flow state is persisted to the `pending_device_flows` table (shared with
+  OIDC flow, account link, token exchange, and OIDC registration stores). Survives controller restarts and supports HA
+  multi-instance deployments. Only the resulting API token is persisted to the `api_tokens` table.
 
 ## Access and Refresh Tokens
 

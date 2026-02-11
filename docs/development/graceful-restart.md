@@ -1,0 +1,39 @@
+# Zero-downtime graceful restart
+
+The controller supports HAProxy-style zero-downtime restarts using `SO_REUSEPORT`. This allows a new controller process
+to start accepting connections while the old process drains existing ones.
+
+**CLI flags:**
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--reuseport` | `false` | Enable `SO_REUSEPORT` socket option (required on both processes) |
+| `--takeover-from <PID>` | — | PID of old process to take over from; sends SIGUSR1 to initiate graceful shutdown |
+| `--shutdown-timeout-secs` | `30` | Graceful shutdown timeout (how long to drain connections) |
+
+**Restart sequence:**
+
+1. Old process is running with `--reuseport`
+1. New process starts with `--reuseport --takeover-from <OLD_PID>`
+1. New process binds to the same port (SO_REUSEPORT allows this)
+1. New process starts accepting connections immediately
+1. New process sends SIGUSR1 to old process
+1. Old process stops accepting new connections
+1. Old process scatters `ServerRestarting` notifications to agents over 5 seconds (avoids thundering herd)
+1. Old process cancels background tasks and waits for drain timeout
+1. Old process exits cleanly
+1. New process serves all traffic
+
+**Signal handling:**
+
+| Signal | Action |
+| --- | --- |
+| SIGTERM | Initiate graceful shutdown |
+| SIGINT | Initiate graceful shutdown |
+| SIGUSR1 | Initiate graceful shutdown (used for takeover) |
+
+**Wire protocol:** The `ServerRestarting` message (`ControllerMessage::ServerRestarting(ServerRestartingPayload)`)
+notifies agents that the controller is restarting. Agents log the message and allow the connection to close naturally;
+their existing reconnect logic handles the rest.
+
+**Platform support:** `SO_REUSEPORT` is available on Linux, macOS, FreeBSD, and OpenBSD. Not available on Windows.
