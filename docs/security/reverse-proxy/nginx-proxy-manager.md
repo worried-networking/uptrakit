@@ -1,6 +1,7 @@
 # Nginx Proxy Manager
 
-[Nginx Proxy Manager](https://nginxproxymanager.com/) (NPM) provides a web GUI for managing Nginx reverse proxies. Client certificate forwarding requires custom Nginx configuration.
+[Nginx Proxy Manager](https://nginxproxymanager.com/) (NPM) provides a web GUI for managing Nginx reverse proxies. Client certificate forwarding
+requires custom Nginx configuration.
 
 ## Basic Reverse Proxy (GUI)
 
@@ -10,7 +11,8 @@
 4. Enable **SSL** and configure your public certificate (Let's Encrypt or custom).
 5. Enable **WebSocket Support**.
 
-This provides basic L7 reverse proxying without client certificate forwarding. Agents must connect directly to the controller for mTLS, or use L4 passthrough via a custom Nginx stream config.
+This provides basic L7 reverse proxying without client certificate forwarding. Agents must connect directly to the controller for mTLS, or use L4
+passthrough via a custom Nginx stream config.
 
 ## Client Certificate Forwarding (Advanced)
 
@@ -32,7 +34,7 @@ proxy_ssl_verify on;
 proxy_set_header X-Forwarded-Client-Cert-Info "Subject=\"$ssl_client_s_dn\";SerialNumber=\"$ssl_client_serial\";Issuer=\"$ssl_client_i_dn\"";
 ```
 
-3. Copy the controller's CA certificate into NPM's data directory:
+1. Copy the controller's CA certificate into NPM's data directory:
 
 ```bash
 curl -k https://uptrakit:8443/api/v1/pki/ca.crt -o /path/to/npm/data/custom_ssl/ca.crt
@@ -51,6 +53,7 @@ uptrakit-controller \
 ```
 
 **Option B — Web UI:** Navigate to Settings > Network and set:
+
 - **Trusted Proxies**: the NPM server's IP or CIDR
 - **Forwarded Client Cert Info Header**: `X-Forwarded-Client-Cert-Info`
 

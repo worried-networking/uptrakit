@@ -13,14 +13,16 @@ The proxy forwards raw TCP traffic to the controller. TLS, including mTLS with a
 
 ### L7 TLS Termination
 
-The proxy terminates TLS, optionally verifies client certificates, and forwards certificate metadata to the controller via headers. The proxy trusts the controller's internal CA for the backend connection.
+The proxy terminates TLS, optionally verifies client certificates, and forwards certificate metadata to the controller via headers. The proxy trusts
+the controller's internal CA for the backend connection.
 
 **Pros:** HTTP routing, host/path-based routing, and traffic management features provided by the proxy.
 **Cons:** Additional header configuration and CA trust required, plus forwarding the client certificate to the controller.
 
 ## Controller Configuration
 
-Configure the controller via CLI flags, the Web UI (Settings > Network), or the REST API (`/api/v1/settings/network`). CLI flags seed the database on first run; thereafter the DB value takes precedence unless `--force-settings-override` is used.
+Configure the controller via CLI flags, the Web UI (Settings > Network), or the REST API (`/api/v1/settings/network`). CLI flags seed the database on
+first run; thereafter the DB value takes precedence unless `--force-settings-override` is used.
 
 | Flag | DB key | Purpose |
 | --- | --- | --- |
@@ -48,7 +50,8 @@ Envoy's XFCC header uses comma-separated pairs and is also supported:
 Subject="CN=<agent-uuid>",Cert="<url-encoded-PEM>"
 ```
 
-Include the `Cert` field whenever possible; the controller parses the full certificate and uses it to verify the issuer and serial number. When `Cert` is absent, the controller falls back to the `Subject`, `Issuer`, and `SerialNumber` fields.
+Include the `Cert` field whenever possible; the controller parses the full certificate and uses it to verify the issuer and serial number. When `Cert`
+is absent, the controller falls back to the `Subject`, `Issuer`, and `SerialNumber` fields.
 
 ### PEM Header
 

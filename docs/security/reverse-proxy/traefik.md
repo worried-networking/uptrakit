@@ -112,6 +112,7 @@ uptrakit-controller \
 ```
 
 **Option B — Web UI:** Navigate to Settings > Network and set:
+
 - **Trusted Proxies**: `172.16.0.0/12`
 - **Forwarded Client Cert Info Header**: `X-Forwarded-Tls-Client-Cert-Info`
 
@@ -133,12 +134,15 @@ Replace `172.16.0.0/12` with your Docker network CIDR. Changes via Web UI or API
 
 - Use `RequestClientCert` (not `RequireAndVerifyClientCert`) so browsers can access the web UI without a client certificate.
 - `passTLSClientCert` sends the `X-Forwarded-Tls-Client-Cert-Info` header with structured Subject, Issuer, and SerialNumber fields.
-- **`serversTransport` requires the `@file` qualifier** (e.g., `uptrakit@file`) when referencing a transport defined in the file provider. Without it, Traefik cannot resolve the transport and falls back to the default (which verifies backend certificates against system CAs, causing connection failures).
+- **`serversTransport` requires the `@file` qualifier** (e.g., `uptrakit@file`) when referencing a transport defined in the file provider. Without it,
+  Traefik cannot resolve the transport and falls back to the default (which verifies backend certificates against system CAs, causing connection
+  failures).
 - Traefik uses form-URL-encoding (`+` for space) in the `passTLSClientCert` header values. The controller handles this automatically.
 
 ### Revocation Checking
 
-Traefik v3 does not support CRL or OCSP checking for client certificates. Revocation is handled at the application layer — the controller's mTLS verifier checks CRLs for direct (non-proxied) connections, and the proxy header middleware verifies forwarded certificate identity regardless.
+Traefik v3 does not support CRL or OCSP checking for client certificates. Revocation is handled at the application layer — the controller's mTLS
+verifier checks CRLs for direct (non-proxied) connections, and the proxy header middleware verifies forwarded certificate identity regardless.
 
 ### Obtaining the CA Certificate
 

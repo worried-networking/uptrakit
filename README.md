@@ -2,7 +2,8 @@
 
 Uptrakit is a self-hosted **update tracking toolkit** for Linux homelabs and small fleets.
 
-It’s intentionally **not** an auto-updater: the controller can *check* for updates on a schedule, but **all update actions require explicit user confirmation**.
+It’s intentionally **not** an auto-updater: the controller can *check* for updates on a schedule, but **all update actions require explicit user
+confirmation**.
 
 ## What it does
 
@@ -67,4 +68,6 @@ dual licensed as above, without any additional terms or conditions.
 
 ## AI Disclosure
 
-The initial codebase for this project was significantly shaped by AI (Claude Code, Codex, Gemini) under heavy human supervision and constant code reviews. While efforts were made to ensure quality and correctness, the project has not undergone a formal 3rd-party security audit. As with any software published online, use at your own risk.
+The initial codebase for this project was significantly shaped by AI (Claude Code, Codex, Gemini) under heavy human supervision and constant code
+reviews. While efforts were made to ensure quality and correctness, the project has not undergone a formal 3rd-party security audit. As with any
+software published online, use at your own risk.

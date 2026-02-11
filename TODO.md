@@ -2,7 +2,8 @@
 
 ## About This Document
 
-This roadmap tracks the development of Uptrakit, a self-hosted software update monitoring and management system. It organizes planned work into logical phases with clear priorities and dependencies.
+This roadmap tracks the development of Uptrakit, a self-hosted software update monitoring and management system. It organizes planned work into
+logical phases with clear priorities and dependencies.
 
 **Current Status**: Early MVP stage with foundational infrastructure in place.
 
@@ -369,9 +370,11 @@ Ways users interact with the system.
 
 ## Phase 4: SSH Agent (Priority 3)
 
-A new agent type that communicates with the controller over WebSocket (like the regular agent) but executes version detection and updates on remote hosts over SSH instead of locally. This is a separate crate (`crates/core/agent-ssh/`) — not integrated into the existing agent or the controller.
+A new agent type that communicates with the controller over WebSocket (like the regular agent) but executes version detection and updates on remote
+hosts over SSH instead of locally. This is a separate crate (`crates/core/agent-ssh/`) — not integrated into the existing agent or the controller.
 
-Use case: managing hosts where installing a persistent daemon is impractical (appliances, locked-down systems, minimal containers, or environments where outbound-only WebSocket is not feasible but inbound SSH is available).
+Use case: managing hosts where installing a persistent daemon is impractical (appliances, locked-down systems, minimal containers, or environments
+where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 ### New Crate & Architecture
 
@@ -611,7 +614,8 @@ Comprehensive security hardening.
 - [ ] Implement security headers
 - [ ] Add input validation and sanitization
 - [x] Implement secrets management
-  - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets` available)
+  - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
+    available)
   - [ ] Credential rotation
   - [ ] Vault integration
 - [ ] Add security scanning to CI/CD
@@ -636,7 +640,8 @@ Ensuring robustness and maintainability.
   - [ ] Database operations
   - [ ] Provider implementations
   - [ ] End-to-end update workflows
-  - [x] OCSP revocation checking with reverse proxies (Nginx `ssl_ocsp leaf`). Uses a standalone test OCSP responder (`ocsp_responder.rs`) reachable from Docker via `host.docker.internal`. CRL tests exist for Nginx, HAProxy, and Envoy; OCSP test covers Nginx.
+  - [x] OCSP revocation checking with reverse proxies (Nginx `ssl_ocsp leaf`). Uses a standalone test OCSP responder (`ocsp_responder.rs`) reachable
+    from Docker via `host.docker.internal`. CRL tests exist for Nginx, HAProxy, and Envoy; OCSP test covers Nginx.
 - [ ] Implement load testing
   - [ ] Many agents scenario
   - [ ] Concurrent update scenario
@@ -842,11 +847,15 @@ Items to consider for future versions but not currently prioritized:
   - [x] All route handlers updated for tenant awareness
   - [ ] Tenant management API (CRUD)
   - [ ] Multi-tenant JWT (per-tenant permissions)
-  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via unified `/api/v1/ws/service` WebSocket endpoint)
+  - [x] Tenant-aware MQTT (separate `uptrakit-mqtt` binary with per-tenant lease-based distribution via unified `/api/v1/ws/service` WebSocket
+    endpoint)
   - [ ] Tenant switching UI
   - [ ] API token scoping per tenant
 - [ ] Agent clustering
-- [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready; settings cache uses version-gated periodic reload for cross-instance consistency; CRL rebuilds propagate cross-instance via `revocation_version` polling; cross-controller push notification delivery via outbox pattern is implemented; JWT signing key is DB-backed and shared across instances; token denylist is per-instance — DB-backed HA sync deferred)
+- [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready; settings cache uses version-gated periodic reload for
+  cross-instance consistency; CRL rebuilds propagate cross-instance via `revocation_version` polling; cross-controller push notification delivery via
+  outbox pattern is implemented; JWT signing key is DB-backed and shared across instances; token denylist is per-instance — DB-backed HA sync
+  deferred)
 - [ ] Update preview/dry-run mode
 - [ ] Cost tracking for cloud-based updates
 - [ ] Compliance reporting (update audit trails)

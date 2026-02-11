@@ -5,6 +5,17 @@ on:
   pull_request:
 
 jobs:
+  markdown:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: npm install -g markdownlint-cli
+      - run: git ls-files '*.md' | xargs markdownlint
+
   backend:
     runs-on:
       - ubuntu-latest

@@ -30,7 +30,8 @@ The controller requires a 256-bit master key (64 hex characters) for encrypting 
 export UPTRAKIT_MASTER_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-Alternatively use `--master-key-file <path>`. For development only, `--allow-plaintext-secrets` disables encryption at rest (and logs a warning), but do not use the example key in production. Generate a production key with `openssl rand -hex 32`.
+Alternatively use `--master-key-file <path>`. For development only, `--allow-plaintext-secrets` disables encryption at rest (and logs a warning), but
+do not use the example key in production. Generate a production key with `openssl rand -hex 32`.
 
 ## Backend Commands
 

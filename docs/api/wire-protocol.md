@@ -1,6 +1,7 @@
 # Wire Protocol
 
-Agent and MQTT service communication with the controller happens over a secure WebSocket (`/api/v1/ws/service`). Both service types share the same `ServiceMessage`/`ControllerMessage` enums, with variants enabled per service type.
+Agent and MQTT service communication with the controller happens over a secure WebSocket (`/api/v1/ws/service`). Both service types share the same
+`ServiceMessage`/`ControllerMessage` enums, with variants enabled per service type.
 
 ## Connection Types
 
@@ -25,27 +26,36 @@ Agents initiate outbound-only connections and never accept inbound traffic. MQTT
 ## Message Types
 
 ### Shared (service → controller)
+
 `ping`, `enroll`, `request_certificate`, `renew_certificate`, `disconnecting`
 
 ### Agent-specific (service → controller)
+
 `report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
 ### MQTT-specific (service → controller)
+
 `register`, `release_tenants`
 
 ### Shared (controller → service)
-`pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `service_settings`, `ca_bundle_updated`, `request_cert_renewal`, `server_restarting`
+
+`pong`, `enrolled`, `approved`, `rejected`, `certificate`, `error`, `service_settings`, `ca_bundle_updated`, `request_cert_renewal`,
+`server_restarting`
 
 ### Agent-specific (controller → service)
+
 `check_versions`, `execute_update`
 
 ### MQTT-specific (controller → service)
+
 `registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`
 
 ## Replay Protection
 
-Every envelope (`ServiceEnvelope` / `ControllerEnvelope`) carries a monotonically increasing `seq` starting at `1`. Each connection tracks per-direction counters; mismatched sequences cause the connection to close with `ErrorCode::SequenceError`.
+Every envelope (`ServiceEnvelope` / `ControllerEnvelope`) carries a monotonically increasing `seq` starting at `1`. Each connection tracks
+per-direction counters; mismatched sequences cause the connection to close with `ErrorCode::SequenceError`.
 
 ## AsyncAPI Specification
 
-The full message schema and payload definitions are published in `crates/shared/wire/asyncapi.yaml`. Use this document to generate clients or validate payload structures. Ensure protobuf/JSON serializers conform to the spec before releasing.
+The full message schema and payload definitions are published in `crates/shared/wire/asyncapi.yaml`. Use this document to generate clients or validate
+payload structures. Ensure protobuf/JSON serializers conform to the spec before releasing.

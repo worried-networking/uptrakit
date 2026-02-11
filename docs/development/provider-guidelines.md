@@ -11,4 +11,5 @@ When adding or changing a provider, document the full lifecycle:
 
 Providers should keep parsing and comparison logic in pure functions so they are easy to test.
 
-The provider registry crate (`uptrakit-provider-registry`) centralizes config validation, mask/restore workflows, and creates provider instances based on `ProviderType`. Document provider behavior so the registry can continue to validate configs and mask secrets correctly.
+The provider registry crate (`uptrakit-provider-registry`) centralizes config validation, mask/restore workflows, and creates provider instances based
+on `ProviderType`. Document provider behavior so the registry can continue to validate configs and mask secrets correctly.

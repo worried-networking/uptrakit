@@ -13,7 +13,8 @@
 | Enrollment tokens | Agent onboarding | One-time tokens with optional expiry/use limit. |
 | MQTT enrollment tokens | MQTT service enrollment | Stored separately (`mqtt_enrollment.token_hash`). |
 
-Authorization uses typed `Permission` enums instead of raw roles. JWTs resolve the user's permissions (e.g., `view_settings`, `manage_agents`), and route handlers call `user.has_permission(...)`. The frontend receives permissions as strings and relies on a TypeScript `Permission` enum.
+Authorization uses typed `Permission` enums instead of raw roles. JWTs resolve the user's permissions (e.g., `view_settings`, `manage_agents`), and
+route handlers call `user.has_permission(...)`. The frontend receives permissions as strings and relies on a TypeScript `Permission` enum.
 
 Roles:
 
@@ -21,4 +22,5 @@ Roles:
 - `admin`: all except `manage_global_settings`.
 - `user`: `view_agents` only.
 
-Adding a new permission requires updating the Rust enum, adding a database migration, guarding the relevant route, and extending the frontend Permission enum.
+Adding a new permission requires updating the Rust enum, adding a database migration, guarding the relevant route, and extending the frontend
+Permission enum.

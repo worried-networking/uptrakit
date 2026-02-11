@@ -130,6 +130,7 @@ uptrakit-controller \
 ```
 
 **Option B — Web UI:** Navigate to Settings > Network and set:
+
 - **Trusted Proxies**: the Envoy server's IP or CIDR
 - **Forwarded Client Cert Info Header**: `X-Forwarded-Client-Cert`
 
@@ -149,9 +150,12 @@ Changes via Web UI or API apply immediately without a restart.
 
 ### Notes
 
-- **`use_remote_address: true` is recommended.** It causes Envoy to set `X-Forwarded-For` so the controller can resolve the real client IP for logging and rate limiting. It also affects how `SANITIZE_SET` processes the XFCC header.
-- **`Cert=` field (preferred):** Envoy includes the URL-encoded PEM certificate in the `Cert` field of the XFCC header. The controller parses this to extract the full identity including serial number and verifies the issuer CN.
-- **`Subject=` field (fallback):** When `Cert` is absent, the controller falls back to the `Subject` field. However, Envoy's XFCC does not include a `SerialNumber` field, so this path uses agent-id-only lookup.
+- **`use_remote_address: true` is recommended.** It causes Envoy to set `X-Forwarded-For` so the controller can resolve the real client IP for logging
+  and rate limiting. It also affects how `SANITIZE_SET` processes the XFCC header.
+- **`Cert=` field (preferred):** Envoy includes the URL-encoded PEM certificate in the `Cert` field of the XFCC header. The controller parses this to
+  extract the full identity including serial number and verifies the issuer CN.
+- **`Subject=` field (fallback):** When `Cert` is absent, the controller falls back to the `Subject` field. However, Envoy's XFCC does not include a
+  `SerialNumber` field, so this path uses agent-id-only lookup.
 - `forward_client_cert_details: SANITIZE_SET` ensures the XFCC header is set by Envoy and not spoofed by clients.
 - `require_client_certificate: false` allows browsers to connect without client certificates.
 - The `upgrade_configs` section enables WebSocket support.
@@ -159,7 +163,8 @@ Changes via Web UI or API apply immediately without a restart.
 
 ### CRL Revocation Checking
 
-Envoy supports CRL checking for client certificates. CRL files are static — use an external sidecar or init container to periodically fetch a fresh CRL from the controller. The controller rebuilds CRLs hourly and immediately on every revocation event. Recommended refresh: every 30-60 minutes.
+Envoy supports CRL checking for client certificates. CRL files are static — use an external sidecar or init container to periodically fetch a fresh
+CRL from the controller. The controller rebuilds CRLs hourly and immediately on every revocation event. Recommended refresh: every 30-60 minutes.
 
 Add `crl` to the `validation_context` in the downstream TLS context:
 
@@ -172,7 +177,8 @@ validation_context:
     filename: /etc/envoy/ssl/ca.crl
 ```
 
-`only_verify_leaf_cert_crl: true` ensures only the leaf (agent) certificate is checked against the CRL, not the CA certificate itself. The CRL file must be in PEM format.
+`only_verify_leaf_cert_crl: true` ensures only the leaf (agent) certificate is checked against the CRL, not the CA certificate itself. The CRL file
+must be in PEM format.
 
 Periodic refresh example (sidecar script or cron):
 

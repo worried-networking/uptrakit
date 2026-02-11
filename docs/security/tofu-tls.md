@@ -2,7 +2,8 @@
 
 ## TofuVerifier
 
-The controller uses `TofuVerifier` with SHA-256 fingerprint pinning during initial CA bootstrap. It always verifies the TLS signature and only skips CA chain validation.
+The controller uses `TofuVerifier` with SHA-256 fingerprint pinning during initial CA bootstrap. It always verifies the TLS signature and only skips
+CA chain validation.
 
 ## Fingerprint Pinning
 
@@ -11,4 +12,5 @@ The controller uses `TofuVerifier` with SHA-256 fingerprint pinning during initi
 
 ## CLI `--insecure`
 
-The CLI client (`crates/ui/cli/src/client.rs`) no longer calls `tls_danger_accept_invalid_certs(true)`. Passing `--insecure` is the only way to skip TLS verification, making the risk explicit to operators.
+The CLI client (`crates/ui/cli/src/client.rs`) no longer calls `tls_danger_accept_invalid_certs(true)`. Passing `--insecure` is the only way to skip
+TLS verification, making the risk explicit to operators.

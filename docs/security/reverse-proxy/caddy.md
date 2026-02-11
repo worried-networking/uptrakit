@@ -2,9 +2,10 @@
 
 ## L4 TLS Passthrough
 
-Requires the [layer4](https://github.com/mholt/caddy-l4) plugin. The proxy forwards raw TCP traffic to the controller without terminating TLS. The controller handles mTLS directly with agents.
+Requires the [layer4](https://github.com/mholt/caddy-l4) plugin. The proxy forwards raw TCP traffic to the controller without terminating TLS. The
+controller handles mTLS directly with agents.
 
-```
+```caddyfile
 {
     layer4 {
         :443 {
@@ -33,7 +34,7 @@ Caddy terminates TLS, requests client certificates, and forwards the PEM-encoded
 
 ### Caddyfile
 
-```
+```caddyfile
 uptrakit.example.com {
     tls {
         client_auth {
@@ -68,6 +69,7 @@ uptrakit-controller \
 ```
 
 **Option B — Web UI:** Navigate to Settings > Network and set:
+
 - **Trusted Proxies**: the Caddy server's IP or CIDR
 - **Forwarded Client Cert PEM Header**: `X-Forwarded-Tls-Client-Cert`
 
@@ -89,13 +91,15 @@ Changes via Web UI or API apply immediately without a restart.
 
 - `mode request` makes client certificates optional (browsers work without one).
 - `trust_pool file` is the modern syntax (Caddy 2.8+). Older versions used the deprecated `trusted_ca_cert_file` directive.
-- `certificate_der_base64` sends the client certificate as base64-encoded DER, which is HTTP-header safe. The older `certificate_pem` placeholder contains raw PEM with newlines, which is **not valid** in HTTP headers.
+- `certificate_der_base64` sends the client certificate as base64-encoded DER, which is HTTP-header safe. The older `certificate_pem` placeholder
+  contains raw PEM with newlines, which is **not valid** in HTTP headers.
 - Caddy sets `X-Forwarded-For`, `X-Forwarded-Proto`, and `X-Forwarded-Host` automatically — no explicit `header_up` directives are needed for these.
 - The `tls_trusted_ca_certs` directive ensures Caddy trusts the controller's internal CA.
 
 ### Revocation Checking
 
-Caddy does not natively support CRL or OCSP checking for client certificates. Revocation is handled at the application layer — the controller's mTLS verifier checks CRLs for direct (non-proxied) connections, and the proxy header middleware verifies forwarded certificate identity regardless.
+Caddy does not natively support CRL or OCSP checking for client certificates. Revocation is handled at the application layer — the controller's mTLS
+verifier checks CRLs for direct (non-proxied) connections, and the proxy header middleware verifies forwarded certificate identity regardless.
 
 ### Obtaining the CA Certificate
 

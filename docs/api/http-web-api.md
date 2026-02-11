@@ -5,12 +5,14 @@ The controller exposes a REST API under `/api/v1/`. Most endpoints are authentic
 ## Common Patterns
 
 - Responses use JSON envelopes with standard pagination (`limit`, `offset`, `total`).
-- Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api/src/auth/rate_limit.rs`). Rate limited endpoints return `429` with a message describing the limit window.
+- Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
+  with a message describing the limit window.
 - Route handlers require permissions (typed `Permission` enum) obtained from the JWT; never rely on raw role strings.
 
 ## Authentication Endpoints
 
-- `POST /api/v1/auth/device`: start a device authorization flow (RFC 8628). Returns `device_code`, `user_code`, `verification_url`, `expires_in`, `interval`.
+- `POST /api/v1/auth/device`: start a device authorization flow (RFC 8628). Returns `device_code`, `user_code`, `verification_url`, `expires_in`,
+  `interval`.
 - `POST /api/v1/auth/device/poll`: poll for approval status; returns the API token once approved.
 - `POST /api/v1/auth/device/approve`: browser-side approval using Bearer token.
 - `POST /api/v1/auth/token`: exchange credentials for tokens (when allowed).
@@ -25,7 +27,8 @@ Access tokens are short-lived, refresh tokens rotate on each use, and logout add
 - GET/PUT `/api/v1/settings/authentication`
 - GET/PUT `/api/v1/settings/service-certificates`
 
-Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in [docs/api/settings-runtime.md](settings-runtime.md). Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
+Settings persist in the `settings` table and are reconciled with CLI arguments following priority rules defined in
+[docs/api/settings-runtime.md](settings-runtime.md). Runtime changes propagate immediately via a `tokio::sync::watch` channel (`SettingsSnapshot`).
 
 ## Services and Software Items
 

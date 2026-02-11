@@ -15,10 +15,12 @@
 
 ## Multi-Tenancy
 
-- Most tables are tenant-scoped (`tenant_id` required). `services`, `hosts`, `provider_configs`, `software_items`, `settings`, and `mqtt_clients` all include the tenant column.
+- Most tables are tenant-scoped (`tenant_id` required). `services`, `hosts`, `provider_configs`, `software_items`, `settings`, and `mqtt_clients` all
+  include the tenant column.
 - Tables without tenant scope include `users`, `roles`, `permissions`, `api_tokens`, and `pending_*` entities.
 - `TenantContext` reads `X-Tenant-Id` or defaults to `AppState.default_tenant_id`. API handlers use it to filter data.
 
 ## Update Hooks
 
-Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in [docs/development/provider-guidelines.md](../development/provider-guidelines.md).
+Update hooks (systemd, Docker Compose, custom commands) inject metadata in `update_output`. Document any new hook configuration in
+[docs/development/provider-guidelines.md](../development/provider-guidelines.md).
