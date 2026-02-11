@@ -15,6 +15,14 @@ Key components:
 
 For full project context, see [README.md](README.md). For contribution rules, see [CONTRIBUTING.md](CONTRIBUTING.md). For system design and technology choices, see [ARCHITECTURE.md](ARCHITECTURE.md). For security policy and cryptographic details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [docs/README.md](docs/README.md).
 
+## Documentation split
+
+- **End-user docs** (`docs/end-user/`): overview, manual update workflow, Home Assistant/MQTT integration, and deployment map (including `docs/end-user/deployment/reverse-proxy.md`).
+- **API & protocol docs** (`docs/api/`): AsyncAPI/wire protocol (`wire-protocol.md`), REST API endpoints (`http-web-api.md`), settings reconciliation (`settings-runtime.md`), auth flows (`auth-flows.md`), and service/tenant operations (`services-operations.md`).
+- **Security docs** (`docs/security/`): architecture, cryptography, PKI/certificates, auth/permissions, secrets/encryption, reverse proxy security, TOFU/TLS, filesystem/dependency hardening, and secure development guidance.
+- **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, provider guidelines, and AI usage expectations.
+- **Deployment guides**: reverse proxy deployment and per-proxy guides now live under `docs/end-user/deployment/` and `docs/security/reverse-proxy/`. Human documentation must link into those files rather than `AGENTS.md`.
+
 ## Codebase layout
 
 ```text
@@ -164,7 +172,7 @@ At startup, the controller validates the existing CA certificate's embedded URLs
 - PKI address not set but CA has extensions: **startup failure** (suggests providing `--pki-addr` or rotating the CA to regenerate without extensions)
 - Neither set: OK
 
-Changing the PKI address requires CA rotation (the URLs are embedded in the CA certificate). See the [reverse proxy guide](docs/reverse-proxy/README.md) for the full flow.
+Changing the PKI address requires CA rotation (the URLs are embedded in the CA certificate). See the [reverse proxy security guide](docs/security/reverse-proxy/index.md) for the full flow.
 
 ### OCSP responder
 

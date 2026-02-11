@@ -38,14 +38,20 @@ Contribution guidelines and project conventions:
 
 ## Documentation
 
-| Document | Description |
-| --- | --- |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, component diagram, technology stack, key decisions |
-| [SECURITY.md](SECURITY.md) | Security policy, vulnerability reporting, cryptographic details |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, testing, commit conventions, PR guidelines |
-| [AGENTS.md](AGENTS.md) | AI agent guide: codebase layout, quality gates, error patterns |
-| [docs/](docs/README.md) | Documentation catalogue and planned guides |
-| [TODO.md](TODO.md) | Project roadmap and progress tracker |
+### Core overviews
+- `ARCHITECTURE.md` — condensed architecture overview linking into `docs/`
+- `SECURITY.md` — high-level security stance and disclosure/reporting policy
+- `CONTRIBUTING.md` — quick contributor overview linking into `docs/development/`
+- `docs/README.md` — catalogue listing all audience-focused documents
+- `TODO.md` — roadmap and planned work
+
+### Audience docs
+- `docs/end-user/system-overview.md`, `docs/end-user/update-workflow.md`, `docs/end-user/home-assistant-mqtt.md`, `docs/end-user/deployment-map.md`
+- `docs/end-user/deployment/reverse-proxy.md` — reverse proxy deployment details
+- `docs/api/wire-protocol.md`, `docs/api/http-web-api.md`, `docs/api/settings-runtime.md`, `docs/api/auth-flows.md`, `docs/api/services-operations.md`
+- `docs/security/*.md` — detailed security guides (`security-architecture`, `pki-certificates`, `auth-and-authorization`, `reverse-proxy`, etc.)
+- `docs/development/*.md` — setup, testing, coding standards, PR process, dependency rules, provider expectations, and AI guidance
+
 
 ## License
 

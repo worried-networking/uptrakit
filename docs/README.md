@@ -1,56 +1,58 @@
 # Uptrakit Documentation
 
-Entry point for all Uptrakit documentation.
+This directory holds the detailed, audience-specific documentation split into four sections.
 
-## Core Documents
-
-| Document | Description |
+## End-user Guides
+| Guide | Description |
 | --- | --- |
-| [README.md](../README.md) | Project overview, quick-start commands, license |
-| [ARCHITECTURE.md](../ARCHITECTURE.md) | System design, component diagram, technology stack, key decisions |
-| [SECURITY.md](../SECURITY.md) | Security policy, vulnerability reporting, cryptographic details, certificate lifecycle |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | Development setup, testing, commit conventions, PR guidelines |
-| [AGENTS.md](../AGENTS.md) | AI agent guide: codebase layout, quality gates, error handling patterns, architecture rules |
-| [TODO.md](../TODO.md) | Project roadmap and progress tracker |
+| `docs/end-user/system-overview.md` | High-level architecture and agent/controller roles. |
+| `docs/end-user/update-workflow.md` | Manual update lifecycle, hooks, and history links. |
+| `docs/end-user/home-assistant-mqtt.md` | MQTT/Home Assistant integration notes. |
+| `docs/end-user/deployment-map.md` | Deployment navigation map and pointers. |
+| `docs/end-user/deployment/reverse-proxy.md` | Reverse proxy deployment choices, headers, and API snippets. |
 
-## API Documentation
-
-| Resource | Description |
+## API & Protocol
+| Guide | Description |
 | --- | --- |
-| OpenAPI / Swagger UI | Available at `/swagger-ui` when the controller is built with the `swagger-ui` feature flag |
-| [AsyncAPI spec](../crates/shared/wire/asyncapi.yaml) | Agent-controller WebSocket wire protocol (message types, payloads, connection lifecycle) |
+| `docs/api/wire-protocol.md` | WebSocket lifecycle, message taxonomy, AsyncAPI spec link. |
+| `docs/api/http-web-api.md` | Public REST endpoints, rate limits, multi-tenancy, update operations. |
+| `docs/api/settings-runtime.md` | DB-managed settings, reconciliation, watch channels. |
+| `docs/api/auth-flows.md` | Device auth, tokens, MQTT enrollment, denylist behavior. |
+| `docs/api/services-operations.md` | Agent/MQTT flows, update history, tenant-scoped tables. |
+
+## Security
+| Guide | Description |
+| --- | --- |
+| `docs/security/security-architecture.md` | Defense-in-depth principles. |
+| `docs/security/cryptography.md` | Crypto primitives and libraries. |
+| `docs/security/pki-certificates.md` | CA rotation, OCSP, CRL, CaSnapshot, PKI addresses. |
+| `docs/security/auth-and-authorization.md` | Authentication methods, permissions model, JWT/roles. |
+| `docs/security/secrets-and-encryption.md` | Master key, encrypted fields, SecretString. |
+| `docs/security/reverse-proxy/index.md` | Proxy trust model and revocation guidance. |
+| `docs/security/tofu-tls.md` | TOFU verifier and CLI hardening. |
+| `docs/security/filesystem-dependency-security.md` | Secure permissions and dependency controls. |
+| `docs/security/secure-development.md` | Security links for contributors. |
+| `docs/security/reverse-proxy/*.md` | Proxy-specific security + configuration notes. |
+
+## Development
+| Guide | Description |
+| --- | --- |
+| `docs/development/setup.md` | Prerequisites, master key, build/lint commands. |
+| `docs/development/testing.md` | Required tests and Docker reverse-proxy suites. |
+| `docs/development/coding-standards.md` | Error handling, logging, and design rules. |
+| `docs/development/pr-process.md` | PR checklist, Conventional Commits expectations. |
+| `docs/development/dependency-policy.md` | Workspace dependency rules and cargo-deny guidance. |
+| `docs/development/provider-guidelines.md` | Provider lifecycle documentation requirements. |
+| `docs/development/ai-guidelines.md` | Responsible AI usage policy. |
 
 ## Deployment Guides
-
-| Resource | Description |
+| Guide | Description |
 | --- | --- |
-| [Reverse Proxy Overview](reverse-proxy/README.md) | L4 passthrough vs L7 TLS termination, controller configuration, security model |
-| [Traefik](reverse-proxy/traefik.md) | TCP passthrough and L7 with `passTLSClientCert` |
-| [Caddy](reverse-proxy/caddy.md) | L4 (layer4 plugin) and L7 with PEM cert forwarding |
-| [Nginx](reverse-proxy/nginx.md) | Stream passthrough and L7 with `ssl_verify_client` |
-| [Nginx Proxy Manager](reverse-proxy/nginx-proxy-manager.md) | GUI setup and custom Nginx config for cert forwarding |
-| [Envoy](reverse-proxy/envoy.md) | TCP proxy and L7 with XFCC header |
-| [HAProxy](reverse-proxy/haproxy.md) | TCP mode and L7 with `ssl_c_s_dn` / `ssl_c_serial` |
+| `docs/end-user/deployment/reverse-proxy.md` | Reverse proxy deployment options and header formats. |
+| `docs/security/reverse-proxy/index.md` | Reverse proxy security considerations, revocation, CA rotation. |
+| `docs/security/reverse-proxy/*.md` | Proxy-specific configuration notes (Nginx, Traefik, Envoy, etc.). |
 
-## Code Reviews
-
-| Resource | Description |
-| --- | --- |
-| [Controller System Code Review](../crates/core/controller/CODEREVIEW.md) | Full-stack review: architecture, security, safety, HA, data integrity (2026-02-08) |
-| [Wire Protocol Code Review](../crates/shared/wire/CODEREVIEW.md) | Wire protocol and WebSocket handler review with 20 fix plans (2026-02-08) |
-
-## Planned Documentation
-
-The following guides are planned but not yet written. Contributions are welcome.
-
-- **Getting Started Guide** -- End-to-end walkthrough: install the controller, enroll an agent, add a software item, trigger a version check.
-
-- **Deployment Guide** -- System requirements, network configuration, systemd service setup, Docker deployment, database backend selection, TLS configuration.
-
-- **Provider Development Guide** -- How to implement a new provider: trait implementation, remote vs. local split, version comparison, testing, and configuration fields.
-
-- **Home Assistant Integration Guide** -- MQTT broker setup, auto-discovery configuration, entity attributes, triggering updates from Home Assistant.
-
-- **CLI Reference** -- Command structure, output formatting options, configuration file, and usage examples for `uptrakit-cli`.
-
-- **Troubleshooting Guide** -- Common issues: agent connection failures, certificate problems, enrollment errors, database migration issues, MQTT connectivity.
+## Additional Resources
+- API reference: `/swagger-ui` when built with the `swagger-ui` feature.
+- AsyncAPI spec: `crates/shared/wire/asyncapi.yaml`.
+- TODO tracker: [`../TODO.md`](../TODO.md).

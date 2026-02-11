@@ -12,7 +12,6 @@ This roadmap tracks the development of Uptrakit, a self-hosted software update m
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System design and technology decisions
 - [SECURITY.md](SECURITY.md) - Security policy and cryptographic details
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Development setup and contribution guidelines
-- [AGENTS.md](AGENTS.md) - AI agent guide with codebase layout and patterns
 - [docs/README.md](docs/README.md) - Documentation catalogue
 
 **How to Use This Roadmap**:
