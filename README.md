@@ -12,11 +12,6 @@ It’s intentionally **not** an auto-updater: the controller can *check* for upd
 - Exposes a minimal Web UI + API
 - Integrates with Home Assistant using MQTT `update` auto-discovery so each tracked item shows up as an Update entity
 
-## Architecture
-
-- **Controller**: API + minimal Web UI, scheduler (checks only), provider “remote” logic, and Home Assistant integration.
-- **Agents**: lightweight daemons on each host that connect **outbound-only** to the controller via secure WebSocket. They detect installed versions and execute updates via **sudo allowlists**.
-
 ## Security stance
 
 - Agents run unprivileged (e.g. `uptrakit`)
@@ -64,12 +59,12 @@ Licensed under either of
 
 at your option.
 
-## AI Disclosure
-
-The initial codebase for this project was significantly shaped by AI (Claude Code, Codex, Gemini) under heavy human supervision and constant code reviews. While efforts were made to ensure quality and correctness, the project has not undergone a formal 3rd-party security audit. As with any software published online, use at your own risk.
-
 ## Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
+
+## AI Disclosure
+
+The initial codebase for this project was significantly shaped by AI (Claude Code, Codex, Gemini) under heavy human supervision and constant code reviews. While efforts were made to ensure quality and correctness, the project has not undergone a formal 3rd-party security audit. As with any software published online, use at your own risk.
