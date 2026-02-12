@@ -107,11 +107,11 @@ The PKI address is embedded into every managed CA certificate; changing it trigg
 
 ## Proxy-Specific Guides
 
-- [Traefik](../../security/reverse-proxy/traefik.md)
-- [Caddy](../../security/reverse-proxy/caddy.md)
-- [Nginx](../../security/reverse-proxy/nginx.md)
-- [Nginx Proxy Manager](../../security/reverse-proxy/nginx-proxy-manager.md)
-- [Envoy](../../security/reverse-proxy/envoy.md)
-- [HAProxy](../../security/reverse-proxy/haproxy.md)
+- [Traefik](traefik.md)
+- [Caddy](caddy.md)
+- [Nginx](nginx.md)
+- [Nginx Proxy Manager](nginx-proxy-manager.md)
+- [Envoy](envoy.md)
+- [HAProxy](haproxy.md)
 
 Detailed header configuration, OCSP/CRL setup, and per-proxy examples live in the security-focused reverse proxy guides above.

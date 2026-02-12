@@ -1,7 +1,7 @@
 # Reverse Proxy Security Model
 
 This page focuses on the security considerations when using a reverse proxy in front of Uptrakit. For the general deployment guide, see
-[docs/end-user/deployment/reverse-proxy.md](../../end-user/deployment/reverse-proxy.md).
+[docs/end-user/deployment/reverse-proxy.md](../end-user/deployment/reverse-proxy.md).
 
 ## Trusted Proxies and Header Trust
 
@@ -28,7 +28,7 @@ Proxies that support OCSP include:
 
 ### CRL (alternative)
 
-CrLs are static files rebuilt hourly and immediately on revocation. Download and reload them every 30–60 minutes when using proxies that lack OCSP
+CRLs are static files rebuilt hourly and immediately on revocation. Download and reload them every 30-60 minutes when using proxies that lack OCSP
 support (HAProxy, Envoy, Traefik, Caddy).
 
 ```bash
@@ -45,8 +45,9 @@ curl -sk https://controller:8443/api/v1/pki/ca.crl -o /etc/proxy/ssl/ca.crl && n
 | Traefik | no | no | Rely on controller-side checks. |
 | Caddy | no | no | Rely on controller-side checks. |
 
-See each per-proxy guide for detailed configuration examples: [Traefik](traefik.md), [Caddy](caddy.md), [Nginx](nginx.md), [Nginx Proxy
-Manager](nginx-proxy-manager.md), [Envoy](envoy.md), [HAProxy](haproxy.md).
+See each per-proxy guide for detailed configuration examples: [Traefik](../end-user/deployment/traefik.md), [Caddy](../end-user/deployment/caddy.md),
+[Nginx](../end-user/deployment/nginx.md), [Nginx Proxy Manager](../end-user/deployment/nginx-proxy-manager.md),
+[Envoy](../end-user/deployment/envoy.md), [HAProxy](../end-user/deployment/haproxy.md).
 
 ## CA Rotation and PKI Address Changes
 
@@ -56,10 +57,10 @@ Manager](nginx-proxy-manager.md), [Envoy](envoy.md), [HAProxy](haproxy.md).
 - Offline agents refresh the bundle when they reconnect, using the `ca_bundle_hash` field.
 - Proxies should re-download the CA certificate after rotation (`GET /api/v1/pki/ca.crt`).
 
-## Per-Proxy Security Guides
+## Per-Proxy Deployment Guides
 
-- [Traefik](traefik.md) — passthrough vs L7, header forwarding, OCSP/CRL notes.
-- [Caddy](caddy.md) — PEM headers and TLS backend trust.
-- [Nginx](nginx.md) — header definitions, OCSP responder wiring, CRL refresh cron sample.
-- [Nginx Proxy Manager](nginx-proxy-manager.md) — GUI configuration + cert trust.
-- [Envoy](envoy.md) and [HAProxy](haproxy.md) — raw header examples, CRL refresh tips.
+- [Traefik](../end-user/deployment/traefik.md) -- passthrough vs L7, header forwarding, OCSP/CRL notes.
+- [Caddy](../end-user/deployment/caddy.md) -- PEM headers and TLS backend trust.
+- [Nginx](../end-user/deployment/nginx.md) -- header definitions, OCSP responder wiring, CRL refresh cron sample.
+- [Nginx Proxy Manager](../end-user/deployment/nginx-proxy-manager.md) -- GUI configuration + cert trust.
+- [Envoy](../end-user/deployment/envoy.md) and [HAProxy](../end-user/deployment/haproxy.md) -- raw header examples, CRL refresh tips.

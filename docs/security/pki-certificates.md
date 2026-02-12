@@ -20,30 +20,144 @@ Uptrakit operates an internal PKI for agents and MQTT services.
 
 ## CA Rotation Flow
 
-1. Background task checks every 24 hours for CAs entering the 6-month rotation window. Admins can also trigger rotation via `POST /api/v1/settings/rotate-ca`.
-2. On rotation, the current CA row is marked inactive, a new CA row is inserted, and `pki.active_ca_fingerprint` is updated.
-3. All non-expired historical CAs remain trusted via the bundle (`bundle_pem`).
-4. CRLs are partitioned per CA (`ca_fingerprint`).
-5. Connected agents receive `CaBundleUpdated` + `RequestCertRenewal` messages.
-6. Offline agents detect staleness via `ca_bundle_hash` and fetch the bundle over HTTPS.
-7. New agent certs are signed by the active CA.
+1. Background task checks every 24 hours for CAs entering the 6-month rotation window. Admins can also trigger rotation
+   via `POST /api/v1/settings/rotate-ca`.
+1. On rotation, the current CA row is marked inactive, a new CA row is inserted, and `pki.active_ca_fingerprint` is
+   updated.
+1. All non-expired historical CAs remain trusted via the bundle (`bundle_pem`).
+1. CRLs are partitioned per CA (`ca_fingerprint`).
+1. Connected agents receive `CaBundleUpdated` + `RequestCertRenewal` messages.
+1. Offline agents detect staleness via `ca_bundle_hash` and fetch the bundle over HTTPS.
+1. New agent certs are signed by the active CA.
 
-## OCSP and CRLs
+## PKI Address and AIA/CDP Extensions
 
-- The controller exposes `/api/v1/pki/ocsp` for OCSP requests (POST and GET) and `/api/v1/pki/ca.crl` for CRLs.
-- OCSP supports SHA-1 and SHA-256 (Nginx uses SHA-1 for requests). Responses are signed with ECDSA P-256 SHA-256.
-- CRLs are rebuilt hourly and on revocation. Proxies should refresh the file every 30–60 minutes when relying on CRLs.
+When `--pki-addr` is configured, the controller embeds AIA (Authority Information Access) and CDP (CRL Distribution
+Points) extensions in both CA and agent certificates:
 
-## PKI Address and Extensions
+| Extension | URL |
+| --- | --- |
+| AIA OCSP | `{pki_addr}/api/v1/pki/ocsp` |
+| AIA CA Issuers | `{pki_addr}/api/v1/pki/ca.crt` |
+| CDP CRL | `{pki_addr}/api/v1/pki/ca.crl` |
 
-- `--pki-addr` embeds Authority Information Access (OCSP, CA Issuers) and CRL Distribution Points in CA and agent certificates.
-- `http://` scheme is recommended so proxies like Nginx can use OCSP (`ssl_ocsp_responder` only supports HTTP).
-- `--pki-http=listener` starts a plain HTTP service for PKI routes, required for proxies such as Nginx’s OCSP responder.
-- `--pki-http=external` suppresses warnings when an external proxy handles PKI HTTP.
-- Changing `--pki-addr` requires CA rotation because the URLs are baked into the certificate extensions.
+`--pki-addr` accepts both `http://` and `https://` URLs. **`http://` is recommended** because Nginx only supports
+`http://` OCSP responder URLs -- `https://` AIA URLs are silently ignored by Nginx's `ssl_ocsp` directive. When the PKI
+address uses `http://`, the `--pki-http` flag controls how plain HTTP serving is handled:
+
+| `--pki-http` value | Behaviour |
+| --- | --- |
+| `listener` | The controller starts a plain HTTP listener on the port from `--pki-addr`, serving only PKI routes (`/healthz`, `/api/v1/pki/ca.crt`, `/api/v1/pki/ca.crl`, `/api/v1/pki/ocsp`). Required for Nginx `ssl_ocsp_responder` which only supports `http://` OCSP responder URLs. |
+| `external` | PKI HTTP is handled by an external component (e.g. reverse proxy). Suppresses the warning about `http://` scheme without `--pki-http`. |
+| (not set) | If `--pki-addr` uses `http://`, the controller logs a warning. |
+
+At startup, the controller validates the existing CA certificate's embedded URLs against the reconciled `pki_addr`:
+
+- PKI address set and matching CA extensions: OK
+- PKI address set but different from CA extensions: **startup failure** (suggests updating the setting or rotating the
+  CA)
+- PKI address set but CA has no extensions: **startup failure** (suggests rotating the CA to regenerate with extensions)
+- PKI address not set but CA has extensions: **startup failure** (suggests providing `--pki-addr` or rotating the CA to
+  regenerate without extensions)
+- Neither set: OK
+
+Changing the PKI address requires CA rotation (the URLs are embedded in the CA certificate). See the
+[reverse proxy security guide](reverse-proxy-security.md) for the full flow.
+
+## OCSP Responder
+
+The controller provides an OCSP responder at `/api/v1/pki/ocsp` (both POST and GET). It accepts standard RFC 6960 OCSP
+requests and returns signed OCSP responses:
+
+- **good**: certificate is valid and not revoked
+- **revoked**: certificate has been revoked (includes revocation time and reason)
+- **unknown**: certificate serial not found
+
+The responder supports both SHA-1 and SHA-256 hash algorithms in requests per RFC 6960. Nginx/OpenSSL always uses SHA-1
+(`1.3.14.3.2.26`) for OCSP requests. `ResponderID::ByKey` uses SHA-1 as required by RFC 6960 Section 2.3. Responses are
+signed with the active CA's private key using ECDSA P-256 SHA-256.
+
+Only Nginx natively supports OCSP verification of client certificates (via `ssl_ocsp` directive, since v1.19.0).
+HAProxy, Envoy, Traefik, and Caddy do not.
+
+## CRLs
+
+CRLs are rebuilt hourly and immediately on revocation. Proxies should refresh the file every 30-60 minutes when relying
+on CRLs. The CRL endpoint is `/api/v1/pki/ca.crl`.
+
+## External CA
+
+Pass `--ca-cert` and `--ca-key` to disable managed CA and rotation. The controller uses the provided CA as-is.
+
+## Server Certificate Auto-Renewal
+
+When the server HTTPS certificate (also CA-signed) approaches expiry, a background task generates a new one and
+hot-reloads the TLS listener. Admins can also trigger renewal manually via
+`POST /api/v1/settings/renew-server-certificate`.
+
+## Server Certificate SAN Sanity Checks
+
+At startup, the controller validates that `--san` values match the existing managed server certificate's SANs:
+
+1. **`--san` is incompatible with `--tls-cert`/`--tls-key`**: the controller rejects this combination because SANs are
+   only configurable for controller-managed certificates.
+1. **SAN mismatch + same CA**: if `--san` values are not present in the existing cert's SANs and the cert was signed by
+   the currently active CA, the cert is silently regenerated.
+1. **SAN mismatch + different CA**: if the cert needing SAN regeneration was signed by a different CA (e.g. after CA
+   rotation), the controller fails with a multi-step fix message guiding the admin through manual certificate renewal.
+
+Shared PKI utility functions (`SanCollection`, `collect_sans`, `cert_signed_by_ca`) live in
+`crates/ui/web-api/src/pki_utils.rs` and are used by both the web API handlers and the controller startup logic.
 
 ## State Management
 
-- CA metadata flows through `CaPublicSnapshot` (watch channel) for API handlers.
-- Private keys live in `CaKeyStore` (`zeroize::Zeroizing<String>` behind `Arc<RwLock>`). Only signing code accesses it.
-- When adding code that uses CA material, use `AppState.ca_snapshot` and request a `CaKeyStoreRef` if signing is required.
+### CaSnapshot Sharing
+
+Runtime CA state is split into **public** and **private** components:
+
+- **`CaPublicSnapshot`** (public certificates, fingerprints, CRL data) is shared via a `tokio::sync::watch` channel. API
+  handlers and route middleware read from this channel. It contains no private key material.
+- **`CaKeyStore`** (private keys wrapped in `zeroize::Zeroizing<String>`) is shared via
+  `Arc<tokio::sync::RwLock<CaKeyStore>>`. Only the OCSP responder, CRL manager, cert signer, and server cert renewal
+  code access the key store. The `Debug` impl redacts all key material.
+
+When adding new code that needs CA certificates or fingerprints, read from `AppState.ca_snapshot`. When adding code that
+needs to **sign** (OCSP responses, CRLs, certificates), also accept a `CaKeyStoreRef` and look up keys by fingerprint.
+
+Controllers poll the `pki.ca_version` settings key to detect CA changes made by other instances and reload both the
+public snapshot and key store.
+
+### Settings Snapshot Sharing
+
+Runtime settings are shared via a `tokio::sync::watch` channel holding an atomic `SettingsSnapshot` struct. This
+replaces the previous 6-`RwLock` pattern that was susceptible to torn reads.
+
+- **Readers** call synchronous methods (e.g. `settings.registration()`, `settings.authentication()`) that borrow the
+  watch channel -- no `.await` needed.
+- **Writers** acquire a `tokio::sync::Mutex` and publish via `send_modify()` for atomic updates.
+- **`reload_from_db()`** builds a complete `SettingsSnapshot` from the database and publishes it atomically.
+- **Version counters** (`version`, `global_version`) use `Ordering::Acquire`/`Release` for cross-instance cache
+  invalidation.
+
+When adding code that reads settings, use the synchronous reader methods. When adding code that modifies settings, use
+the `set_*` methods (e.g. `settings.set_registration(...)`) which acquire the write mutex.
+
+## JWT Signing Key
+
+The JWT signing key is stored in the database settings table (key: `auth.jwt_signing_key`, base64-encoded, marked as
+global). All HA instances share the same key. On first startup, the controller generates a 64-byte random key and stores
+it. Existing file-based keys (`jwt_signing.key`) are automatically migrated to the database on startup.
+
+## JWT Token Denylist
+
+An in-memory `TokenDenylist` (`src/auth/token_denylist.rs`) provides immediate JWT revocation within each controller
+instance. It supports:
+
+- **Per-JTI denial**: individual tokens denied by their `jti` claim.
+- **Per-user denial**: all tokens for a user issued before a given timestamp.
+
+The denylist is checked on every JWT-authenticated request in the `authenticate_jwt` middleware. On logout, all tokens
+for the user are denied for the remaining access token lifetime (15 min). A periodic purge task cleans expired entries.
+
+**Known limitation**: the denylist is per-instance (in-memory). Cross-instance revocation relies on natural token
+expiry. DB-backed HA sync is deferred.

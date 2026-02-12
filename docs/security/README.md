@@ -14,7 +14,7 @@ This folder contains security architecture, cryptography, PKI, authentication, s
 | [TOFU and TLS](tofu-tls.md) | TOFU behavior and TLS trust bootstrap considerations. |
 | [Filesystem and Dependency Security](filesystem-dependency-security.md) | Filesystem permissions, hardening defaults, and dependency safeguards. |
 | [Secure Development](secure-development.md) | Secure coding expectations for contributors. |
-| [Reverse Proxy Security](reverse-proxy/README.md) | Reverse proxy trust model and per-proxy hardening references. |
+| [Reverse Proxy Security](reverse-proxy-security.md) | Reverse proxy trust model, header validation, revocation strategy, and per-proxy guide links. |
 
 ## Related Documentation
 

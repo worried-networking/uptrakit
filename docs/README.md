@@ -1,12 +1,13 @@
 # Uptrakit Documentation
 
-This directory holds audience-specific documentation split into four sections, plus deployment and reference links.
+This directory holds audience-specific documentation split into five sections, plus deployment and reference links.
 
 ## Quick Navigation
 
 - [End-user Guides](#end-user-guides)
 - [API and Protocol](#api-and-protocol)
 - [Security](#security)
+- [Architecture](#architecture)
 - [Development](#development)
 - [Deployment Guides](#deployment-guides)
 - [Additional Resources](#additional-resources)
@@ -18,8 +19,8 @@ This directory holds audience-specific documentation split into four sections, p
 | [System Overview](end-user/system-overview.md) | High-level architecture and agent/controller roles. See also: [Wire Protocol](api/wire-protocol.md), [Security Architecture](security/security-architecture.md). |
 | [Update Workflow](end-user/update-workflow.md) | Manual update lifecycle, hooks, and history links. See also: [Services and Operations](api/services-operations.md). |
 | [Home Assistant and MQTT](end-user/home-assistant-mqtt.md) | MQTT/Home Assistant integration notes. See also: [Auth Flows](api/auth-flows.md), [Services and Operations](api/services-operations.md). |
-| [Deployment Map](end-user/deployment-map.md) | Deployment navigation map and pointers. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md), [Reverse Proxy Security](security/reverse-proxy/index.md). |
-| [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy/index.md). |
+| [Deployment Map](end-user/deployment-map.md) | Deployment navigation map and pointers. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
+| [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 
 ## API and Protocol
 
@@ -37,14 +38,22 @@ This directory holds audience-specific documentation split into four sections, p
 | --- | --- |
 | [Security Architecture](security/security-architecture.md) | Defense-in-depth principles. See also: [Cryptography](security/cryptography.md), [Secure Development](security/secure-development.md). |
 | [Cryptography](security/cryptography.md) | Crypto primitives and libraries. See also: [PKI and Certificates](security/pki-certificates.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
-| [PKI and Certificates](security/pki-certificates.md) | CA rotation, OCSP, CRL, CaSnapshot, and PKI address behavior. See also: [Reverse Proxy Security](security/reverse-proxy/index.md), [TOFU and TLS](security/tofu-tls.md). |
+| [PKI and Certificates](security/pki-certificates.md) | CA rotation, OCSP, CRL, CaSnapshot, and PKI address behavior. See also: [Reverse Proxy Security](security/reverse-proxy-security.md), [TOFU and TLS](security/tofu-tls.md). |
 | [Auth and Authorization](security/auth-and-authorization.md) | Authentication methods, permissions model, JWT, and roles. See also: [Auth Flows](api/auth-flows.md). |
 | [Secrets and Encryption](security/secrets-and-encryption.md) | Master key, encrypted fields, and `SecretString`. See also: [Setup](development/setup.md). |
-| [Reverse Proxy Security](security/reverse-proxy/index.md) | Proxy trust model and revocation guidance. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md). |
+| [Reverse Proxy Security](security/reverse-proxy-security.md) | Proxy trust model and revocation guidance. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md). |
 | [TOFU and TLS](security/tofu-tls.md) | TOFU verifier and CLI hardening. See also: [Auth Flows](api/auth-flows.md). |
 | [Filesystem and Dependency Security](security/filesystem-dependency-security.md) | Secure permissions and dependency controls. See also: [Dependency Policy](development/dependency-policy.md). |
 | [Secure Development](security/secure-development.md) | Security requirements for contributors. See also: [Coding Standards](development/coding-standards.md), [Testing](development/testing.md). |
-| [Per-Proxy Security Guides](security/reverse-proxy/index.md#per-proxy-security-guides) | Security and configuration notes for Nginx, Nginx Proxy Manager, Traefik, Envoy, HAProxy, and Caddy. |
+
+## Architecture
+
+| Guide | Description |
+| --- | --- |
+| [Multi-tenancy](architecture/multi-tenancy.md) | Database and API multi-tenancy model. See also: [Services and Operations](api/services-operations.md). |
+| [Host Entity](architecture/host-entity.md) | Host representation and `machine_id` tracking. See also: [Wire Protocol](api/wire-protocol.md). |
+| [Software Item Entity](architecture/software-item-entity.md) | Software item definition and provider configuration. See also: [Provider Guidelines](development/provider-guidelines.md). |
+| [Update History Entity](architecture/update-history-entity.md) | Immutable update history records. See also: [Update Workflow](end-user/update-workflow.md). |
 
 ## Development
 
@@ -57,19 +66,25 @@ This directory holds audience-specific documentation split into four sections, p
 | [Dependency Policy](development/dependency-policy.md) | Workspace dependency rules and `cargo deny` guidance. |
 | [Provider Guidelines](development/provider-guidelines.md) | Provider lifecycle rules and documentation expectations. See also: [Wire Protocol](api/wire-protocol.md). |
 | [AI Guidelines](development/ai-guidelines.md) | Responsible AI usage policy for contributors and assistants. |
+| [CLI Output](development/cli-output.md) | CLI output formatting conventions and standards. |
+| [Commit Messages](development/commit-messages.md) | Conventional Commits format and examples. |
+| [Cross-Controller Communication](development/cross-controller-comm.md) | HA controller-to-controller event propagation. |
+| [Graceful Restart](development/graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
+| [Quality Gates](development/quality-gates.md) | CI quality gate requirements for all changes. |
+| [Update Hooks](development/update-hooks.md) | Pre/post-update hook execution and configuration. |
 
 ## Deployment Guides
 
 | Guide | Description |
 | --- | --- |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment options and header formats. |
-| [Reverse Proxy Security Overview](security/reverse-proxy/index.md) | Reverse proxy security considerations, revocation, and CA rotation. |
-| [Nginx](security/reverse-proxy/nginx.md) | Nginx-specific hardening and configuration guidance. |
-| [Nginx Proxy Manager](security/reverse-proxy/nginx-proxy-manager.md) | Nginx Proxy Manager-specific guidance. |
-| [Traefik](security/reverse-proxy/traefik.md) | Traefik-specific hardening and configuration guidance. |
-| [Envoy](security/reverse-proxy/envoy.md) | Envoy-specific hardening and configuration guidance. |
-| [HAProxy](security/reverse-proxy/haproxy.md) | HAProxy-specific hardening and configuration guidance. |
-| [Caddy](security/reverse-proxy/caddy.md) | Caddy-specific hardening and configuration guidance. |
+| [Reverse Proxy Security Overview](security/reverse-proxy-security.md) | Reverse proxy security considerations, revocation, and CA rotation. |
+| [Nginx](end-user/deployment/nginx.md) | Nginx reverse proxy configuration guidance. |
+| [Nginx Proxy Manager](end-user/deployment/nginx-proxy-manager.md) | Nginx Proxy Manager configuration guidance. |
+| [Traefik](end-user/deployment/traefik.md) | Traefik reverse proxy configuration guidance. |
+| [Envoy](end-user/deployment/envoy.md) | Envoy reverse proxy configuration guidance. |
+| [HAProxy](end-user/deployment/haproxy.md) | HAProxy reverse proxy configuration guidance. |
+| [Caddy](end-user/deployment/caddy.md) | Caddy reverse proxy configuration guidance. |
 
 ## Additional Resources
 

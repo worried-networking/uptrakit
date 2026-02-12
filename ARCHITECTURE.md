@@ -6,6 +6,9 @@ Assistant via MQTT.
 
 ## Key references
 
+- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update
+  history)
+
 - System architecture and operations: [docs/end-user/system-overview.md](docs/end-user/system-overview.md)
 - API and wire protocol: [docs/api/wire-protocol.md](docs/api/wire-protocol.md) and [docs/api/http-web-api.md](docs/api/http-web-api.md)
 - Settings, authentication, and service flows: [docs/api/settings-runtime.md](docs/api/settings-runtime.md),

@@ -1,4 +1,4 @@
-# AGENTS — AI Agent Guide for Uptrakit
+# AGENTS -- AI Agent Guide for Uptrakit
 
 This file provides structured context for AI coding agents working on the Uptrakit codebase. Read this first before
 making any changes.
@@ -36,12 +36,14 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
 - **Security docs** (`docs/security/`): architecture, cryptography, PKI/certificates, auth/permissions,
   secrets/encryption, reverse proxy security, TOFU/TLS, filesystem/dependency hardening, and secure development
   guidance.
+- **Architecture docs** ([`docs/architecture/`](docs/architecture/)): entity-level design for multi-tenancy, hosts,
+  software items, and update history.
 - **Development docs** (`docs/development/`): setup, testing, coding standards, PR process, dependency policy, provider
   guidelines, and AI usage expectations.
-- **Deployment guides**: reverse proxy deployment and per-proxy guides now live under
-  [`docs/end-user/deployment/`](docs/end-user/deployment/) and
-  [`docs/security/reverse-proxy/`](docs/security/reverse-proxy/). Human documentation must link into those files rather
-  than [AGENTS.md](AGENTS.md).
+- **Deployment guides**: reverse proxy deployment and per-proxy guides live under
+  [`docs/end-user/deployment/`](docs/end-user/deployment/). Reverse proxy security model is at
+  [`docs/security/reverse-proxy-security.md`](docs/security/reverse-proxy-security.md). Human documentation must link
+  into those files rather than [AGENTS.md](AGENTS.md).
 
 ## Codebase layout
 
@@ -120,7 +122,7 @@ These are non-negotiable design constraints. Do not violate them.
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
    treated as untrusted input.
 1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials.
-1. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally —
+1. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally --
    only high-level summaries are retained for display.
 1. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host
    never run concurrently.
@@ -131,7 +133,7 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Cover new logic with tests.** Cover success and failure paths.
 1. **Document everything.** Any code change must be properly documented either in the code, or in the separate
    documentation. Any changes to the agent-controller wire protocol must be documented in
-   `crates/shared/wire/asyncapi.yaml`.
+   `crates/shared/wire/asyncapi.yaml` and reflected in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the
    codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead
    code removal.
@@ -185,16 +187,16 @@ All created files and directories use secure permissions:
 
 The `uptrakit-directories` crate provides helper functions:
 
-- `create_secure_dir(path)` — creates directory with 0o700 permissions
-- `write_secure_file(path, data)` — writes file with 0o600 permissions
-- `AppDirs::resolve(app_kind, config_override, state_override)` — resolves directories for an application
-- `AppDirs::ensure_dirs()` — creates both directories with secure permissions
+- `create_secure_dir(path)` -- creates directory with 0o700 permissions
+- `write_secure_file(path, data)` -- writes file with 0o600 permissions
+- `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
+- `AppDirs::ensure_dirs()` -- creates both directories with secure permissions
 
 #### Key files
 
-| File                                       | Purpose                                                                  |
-|:-------------------------------------------|:-------------------------------------------------------------------------|
-| `crates/shared/directories/src/lib.rs`     | Cross-platform directory resolution and secure file/directory operations |
+| File | Purpose |
+| --- | --- |
+| `crates/shared/directories/src/lib.rs` | Cross-platform directory resolution and secure file/directory operations |
 
 ## Detailed Documentation References
 
@@ -202,10 +204,14 @@ For more in-depth information on specific topics, refer to the following documen
 
 ### Security
 
-- [PKI and CA Rotation](docs/security/pki-details.md)
-- [Sensitive Data Handling](docs/security/sensitive-data-handling.md)
-- [CLI TLS Configuration](docs/security/tls-config.md)
+- [PKI and Certificate Lifecycle](docs/security/pki-certificates.md)
+- [Secrets Handling and Encryption](docs/security/secrets-and-encryption.md)
+- [TOFU and TLS Hardening](docs/security/tofu-tls.md)
 - [Authentication and Authorization](docs/security/auth-and-authorization.md)
+- [Cryptography](docs/security/cryptography.md)
+- [Security Architecture](docs/security/security-architecture.md)
+- [Filesystem and Dependency Security](docs/security/filesystem-dependency-security.md)
+- [Reverse Proxy Security](docs/security/reverse-proxy-security.md)
 
 ### Development Guidelines
 
@@ -228,6 +234,8 @@ For more in-depth information on specific topics, refer to the following documen
 
 ### API and Protocol
 
+- [Wire Protocol](docs/api/wire-protocol.md)
 - [Authentication Flows](docs/api/auth-flows.md)
 - [Settings Runtime](docs/api/settings-runtime.md)
 - [HTTP Web API](docs/api/http-web-api.md)
+- [Services and Operations](docs/api/services-operations.md)

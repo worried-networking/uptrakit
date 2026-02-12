@@ -21,7 +21,7 @@ a week.
 - PKI, certificates, and revocation flows: [docs/security/pki-certificates.md](docs/security/pki-certificates.md)
 - Authentication and permissions: [docs/security/auth-and-authorization.md](docs/security/auth-and-authorization.md)
 - Secrets, encryption, and master key handling: [docs/security/secrets-and-encryption.md](docs/security/secrets-and-encryption.md)
-- Reverse proxy security: [docs/security/reverse-proxy/index.md](docs/security/reverse-proxy/index.md)
+- Reverse proxy security: [docs/security/reverse-proxy-security.md](docs/security/reverse-proxy-security.md)
 - TOFU & TLS hardening: [docs/security/tofu-tls.md](docs/security/tofu-tls.md)
 - Filesystem/dependency hardening: [docs/security/filesystem-dependency-security.md](docs/security/filesystem-dependency-security.md)
 - Secure development practices: [docs/security/secure-development.md](docs/security/secure-development.md)

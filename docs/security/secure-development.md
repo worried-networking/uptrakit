@@ -5,7 +5,7 @@ boundaries. Security-sensitive changes should also reference:
 
 - [PKI and certificates](pki-certificates.md)
 - [Secrets and encryption](secrets-and-encryption.md)
-- [Reverse proxy security](reverse-proxy/index.md)
+- [Reverse proxy security](reverse-proxy-security.md)
 - [Filesystem and dependency security](filesystem-dependency-security.md)
 
 Document any new behavior or configuration in the appropriate `docs/` area and ensure tests cover both success and failure paths.
