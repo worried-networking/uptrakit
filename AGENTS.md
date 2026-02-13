@@ -102,7 +102,7 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 
 All changes must pass defined quality gates. See [docs/development/quality-gates.md](docs/development/quality-gates.md) for details.
 
-#### AI execution guidance (agent-only)
+#### AI execution guidance
 
 - Always run quality gates relevant to modified areas before finalizing.
 - Scope-based execution is allowed for local iteration:
