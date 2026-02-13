@@ -80,10 +80,7 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
         .map_err(|e| report!(EnrollmentError::FetchCa(e.to_string())))?;
 
     if !resp.status().is_success() {
-        return Err(report!(EnrollmentError::FetchCa(format!(
-            "HTTP {}",
-            resp.status()
-        ))));
+        bail!(EnrollmentError::FetchCa(format!("HTTP {}", resp.status())));
     }
 
     let body = resp
@@ -164,10 +161,10 @@ pub async fn bootstrap_ca(
         if let Some(expected) = tofu_fingerprint {
             let expected_normalized = expected.to_lowercase().replace(':', "");
             if fp != expected_normalized {
-                return Err(report!(EnrollmentError::FetchCa(format!(
+                bail!(EnrollmentError::FetchCa(format!(
                     "TOFU fingerprint mismatch: expected SHA256:{expected_normalized}, \
                      got SHA256:{fp}"
-                ))));
+                )));
             }
             tracing::info!("TOFU: fingerprint verified successfully");
         } else {

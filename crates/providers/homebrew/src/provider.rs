@@ -144,9 +144,9 @@ impl HomebrewProvider {
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
         if package_identifier.trim().is_empty() {
-            return Err(report!(ProviderError::Configuration(
+            bail!(ProviderError::Configuration(
                 "package_identifier must not be empty".to_string()
-            )));
+            ));
         }
         Ok(())
     }
@@ -173,7 +173,7 @@ impl Provider for HomebrewProvider {
             })?;
 
         if exit_code != 0 {
-            return Err(report!(ProviderError::CommandFailed(exit_code)));
+            bail!(ProviderError::CommandFailed(exit_code));
         }
 
         tracing::info!("Homebrew package index refreshed");
@@ -204,7 +204,7 @@ impl Provider for HomebrewProvider {
         })?;
 
         if exit_code != 0 {
-            return Err(report!(ProviderError::CommandFailed(exit_code)));
+            bail!(ProviderError::CommandFailed(exit_code));
         }
 
         let json: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
@@ -237,7 +237,7 @@ impl Provider for HomebrewProvider {
         })?;
 
         if exit_code != 0 {
-            return Err(report!(ProviderError::CommandFailed(exit_code)));
+            bail!(ProviderError::CommandFailed(exit_code));
         }
 
         let json: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
@@ -273,7 +273,7 @@ impl Provider for HomebrewProvider {
         })?;
 
         if exit_code != 0 {
-            return Err(report!(ProviderError::CommandFailed(exit_code)));
+            bail!(ProviderError::CommandFailed(exit_code));
         }
 
         let json: serde_json::Value = serde_json::from_str(&output).map_err(|e| {

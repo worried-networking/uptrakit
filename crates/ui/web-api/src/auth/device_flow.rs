@@ -127,12 +127,12 @@ impl DeviceFlowStore {
 
         // Check expiry
         if flow.expires_at <= now {
-            return Err(report!(DeviceFlowError::NotFound));
+            bail!(DeviceFlowError::NotFound);
         }
 
         // Check already authorized
         if flow.status == "authorized" {
-            return Err(report!(DeviceFlowError::AlreadyAuthorized));
+            bail!(DeviceFlowError::AlreadyAuthorized);
         }
 
         // Atomic update: only update if still pending and not expired (HA-safe)
@@ -154,7 +154,7 @@ impl DeviceFlowStore {
 
         if result.rows_affected == 0 {
             // Another instance may have approved it, or it expired
-            return Err(report!(DeviceFlowError::AlreadyAuthorized));
+            bail!(DeviceFlowError::AlreadyAuthorized);
         }
 
         Ok(())
@@ -170,7 +170,7 @@ impl DeviceFlowStore {
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
         if flow.status != "authorized" {
-            return Err(report!(DeviceFlowError::NotFound));
+            bail!(DeviceFlowError::NotFound);
         }
 
         let user_id = flow
@@ -187,7 +187,7 @@ impl DeviceFlowStore {
             .context_to()?;
 
         if result.rows_affected == 0 {
-            return Err(report!(DeviceFlowError::NotFound));
+            bail!(DeviceFlowError::NotFound);
         }
 
         Ok((user_id, client_name))

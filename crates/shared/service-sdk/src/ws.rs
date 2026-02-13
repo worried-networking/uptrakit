@@ -118,31 +118,31 @@ pub async fn send_enroll(
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
                     if let Err(e) = in_seq.validate(envelope.seq) {
-                        return Err(report!(EnrollmentError::Enrollment(format!(
+                        bail!(EnrollmentError::Enrollment(format!(
                             "sequence validation failed: {e}"
-                        ))));
+                        )));
                     }
 
                     match envelope.message {
                         ControllerMessage::Enrolled(payload) => return Ok(payload),
                         ControllerMessage::Error(err) => {
-                            return Err(report!(EnrollmentError::Enrollment(format!(
+                            bail!(EnrollmentError::Enrollment(format!(
                                 "{}: {}",
                                 err.code, err.message
-                            ))));
+                            )));
                         }
                         ControllerMessage::ServerRestarting(payload) => {
                             tracing::info!(reason = %payload.reason, "controller is restarting during enrollment");
-                            return Err(report!(EnrollmentError::ReceiveClosed));
+                            bail!(EnrollmentError::ReceiveClosed);
                         }
                         _ => {
-                            return Err(report!(EnrollmentError::UnexpectedMessage));
+                            bail!(EnrollmentError::UnexpectedMessage);
                         }
                     }
                 }
                 Message::Close(frame) => {
                     log_close_frame(frame);
-                    return Err(report!(EnrollmentError::ReceiveClosed));
+                    bail!(EnrollmentError::ReceiveClosed);
                 }
                 _ => continue,
             }
@@ -165,10 +165,10 @@ pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> R
                 Some(Ok(m)) => m,
                 Some(Err(e)) if is_peer_closed(&e) => {
                     tracing::info!("connection closed by controller while waiting for approval");
-                    return Err(report!(EnrollmentError::ReceiveClosed));
+                    bail!(EnrollmentError::ReceiveClosed);
                 }
                 Some(Err(e)) => return Err(e).context_to::<EnrollmentError>()?,
-                None => return Err(report!(EnrollmentError::ReceiveClosed)),
+                None => bail!(EnrollmentError::ReceiveClosed),
             };
 
             match msg {
@@ -177,9 +177,9 @@ pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> R
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
                     if let Err(e) = in_seq.validate(envelope.seq) {
-                        return Err(report!(EnrollmentError::Enrollment(format!(
+                        bail!(EnrollmentError::Enrollment(format!(
                             "sequence validation failed: {e}"
-                        ))));
+                        )));
                     }
 
                     match envelope.message {
@@ -189,25 +189,25 @@ pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> R
                         }
                         ControllerMessage::Rejected(payload) => {
                             tracing::error!(service_id = %payload.service_id, "enrollment rejected");
-                            return Err(report!(EnrollmentError::EnrollmentRejected));
+                            bail!(EnrollmentError::EnrollmentRejected);
                         }
                         ControllerMessage::Pong(_) => continue,
                         ControllerMessage::Error(err) => {
-                            return Err(report!(EnrollmentError::Enrollment(format!(
+                            bail!(EnrollmentError::Enrollment(format!(
                                 "{}: {}",
                                 err.code, err.message
-                            ))));
+                            )));
                         }
                         ControllerMessage::ServerRestarting(payload) => {
                             tracing::info!(reason = %payload.reason, "controller is restarting while waiting for approval");
-                            return Err(report!(EnrollmentError::ReceiveClosed));
+                            bail!(EnrollmentError::ReceiveClosed);
                         }
                         _ => continue,
                     }
                 }
                 Message::Close(frame) => {
                     log_close_frame(frame);
-                    return Err(report!(EnrollmentError::ReceiveClosed));
+                    bail!(EnrollmentError::ReceiveClosed);
                 }
                 _ => continue,
             }
@@ -250,31 +250,31 @@ pub async fn request_certificate_ws(
                         serde_json::from_str(&text).context_to::<EnrollmentError>()?;
 
                     if let Err(e) = in_seq.validate(envelope.seq) {
-                        return Err(report!(EnrollmentError::Enrollment(format!(
+                        bail!(EnrollmentError::Enrollment(format!(
                             "sequence validation failed: {e}"
-                        ))));
+                        )));
                     }
 
                     match envelope.message {
                         ControllerMessage::Certificate(payload) => return Ok(payload),
                         ControllerMessage::Error(err) => {
-                            return Err(report!(EnrollmentError::Enrollment(format!(
+                            bail!(EnrollmentError::Enrollment(format!(
                                 "{}: {}",
                                 err.code, err.message
-                            ))));
+                            )));
                         }
                         ControllerMessage::ServerRestarting(payload) => {
                             tracing::info!(reason = %payload.reason, "controller is restarting during certificate request");
-                            return Err(report!(EnrollmentError::ReceiveClosed));
+                            bail!(EnrollmentError::ReceiveClosed);
                         }
                         _ => {
-                            return Err(report!(EnrollmentError::UnexpectedMessage));
+                            bail!(EnrollmentError::UnexpectedMessage);
                         }
                     }
                 }
                 Message::Close(frame) => {
                     log_close_frame(frame);
-                    return Err(report!(EnrollmentError::ReceiveClosed));
+                    bail!(EnrollmentError::ReceiveClosed);
                 }
                 _ => continue,
             }

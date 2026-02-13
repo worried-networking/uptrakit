@@ -86,9 +86,9 @@ impl ControllerConnection {
                         }
                     };
                     if let Err(e) = self.in_seq.validate(envelope.seq) {
-                        return Err(report!(EnrollmentError::Enrollment(format!(
+                        bail!(EnrollmentError::Enrollment(format!(
                             "sequence validation failed: {e}"
-                        ))));
+                        )));
                     }
                     return Ok(Some(envelope.message));
                 }
@@ -96,9 +96,9 @@ impl ControllerConnection {
                     let envelope: ControllerEnvelope =
                         serde_json::from_slice(&data).context_to::<EnrollmentError>()?;
                     if let Err(e) = self.in_seq.validate(envelope.seq) {
-                        return Err(report!(EnrollmentError::Enrollment(format!(
+                        bail!(EnrollmentError::Enrollment(format!(
                             "sequence validation failed: {e}"
-                        ))));
+                        )));
                     }
                     return Ok(Some(envelope.message));
                 }

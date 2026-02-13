@@ -115,7 +115,7 @@ impl ApiTokenService {
             .ok_or_else(|| report!(AuthError::ApiTokenNotFound))?;
 
         if token.revoked_at.is_some() {
-            return Err(report!(AuthError::ApiTokenRevoked));
+            bail!(AuthError::ApiTokenRevoked);
         }
 
         // Update last_used_at

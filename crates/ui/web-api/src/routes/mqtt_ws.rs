@@ -630,9 +630,7 @@ pub(crate) async fn do_mqtt_service_enroll(
     ip_address: Option<IpAddr>,
 ) -> MqttWsResult<MqttServiceEnrollResult> {
     if hostname.trim().is_empty() {
-        return Err(report!(MqttWsError::Enrollment(
-            "hostname must not be empty".into()
-        )));
+        bail!(MqttWsError::Enrollment("hostname must not be empty".into()));
     }
 
     let service_id = uuid::Uuid::now_v7();
@@ -648,34 +646,30 @@ pub(crate) async fn do_mqtt_service_enroll(
             Ok(Some(v)) => match v.as_str() {
                 Some(hash) => hash.to_string(),
                 None => {
-                    return Err(report!(MqttWsError::Enrollment(
+                    bail!(MqttWsError::Enrollment(
                         "no MQTT enrollment token configured".into()
-                    )));
+                    ));
                 }
             },
             Ok(None) => {
-                return Err(report!(MqttWsError::Enrollment(
+                bail!(MqttWsError::Enrollment(
                     "no MQTT enrollment token configured".into()
-                )));
+                ));
             }
             Err(e) => {
-                return Err(report!(MqttWsError::Enrollment(format!(
-                    "database error: {e:?}"
-                ))));
+                bail!(MqttWsError::Enrollment(format!("database error: {e:?}")));
             }
         };
 
         match crate::auth::password::verify_password(token, &token_hash) {
             Ok(true) => mqtt_service::ServiceStatus::Approved,
             Ok(false) => {
-                return Err(report!(MqttWsError::Enrollment(
-                    "invalid enrollment token".into()
-                )));
+                bail!(MqttWsError::Enrollment("invalid enrollment token".into()));
             }
             Err(e) => {
-                return Err(report!(MqttWsError::Enrollment(format!(
+                bail!(MqttWsError::Enrollment(format!(
                     "token verification error: {e}"
-                ))));
+                )));
             }
         }
     } else {

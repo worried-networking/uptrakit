@@ -21,6 +21,7 @@ use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
+use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::SettingKey;
@@ -46,6 +47,11 @@ enum AppError {
 
 type Result<T> = std::result::Result<T, rootcause::Report<AppError>>;
 
+impl_report_conversion!(
+    uptrakit_shared_db::crypto::CryptoError => AppError,
+    |e| AppError::Config(e.to_string())
+);
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
@@ -68,8 +74,7 @@ async fn run(args: cli::Args) -> Result<()> {
     // Initialize master encryption key (required for credential encryption at rest)
     {
         let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
-        let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())
-            .map_err(|e| report!(AppError::Config(e)))?;
+        let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())?;
 
         match key_hex {
             Some(key_hex) => {
@@ -79,13 +84,8 @@ async fn run(args: cli::Args) -> Result<()> {
                         encryption remains enabled because a master key was provided."
                     );
                 }
-                let key_bytes =
-                    parse_master_key_hex(&key_hex).map_err(|e| report!(AppError::Config(e)))?;
-                uptrakit_shared_db::crypto::init_master_key(key_bytes).map_err(|e| {
-                    report!(AppError::Config(format!(
-                        "failed to initialize master key: {e}"
-                    )))
-                })?;
+                let key_bytes = parse_master_key_hex(&key_hex)?;
+                uptrakit_shared_db::crypto::init_master_key(key_bytes).context_to()?;
                 tracing::info!("master encryption key initialized");
             }
             None => {
@@ -95,13 +95,13 @@ async fn run(args: cli::Args) -> Result<()> {
                         This is for development only and is NOT safe for production."
                     );
                 } else {
-                    return Err(report!(AppError::Config(
+                    bail!(AppError::Config(
                         "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \
                          (64-char hex string) or pass --master-key-file <path>. \
                          For development only, pass --allow-plaintext-secrets to run without \
                          encryption at rest."
                             .into()
-                    )));
+                    ));
                 }
             }
         }
@@ -484,25 +484,25 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Validate TLS args
     if args.tls_cert.is_some() != args.tls_key.is_some() {
-        return Err(report!(AppError::Config(
+        bail!(AppError::Config(
             "both --tls-cert and --tls-key must be provided together".into()
-        )));
+        ));
     }
 
     // --san only makes sense with managed (auto-generated) certificates
     if !extra_sans.is_empty() && args.tls_cert.is_some() {
-        return Err(report!(AppError::Config(
+        bail!(AppError::Config(
             "--san cannot be used with --tls-cert/--tls-key; \
              SANs are only configurable for controller-managed certificates"
                 .into()
-        )));
+        ));
     }
 
     // Validate CA args
     if args.ca_cert.is_some() != args.ca_key.is_some() {
-        return Err(report!(AppError::Config(
+        bail!(AppError::Config(
             "both --ca-cert and --ca-key must be provided together".into()
-        )));
+        ));
     }
 
     // Validate --pki-http
@@ -609,7 +609,7 @@ async fn run(args: cli::Args) -> Result<()> {
                 cert = pki::renew_server_cert(&pki_path, &ca_state.active, &extra_sans)
                     .context(AppError::Pki)?;
             } else {
-                return Err(report!(AppError::Config(
+                bail!(AppError::Config(
                     "The server certificate does not include the requested SANs and was signed by \
                      a different CA than the currently active one.\n\n\
                      To fix this:\n  \
@@ -617,7 +617,7 @@ async fn run(args: cli::Args) -> Result<()> {
                      2. Regenerate the server certificate via POST /api/v1/settings/renew-server-certificate or the UI\n  \
                      3. Restart the controller with the desired --san flag(s)"
                         .into()
-                )));
+                ));
             }
         }
 
@@ -1271,13 +1271,13 @@ async fn run(args: cli::Args) -> Result<()> {
 fn read_master_key_hex(
     master_key_file: Option<&std::path::Path>,
     env_val: Option<&str>,
-) -> std::result::Result<Option<String>, String> {
+) -> Result<Option<String>> {
     if let Some(key_file) = master_key_file {
         let contents = std::fs::read_to_string(key_file).map_err(|e| {
-            format!(
+            report!(AppError::Config(format!(
                 "failed to read --master-key-file {}: {e}",
                 key_file.display()
-            )
+            )))
         })?;
         return Ok(Some(contents.trim().to_string()));
     }
@@ -1289,14 +1289,17 @@ fn read_master_key_hex(
     Ok(None)
 }
 
-fn parse_master_key_hex(key_hex: &str) -> std::result::Result<[u8; 32], String> {
-    let bytes = uptrakit_shared_types::hex::decode(key_hex)
-        .map_err(|e| format!("master key must be a 64-character hex string: {e}"))?;
+fn parse_master_key_hex(key_hex: &str) -> Result<[u8; 32]> {
+    let bytes = uptrakit_shared_types::hex::decode(key_hex).map_err(|e| {
+        report!(AppError::Config(format!(
+            "master key must be a 64-character hex string: {e}"
+        )))
+    })?;
     let key_bytes: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| {
-        format!(
+        report!(AppError::Config(format!(
             "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
             v.len()
-        )
+        )))
     })?;
     Ok(key_bytes)
 }
@@ -1425,10 +1428,10 @@ fn resolve_static_dir(explicit: Option<PathBuf>) -> Result<Option<PathBuf>> {
     if let Some(dir) = explicit {
         let index = dir.join("index.html");
         if !index.is_file() {
-            return Err(report!(AppError::Config(format!(
+            bail!(AppError::Config(format!(
                 "--static-dir {}: missing index.html",
                 dir.display()
-            ))));
+            )));
         }
         tracing::info!("serving static files from {}", dir.display());
         return Ok(Some(dir));

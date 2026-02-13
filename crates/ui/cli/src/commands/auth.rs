@@ -67,7 +67,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
     };
 
     if server.is_empty() {
-        return Err(report!(CliError::Other("Server URL is required".into())));
+        bail!(CliError::Other("Server URL is required".into()));
     }
 
     // Build client name for the token
@@ -90,10 +90,10 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
             .as_str()
             .unwrap_or("Failed to start device authorization")
             .to_string();
-        return Err(report!(CliError::Api {
+        bail!(CliError::Api {
             status,
             message: msg,
-        }));
+        });
     }
 
     let device_code = body["device_code"]
@@ -138,9 +138,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 
         if start.elapsed() > timeout {
-            return Err(report!(CliError::Other(
-                "Device authorization timed out".into()
-            )));
+            bail!(CliError::Other("Device authorization timed out".into()));
         }
 
         let poll_body = serde_json::json!({ "device_code": device_code });
@@ -155,9 +153,9 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
         }
 
         if poll_status == 404 {
-            return Err(report!(CliError::Other(
+            bail!(CliError::Other(
                 "Device authorization session not found or expired".into(),
-            )));
+            ));
         }
 
         if poll_status != 200 {
@@ -165,10 +163,10 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 .as_str()
                 .unwrap_or("Unexpected error during polling")
                 .to_string();
-            return Err(report!(CliError::Api {
+            bail!(CliError::Api {
                 status: poll_status,
                 message: msg,
-            }));
+            });
         }
 
         let flow_status = poll_resp["status"].as_str().unwrap_or("unknown");
@@ -176,9 +174,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
         match flow_status {
             "pending" => continue,
             "expired" => {
-                return Err(report!(CliError::Other(
-                    "Device authorization expired".into()
-                )));
+                bail!(CliError::Other("Device authorization expired".into()));
             }
             "authorized" => {
                 let api_token = poll_resp["token"]
@@ -201,9 +197,9 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 return Ok(());
             }
             other => {
-                return Err(report!(CliError::Other(format!(
+                bail!(CliError::Other(format!(
                     "Unexpected device flow status: {other}"
-                ))));
+                )));
             }
         }
     }
@@ -226,10 +222,10 @@ pub async fn status(
             .as_str()
             .unwrap_or("Failed to get user info")
             .to_string();
-        return Err(report!(CliError::Api {
+        bail!(CliError::Api {
             status,
             message: msg,
-        }));
+        });
     }
 
     let user: uptrakit_web_api_types::auth::UserResponse =
@@ -286,10 +282,10 @@ pub async fn token_create(
             .as_str()
             .unwrap_or("Failed to create token")
             .to_string();
-        return Err(report!(CliError::Api {
+        bail!(CliError::Api {
             status,
             message: msg,
-        }));
+        });
     }
 
     let id = body["id"].as_str().unwrap_or("").to_string();
@@ -326,10 +322,10 @@ pub async fn token_list(
 
     if status != 200 {
         let msg = body.as_str().unwrap_or("Failed to list tokens").to_string();
-        return Err(report!(CliError::Api {
+        bail!(CliError::Api {
             status,
             message: msg,
-        }));
+        });
     }
 
     let tokens = body["tokens"].as_array();
@@ -393,10 +389,10 @@ pub async fn token_revoke(
             .as_str()
             .unwrap_or("Failed to revoke token")
             .to_string();
-        return Err(report!(CliError::Api {
+        bail!(CliError::Api {
             status,
             message: msg,
-        }));
+        });
     }
 
     let human = format!("Token {} revoked.\n", id);

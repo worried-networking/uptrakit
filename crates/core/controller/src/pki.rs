@@ -332,9 +332,9 @@ pub async fn load_managed_ca_state(
         .context_to::<PkiError>()?;
 
     if !trusted_models.iter().any(|m| m.fingerprint == active_fp) {
-        return Err(report!(PkiError::CaValidation(
+        bail!(PkiError::CaValidation(
             "active CA is expired or missing from trusted set".into()
-        )));
+        ));
     }
 
     trusted_models.sort_by(|a, b| {
@@ -1036,7 +1036,7 @@ pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Result<()
                 || cert_urls.crl_url.as_deref() != Some(&expected_crl);
 
             if mismatch {
-                return Err(report!(PkiError::CaValidation(format!(
+                bail!(PkiError::CaValidation(format!(
                     "The CA certificate's AIA/CDP URLs do not match --pki-addr ({url}).\n\
                      \n\
                      CA certificate contains:\n\
@@ -1055,7 +1055,7 @@ pub fn validate_ca_pki_addr(cert_pem: &str, pki_addr: Option<&str>) -> Result<()
                     cert_urls.ocsp_url.as_deref().unwrap_or("<none>"),
                     cert_urls.ca_issuers_url.as_deref().unwrap_or("<none>"),
                     cert_urls.crl_url.as_deref().unwrap_or("<none>"),
-                ))));
+                )));
             }
             Ok(())
         }

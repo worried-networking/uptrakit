@@ -8,7 +8,48 @@ use std::sync::OnceLock;
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, Nonce, UnboundKey};
 use rand::RngCore;
+use rootcause::prelude::*;
+use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::SecretString;
+
+/// Errors originating from encryption/decryption operations.
+#[derive(Debug, Error)]
+pub enum CryptoError {
+    #[error("master key already initialized")]
+    AlreadyInitialized,
+
+    #[error("master key not initialized")]
+    NotInitialized,
+
+    #[error("encryption key creation failed: {0}")]
+    KeyCreation(String),
+
+    #[error("encryption failed: {0}")]
+    Encryption(String),
+
+    #[error("decryption failed: {0}")]
+    Decryption(String),
+
+    #[error("hex decode failed")]
+    HexDecode(#[from] uptrakit_shared_types::hex::DecodeError),
+
+    #[error("ciphertext too short")]
+    CiphertextTooShort,
+
+    #[error("invalid nonce length")]
+    InvalidNonce,
+
+    #[error("decrypted value is not valid UTF-8: {0}")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
+}
+
+pub type Result<T> = std::result::Result<T, Report<CryptoError>>;
+
+impl_report_conversion! {
+    uptrakit_shared_types::hex::DecodeError => CryptoError::HexDecode,
+    std::string::FromUtf8Error => CryptoError::InvalidUtf8,
+}
 
 /// Global master encryption key (32 bytes for AES-256).
 static MASTER_KEY: OnceLock<[u8; 32]> = OnceLock::new();
@@ -16,10 +57,10 @@ static MASTER_KEY: OnceLock<[u8; 32]> = OnceLock::new();
 /// Initialize the global master key. Must be called once at startup.
 ///
 /// Returns `Err` if the key has already been initialized.
-pub fn init_master_key(key: [u8; 32]) -> Result<(), String> {
+pub fn init_master_key(key: [u8; 32]) -> Result<()> {
     MASTER_KEY
         .set(key)
-        .map_err(|_| "master key already initialized".to_string())
+        .map_err(|_| report!(CryptoError::AlreadyInitialized))
 }
 
 /// Returns `true` if the master key has been initialized.
@@ -38,11 +79,13 @@ fn is_encrypted(s: &str) -> bool {
 /// Encrypt a plaintext string.
 ///
 /// Returns `"ENC:v1:<hex(nonce || ciphertext || tag)>"`.
-fn encrypt_value(plaintext: &str) -> Result<String, String> {
-    let key_bytes = MASTER_KEY.get().ok_or("master key not initialized")?;
+fn encrypt_value(plaintext: &str) -> Result<String> {
+    let key_bytes = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
 
     let unbound = UnboundKey::new(&AES_256_GCM, key_bytes)
-        .map_err(|e| format!("failed to create encryption key: {e}"))?;
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
     let key = LessSafeKey::new(unbound);
 
     // Generate random 12-byte nonce
@@ -54,7 +97,7 @@ fn encrypt_value(plaintext: &str) -> Result<String, String> {
     let mut in_out = plaintext.as_bytes().to_vec();
     let tag = key
         .seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out)
-        .map_err(|e| format!("encryption failed: {e}"))?;
+        .map_err(|e| report!(CryptoError::Encryption(e.to_string())))?;
 
     // Build output: nonce || ciphertext || tag
     let mut output = Vec::with_capacity(12 + in_out.len() + tag.as_ref().len());
@@ -72,35 +115,37 @@ fn encrypt_value(plaintext: &str) -> Result<String, String> {
 ///
 /// Strips the `"ENC:v1:"` prefix, hex-decodes, extracts the nonce,
 /// and decrypts the ciphertext.
-fn decrypt_value(stored: &str) -> Result<String, String> {
-    let key_bytes = MASTER_KEY.get().ok_or("master key not initialized")?;
+fn decrypt_value(stored: &str) -> Result<String> {
+    let key_bytes = MASTER_KEY
+        .get()
+        .ok_or_else(|| report!(CryptoError::NotInitialized))?;
 
     let hex_part = stored
         .strip_prefix(ENC_PREFIX)
-        .ok_or("missing ENC:v1: prefix")?;
+        .ok_or_else(|| report!(CryptoError::Decryption("missing ENC:v1: prefix".into())))?;
 
-    let raw = uptrakit_shared_types::hex::decode(hex_part)
-        .map_err(|e| format!("hex decode failed: {e}"))?;
+    let raw = uptrakit_shared_types::hex::decode(hex_part).context_to()?;
 
     // AES-256-GCM: 12-byte nonce + ciphertext + 16-byte tag
     if raw.len() < 12 + 16 {
-        return Err("ciphertext too short".to_string());
+        bail!(CryptoError::CiphertextTooShort);
     }
 
-    let nonce_bytes: [u8; 12] = raw[..12].try_into().map_err(|_| "invalid nonce length")?;
+    let nonce_bytes: [u8; 12] = raw[..12]
+        .try_into()
+        .map_err(|_| report!(CryptoError::InvalidNonce))?;
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
     let unbound = UnboundKey::new(&AES_256_GCM, key_bytes)
-        .map_err(|e| format!("failed to create decryption key: {e}"))?;
+        .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
     let key = LessSafeKey::new(unbound);
 
     let mut ciphertext_and_tag = raw[12..].to_vec();
     let plaintext = key
         .open_in_place(nonce, Aad::empty(), &mut ciphertext_and_tag)
-        .map_err(|_| "decryption failed (wrong key or tampered data)".to_string())?;
+        .map_err(|_| report!(CryptoError::Decryption("wrong key or tampered data".into())))?;
 
-    String::from_utf8(plaintext.to_vec())
-        .map_err(|e| format!("decrypted value is not valid UTF-8: {e}"))
+    String::from_utf8(plaintext.to_vec()).context_to()
 }
 
 /// A string that is transparently encrypted when written to the database
@@ -138,7 +183,7 @@ impl fmt::Display for EncryptedString {
 // ── SeaORM integration ──────────────────────────────────────────────
 
 impl sea_orm::sea_query::ValueType for EncryptedString {
-    fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
+    fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
             sea_orm::Value::String(Some(s)) => {
                 if is_encrypted(&s) {
@@ -195,7 +240,7 @@ impl sea_orm::TryGetable for EncryptedString {
     fn try_get_by<I: sea_orm::ColIdx>(
         res: &sea_orm::QueryResult,
         index: I,
-    ) -> Result<Self, sea_orm::TryGetError> {
+    ) -> std::result::Result<Self, sea_orm::TryGetError> {
         let s: Option<String> = res.try_get_by(index).map_err(sea_orm::TryGetError::DbErr)?;
         let s = match s {
             Some(s) => s,
@@ -245,10 +290,15 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        for plaintext in ["hello world", "", "🦀 Rust", "a".repeat(10_000).as_str()] {
-            let encrypted = encrypt_value(plaintext).unwrap();
+        for plaintext in [
+            "hello world",
+            "",
+            "\u{1f980} Rust",
+            "a".repeat(10_000).as_str(),
+        ] {
+            let encrypted = encrypt_value(plaintext).expect("encryption should succeed");
             assert!(is_encrypted(&encrypted));
-            let decrypted = decrypt_value(&encrypted).unwrap();
+            let decrypted = decrypt_value(&encrypted).expect("decryption should succeed");
             assert_eq!(decrypted, plaintext);
         }
     }
@@ -258,16 +308,22 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let enc1 = encrypt_value("same input").unwrap();
-        let enc2 = encrypt_value("same input").unwrap();
+        let enc1 = encrypt_value("same input").expect("encryption should succeed");
+        let enc2 = encrypt_value("same input").expect("encryption should succeed");
         assert_ne!(
             enc1, enc2,
             "two encryptions of the same value should produce different ciphertext"
         );
 
         // Both should still decrypt to the same value
-        assert_eq!(decrypt_value(&enc1).unwrap(), "same input");
-        assert_eq!(decrypt_value(&enc2).unwrap(), "same input");
+        assert_eq!(
+            decrypt_value(&enc1).expect("decryption should succeed"),
+            "same input"
+        );
+        assert_eq!(
+            decrypt_value(&enc2).expect("decryption should succeed"),
+            "same input"
+        );
     }
 
     #[test]
@@ -300,10 +356,12 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let encrypted = encrypt_value("sensitive data").unwrap();
+        let encrypted = encrypt_value("sensitive data").expect("encryption should succeed");
         // Tamper with one byte in the hex payload
-        let hex_part = encrypted.strip_prefix(ENC_PREFIX).unwrap();
-        let mut raw = uptrakit_shared_types::hex::decode(hex_part).unwrap();
+        let hex_part = encrypted
+            .strip_prefix(ENC_PREFIX)
+            .expect("should have prefix");
+        let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
         if let Some(byte) = raw.last_mut() {
             *byte ^= 0xFF;
         }
@@ -327,7 +385,8 @@ mod tests {
         }
 
         // Round-trip via ValueType
-        let restored = <EncryptedString as sea_orm::sea_query::ValueType>::try_from(value).unwrap();
+        let restored =
+            <EncryptedString as sea_orm::sea_query::ValueType>::try_from(value).expect("roundtrip");
         assert_eq!(restored.expose_secret(), "database secret");
     }
 
@@ -340,7 +399,10 @@ mod tests {
         let legacy_value = sea_orm::Value::String(Some("old_password".to_string()));
         let result = <EncryptedString as sea_orm::sea_query::ValueType>::try_from(legacy_value);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().expose_secret(), "old_password");
+        assert_eq!(
+            result.expect("should be ok").expose_secret(),
+            "old_password"
+        );
     }
 
     #[tokio::test]

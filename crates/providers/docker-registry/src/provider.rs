@@ -198,7 +198,7 @@ impl Provider for DockerRegistryProvider {
                     output.push_str(&cmd_output);
                 }
                 Err(e) => {
-                    return Err(report!(ProviderError::InstallFailed(e.to_string())));
+                    bail!(ProviderError::InstallFailed(e.to_string()));
                 }
             }
         }

@@ -100,9 +100,9 @@ fn sign_agent_csr(
         })?;
 
     if csr_cn != agent_id.to_string() {
-        return Err(report!(CertSignerError::CsrValidation(format!(
+        bail!(CertSignerError::CsrValidation(format!(
             "CSR CN '{csr_cn}' does not match agent_id '{agent_id}'"
-        ))));
+        )));
     }
 
     // Build new CertificateParams with controller-controlled values
@@ -123,9 +123,9 @@ fn sign_agent_csr(
     }
 
     if not_after <= now {
-        return Err(report!(CertSignerError::Signing(
+        bail!(CertSignerError::Signing(
             "CA certificate is expired or too close to expiry".to_string()
-        )));
+        ));
     }
 
     let mut params = CertificateParams::default();

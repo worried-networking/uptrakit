@@ -73,12 +73,12 @@ impl SessionService {
 
         // Check if revoked
         if session.revoked_at.is_some() {
-            return Err(report!(AuthError::RefreshTokenRevoked));
+            bail!(AuthError::RefreshTokenRevoked);
         }
 
         // Check if expired
         if now >= session.expires_at {
-            return Err(report!(AuthError::RefreshTokenExpired));
+            bail!(AuthError::RefreshTokenExpired);
         }
 
         let user_id = session.user_id;
@@ -109,12 +109,12 @@ impl SessionService {
 
         // Check if already revoked
         if session_model.revoked_at.is_some() {
-            return Err(report!(AuthError::RefreshTokenRevoked));
+            bail!(AuthError::RefreshTokenRevoked);
         }
 
         // Check if expired
         if now >= session_model.expires_at {
-            return Err(report!(AuthError::RefreshTokenExpired));
+            bail!(AuthError::RefreshTokenExpired);
         }
 
         // Revoke old session

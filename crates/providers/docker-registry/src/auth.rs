@@ -105,9 +105,9 @@ impl RegistryAuth {
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
-            return Err(report!(DockerRegistryError::AuthFailed(format!(
+            bail!(DockerRegistryError::AuthFailed(format!(
                 "token endpoint returned {status}: {body}"
-            ))));
+            )));
         }
 
         let token_resp: TokenResponse = response.json().await.map_err(|e| {

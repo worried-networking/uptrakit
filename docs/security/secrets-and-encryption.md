@@ -34,7 +34,9 @@ Legacy plaintext detection allows old values to remain readable until rewritten.
 ## Master Key Management
 
 - A 256-bit master key is required in production via `UPTRAKIT_MASTER_KEY` (64 hex characters) or `--master-key-file`.
-- `init_master_key()` loads the key once at startup and caches it in a global `OnceLock`.
+- `init_master_key()` loads the key once at startup and caches it in a global `OnceLock`. It returns
+  `Report<CryptoError>` — see the `CryptoError` enum in `crates/shared/db/src/crypto.rs` for the full set of typed error
+  variants (e.g. `AlreadyInitialized`, `NotInitialized`, `KeyCreation`, `Encryption`, `Decryption`).
 - The key is never logged or exposed in API responses.
 - `--allow-plaintext-secrets` disables encryption (for development only) and logs a warning.
 

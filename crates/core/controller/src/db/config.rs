@@ -22,9 +22,9 @@ impl DbConfig {
                 // Default to SQLite
                 #[cfg(not(feature = "db-sqlite"))]
                 {
-                    return Err(report!(DbError::Configuration(
+                    bail!(DbError::Configuration(
                         "no database URL provided and SQLite feature not enabled".to_string(),
-                    )));
+                    ));
                 }
 
                 #[cfg(feature = "db-sqlite")]
@@ -46,24 +46,24 @@ impl DbConfig {
     fn validate_backend_support(url: &str) -> Result<()> {
         if url.starts_with("sqlite://") {
             #[cfg(not(feature = "db-sqlite"))]
-            return Err(report!(DbError::Configuration(
+            bail!(DbError::Configuration(
                 "SQLite URL provided but db-sqlite feature not enabled".to_string(),
-            )));
+            ));
         } else if url.starts_with("postgres://") || url.starts_with("postgresql://") {
             #[cfg(not(feature = "db-postgres"))]
-            return Err(report!(DbError::Configuration(
+            bail!(DbError::Configuration(
                 "PostgreSQL URL provided but db-postgres feature not enabled".to_string(),
-            )));
+            ));
         } else if url.starts_with("mysql://") {
             #[cfg(not(feature = "db-mysql"))]
-            return Err(report!(DbError::Configuration(
+            bail!(DbError::Configuration(
                 "MySQL URL provided but db-mysql feature not enabled".to_string(),
-            )));
+            ));
         } else {
-            return Err(report!(DbError::Configuration(format!(
+            bail!(DbError::Configuration(format!(
                 "unsupported database URL scheme: {}",
                 url.split("://").next().unwrap_or("unknown")
-            ))));
+            )));
         }
 
         Ok(())

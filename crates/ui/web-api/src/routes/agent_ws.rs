@@ -992,7 +992,7 @@ async fn deliver_pending_updates(
         };
 
         if sink.send(Message::Text(json.into())).await.is_err() {
-            return Err(report!(AgentWsError::WebSocketSend));
+            bail!(AgentWsError::WebSocketSend);
         }
 
         tracing::info!(
@@ -1053,7 +1053,7 @@ async fn validate_update_ownership(
             host_id = %record.host_id,
             "agent attempted to update record for unlinked host"
         );
-        return Err(report!(AgentWsError::WebSocketSend));
+        bail!(AgentWsError::WebSocketSend);
     }
 
     Ok(record)

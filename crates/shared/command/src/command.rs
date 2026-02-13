@@ -135,7 +135,7 @@ pub async fn run_command_exec(
     let exit_code = status.code().unwrap_or(-1);
 
     if !status.success() {
-        return Err(report!(CommandError::CommandFailed(exit_code)));
+        bail!(CommandError::CommandFailed(exit_code));
     }
 
     Ok((accumulated, exit_code))

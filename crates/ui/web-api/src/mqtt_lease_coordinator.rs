@@ -154,9 +154,9 @@ impl MqttLeaseCoordinator {
                         continue;
                     }
                     Err(e) => {
-                        return Err(report!(LeaseCoordinatorError::Database(format!(
+                        bail!(LeaseCoordinatorError::Database(format!(
                             "failed to insert lease: {e}"
-                        ))));
+                        )));
                     }
                 }
             }
@@ -619,9 +619,9 @@ impl MqttLeaseCoordinator {
                 return Ok(LeaseOutcome::AlreadyLeased);
             }
             Err(e) => {
-                return Err(report!(LeaseCoordinatorError::Database(format!(
+                bail!(LeaseCoordinatorError::Database(format!(
                     "failed to insert lease: {e}"
-                ))));
+                )));
             }
         }
 
@@ -633,9 +633,9 @@ impl MqttLeaseCoordinator {
                 "failed to load lease after insert".into(),
             ))?;
         let Some(lease) = lease else {
-            return Err(report!(LeaseCoordinatorError::Database(
+            bail!(LeaseCoordinatorError::Database(
                 "lease missing after insert".into(),
-            )));
+            ));
         };
 
         if lease.instance_id != candidate.instance_id {

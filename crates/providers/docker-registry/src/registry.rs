@@ -200,7 +200,7 @@ impl RegistryClient {
         let status = response.status();
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(report!(DockerRegistryError::RateLimited));
+            bail!(DockerRegistryError::RateLimited);
         }
 
         if !status.is_success() {
@@ -212,10 +212,10 @@ impl RegistryClient {
                 .map(|e| format!("{}: {}", e.code, e.message))
                 .unwrap_or(body);
 
-            return Err(report!(DockerRegistryError::ApiError {
+            bail!(DockerRegistryError::ApiError {
                 status: status_code,
                 message,
-            }));
+            });
         }
 
         response.text().await.map_err(|e| {
@@ -230,15 +230,15 @@ impl RegistryClient {
         let status = response.status();
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(report!(DockerRegistryError::RateLimited));
+            bail!(DockerRegistryError::RateLimited);
         }
 
         if !status.is_success() {
             let status_code = status.as_u16();
-            return Err(report!(DockerRegistryError::ApiError {
+            bail!(DockerRegistryError::ApiError {
                 status: status_code,
                 message: format!("manifest HEAD returned {status_code}"),
-            }));
+            });
         }
 
         response

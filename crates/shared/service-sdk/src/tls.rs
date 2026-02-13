@@ -197,7 +197,7 @@ fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
         .context_to::<EnrollmentError>()?;
 
     if certs.is_empty() {
-        return Err(report!(EnrollmentError::NoCertificates));
+        bail!(EnrollmentError::NoCertificates);
     }
 
     let mut root_store = RootCertStore::empty();

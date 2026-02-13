@@ -402,7 +402,7 @@ fn pem_to_der_key(pem: &str) -> OcspResult<Vec<u8>> {
     }
 
     if der_data.is_empty() {
-        return Err(report!(OcspError::EmptyPemData));
+        bail!(OcspError::EmptyPemData);
     }
 
     Ok(der_data)

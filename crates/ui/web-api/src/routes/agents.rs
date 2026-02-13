@@ -79,9 +79,9 @@ pub(crate) async fn do_enroll(
         host_info,
     } = params;
     if hostname.trim().is_empty() {
-        return Err(report!(AgentRouteError::BadRequest(
+        bail!(AgentRouteError::BadRequest(
             "hostname must not be empty".into()
-        )));
+        ));
     }
 
     // Generate agent_id server-side (single source of truth)
@@ -93,36 +93,32 @@ pub(crate) async fn do_enroll(
             Ok(Some(v)) => match v.as_str() {
                 Some(hash) => hash.to_string(),
                 None => {
-                    return Err(report!(AgentRouteError::Forbidden(
+                    bail!(AgentRouteError::Forbidden(
                         "No enrollment token configured".into()
-                    )));
+                    ));
                 }
             },
             Ok(None) => {
-                return Err(report!(AgentRouteError::Forbidden(
+                bail!(AgentRouteError::Forbidden(
                     "No enrollment token configured".into()
-                )));
+                ));
             }
             Err(e) => {
                 tracing::error!("Failed to load enrollment token hash: {:?}", e);
-                return Err(report!(AgentRouteError::Internal(
-                    "Internal server error".into()
-                )));
+                bail!(AgentRouteError::Internal("Internal server error".into()));
             }
         };
 
         match password::verify_password(enrollment_token, &token_hash) {
             Ok(true) => AgentStatus::Approved,
             Ok(false) => {
-                return Err(report!(AgentRouteError::Forbidden(
+                bail!(AgentRouteError::Forbidden(
                     "Invalid enrollment token".into()
-                )));
+                ));
             }
             Err(e) => {
                 tracing::error!("Token verification error: {:?}", e);
-                return Err(report!(AgentRouteError::Internal(
-                    "Internal server error".into()
-                )));
+                bail!(AgentRouteError::Internal("Internal server error".into()));
             }
         }
     } else {
@@ -133,9 +129,7 @@ pub(crate) async fn do_enroll(
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to generate enrollment secret: {:?}", e);
-            return Err(report!(AgentRouteError::Internal(
-                "Internal server error".into()
-            )));
+            bail!(AgentRouteError::Internal("Internal server error".into()));
         }
     };
     let secret_hash = token::hash_token(&enrollment_secret);
@@ -282,9 +276,7 @@ pub(crate) async fn do_sign_csr(
     csr_pem: &str,
 ) -> Result<SignedCertBundle, Report<AgentRouteError>> {
     if agent.status != agent::ServiceStatus::Approved {
-        return Err(report!(AgentRouteError::Forbidden(
-            "Agent is not approved".into()
-        )));
+        bail!(AgentRouteError::Forbidden("Agent is not approved".into()));
     }
 
     let lifetime = time::Duration::days(i64::from(settings.agent_cert_lifetime_days()));
@@ -302,9 +294,7 @@ pub(crate) async fn do_sign_csr(
     // Record certificate in DB for revocation tracking
     if let Err(e) = record_certificate(db, agent.id, &bundle.cert_pem, &ca_fp).await {
         tracing::error!("Failed to record agent certificate: {:?}", e);
-        return Err(report!(AgentRouteError::Internal(
-            "Internal server error".into()
-        )));
+        bail!(AgentRouteError::Internal("Internal server error".into()));
     }
 
     // Invalidate enrollment secret

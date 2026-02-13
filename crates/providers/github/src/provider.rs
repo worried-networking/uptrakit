@@ -215,9 +215,9 @@ impl Provider for GitHubProvider {
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("unknown")
                         .to_string();
-                    return Err(report!(ProviderError::Configuration(format!(
+                    bail!(ProviderError::Configuration(format!(
                         "GitHub API rate limit exceeded (resets at {reset_at})"
-                    ))));
+                    )));
                 }
             }
 
@@ -226,9 +226,9 @@ impl Provider for GitHubProvider {
                 .map(|e| e.message)
                 .unwrap_or(body);
 
-            return Err(report!(ProviderError::Configuration(format!(
+            bail!(ProviderError::Configuration(format!(
                 "GitHub API error: {status_code} {message}"
-            ))));
+            )));
         }
 
         let releases: Vec<GitHubRelease> = response.json().await.map_err(|e| {
@@ -304,7 +304,7 @@ impl Provider for GitHubProvider {
                         output.push_str(&cmd_output);
                     }
                     Err(e) => {
-                        return Err(report!(ProviderError::InstallFailed(e.to_string())));
+                        bail!(ProviderError::InstallFailed(e.to_string()));
                     }
                 }
             }

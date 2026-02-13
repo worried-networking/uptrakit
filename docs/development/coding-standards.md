@@ -109,10 +109,14 @@ let user = users::Entity::find_by_id(id)
     .ok_or_else(|| report!(MyError::NotFound(format!("user {id}"))))?;
 ```
 
-### Pattern 4: Use `report!()` to create reports directly
+### Pattern 4: Use `report!()` to create reports inside combinators
+
+`report!()` creates a `Report` value without returning. Use it inside `.ok_or_else()`, `.map_err()`, or when building a
+`Report` to store in a variable:
 
 ```rust
-return Err(report!(MyError::NotFound("item not found".to_string())));
+let user = results
+    .ok_or_else(|| report!(MyError::NotFound("item not found".to_string())))?;
 ```
 
 ### Pattern 5: Adding parent context with `.context()`
@@ -159,6 +163,71 @@ if let Err(e) = operation().await {
 }
 ```
 
+### Pattern 9: `bail!()` for early error returns
+
+`bail!(ErrorEnum::Variant(...))` is sugar for `return Err(report!(...))`. Use `bail!()` for guard-clause early returns.
+Use `report!()` only inside `.ok_or_else()`, `.map_err()`, or when building a `Report` without returning:
+
+```rust
+fn validate(input: &str) -> Result<()> {
+    if input.is_empty() {
+        bail!(MyError::Validation("input must not be empty".into()));
+    }
+    Ok(())
+}
+```
+
+### Pattern 10: Decision guide — which context method to use
+
+| Scenario | Method | Effect |
+| --- | --- | --- |
+| Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl |
+| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node |
+| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` | Replace context, preserve children |
+| One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
+| Guard clause / early return | `bail!(...)` | Return immediately |
+
+### Pattern 11: Custom error helper methods
+
+Define helper methods on error enums for semantic classification that callers match on for retry/reconnect logic:
+
+```rust
+impl MyError {
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::ConnectionReset | Self::Timeout)
+    }
+}
+```
+
+Real example: `crates/core/agent/src/error.rs` defines `is_receive_closed()` and `is_cert_expired()` for reconnect
+decision logic.
+
+### Pattern 12: External crates without `std::error::Error`
+
+When a source error type does not implement `std::error::Error` (e.g. `aws_lc_rs::Unspecified`, certain `rcgen` errors),
+string-based variants are acceptable. Use `.map_err(|e| report!(Err::Variant(e.to_string())))`:
+
+```rust
+UnboundKey::new(&AES_256_GCM, key_bytes)
+    .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
+```
+
+### Pattern 13: Fixed-signature trait boundaries (SeaORM)
+
+SeaORM trait impls (`ValueType`, `TryGetable`) have mandated return types (`ValueTypeErr`, `TryGetError`). At these
+boundaries, convert typed errors via `.map_err()` to the required SeaORM error type. Internally, the helper functions
+still use `Report<CryptoError>`:
+
+```rust
+impl sea_orm::sea_query::ValueType for EncryptedString {
+    fn try_from(v: sea_orm::Value) -> std::result::Result<Self, ValueTypeErr> {
+        // decrypt_value() returns Result<String, Report<CryptoError>>
+        let plaintext = decrypt_value(&s).map_err(|_| ValueTypeErr)?;
+        Ok(EncryptedString::new(plaintext))
+    }
+}
+```
+
 ### Anti-patterns
 
 These are error handling patterns that MUST NOT be used:
@@ -170,6 +239,7 @@ These are error handling patterns that MUST NOT be used:
   preserve the original error.
 - **Bare error enums without `Report`** — every boundary error type should use
   `pub type Result<T> = std::result::Result<T, Report<MyError>>`.
+- **`return Err(report!(...))`** — use `bail!(...)` instead for early returns.
 
 ### Mutex and RwLock locks
 

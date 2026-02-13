@@ -45,24 +45,24 @@ impl GitHubConfig {
     /// missing or any regex patterns are invalid.
     pub fn validate(&self) -> Result<()> {
         if self.owner.is_empty() {
-            return Err(report!(GitHubError::Configuration(
+            bail!(GitHubError::Configuration(
                 "owner must not be empty".to_string()
-            )));
+            ));
         }
         if self.repo.is_empty() {
-            return Err(report!(GitHubError::Configuration(
+            bail!(GitHubError::Configuration(
                 "repo must not be empty".to_string()
-            )));
+            ));
         }
         if self.owner.contains('/') || self.owner.contains("..") {
-            return Err(report!(GitHubError::Configuration(
+            bail!(GitHubError::Configuration(
                 "owner must not contain '/' or '..'".to_string()
-            )));
+            ));
         }
         if self.repo.contains('/') || self.repo.contains("..") {
-            return Err(report!(GitHubError::Configuration(
+            bail!(GitHubError::Configuration(
                 "repo must not contain '/' or '..'".to_string()
-            )));
+            ));
         }
         if let Some(ref url) = self.api_base_url {
             let parsed = Url::parse(url).map_err(|e| {
@@ -71,9 +71,9 @@ impl GitHubConfig {
                 )))
             })?;
             if parsed.scheme() != "https" {
-                return Err(report!(GitHubError::Configuration(
+                bail!(GitHubError::Configuration(
                     "api_base_url must use https".to_string()
-                )));
+                ));
             }
             let host = parsed.host_str().ok_or_else(|| {
                 report!(GitHubError::Configuration(
@@ -81,9 +81,9 @@ impl GitHubConfig {
                 ))
             })?;
             if is_private_host(host) {
-                return Err(report!(GitHubError::Configuration(
+                bail!(GitHubError::Configuration(
                     "api_base_url must not point to private/loopback addresses".to_string()
-                )));
+                ));
             }
         }
         for pattern in &self.asset_patterns {

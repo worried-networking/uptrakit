@@ -159,6 +159,49 @@ These are non-negotiable design constraints. Do not violate them.
    **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe
    because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
+### Error handling quick reference
+
+Every boundary (crate or module) must define its own typed error enum. Here is the minimal setup and decision guide.
+
+**Required imports:**
+
+```rust
+use rootcause::prelude::*;      // Report, report!, bail!, ResultExt, etc.
+use thiserror::Error;            // #[derive(Debug, Error)]
+use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversions
+```
+
+**Boundary checklist:**
+
+1. Define `#[derive(Debug, Error)] pub enum MyError { ... }`
+2. Define `pub type Result<T> = std::result::Result<T, Report<MyError>>;`
+3. Add `impl_report_conversion!` for every foreign error type your boundary encounters.
+
+**`bail!()` vs `report!()`:**
+
+- `bail!(MyError::Variant(...))` — use for guard-clause early returns (replaces `return Err(report!(...))`).
+- `report!(MyError::Variant(...))` — use inside `.ok_or_else()`, `.map_err()`, or when building a `Report` without
+  returning.
+
+**Decision table — which context method to use:**
+
+| Scenario | Method |
+| --- | --- |
+| Foreign error has `ReportConversion` impl | `.context_to()` |
+| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` |
+| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` |
+| One-off conversion, no impl needed | `.map_err(\|e\| report!(...))` |
+| Guard clause / early return | `bail!(...)` |
+
+**Approved exceptions:**
+
+- `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, `RwLock::write().unwrap()` — safe because `panic = "abort"` in
+  release.
+- String-based error variants for external types that don't impl `std::error::Error` (e.g. `aws_lc_rs::Unspecified`):
+  `.map_err(|e| report!(Err::Variant(e.to_string())))`.
+
+Full details: [docs/development/coding-standards.md](docs/development/coding-standards.md).
+
 ### Directory management
 
 All binaries (controller, agent, MQTT service) use the `uptrakit-directories` crate for cross-platform directory

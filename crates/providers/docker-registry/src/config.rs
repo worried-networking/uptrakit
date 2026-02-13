@@ -82,15 +82,15 @@ impl DockerRegistryConfig {
     /// Validate the configuration.
     pub fn validate(&self) -> Result<()> {
         if self.image.is_empty() {
-            return Err(report!(DockerRegistryError::Configuration(
+            bail!(DockerRegistryError::Configuration(
                 "image must not be empty".to_string()
-            )));
+            ));
         }
 
         if self.page_size == 0 {
-            return Err(report!(DockerRegistryError::Configuration(
+            bail!(DockerRegistryError::Configuration(
                 "page_size must be greater than 0".to_string()
-            )));
+            ));
         }
 
         for pattern in &self.tag_patterns {

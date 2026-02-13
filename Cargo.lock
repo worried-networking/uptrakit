@@ -5043,12 +5043,15 @@ version = "0.0.1"
 dependencies = [
  "aws-lc-rs",
  "rand 0.9.2",
+ "rootcause",
  "sea-orm",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
+ "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uuid",
 ]

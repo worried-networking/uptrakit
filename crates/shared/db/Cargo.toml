@@ -10,11 +10,14 @@ publish = false
 [dependencies]
 aws-lc-rs = { workspace = true }
 rand = { workspace = true }
+rootcause = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true }
 

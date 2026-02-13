@@ -89,7 +89,7 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
     // Check limit
     let count = count_mqtt_clients(db, tenant_id).await?;
     if count >= u64::from(max_clients) {
-        return Err(report!(MqttClientError::LimitReached(max_clients)));
+        bail!(MqttClientError::LimitReached(max_clients));
     }
 
     let now = OffsetDateTime::now_utc();
@@ -181,7 +181,7 @@ pub async fn delete_mqtt_client(db: &DatabaseConnection, id: Uuid) -> Result<()>
     let result = MqttClient::delete_by_id(id).exec(db).await.context_to()?;
 
     if result.rows_affected == 0 {
-        return Err(report!(MqttClientError::NotFound));
+        bail!(MqttClientError::NotFound);
     }
 
     Ok(())
@@ -194,7 +194,7 @@ pub async fn update_mqtt_client_status(
     status: MqttClientConnectionStatus,
 ) -> Result<()> {
     let Some(existing) = MqttClient::find_by_id(id).one(db).await.context_to()? else {
-        return Err(report!(MqttClientError::NotFound));
+        bail!(MqttClientError::NotFound);
     };
 
     let mut model: mqtt_client::ActiveModel = existing.into();
@@ -230,7 +230,7 @@ pub async fn update_mqtt_clients_status(
     }
 
     if updated == 0 {
-        return Err(report!(MqttClientError::NotFound));
+        bail!(MqttClientError::NotFound);
     }
 
     Ok(())

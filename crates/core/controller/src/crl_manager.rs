@@ -54,9 +54,9 @@ pub async fn build_initial_crls(
     key_store: &pki::CaKeyStore,
 ) -> pki::Result<(Vec<CertificateRevocationListDer<'static>>, String)> {
     if snapshot.trusted_cas.is_empty() {
-        return Err(report!(pki::PkiError::CaValidation(
+        bail!(pki::PkiError::CaValidation(
             "no trusted CA material available".into()
-        )));
+        ));
     }
 
     let mut crls = Vec::new();
@@ -91,9 +91,9 @@ impl CrlManager {
         key_store: &pki::CaKeyStore,
     ) -> pki::Result<Self> {
         if snapshot.trusted_cas.is_empty() {
-            return Err(report!(pki::PkiError::CaValidation(
+            bail!(pki::PkiError::CaValidation(
                 "no trusted CA material available".into()
-            )));
+            ));
         }
 
         let mut trusted = Vec::new();
@@ -140,9 +140,9 @@ impl CrlManager {
         key_store: &pki::CaKeyStore,
     ) -> pki::Result<()> {
         if snapshot.trusted_cas.is_empty() {
-            return Err(report!(pki::PkiError::CaValidation(
+            bail!(pki::PkiError::CaValidation(
                 "no trusted CA material available".into()
-            )));
+            ));
         }
 
         let mut trusted = Vec::new();
