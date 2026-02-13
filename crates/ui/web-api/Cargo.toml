@@ -35,7 +35,6 @@ uuid = { workspace = true }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-provider-core = { path = "../../providers/core" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
 argon2 = { version = "0.5", features = ["std"] }
 rand = { workspace = true }

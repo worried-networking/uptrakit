@@ -8,6 +8,7 @@ version.workspace = true
 publish = false
 
 [dependencies]
+uptrakit-shared-types = { path = "../../shared/types" }
 uptrakit-provider-core = { path = "../core" }
 uptrakit-provider-github = { path = "../github" }
 uptrakit-provider-docker-registry = { path = "../docker-registry" }

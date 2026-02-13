@@ -9,8 +9,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use uptrakit_provider_core::ProviderType;
-//! use uptrakit_provider_registry::ProviderRegistry;
+//! use uptrakit_provider_registry::{ProviderRegistry, ProviderType};
 //!
 //! // Validate configuration
 //! let config = serde_json::json!({
@@ -35,5 +34,6 @@ pub mod registry;
 pub use error::{RegistryError, Result};
 pub use registry::ProviderRegistry;
 
-// Re-export commonly used types from provider-core
-pub use uptrakit_provider_core::{Provider, ProviderCapability, ProviderType};
+// Re-export commonly used types for provider crate convenience
+pub use uptrakit_provider_core::{Provider, ProviderCapability};
+pub use uptrakit_shared_types::ProviderType;
