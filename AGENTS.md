@@ -102,6 +102,21 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 
 All changes must pass defined quality gates. See [docs/development/quality-gates.md](docs/development/quality-gates.md) for details.
 
+#### AI execution guidance (agent-only)
+
+- Always run quality gates relevant to modified areas before finalizing.
+- Scope-based execution is allowed for local iteration:
+  - frontend-only changes: run frontend checks (`npm run check`, `npm run build`) and docs checks.
+  - Rust/backend-only changes: run Rust checks/tests/linters and docs checks.
+  - mixed changes: run both Rust and frontend gates.
+- If anything related to reverse proxy behavior changes, run ignored reverse proxy integration tests:
+  - `cargo test -p uptrakit-controller reverse_proxy -- --ignored`
+- Treat the reverse proxy trigger list broadly, including (non-exhaustive):
+  - mTLS and certificate forwarding/extraction
+  - auth behavior behind proxies
+  - IP detection / `ClientIp`, forwarded headers, trusted-proxy logic
+  - reverse proxy middleware/settings and related TLS behavior
+
 ### Commit Messages
 
 Conventional Commits are required. See [docs/development/commit-messages.md](docs/development/commit-messages.md) for details.

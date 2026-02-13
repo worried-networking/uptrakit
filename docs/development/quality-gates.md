@@ -1,7 +1,6 @@
 # Quality gates (must pass before committing)
 
-If your changes are confined to the frontend, you do not need to run the Rust `cargo` checks. If your changes are
-confined to Rust/backend crates, you do not need to run the frontend `npm` checks. For mixed changes, run both sections.
+Run all relevant quality gates for the areas touched by your change.
 
 ## Backend (Rust)
 
@@ -13,11 +12,25 @@ cargo clippy --workspace --all-targets --no-default-features --features db-sqlit
 cargo clippy --workspace --all-targets --all-features -- -D warnings # Lint with Clippy
 cargo test --all-features                                            # Tests
 cargo deny check                                                     # Validate new dependencies
-# Docker integration tests (requires Docker, not part of normal CI gate):
-# cargo test -p uptrakit-controller reverse_proxy -- --ignored
 ```
 
 There shouldn't even be any warnings in the output of these commands.
+
+### Reverse proxy-sensitive changes (mandatory)
+
+If the change can affect reverse proxy behavior, you must also run ignored reverse proxy integration tests:
+
+```sh
+cargo test -p uptrakit-controller reverse_proxy -- --ignored
+```
+
+This includes (non-exhaustive):
+
+- mTLS identity extraction and certificate forwarding
+- authentication and authorization behavior behind proxies
+- client IP detection (`ClientIp`), forwarded headers, and trusted proxy logic
+- TLS termination and certificate validation behavior that proxies depend on
+- reverse proxy middleware, settings, or related wire/auth flows
 
 ## Frontend (SvelteKit)
 
