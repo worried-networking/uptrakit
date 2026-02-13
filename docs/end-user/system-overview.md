@@ -9,3 +9,6 @@ Uptrakit tracks installed software across hosts without performing automatic upd
 
 Communication opens secure WebSocket connections to `/api/v1/ws/service` with mutual TLS. Agents and MQTT services enroll via tokens, CSRs, and a
 managed CA.
+
+Operational note: all Uptrakit binaries (`uptrakit-controller`, `uptrakit-agent`, `uptrakit-mqtt`, `uptrakit-cli`)
+support `--version` for deterministic build capability reporting (crate version, enabled features, target/cfg/profile).

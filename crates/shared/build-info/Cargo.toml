@@ -1,0 +1,10 @@
+[package]
+name = "uptrakit-build-info"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }

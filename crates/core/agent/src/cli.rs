@@ -4,6 +4,7 @@ use uptrakit_service_sdk::cli::CommonServiceArgs;
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-agent")]
 #[command(about = "Uptrakit agent that connects to the controller")]
+#[command(disable_version_flag = true)]
 pub struct Args {
     #[command(flatten)]
     pub common: CommonServiceArgs,
@@ -20,6 +21,7 @@ mod tests {
         let args =
             Args::try_parse_from(["uptrakit-agent", "--url", "https://controller.local:8443"])
                 .expect("should parse defaults");
+        assert!(!args.common.version);
         assert!(!args.common.tofu);
         assert!(args.common.ca_cert.is_none());
         assert!(args.common.config_dir.is_none());
@@ -179,5 +181,11 @@ mod tests {
             "ftp://controller:21",
         ]);
         assert!(result.is_err(), "should reject ftp:// scheme");
+    }
+
+    #[test]
+    fn version_flag_parses_without_other_flags() {
+        let args = Args::try_parse_from(["uptrakit-agent", "--version"]).expect("should parse");
+        assert!(args.common.version);
     }
 }

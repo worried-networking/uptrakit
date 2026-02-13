@@ -13,10 +13,14 @@ use uptrakit_directories::AppDirs;
 /// connection, CA bootstrap, enrollment, and directory management.
 #[derive(clap::Args, Debug)]
 pub struct CommonServiceArgs {
+    /// Show crate version and build metadata.
+    #[arg(long)]
+    pub version: bool,
+
     /// Controller URL (e.g., `https://controller:8443`).
     /// Port defaults to 443 if omitted.
-    #[arg(long)]
-    pub url: String,
+    #[arg(long, required_unless_present = "version")]
+    pub url: Option<String>,
 
     /// Trust the controller's TLS certificate on first connection (TOFU).
     /// Only effective when no CA certificate is cached locally.
@@ -92,7 +96,11 @@ impl CommonServiceArgs {
 
     /// Parse `--url` into `(host, port)`.
     pub fn parsed_url(&self) -> std::result::Result<(String, u16), String> {
-        let url_str = self.url.trim_end_matches('/');
+        let raw = self
+            .url
+            .as_deref()
+            .ok_or("URL is required unless --version is used")?;
+        let url_str = raw.trim_end_matches('/');
         let parsed = url::Url::parse(url_str).map_err(|e| format!("invalid URL: {e}"))?;
         if parsed.scheme() != "https" {
             return Err("URL scheme must be https".to_string());
@@ -107,7 +115,10 @@ impl CommonServiceArgs {
 
     /// The base URL (trimmed of trailing slashes).
     pub fn base_url(&self) -> &str {
-        self.url.trim_end_matches('/')
+        self.url
+            .as_deref()
+            .unwrap_or_default()
+            .trim_end_matches('/')
     }
 
     /// The PKI address, if set.
@@ -152,6 +163,7 @@ mod tests {
         let args = TestArgs::try_parse_from(["test-service", "--url", "https://controller:8443"])
             .expect("should parse defaults");
         assert!(!args.common.tofu);
+        assert!(!args.common.version);
         assert!(args.common.ca_cert.is_none());
         assert!(args.common.config_dir.is_none());
         assert!(args.common.state_dir.is_none());
@@ -159,6 +171,7 @@ mod tests {
         assert!(args.common.enrollment_token.is_none());
         assert!(!args.common.force_enroll);
         assert!(args.common.pki_addr.is_none());
+        assert_eq!(args.common.url.as_deref(), Some("https://controller:8443"));
     }
 
     #[test]
@@ -320,6 +333,12 @@ mod tests {
             .expect("should resolve dirs");
         assert!(!dirs.config_dir().as_os_str().is_empty());
         assert!(!dirs.state_dir().as_os_str().is_empty());
+    }
+
+    #[test]
+    fn version_flag_parses_without_url() {
+        let args = TestArgs::try_parse_from(["test-service", "--version"]).expect("should parse");
+        assert!(args.common.version);
     }
 
     #[test]

@@ -4768,6 +4768,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "uptrakit-build-info",
  "uptrakit-command",
  "uptrakit-internal-wire",
  "uptrakit-provider-registry",
@@ -4775,6 +4776,13 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uuid",
+]
+
+[[package]]
+name = "uptrakit-build-info"
+version = "0.0.1"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -4790,6 +4798,7 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror 2.0.18",
  "tokio",
+ "uptrakit-build-info",
  "uptrakit-shared-macros",
  "uptrakit-web-api-types",
 ]
@@ -4841,6 +4850,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uptrakit-build-info",
  "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-shared-db",
@@ -4897,6 +4907,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uptrakit-build-info",
  "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",

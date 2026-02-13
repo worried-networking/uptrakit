@@ -33,7 +33,11 @@ uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 uuid = { workspace = true }
+uptrakit-build-info = { path = "../../shared/build-info" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
+
+[build-dependencies]
+uptrakit-build-info = { path = "../../shared/build-info" }

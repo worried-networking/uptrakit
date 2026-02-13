@@ -10,6 +10,7 @@ use std::time::Duration;
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
+use uptrakit_build_info::BuildInfo;
 use uptrakit_service_sdk::ServiceIdentityState;
 
 use cli::Args;
@@ -18,6 +19,12 @@ use error::Error;
 
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+    if args.common.version {
+        print_build_info();
+        return;
+    }
+
     let filter = match "uptrakit_agent=info".parse() {
         Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
         Err(_) => EnvFilter::from_default_env(),
@@ -27,8 +34,6 @@ async fn main() {
     // Install the default crypto provider for rustls
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    let args = Args::parse();
-
     if let Err(mut e) = run(&args).await {
         if e.current_context_mut().is_receive_closed() {
             tracing::info!("disconnected by controller");
@@ -37,6 +42,16 @@ async fn main() {
             std::process::exit(1);
         }
     }
+}
+
+fn print_build_info() {
+    let build_info = BuildInfo::current(
+        "uptrakit-agent",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+    );
+    let output = build_info.render_human();
+    print!("{output}");
 }
 
 async fn run(args: &Args) -> error::Result<()> {

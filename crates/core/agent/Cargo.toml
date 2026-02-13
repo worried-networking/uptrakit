@@ -25,7 +25,11 @@ uptrakit-internal-wire = { path = "../../shared/wire" }
 uuid = { workspace = true }
 uptrakit-command = { path = "../../shared/command" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
+uptrakit-build-info = { path = "../../shared/build-info" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
+
+[build-dependencies]
+uptrakit-build-info = { path = "../../shared/build-info" }

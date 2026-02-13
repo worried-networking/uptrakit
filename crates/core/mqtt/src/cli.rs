@@ -7,6 +7,7 @@ use uptrakit_service_sdk::cli::CommonServiceArgs;
 /// and lease coordination.
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-mqtt")]
+#[command(disable_version_flag = true)]
 pub struct Args {
     #[command(flatten)]
     pub common: CommonServiceArgs,
@@ -31,7 +32,8 @@ mod tests {
     fn defaults_parse() {
         let args =
             Args::try_parse_from(["uptrakit-mqtt", "--url", "https://localhost:8443"]).unwrap();
-        assert_eq!(args.common.url, "https://localhost:8443");
+        assert_eq!(args.common.url.as_deref(), Some("https://localhost:8443"));
+        assert!(!args.common.version);
         assert!(args.common.config_dir.is_none());
         assert!(args.common.state_dir.is_none());
         assert_eq!(args.max_tenants, 0);
@@ -62,7 +64,10 @@ mod tests {
             "--tofu",
         ])
         .unwrap();
-        assert_eq!(args.common.url, "https://controller.example.com:9443");
+        assert_eq!(
+            args.common.url.as_deref(),
+            Some("https://controller.example.com:9443")
+        );
         assert_eq!(
             args.common.config_dir.as_ref().unwrap().to_str().unwrap(),
             "/opt/mqtt-config"
@@ -88,6 +93,12 @@ mod tests {
     fn url_required() {
         let result = Args::try_parse_from(["uptrakit-mqtt"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn version_flag_parses_without_url() {
+        let args = Args::try_parse_from(["uptrakit-mqtt", "--version"]).expect("should parse");
+        assert!(args.common.version);
     }
 
     #[test]

@@ -21,6 +21,7 @@ use thiserror::Error;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
+use uptrakit_build_info::BuildInfo;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use uptrakit_web_api::AppState;
@@ -54,13 +55,17 @@ impl_report_conversion!(
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
+    let args = cli::Args::parse();
+    if args.version {
+        print_build_info();
+        return std::process::ExitCode::SUCCESS;
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-
-    let args = cli::Args::parse();
 
     if let Err(report) = run(args).await {
         eprintln!("Error: {report:?}");
@@ -68,6 +73,16 @@ async fn main() -> std::process::ExitCode {
     } else {
         std::process::ExitCode::SUCCESS
     }
+}
+
+fn print_build_info() {
+    let build_info = BuildInfo::current(
+        "uptrakit-controller",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+    );
+    let output = build_info.render_human();
+    print!("{output}");
 }
 
 async fn run(args: cli::Args) -> Result<()> {

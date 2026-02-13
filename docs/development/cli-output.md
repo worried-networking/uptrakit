@@ -17,6 +17,25 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
   `TokenListOutput`, `TokenRevokeOutput`) in `commands/auth.rs`.
 - `auth login` is interactive and does not support `--output`.
 
+## Version metadata output
+
+`uptrakit-cli --version` prints crate/build metadata and supports all output formats:
+
+- `--output human` (default): deterministic line-based `key: value` output.
+- `--output json`: compact JSON.
+- `--output yaml`: YAML.
+
+Examples:
+
+```sh
+uptrakit-cli --version
+uptrakit-cli --version --output json
+uptrakit-cli --version --output yaml
+```
+
+Service/controller binaries (`uptrakit-agent`, `uptrakit-mqtt`, `uptrakit-controller`) also expose
+`--version` with the same deterministic human-format keys for automation.
+
 ## Example usage
 
 ```sh

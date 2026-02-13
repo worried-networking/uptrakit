@@ -4,12 +4,18 @@ mod config;
 mod error;
 mod output;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use output::OutputFormat;
+use uptrakit_build_info::BuildInfo;
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(name = "uptrakit-cli", about = "Uptrakit CLI")]
+#[command(disable_version_flag = true)]
 struct Cli {
+    /// Show crate version and build metadata
+    #[arg(long, global = true)]
+    version: bool,
+
     /// Server URL (overrides stored config)
     #[arg(long, global = true)]
     server: Option<String>,
@@ -27,10 +33,10 @@ struct Cli {
     output: OutputFormat,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 enum Commands {
     /// Authentication and token management
     Auth {
@@ -51,7 +57,7 @@ enum Commands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 enum AuthCommands {
     /// Login to the server via browser authorization
     Login,
@@ -64,7 +70,7 @@ enum AuthCommands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 enum TokenCommands {
     /// Create a new API token
     Create {
@@ -84,9 +90,34 @@ enum TokenCommands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    if cli.version {
+        let build_info = BuildInfo::current(
+            "uptrakit-cli",
+            env!("CARGO_PKG_VERSION"),
+            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+        );
+        let human = build_info.render_human();
+        if let Err(e) = output::print_output(cli.output, &human, &build_info) {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    let command = match cli.command {
+        Some(command) => command,
+        None => {
+            let mut cmd = Cli::command();
+            cmd.error(
+                clap::error::ErrorKind::MissingSubcommand,
+                "a subcommand is required",
+            )
+            .exit();
+        }
+    };
 
     let insecure = cli.insecure;
-    let result = match cli.command {
+    let result = match command {
         Commands::Auth { command } => match command {
             AuthCommands::Login => commands::auth::login(cli.server.as_deref(), insecure).await,
             AuthCommands::Status => {
@@ -147,5 +178,18 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("Error: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn version_parses_without_subcommand() {
+        let args = Cli::try_parse_from(["uptrakit-cli", "--version"]).expect("should parse");
+        assert!(args.version);
+        assert!(args.command.is_none());
     }
 }

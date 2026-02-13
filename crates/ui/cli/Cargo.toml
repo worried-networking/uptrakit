@@ -18,3 +18,7 @@ thiserror = { workspace = true }
 hostname = { workspace = true }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 serde_yaml_ng = "0.10"
+uptrakit-build-info = { path = "../../shared/build-info" }
+
+[build-dependencies]
+uptrakit-build-info = { path = "../../shared/build-info" }

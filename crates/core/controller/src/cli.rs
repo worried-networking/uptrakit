@@ -8,7 +8,12 @@ use uptrakit_directories::AppDirs;
 /// Uptrakit Controller — central server for the Uptrakit update tracking toolkit.
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-controller")]
+#[command(disable_version_flag = true)]
 pub struct Args {
+    /// Show crate version and build metadata.
+    #[arg(long)]
+    pub version: bool,
+
     /// Config directory for persistent configuration (CA certificates, TLS certs).
     /// Supports `~` for home directory expansion.
     /// Default: platform-specific (e.g., ~/.config/controller on Linux).
@@ -295,6 +300,7 @@ mod tests {
     fn defaults_have_no_addresses() {
         let args =
             super::Args::try_parse_from(["uptrakit-controller"]).expect("should parse defaults");
+        assert!(!args.version);
         assert!(args.config_dir.is_none());
         assert!(args.state_dir.is_none());
         assert!(args.https_addr.is_none());
@@ -344,6 +350,13 @@ mod tests {
             "0.0.0.0:9443".parse::<std::net::SocketAddr>().unwrap()
         );
         assert_eq!(args.real_ip_header.as_deref(), Some("X-Real-Ip"));
+    }
+
+    #[test]
+    fn version_flag_parses() {
+        let args = super::Args::try_parse_from(["uptrakit-controller", "--version"])
+            .expect("should parse");
+        assert!(args.version);
     }
 
     #[test]
