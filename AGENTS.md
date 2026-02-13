@@ -137,8 +137,10 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the
    codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead
    code removal.
-1. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. See the "Error handling"
-   section in [CONTRIBUTING.md](CONTRIBUTING.md) for approved patterns (match with fallback, serialization helpers).
+1. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. Follow the error handling
+   requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors
+   with `thiserror` and attach/propagate context with `rootcause` (including match-with-fallback and serialization
+   helper patterns where applicable).
    **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe
    because `panic = "abort"` in the release profile makes lock poisoning impossible.
 
