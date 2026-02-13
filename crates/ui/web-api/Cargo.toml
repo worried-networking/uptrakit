@@ -10,6 +10,7 @@ publish = false
 [features]
 default = []
 swagger-ui = ["dep:utoipa-swagger-ui"]
+db-all = ["db-sqlite", "db-postgres", "db-mysql"]
 db-sqlite = ["sea-orm/sqlx-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql"]
