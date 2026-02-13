@@ -115,11 +115,12 @@ For commands not covered by predefined templates:
 
 The `shell` field controls which shell interpreter and fail-early settings are used:
 
-| Shell        | Fail-early settings        | Description                                  |
-|:-------------|:---------------------------|:---------------------------------------------|
-| `bash` (default) | `set -euo pipefail`      | Exit on error, undefined vars, pipe failures |
-| `sh`         | `set -eu`                  | POSIX-compatible exit on error, undefined vars |
-| `powershell` | `$ErrorActionPreference = 'Stop'` | Future Windows support                       |
+| Shell | Fail-early settings | Description |
+| :--------------- | :-------------------------------- | :---------------------------------------------- |
+| `bash` (default) | `set -euo pipefail` | Exit on error, undefined vars, pipe failures. |
+| `sh` | `set -eu` | POSIX-compatible exit on error, undefined vars. |
+| `powershell` | `$ErrorActionPreference = 'Stop'` | Future Windows support. |
+
 Commands are wrapped with fail-early settings before execution to ensure hooks fail fast on errors.
 
 ## Input validation
@@ -158,9 +159,9 @@ Hook output includes clear phase markers for debugging:
 
 ## Key files
 
-| File                                               | Purpose                                             |
-|:---------------------------------------------------|:----------------------------------------------------|
-| `crates/shared/web-api-types/src/update_hooks.rs`  | Hook config types; re-exports `HookShell`         |
-| `crates/ui/web-api/src/update_hooks.rs`            | Hook resolution and merge logic                     |
-| `crates/core/agent/src/update.rs`                  | Hook execution with shell wrapper                   |
-| `crates/shared/wire/asyncapi.yaml`                 | Wire protocol docs (includes `hookCommand` schema)  |
+| File | Purpose |
+| :------------------------------------------------ | :-------------------------------------------------- |
+| `crates/shared/web-api-types/src/update_hooks.rs` | Hook config types; re-exports `HookShell`. |
+| `crates/ui/web-api/src/update_hooks.rs` | Hook resolution and merge logic. |
+| `crates/core/agent/src/update.rs` | Hook execution with shell wrapper. |
+| `crates/shared/wire/asyncapi.yaml` | Wire protocol docs (includes `hookCommand` schema). |

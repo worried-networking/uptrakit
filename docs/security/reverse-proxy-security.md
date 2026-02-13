@@ -7,11 +7,11 @@ This page focuses on the security considerations when using a reverse proxy in f
 
 1. **Trusted proxies required.** The controller only processes certificate-related headers (`X-Forwarded-Client-Cert-Info`, PEM headers, etc.) when
    the request originates from an IP listed in `--trusted-proxy` (or `network.trusted_proxies`). Headers are stripped from untrusted sources.
-2. **CA verification.** The issuer CN from forwarded cert headers must match either the active CA or the most recent non-expired CA maintained in the
+1. **CA verification.** The issuer CN from forwarded cert headers must match either the active CA or the most recent non-expired CA maintained in the
    controller.
-3. **Header stripping.** Headers such as the configured cert header, `X-Forwarded-Proto`, `X-Forwarded-Host`, and `Origin` are removed from non-proxy
+1. **Header stripping.** Headers such as the configured cert header, `X-Forwarded-Proto`, `X-Forwarded-Host`, and `Origin` are removed from non-proxy
    traffic to avoid spoofing.
-4. **mTLS precedence.** Direct mTLS connections take priority; if the mTLS verifier already extracted `ServiceIdentity`, all proxy headers are
+1. **mTLS precedence.** Direct mTLS connections take priority; if the mTLS verifier already extracted `ServiceIdentity`, all proxy headers are
    ignored.
 
 Correct `ClientIp` resolution is also required for service activity visibility in `/api/v1/services`. The controller

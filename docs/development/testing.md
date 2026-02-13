@@ -24,9 +24,13 @@ cargo nextest run --all-features
 ### What We Test
 
 - Pure logic (unit tests)
+
 - Provider behavior (parsing, version comparison, metadata mapping)
+
 - API boundaries (request/response types, compatibility)
+
 - Error paths with clear messaging
+
 - Reverse proxy integration tests (Docker-based, ignored by default):
 
   ```bash

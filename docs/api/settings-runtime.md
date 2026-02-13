@@ -5,10 +5,10 @@ Settings are stored in the database and reconciled with CLI flags during startup
 ## Reconciliation Priority
 
 1. DB value + CLI provided (different) + `--force-settings-override`: CLI wins, DB updated.
-2. DB value + CLI provided (different) + no force: DB wins, warning logged.
-3. DB value + CLI absent or same: DB value used.
-4. No DB value + CLI provided: CLI value saved to DB.
-5. No DB value + CLI absent: default saved to DB.
+1. DB value + CLI provided (different) + no force: DB wins, warning logged.
+1. DB value + CLI absent or same: DB value used.
+1. No DB value + CLI provided: CLI value saved to DB.
+1. No DB value + CLI absent: default saved to DB.
 
 ## Settings Categories
 

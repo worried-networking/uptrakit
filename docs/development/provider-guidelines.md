@@ -18,23 +18,23 @@ on `ProviderType`. Document provider behavior so the registry can continue to va
 
 Each software item is associated with a provider. A provider defines:
 
-| Concern                 | Runs on          | Responsibility                                                                                                                                                                                                                                                                                                                                  |
-|:------------------------|:-----------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Remote/upstream version | Controller or Agent | Fetch latest version metadata. Most providers (GitHub, Docker) resolve on the controller. Providers with a local package index (Homebrew) resolve on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`                                                                         |
-| Local/installed version | Agent            | Detect currently installed version                                                                                                                                                                                                                                                                                                                |
-| Update execution        | Agent            | Run the update (via sudo-allowlisted commands or custom script)                                                                                                                                                                                                                                                                                   |
+| Concern | Runs on | Responsibility |
+| :---------------------- | :------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Remote/upstream version | Controller or Agent | Fetch latest version metadata. Most providers (GitHub, Docker) resolve on the controller. Providers with a local package index (Homebrew) resolve on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in `VersionCheckResult`. |
+| Local/installed version | Agent | Detect currently installed version |
+| Update execution | Agent | Run the update (via sudo-allowlisted commands or custom script) |
 
 Provider crates:
 
-| Crate                                   | Path                         | Purpose                                                 |
-|:----------------------------------------|:-----------------------------|:--------------------------------------------------------|
-| `uptrakit-command`                      | `crates/shared/command/`     | Shell command execution and streaming utilities.        |
-| `uptrakit-provider-core`                | `crates/providers/core/`     | Provider trait/abstractions; delegates commands.        |
-| `uptrakit-provider-registry`            | `crates/providers/registry/` | Centralized provider dispatch & validation.             |
-| `uptrakit-provider-docker-registry`     | `crates/providers/docker-registry/` | Docker/OCI Registry: tracks image tags.                 |
-| `uptrakit-provider-github`              | `crates/providers/github/`   | GitHub Releases: fetches metadata; agent installs.      |
-| `uptrakit-provider-homebrew`            | `crates/providers/homebrew/` | Homebrew: agent-side version tracking & updates.        |
-| `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE: auto-discovers/manages helper scripts.      |
+| Crate | Path | Purpose |
+| :----------------------------------------- | :----------------------------------------- | :----------------------------------------------------- |
+| `uptrakit-command` | `crates/shared/command/` | Shell command execution and streaming utilities. |
+| `uptrakit-provider-core` | `crates/providers/core/` | Provider trait/abstractions; delegates commands. |
+| `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch and validation. |
+| `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: tracks image tags. |
+| `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: fetches metadata; agent installs. |
+| `uptrakit-provider-homebrew` | `crates/providers/homebrew/` | Homebrew: agent-side version tracking and updates. |
+| `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages helper scripts. |
 
 The **Provider Registry** crate centralizes all provider operations:
 
@@ -53,10 +53,10 @@ The update step can always be overridden by a custom shell script, regardless of
 
 The `ProviderCapability` enum defines optional features a provider may support:
 
-| Capability              | Trait method            | Description                                              |
-|:------------------------|:------------------------|:---------------------------------------------------------|
-| `DiscoverLocalSoftware` | `discover_software()`   | Enumerate software the provider can manage on the local system |
-| `RefreshPackageIndex`   | `refresh_package_index()` | Refresh/sync the local package database from remote sources (e.g. `apt update`) |
+| Capability | Trait method | Description |
+| :---------------------- | :------------------------ | :-------------------------------------------------------------- |
+| `DiscoverLocalSoftware` | `discover_software()` | Enumerate software the provider can manage on the local system. |
+| `RefreshPackageIndex` | `refresh_package_index()` | Refresh local package index (for example, `apt update`). |
 
 ### Software discovery
 
@@ -65,12 +65,12 @@ can manage on the local system. Providers that support this capability declare
 `ProviderCapability::DiscoverLocalSoftware` in their `capabilities()` method. The method returns a
 `Vec<DiscoveredSoftware>`, where each entry contains:
 
-| Field                | Type                | Description                                                          |
-|:---------------------|:--------------------|:---------------------------------------------------------------------|
-| `package_identifier` | `String`            | Provider-specific identifier (maps to `SoftwareItem.package_identifier` in DB) |
-| `name`               | `String`            | Human-readable display name                                          |
-| `installed_version`  | `Option<Version>`   | Currently installed version, if detected                             |
-| `extra`              | `Option<serde_json::Value>` | Arbitrary provider-specific metadata (e.g., install path, detection method) |
+| Field | Type | Description |
+| :------------------- | :-------------------------- | :------------------------------------------------------------------------ |
+| `package_identifier` | `String` | Provider-specific identifier (maps to `SoftwareItem.package_identifier`). |
+| `name` | `String` | Human-readable display name. |
+| `installed_version` | `Option<Version>` | Currently installed version, if detected. |
+| `extra` | `Option<serde_json::Value>` | Arbitrary provider-specific metadata (for example, install path). |
 
 The default implementation returns an empty list. Providers that support discovery (e.g., Proxmox Helper-Scripts)
 override this method to scan the local system.
@@ -81,15 +81,15 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 
 **Config fields (`GitHubConfig`):**
 
-| Field               | Type        | Required | Default                    | Description                                         |
-|:--------------------|:------------|:---------|:---------------------------|:----------------------------------------------------|
-| `owner`             | String      | Yes      | —                          | GitHub repository owner                             |
-| `repo`              | String      | Yes      | —                          | GitHub repository name                              |
-| `auth_token`        | String      | No       | `null`                     | Personal access token (for private repos / higher rate limits) |
-| `api_base_url`      | String      | No       | `https://api.github.com`   | API base URL (for GitHub Enterprise)                |
-| `include_prereleases` | bool      | No       | `false`                    | Whether to include pre-release versions             |
-| `tag_strip_prefix`  | String      | No       | `"v"`                      | Prefix to strip from tag names to extract version strings |
-| `asset_patterns`    | Vec\<String> | No       | `[]`                       | Regex patterns to filter release assets (empty = include all) |
+| Field | Type | Required | Default | Description |
+| :-------------------- | :------------ | :------- | :----------------------- | :----------------------------------------------------------- |
+| `owner` | String | Yes | — | GitHub repository owner. |
+| `repo` | String | Yes | — | GitHub repository name. |
+| `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). |
+| `api_base_url` | String | No | `https://api.github.com` | API base URL (for GitHub Enterprise). |
+| `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
+| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. |
+| `asset_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter release assets (empty means all). |
 
 **Behaviour:**
 
@@ -105,17 +105,17 @@ Spec-compliant registry. Currently controller-side only; agent-side container di
 
 **Config fields (`DockerRegistryConfig`):**
 
-| Field             | Type            | Required | Default            | Description                                |
-|:------------------|:----------------|:---------|:-------------------|:-------------------------------------------|
-| `image`           | String          | Yes      | --                 | Full image reference (e.g. `nginx`, `ghcr.io/owner/repo`) |
-| `registry`        | Option\<String> | No       | inferred from `image` | Override registry hostname                 |
-| `auth`            | Option\<DockerAuth> | No       | `null`             | Authentication credentials                 |
-| `tracking_mode`   | TrackingMode    | No       | `semver_tags`      | `semver_tags` or `digest_tracking`         |
-| `tag_patterns`    | Vec\<String>    | No       | `[]`               | Regex patterns to filter tags (semver mode, OR logic) |
-| `tag_strip_prefix`| String          | No       | `"v"`              | Prefix to strip before semver parsing      |
-| `include_prereleases`| bool         | No       | `false`            | Include pre-release versions               |
-| `tracked_tag`     | Option\<String> | No       | `"latest"`         | Tag to track (digest mode)                 |
-| `page_size`       | u32             | No       | `1000`             | Max tags per API request                   |
+| Field | Type | Required | Default | Description |
+| :-------------------- | :------------------- | :------- | :-------------------- | :--------------------------------------------------------- |
+| `image` | String | Yes | -- | Full image reference (e.g. `nginx`, `ghcr.io/owner/repo`). |
+| `registry` | `Option<String>` | No | inferred from `image` | Override registry hostname. |
+| `auth` | `Option<DockerAuth>` | No | `null` | Authentication credentials. |
+| `tracking_mode` | TrackingMode | No | `semver_tags` | `semver_tags` or `digest_tracking`. |
+| `tag_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter tags (semver mode, OR logic). |
+| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip before semver parsing. |
+| `include_prereleases` | bool | No | `false` | Include pre-release versions. |
+| `tracked_tag` | `Option<String>` | No | `"latest"` | Tag to track (digest mode). |
+| `page_size` | u32 | No | `1000` | Max tags per API request. |
 
 **DockerAuth** (tagged enum with `#[serde(tag = "type")]`):
 

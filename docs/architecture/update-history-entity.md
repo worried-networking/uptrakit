@@ -48,17 +48,18 @@ the requesting tenant.
 
 ## REST API
 
-| Method | Path                          | Permission   | Description                                           |
-|:-------|:------------------------------|:-------------|:------------------------------------------------------|
-| GET    | `/api/v1/update-history`      | ViewSettings | List records (filterable by host_id, software_item_id, status) |
-| GET    | `/api/v1/update-history/{id}` | ViewSettings | Get single record                                     |
+| Method | Path | Permission | Description |
+| :----- | :---------------------------- | :----------- | :------------------------------------------------------------- |
+| GET | `/api/v1/update-history` | ViewSettings | List records (filterable by host_id, software_item_id, status) |
+| GET | `/api/v1/update-history/{id}` | ViewSettings | Get single record |
+
 Responses include denormalized `host_name` and `software_item_name` fields.
 
 ## Key files
 
-| File                                                              | Purpose                                  |
-|:------------------------------------------------------------------|:-----------------------------------------|
-| `crates/shared/db/src/entity/update_history.rs`                   | SeaORM entity with `UpdateStatus` enum   |
-| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | DB migration                             |
-| `crates/shared/web-api-types/src/update_history.rs`               | API types (response, query, status enum) |
-| `crates/ui/web-api/src/routes/update_history.rs`                  | Route handlers + unit tests              |
+| File | Purpose |
+| :----------------------------------------------------------------- | :--------------------------------------- |
+| `crates/shared/db/src/entity/update_history.rs` | SeaORM entity with `UpdateStatus` enum |
+| `crates/core/controller/src/migration/m20260209_000001_initial.rs` | DB migration |
+| `crates/shared/web-api-types/src/update_history.rs` | API types (response, query, status enum) |
+| `crates/ui/web-api/src/routes/update_history.rs` | Route handlers + unit tests |

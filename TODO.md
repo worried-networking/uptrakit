@@ -22,7 +22,7 @@ logical phases with clear priorities and dependencies.
 - Review regularly to adjust priorities based on project needs
 - Foundation items should generally be completed before moving to higher-level features
 
----
+______________________________________________________________________
 
 ## Phase 1: Foundation Layer (Priority 1)
 
@@ -149,7 +149,7 @@ Essential infrastructure needed before feature development.
 - [ ] Add provider capability discovery
 - [x] Design provider-specific configuration storage
 
----
+______________________________________________________________________
 
 ## Phase 2: Core Features (Priority 2)
 
@@ -260,7 +260,7 @@ Main functionality that delivers the core value proposition.
   - [x] Background tasks support `CancellationToken` for clean shutdown
 - [ ] Certificate renewal on the controller through API must enable that certificate for new connections
 
----
+______________________________________________________________________
 
 ## Phase 3: User Interfaces (Priority 3)
 
@@ -366,7 +366,7 @@ Ways users interact with the system.
 - [x] Implement MQTT connection resilience
 - [ ] Add MQTT authentication support
 
----
+______________________________________________________________________
 
 ## Phase 4: SSH Agent (Priority 3)
 
@@ -428,7 +428,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [ ] Controller UI and API: SSH-managed hosts appear alongside regular agents with a transport type indicator
 - [ ] MQTT/Home Assistant entities work identically regardless of agent transport
 
----
+______________________________________________________________________
 
 ## Phase 5: Provider Ecosystem (Priority 3-4)
 
@@ -471,7 +471,7 @@ Expanding the provider system with more integrations.
 - [ ] Document provider API reference
 - [ ] Add troubleshooting guide for providers
 
----
+______________________________________________________________________
 
 ## Phase 6: Advanced Features (Priority 4)
 
@@ -538,7 +538,7 @@ Polish and additional capabilities for production use.
 - [ ] Create window configuration UI
 - [ ] Support timezone handling
 
----
+______________________________________________________________________
 
 ## Phase 7: Security Enhancements (Priority 2-3)
 
@@ -623,7 +623,7 @@ Comprehensive security hardening.
   - [ ] Static code analysis
   - [ ] Container image scanning
 
----
+______________________________________________________________________
 
 ## Phase 8: Quality & Reliability (Ongoing)
 
@@ -690,7 +690,7 @@ Ensuring robustness and maintainability.
 - [ ] Implement data integrity checks
 - [ ] Add automatic backup and restore
 
----
+______________________________________________________________________
 
 ## Phase 9: Documentation & Operations (Ongoing)
 
@@ -764,7 +764,7 @@ Making the system usable and maintainable.
 - [ ] Document testing strategy
 - [ ] Create PR template and guidelines
 
----
+______________________________________________________________________
 
 ## Phase 10: Project Infrastructure (Ongoing)
 
@@ -833,7 +833,7 @@ Development and release automation.
 - [ ] Implement consistent error messages
 - [ ] Add development helpers and scripts
 
----
+______________________________________________________________________
 
 ## Future Considerations
 
@@ -867,7 +867,7 @@ Items to consider for future versions but not currently prioritized:
 - [ ] A/B testing framework for updates
 - [ ] Custom metrics and alerting DSL
 
----
+______________________________________________________________________
 
 ## Notes
 

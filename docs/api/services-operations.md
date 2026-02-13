@@ -20,14 +20,14 @@
 Both agents and MQTT services follow a unified startup sequence provided by the `uptrakit-service-sdk` crate:
 
 1. Initialize tracing with a crate-specific directive (e.g. `uptrakit_agent=info`).
-2. Install the `aws-lc-rs` crypto provider for rustls.
-3. Parse CLI arguments and resolve application directories.
-4. Load identity state; clear if `--force-enroll` is set.
-5. Bootstrap the CA certificate (cached, file, PKI endpoint, TOFU, or system trust).
-6. If already certified, check certificate expiry. If expired, clear enrollment state and re-enroll.
-7. If already certified, enter the authenticated loop with reconnection. On certificate-expired TLS errors, fall back to enrollment.
-8. Run enrollment with exponential backoff on disconnects.
-9. Enter the authenticated loop with reconnection (exponential backoff on disconnect; immediate reconnect on certificate rotation).
+1. Install the `aws-lc-rs` crypto provider for rustls.
+1. Parse CLI arguments and resolve application directories.
+1. Load identity state; clear if `--force-enroll` is set.
+1. Bootstrap the CA certificate (cached, file, PKI endpoint, TOFU, or system trust).
+1. If already certified, check certificate expiry. If expired, clear enrollment state and re-enroll.
+1. If already certified, enter the authenticated loop with reconnection. On certificate-expired TLS errors, fall back to enrollment.
+1. Run enrollment with exponential backoff on disconnects.
+1. Enter the authenticated loop with reconnection (exponential backoff on disconnect; immediate reconnect on certificate rotation).
 
 Both services use a shared `ControllerConnection` type for all authenticated WebSocket communication,
 which handles envelope serialization, sequence validation, and WebSocket frame processing

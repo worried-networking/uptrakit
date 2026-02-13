@@ -26,12 +26,12 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 ## Agent Lifecycle
 
 1. Connect anonymously and send `enroll` with host info + optional enrollment token.
-2. Controller assigns UUIDv7 `service_id` and responds with `enrolled` (includes enrollment secret).
-3. Agent generates an ECDSA P-256 keypair locally and submits a CSR (`request_certificate`).
-4. Controller validates the CSR, signs it, and returns `certificate`.
-5. Agent reconnects with mTLS and enters authenticated state.
-6. Normal operation: `ping`/`pong`, `version_check_results`, `update_output`, etc.
-7. On shutdown, agent sends `disconnecting` and waits for in-flight updates to finish.
+1. Controller assigns UUIDv7 `service_id` and responds with `enrolled` (includes enrollment secret).
+1. Agent generates an ECDSA P-256 keypair locally and submits a CSR (`request_certificate`).
+1. Controller validates the CSR, signs it, and returns `certificate`.
+1. Agent reconnects with mTLS and enters authenticated state.
+1. Normal operation: `ping`/`pong`, `version_check_results`, `update_output`, etc.
+1. On shutdown, agent sends `disconnecting` and waits for in-flight updates to finish.
 
 ## Message Types
 

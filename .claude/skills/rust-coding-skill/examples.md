@@ -1,6 +1,7 @@
 # Rust Coding Skill Examples
 
 ## Example 1: Struct with Methods
+
 ```rust
 /// Represents a rectangle shape
 pub struct Rectangle {
@@ -46,6 +47,7 @@ impl Greet for Person {
 ```
 
 ## Example 3: Macro
+
 ```rust
 use serde::{Deserialize, Serialize};
 macro_rules! auto_derived {

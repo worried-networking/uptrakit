@@ -10,11 +10,16 @@ Assistant via MQTT.
   history)
 
 - System architecture and operations: [docs/end-user/system-overview.md](docs/end-user/system-overview.md)
+
 - API and wire protocol: [docs/api/wire-protocol.md](docs/api/wire-protocol.md) and [docs/api/http-web-api.md](docs/api/http-web-api.md)
+
 - Settings, authentication, and service flows: [docs/api/settings-runtime.md](docs/api/settings-runtime.md),
   [docs/api/auth-flows.md](docs/api/auth-flows.md), [docs/api/services-operations.md](docs/api/services-operations.md)
+
 - Reverse proxy deployment: [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)
+
 - Security architecture: [docs/security/security-architecture.md](docs/security/security-architecture.md)
+
 - Provider development expectations: [docs/development/provider-guidelines.md](docs/development/provider-guidelines.md)
 
 ## Project layout

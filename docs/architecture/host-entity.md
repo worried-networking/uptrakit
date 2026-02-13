@@ -214,9 +214,9 @@ Command execution utilities (`shell_escape`, `run_command_exec`, `run_command_wi
 
 ## REST API
 
-| Method | Path                   | Permission   | Action                                        |
+| Method | Path | Permission | Action |
 | :----- | :--------------------- | :----------- | :-------------------------------------------- |
-| GET    | `/api/v1/hosts`        | ViewAgents   | List non-deactivated hosts with linked agents |
-| GET    | `/api/v1/hosts/{id}`   | ViewAgents   | Get single host with linked agents            |
-| PUT    | `/api/v1/hosts/{id}`   | ManageAgents | Update friendly_name                          |
-| DELETE | `/api/v1/hosts/{id}`   | ManageAgents | Soft-delete (set deactivated_at)              |
+| GET | `/api/v1/hosts` | ViewAgents | List non-deactivated hosts with linked agents |
+| GET | `/api/v1/hosts/{id}` | ViewAgents | Get single host with linked agents |
+| PUT | `/api/v1/hosts/{id}` | ManageAgents | Update friendly_name |
+| DELETE | `/api/v1/hosts/{id}` | ManageAgents | Soft-delete (set deactivated_at) |

@@ -101,9 +101,9 @@ After CA rotation, re-run this command before updating the proxy trust store.
 The PKI address is embedded into every managed CA certificate; changing it triggers a CA rotation:
 
 1. Update the PKI address through the Web UI (Settings > Network > PKI Address) or the API (`PUT /api/v1/settings/network` with `pki_addr`).
-2. Rotate the CA via the Web UI (Settings > PKI > Rotate CA) or `POST /api/v1/settings/rotate-ca`.
-3. Connected agents receive a `CaBundleUpdated` + `RequestCertRenewal` message and refresh certificates automatically.
-4. Offline agents detect the updated `ca_bundle_hash` and fetch the new bundle over HTTPS.
+1. Rotate the CA via the Web UI (Settings > PKI > Rotate CA) or `POST /api/v1/settings/rotate-ca`.
+1. Connected agents receive a `CaBundleUpdated` + `RequestCertRenewal` message and refresh certificates automatically.
+1. Offline agents detect the updated `ca_bundle_hash` and fetch the new bundle over HTTPS.
 
 ## Proxy-Specific Guides
 

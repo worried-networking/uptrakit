@@ -4,10 +4,10 @@
 
 1. `POST /api/v1/auth/device` with optional `client_name` → returns `device_code`, `user_code`, `verification_url`, `expires_in` (600s), `interval`
    (5s).
-2. CLI opens `verification_url` and displays `user_code` for the user.
-3. User logs in via browser (password or OIDC) and approves the request (`POST /api/v1/auth/device/approve`).
-4. CLI polls `POST /api/v1/auth/device/poll` every `interval` seconds until approval; response contains access token and refresh token.
-5. On approval, the flow is removed from the DB to prevent reuse.
+1. CLI opens `verification_url` and displays `user_code` for the user.
+1. User logs in via browser (password or OIDC) and approves the request (`POST /api/v1/auth/device/approve`).
+1. CLI polls `POST /api/v1/auth/device/poll` every `interval` seconds until approval; response contains access token and refresh token.
+1. On approval, the flow is removed from the DB to prevent reuse.
 
 ## Device Authorization (CLI) - Detailed Flow
 

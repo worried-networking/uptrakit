@@ -32,15 +32,15 @@ detection timestamp).
 
 ## REST API
 
-| Method | Path                                    | Permission     | Status | Description                                               |
-|:-------|:----------------------------------------|:---------------|:-------|:----------------------------------------------------------|
-| POST   | `/api/v1/software-items`                | ManageSettings | 201    | Create a new software item                                |
-| GET    | `/api/v1/software-items`                | ViewSettings   | 200    | List all active software items (with host count)          |
-| GET    | `/api/v1/software-items/{id}`           | ViewSettings   | 200    | Get software item with assigned hosts + installed versions |
-| PUT    | `/api/v1/software-items/{id}`           | ManageSettings | 200    | Update name, enabled, package_identifier, config_override |
-| DELETE | `/api/v1/software-items/{id}`           | ManageSettings | 204    | Soft-delete                                               |
-| POST   | `/api/v1/software-items/{id}/hosts`     | ManageSettings | 200    | Assign to additional host(s)                              |
-| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSettings | 204    | Unassign from a host                                      |
+| Method | Path | Permission | Status | Description |
+| :----- | :-------------------------------------------- | :------------- | :----- | :--------------------------------------------------------- |
+| POST | `/api/v1/software-items` | ManageSettings | 201 | Create a new software item |
+| GET | `/api/v1/software-items` | ViewSettings | 200 | List all active software items (with host count) |
+| GET | `/api/v1/software-items/{id}` | ViewSettings | 200 | Get software item with assigned hosts + installed versions |
+| PUT | `/api/v1/software-items/{id}` | ManageSettings | 200 | Update name, enabled, package_identifier, config_override |
+| DELETE | `/api/v1/software-items/{id}` | ManageSettings | 204 | Soft-delete |
+| POST | `/api/v1/software-items/{id}/hosts` | ManageSettings | 200 | Assign to additional host(s) |
+| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSettings | 204 | Unassign from a host |
 
 ## Validation rules
 

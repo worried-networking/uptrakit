@@ -178,8 +178,8 @@ use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversio
 **Boundary checklist:**
 
 1. Define `#[derive(Debug, Error)] pub enum MyError { ... }`
-2. Define `pub type Result<T> = std::result::Result<T, Report<MyError>>;`
-3. Add `impl_report_conversion!` for every foreign error type your boundary encounters.
+1. Define `pub type Result<T> = std::result::Result<T, Report<MyError>>;`
+1. Add `impl_report_conversion!` for every foreign error type your boundary encounters.
 
 **`bail!()` vs `report!()`:**
 
