@@ -61,8 +61,7 @@ mod tests {
 
     #[test]
     fn is_cert_expired_enrollment_delegates() {
-        let rustls_err =
-            rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
         let err = AppError::Enrollment(EnrollmentError::Io(io_err));
         assert!(err.is_cert_expired());
@@ -70,8 +69,7 @@ mod tests {
 
     #[test]
     fn is_cert_expired_enrollment_websocket_wrapping_rustls() {
-        let rustls_err =
-            rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
+        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
         let ws_err = tokio_tungstenite::tungstenite::Error::Io(io_err);
         let err = AppError::Enrollment(EnrollmentError::WebSocket(ws_err));

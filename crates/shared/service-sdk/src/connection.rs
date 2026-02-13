@@ -111,8 +111,7 @@ impl ControllerConnection {
                 }
                 Some(Ok(Message::Pong(_))) => continue,
                 Some(Ok(Message::Close(frame))) => {
-                    self.close_reason =
-                        frame.as_ref().map(|f| f.reason.to_string());
+                    self.close_reason = frame.as_ref().map(|f| f.reason.to_string());
                     log_close_frame(frame);
                     return Ok(None);
                 }

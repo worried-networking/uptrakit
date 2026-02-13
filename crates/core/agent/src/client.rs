@@ -1,14 +1,14 @@
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
-use uptrakit_service_sdk::ControllerConnection;
-use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
-use uptrakit_service_sdk::identity::generate_keypair_and_csr;
 use uptrakit_internal_wire::{
     CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
     RenewCertificatePayload, ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
     now_millis,
 };
+use uptrakit_service_sdk::ControllerConnection;
+use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
+use uptrakit_service_sdk::identity::generate_keypair_and_csr;
 
 use crate::error::{Error, Result};
 

@@ -8,11 +8,11 @@ use std::time::Duration;
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
-use uptrakit_service_sdk::{ControllerConnection, ServiceIdentityState};
 use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
     MqttRegisterPayload, PingPayload, ServiceMessage, now_millis,
 };
+use uptrakit_service_sdk::{ControllerConnection, ServiceIdentityState};
 
 use crate::error::{AppError, Result};
 use crate::tenant_manager::TenantManager;
@@ -160,9 +160,8 @@ async fn run(args: cli::Args) -> Result<()> {
         Some(pem) => {
             uptrakit_service_sdk::tls::build_tls_connector(pem).context_to::<AppError>()?
         }
-        None => {
-            uptrakit_service_sdk::tls::build_system_trust_tls_connector().context_to::<AppError>()?
-        }
+        None => uptrakit_service_sdk::tls::build_system_trust_tls_connector()
+            .context_to::<AppError>()?,
     };
 
     let mut enrollment_backoff =
@@ -266,12 +265,10 @@ async fn run_authenticated_with_reconnect(
                 pem, cert_pem, &key_pem,
             )
             .context_to::<AppError>()?,
-            None => {
-                uptrakit_service_sdk::tls::build_system_trust_tls_connector_with_client_cert(
-                    cert_pem, &key_pem,
-                )
-                .context_to::<AppError>()?
-            }
+            None => uptrakit_service_sdk::tls::build_system_trust_tls_connector_with_client_cert(
+                cert_pem, &key_pem,
+            )
+            .context_to::<AppError>()?,
         };
 
         match run_authenticated_loop(AuthenticatedLoopParams {
