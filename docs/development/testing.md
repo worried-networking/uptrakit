@@ -44,6 +44,8 @@ Every behaviour change must include tests. Types of tests used:
 - **API boundary tests**: request/response (de)serialisation, backwards compatibility.
 - **Error path tests**: expected failures produce correct error types and messages.
 - **Docker integration tests**: reverse proxy tests using real containers (see below).
+- **Service activity parity tests**: ensure Agent and MQTT service records update `ip_address` and `last_seen_at`
+  consistently across connect and ping flows.
 
 Run tests with:
 
@@ -89,3 +91,7 @@ cargo test -p uptrakit-controller reverse_proxy::nginx -- --ignored
 ```
 
 A dedicated `reverse-proxy-tests` CI job runs these on `ubuntu-latest` (Docker pre-installed).
+
+When validating reverse proxy setups locally, confirm `/api/v1/services` shows expected service IP metadata and
+`last_seen_at` movement for both Agent and MQTT services. Cross-check the security model in
+[docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md).

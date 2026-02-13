@@ -21,7 +21,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use super::service_ws::{
     MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW, close_with_reason,
-    deserialize_service_msg, send_pong, serialize_controller_msg,
+    deserialize_service_msg, record_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
 use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
@@ -141,6 +141,9 @@ pub(crate) async fn handle_agent_authenticated(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
+                                if let Err(e) = record_service_activity(&state.db, agent_id, None).await {
+                                    tracing::warn!(error = %e, %agent_id, "failed to record service activity");
+                                }
                             }
                             ServiceMessage::ReportHostInfo(payload) => {
                                 if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
@@ -676,6 +679,9 @@ pub(crate) async fn run_agent_enrolled_loop(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
+                                if let Err(e) = record_service_activity(&state.db, agent_id, None).await {
+                                    tracing::warn!(error = %e, %agent_id, "failed to record service activity");
+                                }
                             }
                             ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {

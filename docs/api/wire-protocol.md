@@ -14,6 +14,15 @@ service types share the same `ServiceMessage`/`ControllerMessage` enums, with va
 Agents initiate outbound-only connections and never accept inbound traffic. MQTT services use the same enrollment model
 (shared service abstraction).
 
+## Service Activity Tracking
+
+For both Agent and MQTT services, the controller updates `services.last_seen_at` on every successful WebSocket connect
+and on heartbeat ping/pong exchanges. The controller updates `services.ip_address` on each connect when a client IP is
+resolved by the network middleware.
+
+Accurate client IP tracking depends on trusted-proxy configuration; see
+[docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md).
+
 ## Agent Lifecycle
 
 1. Connect anonymously and send `enroll` with host info + optional enrollment token.

@@ -118,7 +118,7 @@ async fn build_state(
             fingerprint: "0".repeat(64),
             not_after: ::time::OffsetDateTime::now_utc() + ::time::Duration::days(365),
         }],
-        trusted_ca_cns: Vec::new(),
+        trusted_ca_cns: vec!["Test CA".to_string()],
         bundle_pem: pki.ca_cert_pem.clone(),
         bundle_hash: "0".repeat(64),
         managed: true,

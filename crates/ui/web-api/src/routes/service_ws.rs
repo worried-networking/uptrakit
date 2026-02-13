@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::Extension;
@@ -82,6 +83,18 @@ type ServiceWsResult<T> = std::result::Result<T, Report<ServiceWsError>>;
 
 impl_report_conversion!(sea_orm::DbErr => ServiceWsError::Database);
 
+#[derive(Debug, Error)]
+pub(crate) enum ServiceActivityError {
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("service not found: {0}")]
+    ServiceNotFound(uuid::Uuid),
+}
+
+pub(crate) type ServiceActivityResult<T> = std::result::Result<T, Report<ServiceActivityError>>;
+
+impl_report_conversion!(sea_orm::DbErr => ServiceActivityError::Database);
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -155,6 +168,32 @@ fn extract_bearer(headers: &HeaderMap) -> Option<String> {
         .ok()?
         .strip_prefix("Bearer ")
         .map(|s| s.to_string())
+}
+
+pub(crate) async fn record_service_activity(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+    ip_address: Option<IpAddr>,
+) -> ServiceActivityResult<()> {
+    let service = service_entity::Entity::find_by_id(service_id)
+        .one(db)
+        .await
+        .context_to::<ServiceActivityError>()?
+        .ok_or_else(|| report!(ServiceActivityError::ServiceNotFound(service_id)))?;
+
+    let now = time::OffsetDateTime::now_utc();
+    let mut active: service_entity::ActiveModel = service.into();
+    active.last_seen_at = Set(Some(now));
+    active.updated_at = Set(now);
+    if let Some(ip) = ip_address {
+        active.ip_address = Set(Some(ip.to_string()));
+    }
+    active
+        .update(db)
+        .await
+        .context_to::<ServiceActivityError>()?;
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +372,7 @@ async fn handle_connection(
     socket: WebSocket,
     state: Arc<AppState>,
     conn_type: ConnectionType,
-    client_ip: Option<std::net::IpAddr>,
+    client_ip: Option<IpAddr>,
 ) {
     let mut out_seq = OutgoingSeq::new();
     let mut in_seq = IncomingSeq::new();
@@ -348,13 +387,22 @@ async fn handle_connection(
                 state,
                 service_id,
                 cert_serial,
+                client_ip,
                 &mut out_seq,
                 &mut in_seq,
             )
             .await;
         }
         ConnectionType::Enrolled(service_id) => {
-            handle_enrolled(socket, state, service_id, &mut out_seq, &mut in_seq).await;
+            handle_enrolled(
+                socket,
+                state,
+                service_id,
+                client_ip,
+                &mut out_seq,
+                &mut in_seq,
+            )
+            .await;
         }
         ConnectionType::Anonymous => {
             handle_anonymous(socket, state, client_ip, &mut out_seq, &mut in_seq).await;
@@ -374,6 +422,7 @@ async fn handle_authenticated(
     state: Arc<AppState>,
     service_id: uuid::Uuid,
     cert_serial: String,
+    client_ip: Option<IpAddr>,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
@@ -493,12 +542,8 @@ async fn handle_authenticated(
     let previous_last_seen_at = service.last_seen_at;
     let now = time::OffsetDateTime::now_utc();
 
-    // Record service last seen timestamp.
-    let mut service_active: service_entity::ActiveModel = service.clone().into();
-    service_active.last_seen_at = Set(Some(now));
-    service_active.updated_at = Set(now);
-    if let Err(e) = service_active.update(&state.db).await {
-        tracing::error!(error = %e, "failed to update service last_seen_at");
+    if let Err(e) = record_service_activity(&state.db, service_id, client_ip).await {
+        tracing::error!(error = %e, %service_id, "failed to update service activity");
     }
 
     // Record certificate usage.
@@ -563,6 +608,7 @@ async fn handle_enrolled(
     socket: WebSocket,
     state: Arc<AppState>,
     service_id: uuid::Uuid,
+    client_ip: Option<IpAddr>,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
@@ -585,6 +631,10 @@ async fn handle_enrolled(
     };
 
     let (mut sink, mut stream) = socket.split();
+
+    if let Err(e) = record_service_activity(&state.db, service_id, client_ip).await {
+        tracing::error!(error = %e, %service_id, "failed to update service activity");
+    }
 
     // If already approved/rejected, push immediately.
     match service.status {
@@ -658,7 +708,7 @@ const ANONYMOUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30
 async fn handle_anonymous(
     socket: WebSocket,
     state: Arc<AppState>,
-    client_ip: Option<std::net::IpAddr>,
+    client_ip: Option<IpAddr>,
     out_seq: &mut OutgoingSeq,
     in_seq: &mut IncomingSeq,
 ) {
@@ -717,7 +767,9 @@ async fn handle_anonymous(
                                 }
                             }
                             uptrakit_internal_wire::ServiceType::Mqtt => {
-                                match enroll_mqtt(&state, &payload, &mut sink, out_seq).await {
+                                match enroll_mqtt(&state, &payload, client_ip, &mut sink, out_seq)
+                                    .await
+                                {
                                     Some((id, approved)) => {
                                         break (id, service_entity::ServiceType::Mqtt, approved);
                                     }
@@ -865,6 +917,7 @@ async fn enroll_agent(
 async fn enroll_mqtt(
     state: &Arc<AppState>,
     payload: &uptrakit_internal_wire::EnrollPayload,
+    client_ip: Option<IpAddr>,
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
@@ -875,6 +928,7 @@ async fn enroll_mqtt(
         &payload.hostname,
         &payload.friendly_name,
         payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
+        client_ip,
     )
     .await;
 
@@ -932,6 +986,9 @@ async fn enroll_mqtt(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
+    };
 
     #[test]
     fn message_rate_limiter_enforces_window() {
@@ -943,5 +1000,91 @@ mod tests {
         let reset_time = std::time::Instant::now() - WS_MESSAGE_RATE_WINDOW;
         limiter.set_window_start(reset_time);
         assert!(limiter.allow());
+    }
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+        db.execute_unprepared(
+            "CREATE TABLE services (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                friendly_name TEXT NOT NULL,
+                ip_address TEXT,
+                status TEXT NOT NULL,
+                enrollment_secret_hash TEXT NOT NULL UNIQUE,
+                client_version TEXT,
+                last_seen_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deactivated_at INTEGER
+            )",
+        )
+        .await
+        .expect("create services");
+        db
+    }
+
+    async fn insert_service(db: &DatabaseConnection, ip_address: Option<&str>) -> uuid::Uuid {
+        let id = uuid::Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+        service_entity::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(uuid::Uuid::now_v7()),
+            service_type: Set(service_entity::ServiceType::Agent),
+            hostname: Set("test-host".to_string()),
+            friendly_name: Set("test-host".to_string()),
+            ip_address: Set(ip_address.map(ToOwned::to_owned)),
+            status: Set(service_entity::ServiceStatus::Pending),
+            enrollment_secret_hash: Set(format!("secret-{id}")),
+            client_version: Set(None),
+            last_seen_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(None),
+        }
+        .insert(db)
+        .await
+        .expect("insert service");
+        id
+    }
+
+    #[tokio::test]
+    async fn record_service_activity_sets_ip_when_provided() {
+        let db = setup_test_db().await;
+        let service_id = insert_service(&db, None).await;
+
+        let ip = std::net::IpAddr::from([10, 1, 2, 3]);
+        record_service_activity(&db, service_id, Some(ip))
+            .await
+            .expect("record activity");
+
+        let model = service_entity::Entity::find_by_id(service_id)
+            .one(&db)
+            .await
+            .expect("query service")
+            .expect("service exists");
+        assert_eq!(model.ip_address.as_deref(), Some("10.1.2.3"));
+        assert!(model.last_seen_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn record_service_activity_preserves_ip_when_absent() {
+        let db = setup_test_db().await;
+        let service_id = insert_service(&db, Some("192.0.2.7")).await;
+
+        record_service_activity(&db, service_id, None)
+            .await
+            .expect("record activity");
+
+        let model = service_entity::Entity::find_by_id(service_id)
+            .one(&db)
+            .await
+            .expect("query service")
+            .expect("service exists");
+        assert_eq!(model.ip_address.as_deref(), Some("192.0.2.7"));
+        assert!(model.last_seen_at.is_some());
     }
 }

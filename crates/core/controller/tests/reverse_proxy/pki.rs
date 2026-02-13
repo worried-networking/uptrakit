@@ -72,6 +72,7 @@ impl TestPki {
         server_params
             .subject_alt_names
             .push(SanType::IpAddress(Ipv4Addr::LOCALHOST.into()));
+        server_params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
         server_params.not_before = ::time::OffsetDateTime::now_utc() - ::time::Duration::hours(1);
         server_params.not_after = ::time::OffsetDateTime::now_utc() + ::time::Duration::days(1);
 

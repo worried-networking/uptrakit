@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -19,7 +20,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 
 use super::service_ws::{
     MessageRateLimiter, WS_MESSAGE_RATE_LIMIT, WS_MESSAGE_RATE_WINDOW, close_with_reason,
-    deserialize_service_msg, send_pong, serialize_controller_msg,
+    deserialize_service_msg, record_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
 use crate::mqtt_client_store;
@@ -120,6 +121,9 @@ pub(crate) async fn handle_mqtt_authenticated(
                     ServiceMessage::Ping(PingPayload { service_ts }) => {
                         if send_pong(sink, out_seq, service_ts).await.is_err() {
                             return;
+                        }
+                        if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                            tracing::warn!(error = %e, %service_id, "failed to record service activity");
                         }
                     }
                     _ => {
@@ -251,6 +255,9 @@ pub(crate) async fn handle_mqtt_authenticated(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
+                                if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                                    tracing::warn!(error = %e, %service_id, "failed to record service activity");
+                                }
 
                                 // Update lease heartbeats for all tenants held by this service
                                 if let Err(e) = lease_coordinator
@@ -470,6 +477,9 @@ pub(crate) async fn handle_mqtt_enrolled(
                                     break;
                                 };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
+                                if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                                    tracing::warn!(error = %e, %service_id, "failed to record service activity");
+                                }
                             }
                             ServiceMessage::RequestCertificate(payload) => {
                                 if !approved {
@@ -617,6 +627,7 @@ pub(crate) async fn do_mqtt_service_enroll(
     hostname: &str,
     friendly_name: &str,
     enrollment_token: Option<&str>,
+    ip_address: Option<IpAddr>,
 ) -> MqttWsResult<MqttServiceEnrollResult> {
     if hostname.trim().is_empty() {
         return Err(report!(MqttWsError::Enrollment(
@@ -688,11 +699,11 @@ pub(crate) async fn do_mqtt_service_enroll(
         service_type: Set(mqtt_service::ServiceType::Mqtt),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
-        ip_address: Set(None),
+        ip_address: Set(ip_address.map(|ip| ip.to_string())),
         status: Set(status),
         enrollment_secret_hash: Set(secret_hash),
         client_version: Set(None),
-        last_seen_at: Set(None),
+        last_seen_at: Set(Some(now)),
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
@@ -797,4 +808,89 @@ async fn revoke_mqtt_service_certificate(
     active.update(db).await.context_to::<MqttWsError>()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::registration::{RegistrationMode, RegistrationSettings};
+    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+
+    async fn setup_test_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+        db.execute_unprepared(
+            "CREATE TABLE services (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                service_type TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                friendly_name TEXT NOT NULL,
+                ip_address TEXT,
+                status TEXT NOT NULL,
+                enrollment_secret_hash TEXT NOT NULL UNIQUE,
+                client_version TEXT,
+                last_seen_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deactivated_at INTEGER
+            )",
+        )
+        .await
+        .expect("create services");
+        db
+    }
+
+    fn test_settings() -> crate::settings::Settings {
+        crate::settings::Settings::new(
+            RegistrationSettings {
+                mode: RegistrationMode::Open,
+                token_hash: None,
+                require_token_for_oidc: false,
+            },
+            7,
+        )
+    }
+
+    #[tokio::test]
+    async fn mqtt_enroll_sets_ip_and_last_seen() {
+        let db = setup_test_db().await;
+        let settings = test_settings();
+
+        let result = do_mqtt_service_enroll(
+            &db,
+            &settings,
+            uuid::Uuid::now_v7(),
+            "mqtt-host",
+            "mqtt-friendly",
+            None,
+            Some(IpAddr::from([203, 0, 113, 5])),
+        )
+        .await
+        .expect("mqtt enroll");
+
+        assert_eq!(result.service.ip_address.as_deref(), Some("203.0.113.5"));
+        assert!(result.service.last_seen_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn mqtt_enroll_sets_last_seen_without_ip() {
+        let db = setup_test_db().await;
+        let settings = test_settings();
+
+        let result = do_mqtt_service_enroll(
+            &db,
+            &settings,
+            uuid::Uuid::now_v7(),
+            "mqtt-host",
+            "mqtt-friendly",
+            None,
+            None,
+        )
+        .await
+        .expect("mqtt enroll");
+
+        assert_eq!(result.service.ip_address, None);
+        assert!(result.service.last_seen_at.is_some());
+    }
 }

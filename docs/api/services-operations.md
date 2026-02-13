@@ -12,6 +12,8 @@
 - `/api/v1/services/enrollment-token?type=mqtt` issues tokens for MQTT instances.
 - MQTT clients receive `tenant_assignments`, `tenant_config_updated`, and `tenant_revoked` commands after assignment.
 - MQTT services share the same enrollment, certificate, and PKI flows as agents.
+- Agent and MQTT services use the same activity tracking fields in `services`: `ip_address` is refreshed on each WebSocket connect, and `last_seen_at`
+  is refreshed on connect and heartbeat (`ping`).
 
 ## Multi-Tenancy
 

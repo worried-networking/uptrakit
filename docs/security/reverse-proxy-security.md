@@ -14,6 +14,12 @@ This page focuses on the security considerations when using a reverse proxy in f
 4. **mTLS precedence.** Direct mTLS connections take priority; if the mTLS verifier already extracted `ServiceIdentity`, all proxy headers are
    ignored.
 
+Correct `ClientIp` resolution is also required for service activity visibility in `/api/v1/services`. The controller
+refreshes service `ip_address` on each WebSocket connect for both Agent and MQTT services; if proxy trust or real-IP
+header settings are wrong, service IP metadata may remain stale or missing. See
+[docs/api/wire-protocol.md](../api/wire-protocol.md) and
+[docs/development/testing.md](../development/testing.md) for API/runtime verification guidance.
+
 ## Revocation Checking
 
 ### OCSP (recommended)
