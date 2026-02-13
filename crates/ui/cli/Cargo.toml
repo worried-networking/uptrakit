@@ -17,4 +17,4 @@ uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }
 hostname = { workspace = true }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
-serde_yml = "0.0.12"
+serde_yaml_ng = "0.10"

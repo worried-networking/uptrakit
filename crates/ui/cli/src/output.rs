@@ -28,7 +28,7 @@ impl std::fmt::Display for OutputFormat {
 ///
 /// - `Human`: prints the pre-formatted `human_text` string.
 /// - `Json`: compact JSON via `serde_json`.
-/// - `Yaml`: YAML via `serde_yml`.
+/// - `Yaml`: YAML via `serde_yaml_ng`.
 pub fn print_output<T: Serialize>(format: OutputFormat, human_text: &str, value: &T) -> Result<()> {
     match format {
         OutputFormat::Human => {
@@ -39,7 +39,7 @@ pub fn print_output<T: Serialize>(format: OutputFormat, human_text: &str, value:
             println!("{json}");
         }
         OutputFormat::Yaml => {
-            let yaml = serde_yml::to_string(value)
+            let yaml = serde_yaml_ng::to_string(value)
                 .map_err(|e| report!(CliError::Other(format!("YAML serialization error: {e}"))))?;
             print!("{yaml}");
         }
@@ -65,7 +65,7 @@ pub fn print_value(format: OutputFormat, value: &serde_json::Value) -> Result<()
             println!("{json}");
         }
         OutputFormat::Yaml => {
-            let yaml = serde_yml::to_string(value)
+            let yaml = serde_yaml_ng::to_string(value)
                 .map_err(|e| report!(CliError::Other(format!("YAML serialization error: {e}"))))?;
             print!("{yaml}");
         }
@@ -116,8 +116,8 @@ mod tests {
             name: "test".to_string(),
             count: 42,
         };
-        let yaml = serde_yml::to_string(&sample).expect("yaml serialization");
-        let parsed: Sample = serde_yml::from_str(&yaml).expect("yaml deserialization");
+        let yaml = serde_yaml_ng::to_string(&sample).expect("yaml serialization");
+        let parsed: Sample = serde_yaml_ng::from_str(&yaml).expect("yaml deserialization");
         assert_eq!(parsed, sample);
     }
 
@@ -131,8 +131,9 @@ mod tests {
     #[test]
     fn yaml_value_valid() {
         let value = serde_json::json!({"key": "value", "num": 1});
-        let yaml = serde_yml::to_string(&value).expect("yaml serialization");
-        let parsed: serde_json::Value = serde_yml::from_str(&yaml).expect("yaml deserialization");
+        let yaml = serde_yaml_ng::to_string(&value).expect("yaml serialization");
+        let parsed: serde_json::Value =
+            serde_yaml_ng::from_str(&yaml).expect("yaml deserialization");
         assert_eq!(parsed["key"], "value");
         assert_eq!(parsed["num"], 1);
     }

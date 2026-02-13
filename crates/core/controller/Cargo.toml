@@ -40,7 +40,7 @@ time = { workspace = true }
 tower = { workspace = true }
 tower-http = { version = "0.6", features = ["trace", "fs"] }
 sea-orm = { workspace = true }
-sea-orm-migration = { version = "2.0.0-rc.30", default-features = false, features = ["runtime-tokio-rustls"] }
+sea-orm-migration = { version = "2.0.0-rc.32", default-features = false, features = ["runtime-tokio-rustls"] }
 uuid = { workspace = true }
 sha2 = { workspace = true }
 serde_json = { workspace = true }
@@ -51,7 +51,7 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-testcontainers = "0.26"
+testcontainers = "0.27"
 reqwest = { workspace = true }
 serde = { workspace = true }
 base64 = "0.22"

@@ -6,7 +6,7 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
 | --- | --- | --- |
 | Human (default) | `human` | Columnar / free-text output identical to pre-flag behaviour |
 | JSON | `json` | Compact single-line JSON, suitable for `jq` piping |
-| YAML | `yaml` | YAML output via `serde_yml` |
+| YAML | `yaml` | YAML output via `serde_yaml_ng` |
 
 ## Implementation
 
