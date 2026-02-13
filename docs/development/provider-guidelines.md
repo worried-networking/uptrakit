@@ -27,10 +27,11 @@ Each software item is associated with a provider. A provider defines:
 Provider crates:
 
 | Crate | Path | Purpose |
-| :----------------------------------------- | :----------------------------------------- | :----------------------------------------------------- |
+| :----------------------------------------- | :----------------------------------------- | :-------------------------------------------------------------------------------------------------------------------- |
+| `uptrakit-shared-types` | `crates/shared/types/` | Canonical home for `ProviderType`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). |
 | `uptrakit-command` | `crates/shared/command/` | Shell command execution and streaming utilities. |
-| `uptrakit-provider-core` | `crates/providers/core/` | Provider trait/abstractions; delegates commands. |
-| `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch and validation. |
+| `uptrakit-provider-core` | `crates/providers/core/` | Provider trait/abstractions; re-exports shared types; delegates commands. |
+| `uptrakit-provider-registry` | `crates/providers/registry/` | Centralized provider dispatch and validation; re-exports `ProviderType`. |
 | `uptrakit-provider-docker-registry` | `crates/providers/docker-registry/` | Docker/OCI Registry: tracks image tags. |
 | `uptrakit-provider-github` | `crates/providers/github/` | GitHub Releases: fetches metadata; agent installs. |
 | `uptrakit-provider-homebrew` | `crates/providers/homebrew/` | Homebrew: agent-side version tracking and updates. |
@@ -44,7 +45,9 @@ The **Provider Registry** crate centralizes all provider operations:
   (delegates to typed `with_secrets_masked()` / `restore_secrets_from()` methods on each config struct)
 
 The agent crate imports `uptrakit-command` for shell execution and `uptrakit-provider-registry` for provider dispatch —
-it does not depend on `uptrakit-provider-core` directly. The web-api crate imports only `uptrakit-provider-registry`.
+it does not depend on `uptrakit-provider-core` directly. The web-api crate imports `uptrakit-provider-registry` (not
+`uptrakit-provider-core`). The wire protocol crate (`uptrakit-internal-wire`) imports `ProviderType`, `ReleaseAsset`,
+and `ReleaseInfo` directly from `uptrakit-shared-types`, keeping it free of provider-implementation dependencies.
 This eliminates scattered string-based provider matching and keeps all dispatch logic in one place.
 
 The update step can always be overridden by a custom shell script, regardless of provider.

@@ -4883,7 +4883,6 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
- "uptrakit-provider-core",
  "uptrakit-shared-types",
  "uuid",
 ]
@@ -5013,6 +5012,7 @@ dependencies = [
  "uptrakit-provider-homebrew",
  "uptrakit-provider-proxmox-helper-scripts",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -5122,7 +5122,6 @@ dependencies = [
  "tracing",
  "uptrakit-directories",
  "uptrakit-internal-wire",
- "uptrakit-provider-core",
  "uptrakit-provider-registry",
  "uptrakit-shared-db",
  "uptrakit-shared-macros",

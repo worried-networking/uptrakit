@@ -56,7 +56,7 @@ uptrakit/
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
-│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions (delegates command execution to uptrakit-command)
+│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions (re-exports shared types; delegates command execution to uptrakit-command)
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── homebrew/                   # uptrakit-provider-homebrew              (lib)  — Homebrew formulae/cask provider
@@ -68,7 +68,7 @@ uptrakit/
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (SecretString, hex encode/decode)
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex encode/decode)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol

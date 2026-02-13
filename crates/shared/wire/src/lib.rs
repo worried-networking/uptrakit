@@ -7,8 +7,8 @@ use uuid::Uuid;
 /// Current wire protocol version for service-controller communication.
 pub const PROTOCOL_VERSION: u16 = 1;
 
-// Re-export provider-core types used directly in wire protocol messages.
-pub use uptrakit_provider_core::{ProviderType, ReleaseAsset, ReleaseInfo};
+// Re-export shared types used directly in wire protocol messages.
+pub use uptrakit_shared_types::{ProviderType, ReleaseAsset, ReleaseInfo};
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
 
