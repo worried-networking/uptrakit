@@ -29,7 +29,9 @@ Both agents and MQTT services follow a unified startup sequence provided by the 
 8. Run enrollment with exponential backoff on disconnects.
 9. Enter the authenticated loop with reconnection (exponential backoff on disconnect; immediate reconnect on certificate rotation).
 
-Both services use a shared `ControllerConnection` type for all authenticated WebSocket communication, which handles envelope serialization, sequence validation, and WebSocket frame processing (Ping/Pong, Close frames).
+Both services use a shared `ControllerConnection` type for all authenticated WebSocket communication,
+which handles envelope serialization, sequence validation, and WebSocket frame processing
+(Ping/Pong, Close frames).
 
 ## Multi-Tenancy
 
