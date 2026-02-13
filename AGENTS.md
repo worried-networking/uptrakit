@@ -70,7 +70,7 @@ uptrakit/
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (SecretString, hex encode/decode)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── enrollment/                 # uptrakit-enrollment                    (lib)  — shared enrollment, TLS (TofuVerifier), CA bootstrap, CLI
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface

@@ -1,5 +1,5 @@
 use clap::Parser;
-use uptrakit_enrollment::cli::CommonServiceArgs;
+use uptrakit_service_sdk::cli::CommonServiceArgs;
 
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-agent")]

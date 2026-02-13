@@ -363,7 +363,7 @@ Ways users interact with the system.
   - [ ] Publish update status
   - [ ] Publish update progress
 - [ ] Add configurable MQTT topics
-- [ ] Implement MQTT connection resilience
+- [x] Implement MQTT connection resilience
 - [ ] Add MQTT authentication support
 
 ---

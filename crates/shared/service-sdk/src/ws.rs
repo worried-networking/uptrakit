@@ -407,7 +407,6 @@ pub async fn resume_enrollment(
         .ok_or_else(|| report!(EnrollmentError::NotEnrolled))?
         .to_string();
 
-    tracing::info!("reconnecting with enrollment secret");
     let auth_header = format!("Bearer {enrollment_secret}");
     let mut ws = connect_ws(host, port, tls_connector, Some(&auth_header)).await?;
     let mut out_seq = OutgoingSeq::new();

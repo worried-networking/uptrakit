@@ -290,7 +290,7 @@ controller.
 **CLI flags (`uptrakit-mqtt`):**
 
 The agent and MQTT service share a common set of CLI flags via `CommonServiceArgs` (defined in
-`uptrakit-enrollment::cli`). Service-specific flags are listed separately.
+`uptrakit-service-sdk::cli`). Service-specific flags are listed separately.
 
 **Common flags (shared with agent via `CommonServiceArgs`):**
 
@@ -314,16 +314,18 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 | `--max-tenants` | `0` | Max tenants per instance (0 = unlimited) |
 | `--ping-interval` | `15` | Ping interval in seconds |
 
-**Connection lifecycle (shared with agent via `uptrakit-enrollment`):**
+**Connection lifecycle (shared with agent via `uptrakit-service-sdk`):**
 
 1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU (with optional
-   `--tofu-fingerprint` SHA-256 pinning) → system trust (via `uptrakit_enrollment::ca::bootstrap_ca`)
+   `--tofu-fingerprint` SHA-256 pinning) → system trust (via `uptrakit_service_sdk::ca::bootstrap_ca`)
 1. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`,
    hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret
-   (saved to state dir) (via `uptrakit_enrollment::ws::run_enrollment`)
+   (saved to state dir) (via `uptrakit_service_sdk::ws::run_enrollment`)
 1. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate
-   (saved to state dir) (via `uptrakit_enrollment::ws::resume_enrollment`)
-1. **Authenticated operation**: Reconnect with mTLS, send `Register`, receive `TenantAssignments`, run MQTT clients
+   (saved to state dir) (via `uptrakit_service_sdk::ws::resume_enrollment`)
+1. **Authenticated operation**: Reconnect with mTLS using shared `ControllerConnection`, send `Register`,
+   receive `TenantAssignments`, run MQTT clients. Automatic reconnection with exponential backoff on disconnect,
+   and certificate rotation handling (matching agent behavior).
 
 **Instance identification:**
 
@@ -384,7 +386,7 @@ MQTT services use the unified service entity:
 | `crates/shared/db/src/entity/service_certificate.rs` | SeaORM entity for service certificates |
 | `crates/shared/db/src/entity/mqtt_client.rs` | SeaORM entity for MQTT config |
 | `crates/shared/db/src/entity/mqtt_lease.rs` | SeaORM entity for leases (managed by controller) |
-| `crates/shared/enrollment/` | `uptrakit-enrollment` crate: shared enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, and CLI args |
+| `crates/shared/service-sdk/` | `uptrakit-service-sdk` crate: shared service SDK — enrollment, identity, TLS (`TofuVerifier`), CA bootstrap (with `ca_pem_fingerprint()` and `--tofu-fingerprint` pinning), WebSocket protocol, `ControllerConnection`, `Backoff`, and CLI args |
 | `crates/ui/web-api/src/mqtt_client_store.rs` | MQTT client config CRUD store |
 | `crates/ui/web-api/src/service_connections.rs` | `ServiceConnectionRegistry` for all connected services (with `CancellationToken`-based connection deduplication) |
 | `crates/ui/web-api/src/notification_service.rs` | `NotificationService` — cross-controller notification outbox |
@@ -397,7 +399,7 @@ MQTT services use the unified service entity:
 | `crates/ui/web-api/src/routes/services.rs` | Unified service management REST endpoints |
 | `crates/core/mqtt/src/main.rs` | Entry point, enrollment flow, authenticated main loop |
 | `crates/core/mqtt/src/cli.rs` | CLI argument definitions |
-| `crates/core/mqtt/src/controller_client.rs` | WebSocket client for controller communication |
+| `crates/shared/service-sdk/src/connection.rs` | Shared `ControllerConnection` — authenticated WebSocket client for controller communication (used by both agent and MQTT) |
 | `crates/core/mqtt/src/tenant_manager.rs` | Per-MQTT-client lifecycle management (push-based, keyed by `mqtt_client_id`) |
 | `crates/core/mqtt/src/mqtt_client.rs` | MQTT broker connection logic |
 | `crates/core/mqtt/src/error.rs` | Application error types |

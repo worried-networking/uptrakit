@@ -1,5 +1,5 @@
 use clap::Parser;
-use uptrakit_enrollment::cli::CommonServiceArgs;
+use uptrakit_service_sdk::cli::CommonServiceArgs;
 
 /// Uptrakit MQTT Service — WebSocket-connected MQTT client service.
 ///

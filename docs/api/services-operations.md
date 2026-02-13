@@ -15,6 +15,22 @@
 - Agent and MQTT services use the same activity tracking fields in `services`: `ip_address` is refreshed on each WebSocket connect, and `last_seen_at`
   is refreshed on connect and heartbeat (`ping`).
 
+## Shared Service Startup Flow
+
+Both agents and MQTT services follow a unified startup sequence provided by the `uptrakit-service-sdk` crate:
+
+1. Initialize tracing with a crate-specific directive (e.g. `uptrakit_agent=info`).
+2. Install the `aws-lc-rs` crypto provider for rustls.
+3. Parse CLI arguments and resolve application directories.
+4. Load identity state; clear if `--force-enroll` is set.
+5. Bootstrap the CA certificate (cached, file, PKI endpoint, TOFU, or system trust).
+6. If already certified, check certificate expiry. If expired, clear enrollment state and re-enroll.
+7. If already certified, enter the authenticated loop with reconnection. On certificate-expired TLS errors, fall back to enrollment.
+8. Run enrollment with exponential backoff on disconnects.
+9. Enter the authenticated loop with reconnection (exponential backoff on disconnect; immediate reconnect on certificate rotation).
+
+Both services use a shared `ControllerConnection` type for all authenticated WebSocket communication, which handles envelope serialization, sequence validation, and WebSocket frame processing (Ping/Pong, Close frames).
+
 ## Multi-Tenancy
 
 - Most tables are tenant-scoped (`tenant_id` required). `services`, `hosts`, `provider_configs`, `software_items`, `settings`, and `mqtt_clients` all

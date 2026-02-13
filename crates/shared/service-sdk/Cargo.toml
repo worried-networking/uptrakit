@@ -1,5 +1,5 @@
 [package]
-name = "uptrakit-enrollment"
+name = "uptrakit-service-sdk"
 edition = "2024"
 license.workspace = true
 authors.workspace = true
@@ -11,6 +11,7 @@ clap = { workspace = true }
 futures-util = { workspace = true }
 hostname = { workspace = true }
 http = { workspace = true }
+rand = { workspace = true }
 rcgen = { workspace = true }
 reqwest = { workspace = true }
 rootcause = { workspace = true }

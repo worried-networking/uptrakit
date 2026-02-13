@@ -26,3 +26,15 @@ Assistant via MQTT.
 
 Agents and MQTT services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The AsyncAPI
 definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
+
+## Service SDK
+
+The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared infrastructure for building Uptrakit services:
+
+- **Enrollment**: WebSocket-based enrollment with certificate issuance.
+- **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
+- **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust).
+- **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation,
+  Ping/Pong handling, and close-frame reason tracking. Used by both agent and MQTT service.
+- **Backoff**: Exponential backoff with jitter for reconnection delays.
+- **CLI**: Common CLI arguments (`--url`, `--config-dir`, `--state-dir`, `--force-enroll`, etc.).

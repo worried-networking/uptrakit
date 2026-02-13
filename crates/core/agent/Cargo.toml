@@ -9,7 +9,6 @@ version.workspace = true
 [dependencies]
 clap = { workspace = true }
 futures-util = { workspace = true }
-rand = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
@@ -18,10 +17,9 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
-tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-uptrakit-enrollment = { path = "../../shared/enrollment" }
+uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uuid = { workspace = true }
@@ -30,3 +28,4 @@ uptrakit-provider-registry = { path = "../../providers/registry" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio-tungstenite = { workspace = true }

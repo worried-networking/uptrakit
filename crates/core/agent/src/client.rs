@@ -1,14 +1,13 @@
-use futures_util::{SinkExt, StreamExt};
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
-use uptrakit_enrollment::ca::{CaTlsMode, fetch_ca_certificate};
-use uptrakit_enrollment::identity::generate_keypair_and_csr;
-use uptrakit_enrollment::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
+use uptrakit_service_sdk::ControllerConnection;
+use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
+use uptrakit_service_sdk::identity::generate_keypair_and_csr;
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerEnvelope, ControllerMessage, DisconnectReason,
-    DisconnectingPayload, IncomingSeq, OutgoingSeq, PingPayload, RenewCertificatePayload,
-    ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
-    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload, now_millis,
+    CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
+    RenewCertificatePayload, ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload,
+    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
+    now_millis,
 };
 
 use crate::error::{Error, Result};
@@ -56,7 +55,7 @@ pub struct AuthenticatedLoopParams<'a> {
     pub ca_pem: Option<&'a [u8]>,
     pub tls_connector: tokio_rustls::TlsConnector,
     pub cert_not_after_ts: Option<i64>,
-    pub identity: &'a uptrakit_enrollment::ServiceIdentityState,
+    pub identity: &'a uptrakit_service_sdk::ServiceIdentityState,
 }
 
 /// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
@@ -73,31 +72,24 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     } = params;
     use std::pin::Pin;
     use std::time::Duration;
-    use tokio_tungstenite::tungstenite::Message;
 
     const PING_INTERVAL: Duration = Duration::from_secs(300);
     const DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120;
 
-    let mut ws_stream = connect_ws(host, port, &tls_connector, None)
+    tracing::info!("connecting to controller (authenticated)");
+    let mut conn = ControllerConnection::connect(host, port, &tls_connector, None)
         .await
         .context_to::<Error>()?;
-
-    let mut out_seq = OutgoingSeq::new();
-    let mut in_seq = IncomingSeq::new();
 
     // Send host info immediately after connecting
     let host_info = crate::host_info::collect_host_info();
-    let report_msg = ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
+    conn.send(ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
         host_info,
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
-    });
-    let report_json =
-        serde_json::to_string(&out_seq.wrap_service(report_msg)).context_to::<Error>()?;
-    ws_stream
-        .send(Message::Text(report_json.into()))
-        .await
-        .context_to::<Error>()?;
+    }))
+    .await
+    .context_to::<Error>()?;
     tracing::debug!(
         "sent ReportHostInfo with agent_version={}",
         env!("CARGO_PKG_VERSION")
@@ -158,17 +150,14 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
                 match event {
                     UpdateEvent::Output(output_msg) => {
-                        let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
+                        conn.send_best_effort(ServiceMessage::UpdateOutput(UpdateOutputPayload {
                             update_history_id,
                             output: output_msg.output,
                             stream: output_msg.stream,
-                        });
-                        if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(output)) {
-                            let _ = ws_stream.send(Message::Text(json.into())).await;
-                        }
+                        })).await;
                     }
                     UpdateEvent::Completed(result) => {
-                        send_update_result(&mut ws_stream, &mut out_seq, update_history_id, result).await;
+                        send_update_result(&mut conn, update_history_id, result).await;
                         in_flight_update = None;
                     }
                 }
@@ -176,12 +165,8 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
             _ = ping_interval.tick() => {
                 let service_ts = now_millis();
-                let ping = ServiceMessage::Ping(PingPayload { service_ts });
-                let ping_json = serde_json::to_string(&out_seq.wrap_service(ping)).context_to::<Error>()?;
-
                 tracing::trace!(service_ts, "sending ping");
-                ws_stream
-                    .send(Message::Text(ping_json.into()))
+                conn.send(ServiceMessage::Ping(PingPayload { service_ts }))
                     .await
                     .context_to::<Error>()?;
             }
@@ -197,45 +182,19 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                 let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)
                     .context_to::<Error>()?;
                 pending_renewal_key = Some(key_pem);
-                let msg = ServiceMessage::RenewCertificate(RenewCertificatePayload {
+                conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
                     csr_pem,
-                });
-                let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<Error>()?;
-                ws_stream.send(Message::Text(json.into())).await.context_to::<Error>()?;
+                }))
+                .await
+                .context_to::<Error>()?;
                 // Reset to far-future so it doesn't fire again
                 renewal_sleep.as_mut().reset(
                     tokio::time::Instant::now() + FAR_FUTURE
                 );
             }
-            msg = ws_stream.next() => {
-                let msg = match msg {
-                    Some(Ok(m)) => m,
-                    Some(Err(e)) if is_peer_closed(&e) => {
-                        tracing::info!("connection closed by controller");
-                        break LoopOutcome::Disconnected;
-                    }
-                    Some(Err(e)) => return Err(e).context_to::<Error>()?,
-                    None => {
-                        tracing::info!("connection closed by controller");
-                        break LoopOutcome::Disconnected;
-                    }
-                };
-
-                match msg {
-                    Message::Text(text) => {
-                        let envelope: ControllerEnvelope = match serde_json::from_str(&text) {
-                            Ok(env) => env,
-                            Err(e) => {
-                                tracing::debug!("ignoring unrecognized controller message: {e}");
-                                continue;
-                            }
-                        };
-                        if let Err(e) = in_seq.validate(envelope.seq) {
-                            tracing::error!("sequence validation failed: {e}");
-                            break LoopOutcome::Disconnected;
-                        }
-                        let controller_msg = envelope.message;
-
+            msg = conn.recv() => {
+                match msg.context_to::<Error>()? {
+                    Some(controller_msg) => {
                         match controller_msg {
                             ControllerMessage::Pong(pong) => {
                                 let now = now_millis();
@@ -330,13 +289,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                     }
                                 };
                                 pending_renewal_key = Some(key_pem);
-                                let renew_msg = serde_json::to_string(
-                                    &out_seq.wrap_service(ServiceMessage::RenewCertificate(RenewCertificatePayload {
-                                        csr_pem,
-                                    })),
-                                )
-                                .context_to::<Error>()?;
-                                if let Err(e) = ws_stream.send(Message::Text(renew_msg.into())).await {
+                                if let Err(e) = conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
+                                    csr_pem,
+                                })).await {
                                     tracing::error!(error = %e, "failed to send renewal request");
                                     break LoopOutcome::Disconnected;
                                 }
@@ -393,8 +348,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 let response = ServiceMessage::VersionCheckResults(VersionCheckResultsPayload {
                                     results,
                                 });
-                                let response_json = serde_json::to_string(&out_seq.wrap_service(response)).context_to::<Error>()?;
-                                if let Err(e) = ws_stream.send(Message::Text(response_json.into())).await {
+                                if let Err(e) = conn.send(response).await {
                                     tracing::error!(error = %e, "failed to send VersionCheckResults");
                                     break LoopOutcome::Disconnected;
                                 }
@@ -415,17 +369,14 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         update_id = %payload.update_history_id,
                                         "rejecting update: another update is already in progress"
                                     );
-                                    let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
+                                    conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                                         update_history_id: payload.update_history_id,
                                         status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                                         from_version: None,
                                         to_version: None,
                                         output: String::new(),
                                         error: Some("Another update is already in progress".to_string()),
-                                    });
-                                    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
-                                        let _ = ws_stream.send(Message::Text(json.into())).await;
-                                    }
+                                    })).await;
                                     continue;
                                 }
 
@@ -441,12 +392,10 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 });
 
                                 // Send UpdateStarted
-                                let started_msg = ServiceMessage::UpdateStarted(UpdateStartedPayload {
+                                if let Err(e) = conn.send(ServiceMessage::UpdateStarted(UpdateStartedPayload {
                                     update_history_id,
                                     from_version: None,
-                                });
-                                let started_json = serde_json::to_string(&out_seq.wrap_service(started_msg)).context_to::<Error>()?;
-                                if let Err(e) = ws_stream.send(Message::Text(started_json.into())).await {
+                                })).await {
                                     tracing::error!(error = %e, "failed to send UpdateStarted");
                                 }
 
@@ -467,27 +416,33 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             }
                         }
                     }
-                    Message::Close(frame) => {
-                        let reason = frame.as_ref().map(|f| f.reason.as_ref()).unwrap_or("");
-                        if reason == "certificate rotated" {
-                            tracing::info!("connection closed: certificate rotated");
-                            break LoopOutcome::Reconnect;
-                        } else if reason == "certificate revoked" {
-                            tracing::warn!("connection closed: certificate revoked");
-                            break LoopOutcome::Disconnected;
-                        } else {
-                            log_close_frame(frame);
-                            break LoopOutcome::Disconnected;
+                    None => {
+                        // Connection closed — check close reason
+                        match conn.close_reason() {
+                            Some("certificate rotated") => {
+                                tracing::info!("connection closed: certificate rotated");
+                                break LoopOutcome::Reconnect;
+                            }
+                            Some("certificate revoked") => {
+                                tracing::warn!("connection closed: certificate revoked");
+                                break LoopOutcome::Disconnected;
+                            }
+                            Some(reason) => {
+                                tracing::warn!(%reason, "connection closed by controller");
+                                break LoopOutcome::Disconnected;
+                            }
+                            None => {
+                                tracing::info!("connection closed by controller");
+                                break LoopOutcome::Disconnected;
+                            }
                         }
                     }
-                    _ => {}
                 }
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received SIGINT, initiating graceful shutdown");
                 break handle_graceful_shutdown(
-                    &mut ws_stream,
-                    &mut out_seq,
+                    &mut conn,
                     in_flight_update.take(),
                     shutdown_timeout_seconds,
                     DisconnectReason::Shutdown,
@@ -497,8 +452,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
             _ = sigterm.recv() => {
                 tracing::info!("received SIGTERM, initiating graceful shutdown");
                 break handle_graceful_shutdown(
-                    &mut ws_stream,
-                    &mut out_seq,
+                    &mut conn,
                     in_flight_update.take(),
                     shutdown_timeout_seconds,
                     DisconnectReason::Shutdown,
@@ -508,8 +462,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
             _ = sighup.recv() => {
                 tracing::info!("received SIGHUP, initiating graceful restart");
                 break handle_graceful_shutdown(
-                    &mut ws_stream,
-                    &mut out_seq,
+                    &mut conn,
                     in_flight_update.take(),
                     shutdown_timeout_seconds,
                     DisconnectReason::Restart,
@@ -520,11 +473,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     };
 
     // Best-effort close — the peer may have already disconnected.
-    match ws_stream.close(None).await {
-        Ok(()) => tracing::info!("websocket closed gracefully"),
-        Err(e) if is_peer_closed(&e) => tracing::info!("websocket already closed by peer"),
-        Err(e) => return Err(e).context_to::<Error>()?,
-    }
+    let _ = conn.close().await;
 
     Ok(outcome)
 }
@@ -537,34 +486,27 @@ enum UpdateEvent {
 
 /// Send the final update result to the controller.
 async fn send_update_result(
-    ws_stream: &mut WsStream,
-    out_seq: &mut OutgoingSeq,
+    conn: &mut ControllerConnection,
     update_history_id: uuid::Uuid,
     result: std::result::Result<crate::update::UpdateExecutionResult, tokio::task::JoinError>,
 ) {
-    use tokio_tungstenite::tungstenite::Message;
-
     match result {
         Ok(exec_result) => {
-            let result_msg = ServiceMessage::UpdateResult(exec_result.result);
-            if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
-                let _ = ws_stream.send(Message::Text(json.into())).await;
-            }
+            conn.send_best_effort(ServiceMessage::UpdateResult(exec_result.result))
+                .await;
             tracing::info!(update_id = %update_history_id, "update execution completed");
         }
         Err(e) => {
             tracing::error!(error = %e, "update task panicked");
-            let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
+            conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                 update_history_id,
                 status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                 from_version: None,
                 to_version: None,
                 output: String::new(),
                 error: Some("Update task panicked".to_string()),
-            });
-            if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
-                let _ = ws_stream.send(Message::Text(json.into())).await;
-            }
+            }))
+            .await;
         }
     }
 }
@@ -574,15 +516,13 @@ async fn send_update_result(
 /// 2. Send Disconnecting message to controller
 /// 3. Return the appropriate LoopOutcome
 async fn handle_graceful_shutdown(
-    ws_stream: &mut WsStream,
-    out_seq: &mut OutgoingSeq,
+    conn: &mut ControllerConnection,
     in_flight_update: Option<InFlightUpdate>,
     timeout_seconds: u32,
     disconnect_reason: DisconnectReason,
     outcome: LoopOutcome,
 ) -> LoopOutcome {
     use std::time::Duration;
-    use tokio_tungstenite::tungstenite::Message;
 
     if let Some(mut update) = in_flight_update {
         tracing::info!(
@@ -600,17 +540,14 @@ async fn handle_graceful_shutdown(
                 biased;
 
                 Some(output_msg) = update.output_rx.recv() => {
-                    let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
+                    conn.send_best_effort(ServiceMessage::UpdateOutput(UpdateOutputPayload {
                         update_history_id: update.update_history_id,
                         output: output_msg.output,
                         stream: output_msg.stream,
-                    });
-                    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(output)) {
-                        let _ = ws_stream.send(Message::Text(json.into())).await;
-                    }
+                    })).await;
                 }
                 result = &mut update.handle => {
-                    send_update_result(ws_stream, out_seq, update.update_history_id, result).await;
+                    send_update_result(conn, update.update_history_id, result).await;
                     break;
                 }
                 _ = tokio::time::sleep_until(deadline) => {
@@ -619,17 +556,14 @@ async fn handle_graceful_shutdown(
                         "shutdown timeout reached, abandoning in-flight update"
                     );
                     // Send a timeout failure result
-                    let result_msg = ServiceMessage::UpdateResult(UpdateResultPayload {
+                    conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
                         update_history_id: update.update_history_id,
                         status: uptrakit_internal_wire::UpdateFinalStatus::Failed,
                         from_version: None,
                         to_version: None,
                         output: String::new(),
                         error: Some(format!("Agent shutdown timeout ({timeout_seconds}s) reached")),
-                    });
-                    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(result_msg)) {
-                        let _ = ws_stream.send(Message::Text(json.into())).await;
-                    }
+                    })).await;
                     break;
                 }
             }
@@ -637,26 +571,22 @@ async fn handle_graceful_shutdown(
 
         // Drain any remaining output messages
         while let Ok(output_msg) = update.output_rx.try_recv() {
-            let output = ServiceMessage::UpdateOutput(UpdateOutputPayload {
+            conn.send_best_effort(ServiceMessage::UpdateOutput(UpdateOutputPayload {
                 update_history_id: update.update_history_id,
                 output: output_msg.output,
                 stream: output_msg.stream,
-            });
-            if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(output)) {
-                let _ = ws_stream.send(Message::Text(json.into())).await;
-            }
+            }))
+            .await;
         }
     }
 
     // Send Disconnecting message to controller
     let disconnecting_msg =
         ServiceMessage::Disconnecting(DisconnectingPayload::new(disconnect_reason));
-    if let Ok(json) = serde_json::to_string(&out_seq.wrap_service(disconnecting_msg)) {
-        if let Err(e) = ws_stream.send(Message::Text(json.into())).await {
-            tracing::debug!(error = %e, "failed to send Disconnecting message");
-        } else {
-            tracing::debug!(reason = ?disconnect_reason, "sent Disconnecting message to controller");
-        }
+    if let Err(e) = conn.send(disconnecting_msg).await {
+        tracing::debug!(error = %e, "failed to send Disconnecting message");
+    } else {
+        tracing::debug!(reason = ?disconnect_reason, "sent Disconnecting message to controller");
     }
 
     outcome
@@ -679,13 +609,13 @@ async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
 ///
 /// Returns an error if the identity has no service ID, since this is only
 /// called during certificate renewal when the identity must be enrolled.
-fn extract_service_id(identity: &uptrakit_enrollment::ServiceIdentityState) -> Result<String> {
+fn extract_service_id(identity: &uptrakit_service_sdk::ServiceIdentityState) -> Result<String> {
     identity
         .service_id()
         .map(|id| id.to_string())
         .ok_or_else(|| {
             report!(Error::Enrollment(
-                uptrakit_enrollment::EnrollmentError::NotEnrolled
+                uptrakit_service_sdk::EnrollmentError::NotEnrolled
             ))
         })
 }
@@ -817,7 +747,7 @@ mod tests {
     #[test]
     fn extract_service_id_without_id_returns_error() {
         let dir = std::path::Path::new("/tmp/nonexistent-test-dir");
-        let identity = uptrakit_enrollment::ServiceIdentityState::new(dir, dir);
+        let identity = uptrakit_service_sdk::ServiceIdentityState::new(dir, dir);
         // No service.json loaded → service_id is None → returns error
         assert!(extract_service_id(&identity).is_err());
     }
@@ -834,7 +764,7 @@ mod tests {
         tokio::fs::write(&state_path, json.to_string())
             .await
             .expect("write");
-        let mut identity = uptrakit_enrollment::ServiceIdentityState::new(dir.path(), dir.path());
+        let mut identity = uptrakit_service_sdk::ServiceIdentityState::new(dir.path(), dir.path());
         identity.load().await.expect("load");
         assert_eq!(
             extract_service_id(&identity).expect("should have id"),

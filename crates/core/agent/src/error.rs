@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_enrollment::{EnrollmentError, is_rustls_cert_expired};
+use uptrakit_service_sdk::{EnrollmentError, is_rustls_cert_expired};
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
@@ -9,15 +9,9 @@ pub enum Error {
     #[error(transparent)]
     Enrollment(#[from] EnrollmentError),
 
-    // ── I/O and serialization (needed in authenticated loop) ─────────
+    // ── I/O (needed for file operations in authenticated loop) ────────
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-
-    #[error("WebSocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
-
-    #[error("JSON serialization error: {0}")]
-    Json(#[from] serde_json::Error),
 
     // ── Agent-specific ───────────────────────────────────────────────
     #[error("update execution failed: {0}")]
@@ -44,9 +38,6 @@ impl Error {
     pub fn is_cert_expired(&self) -> bool {
         match self {
             Error::Enrollment(e) => e.is_cert_expired(),
-            Error::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err)) => {
-                is_rustls_cert_expired(io_err)
-            }
             Error::Io(io_err) => is_rustls_cert_expired(io_err),
             _ => false,
         }
@@ -58,8 +49,6 @@ pub type Result<T> = std::result::Result<T, Report<Error>>;
 impl_report_conversion! {
     EnrollmentError => Error::Enrollment,
     std::io::Error => Error::Io,
-    tokio_tungstenite::tungstenite::Error => Error::WebSocket,
-    serde_json::Error => Error::Json,
 }
 
 #[cfg(test)]
@@ -97,11 +86,11 @@ mod tests {
     }
 
     #[test]
-    fn is_cert_expired_websocket_wrapping_rustls() {
+    fn is_cert_expired_enrollment_websocket_wrapping_rustls() {
         let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
         let io_err = std::io::Error::other(rustls_err);
         let ws_err = tokio_tungstenite::tungstenite::Error::Io(io_err);
-        let err = Error::WebSocket(ws_err);
+        let err = Error::Enrollment(EnrollmentError::WebSocket(ws_err));
         assert!(err.is_cert_expired());
     }
 
@@ -111,12 +100,6 @@ mod tests {
             std::io::ErrorKind::NotFound,
             "file not found",
         ));
-        assert!(!err.is_cert_expired());
-    }
-
-    #[test]
-    fn is_cert_expired_unrelated_websocket() {
-        let err = Error::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
         assert!(!err.is_cert_expired());
     }
 

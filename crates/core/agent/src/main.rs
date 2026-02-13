@@ -1,4 +1,3 @@
-mod backoff;
 mod cli;
 mod client;
 mod error;
@@ -11,7 +10,7 @@ use std::time::Duration;
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
-use uptrakit_enrollment::ServiceIdentityState;
+use uptrakit_service_sdk::ServiceIdentityState;
 
 use cli::Args;
 use client::LoopOutcome;
@@ -24,6 +23,9 @@ async fn main() {
         Err(_) => EnvFilter::from_default_env(),
     };
     tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    // Install the default crypto provider for rustls
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let args = Args::parse();
 
@@ -38,27 +40,26 @@ async fn main() {
 }
 
 async fn run(args: &Args) -> error::Result<()> {
+    tracing::info!("starting uptrakit-agent service");
+
     // Parse URL early
     let (host, port) = args.common.parsed_url().map_err(|s| {
         report!(Error::Enrollment(
-            uptrakit_enrollment::EnrollmentError::Enrollment(s)
+            uptrakit_service_sdk::EnrollmentError::Enrollment(s)
         ))
     })?;
     let base_url = args.common.base_url();
     let pki_addr = args.common.pki_addr();
 
-    // Install the default crypto provider for rustls
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
     // Resolve application directories
     let app_dirs = args.common.resolve_dirs("agent").map_err(|e| {
         report!(Error::Enrollment(
-            uptrakit_enrollment::EnrollmentError::Enrollment(e.to_string())
+            uptrakit_service_sdk::EnrollmentError::Enrollment(e.to_string())
         ))
     })?;
     app_dirs.ensure_dirs().map_err(|e| {
         report!(Error::Enrollment(
-            uptrakit_enrollment::EnrollmentError::Enrollment(format!(
+            uptrakit_service_sdk::EnrollmentError::Enrollment(format!(
                 "failed to create directories: {e}"
             ))
         ))
@@ -80,7 +81,7 @@ async fn run(args: &Args) -> error::Result<()> {
     }
 
     // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust
-    let ca_pem = uptrakit_enrollment::ca::bootstrap_ca(
+    let ca_pem = uptrakit_service_sdk::ca::bootstrap_ca(
         &mut identity,
         base_url,
         args.common.tofu,
@@ -105,7 +106,7 @@ async fn run(args: &Args) -> error::Result<()> {
                 .context_to::<Error>()?;
             // Fall through to enrollment below
         } else {
-            tracing::info!("loaded existing agent certificate from disk");
+            tracing::info!("loaded existing certificate from disk");
             match run_authenticated_with_reconnect(
                 &host,
                 port,
@@ -136,14 +137,14 @@ async fn run(args: &Args) -> error::Result<()> {
     // Enrollment (existing service.json OR fresh enrollment)
     // Retry on disconnect — e.g. a merge transfers our identity while we wait.
     let tls_connector = match ca_pem.as_deref() {
-        Some(pem) => uptrakit_enrollment::tls::build_tls_connector(pem).context_to::<Error>()?,
+        Some(pem) => uptrakit_service_sdk::tls::build_tls_connector(pem).context_to::<Error>()?,
         None => {
-            uptrakit_enrollment::tls::build_system_trust_tls_connector().context_to::<Error>()?
+            uptrakit_service_sdk::tls::build_system_trust_tls_connector().context_to::<Error>()?
         }
     };
 
     let mut enrollment_backoff =
-        backoff::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+        uptrakit_service_sdk::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     loop {
         match do_enrollment(args, &host, port, &mut identity, &tls_connector).await {
             Ok(()) => break,
@@ -184,7 +185,7 @@ async fn do_enrollment(
     if identity.is_enrolled_only() {
         // Resume: reconnect with Bearer header (existing service.json)
         tracing::info!("reconnecting with enrollment secret");
-        uptrakit_enrollment::ws::resume_enrollment(identity, host, port, tls_connector)
+        uptrakit_service_sdk::ws::resume_enrollment(identity, host, port, tls_connector)
             .await
             .context_to::<Error>()?;
     } else {
@@ -195,7 +196,7 @@ async fn do_enrollment(
         tracing::info!(machine_id = %host_info.machine_id, "collected host info");
 
         tracing::info!("enrolling via WebSocket");
-        uptrakit_enrollment::ws::run_enrollment(uptrakit_enrollment::ws::EnrollmentParams {
+        uptrakit_service_sdk::ws::run_enrollment(uptrakit_service_sdk::ws::EnrollmentParams {
             identity,
             host,
             port,
@@ -224,26 +225,26 @@ async fn run_authenticated_with_reconnect(
     identity: &ServiceIdentityState,
 ) -> error::Result<()> {
     let mut reconnect_backoff =
-        backoff::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
+        uptrakit_service_sdk::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     loop {
         let cert_pem = identity.cert_pem().ok_or_else(|| {
             report!(Error::Enrollment(
-                uptrakit_enrollment::EnrollmentError::NotCertified
+                uptrakit_service_sdk::EnrollmentError::NotCertified
             ))
         })?;
         let key_pem = identity.key_pem().ok_or_else(|| {
             report!(Error::Enrollment(
-                uptrakit_enrollment::EnrollmentError::NotCertified
+                uptrakit_service_sdk::EnrollmentError::NotCertified
             ))
         })?;
         let cert_not_after_ts = identity.cert_not_after_ms();
 
         let mtls_connector = match ca_pem {
-            Some(pem) => uptrakit_enrollment::tls::build_tls_connector_with_client_cert(
+            Some(pem) => uptrakit_service_sdk::tls::build_tls_connector_with_client_cert(
                 pem, cert_pem, &key_pem,
             )
             .context_to::<Error>()?,
-            None => uptrakit_enrollment::tls::build_system_trust_tls_connector_with_client_cert(
+            None => uptrakit_service_sdk::tls::build_system_trust_tls_connector_with_client_cert(
                 cert_pem, &key_pem,
             )
             .context_to::<Error>()?,
