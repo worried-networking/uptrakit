@@ -34,8 +34,8 @@ Returns static configuration for the service:
 
 Returns enrollment-time parameters:
 
-- `service_type` — `ServiceType::Agent` or `ServiceType::Mqtt`.
-- `host_info` — optional `HostInfo` struct. The agent collects host metadata; MQTT sends `None`.
+- `service_type` — `ServiceType::Agent` or `ServiceType::Mqtt`. Host information is not part of enrollment — agents
+  report hosts via `ReportHosts` after authentication.
 
 ### `run_authenticated_loop()`
 
@@ -108,7 +108,6 @@ impl ServiceHandler for MyHandler {
     fn enrollment_info(&self) -> ServiceEnrollmentInfo {
         ServiceEnrollmentInfo {
             service_type: uptrakit_internal_wire::ServiceType::Agent,
-            host_info: None,
         }
     }
 

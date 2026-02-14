@@ -38,7 +38,6 @@ impl ServiceHandler for MqttHandler {
     fn enrollment_info(&self) -> ServiceEnrollmentInfo {
         ServiceEnrollmentInfo {
             service_type: uptrakit_internal_wire::ServiceType::Mqtt,
-            host_info: None,
         }
     }
 

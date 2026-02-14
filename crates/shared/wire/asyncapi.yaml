@@ -1,14 +1,14 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Service-Controller Protocol
-  version: 0.0.8
+  version: 0.0.10
   description: |
     WebSocket protocol for communication between Uptrakit services (agents, MQTT bridges, etc.) and the controller.
 
     ## Service Lifecycle
 
     1. `HTTP GET /api/v1/pki/ca.crt` — TOFU CA pinning (only HTTP endpoint used by services)
-    2. `WSS /api/v1/ws/service` (no auth) — service sends `Enroll` message with hostname, host_info, and service_type
+    2. `WSS /api/v1/ws/service` (no auth) — service sends `Enroll` message with hostname and service_type
     3. Controller generates UUIDv7 `service_id` and responds with `Enrolled` message
     4. Service persists `service_id` + `enrollment_secret`
        (connection promoted in-place — controller now tracks this session)
@@ -122,8 +122,8 @@ channels:
         $ref: "#/components/messages/certificate"
       error:
         $ref: "#/components/messages/error"
-      reportHostInfo:
-        $ref: "#/components/messages/reportHostInfo"
+      reportHosts:
+        $ref: "#/components/messages/reportHosts"
       renewCertificate:
         $ref: "#/components/messages/renewCertificate"
       serviceSettings:
@@ -204,8 +204,8 @@ operations:
       - $ref: "#/channels/serviceConnection/messages/enroll"
     summary: Service sends an enrollment request
     description: |
-      An anonymous service sends its hostname, friendly name, host info (optional),
-      service_type, and optional enrollment token. The controller generates a UUIDv7
+      An anonymous service sends its hostname, friendly name, service_type, and optional
+      enrollment token. The controller generates a UUIDv7
       `service_id`, creates a service record, and responds with an `Enrolled` message
       containing the service_id and enrollment_secret. The actual keypair generation
       and CSR are deferred until after approval.
@@ -271,17 +271,19 @@ operations:
       The private key is not included — the service already holds it locally.
       The service should persist the certificate and reconnect using mTLS.
 
-  sendReportHostInfo:
+  sendReportHosts:
     action: send
     channel:
       $ref: "#/channels/serviceConnection"
     messages:
-      - $ref: "#/channels/serviceConnection/messages/reportHostInfo"
+      - $ref: "#/channels/serviceConnection/messages/reportHosts"
     summary: Agent reports host machine information
     description: |
       Authenticated agent services send this message immediately after connecting
-      via mTLS. The controller uses the machine_id to find or create a Host entity
-      and link it to the service. This enables host tracking across re-enrollments.
+      via mTLS. Contains one or more host entries, enabling a single service to
+      manage multiple hosts (e.g. a future SSH-backed agent). The controller uses
+      each host's machine_id to find or create a Host entity and link it to the
+      service. This enables host tracking across re-enrollments.
 
   receiveError:
     action: receive
@@ -650,13 +652,13 @@ components:
       payload:
         $ref: "#/components/schemas/errorPayload"
 
-    reportHostInfo:
-      name: report_host_info
-      title: Report Host Info Message
+    reportHosts:
+      name: report_hosts
+      title: Report Hosts Message
       summary: Agent reports host machine information to the controller (agent-only)
       contentType: application/json
       payload:
-        $ref: "#/components/schemas/reportHostInfoPayload"
+        $ref: "#/components/schemas/reportHostsPayload"
 
     renewCertificate:
       name: renew_certificate
@@ -911,9 +913,6 @@ components:
           description: Optional pre-shared enrollment token for auto-approval
           examples:
             - tok-abc123
-        host_info:
-          $ref: "#/components/schemas/hostInfo"
-          description: Host machine information for automatic host matching (agent services only, optional for MQTT services)
 
     enrolledPayload:
       type: object
@@ -1120,12 +1119,12 @@ components:
             - x86_64
             - aarch64
 
-    reportHostInfoPayload:
+    reportHostsPayload:
       type: object
       required:
         - seq
         - type
-        - host_info
+        - hosts
         - agent_version
         - protocol_version
       properties:
@@ -1136,11 +1135,16 @@ components:
           description: Monotonically increasing sequence number for replay protection
         type:
           type: string
-          const: report_host_info
+          const: report_hosts
           description: Message type discriminator
-        host_info:
-          $ref: "#/components/schemas/hostInfo"
-          description: Host machine information
+        hosts:
+          type: array
+          items:
+            $ref: "#/components/schemas/hostInfo"
+          description: |
+            One or more host machines managed by this service. Enables a single
+            service instance (e.g. a future SSH-backed agent) to report multiple
+            remote hosts.
         agent_version:
           type: string
           description: Agent binary version (semver format)

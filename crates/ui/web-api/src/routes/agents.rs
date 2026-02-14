@@ -59,7 +59,6 @@ pub(crate) struct EnrollParams<'a> {
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
     pub ip_address: Option<IpAddr>,
-    pub host_info: Option<&'a HostInfo>,
 }
 
 /// Core enrollment logic: creates agent record, returns model + plaintext secret.
@@ -76,7 +75,6 @@ pub(crate) async fn do_enroll(
         friendly_name,
         enrollment_token,
         ip_address,
-        host_info,
     } = params;
     if hostname.trim().is_empty() {
         bail!(AgentRouteError::BadRequest(
@@ -160,21 +158,6 @@ pub(crate) async fn do_enroll(
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
-
-    // Link agent to host (non-fatal on failure)
-    if let Some(info) = host_info
-        && let Err(e) = find_or_create_host_and_link(
-            db,
-            tenant_id,
-            inserted.id,
-            info,
-            hostname,
-            ip_str.as_deref(),
-        )
-        .await
-    {
-        tracing::warn!(error = %e, "failed to link agent to host during enrollment");
-    }
 
     Ok(EnrollResult {
         agent: inserted,

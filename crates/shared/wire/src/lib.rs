@@ -201,7 +201,7 @@ pub enum ServiceMessage {
     RenewCertificate(RenewCertificatePayload),
     Disconnecting(DisconnectingPayload),
     // -- Agent-specific --
-    ReportHostInfo(ReportHostInfoPayload),
+    ReportHosts(ReportHostsPayload),
     VersionCheckResults(VersionCheckResultsPayload),
     UpdateStarted(UpdateStartedPayload),
     UpdateOutput(UpdateOutputPayload),
@@ -272,8 +272,8 @@ pub struct HostInfo {
 
 /// Payload for service enrollment request.
 ///
-/// Both agents and MQTT services use this payload. Agents set `host_info` to
-/// report machine identity; MQTT services leave it `None`.
+/// Used by both agents and MQTT services. Host information is reported
+/// separately via [`ReportHostsPayload`] after authentication.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrollPayload {
     pub hostname: String,
@@ -282,10 +282,6 @@ pub struct EnrollPayload {
     pub enrollment_token: Option<SecretString>,
     /// Identifies the type of service enrolling.
     pub service_type: ServiceType,
-    /// Host machine information for automatic host matching.
-    /// Set by agents, absent for MQTT services.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub host_info: Option<HostInfo>,
 }
 
 /// Payload for requesting a client certificate after approval.
@@ -303,10 +299,13 @@ pub struct RenewCertificatePayload {
 }
 
 /// Payload for reporting host information (sent by authenticated agents on connect).
+///
+/// Supports multiple hosts per message, enabling a single service instance
+/// (e.g. a future SSH-backed agent) to manage several remote hosts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReportHostInfoPayload {
-    /// Host machine information.
-    pub host_info: HostInfo,
+pub struct ReportHostsPayload {
+    /// One or more host machines managed by this service.
+    pub hosts: Vec<HostInfo>,
     /// Agent binary version (e.g., "0.0.1").
     pub agent_version: String,
     /// Wire protocol version reported by the agent.
@@ -877,18 +876,12 @@ mod tests {
             friendly_name: "Node One".to_string(),
             enrollment_token: Some(SecretString::new("tok-123".into())),
             service_type: ServiceType::Agent,
-            host_info: Some(HostInfo {
-                machine_id: "abc123".to_string(),
-                os_type: Some("linux".to_string()),
-                os_version: Some("Ubuntu 24.04".to_string()),
-                architecture: Some("x86_64".to_string()),
-            }),
         });
         let json = serde_json::to_string(&msg).unwrap();
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
-        assert!(json.contains(r#""machine_id":"abc123"#));
         assert!(json.contains(r#""service_type":"agent"#));
+        assert!(!json.contains("host_info"));
     }
 
     #[test]
@@ -898,13 +891,11 @@ mod tests {
             friendly_name: "MQTT Service Node 1".to_string(),
             enrollment_token: Some(SecretString::new("tok-456".into())),
             service_type: ServiceType::Mqtt,
-            host_info: None,
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"enroll"#));
         assert!(json.contains(r#""hostname":"mqtt-service-1"#));
         assert!(json.contains(r#""service_type":"mqtt"#));
-        assert!(!json.contains("host_info"));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -916,18 +907,10 @@ mod tests {
             friendly_name: "Node Two".to_string(),
             enrollment_token: None,
             service_type: ServiceType::Agent,
-            host_info: Some(HostInfo {
-                machine_id: "def456".to_string(),
-                os_type: None,
-                os_version: None,
-                architecture: None,
-            }),
         });
         let json = serde_json::to_string(&msg).unwrap();
         // enrollment_token should be omitted when None
         assert!(!json.contains("enrollment_token"));
-        // Optional host_info fields should be omitted when None
-        assert!(!json.contains("os_type"));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -961,20 +944,48 @@ mod tests {
     }
 
     #[test]
-    fn report_host_info_serialization_roundtrip() {
-        let msg = ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
-            host_info: HostInfo {
+    fn report_hosts_serialization_roundtrip() {
+        let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
+            hosts: vec![HostInfo {
                 machine_id: "machine-42".to_string(),
                 os_type: Some("linux".to_string()),
                 os_version: Some("Ubuntu 24.04 LTS".to_string()),
                 architecture: Some("x86_64".to_string()),
-            },
+            }],
             agent_version: "0.0.1".to_string(),
             protocol_version: PROTOCOL_VERSION,
         });
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains(r#""type":"report_host_info"#));
+        assert!(json.contains(r#""type":"report_hosts"#));
         assert!(json.contains(r#""agent_version":"0.0.1"#));
+        assert!(json.contains(r#""hosts":[{"machine_id":"machine-42""#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn report_hosts_multiple_hosts() {
+        let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
+            hosts: vec![
+                HostInfo {
+                    machine_id: "host-a".to_string(),
+                    os_type: Some("linux".to_string()),
+                    os_version: None,
+                    architecture: None,
+                },
+                HostInfo {
+                    machine_id: "host-b".to_string(),
+                    os_type: Some("linux".to_string()),
+                    os_version: Some("Debian 12".to_string()),
+                    architecture: Some("aarch64".to_string()),
+                },
+            ],
+            agent_version: "0.0.1".to_string(),
+            protocol_version: PROTOCOL_VERSION,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""host-a"#));
+        assert!(json.contains(r#""host-b"#));
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -2011,20 +2022,6 @@ mod tests {
         assert!(result.is_err(), "EnrollPayload requires service_type");
     }
 
-    #[test]
-    fn enroll_host_info_is_optional() {
-        // MQTT services do not send host_info.
-        let json =
-            r#"{"type":"enroll","hostname":"mqtt-1","friendly_name":"MQTT","service_type":"mqtt"}"#;
-        let msg: ServiceMessage = serde_json::from_str(json).unwrap();
-        if let ServiceMessage::Enroll(payload) = msg {
-            assert!(payload.host_info.is_none());
-            assert_eq!(payload.service_type, ServiceType::Mqtt);
-        } else {
-            panic!("Expected Enroll");
-        }
-    }
-
     // =========================================================================
     // Envelope and sequence number tests
     // =========================================================================
@@ -2073,7 +2070,6 @@ mod tests {
                 friendly_name: "Test".to_string(),
                 enrollment_token: None,
                 service_type: ServiceType::Agent,
-                host_info: None,
             }),
         };
         let json = serde_json::to_string(&envelope).unwrap();

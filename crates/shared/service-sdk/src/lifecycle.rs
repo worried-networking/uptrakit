@@ -11,7 +11,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{HostInfo, ServiceType};
+use uptrakit_internal_wire::ServiceType;
 
 use crate::Backoff;
 use crate::cli::CommonServiceArgs;
@@ -45,8 +45,6 @@ pub struct ServiceConfig {
 pub struct ServiceEnrollmentInfo {
     /// Whether this is an Agent or Mqtt service.
     pub service_type: ServiceType,
-    /// Host information collected by the agent; MQTT sends `None`.
-    pub host_info: Option<HostInfo>,
 }
 
 /// Context provided by the lifecycle to the authenticated loop.
@@ -77,7 +75,7 @@ pub trait ServiceHandler {
     /// Return static configuration for this service.
     fn config(&self) -> ServiceConfig;
 
-    /// Return enrollment-time parameters (service type and optional host info).
+    /// Return enrollment-time parameters (service type).
     fn enrollment_info(&self) -> ServiceEnrollmentInfo;
 
     /// Run the authenticated event loop until a [`LoopOutcome`] is reached.
@@ -246,7 +244,6 @@ async fn do_enrollment(
             friendly_name: &friendly_name,
             enrollment_token: args.enrollment_token.as_deref(),
             service_type: enrollment_info.service_type,
-            host_info: enrollment_info.host_info,
         })
         .await?;
     }

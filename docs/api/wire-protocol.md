@@ -25,7 +25,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ## Agent Lifecycle
 
-1. Connect anonymously and send `enroll` with host info + optional enrollment token.
+1. Connect anonymously and send `enroll` with hostname, service type, and optional enrollment token.
 1. Controller assigns UUIDv7 `service_id` and responds with `enrolled` (includes enrollment secret).
 1. Agent generates an ECDSA P-256 keypair locally and submits a CSR (`request_certificate`).
 1. Controller validates the CSR, signs it, and returns `certificate`.
@@ -41,7 +41,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Agent-specific (service -> controller)
 
-`report_host_info`, `version_check_results`, `update_started`, `update_output`, `update_result`
+`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
 ### MQTT-specific (service -> controller)
 

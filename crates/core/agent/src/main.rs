@@ -26,12 +26,8 @@ impl ServiceHandler for AgentHandler {
     }
 
     fn enrollment_info(&self) -> ServiceEnrollmentInfo {
-        let host_info = host_info::collect_host_info();
-        tracing::info!(machine_id = %host_info.machine_id, "collected host info");
-
         ServiceEnrollmentInfo {
             service_type: uptrakit_internal_wire::ServiceType::Agent,
-            host_info: Some(host_info),
         }
     }
 

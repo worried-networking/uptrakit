@@ -2,7 +2,7 @@ use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
     CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
-    RenewCertificatePayload, ReportHostInfoPayload, ServiceMessage, UpdateOutputPayload,
+    RenewCertificatePayload, ReportHostsPayload, ServiceMessage, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
     now_millis,
 };
@@ -83,15 +83,15 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
     // Send host info immediately after connecting
     let host_info = crate::host_info::collect_host_info();
-    conn.send(ServiceMessage::ReportHostInfo(ReportHostInfoPayload {
-        host_info,
+    conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
+        hosts: vec![host_info],
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
     }))
     .await
     .context_to::<Error>()?;
     tracing::debug!(
-        "sent ReportHostInfo with agent_version={}",
+        "sent ReportHosts with agent_version={}",
         env!("CARGO_PKG_VERSION")
     );
 

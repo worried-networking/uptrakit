@@ -64,7 +64,7 @@ const MAX_UPDATE_OUTPUT_BYTES: usize = 1_048_576;
 ///
 /// Called by [`super::service_ws`] after certificate validation, service status
 /// check, and sending `ServiceSettings`. Owns the agent-specific message loop
-/// (ReportHostInfo, VersionCheckResults, Update*, RenewCertificate).
+/// (ReportHosts, VersionCheckResults, Update*, RenewCertificate).
 pub(crate) async fn handle_agent_authenticated(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
@@ -105,7 +105,7 @@ pub(crate) async fn handle_agent_authenticated(
     }
 
     // Cache host IDs linked to this agent for update ownership validation.
-    // Refreshed on ReportHostInfo (which may link new hosts).
+    // Refreshed on ReportHosts (which may link new hosts).
     let mut linked_host_ids: HashSet<uuid::Uuid> = load_linked_host_ids(&state.db, agent_id)
         .await
         .unwrap_or_default();
@@ -145,7 +145,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     tracing::warn!(error = %e, %agent_id, "failed to record service activity");
                                 }
                             }
-                            ServiceMessage::ReportHostInfo(payload) => {
+                            ServiceMessage::ReportHosts(payload) => {
                                 if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
                                     tracing::warn!(
                                         %agent_id,
@@ -216,15 +216,17 @@ pub(crate) async fn handle_agent_authenticated(
                                     tracing::error!(error = %e, "failed to update client_version");
                                 }
 
-                                if let Err(e) = find_or_create_host_and_link(
-                                    &state.db,
-                                    agent_model.tenant_id,
-                                    agent_id,
-                                    &payload.host_info,
-                                    &agent_model.hostname,
-                                    agent_model.ip_address.as_deref(),
-                                ).await {
-                                    tracing::warn!(error = %e, "failed to link host on ReportHostInfo");
+                                for host_info in &payload.hosts {
+                                    if let Err(e) = find_or_create_host_and_link(
+                                        &state.db,
+                                        agent_model.tenant_id,
+                                        agent_id,
+                                        host_info,
+                                        &agent_model.hostname,
+                                        agent_model.ip_address.as_deref(),
+                                    ).await {
+                                        tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host");
+                                    }
                                 }
 
                                 // Refresh cached host IDs (may have linked a new host).
@@ -743,8 +745,8 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     }
                                 }
                             }
-                            ServiceMessage::ReportHostInfo(_) => {
-                                // Host linking happens at enrollment; ignore during enrolled loop
+                            ServiceMessage::ReportHosts(_) => {
+                                // Host linking not supported during enrolled loop
                             }
                             ServiceMessage::Enroll(_) => {
                                 let err = ControllerMessage::Error(ErrorPayload {

@@ -320,7 +320,7 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 1. **CA bootstrap**: Cached CA → `--ca-cert` file → `--pki-addr` fetch → `--tofu` TOFU (with optional
    `--tofu-fingerprint` SHA-256 pinning) → system trust (via `uptrakit_service_sdk::ca::bootstrap_ca`)
 1. **Enrollment**: Connect to `/api/v1/ws/service` anonymously, send `Enroll` with `service_type: "mqtt"`,
-   hostname/friendly_name/enrollment_token (no `host_info`), receive `Enrolled` with service_id and enrollment_secret
+   hostname/friendly_name/enrollment_token, receive `Enrolled` with service_id and enrollment_secret
    (saved to state dir) (via `uptrakit_service_sdk::ws::run_enrollment`)
 1. **Certificate issuance**: Reconnect with bearer token (enrollment_secret), send CSR, receive signed certificate
    (saved to state dir) (via `uptrakit_service_sdk::ws::resume_enrollment`)
@@ -346,7 +346,7 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 **Wire protocol:**
 
 Agents and MQTT services share a unified wire protocol (`ServiceMessage` / `ControllerMessage`) defined in
-`crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHostInfo`,
+`crates/shared/wire/src/lib.rs`. `ServiceMessage` contains both agent-specific variants (`ReportHosts`,
 `VersionCheckResults`, `UpdateStarted`, `UpdateOutput`, `UpdateResult`) and MQTT-specific variants (`Register`,
 `ReleaseTenants`), plus shared variants (`Enroll`, `RequestCertificate`, `RenewCertificate`, `Ping`, `Disconnecting`).
 `ControllerMessage` is fully shared. The `service_ws.rs` module is the single public WebSocket entry point;

@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uptrakit_internal_wire::{
     CertificatePayload, ControllerEnvelope, ControllerMessage, EnrollPayload, EnrolledPayload,
-    EnrollmentStatus, HostInfo, IncomingSeq, OutgoingSeq, RequestCertificatePayload, SecretString,
+    EnrollmentStatus, IncomingSeq, OutgoingSeq, RequestCertificatePayload, SecretString,
     ServiceMessage, ServiceType,
 };
 
@@ -325,7 +325,6 @@ pub struct EnrollmentParams<'a> {
     pub friendly_name: &'a str,
     pub enrollment_token: Option<&'a str>,
     pub service_type: ServiceType,
-    pub host_info: Option<HostInfo>,
 }
 
 /// Run a fresh enrollment flow: enroll → wait for approval → generate CSR → request certificate.
@@ -341,7 +340,6 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
         friendly_name,
         enrollment_token,
         service_type,
-        host_info,
     } = params;
     let mut ws = connect_ws(host, port, tls_connector, None).await?;
     let mut out_seq = OutgoingSeq::new();
@@ -356,7 +354,6 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
             friendly_name: friendly_name.to_string(),
             enrollment_token: enrollment_token.map(|s| SecretString::new(s.to_string())),
             service_type,
-            host_info,
         },
     )
     .await?;
