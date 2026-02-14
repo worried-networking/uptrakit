@@ -12,7 +12,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use uptrakit_internal_wire::{
     ApprovedPayload, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload, IncomingSeq,
     OutgoingSeq, PongPayload, RejectedPayload, ServiceEnvelope, ServiceMessage,
-    ServiceSettingsPayload, now_millis,
+    ServiceSettingsPayload, close_reason, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 
@@ -453,12 +453,12 @@ async fn handle_authenticated(
                     %service_id,
                     "rejected connection: no non-revoked certificate found for service"
                 );
-                let _ = close_with_reason(&mut sink, "no valid certificate").await;
+                let _ = close_with_reason(&mut sink, close_reason::NO_VALID_CERTIFICATE).await;
                 return;
             }
             Err(e) => {
                 tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, "internal error").await;
+                let _ = close_with_reason(&mut sink, close_reason::INTERNAL_ERROR).await;
                 return;
             }
         }
@@ -481,7 +481,7 @@ async fn handle_authenticated(
                         serial_number = %cert_serial,
                         "rejected connection: certificate is revoked"
                     );
-                    let _ = close_with_reason(&mut sink, "certificate revoked").await;
+                    let _ = close_with_reason(&mut sink, close_reason::CERTIFICATE_REVOKED).await;
                     return;
                 }
                 record
@@ -492,12 +492,12 @@ async fn handle_authenticated(
                     serial_number = %cert_serial,
                     "rejected connection: certificate not recognized"
                 );
-                let _ = close_with_reason(&mut sink, "certificate not recognized").await;
+                let _ = close_with_reason(&mut sink, close_reason::CERTIFICATE_NOT_RECOGNIZED).await;
                 return;
             }
             Err(e) => {
                 tracing::error!(error = %e, "certificate validation check failed");
-                let _ = close_with_reason(&mut sink, "internal error").await;
+                let _ = close_with_reason(&mut sink, close_reason::INTERNAL_ERROR).await;
                 return;
             }
         }
@@ -511,24 +511,24 @@ async fn handle_authenticated(
         Ok(Some(svc)) => {
             if svc.deactivated_at.is_some() {
                 tracing::warn!(%service_id, "deactivated service connected with valid certificate");
-                let _ = close_with_reason(&mut sink, "service deactivated").await;
+                let _ = close_with_reason(&mut sink, close_reason::SERVICE_DEACTIVATED).await;
                 return;
             }
             if svc.status != service_entity::ServiceStatus::Approved {
                 tracing::warn!(%service_id, "rejected connection: service not approved");
-                let _ = close_with_reason(&mut sink, "service not approved").await;
+                let _ = close_with_reason(&mut sink, close_reason::SERVICE_NOT_APPROVED).await;
                 return;
             }
             svc
         }
         Ok(None) => {
             tracing::warn!(%service_id, "rejected connection: service not found");
-            let _ = close_with_reason(&mut sink, "service not found").await;
+            let _ = close_with_reason(&mut sink, close_reason::SERVICE_NOT_FOUND).await;
             return;
         }
         Err(e) => {
             tracing::error!(error = %e, "service status check failed");
-            let _ = close_with_reason(&mut sink, "internal error").await;
+            let _ = close_with_reason(&mut sink, close_reason::INTERNAL_ERROR).await;
             return;
         }
     };
@@ -729,7 +729,7 @@ async fn handle_anonymous(
             Ok(None) => return,
             Err(_) => {
                 tracing::warn!("anonymous connection timed out after {ANONYMOUS_TIMEOUT:?}");
-                let _ = close_with_reason(&mut sink, "enrollment timeout").await;
+                let _ = close_with_reason(&mut sink, close_reason::ENROLLMENT_TIMEOUT).await;
                 return;
             }
         };

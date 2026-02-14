@@ -12,3 +12,4 @@ thiserror = { workspace = true }
 rootcause = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+uptrakit-shared-types = { workspace = true }

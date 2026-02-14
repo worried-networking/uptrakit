@@ -7,21 +7,19 @@ use uptrakit_provider_core::{
     UpdateOutputStream, Version,
 };
 
+use crate::config::ProxmoxHelperScriptsConfig;
+
 /// Provider for Proxmox Helper Scripts.
 ///
 /// Executes updates by running the helper script via `curl | bash`.
-pub struct ProxmoxHelperScriptsProvider;
-
-impl Default for ProxmoxHelperScriptsProvider {
-    fn default() -> Self {
-        Self
-    }
+pub struct ProxmoxHelperScriptsProvider {
+    config: ProxmoxHelperScriptsConfig,
 }
 
 impl ProxmoxHelperScriptsProvider {
-    /// Create a new Proxmox Helper Scripts provider.
-    pub fn new() -> Self {
-        Self
+    /// Create a new Proxmox Helper Scripts provider with the given configuration.
+    pub fn new(config: ProxmoxHelperScriptsConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -39,16 +37,11 @@ impl Provider for ProxmoxHelperScriptsProvider {
         &self,
         _package_identifier: &str,
         _to_version: &str,
-        provider_config: &serde_json::Value,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         let mut output = String::new();
-
-        let script_url = provider_config
-            .get("script_url")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| report!(ProviderError::MissingConfig("script_url".to_string())))?;
+        let script_url = &self.config.script_url;
 
         send_output(
             output_tx,
@@ -83,28 +76,16 @@ impl Provider for ProxmoxHelperScriptsProvider {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn detect_installed_version_returns_none() {
-        let provider = ProxmoxHelperScriptsProvider::new();
-        let result = provider.detect_installed_version("example").await.unwrap();
-        assert!(result.is_none());
+    fn test_config() -> ProxmoxHelperScriptsConfig {
+        ProxmoxHelperScriptsConfig {
+            script_url: "https://example.com/update.sh".to_string(),
+        }
     }
 
     #[tokio::test]
-    async fn execute_update_missing_script_url_returns_error() {
-        let provider = ProxmoxHelperScriptsProvider::new();
-        let (tx, _rx) = mpsc::channel(100);
-        let result = provider
-            .execute_update("test-script", "1.0.0", &serde_json::json!({}), None, &tx)
-            .await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            matches!(
-                err.current_context(),
-                ProviderError::MissingConfig(field) if field == "script_url"
-            ),
-            "Expected MissingConfig(script_url), got: {err}"
-        );
+    async fn detect_installed_version_returns_none() {
+        let provider = ProxmoxHelperScriptsProvider::new(test_config());
+        let result = provider.detect_installed_version("example").await.unwrap();
+        assert!(result.is_none());
     }
 }

@@ -68,6 +68,12 @@ pub struct DockerRegistryConfig {
     /// Maximum tags per API request (pagination).
     #[serde(default = "default_page_size")]
     pub page_size: u32,
+    /// Shell command to run after pulling the new image.
+    ///
+    /// Supports `{image}`, `{tag}`, and `{version}` placeholders.
+    /// If absent, only `docker pull` is performed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_command: Option<String>,
 }
 
 fn default_tag_strip_prefix() -> String {
@@ -275,6 +281,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -291,6 +298,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("image"));
@@ -308,6 +316,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 0,
+            restart_command: None,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("page_size"));
@@ -325,6 +334,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("invalid regex"));
@@ -342,6 +352,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert!(config.validate().is_ok());
     }
@@ -358,6 +369,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "registry-1.docker.io");
     }
@@ -374,6 +386,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "registry-1.docker.io");
     }
@@ -390,6 +403,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "ghcr.io");
     }
@@ -406,6 +420,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "registry.example.com");
     }
@@ -422,6 +437,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "my-mirror.example.com");
     }
@@ -438,6 +454,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "localhost");
     }
@@ -454,6 +471,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_registry(), "myhost:5000");
     }
@@ -470,6 +488,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_repository(), "library/nginx");
     }
@@ -486,6 +505,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_repository(), "myuser/myrepo");
     }
@@ -502,6 +522,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_repository(), "owner/repo");
     }
@@ -518,6 +539,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_repository(), "org/team/app");
     }
@@ -534,6 +556,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_tracked_tag(), "latest");
     }
@@ -550,6 +573,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: Some("stable".to_string()),
             page_size: 1000,
+            restart_command: None,
         };
         assert_eq!(config.resolved_tracked_tag(), "stable");
     }
@@ -569,6 +593,7 @@ mod tests {
             include_prereleases: true,
             tracked_tag: Some("main".to_string()),
             page_size: 500,
+            restart_command: None,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         let deserialized: DockerRegistryConfig = serde_json::from_str(&json).expect("deserialize");
@@ -593,6 +618,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let json = serde_json::to_string(&config).expect("serialize");
         assert!(!json.contains("auth"));
@@ -648,6 +674,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let masked = config.with_secrets_masked();
         match masked.auth.unwrap() {
@@ -673,6 +700,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let masked = config.with_secrets_masked();
         match masked.auth.unwrap() {
@@ -695,6 +723,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let masked = config.with_secrets_masked();
         assert!(masked.auth.is_none());
@@ -715,6 +744,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let mut incoming = existing.with_secrets_masked();
         incoming.restore_secrets_from(&existing);
@@ -740,6 +770,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let mut incoming = existing.with_secrets_masked();
         incoming.restore_secrets_from(&existing);
@@ -766,6 +797,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let mut incoming = DockerRegistryConfig {
             image: "nginx".to_string(),
@@ -780,6 +812,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         incoming.restore_secrets_from(&existing);
         match incoming.auth.unwrap() {
@@ -821,6 +854,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let url = config.image_web_url("1.25.0");
         assert_eq!(url, "https://hub.docker.com/_/nginx/tags?name=1.25.0");
@@ -838,6 +872,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let url = config.image_web_url("latest");
         assert_eq!(
@@ -858,6 +893,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let url = config.image_web_url("v1.0.0");
         assert_eq!(url, "https://ghcr.io/owner/repo:v1.0.0");
@@ -875,6 +911,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 1000,
+            restart_command: None,
         };
         let url = config.image_web_url("latest");
         assert_eq!(url, "https://registry.example.com/myapp:latest");

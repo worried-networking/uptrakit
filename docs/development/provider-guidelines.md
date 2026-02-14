@@ -93,6 +93,7 @@ Fetches release metadata from the GitHub API and converts it into `UpstreamRelea
 | `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
 | `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. |
 | `asset_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter release assets (empty means all). |
+| `install_command` | `Option<String>` | No | `null` | Custom shell command to execute after downloading the release asset. Supports `{version}`, `{tag}`, `{asset_url}`, `{asset_name}` placeholders (shell-escaped). |
 
 **Behaviour:**
 
@@ -119,6 +120,7 @@ Spec-compliant registry. Currently controller-side only; agent-side container di
 | `include_prereleases` | bool | No | `false` | Include pre-release versions. |
 | `tracked_tag` | `Option<String>` | No | `"latest"` | Tag to track (digest mode). |
 | `page_size` | u32 | No | `1000` | Max tags per API request. |
+| `restart_command` | `Option<String>` | No | `null` | Custom shell command to run after `docker pull` (e.g. `docker compose up -d`). Supports `{image}`, `{tag}`, `{version}` placeholders (shell-escaped). |
 
 **DockerAuth** (tagged enum with `#[serde(tag = "type")]`):
 
@@ -133,3 +135,22 @@ Spec-compliant registry. Currently controller-side only; agent-side container di
   `assets`).
 - **DigestTracking**: Gets the manifest digest for `tracked_tag` (default `"latest"`). Returns a single
   `UpstreamRelease` with the digest as the version string. Useful for detecting when a mutable tag has been updated.
+
+### Proxmox Helper Scripts provider (`uptrakit-provider-proxmox-helper-scripts`)
+
+Executes Proxmox VE community helper script updates via `curl | bash`.
+
+**Config fields (`ProxmoxHelperScriptsConfig`):**
+
+| Field | Type | Required | Default | Description |
+| :------------ | :----- | :------- | :------ | :-------------------------------------------------------- |
+| `script_url` | String | Yes | -- | URL of the helper script to execute for updates. |
+
+**Behaviour:**
+
+- Update execution runs `curl -fsSL -- "$script_url" | bash -s -- --update` with `set -euo pipefail`.
+- The `script_url` is passed as a positional argument to bash (not interpolated into the command string), preventing injection.
+- `detect_installed_version` returns `None` (version detection is not supported).
+- `fetch_releases` returns an empty list (upstream version checking is not supported).
+
+**Security note:** The `curl | bash` pattern runs arbitrary remote code. The user must trust the script URL source.

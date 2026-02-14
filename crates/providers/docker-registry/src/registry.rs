@@ -270,6 +270,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 100,
+            restart_command: None,
         }
     }
 
@@ -299,6 +300,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 100,
+            restart_command: None,
         };
         let client = RegistryClient::new(&config).expect("valid config");
         assert_eq!(client.base_url, "https://ghcr.io/v2");
@@ -317,6 +319,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 100,
+            restart_command: None,
         };
         let client = RegistryClient::new(&config).expect("valid config");
         assert_eq!(client.base_url, "https://registry.example.com/v2");

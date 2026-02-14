@@ -1,29 +1,8 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
-/// Type of service (agent or MQTT).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "Text")]
-pub enum ServiceType {
-    #[sea_orm(string_value = "agent")]
-    Agent,
-    #[sea_orm(string_value = "mqtt")]
-    Mqtt,
-}
-
-/// Status of a service in the enrollment/approval workflow.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "Text")]
-pub enum ServiceStatus {
-    #[sea_orm(string_value = "pending")]
-    Pending,
-    #[sea_orm(string_value = "approved")]
-    Approved,
-    #[sea_orm(string_value = "rejected")]
-    Rejected,
-    #[sea_orm(string_value = "deactivated")]
-    Deactivated,
-}
+// Canonical types from shared-types with feature-gated SeaORM derives.
+pub use uptrakit_shared_types::{ServiceStatus, ServiceType};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "services")]

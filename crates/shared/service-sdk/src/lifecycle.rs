@@ -57,8 +57,8 @@ pub struct AuthenticatedContext<'a> {
     pub tls_connector: tokio_rustls::TlsConnector,
     /// Raw CA PEM bytes, if a pinned CA is in use.
     pub ca_pem: Option<&'a [u8]>,
-    /// The loaded identity state (certified).
-    pub identity: &'a ServiceIdentityState,
+    /// The loaded identity state (certified, mutable for cert renewal / CA update).
+    pub identity: &'a mut ServiceIdentityState,
     /// Base URL for the controller (e.g. `https://host:8443`).
     pub base_url: &'a str,
     /// Optional PKI address.
@@ -158,7 +158,7 @@ pub async fn run_service_lifecycle(
                 base_url,
                 pki_addr,
                 ca_pem.as_deref(),
-                &identity,
+                &mut identity,
                 handler,
             )
             .await
@@ -209,7 +209,7 @@ pub async fn run_service_lifecycle(
         base_url,
         pki_addr,
         ca_pem.as_deref(),
-        &identity,
+        &mut identity,
         handler,
     )
     .await
@@ -259,7 +259,7 @@ async fn run_authenticated_with_reconnect(
     base_url: &str,
     pki_addr: Option<&str>,
     ca_pem: Option<&[u8]>,
-    identity: &ServiceIdentityState,
+    identity: &mut ServiceIdentityState,
     handler: &mut impl ServiceHandler,
 ) -> Result<()> {
     let mut reconnect_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));

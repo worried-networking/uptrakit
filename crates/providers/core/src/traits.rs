@@ -58,7 +58,6 @@ pub trait Provider: Send + Sync {
         &self,
         _package_identifier: &str,
         _to_version: &str,
-        _provider_config: &serde_json::Value,
         _release_info: Option<&ReleaseInfo>,
         _output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
@@ -138,9 +137,7 @@ mod tests {
     async fn default_execute_update_returns_error() {
         let provider = StubProvider;
         let (tx, _rx) = mpsc::channel(10);
-        let result = provider
-            .execute_update("test", "1.0.0", &serde_json::json!({}), None, &tx)
-            .await;
+        let result = provider.execute_update("test", "1.0.0", None, &tx).await;
         assert!(result.is_err());
     }
 

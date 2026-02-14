@@ -33,7 +33,7 @@ Proxmox VE helper scripts provider crate (~150 lines across 2 source files) impl
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
 | PHS-01 | Major | Correctness | Claims `DiscoverLocalSoftware` capability but does not implement `discover_software()`. The default implementation returns an error. Callers checking `has_capability(DiscoverLocalSoftware)` would expect `discover_software()` to succeed, violating the capability contract. Either implement discovery or remove the capability. | `src/provider.rs:30` |
-| PHS-02 | Minor | Code Quality | No configuration type or validation. The registry creates this provider with `ProxmoxHelperScriptsProvider::new()` and ignores config entirely. The `script_url` required by `execute_update` is only discovered at execution time, not validated at creation time. | `src/provider.rs` |
+| ~~PHS-02~~ | ~~Minor~~ | ~~Code Quality~~ | ~~No configuration type or validation.~~ **FIXED.** `ProxmoxHelperScriptsConfig` struct created with `script_url: String` and `validate()` method. Provider now requires config at construction time. Registry deserializes and validates config before creating provider. | `src/config.rs`, `src/provider.rs` |
 | PHS-03 | Info | Security | The `curl | bash` execution pattern runs arbitrary remote code. While the quoting prevents injection, the pattern itself is inherently risky. Document the trust model: the user must trust the script URL source. | `src/provider.rs` |
 
 ## Verdict

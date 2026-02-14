@@ -98,9 +98,12 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_proxmox_stub_returns_none() {
+        let config = serde_json::json!({
+            "script_url": "https://example.com/update.sh"
+        });
         let outcome = check_version(
             ProviderType::ProxmoxHelperScripts,
-            &serde_json::json!({}),
+            &config,
             "example",
         )
         .await;

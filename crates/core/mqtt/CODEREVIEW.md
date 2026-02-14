@@ -11,101 +11,38 @@ not implemented.
 
 | ID | Title | Severity | Type | File |
 |---|---|---|---|---|
-| [CROSS-01](#cross-01) | Magic string WebSocket close reasons | High | Actionable | `src/main.rs` |
-| [MQTT-01](#mqtt-01) | `CaBundleUpdated` not implemented | Medium | Actionable | `src/main.rs` |
-| [MQTT-02](#mqtt-02) | `RequestCertRenewal` not implemented | Medium | Actionable | `src/main.rs` |
+| ~~[CROSS-01](#cross-01)~~ | ~~Magic string WebSocket close reasons~~ **FIXED** | ~~High~~ | ~~Actionable~~ | `src/main.rs` |
+| ~~[MQTT-01](#mqtt-01)~~ | ~~`CaBundleUpdated` not implemented~~ **FIXED** | ~~Medium~~ | ~~Actionable~~ | `src/main.rs` |
+| ~~[MQTT-02](#mqtt-02)~~ | ~~`RequestCertRenewal` not implemented~~ **FIXED** | ~~Medium~~ | ~~Actionable~~ | `src/main.rs` |
 | [MQTT-03](#mqtt-03) | MQTT broker TLS uses system trust only | Low | Informational | `src/mqtt_client.rs` |
 | [MQTT-04](#mqtt-04) | No SIGHUP handler (unlike agent) | Low | Informational | `src/main.rs` |
 | [CROSS-02](#cross-02) | Protocol version mismatch only warns | Medium | Informational | `src/main.rs` |
 
 ## Details
 
-### CROSS-01
+### ~~CROSS-01~~ **FIXED**
 
-**Magic string WebSocket close reasons**
+**~~Magic string WebSocket close reasons~~**
 
-- **Severity:** High
-- **Type:** Actionable
-- **File:** `src/main.rs:420-437`
-- **Also affects:** `crates/core/agent/src/client.rs:421-438`, `crates/ui/web-api/src/routes/mqtt_ws.rs`
-- **Related finding:** [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01),
-  [CROSS-01 in agent](../agent/CODEREVIEW.md#cross-01)
+**Status:** Resolved. Close reason constants from `uptrakit_internal_wire::close_reason` are now used
+in both pattern matches and sender sites. See [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01).
 
-**Description:** The close reason pattern match in the MQTT service is identical to the agent's. The same
-bare string literals (`"certificate rotated"`, `"certificate revoked"`) are matched against controller-sent
-values with no compile-time safety.
+### ~~MQTT-01~~ **FIXED**
 
-**Code evidence:**
+**~~`CaBundleUpdated` not implemented~~**
 
-```rust
-// crates/core/mqtt/src/main.rs:420-437
-match conn.close_reason() {
-    Some("certificate rotated") => {
-        tracing::info!("connection closed: certificate rotated");
-        break LoopOutcome::Reconnect;
-    }
-    Some("certificate revoked") => {
-        tracing::warn!("connection closed: certificate revoked");
-        break LoopOutcome::Disconnected;
-    }
-    // ...
-}
-```
+**Status:** Resolved. The MQTT service now persists the updated CA bundle via
+`identity.save_ca_cert(&payload.ca_bundle_pem)`, matching the agent's implementation.
+`AuthenticatedContext.identity` changed from `&` to `&mut` to support this.
 
-**Recommendation:** See [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01) for the proposed constants module.
-Both service crates should import and match on these constants.
+### ~~MQTT-02~~ **FIXED**
 
-### MQTT-01
+**~~`RequestCertRenewal` not implemented~~**
 
-**`CaBundleUpdated` not implemented**
-
-- **Severity:** Medium
-- **Type:** Actionable
-- **File:** `src/main.rs:404-407`
-
-**Description:** The `CaBundleUpdated` message is received and logged but the payload is discarded. The
-agent handles this message by fetching the updated CA bundle and persisting it. The MQTT service should do
-the same to stay in sync when the controller rotates its CA.
-
-**Code evidence:**
-
-```rust
-// crates/core/mqtt/src/main.rs:404-407
-Some(ControllerMessage::CaBundleUpdated(payload)) => {
-    tracing::info!("received CA bundle update from controller");
-    let _ = payload;
-}
-```
-
-**Recommendation:** Implement CA bundle persistence using the same pattern as the agent: compute the local
-CA hash, compare with the received hash, fetch the new bundle if stale, and persist via
-`identity.save_ca_cert()`. The `ServiceIdentityState` from service-sdk already provides `save_ca_cert()`.
-
-### MQTT-02
-
-**`RequestCertRenewal` not implemented**
-
-- **Severity:** Medium
-- **Type:** Actionable
-- **File:** `src/main.rs:408-410`
-
-**Description:** The controller can push a `RequestCertRenewal` message to trigger proactive certificate
-renewal before expiry. The MQTT service logs this but takes no action. Without this, the MQTT service relies
-solely on its own expiry-based detection to renew certificates.
-
-**Code evidence:**
-
-```rust
-// crates/core/mqtt/src/main.rs:408-410
-Some(ControllerMessage::RequestCertRenewal(_)) => {
-    tracing::info!("certificate renewal requested (not yet implemented for MQTT)");
-}
-```
-
-**Recommendation:** Implement certificate renewal using the service-sdk's `generate_keypair_and_csr()`
-followed by sending `ServiceMessage::RenewCertificate` and handling the `Certificate` response. The agent's
-renewal flow in `client.rs` can serve as a reference. This should result in a `LoopOutcome::Reconnect` after
-the new certificate is saved.
+**Status:** Resolved. The MQTT service now implements the full certificate renewal flow: generates
+keypair+CSR via `generate_keypair_and_csr()`, sends `RenewCertificate`, handles the `Certificate`
+response by saving cert+key and reconnecting with `LoopOutcome::Reconnect`. Matches the agent's
+implementation.
 
 ### MQTT-03
 
@@ -231,17 +168,9 @@ dependency footprint. Its only weakness as a template is the duplicated enrollme
 service and the agent. This is the strongest signal that the service-sdk should provide a higher-level
 lifecycle abstraction. An external developer building a new service would create a third copy.
 
-### MQTT-06
+### ~~MQTT-06~~ **FIXED**
 
-**`MqttTransport` type mapping is fragile**
+**~~`MqttTransport` type mapping is fragile~~**
 
-- **Severity:** Low
-- **Type:** Informational
-- **File:** `src/tenant_manager.rs:150-161`
-- **Related finding:** [WIRE-04](../../shared/wire/CODEREVIEW.md#wire-04)
-
-**Description:** `local_mqtt_transport()` manually maps `uptrakit_internal_wire::MqttTransport` to
-`uptrakit_web_api_types::mqtt_transport::MqttTransport` variant by variant. If a new transport type is
-added (e.g., `WebSocket`), this function will fail to compile only if the match is exhaustive. The two
-`MqttTransport` enums should be unified into a single type in `shared-types`, or a `From` impl should
-be provided.
+**Status:** Resolved. `MqttTransport` consolidated into `shared-types` with feature-gated derives.
+The manual `local_mqtt_transport()` mapping function removed from `tenant_manager.rs`.

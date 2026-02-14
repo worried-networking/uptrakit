@@ -187,14 +187,11 @@ impl EventPoller {
 
     /// Parse a `target_service_type` string from the DB into a wire `ServiceType`.
     fn parse_service_type(s: &str) -> Option<uptrakit_internal_wire::ServiceType> {
-        match s {
-            "mqtt" => Some(uptrakit_internal_wire::ServiceType::Mqtt),
-            "agent" => Some(uptrakit_internal_wire::ServiceType::Agent),
-            _ => {
-                tracing::warn!(value = %s, "unknown target_service_type in outbox event");
-                None
-            }
+        let result = uptrakit_internal_wire::ServiceType::parse(s);
+        if result.is_none() {
+            tracing::warn!(value = %s, "unknown target_service_type in outbox event");
         }
+        result
     }
 
     /// Deliver a single event to the appropriate local service(s).

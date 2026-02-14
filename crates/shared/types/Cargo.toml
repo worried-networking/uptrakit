@@ -6,8 +6,16 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+default = []
+sea-orm = ["dep:sea-orm", "dep:strum"]
+openapi = ["dep:utoipa"]
+
 [dependencies]
 serde = { workspace = true }
+sea-orm = { workspace = true, optional = true }
+strum = { workspace = true, optional = true }
+utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

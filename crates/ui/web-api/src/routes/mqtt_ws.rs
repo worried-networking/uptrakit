@@ -5,9 +5,10 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
-    ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
-    MqttClientConnectionStatus as WireMqttClientConnectionStatus, MqttRegisteredPayload,
-    MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload, ServiceMessage,
+    close_reason, ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload,
+    IncomingSeq, MqttClientConnectionStatus as WireMqttClientConnectionStatus,
+    MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload,
+    RejectedPayload, ServiceMessage,
 };
 use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
@@ -88,7 +89,7 @@ pub(crate) async fn handle_mqtt_authenticated(
         };
 
         if !rate_limiter.allow() {
-            let _ = close_with_reason(sink, "rate limit exceeded").await;
+            let _ = close_with_reason(sink, close_reason::RATE_LIMIT_EXCEEDED).await;
             return;
         }
 
@@ -238,7 +239,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                     }
                 };
                 if !rate_limiter.allow() {
-                    let _ = close_with_reason(sink, "rate limit exceeded").await;
+                    let _ = close_with_reason(sink, close_reason::RATE_LIMIT_EXCEEDED).await;
                     break;
                 }
                 match msg {
@@ -353,7 +354,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                                         }
                                         state.revocation_notify.notify_one();
                                         tracing::info!(%service_id, old_serial = %cert.serial, "MQTT service certificate renewed, old cert revoked");
-                                        let _ = close_with_reason(sink, "certificate rotated").await;
+                                        let _ = close_with_reason(sink, close_reason::CERTIFICATE_ROTATED).await;
                                         break;
                                     }
                                     Err(e) => {
@@ -401,7 +402,7 @@ pub(crate) async fn handle_mqtt_authenticated(
             }
             _ = cancel_token.cancelled() => {
                 tracing::info!(%service_id, "MQTT connection superseded by new registration");
-                let _ = close_with_reason(sink, "superseded by new connection").await;
+                let _ = close_with_reason(sink, close_reason::SUPERSEDED).await;
                 // Do NOT unregister — the new connection owns the registry entry.
                 // Still release leases since the new connection will re-reconcile.
                 if let Err(e) = lease_coordinator.release_all_for_service(&service_id).await {
@@ -457,7 +458,7 @@ pub(crate) async fn handle_mqtt_enrolled(
                     }
                 };
                 if !rate_limiter.allow() {
-                    let _ = close_with_reason(sink, "rate limit exceeded").await;
+                    let _ = close_with_reason(sink, close_reason::RATE_LIMIT_EXCEEDED).await;
                     break;
                 }
 

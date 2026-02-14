@@ -39,6 +39,8 @@ import type {
 } from './types';
 
 const BASE = '/api/v1';
+const DEFAULT_TIMEOUT_MS = 30_000;
+const REFRESH_TIMEOUT_MS = 10_000;
 
 async function extractErrorMessage(res: Response): Promise<string> {
 	const text = await res.text();
@@ -66,7 +68,8 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		credentials: 'same-origin',
-		body: JSON.stringify({})
+		body: JSON.stringify({}),
+		signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
 	});
 
 	if (!res.ok) {
@@ -81,6 +84,11 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
  * Returns the raw Response for callers to handle body parsing.
  */
 async function authenticatedFetch(path: string, options: RequestInit = {}): Promise<Response> {
+	const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+	const combinedSignal = options.signal
+		? AbortSignal.any([options.signal, timeoutSignal])
+		: timeoutSignal;
+
 	const res = await fetch(`${BASE}${path}`, {
 		credentials: 'same-origin',
 		...options,
@@ -88,7 +96,8 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 			'Content-Type': 'application/json',
 			...authHeaders(),
 			...(options.headers as Record<string, string> | undefined)
-		}
+		},
+		signal: combinedSignal
 	});
 
 	if (res.status === 401 && getAccessToken()) {
@@ -108,6 +117,11 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 			setAccessToken(refreshed.access_token);
 
 			// Retry original request with new token
+			const retryTimeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+			const retryCombinedSignal = options.signal
+				? AbortSignal.any([options.signal, retryTimeoutSignal])
+				: retryTimeoutSignal;
+
 			return fetch(`${BASE}${path}`, {
 				credentials: 'same-origin',
 				...options,
@@ -115,7 +129,8 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 					'Content-Type': 'application/json',
 					Authorization: `Bearer ${refreshed.access_token}`,
 					...(options.headers as Record<string, string> | undefined)
-				}
+				},
+				signal: retryCombinedSignal
 			});
 		} catch {
 			// Refresh failed — clear token and redirect to login
@@ -130,7 +145,15 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 
 /** Performs an authenticated request and parses the JSON response body. */
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-	const res = await authenticatedFetch(path, options);
+	let res: Response;
+	try {
+		res = await authenticatedFetch(path, options);
+	} catch (err) {
+		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+			throw new Error('Request timed out. Please try again.');
+		}
+		throw err;
+	}
 	if (!res.ok) {
 		const message = await extractErrorMessage(res);
 		throw new Error(message);
@@ -140,7 +163,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 /** Performs an authenticated request expecting no response body (204 or empty). */
 async function requestVoid(path: string, options: RequestInit = {}): Promise<void> {
-	const res = await authenticatedFetch(path, options);
+	let res: Response;
+	try {
+		res = await authenticatedFetch(path, options);
+	} catch (err) {
+		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+			throw new Error('Request timed out. Please try again.');
+		}
+		throw err;
+	}
 	if (!res.ok) {
 		const message = await extractErrorMessage(res);
 		throw new Error(message);
@@ -186,7 +217,8 @@ export async function oidcCompleteRegistration(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		credentials: 'same-origin',
-		body: JSON.stringify({ registration_code: registrationCode, registration_token: registrationToken })
+		body: JSON.stringify({ registration_code: registrationCode, registration_token: registrationToken }),
+		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
 	});
 	if (!res.ok) {
 		const message = await extractErrorMessage(res);
@@ -201,7 +233,8 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		credentials: 'same-origin',
-		body: JSON.stringify({ code })
+		body: JSON.stringify({ code }),
+		signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
 	});
 	if (!res.ok) {
 		const message = await extractErrorMessage(res);

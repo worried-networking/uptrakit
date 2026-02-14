@@ -19,10 +19,9 @@
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
-use uptrakit_command::{ShellType, UpdateOutputLine, UpdateOutputStream};
+use uptrakit_command::{UpdateOutputLine, UpdateOutputStream};
 use uptrakit_internal_wire::{
-    ExecuteUpdatePayload, HookCommand, HookShell, OutputStreamType, UpdateFinalStatus,
-    UpdateResultPayload,
+    ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
 use uptrakit_provider_registry::ProviderRegistry;
 
@@ -286,7 +285,6 @@ async fn execute_provider_update(
         .execute_update(
             &payload.package_identifier,
             &payload.to_version,
-            &payload.provider_config,
             payload.release_info.as_ref(),
             &provider_tx,
         )
@@ -298,15 +296,6 @@ async fn execute_provider_update(
     let _ = bridge_handle.await;
 
     result
-}
-
-/// Map a wire `HookShell` to a command `ShellType`.
-fn hook_shell_to_shell_type(shell: HookShell) -> ShellType {
-    match shell {
-        HookShell::Bash => ShellType::Bash,
-        HookShell::Sh => ShellType::Sh,
-        HookShell::PowerShell => ShellType::PowerShell,
-    }
 }
 
 /// Execute a `HookCommand`, dispatching to shell or direct exec as appropriate.
@@ -336,11 +325,7 @@ async fn run_hook_command(
 
     let result = match hook_cmd {
         HookCommand::Shell { command, shell } => {
-            uptrakit_command::run_command_with_shell(
-                command,
-                hook_shell_to_shell_type(*shell),
-                &provider_tx,
-            )
+            uptrakit_command::run_command_with_shell(command, *shell, &provider_tx)
             .await
         }
         HookCommand::Exec {
@@ -378,7 +363,7 @@ async fn send_output(
 mod tests {
     use super::*;
     use serde_json::json;
-    use uptrakit_internal_wire::ProviderType;
+    use uptrakit_internal_wire::{HookShell, ProviderType};
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
@@ -547,15 +532,4 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // ── Hook shell mapping tests ────────────────────────────────────────────
-
-    #[test]
-    fn hook_shell_maps_correctly() {
-        assert_eq!(hook_shell_to_shell_type(HookShell::Bash), ShellType::Bash);
-        assert_eq!(hook_shell_to_shell_type(HookShell::Sh), ShellType::Sh);
-        assert_eq!(
-            hook_shell_to_shell_type(HookShell::PowerShell),
-            ShellType::PowerShell
-        );
-    }
 }

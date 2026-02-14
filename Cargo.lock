@@ -4812,6 +4812,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uptrakit-shared-types",
 ]
 
 [[package]]
@@ -4909,6 +4910,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-build-info",
+ "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
@@ -4993,6 +4995,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "rootcause",
+ "serde",
  "serde_json",
  "tokio",
  "uptrakit-provider-core",
@@ -5080,8 +5083,11 @@ dependencies = [
 name = "uptrakit-shared-types"
 version = "0.0.1"
 dependencies = [
+ "sea-orm",
  "serde",
  "serde_json",
+ "strum",
+ "utoipa",
 ]
 
 [[package]]
@@ -5148,6 +5154,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.18",
  "uptrakit-internal-wire",
+ "uptrakit-shared-types",
  "utoipa",
 ]
 

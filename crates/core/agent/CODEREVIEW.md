@@ -10,69 +10,19 @@ covers SIGINT, SIGTERM, and SIGHUP. The reconnection logic with backoff is robus
 
 | ID | Title | Severity | Type | File |
 |---|---|---|---|---|
-| [CROSS-01](#cross-01) | Magic string WebSocket close reasons | High | Actionable | `src/client.rs` |
+| ~~[CROSS-01](#cross-01)~~ | ~~Magic string WebSocket close reasons~~ **FIXED** | ~~High~~ | ~~Actionable~~ | `src/client.rs` |
 | [CROSS-02](#cross-02) | Protocol version mismatch only warns | Medium | Informational | `src/client.rs` |
 | [AGENT-01](#agent-01) | `ioreg` UUID parsing is brittle | Low | Informational | `src/host_info.rs` |
 
 ## Details
 
-### CROSS-01
+### ~~CROSS-01~~ **FIXED**
 
-**Magic string WebSocket close reasons**
+**~~Magic string WebSocket close reasons~~**
 
-- **Severity:** High
-- **Type:** Actionable
-- **File:** `src/client.rs:421-438`
-- **Also affects:** `crates/core/mqtt/src/main.rs:420-437`, `crates/ui/web-api/src/routes/service_ws.rs`,
-  `crates/ui/web-api/src/routes/agent_ws.rs`, `crates/ui/web-api/src/routes/mqtt_ws.rs`
-- **Related finding:** [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01)
-
-**Description:** Close reason strings like `"certificate rotated"` and `"certificate revoked"` are used as
-bare string literals in pattern matches. The controller sends these strings from `close_with_reason()` in
-`service_ws.rs`. Any typo on either side silently degrades to the catch-all arm.
-
-**Code evidence:**
-
-```rust
-// crates/core/agent/src/client.rs:421-438
-match conn.close_reason() {
-    Some("certificate rotated") => {
-        tracing::info!("connection closed: certificate rotated");
-        break LoopOutcome::Reconnect;
-    }
-    Some("certificate revoked") => {
-        tracing::warn!("connection closed: certificate revoked");
-        break LoopOutcome::Disconnected;
-    }
-    // ...
-}
-```
-
-The controller side uses the same bare strings:
-
-```rust
-// crates/ui/web-api/src/routes/agent_ws.rs:281
-let _ = close_with_reason(sink, "certificate rotated").await;
-// crates/ui/web-api/src/routes/service_ws.rs:484
-let _ = close_with_reason(&mut sink, "certificate revoked").await;
-```
-
-At least 12 distinct close reasons exist across all controller handlers: `"certificate rotated"`,
-`"certificate revoked"`, `"no valid certificate"`, `"internal error"`, `"certificate not recognized"`,
-`"service deactivated"`, `"service not approved"`, `"service not found"`, `"enrollment timeout"`,
-`"agent version too old"`, `"superseded by new connection"`, `"rate limit exceeded"`.
-
-**Recommendation:** Define typed constants in the wire crate (see [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01))
-and use them on both sender and receiver sides:
-
-```rust
-// In uptrakit-internal-wire:
-pub mod close_reason {
-    pub const CERTIFICATE_ROTATED: &str = "certificate rotated";
-    pub const CERTIFICATE_REVOKED: &str = "certificate revoked";
-    // ...
-}
-```
+**Status:** Resolved. A `close_reason` module with 12 named constants was added to `uptrakit-internal-wire`.
+All sender sites (web-api route handlers) and receiver sites (agent `client.rs`, MQTT `main.rs`) now use
+these constants instead of bare string literals.
 
 ### CROSS-02
 

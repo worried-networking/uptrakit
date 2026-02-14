@@ -44,7 +44,7 @@ The `Provider` trait is **well-designed for third-party implementations**:
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
-| PCORE-01 | Major | Extensibility | `execute_update` accepts `provider_config: &serde_json::Value` as raw JSON even though the provider already deserialized its config in `new()`. GitHub and Docker providers re-parse fields from this raw JSON at call time, creating an undocumented API surface. Consider removing this parameter or documenting why it exists (e.g., for runtime overrides). | `src/traits.rs:62` |
+| ~~PCORE-01~~ | ~~Major~~ | ~~Extensibility~~ | ~~`execute_update` accepts `provider_config: &serde_json::Value` as raw JSON.~~ **FIXED.** Raw JSON parameter removed from `Provider::execute_update()`. All providers now use typed config fields (`self.config.install_command`, `self.config.restart_command`, `self.config.script_url`). | `src/traits.rs` |
 | PCORE-02 | Minor | Extensibility | No `provider_type()` or `name()` method on the `Provider` trait. External developers cannot ask a `Box<dyn Provider>` what type it represents, which is needed for logging, telemetry, and configuration introspection. | `src/traits.rs:30` |
 | PCORE-03 | Minor | Code Quality | `async_trait` is used for the `Provider` trait. With Rust edition 2024, native async traits are available. However, `async_trait` is still necessary for object safety with `Box<dyn Provider>`. This should be documented as a conscious choice. | `src/traits.rs:29` |
 | PCORE-04 | Info | Code Quality | `ProviderCapability` enum has only two variants (`DiscoverLocalSoftware`, `RefreshPackageIndex`) and lacks `#[non_exhaustive]`. Adding new capabilities would be a breaking change for exhaustive matchers. | `src/types.rs` |

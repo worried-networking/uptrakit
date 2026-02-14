@@ -53,7 +53,7 @@ The crate is well-scoped as a leaf dependency. Two type-overlap issues affect cr
 | --- | --- | --- | --- | --- |
 | CMD-01 | Info | Code Quality | No timeout mechanism. Callers cannot kill stuck commands. The `MAX_OUTPUT_BYTES` cap prevents OOM but does not address hung processes. Timeout is the responsibility of the caller (agent/controller), but the absence of a built-in mechanism is worth noting. | `src/command.rs:41-142` |
 | CMD-02 | Info | Code Quality | `send_output()` ignores channel send failures (`let _ = output_tx.send(...)`). Intentional and correct (channel closure is not an error for the executor), but callers have no indication that output was dropped. | `src/command.rs:33-38` |
-| CMD-03 | Major | Extensibility | `ShellType` duplicates `HookShell` from the wire crate. Same variants (`Bash`, `Sh`, `PowerShell`), no conversion trait. The agent must manually map between them. Should be unified into a single type in `shared-types`. | `src/types.rs` |
+| ~~CMD-03~~ | ~~Major~~ | ~~Extensibility~~ | ~~`ShellType` duplicates `HookShell` from the wire crate.~~ **FIXED.** `ShellType` replaced with `HookShell` from `shared-types`. The agent no longer needs manual mapping. | `src/types.rs` |
 | CMD-04 | Minor | Extensibility | All public execution functions require `mpsc::Sender<UpdateOutputLine>`. Simple use cases (e.g., running a command and collecting output) need unnecessary channel setup. A convenience wrapper `run_command_simple()` returning `String` would improve ergonomics. | `src/command.rs` |
 
 ## Verdict

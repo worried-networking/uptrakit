@@ -16,13 +16,8 @@ pub enum UpdateOutputStream {
     Stderr,
 }
 
-/// Shell type for command execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShellType {
-    Bash,
-    Sh,
-    PowerShell,
-}
+/// Shell type for command execution (canonical type from shared-types).
+pub type ShellType = uptrakit_shared_types::HookShell;
 
 #[cfg(test)]
 mod tests {

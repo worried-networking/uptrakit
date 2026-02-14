@@ -1,54 +1,7 @@
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
-/// The type of service (agent or MQTT).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ServiceType {
-    Agent,
-    Mqtt,
-}
-
-/// Unified status for all service types.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ServiceStatus {
-    Pending,
-    Approved,
-    Rejected,
-    Deactivated,
-}
-
-impl ServiceStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Approved => "approved",
-            Self::Rejected => "rejected",
-            Self::Deactivated => "deactivated",
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("invalid service status value")]
-pub struct ParseServiceStatusError;
-
-impl std::str::FromStr for ServiceStatus {
-    type Err = ParseServiceStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "pending" => Ok(Self::Pending),
-            "approved" => Ok(Self::Approved),
-            "rejected" => Ok(Self::Rejected),
-            "deactivated" => Ok(Self::Deactivated),
-            _ => Err(ParseServiceStatusError),
-        }
-    }
-}
+// Canonical types from shared-types with feature-gated OpenAPI derives.
+pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus, ServiceType};
 
 /// Unified response for any service (agent or MQTT).
 #[derive(Serialize, Deserialize)]

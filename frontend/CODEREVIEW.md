@@ -64,27 +64,11 @@ trusted.
 
 ## 2. Backend High Availability and Error Handling
 
-### HA-01: No request timeouts (HIGH)
+### ~~HA-01: No request timeouts (HIGH)~~ **FIXED**
 
-**File:** `src/lib/api.ts:84`, `65`, `185`, `200`
-
-Every `fetch()` call lacks a timeout. If the backend hangs (e.g. long GC pause,
-network partition), the UI blocks indefinitely with no user feedback. This
-affects both `authenticatedFetch` (line 84) and direct fetch calls in
-`refreshAccessToken` (line 65), `oidcCompleteRegistration` (line 185), and
-`oidcExchange` (line 200).
-
-**Recommendation:** Wrap fetch calls with `AbortController` and a configurable
-timeout (e.g. 30 seconds for normal requests, 10 seconds for refresh). Show a
-user-friendly timeout error message.
-
-```typescript
-function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 30000): Promise<Response> {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(id));
-}
-```
+**Status:** Resolved. All `fetch()` calls now use `AbortSignal.timeout()` with appropriate
+timeouts (30s default, 10s for refresh). Timeout errors are caught and surfaced as
+user-friendly messages. Existing caller signals are merged via `AbortSignal.any()`.
 
 ### HA-02: No retry or backoff for transient failures (MEDIUM)
 
@@ -418,7 +402,7 @@ settings pages do not.
 
 | ID | Finding | Effort |
 |--------|---------------------------------------------|---------|
-| HA-01 | Add request timeouts via AbortController | Medium |
+| ~~HA-01~~ | ~~Add request timeouts via AbortController~~ **FIXED** | ~~Medium~~ |
 | HA-03 | Translate network errors to friendly messages| Small |
 | HA-04 | Distinguish network vs auth failures on refresh| Medium |
 | HA-05 | Use `Promise.allSettled` consistently | Small |

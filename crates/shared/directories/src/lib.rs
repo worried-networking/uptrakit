@@ -316,6 +316,13 @@ async fn write_with_mode_async(path: &Path, data: &[u8]) -> Result<()> {
         })
     })?;
 
+    file.shutdown().await.map_err(|e| {
+        report!(DirectoryError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })
+    })?;
+
     Ok(())
 }
 

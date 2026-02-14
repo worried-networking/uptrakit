@@ -1,3 +1,5 @@
+pub mod close_reason;
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -8,7 +10,9 @@ use uuid::Uuid;
 pub const PROTOCOL_VERSION: u16 = 1;
 
 // Re-export shared types used directly in wire protocol messages.
-pub use uptrakit_shared_types::{ProviderType, ReleaseAsset, ReleaseInfo};
+pub use uptrakit_shared_types::{
+    HookShell, MqttTransport, ProviderType, ReleaseAsset, ReleaseInfo, ServiceType,
+};
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
 
@@ -29,43 +33,6 @@ impl std::fmt::Display for EnrollmentStatus {
     }
 }
 
-/// Type of service enrolling with the controller.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ServiceType {
-    Agent,
-    Mqtt,
-}
-
-impl std::fmt::Display for ServiceType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Agent => f.write_str("agent"),
-            Self::Mqtt => f.write_str("mqtt"),
-        }
-    }
-}
-
-/// MQTT connection transport protocol.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MqttTransport {
-    /// Plain TCP connection.
-    #[default]
-    Tcp,
-    /// TLS-encrypted connection.
-    Tls,
-}
-
-impl std::fmt::Display for MqttTransport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Tcp => f.write_str("tcp"),
-            Self::Tls => f.write_str("tls"),
-        }
-    }
-}
-
 /// Connection status reported by the MQTT service for a specific client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -81,64 +48,6 @@ impl std::fmt::Display for MqttClientConnectionStatus {
             Self::Online => f.write_str("online"),
             Self::Offline => f.write_str("offline"),
             Self::Connecting => f.write_str("connecting"),
-        }
-    }
-}
-
-/// Shell type for hook execution in update payloads.
-///
-/// Determines which shell interpreter and fail-early settings are used.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookShell {
-    /// Bash shell with `set -euo pipefail`
-    #[default]
-    Bash,
-    /// POSIX sh with `set -eu`
-    Sh,
-    /// PowerShell with `$ErrorActionPreference = 'Stop'`
-    #[serde(rename = "powershell")]
-    PowerShell,
-}
-
-impl std::fmt::Display for HookShell {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl HookShell {
-    /// Returns the string representation of the shell type.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Bash => "bash",
-            Self::Sh => "sh",
-            Self::PowerShell => "powershell",
-        }
-    }
-}
-
-/// Error returned when parsing an invalid [`HookShell`] string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseHookShellError;
-
-impl fmt::Display for ParseHookShellError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("invalid hook shell value")
-    }
-}
-
-impl std::error::Error for ParseHookShellError {}
-
-impl std::str::FromStr for HookShell {
-    type Err = ParseHookShellError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "bash" => Ok(Self::Bash),
-            "sh" => Ok(Self::Sh),
-            "powershell" => Ok(Self::PowerShell),
-            _ => Err(ParseHookShellError),
         }
     }
 }

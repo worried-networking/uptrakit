@@ -146,23 +146,10 @@ impl Default for TenantManager {
     }
 }
 
-/// Convert a wire protocol `MqttTransport` to the `web-api-types` `MqttTransport`.
-fn local_mqtt_transport(
-    wire: uptrakit_internal_wire::MqttTransport,
-) -> uptrakit_web_api_types::mqtt_transport::MqttTransport {
-    match wire {
-        uptrakit_internal_wire::MqttTransport::Tcp => {
-            uptrakit_web_api_types::mqtt_transport::MqttTransport::Tcp
-        }
-        uptrakit_internal_wire::MqttTransport::Tls => {
-            uptrakit_web_api_types::mqtt_transport::MqttTransport::Tls
-        }
-    }
-}
-
 /// Build MqttConfig from wire protocol config.
 fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
-    let transport = local_mqtt_transport(config.transport);
+    // Wire and MqttConfig now use the same canonical MqttTransport type.
+    let transport = config.transport;
     let port = if config.port == 0 {
         transport.default_port()
     } else {

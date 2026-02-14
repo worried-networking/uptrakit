@@ -44,7 +44,7 @@ Runs the service-specific authenticated event loop. Receives an `AuthenticatedCo
 - `host` / `port` — controller address.
 - `tls_connector` — pre-built mTLS connector (rebuilt on each reconnect iteration since certificates may have rotated).
 - `ca_pem` — raw CA PEM bytes if a pinned CA is in use.
-- `identity` — the loaded `ServiceIdentityState` (certified).
+- `identity` — mutable reference to the loaded `ServiceIdentityState` (certified). Mutable access is required for services that handle `CaBundleUpdated` or `Certificate` messages (calling `save_ca_cert()` or `save_certificate()`).
 - `base_url` — controller base URL (e.g. `https://host:8443`).
 - `pki_addr` — optional PKI address.
 

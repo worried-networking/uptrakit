@@ -38,7 +38,7 @@ GitHub Releases provider crate (~900 lines across 6 source files) implementing t
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
-| GH-01 | Minor | Code Quality | `execute_update` reads `install_command` from raw `provider_config` JSON (`provider_config.get("install_command")`) instead of from `self.config`. This field is not declared in `GitHubConfig`, creating an undocumented configuration surface. If `install_command` is a supported field, add it to `GitHubConfig`. | `src/provider.rs:288` |
+| ~~GH-01~~ | ~~Minor~~ | ~~Code Quality~~ | ~~`execute_update` reads `install_command` from raw JSON.~~ **FIXED.** `install_command: Option<String>` added to `GitHubConfig`. Provider uses `self.config.install_command`. Raw JSON parameter removed from trait. | `src/provider.rs` |
 | GH-02 | Minor | Code Quality | `detect_installed_version` overrides the default to return `Ok(None)`. Since GitHub is a remote-only provider, the default error return would be more honest. Either remove the override or add a doc comment explaining the semantics. | `src/provider.rs:257` |
 | GH-03 | Minor | Code Quality | HTTP errors conflated under `ProviderError::Configuration`. Both rate limit errors and API errors are wrapped as `ProviderError::Configuration` in the trait implementation, losing the specificity of `GitHubError::RateLimited` and `GitHubError::ApiError`. | `src/provider.rs` |
 | GH-04 | Minor | Code Quality | `strip_tag_prefix` is duplicated identically in `crates/providers/docker-registry/src/tag.rs`. Should be extracted to `uptrakit-provider-core`. | `src/tag.rs` |

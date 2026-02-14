@@ -151,7 +151,6 @@ impl Provider for DockerRegistryProvider {
         &self,
         package_identifier: &str,
         to_version: &str,
-        provider_config: &serde_json::Value,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_provider_core::Result<String> {
@@ -177,10 +176,7 @@ impl Provider for DockerRegistryProvider {
                 .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
         output.push_str(&cmd_output);
 
-        // Check for restart command in provider config
-        if let Some(restart_cmd) = provider_config.get("restart_command")
-            && let Some(cmd_str) = restart_cmd.as_str()
-        {
+        if let Some(ref cmd_str) = self.config.restart_command {
             let cmd = cmd_str
                 .replace("{image}", &shell_escape(image))
                 .replace("{tag}", &shell_escape(tag))
@@ -224,6 +220,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 100,
+            restart_command: None,
         }
     }
 
@@ -245,6 +242,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 100,
+            restart_command: None,
         };
         assert!(DockerRegistryProvider::new(config).is_err());
     }
@@ -261,6 +259,7 @@ mod tests {
             include_prereleases: false,
             tracked_tag: None,
             page_size: 100,
+            restart_command: None,
         };
         assert!(DockerRegistryProvider::new(config).is_err());
     }
@@ -358,7 +357,7 @@ mod tests {
         let provider = DockerRegistryProvider::new(test_config()).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let _result = provider
-            .execute_update("hello-world", "latest", &serde_json::json!({}), None, &tx)
+            .execute_update("hello-world", "latest", None, &tx)
             .await;
         rx.close();
         while rx.recv().await.is_some() {}

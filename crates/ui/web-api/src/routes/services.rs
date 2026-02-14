@@ -41,47 +41,18 @@ fn format_rfc3339(dt: OffsetDateTime) -> String {
 }
 
 fn model_to_response(m: service::Model) -> ServiceResponse {
-    let service_type = match m.service_type {
-        service::ServiceType::Agent => ServiceType::Agent,
-        service::ServiceType::Mqtt => ServiceType::Mqtt,
-    };
-    let status = match m.status {
-        service::ServiceStatus::Pending => ServiceStatus::Pending,
-        service::ServiceStatus::Approved => ServiceStatus::Approved,
-        service::ServiceStatus::Rejected => ServiceStatus::Rejected,
-        service::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
-    };
+    // DB and API types are now the same canonical type from shared-types.
     ServiceResponse {
         id: m.id.to_string(),
-        service_type,
+        service_type: m.service_type,
         hostname: m.hostname,
         friendly_name: m.friendly_name,
         ip_address: m.ip_address,
-        status,
+        status: m.status,
         client_version: m.client_version,
         last_seen_at: m.last_seen_at.map(format_rfc3339),
         created_at: format_rfc3339(m.created_at),
         updated_at: format_rfc3339(m.updated_at),
-    }
-}
-
-/// Parse the `type` query parameter into a DB `ServiceType`.
-fn parse_service_type(s: &str) -> Option<service::ServiceType> {
-    match s {
-        "agent" => Some(service::ServiceType::Agent),
-        "mqtt" => Some(service::ServiceType::Mqtt),
-        _ => None,
-    }
-}
-
-/// Parse the `status` query parameter into a DB `ServiceStatus`.
-fn parse_service_status(s: &str) -> Option<service::ServiceStatus> {
-    match s {
-        "pending" => Some(service::ServiceStatus::Pending),
-        "approved" => Some(service::ServiceStatus::Approved),
-        "rejected" => Some(service::ServiceStatus::Rejected),
-        "deactivated" => Some(service::ServiceStatus::Deactivated),
-        _ => None,
     }
 }
 
@@ -147,13 +118,13 @@ pub async fn list_services(
         .filter(service::Column::DeactivatedAt.is_null());
 
     if let Some(ref type_filter) = query.r#type
-        && let Some(db_type) = parse_service_type(type_filter)
+        && let Some(db_type) = ServiceType::parse(type_filter)
     {
         q = q.filter(service::Column::ServiceType.eq(db_type));
     }
 
     if let Some(ref status_filter) = query.status
-        && let Some(db_status) = parse_service_status(status_filter)
+        && let Some(db_status) = ServiceStatus::parse(status_filter)
     {
         q = q.filter(service::Column::Status.eq(db_status));
     }

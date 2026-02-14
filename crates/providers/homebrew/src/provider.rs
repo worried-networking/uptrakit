@@ -319,7 +319,6 @@ impl Provider for HomebrewProvider {
         &self,
         package_identifier: &str,
         _to_version: &str,
-        _provider_config: &serde_json::Value,
         _release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {

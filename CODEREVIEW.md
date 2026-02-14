@@ -47,33 +47,12 @@ uptrakit-shared-types (leaf -- no internal deps)
 
 ## Cross-Cutting Findings
 
-### XC-01: Pervasive Type Duplication (Critical)
+### ~~XC-01: Pervasive Type Duplication (Critical)~~ **FIXED**
 
-The most serious architectural issue across the codebase. Four types exist in multiple locations:
-
-| Type | Locations | Impact |
-|---|---|---|
-| `ServiceType` | wire, web-api-types, shared-db | Adding a new service type requires 3 coordinated changes |
-| `MqttTransport` | wire, web-api-types | MQTT service manually maps between the two |
-| `ShellType` / `HookShell` | command, wire | Agent must manually map between them |
-| Status enums | wire, web-api-types, shared-db | Semantically overlapping but structurally distinct |
-
-**Recommendation:** Move canonical types to `shared-types` with feature-gated derives:
-
-```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "sea-orm", derive(sea_orm::EnumIter, sea_orm::DeriveActiveEnum))]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum ServiceType {
-    Agent,
-    Mqtt,
-}
-```
-
-**Related per-crate findings:** [WIRE-04](crates/shared/wire/CODEREVIEW.md#wire-04),
-[WAT-07](crates/shared/web-api-types/CODEREVIEW.md),
-[CMD-03](crates/shared/command/CODEREVIEW.md),
-[MQTT-06](crates/core/mqtt/CODEREVIEW.md#mqtt-06)
+**Status:** Resolved. Canonical types (`ServiceType`, `ServiceStatus`, `MqttTransport`, `HookShell`) moved
+to `shared-types` with feature-gated derives (`sea-orm`, `openapi`). All duplicates removed from `wire`,
+`web-api-types`, `shared-db`, and `command`. Manual conversion functions (`local_mqtt_transport()`,
+`hook_shell_to_shell_type()`, `parse_service_type()`) eliminated.
 
 ### XC-02: Provider System is Closed to External Providers (Critical)
 
@@ -159,15 +138,11 @@ Identical `strip_tag_prefix` function in `providers/github/src/tag.rs` and
 **Related per-crate findings:** [GH-04](crates/providers/github/CODEREVIEW.md),
 [DOCK-02](crates/providers/docker-registry/CODEREVIEW.md)
 
-### XC-08: Undocumented `install_command` / `restart_command` in Provider Configs (Minor)
+### ~~XC-08: Undocumented `install_command` / `restart_command` in Provider Configs (Minor)~~ **FIXED**
 
-Both GitHub and Docker providers extract execution commands from raw JSON `provider_config` rather than
-from their typed config structs. These fields are not declared in `GitHubConfig` or `DockerRegistryConfig`,
-creating an undocumented configuration surface for API consumers.
-
-**Related per-crate findings:** [GH-01](crates/providers/github/CODEREVIEW.md),
-[DOCK-01](crates/providers/docker-registry/CODEREVIEW.md),
-[PCORE-01](crates/providers/core/CODEREVIEW.md)
+**Status:** Resolved. `install_command` added to `GitHubConfig`, `restart_command` added to
+`DockerRegistryConfig`, `ProxmoxHelperScriptsConfig` created with `script_url`. The `provider_config`
+raw JSON parameter removed from `Provider::execute_update()`. All providers now use typed config fields.
 
 ## Three Extensibility Scenarios
 
@@ -203,9 +178,9 @@ enum + static registry)
 
 | Severity | Count | Key Themes |
 |---|---|---|
-| Critical | 2 | Type duplication across crates, closed provider system |
-| Major | 5 | No service lifecycle abstraction, no prelude, AppState construction, overloaded SDK error types, monolithic controller run() |
-| Minor | ~20 | Closed enums without `#[non_exhaustive]`, duplicated code, hardcoded values, inconsistent `FromStr`/`Display` |
+| Critical | 1 (1 fixed) | ~~Type duplication across crates~~, closed provider system |
+| Major | 4 (1 fixed) | No service lifecycle abstraction, no prelude, AppState construction, overloaded SDK error types, monolithic controller run() |
+| Minor | ~17 (3 fixed) | Closed enums without `#[non_exhaustive]`, duplicated code, hardcoded values, inconsistent `FromStr`/`Display` |
 | Info | ~15 | Missing derives, documentation gaps, ergonomic suggestions |
 
 ## Priority Recommendations
@@ -235,22 +210,22 @@ enum + static registry)
 |---|---|---|
 | shared/types | [CODEREVIEW.md](crates/shared/types/CODEREVIEW.md) | Closed `ProviderType` enum (TYP-03) |
 | shared/macros | [CODEREVIEW.md](crates/shared/macros/CODEREVIEW.md) | Missing rootcause documentation (MAC-03) |
-| shared/wire | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) | Type duplication (WIRE-04), no `#[non_exhaustive]` (WIRE-05) |
-| shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | No prelude (WAT-06), type duplication (WAT-07) |
+| shared/wire | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) | ~~Type duplication (WIRE-04)~~ FIXED, no `#[non_exhaustive]` (WIRE-05) |
+| shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | No prelude (WAT-06), ~~type duplication (WAT-07)~~ FIXED |
 | shared/db | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) | Third copy of ServiceType (DB-05) |
-| shared/command | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) | ShellType duplication (CMD-03) |
+| shared/command | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) | ~~ShellType duplication (CMD-03)~~ FIXED |
 | shared/directories | [CODEREVIEW.md](crates/shared/directories/CODEREVIEW.md) | No extensibility issues |
 | shared/service-sdk | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) | No ServiceHandler trait (SDK-02) |
 | shared/build-info | [CODEREVIEW.md](crates/shared/build-info/CODEREVIEW.md) | Missing Deserialize (BI-03) |
-| providers/core | [CODEREVIEW.md](crates/providers/core/CODEREVIEW.md) | Raw JSON in execute_update (PCORE-01) |
+| providers/core | [CODEREVIEW.md](crates/providers/core/CODEREVIEW.md) | ~~Raw JSON in execute_update (PCORE-01)~~ FIXED |
 | providers/registry | [CODEREVIEW.md](crates/providers/registry/CODEREVIEW.md) | Closed registry (PREG-01) |
-| providers/github | [CODEREVIEW.md](crates/providers/github/CODEREVIEW.md) | Undocumented install_command (GH-01) |
-| providers/docker-registry | [CODEREVIEW.md](crates/providers/docker-registry/CODEREVIEW.md) | Undocumented restart_command (DOCK-01) |
+| providers/github | [CODEREVIEW.md](crates/providers/github/CODEREVIEW.md) | ~~Undocumented install_command (GH-01)~~ FIXED |
+| providers/docker-registry | [CODEREVIEW.md](crates/providers/docker-registry/CODEREVIEW.md) | ~~Undocumented restart_command (DOCK-01)~~ FIXED |
 | providers/homebrew | [CODEREVIEW.md](crates/providers/homebrew/CODEREVIEW.md) | Discarded exit code (BREW-02) |
 | providers/proxmox-helper-scripts | [CODEREVIEW.md](crates/providers/proxmox-helper-scripts/CODEREVIEW.md) | Capability contract violation (PHS-01) |
 | ui/web-api | [CODEREVIEW.md](crates/ui/web-api/CODEREVIEW.md) | AppState construction barrier |
 | ui/cli | [CODEREVIEW.md](crates/ui/cli/CODEREVIEW.md) | Proves web-api-types is sufficient for clients |
 | core/agent | [CODEREVIEW.md](crates/core/agent/CODEREVIEW.md) | Enrollment boilerplate (AGENT-02) |
 | core/controller | [CODEREVIEW.md](crates/core/controller/CODEREVIEW.md) | Monolithic run() function |
-| core/mqtt | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) | Best service reference; enrollment boilerplate (MQTT-05) |
+| core/mqtt | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) | Best service reference; enrollment boilerplate (MQTT-05); ~~MQTT-01, MQTT-02~~ FIXED |
 | frontend | [CODEREVIEW.md](frontend/CODEREVIEW.md) | (Separate frontend review) |

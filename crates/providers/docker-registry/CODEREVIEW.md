@@ -37,7 +37,7 @@ Docker/OCI Registry provider crate (~1200 lines across 7 source files) implement
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
-| DOCK-01 | Minor | Code Quality | `execute_update` reads `restart_command` from raw `provider_config` JSON instead of from `self.config`. This field is not declared in `DockerRegistryConfig`, creating an undocumented configuration surface. Same issue as GH-01 in the GitHub provider. | `src/provider.rs:181` |
+| ~~DOCK-01~~ | ~~Minor~~ | ~~Code Quality~~ | ~~`execute_update` reads `restart_command` from raw JSON.~~ **FIXED.** `restart_command: Option<String>` added to `DockerRegistryConfig`. Provider uses `self.config.restart_command`. Raw JSON parameter removed from trait. | `src/provider.rs` |
 | DOCK-02 | Minor | Code Quality | `strip_tag_prefix` is duplicated identically in `crates/providers/github/src/tag.rs`. Should be extracted to `uptrakit-provider-core`. | `src/tag.rs` |
 | DOCK-03 | Minor | Scalability | Tag list pagination is single-page only. `list_tags()` requests `?n={page_size}` but does not follow the `Link` header for next pages. Repositories with many tags (e.g., `nginx`) may not return all tags. | `src/registry_client.rs` |
 | DOCK-04 | Info | Code Quality | `std::sync::Mutex` is used for `cached_token` in `RegistryAuth`. Since this is used in an async context, `tokio::sync::Mutex` would be conventional. However, the lock is never held across `.await` points, so `std::sync::Mutex` is correct and more efficient. | `src/auth.rs:28` |

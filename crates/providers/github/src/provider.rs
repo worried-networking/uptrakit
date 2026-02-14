@@ -262,7 +262,6 @@ impl Provider for GitHubProvider {
         &self,
         package_identifier: &str,
         to_version: &str,
-        provider_config: &serde_json::Value,
         release_info: Option<&ReleaseInfo>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_provider_core::Result<String> {
@@ -285,27 +284,25 @@ impl Provider for GitHubProvider {
             release_info.tag, release_info.release_url
         ));
 
-        if let Some(install_cmd) = provider_config.get("install_command") {
-            if let Some(cmd_str) = install_cmd.as_str() {
-                let cmd = cmd_str
-                    .replace("{version}", &shell_escape(to_version))
-                    .replace("{tag}", &shell_escape(&release_info.tag))
-                    .replace("{package_identifier}", &shell_escape(package_identifier));
+        if let Some(ref cmd_str) = self.config.install_command {
+            let cmd = cmd_str
+                .replace("{version}", &shell_escape(to_version))
+                .replace("{tag}", &shell_escape(&release_info.tag))
+                .replace("{package_identifier}", &shell_escape(package_identifier));
 
-                send_output(
-                    output_tx,
-                    &format!("Running install command: {cmd}"),
-                    UpdateOutputStream::Stdout,
-                )
-                .await;
+            send_output(
+                output_tx,
+                &format!("Running install command: {cmd}"),
+                UpdateOutputStream::Stdout,
+            )
+            .await;
 
-                match run_command(&cmd, output_tx).await {
-                    Ok(cmd_output) => {
-                        output.push_str(&cmd_output);
-                    }
-                    Err(e) => {
-                        bail!(ProviderError::InstallFailed(e.to_string()));
-                    }
+            match run_command(&cmd, output_tx).await {
+                Ok(cmd_output) => {
+                    output.push_str(&cmd_output);
+                }
+                Err(e) => {
+                    bail!(ProviderError::InstallFailed(e.to_string()));
                 }
             }
         } else {
@@ -337,6 +334,7 @@ mod tests {
             include_prereleases: false,
             tag_strip_prefix: "v".to_string(),
             asset_patterns: vec![],
+            install_command: None,
         }
     }
 
@@ -552,6 +550,7 @@ mod tests {
             include_prereleases: config.include_prereleases,
             tag_strip_prefix: config.tag_strip_prefix,
             asset_patterns: config.asset_patterns,
+            install_command: config.install_command,
         };
         assert!(GitHubProvider::new(config).is_err());
     }
@@ -568,13 +567,7 @@ mod tests {
         let provider = test_provider();
         let (tx, _rx) = mpsc::channel(100);
         let result = provider
-            .execute_update(
-                "octocat/hello-world",
-                "1.0.0",
-                &serde_json::json!({}),
-                None,
-                &tx,
-            )
+            .execute_update("octocat/hello-world", "1.0.0", None, &tx)
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -597,7 +590,6 @@ mod tests {
             .execute_update(
                 "octocat/hello-world",
                 "1.0.0",
-                &serde_json::json!({}),
                 Some(&release_info),
                 &tx,
             )

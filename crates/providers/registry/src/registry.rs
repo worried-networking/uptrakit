@@ -4,7 +4,7 @@ use uptrakit_provider_core::{Provider, ProviderType};
 use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 use uptrakit_provider_homebrew::{HomebrewConfig, HomebrewProvider};
-use uptrakit_provider_proxmox_helper_scripts::ProxmoxHelperScriptsProvider;
+use uptrakit_provider_proxmox_helper_scripts::{ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsProvider};
 
 use crate::error::{RegistryError, Result};
 
@@ -47,7 +47,12 @@ impl ProviderRegistry {
                 Ok(Box::new(provider))
             }
             ProviderType::ProxmoxHelperScripts => {
-                let provider = ProxmoxHelperScriptsProvider::new();
+                let proxmox_config: ProxmoxHelperScriptsConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                proxmox_config
+                    .validate()
+                    .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;
+                let provider = ProxmoxHelperScriptsProvider::new(proxmox_config);
                 Ok(Box::new(provider))
             }
             ProviderType::Homebrew => {
@@ -88,7 +93,11 @@ impl ProviderRegistry {
                 Ok(())
             }
             ProviderType::ProxmoxHelperScripts => {
-                // No validation yet for this provider type
+                let proxmox_config: ProxmoxHelperScriptsConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                proxmox_config
+                    .validate()
+                    .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;
                 Ok(())
             }
             ProviderType::Homebrew => {
@@ -292,9 +301,17 @@ mod tests {
 
     #[test]
     fn validate_proxmox_helper_scripts_config() {
-        let config = serde_json::json!({});
+        let config = serde_json::json!({"script_url": "https://example.com/update.sh"});
         assert!(
             ProviderRegistry::validate_config(ProviderType::ProxmoxHelperScripts, &config).is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_proxmox_helper_scripts_empty_url_fails() {
+        let config = serde_json::json!({"script_url": ""});
+        assert!(
+            ProviderRegistry::validate_config(ProviderType::ProxmoxHelperScripts, &config).is_err()
         );
     }
 
@@ -337,7 +354,7 @@ mod tests {
 
     #[test]
     fn create_provider_proxmox() {
-        let config = serde_json::json!({});
+        let config = serde_json::json!({"script_url": "https://example.com/update.sh"});
         let provider =
             ProviderRegistry::create_provider(ProviderType::ProxmoxHelperScripts, &config);
         assert!(provider.is_ok());

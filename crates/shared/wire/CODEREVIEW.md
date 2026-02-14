@@ -30,74 +30,18 @@ The wire crate has several extensibility-related concerns:
 
 | ID | Title | Severity | Type | File |
 |---|---|---|---|---|
-| [WIRE-01](#wire-01) | No close reason constants defined | High | Actionable | `src/lib.rs` |
+| ~~[WIRE-01](#wire-01)~~ | ~~No close reason constants defined~~ **FIXED** | ~~High~~ | ~~Actionable~~ | `src/lib.rs` |
 | [WIRE-02](#wire-02) | `HookShell::parse()` duplicates `FromStr` | Low | Actionable | `src/lib.rs` |
 | [WIRE-03](#wire-03) | AsyncAPI `active_mqtt_clients` items typed `string` not `uuid` | Low | Actionable | `asyncapi.yaml` |
 
 ## Details
 
-### WIRE-01
+### ~~WIRE-01~~ **FIXED**
 
-**No close reason constants defined**
+**~~No close reason constants defined~~**
 
-- **Severity:** High
-- **Type:** Actionable
-- **File:** `src/lib.rs`
-- **Also affects:** `crates/core/agent/src/client.rs:421-438`,
-  `crates/core/mqtt/src/main.rs:420-437`,
-  `crates/ui/web-api/src/routes/service_ws.rs`,
-  `crates/ui/web-api/src/routes/agent_ws.rs`,
-  `crates/ui/web-api/src/routes/mqtt_ws.rs`
-- **Related findings:** [CROSS-01 in agent](../../core/agent/CODEREVIEW.md#cross-01),
-  [CROSS-01 in MQTT](../../core/mqtt/CODEREVIEW.md#cross-01)
-
-**Description:** The wire crate defines message types and error codes as proper Rust types but does not
-define the WebSocket close reason strings. These 12+ strings are scattered as magic literals across the
-controller (sender) and service (receiver) crates with no shared definition.
-
-Close reasons observed across the codebase:
-
-| Reason string | Sender location |
-|---|---|
-| `"certificate rotated"` | `agent_ws.rs:281`, `mqtt_ws.rs:356` |
-| `"certificate revoked"` | `service_ws.rs:484` |
-| `"no valid certificate"` | `service_ws.rs:456` |
-| `"internal error"` | `service_ws.rs:461`, `service_ws.rs:500`, `service_ws.rs:531` |
-| `"certificate not recognized"` | `service_ws.rs:495` |
-| `"service deactivated"` | `service_ws.rs:514` |
-| `"service not approved"` | `service_ws.rs:519` |
-| `"service not found"` | `service_ws.rs:526` |
-| `"enrollment timeout"` | `service_ws.rs:732` |
-| `"agent version too old"` | `agent_ws.rs:176`, `agent_ws.rs:198` |
-| `"superseded by new connection"` | `agent_ws.rs:567`, `agent_ws.rs:852`, `mqtt_ws.rs:404` |
-| `"rate limit exceeded"` | `agent_ws.rs:127`, `agent_ws.rs:664`, `mqtt_ws.rs:91`, `mqtt_ws.rs:241`, `mqtt_ws.rs:460` |
-
-**Recommendation:** Add a `close_reason` module with named constants:
-
-```rust
-/// WebSocket close reason strings sent by the controller.
-///
-/// Used in `CloseFrame::reason` to communicate why a connection was closed.
-/// Both the controller (sender) and services (receiver) must use these
-/// constants to avoid silent mismatches from typos.
-pub mod close_reason {
-    pub const CERTIFICATE_ROTATED: &str = "certificate rotated";
-    pub const CERTIFICATE_REVOKED: &str = "certificate revoked";
-    pub const NO_VALID_CERTIFICATE: &str = "no valid certificate";
-    pub const INTERNAL_ERROR: &str = "internal error";
-    pub const CERTIFICATE_NOT_RECOGNIZED: &str = "certificate not recognized";
-    pub const SERVICE_DEACTIVATED: &str = "service deactivated";
-    pub const SERVICE_NOT_APPROVED: &str = "service not approved";
-    pub const SERVICE_NOT_FOUND: &str = "service not found";
-    pub const ENROLLMENT_TIMEOUT: &str = "enrollment timeout";
-    pub const AGENT_VERSION_TOO_OLD: &str = "agent version too old";
-    pub const SUPERSEDED: &str = "superseded by new connection";
-    pub const RATE_LIMIT_EXCEEDED: &str = "rate limit exceeded";
-}
-```
-
-Then update all sender and receiver sites to use these constants. Document them in the AsyncAPI spec under
-connection lifecycle.
+**Status:** Resolved. A `close_reason` module with 12 named constants added to the wire crate. All
+sender sites (web-api route handlers) and receiver sites (agent, MQTT) updated to use these constants.
 
 ### WIRE-02
 
@@ -152,23 +96,13 @@ active_mqtt_clients:
 
 This improves documentation accuracy and enables code generators to use typed UUID values.
 
-### WIRE-04
+### ~~WIRE-04~~ **FIXED**
 
-**`ServiceType` duplicated across three crates**
+**~~`ServiceType` duplicated across three crates~~**
 
-- **Severity:** Major
-- **Type:** Actionable
-- **File:** `src/lib.rs:34`
-- **Also affects:** `crates/shared/web-api-types/src/services.rs`, `crates/shared/db/src/entity/service.rs`
-
-**Description:** `ServiceType` exists in three locations with the same variants (`Agent`, `Mqtt`) but
-different derives and no conversion between them. An external developer adding a new service type must update
-all three locations. This should be a single type in `shared-types` with feature-gated derives
-(`#[cfg_attr(feature = "sea-orm", derive(DeriveActiveEnum))]`, etc.).
-
-**Recommendation:** Move the canonical `ServiceType` to `uptrakit-shared-types` and re-export from all
-three current locations. Same approach for `MqttTransport`, which is duplicated between wire and
-web-api-types.
+**Status:** Resolved. `ServiceType`, `ServiceStatus`, `MqttTransport`, and `HookShell` moved to
+`shared-types` with feature-gated derives (`sea-orm`, `openapi`). Wire crate re-exports from `shared-types`.
+All duplicates eliminated.
 
 ### WIRE-05
 
