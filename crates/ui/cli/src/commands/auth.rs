@@ -288,8 +288,14 @@ pub async fn token_create(
         });
     }
 
-    let id = body["id"].as_str().unwrap_or("").to_string();
-    let new_token = body["token"].as_str().unwrap_or("").to_string();
+    let resp: uptrakit_web_api_types::api_tokens::CreateApiTokenResponse =
+        serde_json::from_value(body).map_err(|e| {
+            report!(CliError::Other(format!(
+                "Failed to parse token create response: {e}"
+            )))
+        })?;
+    let id = resp.id;
+    let new_token = resp.token;
 
     let mut human = String::new();
     human.push_str("Token created:\n");
@@ -328,26 +334,29 @@ pub async fn token_list(
         });
     }
 
-    let tokens = body["tokens"].as_array();
-    let entries: Vec<TokenEntry> = match tokens {
-        Some(tokens) => tokens
-            .iter()
-            .map(|t| {
-                let status_str = if t["revoked_at"].is_string() {
-                    "revoked"
-                } else {
-                    "active"
-                };
-                TokenEntry {
-                    id: t["id"].as_str().unwrap_or("").to_string(),
-                    name: t["name"].as_str().unwrap_or("").to_string(),
-                    created_at: t["created_at"].as_str().unwrap_or("").to_string(),
-                    status: status_str.to_string(),
-                }
-            })
-            .collect(),
-        None => Vec::new(),
-    };
+    let resp: uptrakit_web_api_types::api_tokens::ApiTokenListResponse =
+        serde_json::from_value(body).map_err(|e| {
+            report!(CliError::Other(format!(
+                "Failed to parse token list response: {e}"
+            )))
+        })?;
+    let entries: Vec<TokenEntry> = resp
+        .tokens
+        .iter()
+        .map(|t| {
+            let status_str = if t.revoked_at.is_some() {
+                "revoked"
+            } else {
+                "active"
+            };
+            TokenEntry {
+                id: t.id.clone(),
+                name: t.name.clone(),
+                created_at: t.created_at.clone(),
+                status: status_str.to_string(),
+            }
+        })
+        .collect();
 
     let mut human = String::new();
     if entries.is_empty() {
