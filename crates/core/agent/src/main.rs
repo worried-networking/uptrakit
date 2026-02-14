@@ -52,7 +52,7 @@ impl ServiceHandler for AgentHandler {
             })
             .await
             {
-                Ok(outcome) => Ok(map_loop_outcome(outcome)),
+                Ok(outcome) => Ok(outcome),
                 Err(e) => {
                     // Convert agent error to SDK error, preserving cert-expired
                     // and receive-closed semantics for the lifecycle.
@@ -77,16 +77,6 @@ impl ServiceHandler for AgentHandler {
                 }
             }
         })
-    }
-}
-
-/// Map agent-internal `LoopOutcome` to SDK `LoopOutcome`.
-fn map_loop_outcome(outcome: client::LoopOutcome) -> LoopOutcome {
-    match outcome {
-        client::LoopOutcome::Shutdown => LoopOutcome::Shutdown,
-        client::LoopOutcome::Reconnect => LoopOutcome::Reconnect,
-        client::LoopOutcome::Disconnected => LoopOutcome::Disconnected,
-        client::LoopOutcome::Restart => LoopOutcome::Restart,
     }
 }
 

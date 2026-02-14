@@ -141,6 +141,54 @@ async fn main() {
 }
 ```
 
+## `CertificateRenewalHandler`
+
+The SDK provides a `CertificateRenewalHandler` struct (in `cert_handler` module) that encapsulates
+the three certificate-lifecycle controller messages shared by all services: `CaBundleUpdated`,
+`RequestCertRenewal`, and `Certificate`. Both the agent and MQTT service delegate to this handler
+instead of duplicating the same logic.
+
+### Why a separate handler
+
+Before the handler existed, each service independently implemented ~70 lines of keypair generation,
+certificate persistence, CA bundle saving, and `pending_renewal_key` tracking. Any future service
+would have needed a third copy. The handler makes the SDK the single place to understand certificate
+renewal behaviour.
+
+### API
+
+Create one `CertificateRenewalHandler` per connection, before the message loop:
+
+```rust
+let mut cert_handler = CertificateRenewalHandler::new();
+```
+
+Then delegate the three controller messages inside the `select!` loop:
+
+| Controller message | Handler method | Return |
+|---|---|---|
+| `CaBundleUpdated` | `handle_ca_bundle_updated(&self, identity, payload)` | `()` (fire-and-forget, logs errors) |
+| `RequestCertRenewal` | `handle_request_cert_renewal(&mut self, identity, conn, payload)` | `Option<LoopOutcome>` — `None` means continue, `Some` means break |
+| `Certificate` | `handle_certificate(&mut self, identity, payload)` | `Result<LoopOutcome>` — `Reconnect` on success, `Disconnected` if no pending key |
+
+For timer-based renewal (agent only), call `initiate_renewal` directly:
+
+```rust
+let csr_pem = cert_handler.initiate_renewal(identity)?;
+conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload { csr_pem })).await?;
+```
+
+`initiate_renewal` extracts the service ID from `identity`, generates a fresh ECDSA P-256 keypair
+and CSR, stores the private key internally, and returns the CSR PEM to send to the controller.
+
+### Internal state
+
+The handler owns a single field — `pending_renewal_key: Option<String>` — that holds the private key
+PEM between the `RequestCertRenewal` → `Certificate` pair (or between a timer-based
+`initiate_renewal` call and the subsequent `Certificate` response). When `handle_certificate` is
+called, it takes the pending key, persists both the certificate and the key via
+`identity.save_certificate()` and `identity.save_private_key()`, and returns `LoopOutcome::Reconnect`.
+
 ## Error handling at the trait boundary
 
 The lifecycle works with `Report<EnrollmentError>`. The handler's `run_authenticated_loop` returns

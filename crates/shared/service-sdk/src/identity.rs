@@ -330,6 +330,28 @@ impl ServiceIdentityState {
         Ok(())
     }
 
+    /// Persist a private key PEM to `state_dir/service.key` and update the
+    /// in-memory keypair.
+    ///
+    /// Used during certificate renewal when a fresh keypair is generated
+    /// separately (not via [`ensure_keypair`](Self::ensure_keypair)) and the
+    /// signed certificate arrives back from the controller.
+    pub async fn save_private_key(&mut self, key_pem: &str) -> Result<()> {
+        let keypair = rcgen::KeyPair::from_pem(key_pem).map_err(|e| {
+            report!(EnrollmentError::KeypairGeneration(format!(
+                "failed to parse private key PEM: {e}"
+            )))
+        })?;
+
+        let key_path = self.state_dir.join(SERVICE_KEY_FILE);
+        uptrakit_directories::write_secure_file_str_async(&key_path, key_pem)
+            .await
+            .context_to::<EnrollmentError>()?;
+
+        self.keypair = Some(keypair);
+        Ok(())
+    }
+
     /// Persist the issued certificate to `state_dir/service.crt`.
     ///
     /// Clears the enrollment secret from the state file since bearer auth is no

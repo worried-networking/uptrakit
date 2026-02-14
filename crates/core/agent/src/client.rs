@@ -1,28 +1,15 @@
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
-    CertificatePayload, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
+    ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
     RenewCertificatePayload, ReportHostsPayload, ServiceMessage, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
     close_reason, now_millis,
 };
-use uptrakit_service_sdk::ControllerConnection;
+use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
-use uptrakit_service_sdk::identity::generate_keypair_and_csr;
 
 use crate::error::{Error, Result};
-
-/// Outcome of the authenticated event loop.
-pub enum LoopOutcome {
-    /// SIGINT/SIGTERM received — shut down cleanly.
-    Shutdown,
-    /// Certificate rotated — reload from disk and reconnect.
-    Reconnect,
-    /// Connection closed by controller — no special action.
-    Disconnected,
-    /// SIGHUP received — exit for external restart.
-    Restart,
-}
 
 /// Far-future delay used when no renewal is scheduled (30 days).
 const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
@@ -55,7 +42,7 @@ pub struct AuthenticatedLoopParams<'a> {
     pub ca_pem: Option<&'a [u8]>,
     pub tls_connector: tokio_rustls::TlsConnector,
     pub cert_not_after_ts: Option<i64>,
-    pub identity: &'a uptrakit_service_sdk::ServiceIdentityState,
+    pub identity: &'a mut uptrakit_service_sdk::ServiceIdentityState,
 }
 
 /// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
@@ -107,8 +94,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     // Renewal timer — initially far-future, reset when AgentSettings arrives
     let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
 
-    // Holds the private key for a pending renewal CSR until the cert arrives
-    let mut pending_renewal_key: Option<String> = None;
+    // Handles certificate lifecycle messages (CaBundleUpdated,
+    // RequestCertRenewal, Certificate) and timer-based renewal.
+    let mut cert_handler = CertificateRenewalHandler::new();
 
     // Shutdown timeout from controller settings
     let mut shutdown_timeout_seconds: u32 = DEFAULT_SHUTDOWN_TIMEOUT;
@@ -116,8 +104,8 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     // Track in-flight update (only one at a time)
     let mut in_flight_update: Option<InFlightUpdate> = None;
 
-    let config_dir = identity.config_dir();
-    let state_dir = identity.state_dir();
+    // Clone directory paths to avoid borrow conflicts with `&mut identity`.
+    let config_dir = identity.config_dir().to_path_buf();
 
     let outcome = loop {
         // If there's an in-flight update, poll it alongside other events
@@ -172,16 +160,13 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
             }
             _ = &mut renewal_sleep => {
                 tracing::info!("renewal window reached, requesting certificate renewal");
-                let client_id_str = match extract_service_id(identity) {
-                    Ok(id) => id,
+                let csr_pem = match cert_handler.initiate_renewal(identity) {
+                    Ok(csr) => csr,
                     Err(e) => {
-                        tracing::error!(error = %e, "cannot renew certificate: no service ID");
+                        tracing::error!(error = %e, "cannot renew certificate");
                         break LoopOutcome::Disconnected;
                     }
                 };
-                let (key_pem, csr_pem) = generate_keypair_and_csr(&client_id_str)
-                    .context_to::<Error>()?;
-                pending_renewal_key = Some(key_pem);
                 conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
                     csr_pem,
                 }))
@@ -207,17 +192,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 );
                             }
                             ControllerMessage::Certificate(payload) => {
-                                // Save new cert + new key to disk
-                                let key_pem = match pending_renewal_key.take() {
-                                    Some(k) => k,
-                                    None => {
-                                        tracing::error!("received certificate but no pending renewal key");
-                                        break LoopOutcome::Disconnected;
-                                    }
-                                };
-                                save_renewed_cert(state_dir, &payload, &key_pem).await?;
-                                tracing::info!("renewed certificate saved, reconnecting");
-                                break LoopOutcome::Reconnect;
+                                break cert_handler.handle_certificate(identity, &payload)
+                                    .await
+                                    .context_to::<Error>()?;
                             }
                             ControllerMessage::ServiceSettings(settings) => {
                                 tracing::trace!(
@@ -243,7 +220,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
                                 // Check if CA bundle is stale
                                 if !settings.ca_bundle_hash.is_empty() {
-                                    let local_hash = compute_local_ca_hash(config_dir).await;
+                                    let local_hash = compute_local_ca_hash(&config_dir).await;
                                     if local_hash != settings.ca_bundle_hash {
                                         tracing::info!("CA bundle hash mismatch, fetching updated bundle");
                                         let ca_fetch_url = pki_addr.unwrap_or(base_url);
@@ -253,7 +230,8 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         };
                                         match fetch_ca_certificate(ca_fetch_url, tls_mode).await {
                                             Ok(pem) => {
-                                                if let Err(e) = save_ca_cert(config_dir, &pem).await {
+                                                let pem_str = String::from_utf8_lossy(&pem);
+                                                if let Err(e) = identity.save_ca_cert(&pem_str).await {
                                                     tracing::warn!("failed to save updated CA: {e}");
                                                 } else {
                                                     tracing::info!("updated CA bundle saved to disk");
@@ -265,37 +243,12 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 }
                             }
                             ControllerMessage::CaBundleUpdated(payload) => {
-                                tracing::info!("received CA bundle update from controller");
-                                if let Err(e) = save_ca_cert(config_dir, payload.ca_bundle_pem.as_bytes()).await {
-                                    tracing::warn!("failed to save updated CA bundle: {e}");
-                                } else {
-                                    tracing::info!("updated CA bundle saved to disk");
-                                }
+                                cert_handler.handle_ca_bundle_updated(identity, &payload).await;
                             }
                             ControllerMessage::RequestCertRenewal(payload) => {
-                                tracing::info!(reason = %payload.reason, "controller requested immediate certificate renewal");
-                                let client_id_str = match extract_service_id(identity) {
-                                    Ok(id) => id,
-                                    Err(e) => {
-                                        tracing::error!(error = %e, "cannot renew certificate: no service ID");
-                                        break LoopOutcome::Disconnected;
-                                    }
-                                };
-                                let (key_pem, csr_pem) = match generate_keypair_and_csr(&client_id_str).context_to::<Error>() {
-                                    Ok(pair) => pair,
-                                    Err(e) => {
-                                        tracing::error!(error = %e, "failed to generate keypair for renewal");
-                                        break LoopOutcome::Disconnected;
-                                    }
-                                };
-                                pending_renewal_key = Some(key_pem);
-                                if let Err(e) = conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
-                                    csr_pem,
-                                })).await {
-                                    tracing::error!(error = %e, "failed to send renewal request");
-                                    break LoopOutcome::Disconnected;
+                                if let Some(o) = cert_handler.handle_request_cert_renewal(identity, &mut conn, &payload).await {
+                                    break o;
                                 }
-                                tracing::debug!("sent RenewCertificate in response to RequestCertRenewal");
                             }
                             ControllerMessage::CheckVersions(payload) => {
                                 tracing::info!(count = payload.assignments.len(), "received CheckVersions request");
@@ -605,47 +558,6 @@ async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
     }
 }
 
-/// Extract the service_id string from the identity state.
-///
-/// Returns an error if the identity has no service ID, since this is only
-/// called during certificate renewal when the identity must be enrolled.
-fn extract_service_id(identity: &uptrakit_service_sdk::ServiceIdentityState) -> Result<String> {
-    identity
-        .service_id()
-        .map(|id| id.to_string())
-        .ok_or_else(|| {
-            report!(Error::Enrollment(
-                uptrakit_service_sdk::EnrollmentError::NotEnrolled
-            ))
-        })
-}
-
-/// Save renewed cert + key to state directory.
-async fn save_renewed_cert(
-    state_dir: &std::path::Path,
-    payload: &CertificatePayload,
-    key_pem: &str,
-) -> Result<()> {
-    let cert_path = state_dir.join("service.crt");
-    let key_path = state_dir.join("service.key");
-    uptrakit_directories::write_secure_file_str_async(&cert_path, &payload.cert_pem)
-        .await
-        .context_to::<Error>()?;
-    uptrakit_directories::write_secure_file_str_async(&key_path, key_pem)
-        .await
-        .context_to::<Error>()?;
-    Ok(())
-}
-
-/// Save CA cert bytes to config directory.
-async fn save_ca_cert(config_dir: &std::path::Path, pem: &[u8]) -> Result<()> {
-    let path = config_dir.join("ca.pem");
-    uptrakit_directories::write_secure_file_async(&path, pem)
-        .await
-        .context_to::<Error>()?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,73 +636,5 @@ mod tests {
             uptrakit_shared_types::hex::encode(h.finalize())
         };
         assert_eq!(hash, expected);
-    }
-
-    // ── extract_service_id ──────────────────────────────────────────────
-
-    #[test]
-    fn extract_service_id_without_id_returns_error() {
-        let dir = std::path::Path::new("/tmp/nonexistent-test-dir");
-        let identity = uptrakit_service_sdk::ServiceIdentityState::new(dir, dir);
-        // No service.json loaded → service_id is None → returns error
-        assert!(extract_service_id(&identity).is_err());
-    }
-
-    #[tokio::test]
-    async fn extract_service_id_with_id() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let state_path = dir.path().join("service.json");
-        let id = uuid::Uuid::now_v7();
-        let json = serde_json::json!({
-            "service_id": id.to_string(),
-            "enrollment_secret": "test-secret"
-        });
-        tokio::fs::write(&state_path, json.to_string())
-            .await
-            .expect("write");
-        let mut identity = uptrakit_service_sdk::ServiceIdentityState::new(dir.path(), dir.path());
-        identity.load().await.expect("load");
-        assert_eq!(
-            extract_service_id(&identity).expect("should have id"),
-            id.to_string()
-        );
-    }
-
-    // ── save_renewed_cert ───────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn save_renewed_cert_writes_files() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        // Construct CertificatePayload via deserialization to avoid direct time dependency.
-        let payload: CertificatePayload = serde_json::from_value(serde_json::json!({
-            "cert_pem": "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----",
-            "not_after": 0
-        }))
-        .expect("deserialize");
-        save_renewed_cert(dir.path(), &payload, "key-pem-data")
-            .await
-            .expect("save");
-        let cert = tokio::fs::read_to_string(dir.path().join("service.crt"))
-            .await
-            .expect("read cert");
-        let key = tokio::fs::read_to_string(dir.path().join("service.key"))
-            .await
-            .expect("read key");
-        assert_eq!(cert, payload.cert_pem);
-        assert_eq!(key, "key-pem-data");
-    }
-
-    // ── save_ca_cert ────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn save_ca_cert_writes_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        save_ca_cert(dir.path(), b"ca-pem-data")
-            .await
-            .expect("save");
-        let content = tokio::fs::read_to_string(dir.path().join("ca.pem"))
-            .await
-            .expect("read");
-        assert_eq!(content, "ca-pem-data");
     }
 }

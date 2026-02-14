@@ -4910,7 +4910,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uptrakit-build-info",
- "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",

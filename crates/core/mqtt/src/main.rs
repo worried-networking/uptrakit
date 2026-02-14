@@ -10,13 +10,11 @@ use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
-    MqttRegisterPayload, PingPayload, RenewCertificatePayload, ServiceMessage, close_reason,
-    now_millis,
+    MqttRegisterPayload, PingPayload, ServiceMessage, close_reason, now_millis,
 };
 use uptrakit_service_sdk::{
-    AuthenticatedContext, ControllerConnection, LoopOutcome, ServiceConfig, ServiceEnrollmentInfo,
-    ServiceHandler,
-    identity::generate_keypair_and_csr,
+    AuthenticatedContext, CertificateRenewalHandler, ControllerConnection, LoopOutcome,
+    ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
 };
 
 use crate::tenant_manager::TenantManager;
@@ -153,9 +151,9 @@ async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_ser
         identity,
     } = params;
 
-    // Pending renewal key: stored temporarily until the controller sends the
-    // signed certificate back.
-    let mut pending_renewal_key: Option<String> = None;
+    // Handles certificate lifecycle messages (CaBundleUpdated,
+    // RequestCertRenewal, Certificate) and the pending renewal key.
+    let mut cert_handler = CertificateRenewalHandler::new();
 
     tracing::info!("connecting to controller (authenticated)");
     let mut conn = ControllerConnection::connect(host, port, &tls_connector, None).await?;
@@ -218,58 +216,15 @@ async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_ser
                         }
                     }
                     Some(ControllerMessage::CaBundleUpdated(payload)) => {
-                        tracing::info!("received CA bundle update from controller");
-                        if let Err(e) = identity.save_ca_cert(&payload.ca_bundle_pem).await {
-                            tracing::warn!(error = %e, "failed to save updated CA bundle");
-                        } else {
-                            tracing::info!("updated CA bundle saved to disk");
-                        }
+                        cert_handler.handle_ca_bundle_updated(identity, &payload).await;
                     }
                     Some(ControllerMessage::RequestCertRenewal(payload)) => {
-                        tracing::info!(reason = %payload.reason, "controller requested certificate renewal");
-                        let service_id_str = match identity.service_id() {
-                            Some(id) => id.to_string(),
-                            None => {
-                                tracing::error!("cannot renew certificate: no service ID");
-                                break LoopOutcome::Disconnected;
-                            }
-                        };
-                        let (key_pem, csr_pem) = match generate_keypair_and_csr(&service_id_str) {
-                            Ok(pair) => pair,
-                            Err(e) => {
-                                tracing::error!(error = %e, "failed to generate keypair for renewal");
-                                break LoopOutcome::Disconnected;
-                            }
-                        };
-                        pending_renewal_key = Some(key_pem);
-                        if let Err(e) = conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
-                            csr_pem,
-                        })).await {
-                            tracing::error!(error = %e, "failed to send renewal request");
-                            break LoopOutcome::Disconnected;
+                        if let Some(o) = cert_handler.handle_request_cert_renewal(identity, &mut conn, &payload).await {
+                            break o;
                         }
-                        tracing::debug!("sent RenewCertificate in response to RequestCertRenewal");
                     }
                     Some(ControllerMessage::Certificate(payload)) => {
-                        let key_pem = match pending_renewal_key.take() {
-                            Some(k) => k,
-                            None => {
-                                tracing::error!("received certificate but no pending renewal key");
-                                break LoopOutcome::Disconnected;
-                            }
-                        };
-                        if let Err(e) = identity.save_certificate(&payload.cert_pem).await {
-                            tracing::error!(error = %e, "failed to save renewed certificate");
-                            break LoopOutcome::Disconnected;
-                        }
-                        // Persist the new private key alongside the certificate.
-                        let key_path = identity.state_dir().join("service.key");
-                        if let Err(e) = uptrakit_directories::write_secure_file_str_async(&key_path, &key_pem).await {
-                            tracing::error!(error = %e, "failed to save renewed private key");
-                            break LoopOutcome::Disconnected;
-                        }
-                        tracing::info!("renewed certificate saved, reconnecting");
-                        break LoopOutcome::Reconnect;
+                        break cert_handler.handle_certificate(identity, &payload).await?;
                     }
                     Some(ControllerMessage::ServerRestarting(payload)) => {
                         tracing::info!(reason = %payload.reason, "controller is restarting");
