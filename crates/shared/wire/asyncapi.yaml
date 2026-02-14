@@ -1790,6 +1790,7 @@ components:
           type: array
           items:
             type: string
+            format: uuid
           description: List of active MQTT client IDs (MQTT services only, for graceful handoff)
 
     mqttRegisterPayload:
@@ -1826,6 +1827,7 @@ components:
           type: array
           items:
             type: string
+            format: uuid
           description: |
             Currently active MQTT client IDs (for reconnect reconciliation).
             Omitted when empty (empty array is the default).
@@ -1879,6 +1881,7 @@ components:
           type: array
           items:
             type: string
+            format: uuid
           description: MQTT client IDs to release
           examples:
             - ["660e8400-e29b-41d4-a716-446655440001"]
