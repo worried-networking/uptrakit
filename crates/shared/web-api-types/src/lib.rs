@@ -65,34 +65,34 @@ mod tests {
     }
 
     #[test]
-    fn permission_parse_valid() {
+    fn permission_from_str_valid() {
         assert_eq!(
-            Permission::parse("view_settings"),
+            "view_settings".parse::<Permission>().ok(),
             Some(Permission::ViewSettings)
         );
         assert_eq!(
-            Permission::parse("manage_settings"),
+            "manage_settings".parse::<Permission>().ok(),
             Some(Permission::ManageSettings)
         );
         assert_eq!(
-            Permission::parse("view_agents"),
+            "view_agents".parse::<Permission>().ok(),
             Some(Permission::ViewAgents)
         );
         assert_eq!(
-            Permission::parse("manage_agents"),
+            "manage_agents".parse::<Permission>().ok(),
             Some(Permission::ManageAgents)
         );
         assert_eq!(
-            Permission::parse("manage_global_settings"),
+            "manage_global_settings".parse::<Permission>().ok(),
             Some(Permission::ManageGlobalSettings)
         );
     }
 
     #[test]
-    fn permission_parse_invalid_returns_none() {
-        assert_eq!(Permission::parse("nonexistent"), None);
-        assert_eq!(Permission::parse(""), None);
-        assert_eq!(Permission::parse("VIEW_SETTINGS"), None);
+    fn permission_from_str_invalid_returns_err() {
+        assert!("nonexistent".parse::<Permission>().is_err());
+        assert!("".parse::<Permission>().is_err());
+        assert!("VIEW_SETTINGS".parse::<Permission>().is_err());
     }
 
     #[test]
@@ -108,10 +108,12 @@ mod tests {
     }
 
     #[test]
-    fn permission_as_str_round_trips_through_parse() {
+    fn permission_as_str_round_trips_through_from_str() {
         for perm in Permission::iter() {
             let s = perm.as_str();
-            let parsed = Permission::parse(s).expect("parse should succeed for as_str output");
+            let parsed: Permission = s
+                .parse()
+                .expect("from_str should succeed for as_str output");
             assert_eq!(parsed, perm);
         }
     }

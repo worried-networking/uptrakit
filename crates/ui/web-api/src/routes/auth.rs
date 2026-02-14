@@ -904,7 +904,7 @@ pub async fn get_user_permissions(
     let mut seen = std::collections::HashSet::new();
     let permissions: Vec<Permission> = perm_models
         .into_iter()
-        .filter_map(|p| Permission::parse(&p.name))
+        .filter_map(|p| p.name.parse::<Permission>().ok())
         .filter(|p| seen.insert(p.clone()))
         .collect();
 

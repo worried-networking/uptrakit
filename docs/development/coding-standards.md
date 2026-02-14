@@ -29,6 +29,45 @@
 Refer to [docs/security/secure-development.md](../security/secure-development.md) when the change touches PKI, secrets, reverse proxies, or filesystem
 security.
 
+## String-to-Type Conversions
+
+All string-to-type conversions must use the standard `FromStr` trait. Do not add ad-hoc `parse(&str)` methods
+that serve the same purpose.
+
+### Required pattern
+
+```rust
+use std::str::FromStr;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+#[error("invalid my type value")]
+pub struct ParseMyTypeError;
+
+impl FromStr for MyType {
+    type Err = ParseMyTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "variant_a" => Ok(Self::VariantA),
+            _ => Err(ParseMyTypeError),
+        }
+    }
+}
+```
+
+### Conventions
+
+- **Error type naming:** `Parse{TypeName}Error` (e.g., `ParsePermissionError`, `ParseMqttTransportError`).
+- **Error derivation:** Use `thiserror::Error` in crates that depend on `thiserror`. In crates without `thiserror` (e.g., `uptrakit-internal-wire`), implement `Display` and `Error` manually.
+- **Call sites:** Prefer `s.parse::<MyType>()` over explicit `MyType::from_str(s)`.
+- **Fallible conversions with defaults:** Use `s.parse::<MyType>().unwrap_or_default()` when a default is acceptable.
+- **`from_url_scheme()` and similar:** Domain-specific parsers that convert from a different representation (e.g., URL schemes like `mqtt`/`mqtts` to `MqttTransport`) are not `FromStr` candidates and should remain as named methods.
+
+### Anti-pattern
+
+- **Ad-hoc `parse(&str)` methods** returning `Option<Self>` or `Result<Self, String>` -- always implement `FromStr` instead.
+
 ## Error Handling - Detailed
 
 Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagation and

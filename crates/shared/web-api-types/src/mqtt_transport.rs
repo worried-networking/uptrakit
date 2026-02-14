@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use thiserror::Error;
 
 /// MQTT connection transport type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,21 +12,17 @@ pub enum MqttTransport {
     Tls,
 }
 
+/// Error returned when parsing an invalid [`MqttTransport`] string.
+#[derive(Debug, Error)]
+#[error("invalid MQTT transport value")]
+pub struct ParseMqttTransportError;
+
 impl MqttTransport {
     /// DB / wire representation.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Tcp => "tcp",
             Self::Tls => "tls",
-        }
-    }
-
-    /// Parse from a DB / wire string.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "tcp" => Some(Self::Tcp),
-            "tls" => Some(Self::Tls),
-            _ => None,
         }
     }
 
@@ -59,6 +57,18 @@ impl MqttTransport {
     }
 }
 
+impl FromStr for MqttTransport {
+    type Err = ParseMqttTransportError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "tcp" => Ok(Self::Tcp),
+            "tls" => Ok(Self::Tls),
+            _ => Err(ParseMqttTransportError),
+        }
+    }
+}
+
 impl std::fmt::Display for MqttTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -73,8 +83,8 @@ mod tests {
     fn round_trip_all_variants() {
         for transport in [MqttTransport::Tcp, MqttTransport::Tls] {
             let s = transport.as_str();
-            let parsed = MqttTransport::parse(s);
-            assert_eq!(parsed, Some(transport), "round-trip failed for {s}");
+            let parsed: MqttTransport = s.parse().expect("round-trip should succeed");
+            assert_eq!(parsed, transport, "round-trip failed for {s}");
         }
     }
 
@@ -113,10 +123,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_unknown_returns_none() {
-        assert_eq!(MqttTransport::parse("unknown"), None);
-        assert_eq!(MqttTransport::parse(""), None);
-        assert_eq!(MqttTransport::parse("TCP"), None);
+    fn from_str_unknown_returns_err() {
+        assert!("unknown".parse::<MqttTransport>().is_err());
+        assert!("".parse::<MqttTransport>().is_err());
+        assert!("TCP".parse::<MqttTransport>().is_err());
     }
 
     #[test]

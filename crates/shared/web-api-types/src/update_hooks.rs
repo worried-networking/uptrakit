@@ -273,17 +273,26 @@ mod tests {
     }
 
     #[test]
-    fn hook_shell_parse_valid() {
-        assert_eq!(HookShell::parse("bash"), Some(HookShell::Bash));
-        assert_eq!(HookShell::parse("sh"), Some(HookShell::Sh));
-        assert_eq!(HookShell::parse("powershell"), Some(HookShell::PowerShell));
+    fn hook_shell_from_str_valid() {
+        assert_eq!(
+            "bash".parse::<HookShell>().ok(),
+            Some(HookShell::Bash)
+        );
+        assert_eq!(
+            "sh".parse::<HookShell>().ok(),
+            Some(HookShell::Sh)
+        );
+        assert_eq!(
+            "powershell".parse::<HookShell>().ok(),
+            Some(HookShell::PowerShell)
+        );
     }
 
     #[test]
-    fn hook_shell_parse_invalid() {
-        assert_eq!(HookShell::parse("zsh"), None);
-        assert_eq!(HookShell::parse(""), None);
-        assert_eq!(HookShell::parse("BASH"), None);
+    fn hook_shell_from_str_invalid() {
+        assert!("zsh".parse::<HookShell>().is_err());
+        assert!("".parse::<HookShell>().is_err());
+        assert!("BASH".parse::<HookShell>().is_err());
     }
 
     #[test]

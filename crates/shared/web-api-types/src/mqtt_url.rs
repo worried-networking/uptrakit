@@ -1,4 +1,5 @@
 use crate::mqtt_transport::MqttTransport;
+use std::str::FromStr;
 use thiserror::Error;
 
 /// Error returned when parsing an MQTT URL fails.
@@ -29,12 +30,14 @@ pub struct MqttUrl {
     pub port: u16,
 }
 
-impl MqttUrl {
+impl FromStr for MqttUrl {
+    type Err = MqttUrlError;
+
     /// Parse an MQTT URL string.
     ///
     /// Accepted schemes: `mqtt://`, `mqtts://`.
     /// If the port is omitted, the default port for the transport is used.
-    pub fn parse(url: &str) -> Result<Self, MqttUrlError> {
+    fn from_str(url: &str) -> Result<Self, Self::Err> {
         // Split scheme manually because url::Url doesn't know mqtt/mqtts schemes
         let (scheme, rest) = url
             .split_once("://")
@@ -105,7 +108,9 @@ impl MqttUrl {
             port,
         })
     }
+}
 
+impl MqttUrl {
     /// Format back into a URL string.
     pub fn to_url_string(&self) -> String {
         let scheme = self.transport.url_scheme();
@@ -134,7 +139,7 @@ mod tests {
 
     #[test]
     fn parse_mqtt_tcp_default_port() {
-        let url = MqttUrl::parse("mqtt://broker.local").unwrap();
+        let url: MqttUrl = "mqtt://broker.local".parse().unwrap();
         assert_eq!(url.transport, MqttTransport::Tcp);
         assert_eq!(url.host, "broker.local");
         assert_eq!(url.port, 1883);
@@ -142,7 +147,7 @@ mod tests {
 
     #[test]
     fn parse_mqtt_tcp_custom_port() {
-        let url = MqttUrl::parse("mqtt://broker.local:9883").unwrap();
+        let url: MqttUrl = "mqtt://broker.local:9883".parse().unwrap();
         assert_eq!(url.transport, MqttTransport::Tcp);
         assert_eq!(url.host, "broker.local");
         assert_eq!(url.port, 9883);
@@ -150,7 +155,7 @@ mod tests {
 
     #[test]
     fn parse_mqtts_default_port() {
-        let url = MqttUrl::parse("mqtts://secure.broker").unwrap();
+        let url: MqttUrl = "mqtts://secure.broker".parse().unwrap();
         assert_eq!(url.transport, MqttTransport::Tls);
         assert_eq!(url.host, "secure.broker");
         assert_eq!(url.port, 8883);
@@ -158,57 +163,59 @@ mod tests {
 
     #[test]
     fn parse_trailing_slash_ignored() {
-        let url = MqttUrl::parse("mqtt://broker.local/").unwrap();
+        let url: MqttUrl = "mqtt://broker.local/".parse().unwrap();
         assert_eq!(url.transport, MqttTransport::Tcp);
         assert_eq!(url.host, "broker.local");
     }
 
     #[test]
     fn parse_path_rejected() {
-        let err = MqttUrl::parse("mqtt://broker.local/mqtt").unwrap_err();
+        let err = "mqtt://broker.local/mqtt".parse::<MqttUrl>().unwrap_err();
         assert_eq!(err, MqttUrlError::PathNotSupported);
     }
 
     #[test]
     fn parse_ipv6_host() {
-        let url = MqttUrl::parse("mqtt://[::1]:1883").unwrap();
+        let url: MqttUrl = "mqtt://[::1]:1883".parse().unwrap();
         assert_eq!(url.host, "::1");
         assert_eq!(url.port, 1883);
     }
 
     #[test]
     fn parse_error_unsupported_scheme() {
-        let err = MqttUrl::parse("http://broker.local").unwrap_err();
+        let err = "http://broker.local".parse::<MqttUrl>().unwrap_err();
         assert_eq!(err, MqttUrlError::UnsupportedScheme("http".to_string()));
     }
 
     #[test]
     fn parse_error_ws_scheme() {
-        let err = MqttUrl::parse("ws://broker.local").unwrap_err();
+        let err = "ws://broker.local".parse::<MqttUrl>().unwrap_err();
         assert_eq!(err, MqttUrlError::UnsupportedScheme("ws".to_string()));
     }
 
     #[test]
     fn parse_error_wss_scheme() {
-        let err = MqttUrl::parse("wss://broker.local").unwrap_err();
+        let err = "wss://broker.local".parse::<MqttUrl>().unwrap_err();
         assert_eq!(err, MqttUrlError::UnsupportedScheme("wss".to_string()));
     }
 
     #[test]
     fn parse_error_missing_host() {
-        let err = MqttUrl::parse("mqtt://").unwrap_err();
+        let err = "mqtt://".parse::<MqttUrl>().unwrap_err();
         assert_eq!(err, MqttUrlError::MissingHost);
     }
 
     #[test]
     fn parse_error_no_separator() {
-        let err = MqttUrl::parse("broker.local").unwrap_err();
+        let err = "broker.local".parse::<MqttUrl>().unwrap_err();
         matches!(err, MqttUrlError::InvalidUrl(_));
     }
 
     #[test]
     fn parse_error_invalid_port() {
-        let err = MqttUrl::parse("mqtt://broker.local:notaport").unwrap_err();
+        let err = "mqtt://broker.local:notaport"
+            .parse::<MqttUrl>()
+            .unwrap_err();
         assert_eq!(err, MqttUrlError::InvalidPort);
     }
 
@@ -241,7 +248,7 @@ mod tests {
             ("mqtts://broker:8883", "mqtts://broker"),
         ];
         for (input, expected) in cases {
-            let parsed = MqttUrl::parse(input).unwrap();
+            let parsed: MqttUrl = input.parse().unwrap();
             assert_eq!(parsed.to_url_string(), expected);
         }
     }
@@ -250,7 +257,7 @@ mod tests {
     fn round_trip_custom_ports() {
         let urls = ["mqtt://broker:9883", "mqtts://broker:9443"];
         for input in urls {
-            let parsed = MqttUrl::parse(input).unwrap();
+            let parsed: MqttUrl = input.parse().unwrap();
             assert_eq!(parsed.to_url_string(), input);
         }
     }

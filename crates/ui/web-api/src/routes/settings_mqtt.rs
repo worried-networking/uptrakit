@@ -29,7 +29,7 @@ fn model_to_response(
     model: &mqtt_client::Model,
     connection_status: MqttClientConnectionStatus,
 ) -> MqttClientResponse {
-    let transport = MqttTransport::parse(&model.transport).unwrap_or_default();
+    let transport = model.transport.parse::<MqttTransport>().unwrap_or_default();
     let port = u16::try_from(model.port).unwrap_or(transport.default_port());
     let url = uptrakit_web_api_types::mqtt_url::build_url(transport, &model.host, port);
 
@@ -49,7 +49,7 @@ fn model_to_response(
 }
 
 fn parse_connection_status(model: &mqtt_client::Model) -> MqttClientConnectionStatus {
-    MqttClientConnectionStatus::parse(&model.connection_status).unwrap_or_default()
+    model.connection_status.parse::<MqttClientConnectionStatus>().unwrap_or_default()
 }
 
 fn resolve_connection_status(
@@ -171,7 +171,7 @@ pub async fn create_mqtt_settings(
 
     // Resolve connection parameters from URL or individual fields
     let (transport, host, port) = if let Some(ref url_str) = req.url {
-        match MqttUrl::parse(url_str) {
+        match url_str.parse::<MqttUrl>() {
             Ok(parsed) => (parsed.transport, parsed.host, parsed.port),
             Err(e) => {
                 return error_response(StatusCode::BAD_REQUEST, format!("invalid url: {e}"));
@@ -467,7 +467,7 @@ pub async fn update_mqtt_settings(
 
     // Resolve URL-based overrides
     let (url_transport, url_host, url_port) = if let Some(ref url_str) = req.url {
-        match MqttUrl::parse(url_str) {
+        match url_str.parse::<MqttUrl>() {
             Ok(parsed) => (Some(parsed.transport), Some(parsed.host), Some(parsed.port)),
             Err(e) => {
                 return error_response(StatusCode::BAD_REQUEST, format!("invalid url: {e}"));

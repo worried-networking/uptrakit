@@ -101,45 +101,12 @@ connection lifecycle.
 
 ### WIRE-02
 
-**`HookShell::parse()` duplicates `FromStr`**
+**`HookShell::parse()` duplicates `FromStr`** -- **RESOLVED**
 
 - **Severity:** Low
 - **Type:** Actionable
-- **File:** `src/lib.rs:121-137`
-
-**Description:** `HookShell` has both a `parse()` inherent method (returning `Option<Self>`) and a `FromStr`
-impl (returning `Result<Self, String>`). The `FromStr` impl delegates to `parse()`, so there is no logic
-duplication, but having two parsing entry points with different return types is unnecessary API surface.
-
-**Code evidence:**
-
-```rust
-// src/lib.rs:121-128
-impl HookShell {
-    /// Parses a string into a `HookShell` variant.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "bash" => Some(Self::Bash),
-            "sh" => Some(Self::Sh),
-            "powershell" => Some(Self::PowerShell),
-            _ => None,
-        }
-    }
-}
-
-// src/lib.rs:131-137
-impl std::str::FromStr for HookShell {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown shell: {s}"))
-    }
-}
-```
-
-**Recommendation:** Remove the `parse()` inherent method and have callers use `FromStr` (via
-`"bash".parse::<HookShell>()`) or add a `TryFrom<&str>` alias. If `Option`-returning parsing is needed in a
-hot path, keep `parse()` but mark `FromStr` as the canonical entry point in documentation.
+- **File:** `src/lib.rs`
+- **Status:** Resolved -- `parse()` removed, `FromStr` is now self-contained with typed `ParseHookShellError`.
 
 ### WIRE-03
 

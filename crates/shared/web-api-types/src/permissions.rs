@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -22,15 +24,24 @@ impl Permission {
             Permission::ManageGlobalSettings => "manage_global_settings",
         }
     }
+}
 
-    pub fn parse(s: &str) -> Option<Self> {
+/// Error returned when parsing an invalid [`Permission`] string.
+#[derive(Debug, Error)]
+#[error("invalid permission value")]
+pub struct ParsePermissionError;
+
+impl FromStr for Permission {
+    type Err = ParsePermissionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "view_settings" => Some(Permission::ViewSettings),
-            "manage_settings" => Some(Permission::ManageSettings),
-            "view_agents" => Some(Permission::ViewAgents),
-            "manage_agents" => Some(Permission::ManageAgents),
-            "manage_global_settings" => Some(Permission::ManageGlobalSettings),
-            _ => None,
+            "view_settings" => Ok(Self::ViewSettings),
+            "manage_settings" => Ok(Self::ManageSettings),
+            "view_agents" => Ok(Self::ViewAgents),
+            "manage_agents" => Ok(Self::ManageAgents),
+            "manage_global_settings" => Ok(Self::ManageGlobalSettings),
+            _ => Err(ParsePermissionError),
         }
     }
 }

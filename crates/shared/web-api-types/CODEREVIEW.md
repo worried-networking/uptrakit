@@ -69,7 +69,7 @@ This crate is the primary interface for external API client developers. Several 
 | WAT-07 | Major | Extensibility | `ServiceType` and `MqttTransport` duplicated between this crate and the wire crate. The `update_hooks` module already re-exports `HookShell` from wire (correct pattern). The other duplicates should follow suit, or all shared types should move to `shared-types`. | `src/services.rs`, `src/mqtt_transport.rs` |
 | WAT-08 | Minor | Extensibility | `CreateProviderConfigRequest.provider_type` is `String` instead of `ProviderType` from `shared-types`. Loses compile-time and deserialization-time type safety for API clients. | `src/provider_configs.rs:9` |
 | WAT-09 | Minor | Extensibility | `ListAgentsQuery.status` is `Option<String>` instead of `Option<AgentStatus>`. Same type safety concern. | `src/agents.rs` |
-| WAT-10 | Minor | Extensibility | `Permission` enum uses `parse()` returning `Option` instead of implementing `FromStr`. Inconsistent with `AgentStatus`, `RegistrationMode`, etc. which implement `FromStr`. | `src/permissions.rs` |
+| WAT-10 | Minor | Extensibility | ~~`Permission` enum uses `parse()` returning `Option` instead of implementing `FromStr`.~~ **RESOLVED** -- `Permission` now implements `FromStr` with typed `ParsePermissionError`. | `src/permissions.rs` |
 
 ## Verdict
 

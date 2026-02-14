@@ -116,23 +116,30 @@ impl HookShell {
             Self::PowerShell => "powershell",
         }
     }
+}
 
-    /// Parses a string into a `HookShell` variant.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "bash" => Some(Self::Bash),
-            "sh" => Some(Self::Sh),
-            "powershell" => Some(Self::PowerShell),
-            _ => None,
-        }
+/// Error returned when parsing an invalid [`HookShell`] string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseHookShellError;
+
+impl fmt::Display for ParseHookShellError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid hook shell value")
     }
 }
 
+impl std::error::Error for ParseHookShellError {}
+
 impl std::str::FromStr for HookShell {
-    type Err = String;
+    type Err = ParseHookShellError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown shell: {s}"))
+        match s {
+            "bash" => Ok(Self::Bash),
+            "sh" => Ok(Self::Sh),
+            "powershell" => Ok(Self::PowerShell),
+            _ => Err(ParseHookShellError),
+        }
     }
 }
 
