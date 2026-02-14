@@ -4770,6 +4770,7 @@ dependencies = [
  "tracing-subscriber",
  "uptrakit-build-info",
  "uptrakit-command",
+ "uptrakit-directories",
  "uptrakit-internal-wire",
  "uptrakit-provider-registry",
  "uptrakit-service-sdk",
@@ -4874,6 +4875,7 @@ dependencies = [
  "rootcause",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

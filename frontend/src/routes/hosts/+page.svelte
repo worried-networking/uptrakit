@@ -210,7 +210,8 @@
 	{#if confirmAction}
 		<ConfirmDialog
 			title="Deactivate Host"
-			message="Are you sure you want to deactivate <strong>{confirmAction.name}</strong>?"
+			messagePrefix="Are you sure you want to deactivate"
+			entityName={confirmAction.name}
 			confirmLabel={submitting ? 'Processing...' : 'Deactivate'}
 			confirmDisabled={submitting}
 			onconfirm={executeConfirmed}

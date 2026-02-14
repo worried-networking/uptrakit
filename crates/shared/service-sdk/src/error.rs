@@ -79,6 +79,10 @@ pub enum EnrollmentError {
 
     #[error("failed to read CA certificate file: {0}")]
     CaCertFile(String),
+
+    // ── Directory operations ────────────────────────────────────────
+    #[error("directory operation failed")]
+    Directory(#[from] uptrakit_directories::DirectoryError),
 }
 
 pub type Result<T> = std::result::Result<T, Report<EnrollmentError>>;
@@ -134,6 +138,7 @@ impl_report_conversion! {
     rustls::pki_types::pem::Error           => EnrollmentError::Pem,
     tokio_tungstenite::tungstenite::Error   => EnrollmentError::WebSocket,
     http::uri::InvalidUri                   => EnrollmentError::HttpUri,
+    uptrakit_directories::DirectoryError    => EnrollmentError::Directory,
 }
 
 #[cfg(test)]

@@ -107,16 +107,12 @@ impl ServiceIdentityState {
     ///
     /// Creates both directories if they do not exist.
     pub async fn load(&mut self) -> Result<()> {
-        fs::create_dir_all(&self.config_dir)
-            .await
+        uptrakit_directories::create_secure_dir(&self.config_dir)
             .context_to::<EnrollmentError>()?;
-        set_secure_dir_permissions(&self.config_dir).await?;
 
         if self.config_dir != self.state_dir {
-            fs::create_dir_all(&self.state_dir)
-                .await
+            uptrakit_directories::create_secure_dir(&self.state_dir)
                 .context_to::<EnrollmentError>()?;
-            set_secure_dir_permissions(&self.state_dir).await?;
         }
 
         // Load enrollment state (service_id + secret) from state_dir.
@@ -269,10 +265,9 @@ impl ServiceIdentityState {
 
         let key_pem = keypair.serialize_pem();
         let key_path = self.state_dir.join(SERVICE_KEY_FILE);
-        fs::write(&key_path, &key_pem)
+        uptrakit_directories::write_secure_file_str_async(&key_path, &key_pem)
             .await
             .context_to::<EnrollmentError>()?;
-        set_secure_file_permissions(&key_path).await?;
 
         self.keypair = Some(keypair);
         Ok(())
@@ -326,10 +321,9 @@ impl ServiceIdentityState {
         };
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
         let path = self.state_dir.join(STATE_FILE);
-        fs::write(&path, json)
+        uptrakit_directories::write_secure_file_str_async(&path, &json)
             .await
             .context_to::<EnrollmentError>()?;
-        set_secure_file_permissions(&path).await?;
 
         self.service_id = Some(service_id);
         self.enrollment_secret = Some(enrollment_secret.to_string());
@@ -342,10 +336,9 @@ impl ServiceIdentityState {
     /// longer needed once mTLS is available.
     pub async fn save_certificate(&mut self, cert_pem: &str) -> Result<()> {
         let cert_path = self.state_dir.join(SERVICE_CERT_FILE);
-        fs::write(&cert_path, cert_pem)
+        uptrakit_directories::write_secure_file_str_async(&cert_path, cert_pem)
             .await
             .context_to::<EnrollmentError>()?;
-        set_secure_file_permissions(&cert_path).await?;
         self.certificate_pem = Some(cert_pem.to_string());
 
         // Rewrite state file without enrollment_secret.
@@ -356,10 +349,9 @@ impl ServiceIdentityState {
             };
             let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
             let path = self.state_dir.join(STATE_FILE);
-            fs::write(&path, json)
+            uptrakit_directories::write_secure_file_str_async(&path, &json)
                 .await
                 .context_to::<EnrollmentError>()?;
-            set_secure_file_permissions(&path).await?;
         }
         self.enrollment_secret = None;
 
@@ -369,10 +361,9 @@ impl ServiceIdentityState {
     /// Persist the CA certificate bundle to `config_dir/ca.pem`.
     pub async fn save_ca_cert(&mut self, ca_pem: &str) -> Result<()> {
         let ca_path = self.config_dir.join(CA_CERT_FILE);
-        fs::write(&ca_path, ca_pem)
+        uptrakit_directories::write_secure_file_str_async(&ca_path, ca_pem)
             .await
             .context_to::<EnrollmentError>()?;
-        set_secure_file_permissions(&ca_path).await?;
         self.ca_cert_pem = Some(ca_pem.to_string());
         Ok(())
     }
@@ -476,38 +467,6 @@ pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
-
-/// Set file permissions to `0600` (owner read/write only) on Unix.
-async fn set_secure_file_permissions(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .await
-            .context_to::<EnrollmentError>()?;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
-    Ok(())
-}
-
-/// Set directory permissions to `0700` (owner rwx only) on Unix.
-async fn set_secure_dir_permissions(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .await
-            .context_to::<EnrollmentError>()?;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
-    Ok(())
-}
 
 /// Decode the first PEM block into DER bytes.
 fn pem_to_der(pem: &str) -> Option<Vec<u8>> {

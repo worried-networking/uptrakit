@@ -234,7 +234,8 @@
 {#if mqttDeleteConfirm}
 	<ConfirmDialog
 		title="Delete MQTT Client"
-		message="Are you sure you want to delete the MQTT client <strong>{mqttDeleteConfirm.url}</strong>?"
+		messagePrefix="Are you sure you want to delete the MQTT client"
+		entityName={mqttDeleteConfirm.url}
 		confirmLabel="Delete"
 		onconfirm={executeDeleteMqtt}
 		oncancel={() => { mqttDeleteConfirm = null; }}

@@ -17,8 +17,15 @@ Wire fields using `SecretString`: `EnrollPayload.enrollment_token`, `EnrolledPay
 ## Encryption at Rest
 
 Sensitive credentials stored in the database are encrypted using AES-256-GCM via the `EncryptedString` SeaORM custom
-type (defined in `crates/shared/db/src/crypto.rs`). `EncryptedString` wraps `SecretString` internally, inheriting its
-debug/display redaction.
+type (defined in `crates/shared/db/src/crypto.rs`). `EncryptedString` stores the plaintext (wrapped in `SecretString`
+for redacted debug/display) alongside a pre-computed database representation (encrypted ciphertext, or plaintext in dev
+mode).
+
+`EncryptedString::new()` is **fallible** — it encrypts eagerly at construction time and returns
+`Result<Self, Report<CryptoError>>`. This prevents silent plaintext fallback: if the master key is present but
+encryption fails, the error propagates immediately instead of silently storing unencrypted secrets in the database.
+When no master key is configured (development mode with `--allow-plaintext-secrets`), construction succeeds with
+plaintext as the database value.
 
 Database columns using encryption:
 

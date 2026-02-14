@@ -628,37 +628,21 @@ async fn save_renewed_cert(
 ) -> Result<()> {
     let cert_path = state_dir.join("service.crt");
     let key_path = state_dir.join("service.key");
-    tokio::fs::write(&cert_path, &payload.cert_pem)
+    uptrakit_directories::write_secure_file_str_async(&cert_path, &payload.cert_pem)
         .await
         .context_to::<Error>()?;
-    set_secure_permissions(&cert_path).await?;
-    tokio::fs::write(&key_path, key_pem)
+    uptrakit_directories::write_secure_file_str_async(&key_path, key_pem)
         .await
         .context_to::<Error>()?;
-    set_secure_permissions(&key_path).await?;
     Ok(())
 }
 
 /// Save CA cert bytes to config directory.
 async fn save_ca_cert(config_dir: &std::path::Path, pem: &[u8]) -> Result<()> {
     let path = config_dir.join("ca.pem");
-    tokio::fs::write(&path, pem).await.context_to::<Error>()?;
-    set_secure_permissions(&path).await?;
-    Ok(())
-}
-
-async fn set_secure_permissions(path: &std::path::Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .await
-            .context_to::<Error>()?;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
+    uptrakit_directories::write_secure_file_async(&path, pem)
+        .await
+        .context_to::<Error>()?;
     Ok(())
 }
 

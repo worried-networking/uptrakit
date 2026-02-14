@@ -223,10 +223,13 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
     fn try_from(v: sea_orm::Value) -> std::result::Result<Self, ValueTypeErr> {
         // decrypt_value() returns Result<String, Report<CryptoError>>
         let plaintext = decrypt_value(&s).map_err(|_| ValueTypeErr)?;
-        Ok(EncryptedString::new(plaintext))
+        Ok(EncryptedString::from_db(plaintext, s))
     }
 }
 ```
+
+Note: `EncryptedString::new()` is fallible — it encrypts eagerly at construction time and returns
+`Result<Self, Report<CryptoError>>`. Callers must propagate the error via `.context_to()?`.
 
 ### Anti-patterns
 

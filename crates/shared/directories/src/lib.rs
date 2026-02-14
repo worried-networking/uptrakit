@@ -164,45 +164,159 @@ fn home_dir() -> Option<PathBuf> {
 
 /// Create a directory with secure permissions (700).
 ///
-/// Creates parent directories as needed, also with 700 permissions.
+/// On Unix, uses `DirBuilder` with mode `0o700` so the directory is created
+/// with the correct permissions atomically, avoiding a TOCTOU window.
+/// Creates parent directories as needed.
 pub fn create_secure_dir(path: &Path) -> Result<()> {
     if path.exists() {
         return Ok(());
     }
 
-    fs::create_dir_all(path).map_err(|e| {
-        report!(DirectoryError::CreateDir {
-            path: path.to_path_buf(),
-            source: e,
-        })
-    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)
+            .map_err(|e| {
+                report!(DirectoryError::CreateDir {
+                    path: path.to_path_buf(),
+                    source: e,
+                })
+            })?;
+    }
 
-    set_dir_permissions(path)?;
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(path).map_err(|e| {
+            report!(DirectoryError::CreateDir {
+                path: path.to_path_buf(),
+                source: e,
+            })
+        })?;
+    }
+
     Ok(())
 }
 
-/// Write data to a file with secure permissions (600).
+/// Write data to a file atomically with secure permissions (600).
 ///
+/// On Unix, opens the file with `mode(0o600)` via `OpenOptionsExt` so it is
+/// never world-readable, eliminating the TOCTOU window of write-then-chmod.
 /// Creates parent directories as needed with 700 permissions.
 pub fn write_secure_file(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         create_secure_dir(parent)?;
     }
 
-    fs::write(path, data).map_err(|e| {
-        report!(DirectoryError::WriteFile {
-            path: path.to_path_buf(),
-            source: e,
-        })
-    })?;
-
-    set_file_permissions(path)?;
+    write_with_mode(path, data)?;
     Ok(())
 }
 
 /// Write string data to a file with secure permissions (600).
 pub fn write_secure_file_str(path: &Path, data: &str) -> Result<()> {
     write_secure_file(path, data.as_bytes())
+}
+
+/// Async variant of [`write_secure_file`].
+///
+/// On Unix, opens the file with `mode(0o600)` via `OpenOptionsExt` so it is
+/// never world-readable, eliminating the TOCTOU window.
+/// Creates parent directories as needed with 700 permissions.
+pub async fn write_secure_file_async(path: &Path, data: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        // create_secure_dir is sync but fast (filesystem metadata only);
+        // acceptable for the rare directory-creation path at startup.
+        create_secure_dir(parent)?;
+    }
+
+    write_with_mode_async(path, data).await?;
+    Ok(())
+}
+
+/// Async variant of [`write_secure_file_str`].
+pub async fn write_secure_file_str_async(path: &Path, data: &str) -> Result<()> {
+    write_secure_file_async(path, data.as_bytes()).await
+}
+
+/// Sync helper: open + write with `mode(0o600)` on Unix.
+fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
+    use std::io::Write;
+
+    #[cfg(unix)]
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+    };
+
+    #[cfg(not(unix))]
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path);
+
+    let mut file = file.map_err(|e| {
+        report!(DirectoryError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })
+    })?;
+
+    file.write_all(data).map_err(|e| {
+        report!(DirectoryError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })
+    })?;
+
+    Ok(())
+}
+
+/// Async helper: open + write with `mode(0o600)` on Unix via tokio.
+async fn write_with_mode_async(path: &Path, data: &[u8]) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+
+    #[cfg(unix)]
+    let file = {
+        tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .await
+    };
+
+    #[cfg(not(unix))]
+    let file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .await;
+
+    let mut file = file.map_err(|e| {
+        report!(DirectoryError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })
+    })?;
+
+    file.write_all(data).await.map_err(|e| {
+        report!(DirectoryError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })
+    })?;
+
+    Ok(())
 }
 
 /// Set directory permissions to 700 (owner rwx only).
@@ -347,5 +461,41 @@ mod tests {
 
         assert_eq!(dirs.config_path("ca.crt"), temp.path().join("ca.crt"));
         assert_eq!(dirs.state_path("db.sqlite"), temp.path().join("db.sqlite"));
+    }
+
+    #[tokio::test]
+    async fn write_secure_file_async_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("async_secure_file");
+
+        write_secure_file_async(&file, b"async secret data")
+            .await
+            .expect("should write");
+
+        assert!(file.is_file());
+        let metadata = fs::metadata(&file).expect("metadata");
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        let content = fs::read(&file).expect("read");
+        assert_eq!(content, b"async secret data");
+    }
+
+    #[tokio::test]
+    async fn write_secure_file_str_async_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("async_secure_str_file");
+
+        write_secure_file_str_async(&file, "async string data")
+            .await
+            .expect("should write");
+
+        assert!(file.is_file());
+        let metadata = fs::metadata(&file).expect("metadata");
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        let content = fs::read_to_string(&file).expect("read");
+        assert_eq!(content, "async string data");
     }
 }

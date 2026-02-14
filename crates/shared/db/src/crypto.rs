@@ -151,20 +151,70 @@ fn decrypt_value(stored: &str) -> Result<String> {
 /// A string that is transparently encrypted when written to the database
 /// and decrypted when read back.
 ///
-/// In memory, holds the plaintext value. On conversion to/from `sea_orm::Value`,
-/// encryption/decryption is applied.
-#[derive(Clone, PartialEq)]
-pub struct EncryptedString(SecretString);
+/// Encryption is performed eagerly at construction time. The pre-computed
+/// database representation is stored alongside the plaintext so that
+/// `From<EncryptedString> for sea_orm::Value` is infallible.
+///
+/// When no master key is configured (development mode), the plaintext is
+/// stored as the DB value. Construction fails if the master key is present
+/// but encryption fails — this prevents silent plaintext fallback in
+/// production.
+pub struct EncryptedString {
+    /// Plaintext value (for `expose_secret`).
+    plaintext: SecretString,
+    /// Pre-computed value for database storage (encrypted, or plaintext in dev mode).
+    db_value: String,
+}
+
+impl Clone for EncryptedString {
+    fn clone(&self) -> Self {
+        Self {
+            plaintext: self.plaintext.clone(),
+            db_value: self.db_value.clone(),
+        }
+    }
+}
+
+impl PartialEq for EncryptedString {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare only plaintext — encrypted values include random nonces
+        // so two encryptions of the same value differ.
+        self.plaintext.expose_secret() == other.plaintext.expose_secret()
+    }
+}
 
 impl EncryptedString {
     /// Create a new `EncryptedString` from a plaintext value.
-    pub fn new(plaintext: String) -> Self {
-        Self(SecretString::new(plaintext))
+    ///
+    /// Encrypts immediately if a master key is available. Returns `Err` if
+    /// encryption fails. When no master key is configured, stores plaintext
+    /// as the DB value (development mode).
+    pub fn new(plaintext: String) -> Result<Self> {
+        let db_value = if master_key_available() {
+            encrypt_value(&plaintext)?
+        } else {
+            plaintext.clone()
+        };
+        Ok(Self {
+            plaintext: SecretString::new(plaintext),
+            db_value,
+        })
+    }
+
+    /// Construct from a decrypted DB value on the read path.
+    ///
+    /// Used by `ValueType` / `TryGetable` impls to construct from a decrypted
+    /// value while preserving the original DB representation.
+    fn from_db(plaintext: String, db_repr: String) -> Self {
+        Self {
+            plaintext: SecretString::new(plaintext),
+            db_value: db_repr,
+        }
     }
 
     /// Expose the plaintext secret.
     pub fn expose_secret(&self) -> &str {
-        self.0.expose_secret()
+        self.plaintext.expose_secret()
     }
 }
 
@@ -189,10 +239,10 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
                 if is_encrypted(&s) {
                     let plaintext =
                         decrypt_value(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)?;
-                    Ok(EncryptedString(SecretString::new(plaintext)))
+                    Ok(EncryptedString::from_db(plaintext, s))
                 } else {
                     // Legacy plaintext — accept as-is
-                    Ok(EncryptedString(SecretString::new(s)))
+                    Ok(EncryptedString::from_db(s.clone(), s))
                 }
             }
             _ => Err(sea_orm::sea_query::ValueTypeErr),
@@ -220,19 +270,7 @@ impl sea_orm::sea_query::Nullable for EncryptedString {
 
 impl From<EncryptedString> for sea_orm::Value {
     fn from(val: EncryptedString) -> Self {
-        let plaintext = val.0.into_inner();
-        if master_key_available() {
-            match encrypt_value(&plaintext) {
-                Ok(encrypted) => sea_orm::Value::String(Some(encrypted)),
-                Err(e) => {
-                    tracing::error!(error = %e, "EncryptedString encryption failed, storing plaintext");
-                    sea_orm::Value::String(Some(plaintext))
-                }
-            }
-        } else {
-            // No master key — store plaintext (should not happen in production)
-            sea_orm::Value::String(Some(plaintext))
-        }
+        sea_orm::Value::String(Some(val.db_value))
     }
 }
 
@@ -259,10 +297,10 @@ impl sea_orm::TryGetable for EncryptedString {
                     "EncryptedString decryption failed: {e}"
                 )))
             })?;
-            Ok(EncryptedString(SecretString::new(plaintext)))
+            Ok(EncryptedString::from_db(plaintext, s))
         } else {
             // Legacy plaintext — accept as-is
-            Ok(EncryptedString(SecretString::new(s)))
+            Ok(EncryptedString::from_db(s.clone(), s))
         }
     }
 }
@@ -336,7 +374,10 @@ mod tests {
 
     #[test]
     fn test_debug_display_redact() {
-        let s = EncryptedString::new("my secret".to_string());
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let s = EncryptedString::new("my secret".to_string()).expect("test key set");
         let debug = format!("{s:?}");
         let display = format!("{s}");
         assert!(
@@ -374,7 +415,8 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let original = EncryptedString::new("database secret".to_string());
+        let original =
+            EncryptedString::new("database secret".to_string()).expect("test key set");
         let value: sea_orm::Value = original.clone().into();
 
         // The Value should contain an encrypted string
@@ -388,6 +430,36 @@ mod tests {
         let restored =
             <EncryptedString as sea_orm::sea_query::ValueType>::try_from(value).expect("roundtrip");
         assert_eq!(restored.expose_secret(), "database secret");
+    }
+
+    #[test]
+    fn test_new_encrypts_when_key_available() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es = EncryptedString::new("secret".to_string()).expect("test key set");
+        assert!(
+            is_encrypted(&es.db_value),
+            "db_value should be encrypted when master key is available"
+        );
+        assert_eq!(es.expose_secret(), "secret");
+    }
+
+    #[test]
+    fn test_from_impl_uses_precomputed_value() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es = EncryptedString::new("precomputed".to_string()).expect("test key set");
+        let precomputed = es.db_value.clone();
+        let value: sea_orm::Value = es.into();
+
+        // The Value must contain exactly the pre-computed db_value
+        if let sea_orm::Value::String(Some(s)) = value {
+            assert_eq!(s, precomputed);
+        } else {
+            panic!("Expected String value");
+        }
     }
 
     #[test]

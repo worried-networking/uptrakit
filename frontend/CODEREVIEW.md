@@ -26,24 +26,11 @@ level, the affected file(s) with line numbers, and a recommended fix.
 
 ## 1. Security and Safety
 
-### SEC-01: XSS via `{@html}` in ConfirmDialog (HIGH)
+### ~~SEC-01: XSS via `{@html}` in ConfirmDialog (HIGH)~~ **FIXED**
 
-**File:** `src/lib/components/ConfirmDialog.svelte:26`
-
-The `message` prop is rendered with `{@html message}`, which interprets raw
-HTML. Every caller interpolates user-controlled data (entity names, URLs) into
-this prop:
-
-- `src/routes/hosts/+page.svelte:213` - host `friendly_name`
-- `src/routes/services/+page.svelte:300` - service `friendly_name`
-- `src/routes/settings/MqttClientsSettings.svelte:237` - MQTT client `url`
-- `src/routes/settings/OidcProvidersSettings.svelte:276` - OIDC provider `name`
-
-If an attacker controls a service name (e.g. sets `friendly_name` to
-`<img src=x onerror=alert(document.cookie)>`), the script executes in the
-admin's browser context.
-
-**Recommendation:** Replace `{@html message}` with a safe rendering approach.
+**Status:** Resolved. Replaced `{@html message}` with structured `messagePrefix` + `entityName` props.
+User-controlled data is now rendered via Svelte's auto-escaped `{expression}` syntax. All four
+callers updated.
 Either pass the entity name as a separate prop and use text interpolation with a
 `<strong>` element in the template, or sanitize the message before rendering.
 
@@ -425,7 +412,7 @@ settings pages do not.
 
 | ID | Finding | Effort |
 |--------|---------------------------------------------|--------|
-| SEC-01 | Fix XSS in ConfirmDialog `{@html}` | Small |
+| ~~SEC-01~~ | ~~Fix XSS in ConfirmDialog `{@html}`~~ **FIXED** | ~~Small~~ |
 
 ### Priority 2 - Backend Resilience (fix for production readiness)
 

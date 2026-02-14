@@ -13,6 +13,10 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    // ── Directory operations ────────────────────────────────────────
+    #[error("directory operation failed")]
+    Directory(#[from] uptrakit_directories::DirectoryError),
+
     // ── Agent-specific ───────────────────────────────────────────────
     #[error("update execution failed: {0}")]
     UpdateExecution(String),
@@ -49,6 +53,7 @@ pub type Result<T> = std::result::Result<T, Report<Error>>;
 impl_report_conversion! {
     EnrollmentError => Error::Enrollment,
     std::io::Error => Error::Io,
+    uptrakit_directories::DirectoryError => Error::Directory,
 }
 
 #[cfg(test)]

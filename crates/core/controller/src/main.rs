@@ -434,6 +434,11 @@ async fn run(args: cli::Args) -> Result<()> {
                     use time::OffsetDateTime;
 
                     let now = OffsetDateTime::now_utc();
+                    let encrypted_secret =
+                        uptrakit_shared_db::crypto::EncryptedString::new(
+                            client_secret.to_string(),
+                        )
+                        .context_to()?;
                     let provider = oidc_provider::ActiveModel {
                         id: Set(uuid::Uuid::now_v7()),
                         tenant_id: Set(default_tenant_id),
@@ -442,9 +447,7 @@ async fn run(args: cli::Args) -> Result<()> {
                         logo_url: Set(None),
                         issuer_url: Set(issuer_url.to_string()),
                         client_id: Set(client_id.to_string()),
-                        client_secret: Set(uptrakit_shared_db::crypto::EncryptedString::new(
-                            client_secret.to_string(),
-                        )),
+                        client_secret: Set(encrypted_secret),
                         scopes: Set(scopes.to_string()),
                         auto_create_users: Set(true),
                         email_verified_trusted: Set(false),
@@ -468,12 +471,15 @@ async fn run(args: cli::Args) -> Result<()> {
                     use sea_orm::{ActiveModelTrait, IntoActiveModel};
                     use time::OffsetDateTime;
 
+                    let encrypted_secret =
+                        uptrakit_shared_db::crypto::EncryptedString::new(
+                            client_secret.to_string(),
+                        )
+                        .context_to()?;
                     let mut model = existing_provider.into_active_model();
                     model.issuer_url = Set(issuer_url.to_string());
                     model.client_id = Set(client_id.to_string());
-                    model.client_secret = Set(uptrakit_shared_db::crypto::EncryptedString::new(
-                        client_secret.to_string(),
-                    ));
+                    model.client_secret = Set(encrypted_secret);
                     model.is_active = Set(true);
                     model.updated_at = Set(OffsetDateTime::now_utc());
                     model.update(&db_conn).await.context(AppError::Database)?;

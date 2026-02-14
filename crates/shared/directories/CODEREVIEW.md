@@ -36,11 +36,11 @@ Cross-platform directory management crate (~352 lines, single source file) provi
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
-| DIR-01 | Medium | Security | TOCTOU permission window in `write_secure_file()`. File is created with `fs::write()` (default umask permissions), then restricted to 0o600 via `set_file_permissions()`. Brief window where sensitive files (keys, certificates) may be world-readable. Fix: use `std::fs::OpenOptions` with `std::os::unix::fs::OpenOptionsExt::mode(0o600)` on Unix. | `src/lib.rs:192-199` |
+| ~~DIR-01~~ | ~~Medium~~ | ~~Security~~ | ~~TOCTOU permission window in `write_secure_file()`.~~ **FIXED.** Permissions are now set atomically at creation time using `OpenOptionsExt::mode(0o600)` for files and `DirBuilderExt::mode(0o700)` for directories. Async variants added. All callers across the workspace migrated. | `src/lib.rs` |
 | DIR-02 | Low | Code Quality | Doc comment inaccuracy: `create_secure_dir()` doc says "Creates parent directories as needed, also with 700 permissions" but `set_dir_permissions()` is only called on the leaf directory. Intermediate directories created by `create_dir_all()` retain default umask permissions. | `src/lib.rs:165-167` |
 | DIR-03 | Info | Code Quality | `create_secure_dir()` has a TOCTOU race on the `path.exists()` check at line 169. Another process could remove the directory between the check and `create_dir_all()`. The `create_dir_all()` call handles this gracefully (succeeds if dir exists), so the impact is cosmetic (the early return skips re-applying permissions to an existing dir). | `src/lib.rs:169-171` |
 | DIR-04 | Info | Code Quality | Windows support is minimal: permission-setting functions are no-ops on non-Unix platforms. Acceptable given the project targets Linux primarily, but not documented in the public API. | `src/lib.rs:220-223`, `src/lib.rs:239-242` |
 
 ## Verdict
 
-**Conditional pass.** The TOCTOU window in `write_secure_file()` (DIR-01) is a real security concern for sensitive files. The doc comment inaccuracy (DIR-02) should be corrected to avoid misleading consumers. The crate is otherwise well-structured with good error handling and test coverage.
+**Pass.** DIR-01 (TOCTOU permission window) has been resolved — permissions are now set atomically at creation time. The doc comment inaccuracy (DIR-02) should be corrected to avoid misleading consumers. The crate is otherwise well-structured with good error handling and test coverage.

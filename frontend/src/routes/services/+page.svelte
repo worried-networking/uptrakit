@@ -297,7 +297,8 @@
 		{@const labels = confirmLabels[confirmAction.action]}
 		<ConfirmDialog
 			title={labels.title}
-			message="Are you sure you want to {labels.verb} <strong>{confirmAction.name}</strong>?"
+			messagePrefix="Are you sure you want to {labels.verb}"
+			entityName={confirmAction.name}
 			confirmLabel={submitting ? 'Processing...' : labels.title}
 			confirmClass={labels.btnClass}
 			confirmDisabled={submitting}

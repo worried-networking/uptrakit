@@ -249,12 +249,17 @@ All created files and directories use secure permissions:
 - **Directories**: 0o700 (owner read/write/execute only)
 - **Files**: 0o600 (owner read/write only)
 
-The `uptrakit-directories` crate provides helper functions:
+The `uptrakit-directories` crate provides helper functions (permissions are set **atomically at creation time** on
+Unix, eliminating TOCTOU windows):
 
 - `create_secure_dir(path)` -- creates directory with 0o700 permissions
-- `write_secure_file(path, data)` -- writes file with 0o600 permissions
+- `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- writes file with 0o600 permissions (sync)
+- `write_secure_file_async(path, data)` / `write_secure_file_str_async(path, str)` -- async variants via tokio
 - `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
 - `AppDirs::ensure_dirs()` -- creates both directories with secure permissions
+
+All crates writing sensitive files (private keys, certificates, CA bundles) **must** use these helpers instead of raw
+`fs::write` / `tokio::fs::write`.
 
 #### Key files
 

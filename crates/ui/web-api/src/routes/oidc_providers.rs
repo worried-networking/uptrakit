@@ -92,6 +92,16 @@ pub async fn create_provider(
         return error_response(StatusCode::CONFLICT, "Slug already exists");
     }
 
+    let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(
+        req.client_secret,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("encryption failed: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
     let now = OffsetDateTime::now_utc();
     let provider = oidc_provider::ActiveModel {
         id: Set(generate_uuid()),
@@ -101,9 +111,7 @@ pub async fn create_provider(
         logo_url: Set(req.logo_url),
         issuer_url: Set(req.issuer_url),
         client_id: Set(req.client_id),
-        client_secret: Set(uptrakit_shared_db::crypto::EncryptedString::new(
-            req.client_secret,
-        )),
+        client_secret: Set(encrypted_secret),
         scopes: Set(req.scopes),
         auto_create_users: Set(req.auto_create_users),
         email_verified_trusted: Set(req.email_verified_trusted),
@@ -272,9 +280,19 @@ pub async fn update_provider(
         model.client_id = Set(client_id);
     }
     if let Some(client_secret) = req.client_secret {
-        model.client_secret = Set(uptrakit_shared_db::crypto::EncryptedString::new(
+        let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(
             client_secret,
-        ));
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("encryption failed: {e}");
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+            }
+        };
+        model.client_secret = Set(encrypted_secret);
     }
     if let Some(scopes) = req.scopes {
         model.scopes = Set(scopes);

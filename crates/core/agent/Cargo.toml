@@ -19,6 +19,7 @@ tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }

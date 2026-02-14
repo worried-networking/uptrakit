@@ -15,6 +15,9 @@ pub enum MqttClientError {
     #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
 
+    #[error("encryption failed")]
+    Encryption(#[from] uptrakit_shared_db::crypto::CryptoError),
+
     #[error("mqtt client not found")]
     NotFound,
 
@@ -25,6 +28,7 @@ pub enum MqttClientError {
 pub type Result<T> = std::result::Result<T, Report<MqttClientError>>;
 
 impl_report_conversion!(sea_orm::DbErr => MqttClientError::Database);
+impl_report_conversion!(uptrakit_shared_db::crypto::CryptoError => MqttClientError::Encryption);
 
 /// Load all MQTT clients for a given tenant.
 pub async fn load_mqtt_clients(
@@ -103,7 +107,10 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         client_id: Set(client_id.to_string()),
         username: Set(username.map(String::from)),
         password: Set(
-            password.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+            password
+                .map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+                .transpose()
+                .context_to()?
         ),
         topic_prefix: Set(topic_prefix.to_string()),
         connection_status: Set(MqttClientConnectionStatus::Offline.as_str().to_string()),
@@ -165,8 +172,11 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
         model.username = Set(v.map(String::from));
     }
     if let Some(v) = password {
-        model.password =
-            Set(v.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string())));
+        model.password = Set(
+            v.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+                .transpose()
+                .context_to()?,
+        );
     }
     if let Some(v) = topic_prefix {
         model.topic_prefix = Set(v.to_string());

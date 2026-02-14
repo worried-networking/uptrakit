@@ -273,7 +273,8 @@
 {#if deleteConfirm}
 	<ConfirmDialog
 		title="Delete OIDC Provider"
-		message="Are you sure you want to delete <strong>{deleteConfirm.name}</strong>?"
+		messagePrefix="Are you sure you want to delete"
+		entityName={deleteConfirm.name}
 		confirmLabel="Delete"
 		onconfirm={executeDeleteOidc}
 		oncancel={() => { deleteConfirm = null; }}

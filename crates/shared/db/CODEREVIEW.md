@@ -53,7 +53,7 @@ Database layer crate providing SeaORM entity definitions (33 entities) and AES-2
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
-| DB-01 | Medium | Security / HA | `EncryptedString` plaintext fallback on encryption failure or missing master key. In HA, a misconfigured controller writes plaintext to the shared database. The `From<EncryptedString> for sea_orm::Value` trait requires a total function (no `Result`), constraining the design. | `src/crypto.rs:221-237` |
+| ~~DB-01~~ | ~~Medium~~ | ~~Security / HA~~ | ~~`EncryptedString` plaintext fallback on encryption failure or missing master key.~~ **FIXED.** `EncryptedString::new()` is now fallible and encrypts eagerly at construction time. The `From<EncryptedString> for Value` impl uses the pre-computed `db_value` and is infallible. All callers updated to propagate encryption errors. | `src/crypto.rs` |
 | DB-02 | Medium | HA | Master key must be identical across all controller instances. No validation at the crypto layer to detect key mismatches. A controller with a wrong key would fail to decrypt values from other instances. | `src/crypto.rs:55` |
 | DB-03 | Medium | HA | No optimistic concurrency controls in entity layer. Entities like `settings_version`, `mqtt_client`, and `update_history` have mutable state but no `version` column or `updated_at`-based optimistic locking via SeaORM. | `src/entity/settings_version.rs:4-13` |
 | DB-04 | Low | Code Quality | `RoleMapping` serialization fallback produces empty JSON object `{}` on failure instead of propagating the error. The `From<RoleMapping> for Value` trait constrains this similarly to `EncryptedString`. | `src/entity/oidc_provider.rs:35-41` |
@@ -66,4 +66,4 @@ Database layer crate providing SeaORM entity definitions (33 entities) and AES-2
 
 ## Verdict
 
-**Conditional pass.** Crypto implementation is sound (AES-256-GCM, random nonces, tamper detection, secret redaction). The plaintext fallback in `From<EncryptedString> for Value` (DB-01) is the most significant concern -- it's constrained by SeaORM's trait signature but creates a silent data-corruption vector in HA deployments. Master key consistency (DB-02) and optimistic locking (DB-03) should be addressed as part of HA hardening. The `DeriveActiveEnum` improvements (DB-05) are recommended for type safety.
+**Pass.** Crypto implementation is sound (AES-256-GCM, random nonces, tamper detection, secret redaction). DB-01 (plaintext fallback) has been resolved — `EncryptedString::new()` is now fallible with eager encryption, eliminating the silent data-corruption vector. Master key consistency (DB-02) and optimistic locking (DB-03) should be addressed as part of HA hardening. The `DeriveActiveEnum` improvements (DB-05) are recommended for type safety.

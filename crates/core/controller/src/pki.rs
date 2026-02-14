@@ -123,6 +123,12 @@ pub enum PkiError {
     #[error("database error: {0}")]
     Database(String),
 
+    #[error("directory operation failed")]
+    Directory(#[from] uptrakit_directories::DirectoryError),
+
+    #[error("encryption failed")]
+    Crypto(#[from] uptrakit_shared_db::crypto::CryptoError),
+
     #[error("CA validation failed: {0}")]
     CaValidation(String),
 }
@@ -133,6 +139,8 @@ impl_report_conversion! {
     std::io::Error => PkiError::Io,
     rcgen::Error => PkiError::Rcgen,
     rustls::Error => PkiError::Rustls,
+    uptrakit_directories::DirectoryError => PkiError::Directory,
+    uptrakit_shared_db::crypto::CryptoError => PkiError::Crypto,
 }
 
 impl_report_conversion!(sea_orm::DbErr => PkiError, |e| PkiError::Database(e.to_string()));
@@ -280,12 +288,14 @@ pub async fn load_or_init_managed_ca(
         return load_managed_ca_state(db, tenant_id).await;
     }
 
+    let encrypted_key = uptrakit_shared_db::crypto::EncryptedString::new(
+        bundle.key_pem.clone(),
+    )
+    .context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(fingerprint.clone()),
         cert_pem: Set(bundle.cert_pem.clone()),
-        key_pem: Set(uptrakit_shared_db::crypto::EncryptedString::new(
-            bundle.key_pem.clone(),
-        )),
+        key_pem: Set(encrypted_key),
         not_before: Set(not_before),
         not_after: Set(not_after),
         activated_at: Set(now),
@@ -413,12 +423,14 @@ pub async fn rotate_managed_ca(
     let not_before = cert_not_before(&new_ca.cert_pem)?;
     let not_after = cert_not_after(&new_ca.cert_pem)?;
 
+    let encrypted_key = uptrakit_shared_db::crypto::EncryptedString::new(
+        new_ca.key_pem.clone(),
+    )
+    .context_to()?;
     let cert_model = ca_certificate::ActiveModel {
         fingerprint: Set(new_fp.clone()),
         cert_pem: Set(new_ca.cert_pem.clone()),
-        key_pem: Set(uptrakit_shared_db::crypto::EncryptedString::new(
-            new_ca.key_pem.clone(),
-        )),
+        key_pem: Set(encrypted_key),
         not_before: Set(not_before),
         not_after: Set(not_after),
         activated_at: Set(now),
@@ -722,8 +734,10 @@ pub fn load_or_generate_server_cert(
     }
 
     let bundle = generate_server_cert(ca, extra_sans)?;
-    fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
-    fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;
+    uptrakit_directories::write_secure_file_str(&cert_path, &bundle.cert_pem)
+        .context_to::<PkiError>()?;
+    uptrakit_directories::write_secure_file_str(&key_path, &bundle.key_pem)
+        .context_to::<PkiError>()?;
     tracing::info!("generated new server certificate at {}", pki.display());
     Ok(bundle)
 }
@@ -849,8 +863,10 @@ pub fn renew_server_cert(
     let bundle = generate_server_cert(ca, extra_sans)?;
     let cert_path = pki.join("server.crt");
     let key_path = pki.join("server.key");
-    fs::write(&cert_path, &bundle.cert_pem).context_to::<PkiError>()?;
-    fs::write(&key_path, &bundle.key_pem).context_to::<PkiError>()?;
+    uptrakit_directories::write_secure_file_str(&cert_path, &bundle.cert_pem)
+        .context_to::<PkiError>()?;
+    uptrakit_directories::write_secure_file_str(&key_path, &bundle.key_pem)
+        .context_to::<PkiError>()?;
     tracing::info!("server certificate renewed at {}", pki.display());
     Ok(bundle)
 }
