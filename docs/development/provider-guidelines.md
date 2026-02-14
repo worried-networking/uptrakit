@@ -14,6 +14,8 @@ Providers should keep parsing and comparison logic in pure functions so they are
 The provider registry crate (`uptrakit-provider-registry`) centralizes config validation, mask/restore workflows, and creates provider instances based
 on `ProviderType`. Document provider behavior so the registry can continue to validate configs and mask secrets correctly.
 
+`ProviderType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use `s.parse::<ProviderType>()` to convert strings (returns `ParseProviderTypeError` on failure). The string representations are: `github_releases`, `proxmox_helper_scripts`, `docker_registry`, `homebrew`.
+
 ## Provider Architecture - Detailed
 
 Each software item is associated with a provider. A provider defines:

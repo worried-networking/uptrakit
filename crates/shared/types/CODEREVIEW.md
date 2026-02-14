@@ -55,7 +55,7 @@ This crate is the foundation for external extensibility. Two critical issues lim
 | TYP-01 | Info | Security | `SecretString` does not implement `Zeroize`. The inner `String` stays in memory until dropped. The workspace has `zeroize` as a dependency. Adding `#[derive(Zeroize, ZeroizeOnDrop)]` or a manual `Drop` impl would provide defense-in-depth against memory scraping. | `src/secret_string.rs:11-13` |
 | TYP-02 | Info | Code Quality | `ProviderType::Display` implementation manually matches variants to snake_case strings. Using `strum::Display` with `#[strum(serialize_all = "snake_case")]` would reduce duplication with the serde `rename_all`, but the manual impl is correct and tested. | `src/provider_types.rs:15-24` |
 | TYP-03 | Major | Extensibility | `ProviderType` is a closed enum without `#[non_exhaustive]`. External developers cannot add provider types without forking. Adding a variant is a semver-breaking change. At minimum add `#[non_exhaustive]`; consider a string-based newtype or `Other(String)` variant for full extensibility. | `src/provider_types.rs:7-13` |
-| TYP-04 | Minor | Extensibility | `ProviderType` lacks `FromStr` implementation. External consumers parsing provider types from user input or config files must manually match against serialized strings rather than using the idiomatic `"github_releases".parse::<ProviderType>()`. | `src/provider_types.rs` |
+| ~~TYP-04~~ | ~~Minor~~ | ~~Extensibility~~ | ~~`ProviderType` lacks `FromStr` implementation.~~ **FIXED.** `FromStr` implemented with typed `ParseProviderTypeError`, matching the `Permission`/`AgentStatus` pattern. | `src/provider_types.rs` |
 
 ## Verdict
 

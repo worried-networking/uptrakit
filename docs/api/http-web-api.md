@@ -203,3 +203,4 @@ without an existing query struct, use `Query<PaginationParams>` as a new extract
 | File | Purpose |
 | --- | --- |
 | `crates/shared/web-api-types/src/pagination.rs` | `PaginationParams`, `ResolvedPagination`, `PaginatedResponse<T>` |
+| `crates/shared/web-api-types/src/prelude.rs` | Convenience re-exports of ~35 commonly used request/response types (`use uptrakit_web_api_types::prelude::*`) |

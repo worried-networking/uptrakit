@@ -97,10 +97,10 @@ An external developer building a new service would create a third copy of this b
 [AGENT-02](crates/core/agent/CODEREVIEW.md#agent-02),
 [MQTT-05](crates/core/mqtt/CODEREVIEW.md#mqtt-05)
 
-### XC-04: web-api-types Lacks Prelude for API Client Developers (Major)
+### ~~XC-04: web-api-types Lacks Prelude for API Client Developers (Major)~~ **FIXED**
 
-The crate exposes 28 public modules with zero root-level re-exports. External API client developers must
-discover which module contains each type. The CLI crate proves this works but requires verbose imports.
+**Status:** Resolved. `pub mod prelude` added with ~35 commonly used type re-exports grouped by domain.
+External crates can now `use uptrakit_web_api_types::prelude::*`.
 
 **Recommendation:** Add a `pub mod prelude` or flat re-exports of commonly used types (all response types,
 request types, `ErrorResponse`, `PaginatedResponse`, `Permission`).
@@ -179,7 +179,7 @@ enum + static registry)
 | Severity | Count | Key Themes |
 |---|---|---|
 | Critical | 1 (1 fixed) | ~~Type duplication across crates~~, closed provider system |
-| Major | 4 (1 fixed) | No service lifecycle abstraction, no prelude, AppState construction, overloaded SDK error types, monolithic controller run() |
+| Major | 4 (2 fixed) | No service lifecycle abstraction, ~~no prelude~~, AppState construction, overloaded SDK error types, monolithic controller run() |
 | Minor | ~17 (3 fixed) | Closed enums without `#[non_exhaustive]`, duplicated code, hardcoded values, inconsistent `FromStr`/`Display` |
 | Info | ~15 | Missing derives, documentation gaps, ergonomic suggestions |
 

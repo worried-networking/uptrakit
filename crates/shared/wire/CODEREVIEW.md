@@ -32,7 +32,7 @@ The wire crate has several extensibility-related concerns:
 |---|---|---|---|---|
 | ~~[WIRE-01](#wire-01)~~ | ~~No close reason constants defined~~ **FIXED** | ~~High~~ | ~~Actionable~~ | `src/lib.rs` |
 | [WIRE-02](#wire-02) | `HookShell::parse()` duplicates `FromStr` | Low | Actionable | `src/lib.rs` |
-| [WIRE-03](#wire-03) | AsyncAPI `active_mqtt_clients` items typed `string` not `uuid` | Low | Actionable | `asyncapi.yaml` |
+| ~~[WIRE-03](#wire-03)~~ | ~~AsyncAPI `active_mqtt_clients` items typed `string` not `uuid`~~ **FIXED** | ~~Low~~ | ~~Actionable~~ | `asyncapi.yaml` |
 
 ## Details
 
@@ -52,17 +52,16 @@ sender sites (web-api route handlers) and receiver sites (agent, MQTT) updated t
 - **File:** `src/lib.rs`
 - **Status:** Resolved -- `parse()` removed, `FromStr` is now self-contained with typed `ParseHookShellError`.
 
-### WIRE-03
+### ~~WIRE-03~~ **FIXED**
 
-**AsyncAPI `active_mqtt_clients` items typed `string` not `uuid`**
+**~~AsyncAPI `active_mqtt_clients` items typed `string` not `uuid`~~**
 
-- **Severity:** Low
-- **Type:** Actionable
-- **File:** `asyncapi.yaml:1785-1789`, `asyncapi.yaml:1821-1826`
+**Status:** Resolved. `format: uuid` added to array items in `disconnectingPayload.active_mqtt_clients`,
+`mqttRegisterPayload.active_mqtt_clients`, and `mqttReleaseTenantsPayload.mqtt_client_ids`.
 
-**Description:** The `active_mqtt_clients` array in both `disconnecting` and `mqttRegister` message schemas
-declares items as `type: string`. In the Rust code, these are `Vec<uuid::Uuid>`, and the values are always
-UUIDs. The AsyncAPI spec should reflect this with `format: uuid`.
+**Original description:** The `active_mqtt_clients` array in both `disconnecting` and `mqttRegister` message schemas
+declared items as `type: string`. In the Rust code, these are `Vec<uuid::Uuid>`, and the values are always
+UUIDs. The AsyncAPI spec now reflects this with `format: uuid`.
 
 **Code evidence:**
 

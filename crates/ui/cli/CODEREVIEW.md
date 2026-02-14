@@ -39,8 +39,8 @@ Command-line interface binary crate (~600 lines across 7 source files) providing
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
-| CLI-01 | Minor | Code Quality | Token create/list/revoke commands manually extract fields from `serde_json::Value` (e.g., `body["id"].as_str().unwrap_or("")`). Should use `web-api-types::api_tokens::CreateApiTokenResponse` and `ApiTokenListResponse` for type safety, matching the pattern used by `auth status` with `UserResponse`. | `src/commands/auth.rs:291-292` |
-| CLI-02 | Minor | Code Quality | `chrono_date()` function manually calculates year/month/day from Unix epoch with hand-rolled leap year logic. The crate has `time` as a transitive dependency; using `time::OffsetDateTime::from_unix_timestamp()` would be safer and shorter. | `src/commands/auth.rs:435-469` |
+| ~~CLI-01~~ | ~~Minor~~ | ~~Code Quality~~ | ~~Token commands manually extract fields from `serde_json::Value`.~~ **FIXED.** `token_create()` and `token_list()` now use typed `CreateApiTokenResponse` and `ApiTokenListResponse` deserialization, matching the `UserResponse` pattern. | `src/commands/auth.rs` |
+| ~~CLI-02~~ | ~~Minor~~ | ~~Code Quality~~ | ~~`chrono_date()` hand-rolls epoch-to-date calculation with `is_leap()`.~~ **FIXED.** Replaced with `time::OffsetDateTime::now_utc()`. `is_leap()` deleted. | `src/commands/auth.rs` |
 | CLI-03 | Minor | Code Quality | `ApiClient::request()` returns `(u16, serde_json::Value)` tuple. A typed wrapper (e.g., `fn get<T: DeserializeOwned>(&self, path) -> Result<T>`) would reduce boilerplate at call sites. | `src/client.rs` |
 | CLI-04 | Minor | Consistency | `config_dir()` hardcodes `$HOME/.config/uptrakit/`. On macOS, the conventional location is `~/Library/Application Support/`. The `directories` crate (used elsewhere in the workspace) provides platform-appropriate paths. | `src/config.rs:21` |
 | CLI-05 | Info | UX | No `--quiet` flag for script-friendly usage. For automation scenarios, suppressing text output and relying on exit codes would improve integration. | `src/main.rs` |
