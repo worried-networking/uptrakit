@@ -7,6 +7,25 @@ well-documented with serde attributes for correct serialization. The `PROTOCOL_V
 helpers, and `UtcDateTime` serde module are clean and correct. The AsyncAPI spec is thorough and
 well-maintained.
 
+## Extensibility Assessment
+
+The wire crate has several extensibility-related concerns:
+
+1. **Monolithic single-file design**: The entire wire protocol (~800+ lines of production code) lives in a
+   single `lib.rs`. Splitting into logical modules (`envelopes.rs`, `payloads/`, `enums.rs`) would improve
+   navigability for external developers building new services.
+
+2. **Type duplication across crates**: `ServiceType` is defined here, in `web-api-types`, and in `shared-db`
+   (three copies). `MqttTransport` exists here and in `web-api-types` (two copies). These should be
+   consolidated into `shared-types` with feature-gated derives.
+
+3. **Closed message enums**: `ServiceMessage` and `ControllerMessage` are closed enums without
+   `#[non_exhaustive]`. Adding a new message type is a breaking change. External developers building new
+   service types cannot extend the protocol.
+
+4. **Private utility modules**: The `utc_datetime_millis` serde module is private but useful for external
+   consumers building API clients.
+
 ## Findings
 
 | ID | Title | Severity | Type | File |
@@ -165,3 +184,33 @@ active_mqtt_clients:
 ```
 
 This improves documentation accuracy and enables code generators to use typed UUID values.
+
+### WIRE-04
+
+**`ServiceType` duplicated across three crates**
+
+- **Severity:** Major
+- **Type:** Actionable
+- **File:** `src/lib.rs:34`
+- **Also affects:** `crates/shared/web-api-types/src/services.rs`, `crates/shared/db/src/entity/service.rs`
+
+**Description:** `ServiceType` exists in three locations with the same variants (`Agent`, `Mqtt`) but
+different derives and no conversion between them. An external developer adding a new service type must update
+all three locations. This should be a single type in `shared-types` with feature-gated derives
+(`#[cfg_attr(feature = "sea-orm", derive(DeriveActiveEnum))]`, etc.).
+
+**Recommendation:** Move the canonical `ServiceType` to `uptrakit-shared-types` and re-export from all
+three current locations. Same approach for `MqttTransport`, which is duplicated between wire and
+web-api-types.
+
+### WIRE-05
+
+**`ServiceMessage` and `ControllerMessage` lack `#[non_exhaustive]`**
+
+- **Severity:** Minor
+- **Type:** Actionable
+- **File:** `src/lib.rs`
+
+**Description:** Both message enums are closed without `#[non_exhaustive]`. Adding a new message type is a
+breaking change for downstream consumers. While this may be intentional for a wire protocol, applying
+`#[non_exhaustive]` would enable the project to evolve without breaking downstream code.

@@ -34,13 +34,28 @@ Shell command execution crate (~360 lines across 4 source files) providing `run_
 - `Result<T>` type alias defined (`src/error.rs:21`).
 - No `#[allow()]` directives.
 
+## Extensibility Assessment
+
+The crate is well-scoped as a leaf dependency. Two type-overlap issues affect cross-crate consistency:
+
+1. **`ShellType` duplicates `HookShell` from the wire crate**: Both enums have the same variants
+   (`Bash`, `Sh`, `PowerShell`). No conversion exists between them. When the agent receives an
+   `ExecuteUpdatePayload` with `HookShell::Bash`, it must manually map to `ShellType::Bash` before
+   calling `run_command_with_shell`. These should be unified into a single type.
+
+2. **All public functions require `mpsc::Sender<UpdateOutputLine>`**: This makes the execution functions
+   unusable for simple use cases where output streaming is not needed. A wrapper that discards output or
+   returns it as a collected string would improve ergonomics for external consumers.
+
 ## Findings
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
 | CMD-01 | Info | Code Quality | No timeout mechanism. Callers cannot kill stuck commands. The `MAX_OUTPUT_BYTES` cap prevents OOM but does not address hung processes. Timeout is the responsibility of the caller (agent/controller), but the absence of a built-in mechanism is worth noting. | `src/command.rs:41-142` |
 | CMD-02 | Info | Code Quality | `send_output()` ignores channel send failures (`let _ = output_tx.send(...)`). Intentional and correct (channel closure is not an error for the executor), but callers have no indication that output was dropped. | `src/command.rs:33-38` |
+| CMD-03 | Major | Extensibility | `ShellType` duplicates `HookShell` from the wire crate. Same variants (`Bash`, `Sh`, `PowerShell`), no conversion trait. The agent must manually map between them. Should be unified into a single type in `shared-types`. | `src/types.rs` |
+| CMD-04 | Minor | Extensibility | All public execution functions require `mpsc::Sender<UpdateOutputLine>`. Simple use cases (e.g., running a command and collecting output) need unnecessary channel setup. A convenience wrapper `run_command_simple()` returning `String` would improve ergonomics. | `src/command.rs` |
 
 ## Verdict
 
-**Pass.** Excellent security posture with multi-layered injection prevention and comprehensive tests. No critical or high-severity findings. Timeout management is left to callers by design.
+**Pass.** Excellent security posture with multi-layered injection prevention and comprehensive tests. The `ShellType` duplication (CMD-03) is the main extensibility concern. Timeout management is left to callers by design.

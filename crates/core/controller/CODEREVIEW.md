@@ -114,3 +114,38 @@ Extracting these to named constants would improve maintainability.
 from `reconcile::reconcile_setting()` in `reconcile.rs:47`. The `Vec<T>`
 specialisation is necessary (empty vec = "not provided"), but consolidation into
 `reconcile.rs` with a trait-based approach could reduce duplication.
+
+## Extensibility Assessment
+
+The controller is **not intended as a template** for external developers -- it is
+the unique central server. However, several issues affect maintainability and
+would need to be addressed before the codebase could support embedded or
+alternative controller configurations.
+
+### MAJOR: `main.rs` has a monolithic ~1,200-line `run()` function
+
+The `run()` function handles master key initialization, directory resolution,
+database setup, migrations, tenant loading, settings reconciliation, OIDC
+bootstrap, PKI initialization, CA rotation setup, CRL management, server
+certificate handling, JWT key migration, OIDC state stores, background task
+spawning, server startup, signal handling, and graceful shutdown -- all in a
+single function. This makes the controller extremely difficult for external
+developers to understand or adapt.
+
+**Recommendation:** Split `run()` into well-named initialization phases:
+`init_master_key()`, `init_database()`, `init_settings()`, `init_pki()`,
+`init_auth_stores()`, `spawn_background_tasks()`, `run_server()`.
+
+### MINOR: Direct sea-orm entity operations for OIDC bootstrap in `main.rs`
+
+Lines ~388-495 contain raw `ActiveModel` operations for OIDC provider
+bootstrapping directly in `main.rs`. This logic should be in a dedicated module
+or delegated to the web-api layer. The controller binary should orchestrate, not
+implement, database CRUD.
+
+### MINOR: `uptrakit-web-api-types` dependency may be unnecessary
+
+The `Cargo.toml` lists `uptrakit-web-api-types` but it may not be directly
+imported in reviewed source files. If only needed transitively through
+`uptrakit-web-api`, it should be removed as a direct dependency to reduce
+confusion about actual dependency boundaries.

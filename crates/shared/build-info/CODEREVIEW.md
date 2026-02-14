@@ -33,12 +33,19 @@ Small, focused crate (1 source file, ~217 lines) providing build-time metadata c
 - No `unwrap`/`panic` in non-test code.
 - Uses workspace edition 2024.
 
+## Extensibility Assessment
+
+Clean leaf crate with no extensibility concerns. External services can use `BuildInfo::current()` and
+`render_human()` for their own `--version` output. One minor gap: `BuildInfo` derives `Serialize` but not
+`Deserialize`, so external consumers cannot parse `BuildInfo` from a JSON `/version` endpoint response.
+
 ## Findings
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
 | BI-01 | Info | Code Quality | `render_human()` discards `writeln!` results with `let _ =`. Writing to `String` is infallible so this is correct, but lacks an explanatory comment. | `src/lib.rs:65-78` |
 | BI-02 | Info | Code Quality | `target_env()` and `target_family()` use cascading `if cfg!()` checks. A `cfg_attr`-based approach could be more concise but is not required. | `src/lib.rs:112-136` |
+| BI-03 | Info | Extensibility | `BuildInfo` derives `Serialize` but not `Deserialize`. External consumers wanting to parse `BuildInfo` from a JSON response cannot do so without adding `Deserialize`. | `src/lib.rs` |
 
 ## Verdict
 

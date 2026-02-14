@@ -209,3 +209,39 @@ if settings.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
 ```
 
 **Recommendation:** Same as for the agent. Revisit when protocol version 2 introduces breaking changes.
+
+## Extensibility Assessment
+
+The MQTT crate is the **best reference implementation** for external service developers. It demonstrates
+the complete service lifecycle (enroll, authenticate, handle messages, graceful shutdown) with a minimal
+dependency footprint. Its only weakness as a template is the duplicated enrollment boilerplate.
+
+### MQTT-05
+
+**Enrollment boilerplate duplicated with agent**
+
+- **Severity:** Medium
+- **Type:** Informational
+- **File:** `src/main.rs`
+- **Also affects:** `crates/core/agent/src/main.rs`
+- **Related finding:** [SDK-02](../../shared/service-sdk/CODEREVIEW.md#sdk-02),
+  [AGENT-02](../agent/CODEREVIEW.md#agent-02)
+
+**Description:** ~200 lines of enrollment/reconnection boilerplate are duplicated between the MQTT
+service and the agent. This is the strongest signal that the service-sdk should provide a higher-level
+lifecycle abstraction. An external developer building a new service would create a third copy.
+
+### MQTT-06
+
+**`MqttTransport` type mapping is fragile**
+
+- **Severity:** Low
+- **Type:** Informational
+- **File:** `src/tenant_manager.rs:150-161`
+- **Related finding:** [WIRE-04](../../shared/wire/CODEREVIEW.md#wire-04)
+
+**Description:** `local_mqtt_transport()` manually maps `uptrakit_internal_wire::MqttTransport` to
+`uptrakit_web_api_types::mqtt_transport::MqttTransport` variant by variant. If a new transport type is
+added (e.g., `WebSocket`), this function will fail to compile only if the match is exhaustive. The two
+`MqttTransport` enums should be unified into a single type in `shared-types`, or a `From` impl should
+be provided.

@@ -34,6 +34,28 @@ HTTP request/response type definitions crate (~2500+ lines across 29 source file
 - No `#[allow()]` directives.
 - Enum types consistently implement `FromStr`, `Display`/`as_str`, and serde traits.
 
+## Extensibility Assessment
+
+This crate is the primary interface for external API client developers. Several issues impact usability:
+
+1. **No prelude or root-level re-exports**: The `lib.rs` exposes 28 `pub mod` declarations with zero
+   re-exports. An external developer building an API client must know which module contains each type and
+   write verbose imports like `use uptrakit_web_api_types::agents::AgentResponse`. A `pub mod prelude` or
+   flat re-exports of the most commonly used types would dramatically improve ergonomics.
+
+2. **Duplicate types with wire crate**: `ServiceType` and `MqttTransport` exist in both this crate and the
+   wire crate. The `update_hooks` module correctly re-exports `HookShell` from wire, proving the pattern
+   works. The other duplicates should follow suit.
+
+3. **`CreateProviderConfigRequest.provider_type` is `String`**: This loses type safety. Using `ProviderType`
+   from `shared-types` would catch errors at compile time and deserialization time.
+
+4. **`ListAgentsQuery.status` is `Option<String>`**: Should be `Option<AgentStatus>` for type safety.
+
+5. **Dependency on `uptrakit-internal-wire`**: An HTTP-only API client that never uses WebSocket still pulls
+   in the wire protocol as a transitive dependency. The dependency exists to re-export `HookShell` and
+   `MqttTransport`. If these types moved to `shared-types`, the wire dependency could be removed.
+
 ## Findings
 
 | ID | Severity | Category | Description | File:Line |
@@ -43,7 +65,12 @@ HTTP request/response type definitions crate (~2500+ lines across 29 source file
 | WAT-03 | Low | Code Quality | `SystemAlert.severity` is `String`. Could be a typed enum (e.g., `Critical`, `Warning`, `Info`) for consistent severity handling across the system. | `src/system_alerts.rs:7` |
 | WAT-04 | Info | Security | Auth request DTOs (`RegisterRequest`, `LoginRequest`) use plain `String` for passwords. Typical for HTTP DTOs, but using `SecretString` from `uptrakit-shared-types` would add accidental-logging protection. The absence of `Debug` on these types partially mitigates this. | `src/auth.rs:20`, `src/auth.rs:35` |
 | WAT-05 | Info | Code Quality | Inconsistent `Debug` derive across the crate. Some types have it (`SystemAlert`, `ErrorResponse`, `Permission`, enums), others don't (most request/response DTOs). A consistent policy would improve debuggability. | Multiple files |
+| WAT-06 | Major | Extensibility | No prelude or root-level re-exports. 28 public modules with no curation forces external API client developers to discover module locations manually. Add a `pub mod prelude` or flat re-exports of the most commonly used types. | `src/lib.rs` |
+| WAT-07 | Major | Extensibility | `ServiceType` and `MqttTransport` duplicated between this crate and the wire crate. The `update_hooks` module already re-exports `HookShell` from wire (correct pattern). The other duplicates should follow suit, or all shared types should move to `shared-types`. | `src/services.rs`, `src/mqtt_transport.rs` |
+| WAT-08 | Minor | Extensibility | `CreateProviderConfigRequest.provider_type` is `String` instead of `ProviderType` from `shared-types`. Loses compile-time and deserialization-time type safety for API clients. | `src/provider_configs.rs:9` |
+| WAT-09 | Minor | Extensibility | `ListAgentsQuery.status` is `Option<String>` instead of `Option<AgentStatus>`. Same type safety concern. | `src/agents.rs` |
+| WAT-10 | Minor | Extensibility | `Permission` enum uses `parse()` returning `Option` instead of implementing `FromStr`. Inconsistent with `AgentStatus`, `RegistrationMode`, etc. which implement `FromStr`. | `src/permissions.rs` |
 
 ## Verdict
 
-**Pass.** Well-structured DTO crate with strong validation (especially update hooks), consistent serde patterns, and comprehensive test coverage. The `String`-typed status/severity fields (WAT-02, WAT-03) are the most actionable findings for improving type safety. Auth password handling (WAT-04) is acceptable for HTTP DTOs but could benefit from `SecretString`.
+**Pass.** Well-structured DTO crate with strong validation (especially update hooks), consistent serde patterns, and comprehensive test coverage. The missing prelude (WAT-06) and type duplication (WAT-07) are the most impactful extensibility findings. The `String`-typed fields (WAT-02, WAT-03, WAT-08, WAT-09) are the most actionable for type safety improvement.

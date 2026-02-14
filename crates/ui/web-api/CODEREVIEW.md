@@ -195,3 +195,47 @@ shared test fixture module could reduce this.
 back to `Password` if the stored auth method string is unrecognised. This is
 safe but could mask data corruption; a `tracing::warn!` on fallback would aid
 debugging.
+
+## Extensibility Assessment
+
+The web-api crate's `build_router(state) -> Router` API surface is clean and
+correct for embedding. However, constructing the required `Arc<AppState>` is a
+significant barrier for external embedders.
+
+### MAJOR: Hard coupling to `axum-server` TLS implementation
+
+`AppState` requires `axum_server::tls_rustls::RustlsConfig`. An embedder
+terminating TLS externally (e.g., behind a reverse proxy) must still construct a
+dummy `RustlsConfig`, as the test code demonstrates. Consider making this field
+`Option<RustlsConfig>` or extracting TLS concerns to the controller binary.
+
+### MAJOR: No builder or factory for `AppState`
+
+There is no `AppState::new()`, `AppState::builder()`, or factory function. The
+only construction examples are `test_state()` functions scattered across test
+files. An external consumer has no documented or ergonomic way to construct the
+state. An `AppStateBuilder` with sensible defaults would dramatically improve
+embeddability.
+
+### MINOR: `ca_snapshot` module defined inline in `lib.rs`
+
+The `ca_snapshot` module (~105 lines, 6 types) is defined as an inline
+`pub mod` in `lib.rs`. These types (`CaPublicSnapshot`, `CaKeyStore`,
+`SplitSnapshotInput`, etc.) are domain concepts independent of the web framework.
+The controller binary needs them but currently must depend on all of web-api to
+access them. Consider extracting to a shared crate or separate file.
+
+### MINOR: `SettingKey` and settings infrastructure in web-api
+
+`SettingKey` is a pure data type with no web dependencies. The
+`settings_store.rs` module only depends on `sea-orm` (already a `shared-db`
+dependency). These could live in `shared-db` or a dedicated `shared-settings`
+crate, allowing non-web components to access settings without depending on the
+web-api crate.
+
+### SUGGESTION: `provider-registry` dependency could be feature-gated
+
+`ProviderRegistry` is only used via two static method calls for config
+validation. A `provider-validation` feature flag would allow embedders who do not
+need provider config validation to avoid pulling in the provider-registry
+dependency tree.

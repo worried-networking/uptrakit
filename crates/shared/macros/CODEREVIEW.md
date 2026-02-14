@@ -33,12 +33,21 @@ Minimal macro crate (102 lines, single source file) providing the `impl_report_c
 - No `#[allow()]` directives.
 - Uses workspace edition 2024.
 
+## Extensibility Assessment
+
+External developers building new crates must also use `rootcause` 0.12 for error handling -- the shared
+crates do not support alternative error frameworks. The macro documentation does not explain what `rootcause`
+is or why it was chosen, which creates an onboarding barrier. A brief crate-level doc comment explaining the
+error-handling strategy (rootcause + thiserror + this macro) and linking to
+`docs/development/coding-standards.md` would help external contributors.
+
 ## Findings
 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
 | MAC-01 | Info | Code Quality | No direct unit tests. Declarative macros are inherently tested through consumers, and the macro is exercised by every crate that defines error types. Compile-time failures would surface immediately. | `src/lib.rs` |
 | MAC-02 | Info | Code Quality | Doc examples use `/// ```ignore` directive. Changing to `/// ```compile_fail` or `/// ```no_run` where applicable would provide stronger guarantees, but requires surrounding crate context that is impractical for isolated examples. | `src/lib.rs:11`, `src/lib.rs:17`, `src/lib.rs:34`, `src/lib.rs:40` |
+| MAC-03 | Minor | Extensibility | No documentation on what `rootcause` is or why it was chosen. External developers encountering `impl_report_conversion!` for the first time cannot understand its purpose without first understanding the `rootcause` crate. Add a brief crate-level doc comment linking to the coding standards. | `src/lib.rs` |
 
 ## Verdict
 

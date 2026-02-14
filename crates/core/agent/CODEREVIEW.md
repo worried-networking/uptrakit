@@ -134,3 +134,41 @@ for line in stdout.lines() {
 fallback to `"unknown"` is safe. If more robustness is desired, a regex or the
 `system_profiler SPHardwareDataType -json` approach could be used, but the added complexity is unlikely to be
 worth it given that `ioreg` output has been stable for decades.
+
+## Extensibility Assessment
+
+The agent serves as a **good reference implementation** for external developers building new services. Its
+provider-registry consumption pattern (never bypassing the registry to access provider-core directly) is
+exemplary. However, it is not ideal as a template due to enrollment boilerplate duplication.
+
+### AGENT-02
+
+**Enrollment boilerplate duplicated with MQTT service**
+
+- **Severity:** Medium
+- **Type:** Informational
+- **File:** `src/main.rs`, `src/client.rs`
+- **Also affects:** `crates/core/mqtt/src/main.rs`
+- **Related finding:** [SDK-02](../../shared/service-sdk/CODEREVIEW.md#sdk-02)
+
+**Description:** `run()`, `do_enrollment()`, and `run_authenticated_with_reconnect()` are structurally
+~80% identical to the MQTT service's corresponding functions. This includes URL parsing, directory
+resolution, identity loading, force-enroll check, CA bootstrap, certificate expiry checking, enrollment
+with backoff, and reconnection with backoff. An external developer building a new service would copy this
+boilerplate, creating a third copy.
+
+**Recommendation:** Extract the enrollment-reconnect lifecycle into the service-sdk (see
+[SDK-02](../../shared/service-sdk/CODEREVIEW.md#sdk-02)). Both the agent and MQTT service would then only
+implement the authenticated message-handling loop.
+
+### AGENT-03
+
+**Hardcoded log directive default**
+
+- **Severity:** Low
+- **Type:** Informational
+- **File:** `src/main.rs:28`
+
+**Description:** The default log directive `"uptrakit_agent=info"` is hardcoded as a string. An external
+developer copying this pattern for their own service must remember to change the string. The service-sdk
+should provide a helper that derives the module directive from the crate name.
