@@ -1,0 +1,53 @@
+//! Convenience re-exports for API client developers.
+//!
+//! Import this module to get the most commonly used request/response types:
+//!
+//! ```rust
+//! use uptrakit_web_api_types::prelude::*;
+//! ```
+
+// ── Auth ─────────────────────────────────────────────────────────────
+pub use crate::auth::{AuthResponse, LoginRequest, RegisterRequest, UserResponse};
+
+// ── Agents ───────────────────────────────────────────────────────────
+pub use crate::agents::{AgentResponse, AgentStatus};
+
+// ── Services ─────────────────────────────────────────────────────────
+pub use crate::services::{ServiceResponse, ServiceStatus, ServiceType};
+
+// ── Hosts ────────────────────────────────────────────────────────────
+pub use crate::hosts::{HostAgentSummary, HostResponse};
+
+// ── Software items ───────────────────────────────────────────────────
+pub use crate::software_items::{
+    SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
+    TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus,
+};
+
+// ── Provider configs ─────────────────────────────────────────────────
+pub use crate::provider_configs::{CreateProviderConfigRequest, ProviderConfigResponse};
+
+// ── Update history ───────────────────────────────────────────────────
+pub use crate::update_history::{UpdateHistoryResponse, UpdateStatus};
+
+// ── API tokens ───────────────────────────────────────────────────────
+pub use crate::api_tokens::{
+    ApiTokenListResponse, ApiTokenResponse, CreateApiTokenResponse,
+};
+
+// ── OIDC ─────────────────────────────────────────────────────────────
+pub use crate::oidc_auth::{AuthMethodsResponse, OidcProviderInfo};
+pub use crate::oidc_providers::OidcProviderResponse;
+
+// ── Settings ─────────────────────────────────────────────────────────
+pub use crate::settings::RegistrationSettingsResponse;
+
+// ── MQTT ─────────────────────────────────────────────────────────────
+pub use crate::settings_mqtt::MqttClientConnectionStatus;
+pub use crate::mqtt_transport::MqttTransport;
+
+// ── Common ───────────────────────────────────────────────────────────
+pub use crate::error::ErrorResponse;
+pub use crate::pagination::{PaginatedResponse, PaginationParams};
+pub use crate::permissions::Permission;
+pub use crate::registration::RegistrationMode;

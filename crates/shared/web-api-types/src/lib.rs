@@ -11,6 +11,7 @@ pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod pagination;
 pub mod permissions;
+pub mod prelude;
 pub mod provider_configs;
 pub mod registration;
 pub mod server_cert;
@@ -808,5 +809,52 @@ mod tests {
         assert!(resp.items.is_empty());
         assert_eq!(resp.total, 0);
         assert_eq!(resp.total_pages, 0);
+    }
+
+    // ── 10. Prelude compile check ───────────────────────────────────────
+
+    #[test]
+    fn prelude_re_exports_resolve() {
+        use crate::prelude::*;
+
+        // Auth
+        let _: AuthResponse;
+        let _: UserResponse;
+
+        // Agents / Services
+        let _ = AgentStatus::Pending;
+        let _ = ServiceStatus::Pending;
+
+        // Hosts
+        let _: HostResponse;
+
+        // Software items
+        let _: SoftwareItemResponse;
+        let _ = TriggerUpdateStatus::Pending;
+
+        // Provider configs
+        let _: ProviderConfigResponse;
+
+        // Update history
+        let _ = UpdateStatus::Pending;
+
+        // API tokens
+        let _: ApiTokenListResponse;
+        let _: CreateApiTokenResponse;
+
+        // OIDC
+        let _: OidcProviderResponse;
+        let _: AuthMethodsResponse;
+
+        // MQTT
+        let _ = MqttClientConnectionStatus::Online;
+        let _ = MqttTransport::Tcp;
+
+        // Common
+        let _: ErrorResponse;
+        let _: PaginatedResponse<String>;
+        let _: PaginationParams;
+        let _ = Permission::ViewSettings;
+        let _ = RegistrationMode::Open;
     }
 }
