@@ -124,10 +124,7 @@ impl ProviderRegistry {
     ///
     /// `Ok(())` if configuration is valid, or a `RegistryError` describing the validation failure.
     pub fn validate_config_str(provider_type: &str, config: &serde_json::Value) -> Result<()> {
-        let pt: ProviderType = serde_json::from_value(serde_json::Value::String(
-            provider_type.to_string(),
-        ))
-        .map_err(|_| {
+        let pt: ProviderType = provider_type.parse().map_err(|_| {
             report!(RegistryError::UnknownProviderType(
                 provider_type.to_string()
             ))
@@ -236,7 +233,7 @@ impl ProviderRegistry {
     ///
     /// `Some(ProviderType)` if the string is valid, or `None` if unknown.
     pub fn parse_provider_type(s: &str) -> Option<ProviderType> {
-        serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+        s.parse().ok()
     }
 }
 

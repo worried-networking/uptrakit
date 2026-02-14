@@ -8,7 +8,7 @@ mod service_type;
 
 pub use hook_shell::HookShell;
 pub use mqtt_transport::MqttTransport;
-pub use provider_types::{ProviderType, ReleaseAsset, ReleaseInfo};
+pub use provider_types::{ParseProviderTypeError, ProviderType, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use service_type::ServiceType;

@@ -13,6 +13,7 @@ openapi = ["dep:utoipa"]
 
 [dependencies]
 serde = { workspace = true }
+thiserror = { workspace = true }
 sea-orm = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }

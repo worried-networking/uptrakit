@@ -1,6 +1,8 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// Supported provider types.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -12,14 +14,40 @@ pub enum ProviderType {
     Homebrew,
 }
 
+impl ProviderType {
+    /// Returns the snake_case string representation of this provider type.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::GithubReleases => "github_releases",
+            Self::ProxmoxHelperScripts => "proxmox_helper_scripts",
+            Self::DockerRegistry => "docker_registry",
+            Self::Homebrew => "homebrew",
+        }
+    }
+}
+
+/// Error returned when parsing an invalid [`ProviderType`] string.
+#[derive(Debug, Error)]
+#[error("unknown provider type: {0}")]
+pub struct ParseProviderTypeError(pub String);
+
+impl FromStr for ProviderType {
+    type Err = ParseProviderTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "github_releases" => Ok(Self::GithubReleases),
+            "proxmox_helper_scripts" => Ok(Self::ProxmoxHelperScripts),
+            "docker_registry" => Ok(Self::DockerRegistry),
+            "homebrew" => Ok(Self::Homebrew),
+            _ => Err(ParseProviderTypeError(s.to_string())),
+        }
+    }
+}
+
 impl fmt::Display for ProviderType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::GithubReleases => write!(f, "github_releases"),
-            Self::ProxmoxHelperScripts => write!(f, "proxmox_helper_scripts"),
-            Self::DockerRegistry => write!(f, "docker_registry"),
-            Self::Homebrew => write!(f, "homebrew"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
@@ -102,6 +130,70 @@ mod tests {
         );
         assert_eq!(ProviderType::DockerRegistry.to_string(), "docker_registry");
         assert_eq!(ProviderType::Homebrew.to_string(), "homebrew");
+    }
+
+    #[test]
+    fn provider_type_from_str_valid() {
+        assert_eq!(
+            "github_releases".parse::<ProviderType>().ok(),
+            Some(ProviderType::GithubReleases)
+        );
+        assert_eq!(
+            "proxmox_helper_scripts".parse::<ProviderType>().ok(),
+            Some(ProviderType::ProxmoxHelperScripts)
+        );
+        assert_eq!(
+            "docker_registry".parse::<ProviderType>().ok(),
+            Some(ProviderType::DockerRegistry)
+        );
+        assert_eq!(
+            "homebrew".parse::<ProviderType>().ok(),
+            Some(ProviderType::Homebrew)
+        );
+    }
+
+    #[test]
+    fn provider_type_from_str_invalid_returns_err() {
+        assert!("unknown".parse::<ProviderType>().is_err());
+        assert!("".parse::<ProviderType>().is_err());
+        assert!("GITHUB_RELEASES".parse::<ProviderType>().is_err());
+        assert!("GithubReleases".parse::<ProviderType>().is_err());
+    }
+
+    #[test]
+    fn provider_type_from_str_error_contains_input() {
+        let err = "bad_value".parse::<ProviderType>().unwrap_err();
+        assert!(err.to_string().contains("bad_value"));
+    }
+
+    #[test]
+    fn provider_type_display_round_trips_through_from_str() {
+        let variants = [
+            ProviderType::GithubReleases,
+            ProviderType::ProxmoxHelperScripts,
+            ProviderType::DockerRegistry,
+            ProviderType::Homebrew,
+        ];
+        for pt in &variants {
+            let s = pt.to_string();
+            let parsed: ProviderType = s
+                .parse()
+                .expect("from_str should succeed for Display output");
+            assert_eq!(&parsed, pt);
+        }
+    }
+
+    #[test]
+    fn provider_type_as_str_matches_display() {
+        let variants = [
+            ProviderType::GithubReleases,
+            ProviderType::ProxmoxHelperScripts,
+            ProviderType::DockerRegistry,
+            ProviderType::Homebrew,
+        ];
+        for pt in &variants {
+            assert_eq!(pt.as_str(), pt.to_string());
+        }
     }
 
     #[test]
