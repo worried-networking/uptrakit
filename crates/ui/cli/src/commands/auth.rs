@@ -442,43 +442,13 @@ fn prompt(msg: &str) -> Result<String> {
 }
 
 fn chrono_date() -> String {
-    // Simple date string YYYY-MM-DD without pulling in chrono
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // Days since epoch
-    let days = now / 86400;
-    // Approximate date calculation
-    let mut y = 1970i64;
-    let mut remaining = days as i64;
-    loop {
-        let days_in_year = if is_leap(y) { 366 } else { 365 };
-        if remaining < days_in_year {
-            break;
-        }
-        remaining -= days_in_year;
-        y += 1;
-    }
-    let month_days: &[i64] = if is_leap(y) {
-        &[31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        &[31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut m = 1;
-    for &md in month_days {
-        if remaining < md {
-            break;
-        }
-        remaining -= md;
-        m += 1;
-    }
-    let d = remaining + 1;
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-fn is_leap(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    let now = time::OffsetDateTime::now_utc();
+    format!(
+        "{:04}-{:02}-{:02}",
+        now.year(),
+        now.month() as u8,
+        now.day()
+    )
 }
 
 /// Open a URL in the user's default browser.
@@ -556,6 +526,22 @@ mod tests {
         assert_eq!(parsed["tokens"].as_array().expect("array").len(), 2);
         assert_eq!(parsed["tokens"][0]["status"], "active");
         assert_eq!(parsed["tokens"][1]["status"], "revoked");
+    }
+
+    #[test]
+    fn chrono_date_format_is_yyyy_mm_dd() {
+        let date = chrono_date();
+        // Must match YYYY-MM-DD pattern
+        assert_eq!(date.len(), 10, "date should be 10 characters: {date}");
+        let parts: Vec<&str> = date.split('-').collect();
+        assert_eq!(parts.len(), 3, "date should have 3 dash-separated parts");
+        assert_eq!(parts[0].len(), 4, "year should be 4 digits");
+        assert_eq!(parts[1].len(), 2, "month should be 2 digits");
+        assert_eq!(parts[2].len(), 2, "day should be 2 digits");
+        // All parts should be numeric
+        assert!(parts[0].chars().all(|c| c.is_ascii_digit()));
+        assert!(parts[1].chars().all(|c| c.is_ascii_digit()));
+        assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
     }
 
     #[test]
