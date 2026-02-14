@@ -20,6 +20,7 @@ Uptrakit.
 | [Graceful Restart](graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
 | [Quality Gates](quality-gates.md) | CI quality gate requirements for all changes. |
 | [Update Hooks](update-hooks.md) | Pre/post-update hook execution and configuration. |
+| [Service Lifecycle](service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. |
 
 ## Related Documentation
 

@@ -511,53 +511,8 @@ async fn set_secure_dir_permissions(path: &Path) -> Result<()> {
 
 /// Decode the first PEM block into DER bytes.
 fn pem_to_der(pem: &str) -> Option<Vec<u8>> {
-    // Find the base64 content between BEGIN and END markers.
-    let start_marker = "-----BEGIN CERTIFICATE-----";
-    let end_marker = "-----END CERTIFICATE-----";
-    let start = pem.find(start_marker)? + start_marker.len();
-    let end = pem[start..].find(end_marker)? + start;
-    let b64: String = pem[start..end]
-        .chars()
-        .filter(|c| !c.is_ascii_whitespace())
-        .collect();
-
-    // Use a simple base64 decoder (standard alphabet).
-    base64_decode(&b64)
-}
-
-/// Minimal base64 decoder (standard alphabet, no padding required).
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    fn val(c: u8) -> Option<u8> {
-        TABLE.iter().position(|&b| b == c).map(|p| p as u8)
-    }
-
-    let bytes: Vec<u8> = input.bytes().filter(|&b| b != b'=').collect();
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-
-    for chunk in bytes.chunks(4) {
-        let mut buf: u32 = 0;
-        for (i, &b) in chunk.iter().enumerate() {
-            buf |= (val(b)? as u32) << (18 - 6 * i);
-        }
-        match chunk.len() {
-            4 => {
-                out.push((buf >> 16) as u8);
-                out.push((buf >> 8) as u8);
-                out.push(buf as u8);
-            }
-            3 => {
-                out.push((buf >> 16) as u8);
-                out.push((buf >> 8) as u8);
-            }
-            2 => {
-                out.push((buf >> 16) as u8);
-            }
-            _ => return None,
-        }
-    }
-    Some(out)
+    let (_, pem) = x509_parser::pem::parse_x509_pem(pem.as_bytes()).ok()?;
+    Some(pem.contents)
 }
 
 #[cfg(test)]
@@ -812,11 +767,26 @@ mod tests {
     }
 
     #[test]
-    fn pem_to_der_basic() {
-        // Verify our minimal PEM decoder works for a trivial payload.
-        let encoded = "-----BEGIN CERTIFICATE-----\nSGVsbG8=\n-----END CERTIFICATE-----\n";
-        let der = pem_to_der(encoded).expect("decode");
-        assert_eq!(der, b"Hello");
+    fn pem_to_der_real_certificate() {
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
+        let cert = params.self_signed(&kp).expect("self-sign");
+        let pem = cert.pem();
+
+        let der = pem_to_der(&pem).expect("decode");
+        // The DER bytes should parse as a valid X.509 certificate.
+        let (_, parsed) = x509_parser::parse_x509_certificate(&der).expect("parse x509");
+        assert!(parsed.validity().is_valid());
+    }
+
+    #[test]
+    fn pem_to_der_empty_string() {
+        assert!(pem_to_der("").is_none());
+    }
+
+    #[test]
+    fn pem_to_der_non_pem_text() {
+        assert!(pem_to_der("this is not a PEM").is_none());
     }
 
     #[tokio::test]

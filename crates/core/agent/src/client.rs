@@ -322,7 +322,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                 }
 
                                 use futures_util::stream::{self, StreamExt};
-                                let results: Vec<VersionCheckResult> = stream::iter(&payload.assignments)
+                                let results: Vec<VersionCheckResult> = stream::iter(payload.assignments)
                                     .map(|assignment| async move {
                                         tracing::debug!(
                                             software_item_id = %assignment.software_item_id,
@@ -331,7 +331,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                             "checking version"
                                         );
                                         let outcome = crate::version_check::check_version(
-                                            assignment.provider_type.clone(),
+                                            assignment.provider_type,
                                             &assignment.config,
                                             &assignment.package_identifier,
                                         ).await;

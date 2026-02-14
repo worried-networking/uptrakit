@@ -36,6 +36,10 @@ definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs
 
 The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared infrastructure for building Uptrakit services:
 
+- **Lifecycle**: The `ServiceHandler` trait and `run_service_lifecycle()` function encapsulate the full
+  bootstrap-enrollment-reconnect flow. New services implement three methods (`config()`, `enrollment_info()`,
+  `run_authenticated_loop()`) and get directory setup, identity management, CA bootstrap, enrollment with backoff,
+  and reconnection with backoff for free. See [Service Lifecycle](docs/development/service-lifecycle.md).
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
 - **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust).

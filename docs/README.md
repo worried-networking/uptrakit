@@ -72,6 +72,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Graceful Restart](development/graceful-restart.md) | Zero-downtime restart and shutdown behavior. |
 | [Quality Gates](development/quality-gates.md) | CI quality gate requirements for all changes. |
 | [Update Hooks](development/update-hooks.md) | Pre/post-update hook execution and configuration. |
+| [Service Lifecycle](development/service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. See also: [Services and Operations](api/services-operations.md). |
 
 ## Deployment Guides
 

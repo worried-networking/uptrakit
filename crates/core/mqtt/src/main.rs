@@ -1,5 +1,4 @@
 mod cli;
-mod error;
 mod mqtt_client;
 mod tenant_manager;
 
@@ -13,19 +12,56 @@ use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
     MqttRegisterPayload, PingPayload, ServiceMessage, now_millis,
 };
-use uptrakit_service_sdk::{ControllerConnection, ServiceIdentityState};
+use uptrakit_service_sdk::{
+    AuthenticatedContext, ControllerConnection, LoopOutcome, ServiceConfig, ServiceEnrollmentInfo,
+    ServiceHandler,
+};
 
-use crate::error::{AppError, Result};
 use crate::tenant_manager::TenantManager;
 
-/// Outcome of the authenticated event loop.
-enum LoopOutcome {
-    /// SIGINT/SIGTERM received — shut down cleanly.
-    Shutdown,
-    /// Certificate rotated — reload from disk and reconnect.
-    Reconnect,
-    /// Connection closed by controller — no special action.
-    Disconnected,
+struct MqttHandler {
+    max_tenants: u32,
+    ping_interval: u64,
+    instance_id: String,
+    tenant_mgr: TenantManager,
+    status_rx: tokio::sync::mpsc::UnboundedReceiver<mqtt_client::MqttClientStatusEvent>,
+}
+
+impl ServiceHandler for MqttHandler {
+    fn config(&self) -> ServiceConfig {
+        ServiceConfig {
+            dir_name: "mqtt",
+            service_label: "uptrakit-mqtt service",
+        }
+    }
+
+    fn enrollment_info(&self) -> ServiceEnrollmentInfo {
+        ServiceEnrollmentInfo {
+            service_type: uptrakit_internal_wire::ServiceType::Mqtt,
+            host_info: None,
+        }
+    }
+
+    fn run_authenticated_loop<'a>(
+        &'a mut self,
+        ctx: AuthenticatedContext<'a>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            run_mqtt_authenticated_loop(MqttLoopParams {
+                host: ctx.host,
+                port: ctx.port,
+                tls_connector: ctx.tls_connector,
+                max_tenants: self.max_tenants,
+                ping_interval: self.ping_interval,
+                instance_id: &self.instance_id,
+                tenant_mgr: &mut self.tenant_mgr,
+                status_rx: &mut self.status_rx,
+            })
+            .await
+        })
+    }
 }
 
 #[tokio::main]
@@ -45,8 +81,22 @@ async fn main() {
     // Install the default crypto provider for rustls
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    if let Err(mut e) = run(args).await {
-        if e.current_context_mut().is_receive_closed() {
+    let instance_id = generate_instance_id();
+    tracing::info!(%instance_id, "starting uptrakit-mqtt service");
+
+    let (status_tx, status_rx) = tokio::sync::mpsc::unbounded_channel();
+    let tenant_mgr = TenantManager::new(Some(status_tx));
+
+    let mut handler = MqttHandler {
+        max_tenants: args.max_tenants,
+        ping_interval: args.ping_interval,
+        instance_id,
+        tenant_mgr,
+        status_rx,
+    };
+
+    if let Err(e) = uptrakit_service_sdk::run_service_lifecycle(&args.common, &mut handler).await {
+        if e.current_context().is_receive_closed() {
             tracing::info!("disconnected by controller");
         } else {
             tracing::error!(error = %e, "mqtt service failed");
@@ -74,286 +124,44 @@ fn generate_instance_id() -> String {
     format!("{host}-{uuid_prefix}")
 }
 
-async fn run(args: cli::Args) -> Result<()> {
-    let instance_id = generate_instance_id();
-    tracing::info!(%instance_id, "starting uptrakit-mqtt service");
-
-    // Parse URL early
-    let (host, port) = args.common.parsed_url().map_err(|s| {
-        report!(AppError::Enrollment(
-            uptrakit_service_sdk::EnrollmentError::Enrollment(s)
-        ))
-    })?;
-    let base_url = args.common.base_url();
-    let pki_addr = args.common.pki_addr();
-
-    // Resolve application directories
-    let app_dirs = args.common.resolve_dirs("mqtt").map_err(|e| {
-        report!(AppError::Enrollment(
-            uptrakit_service_sdk::EnrollmentError::Enrollment(e.to_string())
-        ))
-    })?;
-    app_dirs.ensure_dirs().map_err(|e| {
-        report!(AppError::Enrollment(
-            uptrakit_service_sdk::EnrollmentError::Enrollment(format!(
-                "failed to create directories: {e}"
-            ))
-        ))
-    })?;
-    tracing::info!("config directory: {}", app_dirs.config_dir().display());
-    tracing::info!("state directory: {}", app_dirs.state_dir().display());
-
-    // Create and load identity state
-    let mut identity = ServiceIdentityState::new(app_dirs.config_dir(), app_dirs.state_dir());
-    identity.load().await.context_to::<AppError>()?;
-
-    // --force-enroll: clear existing enrollment state (preserves CA cert)
-    if args.common.force_enroll {
-        tracing::info!("--force-enroll: clearing existing enrollment state");
-        identity
-            .clear_enrollment_state()
-            .await
-            .context_to::<AppError>()?;
-    }
-
-    // CA bootstrap: cached → --ca-cert file → --pki-addr → --tofu TOFU → system trust
-    let ca_pem = uptrakit_service_sdk::ca::bootstrap_ca(
-        &mut identity,
-        base_url,
-        args.common.tofu,
-        args.common.tofu_fingerprint.as_deref(),
-        args.common.ca_cert.as_deref(),
-        pki_addr,
-    )
-    .await
-    .context_to::<AppError>()?;
-
-    // Check for existing certificate
-    if identity.is_certified() {
-        let cert_not_after_ts = identity.cert_not_after_ms();
-        let cert_expired =
-            cert_not_after_ts.is_some_and(|ts| uptrakit_internal_wire::now_millis() >= ts);
-
-        if cert_expired {
-            tracing::warn!("certificate expired, falling back to fresh enrollment");
-            identity
-                .clear_enrollment_state()
-                .await
-                .context_to::<AppError>()?;
-            // Fall through to enrollment below
-        } else {
-            tracing::info!("loaded existing certificate from disk");
-            match run_authenticated_with_reconnect(
-                &host,
-                port,
-                ca_pem.as_deref(),
-                &identity,
-                &args,
-                &instance_id,
-            )
-            .await
-            {
-                Ok(()) => return Ok(()),
-                Err(mut e) => {
-                    if e.current_context_mut().is_cert_expired() {
-                        tracing::warn!("certificate expired, falling back to enrollment");
-                        identity
-                            .clear_enrollment_state()
-                            .await
-                            .context_to::<AppError>()?;
-                        // Fall through to enrollment below
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-    }
-
-    // Enrollment with backoff loop
-    let tls_connector = match ca_pem.as_deref() {
-        Some(pem) => {
-            uptrakit_service_sdk::tls::build_tls_connector(pem).context_to::<AppError>()?
-        }
-        None => uptrakit_service_sdk::tls::build_system_trust_tls_connector()
-            .context_to::<AppError>()?,
-    };
-
-    let mut enrollment_backoff =
-        uptrakit_service_sdk::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    loop {
-        match do_enrollment(&args, &host, port, &mut identity, &tls_connector).await {
-            Ok(()) => break,
-            Err(mut e) => {
-                if e.current_context_mut().is_receive_closed() {
-                    let delay = enrollment_backoff.next_delay();
-                    tracing::info!("disconnected during enrollment, reconnecting in {delay:?}");
-                    tokio::time::sleep(delay).await;
-                    // Reload identity in case enrollment partially completed
-                    identity.load().await.context_to::<AppError>()?;
-                    continue;
-                }
-                return Err(e);
-            }
-        }
-    }
-
-    // Enter mTLS loop with reconnect
-    run_authenticated_with_reconnect(
-        &host,
-        port,
-        ca_pem.as_deref(),
-        &identity,
-        &args,
-        &instance_id,
-    )
-    .await
-}
-
-/// Run enrollment using the shared SDK crate.
-async fn do_enrollment(
-    args: &cli::Args,
-    host: &str,
-    port: u16,
-    identity: &mut ServiceIdentityState,
-    tls_connector: &tokio_rustls::TlsConnector,
-) -> Result<()> {
-    if identity.is_enrolled_only() {
-        // Resume: reconnect with Bearer header (existing service.json)
-        tracing::info!("reconnecting with enrollment secret");
-        uptrakit_service_sdk::ws::resume_enrollment(identity, host, port, tls_connector)
-            .await
-            .context_to::<AppError>()?;
-    } else {
-        // Fresh enrollment
-        let hostname = args.common.hostname();
-        let friendly_name = args.common.friendly_name_or_hostname();
-
-        tracing::info!("enrolling via WebSocket");
-        uptrakit_service_sdk::ws::run_enrollment(uptrakit_service_sdk::ws::EnrollmentParams {
-            identity,
-            host,
-            port,
-            tls_connector,
-            hostname: &hostname,
-            friendly_name: &friendly_name,
-            enrollment_token: args.common.enrollment_token.as_deref(),
-            service_type: uptrakit_internal_wire::ServiceType::Mqtt,
-            host_info: None, // MQTT service doesn't collect host_info
-        })
-        .await
-        .context_to::<AppError>()?;
-    }
-
-    tracing::info!("enrollment complete, certificate saved to disk");
-    Ok(())
-}
-
-/// Enter the mTLS authenticated loop with automatic reconnection on cert rotation.
-async fn run_authenticated_with_reconnect(
-    host: &str,
-    port: u16,
-    ca_pem: Option<&[u8]>,
-    identity: &ServiceIdentityState,
-    args: &cli::Args,
-    instance_id: &str,
-) -> Result<()> {
-    let (status_tx, mut status_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut tenant_mgr = TenantManager::new(Some(status_tx));
-
-    let mut reconnect_backoff =
-        uptrakit_service_sdk::Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
-    loop {
-        let cert_pem = identity.cert_pem().ok_or_else(|| {
-            report!(AppError::Enrollment(
-                uptrakit_service_sdk::EnrollmentError::NotCertified
-            ))
-        })?;
-        let key_pem = identity.key_pem().ok_or_else(|| {
-            report!(AppError::Enrollment(
-                uptrakit_service_sdk::EnrollmentError::NotCertified
-            ))
-        })?;
-
-        let mtls_connector = match ca_pem {
-            Some(pem) => uptrakit_service_sdk::tls::build_tls_connector_with_client_cert(
-                pem, cert_pem, &key_pem,
-            )
-            .context_to::<AppError>()?,
-            None => uptrakit_service_sdk::tls::build_system_trust_tls_connector_with_client_cert(
-                cert_pem, &key_pem,
-            )
-            .context_to::<AppError>()?,
-        };
-
-        match run_authenticated_loop(AuthenticatedLoopParams {
-            host,
-            port,
-            tls_connector: mtls_connector,
-            args,
-            instance_id,
-            tenant_mgr: &mut tenant_mgr,
-            status_rx: &mut status_rx,
-        })
-        .await?
-        {
-            LoopOutcome::Shutdown => return Ok(()),
-            LoopOutcome::Reconnect => {
-                // Certificate rotation is expected; reset backoff and reconnect quickly.
-                reconnect_backoff.reset();
-                tracing::info!("reconnecting with new certificate");
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            LoopOutcome::Disconnected => {
-                let delay = reconnect_backoff.next_delay();
-                tracing::warn!("disconnected by controller, reconnecting in {delay:?}");
-                tokio::time::sleep(delay).await;
-                continue;
-            }
-        }
-    }
-}
-
-/// Parameters for [`run_authenticated_loop`].
-struct AuthenticatedLoopParams<'a> {
+/// Parameters for [`run_mqtt_authenticated_loop`].
+struct MqttLoopParams<'a> {
     host: &'a str,
     port: u16,
     tls_connector: tokio_rustls::TlsConnector,
-    args: &'a cli::Args,
+    max_tenants: u32,
+    ping_interval: u64,
     instance_id: &'a str,
     tenant_mgr: &'a mut TenantManager,
     status_rx: &'a mut tokio::sync::mpsc::UnboundedReceiver<mqtt_client::MqttClientStatusEvent>,
 }
 
-/// Authenticated event loop (mTLS connection).
-async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Result<LoopOutcome> {
-    let AuthenticatedLoopParams {
+/// Authenticated event loop (mTLS connection) — service-specific logic for MQTT.
+async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_service_sdk::Result<LoopOutcome> {
+    let MqttLoopParams {
         host,
         port,
         tls_connector,
-        args,
+        max_tenants,
+        ping_interval: ping_interval_secs,
         instance_id,
         tenant_mgr,
         status_rx,
     } = params;
 
     tracing::info!("connecting to controller (authenticated)");
-    let mut conn = ControllerConnection::connect(host, port, &tls_connector, None)
-        .await
-        .context_to::<AppError>()?;
+    let mut conn = ControllerConnection::connect(host, port, &tls_connector, None).await?;
 
     // Register with controller
     conn.send(ServiceMessage::Register(MqttRegisterPayload {
         instance_id: instance_id.to_string(),
-        max_tenants: args.max_tenants,
+        max_tenants,
         active_mqtt_clients: tenant_mgr.active_mqtt_client_ids(),
         protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
     }))
-    .await
-    .context_to::<AppError>()?;
+    .await?;
 
-    let ping_interval = Duration::from_secs(args.ping_interval);
+    let ping_interval = Duration::from_secs(ping_interval_secs);
     let mut ping_ticker = tokio::time::interval(ping_interval);
 
     // Skip the first immediate tick
@@ -361,14 +169,14 @@ async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Result<L
 
     #[cfg(unix)]
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .context_to::<AppError>()?;
+        .map_err(|e| report!(uptrakit_service_sdk::EnrollmentError::Io(e)))?;
 
     let outcome = loop {
         tokio::select! {
             biased;
 
             msg = conn.recv() => {
-                match msg.context_to::<AppError>()? {
+                match msg? {
                     Some(ControllerMessage::Registered(payload)) => {
                         tracing::info!(instance_id = %payload.instance_id, "registered with controller");
                     }
@@ -452,8 +260,7 @@ async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Result<L
                 let service_ts = now_millis();
                 tracing::trace!(service_ts, "sending ping");
                 conn.send(ServiceMessage::Ping(PingPayload { service_ts }))
-                    .await
-                    .context_to::<AppError>()?;
+                    .await?;
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received SIGINT, initiating graceful shutdown");

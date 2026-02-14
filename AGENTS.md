@@ -70,7 +70,7 @@ uptrakit/
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex encode/decode)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection)
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
@@ -288,6 +288,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Testing Expectations](docs/development/testing.md)
 - [Provider Guidelines](docs/development/provider-guidelines.md)
 - [Update Hooks](docs/development/update-hooks.md)
+- [Service Lifecycle](docs/development/service-lifecycle.md)
 
 ### Architecture
 

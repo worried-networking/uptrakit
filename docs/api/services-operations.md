@@ -17,10 +17,11 @@
 
 ## Shared Service Startup Flow
 
-Both agents and MQTT services follow a unified startup sequence provided by the `uptrakit-service-sdk` crate:
+Both agents and MQTT services implement the `ServiceHandler` trait from `uptrakit-service-sdk` and delegate their
+startup to `run_service_lifecycle()`. Each service only provides service-specific configuration (`config()`),
+enrollment parameters (`enrollment_info()`), and the authenticated event loop (`run_authenticated_loop()`). The
+SDK handles all common plumbing:
 
-1. Initialize tracing with a crate-specific directive (e.g. `uptrakit_agent=info`).
-1. Install the `aws-lc-rs` crypto provider for rustls.
 1. Parse CLI arguments and resolve application directories.
 1. Load identity state; clear if `--force-enroll` is set.
 1. Bootstrap the CA certificate (cached, file, PKI endpoint, TOFU, or system trust).
@@ -32,6 +33,8 @@ Both agents and MQTT services follow a unified startup sequence provided by the 
 Both services use a shared `ControllerConnection` type for all authenticated WebSocket communication,
 which handles envelope serialization, sequence validation, and WebSocket frame processing
 (Ping/Pong, Close frames).
+
+For development details on the `ServiceHandler` trait, see [Service Lifecycle](../development/service-lifecycle.md).
 
 ## Multi-Tenancy
 
