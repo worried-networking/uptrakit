@@ -62,7 +62,9 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
             }
             CaTlsMode::PinnedCa(ca_pem) => {
                 let cert = reqwest::Certificate::from_pem(ca_pem).map_err(|e| {
-                    report!(EnrollmentError::Ca(CaError::Fetch(format!("invalid CA PEM: {e}"))))
+                    report!(EnrollmentError::Ca(CaError::Fetch(format!(
+                        "invalid CA PEM: {e}"
+                    ))))
                 })?;
                 builder = builder.tls_certs_only([cert]);
             }
@@ -80,7 +82,10 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
         .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 
     if !resp.status().is_success() {
-        bail!(EnrollmentError::Ca(CaError::Fetch(format!("HTTP {}", resp.status()))));
+        bail!(EnrollmentError::Ca(CaError::Fetch(format!(
+            "HTTP {}",
+            resp.status()
+        ))));
     }
 
     let body = resp

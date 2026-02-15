@@ -101,20 +101,22 @@ pub async fn run_service_lifecycle(
     tracing::info!("starting {}", config.service_label);
 
     // Parse URL early.
-    let (host, port) = args.parsed_url().map_err(|s| {
-        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(s)))
-    })?;
+    let (host, port) = args
+        .parsed_url()
+        .map_err(|s| report!(EnrollmentError::Protocol(ProtocolError::Enrollment(s))))?;
     let base_url = args.base_url();
     let pki_addr = args.pki_addr();
 
     // Resolve application directories.
     let app_dirs = args.resolve_dirs(config.dir_name).map_err(|e| {
-        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(e.to_string())))
+        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+            e.to_string()
+        )))
     })?;
     app_dirs.ensure_dirs().map_err(|e| {
-        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(
-            "failed to create directories: {e}"
-        ))))
+        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+            format!("failed to create directories: {e}")
+        )))
     })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
@@ -265,16 +267,18 @@ async fn run_authenticated_with_reconnect(
     let mut reconnect_backoff = Backoff::new(Duration::from_secs(2), Duration::from_secs(60));
     loop {
         // Rebuild the mTLS connector each iteration (certificates may have rotated).
-        let cert_pem = identity.cert_pem().ok_or_else(|| {
-            report!(EnrollmentError::Identity(IdentityError::NotCertified))
-        })?;
-        let key_pem = identity.key_pem().ok_or_else(|| {
-            report!(EnrollmentError::Identity(IdentityError::NotCertified))
-        })?;
+        let cert_pem = identity
+            .cert_pem()
+            .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
+        let key_pem = identity
+            .key_pem()
+            .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotCertified)))?;
 
         let mtls_connector = match ca_pem {
             Some(pem) => crate::tls::build_tls_connector_with_client_cert(pem, cert_pem, &key_pem)?,
-            None => crate::tls::build_system_trust_tls_connector_with_client_cert(cert_pem, &key_pem)?,
+            None => {
+                crate::tls::build_system_trust_tls_connector_with_client_cert(cert_pem, &key_pem)?
+            }
         };
 
         let ctx = AuthenticatedContext {

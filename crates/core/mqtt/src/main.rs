@@ -45,7 +45,9 @@ impl ServiceHandler for MqttHandler {
         &'a mut self,
         ctx: AuthenticatedContext<'a>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a>,
+        Box<
+            dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a,
+        >,
     > {
         Box::pin(async move {
             run_mqtt_authenticated_loop(MqttLoopParams {
@@ -138,7 +140,9 @@ struct MqttLoopParams<'a> {
 }
 
 /// Authenticated event loop (mTLS connection) — service-specific logic for MQTT.
-async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_service_sdk::Result<LoopOutcome> {
+async fn run_mqtt_authenticated_loop(
+    params: MqttLoopParams<'_>,
+) -> uptrakit_service_sdk::Result<LoopOutcome> {
     let MqttLoopParams {
         host,
         port,

@@ -94,10 +94,22 @@ mod tests {
 
     #[test]
     fn from_str_valid() {
-        assert_eq!("info".parse::<AlertSeverity>().expect("info"), AlertSeverity::Info);
-        assert_eq!("warning".parse::<AlertSeverity>().expect("warning"), AlertSeverity::Warning);
-        assert_eq!("error".parse::<AlertSeverity>().expect("error"), AlertSeverity::Error);
-        assert_eq!("critical".parse::<AlertSeverity>().expect("critical"), AlertSeverity::Critical);
+        assert_eq!(
+            "info".parse::<AlertSeverity>().expect("info"),
+            AlertSeverity::Info
+        );
+        assert_eq!(
+            "warning".parse::<AlertSeverity>().expect("warning"),
+            AlertSeverity::Warning
+        );
+        assert_eq!(
+            "error".parse::<AlertSeverity>().expect("error"),
+            AlertSeverity::Error
+        );
+        assert_eq!(
+            "critical".parse::<AlertSeverity>().expect("critical"),
+            AlertSeverity::Critical
+        );
     }
 
     #[test]
@@ -109,7 +121,12 @@ mod tests {
 
     #[test]
     fn as_str_matches_display() {
-        for severity in [AlertSeverity::Info, AlertSeverity::Warning, AlertSeverity::Error, AlertSeverity::Critical] {
+        for severity in [
+            AlertSeverity::Info,
+            AlertSeverity::Warning,
+            AlertSeverity::Error,
+            AlertSeverity::Critical,
+        ] {
             assert_eq!(severity.as_str(), severity.to_string());
         }
     }

@@ -118,8 +118,9 @@ mod tests {
             MqttClientConnectionStatus::Connecting,
         ] {
             let s = status.as_str();
-            let parsed: MqttClientConnectionStatus =
-                s.parse().expect("from_str should succeed for as_str output");
+            let parsed: MqttClientConnectionStatus = s
+                .parse()
+                .expect("from_str should succeed for as_str output");
             assert_eq!(parsed, status);
         }
     }
@@ -151,8 +152,7 @@ mod tests {
             MqttClientConnectionStatus::Connecting,
         ] {
             let json = serde_json::to_string(&status).unwrap();
-            let deserialized: MqttClientConnectionStatus =
-                serde_json::from_str(&json).unwrap();
+            let deserialized: MqttClientConnectionStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, status);
         }
     }

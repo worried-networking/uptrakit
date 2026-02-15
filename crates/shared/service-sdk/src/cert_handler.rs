@@ -7,8 +7,8 @@
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
-    CaBundleUpdatedPayload, CertificatePayload, RenewCertificatePayload,
-    RequestCertRenewalPayload, ServiceMessage,
+    CaBundleUpdatedPayload, CertificatePayload, RenewCertificatePayload, RequestCertRenewalPayload,
+    ServiceMessage,
 };
 
 use crate::connection::ControllerConnection;
@@ -134,13 +134,10 @@ impl CertificateRenewalHandler {
     /// [`handle_request_cert_renewal`](Self::handle_request_cert_renewal)
     /// and can also be called directly for timer-based renewal (e.g. in the
     /// agent's renewal window logic).
-    pub fn initiate_renewal(
-        &mut self,
-        identity: &ServiceIdentityState,
-    ) -> Result<String> {
-        let service_id = identity.service_id().ok_or_else(|| {
-            report!(EnrollmentError::Identity(IdentityError::NotEnrolled))
-        })?;
+    pub fn initiate_renewal(&mut self, identity: &ServiceIdentityState) -> Result<String> {
+        let service_id = identity
+            .service_id()
+            .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotEnrolled)))?;
         let (key_pem, csr_pem) = generate_keypair_and_csr(&service_id.to_string())?;
         self.pending_renewal_key = Some(key_pem);
         Ok(csr_pem)
@@ -226,8 +223,7 @@ mod tests {
         let _csr = handler.initiate_renewal(&identity).expect("initiate");
 
         // Create a real self-signed cert for the payload.
-        let kp =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
         let params = rcgen::CertificateParams::new(vec![]).expect("cert params");
         let cert = params.self_signed(&kp).expect("self-sign");
 

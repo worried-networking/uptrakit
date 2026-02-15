@@ -714,8 +714,8 @@ mod tests {
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
     };
-    use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
     use uptrakit_shared_db::MqttTransport;
+    use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());

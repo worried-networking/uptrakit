@@ -91,9 +91,8 @@ pub async fn create_provider(
         return error_response(StatusCode::CONFLICT, "Slug already exists");
     }
 
-    let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(
-        req.client_secret,
-    ) {
+    let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(req.client_secret)
+    {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("encryption failed: {e}");
@@ -278,16 +277,12 @@ pub async fn update_provider(
         model.client_id = Set(client_id);
     }
     if let Some(client_secret) = req.client_secret {
-        let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(
-            client_secret,
-        ) {
+        let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(client_secret)
+        {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("encryption failed: {e}");
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         };
         model.client_secret = Set(encrypted_secret);

@@ -62,7 +62,9 @@ mod tests {
 
     #[test]
     fn is_receive_closed_enrollment_error() {
-        let err = Error::Enrollment(EnrollmentError::Protocol(uptrakit_service_sdk::ProtocolError::ReceiveClosed));
+        let err = Error::Enrollment(EnrollmentError::Protocol(
+            uptrakit_service_sdk::ProtocolError::ReceiveClosed,
+        ));
         assert!(err.is_receive_closed());
     }
 

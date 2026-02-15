@@ -587,12 +587,7 @@ mod tests {
             assets: vec![],
         };
         let result = provider
-            .execute_update(
-                "octocat/hello-world",
-                "1.0.0",
-                Some(&release_info),
-                &tx,
-            )
+            .execute_update("octocat/hello-world", "1.0.0", Some(&release_info), &tx)
             .await;
         assert!(result.is_ok());
         let output = result.unwrap();

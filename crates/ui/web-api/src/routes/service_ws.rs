@@ -492,7 +492,8 @@ async fn handle_authenticated(
                     serial_number = %cert_serial,
                     "rejected connection: certificate not recognized"
                 );
-                let _ = close_with_reason(&mut sink, close_reason::CERTIFICATE_NOT_RECOGNIZED).await;
+                let _ =
+                    close_with_reason(&mut sink, close_reason::CERTIFICATE_NOT_RECOGNIZED).await;
                 return;
             }
             Err(e) => {
@@ -605,8 +606,13 @@ async fn handle_authenticated(
                 out_seq,
                 in_seq,
             };
-            super::ssh_agent_ws::handle_ssh_agent_authenticated(&mut sink, &mut stream, &state, ctx)
-                .await;
+            super::ssh_agent_ws::handle_ssh_agent_authenticated(
+                &mut sink,
+                &mut stream,
+                &state,
+                ctx,
+            )
+            .await;
         }
     }
 }
@@ -1053,10 +1059,7 @@ async fn enroll_ssh_agent(
         state.default_tenant_id,
         &payload.hostname,
         &payload.friendly_name,
-        payload
-            .enrollment_token
-            .as_ref()
-            .map(|s| s.expose_secret()),
+        payload.enrollment_token.as_ref().map(|s| s.expose_secret()),
         client_ip,
     )
     .await;

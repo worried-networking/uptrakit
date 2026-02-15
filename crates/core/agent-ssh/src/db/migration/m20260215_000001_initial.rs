@@ -11,12 +11,7 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(SshHosts::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(SshHosts::Id)
-                            .text()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(SshHosts::Id).text().not_null().primary_key())
                     .col(ColumnDef::new(SshHosts::Name).text().not_null())
                     .col(ColumnDef::new(SshHosts::Hostname).text().not_null())
                     .col(

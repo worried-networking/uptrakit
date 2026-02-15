@@ -82,8 +82,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     ping_interval.tick().await;
 
     // Renewal timer — initially far-future, reset when ServiceSettings arrives.
-    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> =
-        Box::pin(tokio::time::sleep(FAR_FUTURE));
+    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
 
     let mut cert_handler = CertificateRenewalHandler::new();
 

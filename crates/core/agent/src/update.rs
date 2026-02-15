@@ -325,8 +325,7 @@ async fn run_hook_command(
 
     let result = match hook_cmd {
         HookCommand::Shell { command, shell } => {
-            uptrakit_command::run_command_with_shell(command, *shell, &provider_tx)
-            .await
+            uptrakit_command::run_command_with_shell(command, *shell, &provider_tx).await
         }
         HookCommand::Exec {
             program,
@@ -531,5 +530,4 @@ mod tests {
         let result = detect_current_version(&payload).await;
         assert!(result.is_none());
     }
-
 }

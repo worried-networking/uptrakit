@@ -35,9 +35,7 @@ pub use crate::provider_configs::{CreateProviderConfigRequest, ProviderConfigRes
 pub use crate::update_history::{UpdateHistoryResponse, UpdateStatus};
 
 // ── API tokens ───────────────────────────────────────────────────────
-pub use crate::api_tokens::{
-    ApiTokenListResponse, ApiTokenResponse, CreateApiTokenResponse,
-};
+pub use crate::api_tokens::{ApiTokenListResponse, ApiTokenResponse, CreateApiTokenResponse};
 
 // ── OIDC ─────────────────────────────────────────────────────────────
 pub use crate::oidc_auth::{AuthMethodsResponse, OidcProviderInfo};
@@ -47,8 +45,8 @@ pub use crate::oidc_providers::OidcProviderResponse;
 pub use crate::settings::RegistrationSettingsResponse;
 
 // ── MQTT ─────────────────────────────────────────────────────────────
-pub use crate::settings_mqtt::MqttClientConnectionStatus;
 pub use crate::mqtt_transport::MqttTransport;
+pub use crate::settings_mqtt::MqttClientConnectionStatus;
 
 // ── System alerts ────────────────────────────────────────────────────
 pub use crate::system_alerts::AlertSeverity;

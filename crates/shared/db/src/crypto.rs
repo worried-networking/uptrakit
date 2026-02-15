@@ -415,8 +415,7 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         ensure_test_key();
 
-        let original =
-            EncryptedString::new("database secret".to_string()).expect("test key set");
+        let original = EncryptedString::new("database secret".to_string()).expect("test key set");
         let value: sea_orm::Value = original.clone().into();
 
         // The Value should contain an encrypted string

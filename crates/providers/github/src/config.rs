@@ -108,7 +108,6 @@ impl GitHubConfig {
             .as_deref()
             .unwrap_or("https://api.github.com")
     }
-
 }
 
 impl SecretMasking for GitHubConfig {

@@ -35,7 +35,9 @@ impl ServiceHandler for AgentHandler {
         &'a mut self,
         ctx: AuthenticatedContext<'a>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a>,
+        Box<
+            dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a,
+        >,
     > {
         Box::pin(async move {
             let cert_not_after_ts = ctx.identity.cert_not_after_ms();
@@ -58,27 +60,19 @@ impl ServiceHandler for AgentHandler {
                     // and receive-closed semantics for the lifecycle.
                     let ctx = e.current_context();
                     if ctx.is_cert_expired() {
-                        Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Tls(
-                                uptrakit_service_sdk::TlsError::Rustls(
-                                    rustls::Error::AlertReceived(
-                                        rustls::AlertDescription::CertificateExpired,
-                                    )
-                                )
-                            )
-                        ))
+                        Err(report!(uptrakit_service_sdk::EnrollmentError::Tls(
+                            uptrakit_service_sdk::TlsError::Rustls(rustls::Error::AlertReceived(
+                                rustls::AlertDescription::CertificateExpired,
+                            ))
+                        )))
                     } else if ctx.is_receive_closed() {
-                        Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Protocol(
-                                uptrakit_service_sdk::ProtocolError::ReceiveClosed
-                            )
-                        ))
+                        Err(report!(uptrakit_service_sdk::EnrollmentError::Protocol(
+                            uptrakit_service_sdk::ProtocolError::ReceiveClosed
+                        )))
                     } else {
-                        Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Protocol(
-                                uptrakit_service_sdk::ProtocolError::Enrollment(e.to_string())
-                            )
-                        ))
+                        Err(report!(uptrakit_service_sdk::EnrollmentError::Protocol(
+                            uptrakit_service_sdk::ProtocolError::Enrollment(e.to_string())
+                        )))
                     }
                 }
             }

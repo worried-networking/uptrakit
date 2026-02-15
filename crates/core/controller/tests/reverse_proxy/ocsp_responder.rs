@@ -426,9 +426,8 @@ fn format_serial_hex(bytes: &[u8]) -> String {
 fn make_ocsp_time(dt: time::OffsetDateTime) -> OcspGeneralizedTime {
     let year = u16::try_from(dt.year()).expect("year fits in u16");
     let month: u8 = dt.month().into();
-    let der_dt =
-        der::DateTime::new(year, month, dt.day(), dt.hour(), dt.minute(), dt.second())
-            .expect("valid datetime components");
+    let der_dt = der::DateTime::new(year, month, dt.day(), dt.hour(), dt.minute(), dt.second())
+        .expect("valid datetime components");
     OcspGeneralizedTime::from(der::asn1::GeneralizedTime::from_date_time(der_dt))
 }
 

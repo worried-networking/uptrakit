@@ -34,7 +34,6 @@ impl std::fmt::Display for EnrollmentStatus {
     }
 }
 
-
 /// A single hook command to execute on the agent.
 ///
 /// Predefined hooks use the `Exec` variant which avoids shell interpretation.
@@ -400,7 +399,6 @@ pub struct VersionCheckResult {
 }
 
 // --- Update execution messages ---
-
 
 /// Final status of an update execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

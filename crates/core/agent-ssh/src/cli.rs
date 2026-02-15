@@ -123,8 +123,7 @@ mod tests {
 
     #[test]
     fn parsed_url_default_port() {
-        let args =
-            Args::try_parse_from(["uptrakit-agent-ssh", "--url", "https://myhost"]).unwrap();
+        let args = Args::try_parse_from(["uptrakit-agent-ssh", "--url", "https://myhost"]).unwrap();
         let (host, port) = args.common.parsed_url().unwrap();
         assert_eq!(host, "myhost");
         assert_eq!(port, 443);
@@ -158,11 +157,7 @@ mod tests {
         ])
         .expect("should parse --master-key-file");
         assert_eq!(
-            args.master_key_file
-                .as_ref()
-                .unwrap()
-                .to_str()
-                .unwrap(),
+            args.master_key_file.as_ref().unwrap().to_str().unwrap(),
             "/etc/uptrakit/master.key"
         );
     }
@@ -181,8 +176,7 @@ mod tests {
 
     #[test]
     fn version_flag_parses_without_other_flags() {
-        let args =
-            Args::try_parse_from(["uptrakit-agent-ssh", "--version"]).expect("should parse");
+        let args = Args::try_parse_from(["uptrakit-agent-ssh", "--version"]).expect("should parse");
         assert!(args.common.version);
     }
 }

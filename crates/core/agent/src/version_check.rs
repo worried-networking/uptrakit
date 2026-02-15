@@ -101,12 +101,7 @@ mod tests {
         let config = serde_json::json!({
             "script_url": "https://example.com/update.sh"
         });
-        let outcome = check_version(
-            ProviderType::ProxmoxHelperScripts,
-            &config,
-            "example",
-        )
-        .await;
+        let outcome = check_version(ProviderType::ProxmoxHelperScripts, &config, "example").await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());

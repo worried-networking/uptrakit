@@ -6,8 +6,8 @@ use uptrakit_internal_wire::{
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
     close_reason, now_millis,
 };
-use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
+use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
 
 use crate::error::{Error, Result};
 

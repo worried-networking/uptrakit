@@ -6,8 +6,8 @@ use sea_orm::{
     TransactionTrait,
 };
 use time::{Duration, OffsetDateTime};
-use uptrakit_shared_db::entity::{prelude::*, session};
 use uptrakit_shared_db::SessionTokenType;
+use uptrakit_shared_db::entity::{prelude::*, session};
 
 /// Refresh token configuration constants
 const REFRESH_TOKEN_EXPIRY_DAYS: i64 = 7;

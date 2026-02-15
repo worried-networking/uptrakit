@@ -72,9 +72,9 @@ pub async fn connect_ws(
         request.headers_mut().insert(
             http::header::AUTHORIZATION,
             http::HeaderValue::from_str(header_value).map_err(|e| {
-                report!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(
-                    "invalid authorization header: {e}"
-                ))))
+                report!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+                    format!("invalid authorization header: {e}")
+                )))
             })?,
         );
     }

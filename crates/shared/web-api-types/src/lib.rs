@@ -33,7 +33,6 @@ mod tests {
     use crate::agents::{AgentResponse, AgentStatus};
     use crate::auth::{AuthResponse, UserResponse};
     use crate::device_auth::DeviceAuthPollResponse;
-    use uptrakit_shared_types::DeviceAuthStatus;
     use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
     use crate::permissions::Permission;
@@ -42,6 +41,7 @@ mod tests {
     use crate::software_items::CreateSoftwareItemRequest;
     use crate::update_history::UpdateStatus;
     use strum::IntoEnumIterator;
+    use uptrakit_shared_types::DeviceAuthStatus;
 
     // ── 1. Permission enum round-trip ─────────────────────────────────────
 

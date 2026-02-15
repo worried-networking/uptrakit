@@ -35,7 +35,9 @@ impl ServiceHandler for SshAgentHandler {
         &'a mut self,
         ctx: AuthenticatedContext<'a>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a>,
+        Box<
+            dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a,
+        >,
     > {
         Box::pin(async move {
             let cert_not_after_ts = ctx.identity.cert_not_after_ms();
@@ -57,27 +59,19 @@ impl ServiceHandler for SshAgentHandler {
                 Err(e) => {
                     let ctx = e.current_context();
                     if ctx.is_cert_expired() {
-                        Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Tls(
-                                uptrakit_service_sdk::TlsError::Rustls(
-                                    rustls::Error::AlertReceived(
-                                        rustls::AlertDescription::CertificateExpired,
-                                    )
-                                )
-                            )
-                        ))
+                        Err(report!(uptrakit_service_sdk::EnrollmentError::Tls(
+                            uptrakit_service_sdk::TlsError::Rustls(rustls::Error::AlertReceived(
+                                rustls::AlertDescription::CertificateExpired,
+                            ))
+                        )))
                     } else if ctx.is_receive_closed() {
-                        Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Protocol(
-                                uptrakit_service_sdk::ProtocolError::ReceiveClosed
-                            )
-                        ))
+                        Err(report!(uptrakit_service_sdk::EnrollmentError::Protocol(
+                            uptrakit_service_sdk::ProtocolError::ReceiveClosed
+                        )))
                     } else {
-                        Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Protocol(
-                                uptrakit_service_sdk::ProtocolError::Enrollment(e.to_string())
-                            )
-                        ))
+                        Err(report!(uptrakit_service_sdk::EnrollmentError::Protocol(
+                            uptrakit_service_sdk::ProtocolError::Enrollment(e.to_string())
+                        )))
                     }
                 }
             }
@@ -199,14 +193,12 @@ fn read_master_key_hex(
 fn parse_master_key_hex(key_hex: &str) -> std::result::Result<[u8; 32], String> {
     let bytes = uptrakit_shared_types::hex::decode(key_hex)
         .map_err(|e| format!("master key must be a 64-character hex string: {e}"))?;
-    let key_bytes: [u8; 32] = bytes
-        .try_into()
-        .map_err(|v: Vec<u8>| {
-            format!(
-                "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
-                v.len()
-            )
-        })?;
+    let key_bytes: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| {
+        format!(
+            "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
+            v.len()
+        )
+    })?;
     Ok(key_bytes)
 }
 

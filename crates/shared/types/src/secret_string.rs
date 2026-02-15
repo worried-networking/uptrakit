@@ -23,8 +23,6 @@ impl SecretString {
     pub fn expose_secret(&self) -> &str {
         &self.0
     }
-
-
 }
 
 impl fmt::Debug for SecretString {
@@ -70,8 +68,6 @@ mod tests {
         let s = SecretString::new("token-123".into());
         assert_eq!(s.expose_secret(), "token-123");
     }
-
-
 
     #[test]
     fn serde_roundtrip() {

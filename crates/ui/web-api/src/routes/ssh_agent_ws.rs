@@ -72,8 +72,10 @@ pub(crate) async fn handle_ssh_agent_authenticated(
     } = ctx;
 
     // Register in connection registry.
-    let (mut push_rx, cancel_token) =
-        state.service_connections.register_ssh_agent(service_id).await;
+    let (mut push_rx, cancel_token) = state
+        .service_connections
+        .register_ssh_agent(service_id)
+        .await;
 
     let delivered = state
         .notification_service
@@ -473,7 +475,9 @@ pub(crate) async fn do_ssh_agent_enroll(
                 ));
             }
             Err(e) => {
-                bail!(SshAgentWsError::Enrollment(format!("database error: {e:?}")));
+                bail!(SshAgentWsError::Enrollment(format!(
+                    "database error: {e:?}"
+                )));
             }
         };
 
@@ -598,10 +602,7 @@ async fn record_ssh_agent_certificate(
         last_seen_at: Set(None),
     };
 
-    record
-        .insert(db)
-        .await
-        .context_to::<SshAgentWsError>()?;
+    record.insert(db).await.context_to::<SshAgentWsError>()?;
 
     Ok(())
 }
@@ -624,10 +625,7 @@ async fn revoke_ssh_agent_certificate(
     let mut active: ssh_agent_service_certificate::ActiveModel = cert.into();
     active.revoked_at = Set(Some(time::OffsetDateTime::now_utc()));
     active.revocation_reason = Set(Some(reason));
-    active
-        .update(db)
-        .await
-        .context_to::<SshAgentWsError>()?;
+    active.update(db).await.context_to::<SshAgentWsError>()?;
 
     Ok(())
 }

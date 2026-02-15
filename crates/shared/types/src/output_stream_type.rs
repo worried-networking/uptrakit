@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
     feature = "sea-orm",
     derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
 )]
-#[cfg_attr(
-    feature = "sea-orm",
-    sea_orm(rs_type = "String", db_type = "Text")
-)]
+#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum OutputStreamType {

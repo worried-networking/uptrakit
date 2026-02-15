@@ -34,7 +34,10 @@ mod tests {
         let result = db
             .execute_unprepared("SELECT count(*) FROM ssh_hosts")
             .await;
-        assert!(result.is_ok(), "ssh_hosts table should exist after migration");
+        assert!(
+            result.is_ok(),
+            "ssh_hosts table should exist after migration"
+        );
     }
 
     #[tokio::test]

@@ -6,8 +6,8 @@ use sea_orm::{
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
-use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_db::{MqttClientConnectionStatus, MqttTransport};
+use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -106,12 +106,10 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         port: Set(i32::from(port)),
         client_id: Set(client_id.to_string()),
         username: Set(username.map(String::from)),
-        password: Set(
-            password
-                .map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
-                .transpose()
-                .context_to()?
-        ),
+        password: Set(password
+            .map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+            .transpose()
+            .context_to()?),
         topic_prefix: Set(topic_prefix.to_string()),
         connection_status: Set(MqttClientConnectionStatus::Offline),
         status_updated_at: Set(now),
@@ -172,11 +170,10 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
         model.username = Set(v.map(String::from));
     }
     if let Some(v) = password {
-        model.password = Set(
-            v.map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
-                .transpose()
-                .context_to()?,
-        );
+        model.password = Set(v
+            .map(|p| uptrakit_shared_db::crypto::EncryptedString::new(p.to_string()))
+            .transpose()
+            .context_to()?);
     }
     if let Some(v) = topic_prefix {
         model.topic_prefix = Set(v.to_string());

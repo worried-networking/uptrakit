@@ -274,14 +274,8 @@ mod tests {
 
     #[test]
     fn hook_shell_from_str_valid() {
-        assert_eq!(
-            "bash".parse::<HookShell>().ok(),
-            Some(HookShell::Bash)
-        );
-        assert_eq!(
-            "sh".parse::<HookShell>().ok(),
-            Some(HookShell::Sh)
-        );
+        assert_eq!("bash".parse::<HookShell>().ok(), Some(HookShell::Bash));
+        assert_eq!("sh".parse::<HookShell>().ok(), Some(HookShell::Sh));
         assert_eq!(
             "powershell".parse::<HookShell>().ok(),
             Some(HookShell::PowerShell)

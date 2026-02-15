@@ -260,8 +260,12 @@ impl ServiceIdentityState {
             return Ok(());
         }
 
-        let keypair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
-            .map_err(|e| report!(EnrollmentError::Identity(IdentityError::KeypairGeneration(e.to_string()))))?;
+        let keypair =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
+                report!(EnrollmentError::Identity(IdentityError::KeypairGeneration(
+                    e.to_string()
+                )))
+            })?;
 
         let key_pem = keypair.serialize_pem();
         let key_path = self.state_dir.join(SERVICE_KEY_FILE);
@@ -294,19 +298,27 @@ impl ServiceIdentityState {
             )))
         })?;
 
-        let mut params = rcgen::CertificateParams::new(vec![])
-            .map_err(|e| report!(EnrollmentError::Identity(IdentityError::CsrGeneration(e.to_string()))))?;
+        let mut params = rcgen::CertificateParams::new(vec![]).map_err(|e| {
+            report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+                e.to_string()
+            )))
+        })?;
         params.distinguished_name = rcgen::DistinguishedName::new();
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, service_id.to_string());
 
-        let csr = params
-            .serialize_request(keypair)
-            .map_err(|e| report!(EnrollmentError::Identity(IdentityError::CsrGeneration(e.to_string()))))?;
+        let csr = params.serialize_request(keypair).map_err(|e| {
+            report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+                e.to_string()
+            )))
+        })?;
 
-        csr.pem()
-            .map_err(|e| report!(EnrollmentError::Identity(IdentityError::CsrGeneration(e.to_string()))))
+        csr.pem().map_err(|e| {
+            report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+                e.to_string()
+            )))
+        })
     }
 
     /// Persist enrollment result (service_id + enrollment_secret) to state_dir.
@@ -338,9 +350,9 @@ impl ServiceIdentityState {
     /// signed certificate arrives back from the controller.
     pub async fn save_private_key(&mut self, key_pem: &str) -> Result<()> {
         let keypair = rcgen::KeyPair::from_pem(key_pem).map_err(|e| {
-            report!(EnrollmentError::Identity(IdentityError::KeypairGeneration(format!(
-                "failed to parse private key PEM: {e}"
-            ))))
+            report!(EnrollmentError::Identity(IdentityError::KeypairGeneration(
+                format!("failed to parse private key PEM: {e}")
+            )))
         })?;
 
         let key_path = self.state_dir.join(SERVICE_KEY_FILE);
@@ -463,9 +475,9 @@ impl ServiceIdentityState {
 /// overwriting the current one on disk until the new certificate arrives.
 pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| {
-        report!(EnrollmentError::Identity(IdentityError::CsrGeneration(format!(
-            "key generation failed: {e}"
-        ))))
+        report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+            format!("key generation failed: {e}")
+        )))
     })?;
 
     let mut params = rcgen::CertificateParams::default();
@@ -474,15 +486,15 @@ pub fn generate_keypair_and_csr(service_id: &str) -> Result<(String, String)> {
         .push(rcgen::DnType::CommonName, service_id.to_string());
 
     let csr = params.serialize_request(&key_pair).map_err(|e| {
-        report!(EnrollmentError::Identity(IdentityError::CsrGeneration(format!(
-            "CSR serialization failed: {e}"
-        ))))
+        report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+            format!("CSR serialization failed: {e}")
+        )))
     })?;
 
     let csr_pem = csr.pem().map_err(|e| {
-        report!(EnrollmentError::Identity(IdentityError::CsrGeneration(format!(
-            "CSR PEM encoding failed: {e}"
-        ))))
+        report!(EnrollmentError::Identity(IdentityError::CsrGeneration(
+            format!("CSR PEM encoding failed: {e}")
+        )))
     })?;
 
     Ok((key_pair.serialize_pem(), csr_pem))

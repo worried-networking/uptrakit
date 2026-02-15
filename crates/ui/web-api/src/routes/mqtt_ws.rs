@@ -5,10 +5,10 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uptrakit_internal_wire::{
-    close_reason, ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload,
-    IncomingSeq, MqttClientConnectionStatus as WireMqttClientConnectionStatus,
-    MqttRegisteredPayload, MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload,
-    RejectedPayload, ServiceMessage,
+    ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload, IncomingSeq,
+    MqttClientConnectionStatus as WireMqttClientConnectionStatus, MqttRegisteredPayload,
+    MqttTenantAssignmentsPayload, OutgoingSeq, PingPayload, RejectedPayload, ServiceMessage,
+    close_reason,
 };
 use uptrakit_shared_db::entity::{
     service as mqtt_service, service_certificate as mqtt_service_certificate,
