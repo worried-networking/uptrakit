@@ -10,7 +10,7 @@ use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use tokio_rustls::TlsConnector;
 
-use crate::error::{EnrollmentError, Result};
+use crate::error::{EnrollmentError, Result, TlsError};
 
 // ── TlsConnector builders (agent-style manual TCP→TLS→WS) ───────────
 
@@ -197,7 +197,7 @@ fn build_root_store(ca_pem: &[u8]) -> Result<RootCertStore> {
         .context_to::<EnrollmentError>()?;
 
     if certs.is_empty() {
-        bail!(EnrollmentError::NoCertificates);
+        bail!(EnrollmentError::Tls(TlsError::NoCertificates));
     }
 
     let mut root_store = RootCertStore::empty();

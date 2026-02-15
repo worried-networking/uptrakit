@@ -10,7 +10,7 @@
 use rootcause::prelude::*;
 use sha2::Digest;
 
-use crate::error::{EnrollmentError, Result};
+use crate::error::{CaError, EnrollmentError, Result, TlsError};
 
 /// TLS mode for the CA certificate fetch via reqwest.
 pub enum CaTlsMode<'a> {
@@ -26,9 +26,9 @@ pub enum CaTlsMode<'a> {
 /// Compute the SHA-256 hex fingerprint of a PEM-encoded CA certificate's DER content.
 pub fn ca_pem_fingerprint(pem_bytes: &[u8]) -> Result<String> {
     let (_, pem) = x509_parser::pem::parse_x509_pem(pem_bytes).map_err(|e| {
-        report!(EnrollmentError::CertificateParse(format!(
+        report!(EnrollmentError::Tls(TlsError::CertificateParse(format!(
             "PEM parse failed: {e}"
-        )))
+        ))))
     })?;
     let digest = sha2::Sha256::digest(&pem.contents);
     Ok(uptrakit_shared_types::hex::encode(digest))
@@ -62,7 +62,7 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
             }
             CaTlsMode::PinnedCa(ca_pem) => {
                 let cert = reqwest::Certificate::from_pem(ca_pem).map_err(|e| {
-                    report!(EnrollmentError::FetchCa(format!("invalid CA PEM: {e}")))
+                    report!(EnrollmentError::Ca(CaError::Fetch(format!("invalid CA PEM: {e}"))))
                 })?;
                 builder = builder.tls_certs_only([cert]);
             }
@@ -71,22 +71,22 @@ pub async fn fetch_ca_certificate(base_url: &str, tls_mode: CaTlsMode<'_>) -> Re
 
     let client = builder
         .build()
-        .map_err(|e| report!(EnrollmentError::FetchCa(e.to_string())))?;
+        .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 
     let resp = client
         .get(&fetch_url)
         .send()
         .await
-        .map_err(|e| report!(EnrollmentError::FetchCa(e.to_string())))?;
+        .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 
     if !resp.status().is_success() {
-        bail!(EnrollmentError::FetchCa(format!("HTTP {}", resp.status())));
+        bail!(EnrollmentError::Ca(CaError::Fetch(format!("HTTP {}", resp.status()))));
     }
 
     let body = resp
         .bytes()
         .await
-        .map_err(|e| report!(EnrollmentError::FetchCa(e.to_string())))?;
+        .map_err(|e| report!(EnrollmentError::Ca(CaError::Fetch(e.to_string()))))?;
 
     tracing::info!(bytes = body.len(), "CA certificate fetched");
     Ok(body.to_vec())
@@ -125,10 +125,10 @@ pub async fn bootstrap_ca(
     if let Some(ca_path) = ca_cert_path {
         tracing::info!("loading CA certificate from {}", ca_path.display());
         let pem = std::fs::read(ca_path).map_err(|e| {
-            report!(EnrollmentError::CaCertFile(format!(
+            report!(EnrollmentError::Ca(CaError::CertFile(format!(
                 "{}: {e}",
                 ca_path.display()
-            )))
+            ))))
         })?;
         identity
             .save_ca_cert(&String::from_utf8_lossy(&pem))
@@ -161,10 +161,10 @@ pub async fn bootstrap_ca(
         if let Some(expected) = tofu_fingerprint {
             let expected_normalized = expected.to_lowercase().replace(':', "");
             if fp != expected_normalized {
-                bail!(EnrollmentError::FetchCa(format!(
+                bail!(EnrollmentError::Ca(CaError::Fetch(format!(
                     "TOFU fingerprint mismatch: expected SHA256:{expected_normalized}, \
                      got SHA256:{fp}"
-                )));
+                ))));
             }
             tracing::info!("TOFU: fingerprint verified successfully");
         } else {

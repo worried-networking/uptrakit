@@ -59,19 +59,25 @@ impl ServiceHandler for AgentHandler {
                     let ctx = e.current_context();
                     if ctx.is_cert_expired() {
                         Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Rustls(
-                                rustls::Error::AlertReceived(
-                                    rustls::AlertDescription::CertificateExpired,
+                            uptrakit_service_sdk::EnrollmentError::Tls(
+                                uptrakit_service_sdk::TlsError::Rustls(
+                                    rustls::Error::AlertReceived(
+                                        rustls::AlertDescription::CertificateExpired,
+                                    )
                                 )
                             )
                         ))
                     } else if ctx.is_receive_closed() {
                         Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::ReceiveClosed
+                            uptrakit_service_sdk::EnrollmentError::Protocol(
+                                uptrakit_service_sdk::ProtocolError::ReceiveClosed
+                            )
                         ))
                     } else {
                         Err(report!(
-                            uptrakit_service_sdk::EnrollmentError::Enrollment(e.to_string())
+                            uptrakit_service_sdk::EnrollmentError::Protocol(
+                                uptrakit_service_sdk::ProtocolError::Enrollment(e.to_string())
+                            )
                         ))
                     }
                 }

@@ -12,7 +12,7 @@ use uptrakit_internal_wire::{
 };
 
 use crate::connection::ControllerConnection;
-use crate::error::{EnrollmentError, Result};
+use crate::error::{EnrollmentError, IdentityError, Result};
 use crate::identity::{ServiceIdentityState, generate_keypair_and_csr};
 use crate::lifecycle::LoopOutcome;
 
@@ -139,7 +139,7 @@ impl CertificateRenewalHandler {
         identity: &ServiceIdentityState,
     ) -> Result<String> {
         let service_id = identity.service_id().ok_or_else(|| {
-            report!(EnrollmentError::NotEnrolled)
+            report!(EnrollmentError::Identity(IdentityError::NotEnrolled))
         })?;
         let (key_pem, csr_pem) = generate_keypair_and_csr(&service_id.to_string())?;
         self.pending_renewal_key = Some(key_pem);

@@ -2,85 +2,86 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
+// ── Domain sub-enums ──────────────────────────────────────────────────
+
+/// TLS and certificate parsing errors.
 #[derive(Debug, Error)]
-pub enum EnrollmentError {
-    // ── I/O and serialization ────────────────────────────────────────
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("JSON serialization error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    // ── TLS / certificate parsing ────────────────────────────────────
+pub enum TlsError {
     #[error("TLS error: {0}")]
-    Tls(String),
-
+    Config(String),
     #[error("TLS name validation error: {0}")]
-    TlsName(#[from] rustls::pki_types::InvalidDnsNameError),
-
+    InvalidDnsName(#[from] rustls::pki_types::InvalidDnsNameError),
     #[error("rustls error: {0}")]
     Rustls(#[from] rustls::Error),
-
     #[error("PEM parsing error: {0}")]
     Pem(#[from] rustls::pki_types::pem::Error),
-
     #[error("no certificates found in CA response")]
     NoCertificates,
-
     #[error("certificate parse error: {0}")]
     CertificateParse(String),
+}
 
-    // ── Key / CSR generation ─────────────────────────────────────────
+/// Identity and key management errors.
+#[derive(Debug, Error)]
+pub enum IdentityError {
     #[error("keypair generation failed: {0}")]
     KeypairGeneration(String),
-
     #[error("CSR generation error: {0}")]
     CsrGeneration(String),
-
-    // ── WebSocket / HTTP ─────────────────────────────────────────────
-    #[error("WebSocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
-
-    #[error("HTTP URI parsing error: {0}")]
-    HttpUri(#[from] http::uri::InvalidUri),
-
-    // ── Enrollment protocol ──────────────────────────────────────────
-    #[error("connection closed by controller")]
-    ReceiveClosed,
-
-    #[error("unexpected message type")]
-    UnexpectedMessage,
-
-    #[error("enrollment failed: {0}")]
-    Enrollment(String),
-
-    #[error("enrollment rejected by controller")]
-    EnrollmentRejected,
-
-    #[error("timed out waiting for approval")]
-    ApprovalTimeout,
-
-    #[error("timed out waiting for response")]
-    ResponseTimeout,
-
-    #[error("TCP connection timed out")]
-    ConnectionTimeout,
-
-    // ── Identity state ───────────────────────────────────────────────
     #[error("identity not enrolled")]
     NotEnrolled,
-
     #[error("identity not certified (no certificate)")]
     NotCertified,
+}
 
-    // ── CA fetch / bootstrap ─────────────────────────────────────────
+/// Enrollment protocol and connection errors.
+#[derive(Debug, Error)]
+pub enum ProtocolError {
+    #[error("connection closed by controller")]
+    ReceiveClosed,
+    #[error("unexpected message type")]
+    UnexpectedMessage,
+    #[error("enrollment failed: {0}")]
+    Enrollment(String),
+    #[error("enrollment rejected by controller")]
+    EnrollmentRejected,
+    #[error("timed out waiting for approval")]
+    ApprovalTimeout,
+    #[error("timed out waiting for response")]
+    ResponseTimeout,
+    #[error("TCP connection timed out")]
+    ConnectionTimeout,
+}
+
+/// CA certificate fetch and bootstrap errors.
+#[derive(Debug, Error)]
+pub enum CaError {
     #[error("failed to fetch CA certificate: {0}")]
-    FetchCa(String),
-
+    Fetch(String),
     #[error("failed to read CA certificate file: {0}")]
-    CaCertFile(String),
+    CertFile(String),
+}
 
-    // ── Directory operations ────────────────────────────────────────
+// ── Top-level error ───────────────────────────────────────────────────
+
+#[derive(Debug, Error)]
+pub enum EnrollmentError {
+    #[error(transparent)]
+    Tls(#[from] TlsError),
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
+    #[error(transparent)]
+    Protocol(#[from] ProtocolError),
+    #[error(transparent)]
+    Ca(#[from] CaError),
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("WebSocket error: {0}")]
+    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error("HTTP URI parsing error: {0}")]
+    HttpUri(#[from] http::uri::InvalidUri),
     #[error("directory operation failed")]
     Directory(#[from] uptrakit_directories::DirectoryError),
 }
@@ -109,20 +110,20 @@ pub fn is_rustls_cert_expired(io_err: &std::io::Error) -> bool {
 impl EnrollmentError {
     /// `true` when the controller closed the connection (normal during merges or restarts).
     pub fn is_receive_closed(&self) -> bool {
-        matches!(self, EnrollmentError::ReceiveClosed)
+        matches!(self, Self::Protocol(ProtocolError::ReceiveClosed))
     }
 
     /// `true` when the TLS handshake failed because the server considers our
     /// client certificate expired.
     pub fn is_cert_expired(&self) -> bool {
         match self {
-            EnrollmentError::Rustls(rustls::Error::AlertReceived(
+            Self::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
                 rustls::AlertDescription::CertificateExpired,
-            )) => true,
-            EnrollmentError::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err)) => {
+            ))) => true,
+            Self::WebSocket(tokio_tungstenite::tungstenite::Error::Io(io_err)) => {
                 is_rustls_cert_expired(io_err)
             }
-            EnrollmentError::Io(io_err) => is_rustls_cert_expired(io_err),
+            Self::Io(io_err) => is_rustls_cert_expired(io_err),
             _ => false,
         }
     }
@@ -131,15 +132,23 @@ impl EnrollmentError {
 // ── ReportConversion impls ───────────────────────────────────────────
 
 impl_report_conversion! {
-    std::io::Error                          => EnrollmentError::Io,
-    serde_json::Error                       => EnrollmentError::Json,
-    rustls::pki_types::InvalidDnsNameError  => EnrollmentError::TlsName,
-    rustls::Error                           => EnrollmentError::Rustls,
-    rustls::pki_types::pem::Error           => EnrollmentError::Pem,
-    tokio_tungstenite::tungstenite::Error   => EnrollmentError::WebSocket,
-    http::uri::InvalidUri                   => EnrollmentError::HttpUri,
-    uptrakit_directories::DirectoryError    => EnrollmentError::Directory,
+    std::io::Error                        => EnrollmentError::Io,
+    serde_json::Error                     => EnrollmentError::Json,
+    tokio_tungstenite::tungstenite::Error => EnrollmentError::WebSocket,
+    http::uri::InvalidUri                 => EnrollmentError::HttpUri,
+    uptrakit_directories::DirectoryError  => EnrollmentError::Directory,
+    TlsError                              => EnrollmentError::Tls,
+    IdentityError                         => EnrollmentError::Identity,
+    ProtocolError                         => EnrollmentError::Protocol,
+    CaError                               => EnrollmentError::Ca,
 }
+
+impl_report_conversion!(rustls::pki_types::InvalidDnsNameError => EnrollmentError,
+    |e| EnrollmentError::Tls(TlsError::InvalidDnsName(e)));
+impl_report_conversion!(rustls::Error => EnrollmentError,
+    |e| EnrollmentError::Tls(TlsError::Rustls(e)));
+impl_report_conversion!(rustls::pki_types::pem::Error => EnrollmentError,
+    |e| EnrollmentError::Tls(TlsError::Pem(e)));
 
 #[cfg(test)]
 mod tests {
@@ -147,17 +156,17 @@ mod tests {
 
     #[test]
     fn is_cert_expired_rustls_direct() {
-        let err = EnrollmentError::Rustls(rustls::Error::AlertReceived(
+        let err = EnrollmentError::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
             rustls::AlertDescription::CertificateExpired,
-        ));
+        )));
         assert!(err.is_cert_expired());
     }
 
     #[test]
     fn is_cert_expired_rustls_different_alert() {
-        let err = EnrollmentError::Rustls(rustls::Error::AlertReceived(
+        let err = EnrollmentError::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
             rustls::AlertDescription::HandshakeFailure,
-        ));
+        )));
         assert!(!err.is_cert_expired());
     }
 
@@ -189,7 +198,7 @@ mod tests {
 
     #[test]
     fn is_cert_expired_unrelated_variant() {
-        let err = EnrollmentError::ReceiveClosed;
+        let err = EnrollmentError::Protocol(ProtocolError::ReceiveClosed);
         assert!(!err.is_cert_expired());
     }
 

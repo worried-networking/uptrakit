@@ -12,7 +12,10 @@ pub mod ws;
 pub use backoff::Backoff;
 pub use cert_handler::CertificateRenewalHandler;
 pub use connection::ControllerConnection;
-pub use error::{EnrollmentError, Result, is_rustls_cert_expired};
+pub use error::{
+    CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,
+    is_rustls_cert_expired,
+};
 pub use identity::ServiceIdentityState;
 pub use lifecycle::{
     AuthenticatedContext, LoopOutcome, ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
