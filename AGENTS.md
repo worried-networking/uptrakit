@@ -53,6 +53,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent (manages remote hosts over SSH)
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
@@ -68,7 +69,7 @@ uptrakit/
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex, ServiceType, ServiceStatus, MqttTransport, HookShell, DeviceAuthStatus, MqttClientConnectionStatus, OutputStreamType, SessionTokenType — feature-gated: sea-orm, openapi)
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex, ServiceType (Agent, Mqtt, SshAgent), ServiceStatus, MqttTransport, HookShell, DeviceAuthStatus, MqttClientConnectionStatus, OutputStreamType, SessionTokenType — feature-gated: sea-orm, openapi)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
@@ -150,7 +151,7 @@ These are non-negotiable design constraints. Do not violate them.
    documentation. Any changes to the agent-controller wire protocol must be documented in
    `crates/shared/wire/asyncapi.yaml` and reflected in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 1. **Version/build metadata contract is unified.** All workspace binaries (`uptrakit-controller`, `uptrakit-agent`,
-   `uptrakit-mqtt`, `uptrakit-cli`) must expose consistent `--version` metadata output. Enabled features are derived at
+   `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit-cli`) must expose consistent `--version` metadata output. Enabled features are derived at
    build time from `CARGO_CFG_FEATURE` via `uptrakit_build_info::emit_enabled_features_env()` and passed through
    `UPTRAKIT_BUILD_ENABLED_FEATURES`; do not hardcode feature lists per binary.
 1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the
@@ -220,7 +221,7 @@ resolution. The crate uses the `directories` crate (`ProjectDirs`) to follow pla
 | macOS | `~/Library/Application Support/io.uptrakit.{app}/` | `~/Library/Application Support/io.uptrakit.{app}/` |
 | Windows | `{FOLDERID_RoamingAppData}\uptrakit\{app}\` | `{FOLDERID_LocalAppData}\uptrakit\{app}\` |
 
-Where `{app}` is one of: `controller`, `agent`, `mqtt`.
+Where `{app}` is one of: `controller`, `agent`, `agent-ssh`, `mqtt`.
 
 #### Config vs state separation
 
@@ -238,6 +239,11 @@ Where `{app}` is one of: `controller`, `agent`, `mqtt`.
 
 - Config: Controller's CA certificate
 - State: Service ID, private key, issued certificate
+
+**SSH Agent:**
+
+- Config: Controller's CA certificate
+- State: Service ID, private key, issued certificate, local SQLite DB (`agent-ssh.db` with encrypted SSH credentials)
 
 #### CLI directory flags
 
@@ -284,6 +290,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Security Architecture](docs/security/security-architecture.md)
 - [Filesystem and Dependency Security](docs/security/filesystem-dependency-security.md)
 - [Reverse Proxy Security](docs/security/reverse-proxy-security.md)
+- [SSH Agent Secrets](docs/security/ssh-agent-secrets.md)
 
 ### Development Guidelines
 
@@ -304,6 +311,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Host Entity](docs/architecture/host-entity.md)
 - [Software Item Entity](docs/architecture/software-item-entity.md)
 - [Update History Entity](docs/architecture/update-history-entity.md)
+- [SSH Agent](docs/architecture/ssh-agent.md)
 
 ### API and Protocol
 

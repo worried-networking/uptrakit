@@ -791,6 +791,22 @@ mod tests {
     }
 
     #[test]
+    fn enroll_ssh_agent_serialization_roundtrip() {
+        let msg = ServiceMessage::Enroll(EnrollPayload {
+            hostname: "ssh-agent-1".to_string(),
+            friendly_name: "SSH Agent Node 1".to_string(),
+            enrollment_token: Some(SecretString::new("tok-789".into())),
+            service_type: ServiceType::SshAgent,
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"enroll"#));
+        assert!(json.contains(r#""hostname":"ssh-agent-1"#));
+        assert!(json.contains(r#""service_type":"ssh_agent"#));
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
     fn enroll_without_token_serialization_roundtrip() {
         let msg = ServiceMessage::Enroll(EnrollPayload {
             hostname: "node-2".to_string(),
@@ -1668,7 +1684,11 @@ mod tests {
 
     #[test]
     fn service_type_all_variants() {
-        for (svc_type, expected) in [(ServiceType::Agent, "agent"), (ServiceType::Mqtt, "mqtt")] {
+        for (svc_type, expected) in [
+            (ServiceType::Agent, "agent"),
+            (ServiceType::Mqtt, "mqtt"),
+            (ServiceType::SshAgent, "ssh_agent"),
+        ] {
             let json = serde_json::to_string(&svc_type).unwrap();
             assert_eq!(json, format!(r#""{expected}""#));
             let deserialized: ServiceType = serde_json::from_str(&json).unwrap();

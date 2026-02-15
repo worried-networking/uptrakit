@@ -119,6 +119,34 @@ impl ServiceConnectionRegistry {
         (rx, cancel_token)
     }
 
+    /// Register a connected SSH agent and return a receiver for push messages
+    /// plus a cancellation token that is triggered if the same `service_id`
+    /// registers again (connection deduplication).
+    pub async fn register_ssh_agent(
+        &self,
+        service_id: Uuid,
+    ) -> (mpsc::Receiver<ControllerMessage>, CancellationToken) {
+        let (tx, rx) = mpsc::channel(PUSH_CHANNEL_CAPACITY);
+        let cancel_token = CancellationToken::new();
+        let conn = ServiceConnection {
+            sender: tx,
+            cancel_token: cancel_token.clone(),
+            service_type: ServiceType::SshAgent,
+            instance_id: None,
+            max_tenants: None,
+            assigned_mqtt_clients: HashSet::new(),
+            last_heartbeat: None,
+            connected_at: OffsetDateTime::now_utc(),
+        };
+        let mut guard = self.inner.write().await;
+        if let Some(old) = guard.connections.remove(&service_id) {
+            old.cancel_token.cancel();
+            tracing::info!(%service_id, "cancelled superseded SSH agent connection");
+        }
+        guard.connections.insert(service_id, conn);
+        (rx, cancel_token)
+    }
+
     /// Register a connected MQTT service and return a receiver for push messages
     /// plus a cancellation token that is triggered if the same `service_id`
     /// registers again (connection deduplication).

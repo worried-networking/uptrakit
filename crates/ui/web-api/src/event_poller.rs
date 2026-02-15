@@ -233,6 +233,13 @@ impl EventPoller {
                     .await;
                 true
             }
+            // Targeted to SSH agent services
+            (None, Some(uptrakit_internal_wire::ServiceType::SshAgent)) => {
+                self.registry
+                    .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::SshAgent, msg)
+                    .await;
+                true
+            }
             // Broadcast to all services (no type filter or unknown type)
             (None, None) => {
                 self.registry.broadcast(msg).await;

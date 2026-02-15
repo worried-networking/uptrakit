@@ -1,0 +1,37 @@
+[package]
+name = "uptrakit-agent-ssh"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+rootcause = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+rustls = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uptrakit-directories = { path = "../../shared/directories" }
+uptrakit-service-sdk = { path = "../../shared/service-sdk" }
+uptrakit-shared-types = { workspace = true }
+uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-internal-wire = { path = "../../shared/wire" }
+uptrakit-build-info = { path = "../../shared/build-info" }
+sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
+sea-orm-migration = { version = "2.0.0-rc.32", default-features = false, features = ["runtime-tokio-rustls", "sqlx-sqlite"] }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+[build-dependencies]
+uptrakit-build-info = { path = "../../shared/build-info" }

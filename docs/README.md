@@ -45,6 +45,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [TOFU and TLS](security/tofu-tls.md) | TOFU verifier and CLI hardening. See also: [Auth Flows](api/auth-flows.md). |
 | [Filesystem and Dependency Security](security/filesystem-dependency-security.md) | Secure permissions and dependency controls. See also: [Dependency Policy](development/dependency-policy.md). |
 | [Secure Development](security/secure-development.md) | Security requirements for contributors. See also: [Coding Standards](development/coding-standards.md), [Testing](development/testing.md). |
+| [SSH Agent Secrets](security/ssh-agent-secrets.md) | SSH agent secret storage, master key management, and threat model. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 
 ## Architecture
 
@@ -54,6 +55,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Host Entity](architecture/host-entity.md) | Host representation and `machine_id` tracking. See also: [Wire Protocol](api/wire-protocol.md). |
 | [Software Item Entity](architecture/software-item-entity.md) | Software item definition and provider configuration. See also: [Provider Guidelines](development/provider-guidelines.md). |
 | [Update History Entity](architecture/update-history-entity.md) | Immutable update history records. See also: [Update Workflow](end-user/update-workflow.md). |
+| [SSH Agent](architecture/ssh-agent.md) | SSH-backed agent architecture, local DB schema, and self-managed encryption. See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [Service Lifecycle](development/service-lifecycle.md). |
 
 ## Development
 

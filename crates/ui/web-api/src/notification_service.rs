@@ -117,6 +117,7 @@ impl NotificationService {
         let service_type_str = match service_type {
             ServiceType::Agent => "agent",
             ServiceType::Mqtt => "mqtt",
+            ServiceType::SshAgent => "ssh_agent",
         };
 
         let broadcast_condition = Condition::all()
@@ -205,6 +206,10 @@ fn should_deliver_backlog_message(service_type: ServiceType, msg: &ControllerMes
                 | ControllerMessage::RequestCertRenewal(_)
         ),
         ServiceType::Mqtt => matches!(
+            msg,
+            ControllerMessage::CaBundleUpdated(_) | ControllerMessage::RequestCertRenewal(_)
+        ),
+        ServiceType::SshAgent => matches!(
             msg,
             ControllerMessage::CaBundleUpdated(_) | ControllerMessage::RequestCertRenewal(_)
         ),

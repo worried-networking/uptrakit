@@ -1,6 +1,6 @@
 # Wire Protocol
 
-Agent and MQTT service communication with the controller happens over a secure WebSocket (`/api/v1/ws/service`). Both
+Agent, SSH agent, and MQTT service communication with the controller happens over a secure WebSocket (`/api/v1/ws/service`). All
 service types share the same `ServiceMessage`/`ControllerMessage` enums, with variants enabled per service type.
 
 ## Connection Types
@@ -11,12 +11,12 @@ service types share the same `ServiceMessage`/`ControllerMessage` enums, with va
 | Enrolled | Bearer token | Certificate request (`request_certificate`). |
 | Authenticated | mTLS client cert | Normal operation (heartbeats, commands, data). |
 
-Agents initiate outbound-only connections and never accept inbound traffic. MQTT services use the same enrollment model
-(shared service abstraction).
+Agents and SSH agents initiate outbound-only connections and never accept inbound traffic. MQTT services and SSH agents
+use the same enrollment model (shared service abstraction).
 
 ## Service Activity Tracking
 
-For both Agent and MQTT services, the controller updates `services.last_seen_at` on every successful WebSocket connect
+For Agent, SSH agent, and MQTT services, the controller updates `services.last_seen_at` on every successful WebSocket connect
 and on heartbeat ping/pong exchanges. The controller updates `services.ip_address` on each connect when a client IP is
 resolved by the network middleware.
 

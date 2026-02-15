@@ -58,7 +58,7 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
 
 /// Error returned when the `type` query parameter is invalid.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid type parameter: '{0}', expected 'agent' or 'mqtt'")]
+#[error("invalid type parameter: '{0}', expected 'agent', 'mqtt', or 'ssh_agent'")]
 struct InvalidServiceTypeParam(String);
 
 impl IntoResponse for InvalidServiceTypeParam {
@@ -75,6 +75,7 @@ fn enrollment_setting_key(
     match type_param {
         Some("agent") | None => Ok(SettingKey::EnrollmentTokenHash),
         Some("mqtt") => Ok(SettingKey::MqttEnrollmentTokenHash),
+        Some("ssh_agent") => Ok(SettingKey::SshAgentEnrollmentTokenHash),
         Some(other) => Err(InvalidServiceTypeParam(other.to_string())),
     }
 }

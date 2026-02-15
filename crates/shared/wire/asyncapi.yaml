@@ -907,6 +907,7 @@ components:
           enum:
             - agent
             - mqtt
+            - ssh_agent
           description: Type of service enrolling with the controller
         enrollment_token:
           type: string

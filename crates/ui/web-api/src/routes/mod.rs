@@ -28,3 +28,4 @@ pub mod update_history;
 // from the router.
 pub(crate) mod agent_ws;
 pub(crate) mod mqtt_ws;
+pub(crate) mod ssh_agent_ws;

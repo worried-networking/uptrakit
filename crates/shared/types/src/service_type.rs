@@ -19,6 +19,8 @@ pub enum ServiceType {
     Agent,
     #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "mqtt"))]
     Mqtt,
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "ssh_agent"))]
+    SshAgent,
 }
 
 impl fmt::Display for ServiceType {
@@ -26,6 +28,7 @@ impl fmt::Display for ServiceType {
         match self {
             Self::Agent => f.write_str("agent"),
             Self::Mqtt => f.write_str("mqtt"),
+            Self::SshAgent => f.write_str("ssh_agent"),
         }
     }
 }
@@ -36,6 +39,7 @@ impl ServiceType {
         match self {
             Self::Agent => "agent",
             Self::Mqtt => "mqtt",
+            Self::SshAgent => "ssh_agent",
         }
     }
 
@@ -44,6 +48,7 @@ impl ServiceType {
         match s {
             "agent" => Some(Self::Agent),
             "mqtt" => Some(Self::Mqtt),
+            "ssh_agent" => Some(Self::SshAgent),
             _ => None,
         }
     }
@@ -63,7 +68,7 @@ mod tests {
 
     #[test]
     fn serde_round_trip() {
-        for variant in [ServiceType::Agent, ServiceType::Mqtt] {
+        for variant in [ServiceType::Agent, ServiceType::Mqtt, ServiceType::SshAgent] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: ServiceType = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, variant);
@@ -72,14 +77,14 @@ mod tests {
 
     #[test]
     fn display_matches_as_str() {
-        for variant in [ServiceType::Agent, ServiceType::Mqtt] {
+        for variant in [ServiceType::Agent, ServiceType::Mqtt, ServiceType::SshAgent] {
             assert_eq!(format!("{variant}"), variant.as_str());
         }
     }
 
     #[test]
     fn parse_round_trip() {
-        for variant in [ServiceType::Agent, ServiceType::Mqtt] {
+        for variant in [ServiceType::Agent, ServiceType::Mqtt, ServiceType::SshAgent] {
             let s = variant.as_str();
             let parsed = ServiceType::parse(s);
             assert_eq!(parsed, Some(variant));
@@ -94,7 +99,7 @@ mod tests {
 
     #[test]
     fn from_str_round_trip() {
-        for variant in [ServiceType::Agent, ServiceType::Mqtt] {
+        for variant in [ServiceType::Agent, ServiceType::Mqtt, ServiceType::SshAgent] {
             let s = variant.as_str();
             let parsed: ServiceType = s.parse().unwrap();
             assert_eq!(parsed, variant);

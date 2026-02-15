@@ -2,7 +2,7 @@
 
 The `uptrakit-service-sdk` crate provides a `ServiceHandler` trait and `run_service_lifecycle()` function
 that encapsulate the entire bootstrap-enrollment-reconnect flow shared by all Uptrakit services (agent,
-MQTT, and any future service types).
+SSH agent, MQTT, and any future service types).
 
 ## Overview
 
@@ -34,7 +34,7 @@ Returns static configuration for the service:
 
 Returns enrollment-time parameters:
 
-- `service_type` — `ServiceType::Agent` or `ServiceType::Mqtt`. Host information is not part of enrollment — agents
+- `service_type` — `ServiceType::Agent`, `ServiceType::Mqtt`, or `ServiceType::SshAgent`. Host information is not part of enrollment — agents
   report hosts via `ReportHosts` after authentication.
 
 ### `run_authenticated_loop()`
