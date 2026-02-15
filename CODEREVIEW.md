@@ -59,7 +59,7 @@ to `shared-types` with feature-gated derives (`sea-orm`, `openapi`). All duplica
 The combination of a closed `ProviderType` enum and a static-dispatch registry makes it impossible for
 external developers to add providers without forking two crates:
 
-1. `ProviderType` in `shared-types` is a closed enum with 4 variants (no `#[non_exhaustive]`)
+1. `ProviderType` in `shared-types` is a closed enum with 4 variants (`#[non_exhaustive]` now applied — see XC-06)
 2. `ProviderRegistry` in `provider-registry` is a unit struct with static methods using `match` on `ProviderType`
 3. All 4 provider crates are unconditional compile-time dependencies
 
@@ -117,18 +117,11 @@ documented guidance. The only examples are scattered test helpers.
 
 **Related per-crate findings:** See web-api CODEREVIEW.md extensibility section.
 
-### XC-06: Closed Enums Without `#[non_exhaustive]` (Minor)
+### ~~XC-06: Closed Enums Without `#[non_exhaustive]` (Minor)~~ **FIXED**
 
-Multiple public enums across the codebase lack `#[non_exhaustive]`:
-
-- `ProviderType` (shared-types)
-- `ServiceMessage`, `ControllerMessage` (wire)
-- `ServiceType` (wire, web-api-types, db)
-- `ProviderCapability` (provider-core)
-
-Adding variants to any of these is a semver-breaking change, even for in-project evolution.
-
-**Recommendation:** Apply `#[non_exhaustive]` to all public enums that may evolve.
+**Status:** Resolved. `#[non_exhaustive]` added to `ProviderType` (shared-types), `ServiceMessage` and
+`ControllerMessage` (wire), and `ProviderCapability` (provider-core). All exhaustive match expressions in
+external crates updated with wildcard `_ =>` arms.
 
 ### XC-07: Duplicated `strip_tag_prefix` in Provider Crates (Minor)
 
@@ -161,8 +154,8 @@ raw JSON parameter removed from `Provider::execute_update()`. All providers now 
 
 **After recommended changes:** `use uptrakit_web_api_types::prelude::*` for all common types.
 
-**Key blockers:** [XC-04](#xc-04-web-api-types-lacks-prelude-for-api-client-developers-major) (no prelude),
-[WAT-08/09](crates/shared/web-api-types/CODEREVIEW.md) (weak typing in some request types)
+**Key blockers:** ~~[XC-04](#xc-04-web-api-types-lacks-prelude-for-api-client-developers-major)~~ (FIXED),
+~~[WAT-08/09](crates/shared/web-api-types/CODEREVIEW.md)~~ (FIXED — typed enums replace String fields)
 
 ### Scenario 3: Building a New Provider
 
@@ -179,8 +172,8 @@ enum + static registry)
 | Severity | Count | Key Themes |
 |---|---|---|
 | Critical | 1 (1 fixed) | ~~Type duplication across crates~~, closed provider system |
-| Major | 4 (2 fixed) | No service lifecycle abstraction, ~~no prelude~~, AppState construction, overloaded SDK error types, monolithic controller run() |
-| Minor | ~17 (3 fixed) | Closed enums without `#[non_exhaustive]`, duplicated code, hardcoded values, inconsistent `FromStr`/`Display` |
+| Major | 4 (3 fixed) | No service lifecycle abstraction, ~~no prelude~~, AppState construction, ~~overloaded SDK error types~~, monolithic controller run() |
+| Minor | ~17 (8 fixed) | ~~Closed enums without `#[non_exhaustive]`~~, duplicated code, hardcoded values, ~~inconsistent `FromStr`/`Display`~~, ~~string-typed fields~~, ~~duplicated secret masking~~ |
 | Info | ~15 | Missing derives, documentation gaps, ergonomic suggestions |
 
 ## Priority Recommendations
@@ -208,17 +201,17 @@ enum + static registry)
 
 | Crate | File | Key Extensibility Finding |
 |---|---|---|
-| shared/types | [CODEREVIEW.md](crates/shared/types/CODEREVIEW.md) | Closed `ProviderType` enum (TYP-03) |
+| shared/types | [CODEREVIEW.md](crates/shared/types/CODEREVIEW.md) | ~~Closed `ProviderType` enum (TYP-03)~~ FIXED |
 | shared/macros | [CODEREVIEW.md](crates/shared/macros/CODEREVIEW.md) | Missing rootcause documentation (MAC-03) |
-| shared/wire | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) | ~~Type duplication (WIRE-04)~~ FIXED, no `#[non_exhaustive]` (WIRE-05) |
-| shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | No prelude (WAT-06), ~~type duplication (WAT-07)~~ FIXED |
-| shared/db | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) | Third copy of ServiceType (DB-05) |
+| shared/wire | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) | ~~Type duplication (WIRE-04)~~ FIXED, ~~no `#[non_exhaustive]` (WIRE-05)~~ FIXED |
+| shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | ~~No prelude (WAT-06)~~ FIXED, ~~type duplication (WAT-07)~~ FIXED, ~~string fields (WAT-02, WAT-08, WAT-09)~~ FIXED |
+| shared/db | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) | ~~Third copy of ServiceType (DB-05)~~ partially FIXED |
 | shared/command | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) | ~~ShellType duplication (CMD-03)~~ FIXED |
 | shared/directories | [CODEREVIEW.md](crates/shared/directories/CODEREVIEW.md) | No extensibility issues |
-| shared/service-sdk | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) | No ServiceHandler trait (SDK-02) |
+| shared/service-sdk | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) | No ServiceHandler trait (SDK-02), ~~overloaded EnrollmentError (SDK-03)~~ FIXED |
 | shared/build-info | [CODEREVIEW.md](crates/shared/build-info/CODEREVIEW.md) | Missing Deserialize (BI-03) |
-| providers/core | [CODEREVIEW.md](crates/providers/core/CODEREVIEW.md) | ~~Raw JSON in execute_update (PCORE-01)~~ FIXED |
-| providers/registry | [CODEREVIEW.md](crates/providers/registry/CODEREVIEW.md) | Closed registry (PREG-01) |
+| providers/core | [CODEREVIEW.md](crates/providers/core/CODEREVIEW.md) | ~~Raw JSON in execute_update (PCORE-01)~~ FIXED, ~~no `#[non_exhaustive]` (PCORE-04)~~ FIXED |
+| providers/registry | [CODEREVIEW.md](crates/providers/registry/CODEREVIEW.md) | Closed registry (PREG-01), ~~duplicated secret masking (PREG-05)~~ FIXED |
 | providers/github | [CODEREVIEW.md](crates/providers/github/CODEREVIEW.md) | ~~Undocumented install_command (GH-01)~~ FIXED |
 | providers/docker-registry | [CODEREVIEW.md](crates/providers/docker-registry/CODEREVIEW.md) | ~~Undocumented restart_command (DOCK-01)~~ FIXED |
 | providers/homebrew | [CODEREVIEW.md](crates/providers/homebrew/CODEREVIEW.md) | Discarded exit code (BREW-02) |

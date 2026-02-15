@@ -103,14 +103,9 @@ This improves documentation accuracy and enables code generators to use typed UU
 `shared-types` with feature-gated derives (`sea-orm`, `openapi`). Wire crate re-exports from `shared-types`.
 All duplicates eliminated.
 
-### WIRE-05
+### ~~WIRE-05~~ **FIXED**
 
-**`ServiceMessage` and `ControllerMessage` lack `#[non_exhaustive]`**
+**~~`ServiceMessage` and `ControllerMessage` lack `#[non_exhaustive]`~~**
 
-- **Severity:** Minor
-- **Type:** Actionable
-- **File:** `src/lib.rs`
-
-**Description:** Both message enums are closed without `#[non_exhaustive]`. Adding a new message type is a
-breaking change for downstream consumers. While this may be intentional for a wire protocol, applying
-`#[non_exhaustive]` would enable the project to evolve without breaking downstream code.
+**Status:** Resolved. `#[non_exhaustive]` added to both `ServiceMessage` and `ControllerMessage` enums.
+All exhaustive match expressions in external crates updated with wildcard `_ =>` arms.

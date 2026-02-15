@@ -42,7 +42,7 @@ Provider dispatch and validation crate (~350 lines across 3 source files) acting
 | PREG-02 | Major | Extensibility | Hard compile-time dependency on all provider crates. Every provider is unconditionally compiled into the registry. There are no Cargo feature gates to exclude unneeded providers, and no way to compile a minimal binary. Adding a provider with heavy dependencies (e.g., a cloud SDK) inflates all binaries. | `Cargo.toml:13-16` |
 | PREG-03 | Major | Extensibility | `ProviderRegistry` is a unit struct with all static methods -- there is no instance-based registry. Providers cannot be registered at runtime. To support external providers, the registry would need a `HashMap<String, Box<dyn ProviderFactory>>` and a `register()` method. | `src/registry.rs:18` |
 | ~~PREG-04~~ | ~~Minor~~ | ~~Code Quality~~ | ~~`parse_provider_type()` uses serde JSON hack as a parser.~~ **FIXED.** `ProviderType` now implements `FromStr`; `parse_provider_type()` and `validate_config_str()` use `str::parse()`. | `src/registry.rs` |
-| PREG-05 | Minor | Code Quality | Secret masking/restoration logic is duplicated across the `match` arms rather than being delegated to a trait method on provider configs. A `ProviderConfig` trait with `fn mask_secrets(&mut self)` and `fn restore_secrets(&mut self, existing: &Self)` would allow polymorphic dispatch. | `src/registry.rs:95-180` |
+| ~~PREG-05~~ | ~~Minor~~ | ~~Code Quality~~ | ~~Secret masking/restoration logic is duplicated across the `match` arms.~~ **FIXED.** Extracted `SecretMasking` trait in `provider-core` with default no-op implementations. All 4 config types implement the trait. Registry uses generic `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` helpers. | `src/registry.rs` |
 
 ## Recommendations
 

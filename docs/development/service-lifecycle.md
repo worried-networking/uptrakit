@@ -200,6 +200,21 @@ to `EnrollmentError` at the boundary. The lifecycle only needs two semantic chec
 
 All other errors propagate up and terminate the lifecycle.
 
+### `EnrollmentError` sub-enum structure
+
+`EnrollmentError` is organized into domain sub-enums for clearer error categorization:
+
+| Sub-enum | Domain | Example variants |
+|---|---|---|
+| `TlsError` | TLS/certificate errors | `Config`, `Rustls`, `NoCertificates`, `CertificateParse`, `Pem`, `InvalidDnsName` |
+| `IdentityError` | Identity/enrollment state | `KeypairGeneration`, `CsrGeneration`, `NotEnrolled`, `NotCertified` |
+| `ProtocolError` | Wire protocol/enrollment flow | `ReceiveClosed`, `UnexpectedMessage`, `Enrollment`, `EnrollmentRejected`, timeouts |
+| `CaError` | CA certificate operations | `Fetch`, `CertFile` |
+
+Top-level variants (`Io`, `Json`, `WebSocket`, `HttpUri`, `Directory`) remain directly on
+`EnrollmentError`. Services can match on categories (e.g., `EnrollmentError::Tls(_)`) instead of
+individual variants for coarse-grained error handling.
+
 ## Related documentation
 
 - [Services and Operations](../api/services-operations.md) — shared startup flow and API operations

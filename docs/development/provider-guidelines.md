@@ -44,7 +44,37 @@ The **Provider Registry** crate centralizes all provider operations:
 - `ProviderRegistry::create_provider()` — creates `Provider` instances from `ProviderType` and config
 - `ProviderRegistry::validate_config()` — validates provider configuration JSON
 - `ProviderRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for API responses
-  (delegates to typed `with_secrets_masked()` / `restore_secrets_from()` methods on each config struct)
+  (delegates to the `SecretMasking` trait implemented on each config struct)
+
+### Secret masking with the `SecretMasking` trait
+
+The `SecretMasking` trait (`crates/providers/core/src/secrets.rs`, re-exported from `uptrakit-provider-core`) provides
+a standard interface for masking and restoring secrets in provider configurations. It has two methods with
+default no-op implementations:
+
+```rust
+pub trait SecretMasking: Serialize + DeserializeOwned {
+    /// Return a copy with secret fields replaced by `"***"`.
+    fn with_secrets_masked(self) -> Self { self }
+
+    /// Restore secret fields from an existing config where `self` contains `"***"` sentinels.
+    fn restore_secrets_from(&mut self, _existing: &Self) {}
+}
+```
+
+Providers with no secrets (Homebrew, Proxmox Helper Scripts) use the default no-op implementations.
+Providers with secrets (GitHub, Docker Registry) override both methods with field-level masking logic.
+
+The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that
+deserialize the JSON config, apply the trait methods, and re-serialize. This eliminates duplicated
+deserialize-method-serialize boilerplate per provider.
+
+When adding a new provider with secrets, implement `SecretMasking` on your config struct. The registry
+match arms become one-liners:
+
+```rust
+ProviderType::MyProvider => mask_secrets_for::<MyProviderConfig>(config),
+```
 
 The agent crate imports `uptrakit-command` for shell execution and `uptrakit-provider-registry` for provider dispatch —
 it does not depend on `uptrakit-provider-core` directly. The web-api crate imports `uptrakit-provider-registry` (not

@@ -13,7 +13,9 @@ The controller exposes a REST API under `/api/v1/`. Most endpoints are authentic
 
 - `POST /api/v1/auth/device`: start a device authorization flow (RFC 8628). Returns `device_code`, `user_code`, `verification_url`, `expires_in`,
   `interval`.
-- `POST /api/v1/auth/device/poll`: poll for approval status; returns the API token once approved.
+- `POST /api/v1/auth/device/poll`: poll for approval status. The `status` field is a typed `DeviceAuthStatus` enum
+  (`pending`, `authorized`, `expired`) defined in `uptrakit-shared-types`. Returns the API token once status is
+  `authorized`.
 - `POST /api/v1/auth/device/approve`: browser-side approval using Bearer token.
 - `POST /api/v1/auth/token`: exchange credentials for tokens (when allowed).
 

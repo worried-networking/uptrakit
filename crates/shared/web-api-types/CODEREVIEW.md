@@ -61,14 +61,14 @@ This crate is the primary interface for external API client developers. Several 
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
 | WAT-01 | Low | Code Quality | `CreateProviderConfigRequest`, `UpdateProviderConfigRequest`, and `ProviderConfigResponse` lack `Debug` derive. These types do not contain secrets, so `Debug` should be safe to add for logging and error reporting. | `src/provider_configs.rs:7`, `src/provider_configs.rs:20`, `src/provider_configs.rs:28` |
-| WAT-02 | Low | Code Quality | `DeviceAuthPollResponse.status` is `String`. Should be a typed enum (e.g., `AuthorizationPending`, `Complete`, `SlowDown`, `Expired`) for type safety. Tests show values `"authorization_pending"` and `"complete"`. | `src/device_auth.rs:28` |
+| ~~WAT-02~~ | ~~Low~~ | ~~Code Quality~~ | ~~`DeviceAuthPollResponse.status` is `String`.~~ **FIXED.** `DeviceAuthStatus` enum (Pending, Authorized, Expired) defined in `shared-types` with feature-gated `DeriveActiveEnum` and `ToSchema`. Used across DB entity, device flow logic, and API response. | `src/device_auth.rs` |
 | WAT-03 | Low | Code Quality | `SystemAlert.severity` is `String`. Could be a typed enum (e.g., `Critical`, `Warning`, `Info`) for consistent severity handling across the system. | `src/system_alerts.rs:7` |
 | WAT-04 | Info | Security | Auth request DTOs (`RegisterRequest`, `LoginRequest`) use plain `String` for passwords. Typical for HTTP DTOs, but using `SecretString` from `uptrakit-shared-types` would add accidental-logging protection. The absence of `Debug` on these types partially mitigates this. | `src/auth.rs:20`, `src/auth.rs:35` |
 | WAT-05 | Info | Code Quality | Inconsistent `Debug` derive across the crate. Some types have it (`SystemAlert`, `ErrorResponse`, `Permission`, enums), others don't (most request/response DTOs). A consistent policy would improve debuggability. | Multiple files |
 | ~~WAT-06~~ | ~~Major~~ | ~~Extensibility~~ | ~~No prelude or root-level re-exports.~~ **FIXED.** `pub mod prelude` added with ~35 commonly used type re-exports grouped by domain (auth, agents, hosts, services, software items, provider configs, update history, API tokens, OIDC, MQTT, settings, common). | `src/prelude.rs` |
 | ~~WAT-07~~ | ~~Major~~ | ~~Extensibility~~ | ~~`ServiceType` and `MqttTransport` duplicated.~~ **FIXED.** Both types now imported from `shared-types` (with `openapi` feature). Local definitions removed. | `src/services.rs`, `src/mqtt_transport.rs` |
-| WAT-08 | Minor | Extensibility | `CreateProviderConfigRequest.provider_type` is `String` instead of `ProviderType` from `shared-types`. Loses compile-time and deserialization-time type safety for API clients. | `src/provider_configs.rs:9` |
-| WAT-09 | Minor | Extensibility | `ListAgentsQuery.status` is `Option<String>` instead of `Option<AgentStatus>`. Same type safety concern. | `src/agents.rs` |
+| ~~WAT-08~~ | ~~Minor~~ | ~~Extensibility~~ | ~~`CreateProviderConfigRequest.provider_type` is `String`.~~ **FIXED.** Changed to typed `ProviderType` from `shared-types`. Serde validates on deserialization. | `src/provider_configs.rs` |
+| ~~WAT-09~~ | ~~Minor~~ | ~~Extensibility~~ | ~~`ListAgentsQuery.status` is `Option<String>`.~~ **FIXED.** Changed to `Option<AgentStatus>`. | `src/agents.rs` |
 | WAT-10 | Minor | Extensibility | ~~`Permission` enum uses `parse()` returning `Option` instead of implementing `FromStr`.~~ **RESOLVED** -- `Permission` now implements `FromStr` with typed `ParsePermissionError`. | `src/permissions.rs` |
 
 ## Verdict

@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | Password (Argon2id) | User login | Local accounts with hashed passwords. |
 | OIDC | User login | External identity providers with auto-create or account linking. |
-| Device authorization | CLI login | RFC 8628-style flow: device code, browser approval, API token issuance. |
+| Device authorization | CLI login | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`). |
 | JWT access tokens | API requests | Short-lived tokens that carry resolved permissions (never stored). |
 | Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use, revoking the predecessor. |
 | API tokens | Programmatic access | Long-lived, revocable bearer tokens stored in the database. |

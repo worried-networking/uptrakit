@@ -16,6 +16,21 @@
   poisoning impossible.
 - When serialization/parsing can fail, use `match` to handle errors gracefully or propagate them with context.
 
+## Public Enum Extensibility
+
+All public enums that may gain new variants must carry the `#[non_exhaustive]` attribute. This allows the
+project to evolve without semver-breaking changes for downstream consumers. External crates matching on
+these enums must include a wildcard `_ =>` arm.
+
+Enums currently annotated with `#[non_exhaustive]`:
+
+- `ProviderType` (`shared-types`)
+- `ServiceMessage`, `ControllerMessage` (`wire`)
+- `ProviderCapability` (`provider-core`)
+
+When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly
+guaranteed to be closed (e.g., a two-variant boolean-like enum).
+
 ## Design Principles
 
 - Keep every boundary clear: the controller orchestrates scheduling, upstream checks, API/UI; the MQTT service handles MQTT/Home Assistant

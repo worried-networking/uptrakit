@@ -19,10 +19,8 @@ bootstrap-enrollment-reconnect flow, so new services only need to implement thre
 
 Remaining extensibility gaps:
 
-1. **`EnrollmentError` is overloaded**: 19 variants spanning I/O, TLS, key generation, WebSocket, enrollment
-   protocol, identity state, and CA operations in a single flat enum. External consumers cannot distinguish
-   "network is down" from "certificate expired" from "enrollment rejected" without matching individual
-   variants. Consider splitting into sub-error enums.
+1. ~~**`EnrollmentError` is overloaded**~~ **FIXED** — restructured into 4 domain sub-enums (`TlsError`,
+   `IdentityError`, `ProtocolError`, `CaError`) plus 5 top-level variants.
 
 2. **`WsStream` type alias leaks implementation details**: Exposes `tokio_tungstenite::WebSocketStream<
    tokio_rustls::client::TlsStream<tokio::net::TcpStream>>`. Switching TLS libraries or transport would
@@ -41,21 +39,16 @@ Remaining extensibility gaps:
 
 ## Details
 
-### SDK-03
+### ~~SDK-03~~ **FIXED**
 
-**`EnrollmentError` overloaded with 19 variants spanning 6 concerns**
+**~~`EnrollmentError` overloaded with 19 variants spanning 6 concerns~~**
 
-- **Severity:** Medium
-- **Type:** Actionable
-- **File:** `src/error.rs`
-
-**Description:** The `EnrollmentError` enum covers I/O, TLS/certificates, key/CSR generation,
-WebSocket/HTTP, enrollment protocol, identity state, and CA operations in a single flat enum. External
-consumers cannot distinguish error categories (e.g., "network is down" vs "cert expired" vs "enrollment
-rejected") without matching individual variants.
-
-**Recommendation:** Consider splitting into sub-enums (`TlsError`, `IdentityError`, `ProtocolError`,
-`CaError`) and using `#[from]` or `context_to()` for composition.
+**Status:** Resolved. `EnrollmentError` restructured from 19 flat variants into 4 domain sub-enums
+(`TlsError`, `IdentityError`, `ProtocolError`, `CaError`) plus 5 top-level variants (`Io`, `Json`,
+`WebSocket`, `HttpUri`, `Directory`). Sub-enums use `#[from]` for composition. `impl_report_conversion!`
+updated with closure-based forms for leaf-type-to-top-level conversions. All construction sites (~60)
+updated across 8 files. Helper methods (`is_receive_closed()`, `is_cert_expired()`) updated to match
+new paths.
 
 ### SDK-04
 
