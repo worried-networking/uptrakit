@@ -7,6 +7,7 @@ use crate::version::Version;
 
 /// Capabilities that a provider may support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderCapability {
     /// Provider can discover locally installed software.

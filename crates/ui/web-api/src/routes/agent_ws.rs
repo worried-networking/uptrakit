@@ -800,6 +800,15 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
+                            _ => {
+                                let err = ControllerMessage::Error(ErrorPayload {
+                                    code: ErrorCode::BadRequest,
+                                    message: "unknown message type".to_string(),
+                                });
+                                if let Some(json) = serialize_controller_msg(out_seq, err) {
+                                    let _ = sink.send(Message::Text(json.into())).await;
+                                }
+                            }
                         }
                     }
                     Message::Close(_) => break,

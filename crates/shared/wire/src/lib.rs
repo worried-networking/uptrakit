@@ -108,6 +108,7 @@ pub fn now_millis() -> Timestamp {
 
 /// Messages sent from a service (agent or MQTT) to the controller.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceMessage {
     // -- Shared enrollment + lifecycle --
@@ -130,6 +131,7 @@ pub enum ServiceMessage {
 
 /// Messages sent from the controller to a service (agent or MQTT).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ControllerMessage {
     // -- Shared --

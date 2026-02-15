@@ -6,6 +6,8 @@ use thiserror::Error;
 
 /// Supported provider types.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderType {
     GithubReleases,

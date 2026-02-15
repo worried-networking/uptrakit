@@ -1,12 +1,39 @@
 use rootcause::prelude::*;
 
-use uptrakit_provider_core::{Provider, ProviderType};
+use uptrakit_provider_core::{Provider, ProviderType, SecretMasking};
 use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 use uptrakit_provider_homebrew::{HomebrewConfig, HomebrewProvider};
-use uptrakit_provider_proxmox_helper_scripts::{ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsProvider};
+use uptrakit_provider_proxmox_helper_scripts::{
+    ProxmoxHelperScriptsConfig, ProxmoxHelperScriptsProvider,
+};
 
 use crate::error::{RegistryError, Result};
+
+/// Deserialize, mask secrets via [`SecretMasking`], and re-serialize.
+fn mask_secrets_for<T: SecretMasking>(config: &serde_json::Value) -> serde_json::Value {
+    let Ok(cfg) = serde_json::from_value::<T>(config.clone()) else {
+        return config.clone();
+    };
+    serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
+}
+
+/// Deserialize both values, restore secrets via [`SecretMasking`], and write back.
+fn restore_secrets_for<T: SecretMasking>(
+    incoming: &mut serde_json::Value,
+    existing: &serde_json::Value,
+) {
+    let (Ok(mut inc), Ok(ex)) = (
+        serde_json::from_value::<T>(incoming.clone()),
+        serde_json::from_value::<T>(existing.clone()),
+    ) else {
+        return;
+    };
+    inc.restore_secrets_from(&ex);
+    if let Ok(v) = serde_json::to_value(&inc) {
+        *incoming = v;
+    }
+}
 
 /// Provider registry for creating and validating providers.
 ///
@@ -61,6 +88,9 @@ impl ProviderRegistry {
                 let provider = HomebrewProvider::new(homebrew_config);
                 Ok(Box::new(provider))
             }
+            _ => Err(report!(RegistryError::UnknownProviderType(
+                format!("{provider_type}")
+            ))),
         }
     }
 
@@ -108,6 +138,9 @@ impl ProviderRegistry {
                     .map_err(|e| report!(RegistryError::ConfigValidation(e)))?;
                 Ok(())
             }
+            _ => Err(report!(RegistryError::UnknownProviderType(
+                format!("{provider_type}")
+            ))),
         }
     }
 
@@ -135,28 +168,20 @@ impl ProviderRegistry {
 
     /// Mask secrets in provider configuration JSON for API responses.
     ///
-    /// Deserializes config, calls the typed `with_secrets_masked()` method, and
-    /// serializes back. Unknown provider types are returned unchanged.
+    /// Deserializes config, calls the [`SecretMasking::with_secrets_masked()`] method,
+    /// and serializes back. Unknown provider types are returned unchanged.
     pub fn mask_config_secrets(
         provider_type: ProviderType,
         config: &serde_json::Value,
     ) -> serde_json::Value {
         match provider_type {
-            ProviderType::GithubReleases => {
-                let Ok(cfg) = serde_json::from_value::<GitHubConfig>(config.clone()) else {
-                    return config.clone();
-                };
-                serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
+            ProviderType::GithubReleases => mask_secrets_for::<GitHubConfig>(config),
+            ProviderType::DockerRegistry => mask_secrets_for::<DockerRegistryConfig>(config),
+            ProviderType::ProxmoxHelperScripts => {
+                mask_secrets_for::<ProxmoxHelperScriptsConfig>(config)
             }
-            ProviderType::DockerRegistry => {
-                let Ok(cfg) = serde_json::from_value::<DockerRegistryConfig>(config.clone()) else {
-                    return config.clone();
-                };
-                serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
-            }
-            ProviderType::ProxmoxHelperScripts => config.clone(),
-            // Homebrew has no secrets to mask
-            ProviderType::Homebrew => config.clone(),
+            ProviderType::Homebrew => mask_secrets_for::<HomebrewConfig>(config),
+            _ => config.clone(),
         }
     }
 
@@ -173,8 +198,8 @@ impl ProviderRegistry {
 
     /// Restore masked secrets from existing configuration.
     ///
-    /// Deserializes both incoming and existing configs, calls the typed
-    /// `restore_secrets_from()` method, and writes back to `incoming`.
+    /// Deserializes both incoming and existing configs, calls the
+    /// [`SecretMasking::restore_secrets_from()`] method, and writes back to `incoming`.
     pub fn restore_config_secrets(
         provider_type: ProviderType,
         incoming: &mut serde_json::Value,
@@ -182,32 +207,18 @@ impl ProviderRegistry {
     ) {
         match provider_type {
             ProviderType::GithubReleases => {
-                let (Ok(mut inc), Ok(ex)) = (
-                    serde_json::from_value::<GitHubConfig>(incoming.clone()),
-                    serde_json::from_value::<GitHubConfig>(existing.clone()),
-                ) else {
-                    return;
-                };
-                inc.restore_secrets_from(&ex);
-                if let Ok(v) = serde_json::to_value(&inc) {
-                    *incoming = v;
-                }
+                restore_secrets_for::<GitHubConfig>(incoming, existing);
             }
             ProviderType::DockerRegistry => {
-                let (Ok(mut inc), Ok(ex)) = (
-                    serde_json::from_value::<DockerRegistryConfig>(incoming.clone()),
-                    serde_json::from_value::<DockerRegistryConfig>(existing.clone()),
-                ) else {
-                    return;
-                };
-                inc.restore_secrets_from(&ex);
-                if let Ok(v) = serde_json::to_value(&inc) {
-                    *incoming = v;
-                }
+                restore_secrets_for::<DockerRegistryConfig>(incoming, existing);
             }
-            ProviderType::ProxmoxHelperScripts => {}
-            // Homebrew has no secrets to restore
-            ProviderType::Homebrew => {}
+            ProviderType::ProxmoxHelperScripts => {
+                restore_secrets_for::<ProxmoxHelperScriptsConfig>(incoming, existing);
+            }
+            ProviderType::Homebrew => {
+                restore_secrets_for::<HomebrewConfig>(incoming, existing);
+            }
+            _ => {}
         }
     }
 
