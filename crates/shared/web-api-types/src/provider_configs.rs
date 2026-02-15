@@ -4,7 +4,7 @@ pub fn default_enabled() -> bool {
     true
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateProviderConfigRequest {
     pub name: String,
@@ -17,7 +17,7 @@ pub struct CreateProviderConfigRequest {
     pub enabled: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateProviderConfigRequest {
     pub name: Option<String>,
@@ -25,7 +25,7 @@ pub struct UpdateProviderConfigRequest {
     pub enabled: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProviderConfigResponse {
     pub id: String,

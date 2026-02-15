@@ -2,13 +2,14 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A newtype wrapper for strings that contain sensitive data (secrets, tokens,
 /// passwords).
 ///
 /// `Debug` and `Display` implementations redact the value. Serialization is
 /// transparent so the JSON wire format is unchanged.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct SecretString(String);
 
@@ -23,10 +24,7 @@ impl SecretString {
         &self.0
     }
 
-    /// Consume the wrapper and return the inner string.
-    pub fn into_inner(self) -> String {
-        self.0
-    }
+
 }
 
 impl fmt::Debug for SecretString {
@@ -73,11 +71,7 @@ mod tests {
         assert_eq!(s.expose_secret(), "token-123");
     }
 
-    #[test]
-    fn into_inner_returns_value() {
-        let s = SecretString::new("token-123".into());
-        assert_eq!(s.into_inner(), "token-123");
-    }
+
 
     #[test]
     fn serde_roundtrip() {

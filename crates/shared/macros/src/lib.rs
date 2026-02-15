@@ -1,3 +1,12 @@
+//! This crate provides the `impl_report_conversion!` macro, a foundational component
+//! of the project's error handling strategy. It simplifies the conversion of error
+//! types wrapped in `rootcause::Report`, enabling a consistent and ergonomic
+//! approach to error propagation across crate boundaries.
+//!
+//! For a comprehensive understanding of the error handling strategy, including
+//! the role of `rootcause` and `thiserror`, please refer to the
+//! [Coding Standards documentation](../../docs/development/coding-standards.md).
+
 /// Generate `ReportConversion` implementations to enable `.context_to()` conversions.
 ///
 /// Reduces boilerplate for the common pattern of converting a `Report<SourceError>`

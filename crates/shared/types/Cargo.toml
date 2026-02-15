@@ -16,6 +16,7 @@ serde = { workspace = true }
 sea-orm = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

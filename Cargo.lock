@@ -5087,6 +5087,7 @@ dependencies = [
  "serde_json",
  "strum",
  "utoipa",
+ "zeroize",
 ]
 
 [[package]]
