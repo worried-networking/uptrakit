@@ -33,6 +33,7 @@ mod tests {
     use crate::agents::{AgentResponse, AgentStatus};
     use crate::auth::{AuthResponse, UserResponse};
     use crate::device_auth::DeviceAuthPollResponse;
+    use uptrakit_shared_types::DeviceAuthStatus;
     use crate::error::ErrorResponse;
     use crate::oidc_providers::CreateOidcProviderRequest;
     use crate::permissions::Permission;
@@ -352,7 +353,7 @@ mod tests {
     #[test]
     fn device_auth_poll_response_omits_none_fields() {
         let resp = DeviceAuthPollResponse {
-            status: "authorization_pending".to_string(),
+            status: DeviceAuthStatus::Pending,
             token: None,
             token_name: None,
         };
@@ -373,14 +374,14 @@ mod tests {
     #[test]
     fn device_auth_poll_response_includes_some_fields() {
         let resp = DeviceAuthPollResponse {
-            status: "complete".to_string(),
+            status: DeviceAuthStatus::Authorized,
             token: Some("secret-token-value".to_string()),
             token_name: Some("my-device".to_string()),
         };
         let json = serde_json::to_value(&resp).unwrap();
         let obj = json.as_object().unwrap();
 
-        assert_eq!(obj.get("status").unwrap(), "complete");
+        assert_eq!(obj.get("status").unwrap(), "authorized");
         assert_eq!(obj.get("token").unwrap(), "secret-token-value");
         assert_eq!(obj.get("token_name").unwrap(), "my-device");
     }
@@ -388,13 +389,13 @@ mod tests {
     #[test]
     fn device_auth_poll_response_round_trip_with_none() {
         let resp = DeviceAuthPollResponse {
-            status: "authorization_pending".to_string(),
+            status: DeviceAuthStatus::Pending,
             token: None,
             token_name: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         let deserialized: DeviceAuthPollResponse = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.status, "authorization_pending");
+        assert_eq!(deserialized.status, DeviceAuthStatus::Pending);
         assert!(deserialized.token.is_none());
         assert!(deserialized.token_name.is_none());
     }
@@ -402,13 +403,13 @@ mod tests {
     #[test]
     fn device_auth_poll_response_round_trip_with_some() {
         let resp = DeviceAuthPollResponse {
-            status: "complete".to_string(),
+            status: DeviceAuthStatus::Authorized,
             token: Some("tok".to_string()),
             token_name: Some("dev".to_string()),
         };
         let json = serde_json::to_string(&resp).unwrap();
         let deserialized: DeviceAuthPollResponse = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.status, "complete");
+        assert_eq!(deserialized.status, DeviceAuthStatus::Authorized);
         assert_eq!(deserialized.token.as_deref(), Some("tok"));
         assert_eq!(deserialized.token_name.as_deref(), Some("dev"));
     }

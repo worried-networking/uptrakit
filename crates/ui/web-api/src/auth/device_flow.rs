@@ -3,7 +3,8 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{pending_device_flow, prelude::PendingDeviceFlow};
+use uptrakit_shared_db::entity::pending_device_flow::{self, DeviceAuthStatus};
+use uptrakit_shared_db::entity::prelude::PendingDeviceFlow;
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
@@ -65,7 +66,7 @@ impl DeviceFlowStore {
         let model = pending_device_flow::ActiveModel {
             device_code: Set(device_code.clone()),
             user_code: Set(raw_user_code),
-            status: Set("pending".to_string()),
+            status: Set(DeviceAuthStatus::Pending),
             user_id: Set(None),
             client_name: Set(client_name),
             created_at: Set(now),
@@ -90,8 +91,8 @@ impl DeviceFlowStore {
             return Ok(DeviceFlowStatus::Expired);
         }
 
-        match flow.status.as_str() {
-            "authorized" => {
+        match flow.status {
+            DeviceAuthStatus::Authorized => {
                 let user_id = flow
                     .user_id
                     .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
@@ -131,7 +132,7 @@ impl DeviceFlowStore {
         }
 
         // Check already authorized
-        if flow.status == "authorized" {
+        if flow.status == DeviceAuthStatus::Authorized {
             bail!(DeviceFlowError::AlreadyAuthorized);
         }
 
@@ -139,14 +140,14 @@ impl DeviceFlowStore {
         let result = PendingDeviceFlow::update_many()
             .col_expr(
                 pending_device_flow::Column::Status,
-                sea_orm::sea_query::Expr::value("authorized"),
+                sea_orm::sea_query::Expr::value(DeviceAuthStatus::Authorized.as_str()),
             )
             .col_expr(
                 pending_device_flow::Column::UserId,
                 sea_orm::sea_query::Expr::value(user_id),
             )
             .filter(pending_device_flow::Column::DeviceCode.eq(&flow.device_code))
-            .filter(pending_device_flow::Column::Status.eq("pending"))
+            .filter(pending_device_flow::Column::Status.eq(DeviceAuthStatus::Pending.as_str()))
             .filter(pending_device_flow::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
@@ -169,7 +170,7 @@ impl DeviceFlowStore {
             .context_to()?
             .ok_or_else(|| report!(DeviceFlowError::NotFound))?;
 
-        if flow.status != "authorized" {
+        if flow.status != DeviceAuthStatus::Authorized {
             bail!(DeviceFlowError::NotFound);
         }
 
@@ -181,7 +182,7 @@ impl DeviceFlowStore {
         // Atomic delete: only delete if still authorized (HA-safe double-consume prevention)
         let result = PendingDeviceFlow::delete_many()
             .filter(pending_device_flow::Column::DeviceCode.eq(device_code))
-            .filter(pending_device_flow::Column::Status.eq("authorized"))
+            .filter(pending_device_flow::Column::Status.eq(DeviceAuthStatus::Authorized.as_str()))
             .exec(&self.db)
             .await
             .context_to()?;

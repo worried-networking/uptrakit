@@ -12,6 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
+use uptrakit_shared_db::entity::pending_device_flow::DeviceAuthStatus;
 
 pub use uptrakit_web_api_types::device_auth::{
     DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,
@@ -107,7 +108,7 @@ pub async fn device_auth_poll(
         DeviceFlowStatus::Pending => (
             StatusCode::OK,
             Json(DeviceAuthPollResponse {
-                status: "pending".into(),
+                status: DeviceAuthStatus::Pending,
                 token: None,
                 token_name: None,
             }),
@@ -116,7 +117,7 @@ pub async fn device_auth_poll(
         DeviceFlowStatus::Expired => (
             StatusCode::OK,
             Json(DeviceAuthPollResponse {
-                status: "expired".into(),
+                status: DeviceAuthStatus::Expired,
                 token: None,
                 token_name: None,
             }),
@@ -152,7 +153,7 @@ pub async fn device_auth_poll(
                 Ok(created) => (
                     StatusCode::OK,
                     Json(DeviceAuthPollResponse {
-                        status: "authorized".into(),
+                        status: DeviceAuthStatus::Authorized,
                         token: Some(created.plaintext_token),
                         token_name: Some(token_name),
                     }),
