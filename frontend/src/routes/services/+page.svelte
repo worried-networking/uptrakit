@@ -31,10 +31,15 @@
 
 	onMount(() => loadServices(1));
 
+	$effect(() => {
+		loadServices(1); // Reload services when typeFilter changes, reset to first page
+	});
+
 	async function loadServices(page: number) {
 		try {
 			error = null;
-			const result = await getServices(undefined, page);
+			// Pass typeFilter to getServices if it's not 'all'
+			const result = await getServices(typeFilter === 'all' ? undefined : typeFilter, page);
 			services = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;

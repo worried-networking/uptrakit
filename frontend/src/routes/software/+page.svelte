@@ -61,21 +61,33 @@
 		loading = true;
 		try {
 			error = null;
-			const [itemsResult, configsResult] = await Promise.all([
+			const [itemsPromise, configsPromise] = await Promise.allSettled([
 				getSoftwareItems(page),
 				getProviderConfigs(1, 500)
 			]);
-			items = itemsResult.items;
-			currentPage = itemsResult.page;
-			totalPages = itemsResult.total_pages;
-			providerConfigs = configsResult.items;
-			if (!providerConfigId) {
-				const preferred = configsResult.items.find((config) => config.provider_type === 'homebrew');
-				providerConfigId = preferred?.id ?? configsResult.items[0]?.id ?? '';
+
+			if (itemsPromise.status === 'fulfilled') {
+				items = itemsPromise.value.items;
+				currentPage = itemsPromise.value.page;
+				totalPages = itemsPromise.value.total_pages;
+				error = null; // Clear previous error if items loaded successfully
+			} else {
+				error = itemsPromise.reason instanceof Error ? itemsPromise.reason.message : 'Failed to load software items.';
 			}
-			if (configsResult.items.length === 0) {
-				createNewConfig = true;
-				ensureProviderConfigTemplate();
+
+			if (configsPromise.status === 'fulfilled') {
+				providerConfigs = configsPromise.value.items;
+				providerConfigError = null; // Clear previous error if provider configs loaded successfully
+				if (!providerConfigId) {
+					const preferred = configsPromise.value.items.find((config) => config.provider_type === 'homebrew');
+					providerConfigId = preferred?.id ?? configsPromise.value.items[0]?.id ?? '';
+				}
+				if (configsPromise.value.items.length === 0) {
+					createNewConfig = true;
+					ensureProviderConfigTemplate();
+				}
+			} else {
+				providerConfigError = configsPromise.reason instanceof Error ? configsPromise.reason.message : 'Failed to load provider configurations.';
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load software items';

@@ -151,6 +151,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 	} catch (err) {
 		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
 			throw new Error('Request timed out. Please try again.');
+		} else if (err instanceof TypeError) {
+			throw new Error('Network error: Unable to connect to the server. Check your network connection.');
 		}
 		throw err;
 	}
@@ -169,6 +171,8 @@ async function requestVoid(path: string, options: RequestInit = {}): Promise<voi
 	} catch (err) {
 		if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
 			throw new Error('Request timed out. Please try again.');
+		} else if (err instanceof TypeError) {
+			throw new Error('Network error: Unable to connect to the server. Check your network connection.');
 		}
 		throw err;
 	}
