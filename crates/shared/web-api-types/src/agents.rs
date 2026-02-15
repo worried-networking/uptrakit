@@ -55,7 +55,7 @@ pub struct AgentResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ListAgentsQuery {
-    pub status: Option<String>,
+    pub status: Option<AgentStatus>,
 }
 
 #[derive(Serialize, Deserialize)]

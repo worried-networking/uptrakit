@@ -330,7 +330,7 @@ pub async fn create_software_item(
                 id: Set(provider_config_id),
                 tenant_id: Set(tenant.tenant_id),
                 name: Set(inline.name.clone()),
-                provider_type: Set(inline.provider_type.clone()),
+                provider_type: Set(inline.provider_type.to_string()),
                 config: Set(inline.config.clone()),
                 enabled: Set(inline.enabled),
                 created_at: Set(now),

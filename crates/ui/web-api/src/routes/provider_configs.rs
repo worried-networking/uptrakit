@@ -32,11 +32,7 @@ pub(crate) fn validate_provider_config_request(
         return Err("name must not be empty".to_string());
     }
 
-    if ProviderRegistry::parse_provider_type(&req.provider_type).is_none() {
-        return Err(format!("unknown provider_type: {}", req.provider_type));
-    }
-
-    if let Err(e) = ProviderRegistry::validate_config_str(&req.provider_type, &req.config) {
+    if let Err(e) = ProviderRegistry::validate_config(req.provider_type.clone(), &req.config) {
         return Err(e.to_string());
     }
 
@@ -96,7 +92,7 @@ pub async fn create_provider_config(
         id: Set(generate_uuid()),
         tenant_id: Set(tenant.tenant_id),
         name: Set(req.name),
-        provider_type: Set(req.provider_type),
+        provider_type: Set(req.provider_type.to_string()),
         config: Set(req.config),
         enabled: Set(req.enabled),
         created_at: Set(now),
