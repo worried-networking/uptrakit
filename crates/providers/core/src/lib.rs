@@ -1,11 +1,13 @@
 pub mod command;
 pub mod error;
+pub mod secrets;
 pub mod serde_helpers;
 pub mod traits;
 pub mod types;
 pub mod version;
 
 pub use error::{ProviderError, Result};
+pub use secrets::SecretMasking;
 pub use traits::Provider;
 pub use types::{
     DiscoveredSoftware, ProviderCapability, ProviderType, ReleaseAsset, ReleaseInfo,

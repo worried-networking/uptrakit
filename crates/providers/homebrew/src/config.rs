@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_provider_core::SecretMasking;
 
 /// Homebrew package type: formula (CLI tools, libraries) or cask (GUI applications).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +22,8 @@ pub struct HomebrewConfig {
     #[serde(default)]
     pub package_type: HomebrewPackageType,
 }
+
+impl SecretMasking for HomebrewConfig {}
 
 impl HomebrewConfig {
     /// Validate the configuration.

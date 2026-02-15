@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_provider_core::ProviderError;
+use uptrakit_provider_core::{ProviderError, SecretMasking};
 
 /// Configuration for the Proxmox Helper Scripts provider.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -8,6 +8,8 @@ pub struct ProxmoxHelperScriptsConfig {
     /// URL of the Proxmox helper script to execute for updates.
     pub script_url: String,
 }
+
+impl SecretMasking for ProxmoxHelperScriptsConfig {}
 
 impl ProxmoxHelperScriptsConfig {
     /// Validate the configuration.

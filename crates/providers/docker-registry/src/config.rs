@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use uptrakit_provider_core::SecretString;
+use uptrakit_provider_core::{SecretMasking, SecretString};
 
 use crate::error::{DockerRegistryError, Result};
 
@@ -137,13 +137,30 @@ impl DockerRegistryConfig {
         self.tracked_tag.as_deref().unwrap_or("latest")
     }
 
+    /// Best-effort web URL for the image.
+    pub fn image_web_url(&self, tag: &str) -> String {
+        let registry = self.resolved_registry();
+        let repo = self.resolved_repository();
+
+        if registry == "registry-1.docker.io" {
+            // Docker Hub official or user images
+            let hub_path = repo.strip_prefix("library/").unwrap_or(&repo);
+            format!("https://hub.docker.com/_/{hub_path}/tags?name={tag}")
+        } else if registry == "ghcr.io" {
+            format!("https://ghcr.io/{repo}:{tag}")
+        } else {
+            format!("https://{registry}/{repo}:{tag}")
+        }
+    }
+}
+
+impl SecretMasking for DockerRegistryConfig {
     /// Return a copy with secret fields masked for API responses.
     ///
     /// `None` auth stays `None`. When auth is present, password/token fields
     /// are replaced with the mask sentinel.
-    pub fn with_secrets_masked(&self) -> Self {
-        let mut masked = self.clone();
-        masked.auth = masked.auth.map(|a| match a {
+    fn with_secrets_masked(mut self) -> Self {
+        self.auth = self.auth.map(|a| match a {
             DockerAuth::Basic { username, .. } => DockerAuth::Basic {
                 username,
                 password: SecretString::new(SECRET_MASK.to_string()),
@@ -152,14 +169,14 @@ impl DockerRegistryConfig {
                 token: SecretString::new(SECRET_MASK.to_string()),
             },
         });
-        masked
+        self
     }
 
     /// Restore masked secrets from an existing config (for PUT updates).
     ///
     /// If the incoming auth credentials contain the mask sentinel, take
     /// the value from `existing`.
-    pub fn restore_secrets_from(&mut self, existing: &Self) {
+    fn restore_secrets_from(&mut self, existing: &Self) {
         let Some(existing_auth) = &existing.auth else {
             return;
         };
@@ -194,22 +211,6 @@ impl DockerRegistryConfig {
                 }
             }
             _ => {}
-        }
-    }
-
-    /// Best-effort web URL for the image.
-    pub fn image_web_url(&self, tag: &str) -> String {
-        let registry = self.resolved_registry();
-        let repo = self.resolved_repository();
-
-        if registry == "registry-1.docker.io" {
-            // Docker Hub official or user images
-            let hub_path = repo.strip_prefix("library/").unwrap_or(&repo);
-            format!("https://hub.docker.com/_/{hub_path}/tags?name={tag}")
-        } else if registry == "ghcr.io" {
-            format!("https://ghcr.io/{repo}:{tag}")
-        } else {
-            format!("https://{registry}/{repo}:{tag}")
         }
     }
 }
@@ -746,7 +747,7 @@ mod tests {
             page_size: 1000,
             restart_command: None,
         };
-        let mut incoming = existing.with_secrets_masked();
+        let mut incoming = existing.clone().with_secrets_masked();
         incoming.restore_secrets_from(&existing);
         match incoming.auth.unwrap() {
             DockerAuth::Basic { password, .. } => {
@@ -772,7 +773,7 @@ mod tests {
             page_size: 1000,
             restart_command: None,
         };
-        let mut incoming = existing.with_secrets_masked();
+        let mut incoming = existing.clone().with_secrets_masked();
         incoming.restore_secrets_from(&existing);
         match incoming.auth.unwrap() {
             DockerAuth::Bearer { token } => {

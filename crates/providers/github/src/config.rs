@@ -1,7 +1,7 @@
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use uptrakit_provider_core::SecretString;
+use uptrakit_provider_core::{SecretMasking, SecretString};
 use url::Url;
 
 use crate::error::{GitHubError, Result};
@@ -109,19 +109,21 @@ impl GitHubConfig {
             .unwrap_or("https://api.github.com")
     }
 
+}
+
+impl SecretMasking for GitHubConfig {
     /// Return a copy with secret fields masked for API responses.
     ///
     /// Unset secrets become `Some("***")` so the field always appears in JSON.
-    pub fn with_secrets_masked(&self) -> Self {
-        let mut masked = self.clone();
-        masked.auth_token = Some(SecretString::new(SECRET_MASK.to_string()));
-        masked
+    fn with_secrets_masked(mut self) -> Self {
+        self.auth_token = Some(SecretString::new(SECRET_MASK.to_string()));
+        self
     }
 
     /// Restore masked secrets from an existing config (for PUT updates).
     ///
     /// If `auth_token` is the mask sentinel, take the value from `existing`.
-    pub fn restore_secrets_from(&mut self, existing: &Self) {
+    fn restore_secrets_from(&mut self, existing: &Self) {
         if let Some(ref token) = self.auth_token
             && token.expose_secret() == SECRET_MASK
         {
@@ -383,7 +385,7 @@ mod tests {
             asset_patterns: vec![],
             install_command: None,
         };
-        let mut incoming = existing.with_secrets_masked();
+        let mut incoming = existing.clone().with_secrets_masked();
         incoming.restore_secrets_from(&existing);
         assert_eq!(
             incoming.auth_token.unwrap().expose_secret(),
