@@ -15,7 +15,7 @@ not implemented.
 | ~~[MQTT-01](#mqtt-01)~~ | ~~`CaBundleUpdated` not implemented~~ **FIXED** | ~~Medium~~ | ~~Actionable~~ | `src/main.rs` |
 | ~~[MQTT-02](#mqtt-02)~~ | ~~`RequestCertRenewal` not implemented~~ **FIXED** | ~~Medium~~ | ~~Actionable~~ | `src/main.rs` |
 | [MQTT-03](#mqtt-03) | MQTT broker TLS uses system trust only | Low | Informational | `src/mqtt_client.rs` |
-| [MQTT-04](#mqtt-04) | No SIGHUP handler (unlike agent) | Low | Informational | `src/main.rs` |
+| ~~[MQTT-04](#mqtt-04)~~ | ~~No SIGHUP handler (unlike agent)~~ **FIXED** | ~~Low~~ | ~~Informational~~ | `src/main.rs` |
 | [CROSS-02](#cross-02) | Protocol version mismatch only warns | Medium | Informational | `src/main.rs` |
 
 ## Details
@@ -74,49 +74,14 @@ MqttTransport::Tls => {
 enhancement could allow the tenant configuration to include a CA bundle for broker TLS validation. The
 current system-trust-only approach is acceptable for public brokers and standard enterprise setups.
 
-### MQTT-04
+### ~~MQTT-04~~ **FIXED**
 
-**No SIGHUP handler (unlike agent)**
+**~~No SIGHUP handler (unlike agent)~~**
 
-- **Severity:** Low
-- **Type:** Informational
-- **File:** `src/main.rs:362-364`
-
-**Description:** The MQTT service handles SIGINT and SIGTERM but not SIGHUP. The agent treats SIGHUP as a
-graceful restart signal (disconnects with `DisconnectReason::Restart` and exits for systemd to restart it).
-The MQTT service lacks this capability.
-
-**Code evidence:**
-
-```rust
-// crates/core/mqtt/src/main.rs:362-364
-#[cfg(unix)]
-let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-    .context_to::<AppError>()?;
-```
-
-Compare with the agent:
-
-```rust
-// crates/core/agent/src/client.rs:100-101
-let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
-    .context_to::<Error>()?;
-
-// crates/core/agent/src/client.rs:462-470
-_ = sighup.recv() => {
-    tracing::info!("received SIGHUP, initiating graceful restart");
-    break handle_graceful_shutdown(
-        &mut conn,
-        in_flight_update.take(),
-        shutdown_timeout_seconds,
-        DisconnectReason::Restart,
-        LoopOutcome::Restart,
-    ).await;
-}
-```
-
-**Recommendation:** Consider adding SIGHUP handling for operational parity. SIGHUP is useful for triggering
-a clean reconnect cycle (e.g., after a configuration change) without a full process restart via SIGTERM.
+**Status:** Resolved. The MQTT service now handles SIGHUP alongside SIGINT/SIGTERM. SIGHUP triggers
+a graceful restart (`DisconnectReason::Restart`, `LoopOutcome::Restart`), matching the agent's
+behavior. The `handle_graceful_shutdown()` function was refactored to accept `DisconnectReason` and
+`LoopOutcome` parameters instead of hardcoding `Shutdown`.
 
 ### CROSS-02
 

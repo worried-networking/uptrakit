@@ -60,6 +60,9 @@ export async function handleLogout() {
 
 export async function handleOidcLogin(providerId: string) {
 	const { authorize_url } = await api.getOidcAuthorizeUrl(providerId);
+	if (!authorize_url.startsWith('https://')) {
+		throw new Error('Invalid OIDC authorize URL: only HTTPS redirects are allowed');
+	}
 	window.location.href = authorize_url;
 }
 

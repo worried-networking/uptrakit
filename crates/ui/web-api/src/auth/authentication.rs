@@ -57,9 +57,7 @@ pub enum OidcUserResolution {
     },
     /// Email match, user has password, no active OIDC links -> require password.
     LinkViaPasswordRequired { user_id: uuid::Uuid },
-    /// OIDC-only user matched by email, no link for this provider -> auto-link.
-    AutoLink { user_id: uuid::Uuid },
-    /// Email is not verified or provider does not trust email verification.
+    /// Email matched but no existing link — manual linking required.
     EmailNotVerified,
     /// New user created with link.
     NewUser(uuid::Uuid),
@@ -80,7 +78,6 @@ pub struct OidcUserParams<'a, C: ConnectionTrait> {
     pub last_name: Option<&'a str>,
     pub auto_create: bool,
     pub email_verified: Option<bool>,
-    pub provider_trusts_email: bool,
 }
 
 /// Resolve an OIDC-authenticated user.
@@ -91,7 +88,7 @@ pub struct OidcUserParams<'a, C: ConnectionTrait> {
 ///    a. Deactivated -> `Deactivated`.
 ///    b. Has link with another active, non-deleted provider -> `LinkViaOidcRequired`.
 ///    c. Has password_hash -> `LinkViaPasswordRequired`.
-///    d. Otherwise -> `AutoLink`.
+///    d. Otherwise -> `EmailNotVerified` (manual linking required).
 /// 3. Not found: auto_create -> create user + link -> `NewUser`. Else -> `NotAllowed`.
 pub async fn resolve_oidc_user<C: ConnectionTrait>(
     params: OidcUserParams<'_, C>,
@@ -105,8 +102,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
         first_name,
         last_name,
         auto_create,
-        email_verified,
-        provider_trusts_email,
+        email_verified: _,
     } = params;
     // 1. Check for existing link
     let existing_link = UserOidcLink::find()
@@ -170,14 +166,9 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
             });
         }
 
-        // 2d. Auto-link (only if email is verified and provider is trusted)
-        if !provider_trusts_email || email_verified != Some(true) {
-            return Ok(OidcUserResolution::EmailNotVerified);
-        }
-
-        return Ok(OidcUserResolution::AutoLink {
-            user_id: found_user.id,
-        });
+        // 2d. No existing link for this provider — manual linking required.
+        // Auto-linking by email is intentionally not supported.
+        return Ok(OidcUserResolution::EmailNotVerified);
     }
 
     // 3. Not found

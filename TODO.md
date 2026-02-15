@@ -248,7 +248,7 @@ Main functionality that delivers the core value proposition.
   - [x] External base URL resolution for OIDC/device auth redirects
   - [x] Agent-id-only lookup when cert serial unavailable
   - [x] Deployment guides for Traefik, Caddy, Nginx, NPM, Envoy, HAProxy
-- [x] SIGHUP support for graceful restart (agent exits cleanly for external restart)
+- [x] SIGHUP support for graceful restart (agent and MQTT service exit cleanly for external restart)
 - [ ] SIGHUP support for graceful reloading (controller)
   - [ ] All possible settings are reloaded
   - [ ] Agents should not be disconnected during reload (but there should be a "please reconnect" message)

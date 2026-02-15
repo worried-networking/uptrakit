@@ -431,7 +431,6 @@ pub async fn oidc_callback(
         last_name: last_name.as_deref(),
         auto_create: provider.auto_create_users,
         email_verified,
-        provider_trusts_email: provider.email_verified_trusted,
     })
     .await
     {
@@ -509,34 +508,6 @@ pub async fn oidc_callback(
             }
 
             // Sync roles
-            let _ = sync_oidc_roles(
-                &txn,
-                state.default_tenant_id,
-                user_id,
-                &provider,
-                &additional_claims,
-            )
-            .await;
-
-            if let Err(e) = txn.commit().await {
-                tracing::error!("Failed to commit OIDC callback transaction: {e}");
-                return Redirect::to("/login?error=oidc_internal_error").into_response();
-            }
-            create_oidc_exchange_and_redirect(&state, user_id, flow.provider_id).await
-        }
-        OidcUserResolution::AutoLink { user_id } => {
-            // Auto-link and create session
-            let link = user_oidc_link::ActiveModel {
-                id: Set(generate_uuid()),
-                user_id: Set(user_id),
-                provider_id: Set(flow.provider_id),
-                oidc_subject: Set(sub),
-                linked_at: Set(OffsetDateTime::now_utc()),
-            };
-            if let Err(e) = link.insert(&txn).await {
-                tracing::error!("Failed to auto-link OIDC account: {e}");
-                return Redirect::to("/login?error=oidc_link_failed").into_response();
-            }
             let _ = sync_oidc_roles(
                 &txn,
                 state.default_tenant_id,

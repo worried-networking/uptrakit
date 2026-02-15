@@ -10,7 +10,7 @@ use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
 
-pub use uptrakit_web_api_types::system_alerts::{SystemAlert, SystemAlertsResponse};
+pub use uptrakit_web_api_types::system_alerts::{AlertSeverity, SystemAlert, SystemAlertsResponse};
 
 /// Get system alerts for the admin dashboard.
 #[utoipa::path(
@@ -42,7 +42,7 @@ pub async fn get_system_alerts(
         if days_until_expiry <= 183 {
             alerts.push(SystemAlert {
                 id: "ca_expiring".to_string(),
-                severity: "warning".to_string(),
+                severity: AlertSeverity::Warning,
                 title: "CA Certificate Expiring".to_string(),
                 message: format!(
                     "The internal CA certificate expires in {} days. \
@@ -70,7 +70,7 @@ pub async fn get_system_alerts(
         if signed_by_trusted && !signed_by_active {
             alerts.push(SystemAlert {
                 id: "server_cert_old_ca".to_string(),
-                severity: "info".to_string(),
+                severity: AlertSeverity::Info,
                 title: "Server Certificate Under Non-Active CA".to_string(),
                 message: "The HTTPS server certificate was signed by a non-active CA. \
                           Consider renewing it to use the current active CA."
@@ -85,7 +85,7 @@ pub async fn get_system_alerts(
         if days_until_expiry <= 30 {
             alerts.push(SystemAlert {
                 id: "server_cert_expiring".to_string(),
-                severity: "warning".to_string(),
+                severity: AlertSeverity::Warning,
                 title: "Server Certificate Expiring".to_string(),
                 message: format!(
                     "The HTTPS server certificate expires in {} days. \

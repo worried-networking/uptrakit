@@ -146,7 +146,6 @@ export interface OidcProviderResponse {
 	has_client_secret: boolean;
 	scopes: string;
 	auto_create_users: boolean;
-	email_verified_trusted: boolean;
 	role_claim_path: string | null;
 	role_mapping: Record<string, string>;
 	is_active: boolean;
@@ -163,14 +162,13 @@ export interface CreateOidcProviderRequest {
 	logo_url?: string;
 	scopes?: string;
 	auto_create_users?: boolean;
-	email_verified_trusted?: boolean;
 	role_claim_path?: string;
 	role_mapping?: Record<string, string>;
 }
 
 export interface SystemAlert {
 	id: string;
-	severity: string;
+	severity: 'info' | 'warning' | 'error' | 'critical';
 	title: string;
 	message: string;
 	action?: string;
@@ -330,7 +328,6 @@ export interface UpdateOidcProviderRequest {
 	client_secret?: string;
 	scopes?: string;
 	auto_create_users?: boolean;
-	email_verified_trusted?: boolean;
 	role_claim_path?: string;
 	role_mapping?: Record<string, string>;
 }

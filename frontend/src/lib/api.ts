@@ -273,12 +273,19 @@ export async function oidcExchange(code: string): Promise<AuthResponse> {
 	return res.json();
 }
 
-export function getServices(status?: string, page?: number, perPage?: number): Promise<PaginatedResponse<ServiceResponse>> {
+export function getServices(options?: {
+	type?: string;
+	status?: string;
+	page?: number;
+	perPage?: number;
+}): Promise<PaginatedResponse<ServiceResponse>> {
 	const params = new URLSearchParams();
-	if (status) params.set('status', status);
-	if (page != null) params.set('page', String(page));
-	if (perPage != null) params.set('per_page', String(perPage));
-	return request(`/services?${params.toString()}`);
+	if (options?.type) params.set('type', options.type);
+	if (options?.status) params.set('status', options.status);
+	if (options?.page != null) params.set('page', String(options.page));
+	if (options?.perPage != null) params.set('per_page', String(options.perPage));
+	const query = params.toString();
+	return request(`/services${query ? `?${query}` : ''}`);
 }
 
 export function approveService(id: string): Promise<ServiceResponse> {

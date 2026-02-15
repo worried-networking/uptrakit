@@ -50,6 +50,9 @@ pub use crate::settings::RegistrationSettingsResponse;
 pub use crate::settings_mqtt::MqttClientConnectionStatus;
 pub use crate::mqtt_transport::MqttTransport;
 
+// ── System alerts ────────────────────────────────────────────────────
+pub use crate::system_alerts::AlertSeverity;
+
 // ── Common ───────────────────────────────────────────────────────────
 pub use crate::error::ErrorResponse;
 pub use crate::pagination::{PaginatedResponse, PaginationParams};

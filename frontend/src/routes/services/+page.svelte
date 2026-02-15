@@ -25,10 +25,6 @@
 
 	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
 
-	const filteredServices = $derived(
-		typeFilter === 'all' ? services : services.filter((service) => service.service_type === typeFilter)
-	);
-
 	onMount(() => loadServices(1));
 
 	$effect(() => {
@@ -39,7 +35,10 @@
 		try {
 			error = null;
 			// Pass typeFilter to getServices if it's not 'all'
-			const result = await getServices(typeFilter === 'all' ? undefined : typeFilter, page);
+			const result = await getServices({
+				type: typeFilter === 'all' ? undefined : typeFilter,
+				page
+			});
 			services = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
@@ -199,7 +198,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each filteredServices as service (service.id)}
+				{#each services as service (service.id)}
 					<tr>
 						<td>{service.friendly_name}</td>
 						<td>

@@ -177,6 +177,10 @@ async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_ser
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .map_err(|e| report!(uptrakit_service_sdk::EnrollmentError::Io(e)))?;
 
+    #[cfg(unix)]
+    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        .map_err(|e| report!(uptrakit_service_sdk::EnrollmentError::Io(e)))?;
+
     let outcome = loop {
         tokio::select! {
             biased;
@@ -274,7 +278,7 @@ async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_ser
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received SIGINT, initiating graceful shutdown");
-                break handle_graceful_shutdown(&mut conn, tenant_mgr).await;
+                break handle_graceful_shutdown(&mut conn, tenant_mgr, DisconnectReason::Shutdown, LoopOutcome::Shutdown).await;
             }
             _ = async {
                 #[cfg(unix)]
@@ -287,7 +291,20 @@ async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_ser
                 }
             } => {
                 tracing::info!("received SIGTERM, initiating graceful shutdown");
-                break handle_graceful_shutdown(&mut conn, tenant_mgr).await;
+                break handle_graceful_shutdown(&mut conn, tenant_mgr, DisconnectReason::Shutdown, LoopOutcome::Shutdown).await;
+            }
+            _ = async {
+                #[cfg(unix)]
+                {
+                    sighup.recv().await;
+                }
+                #[cfg(not(unix))]
+                {
+                    futures_util::future::pending::<()>().await;
+                }
+            } => {
+                tracing::info!("received SIGHUP, initiating graceful restart");
+                break handle_graceful_shutdown(&mut conn, tenant_mgr, DisconnectReason::Restart, LoopOutcome::Restart).await;
             }
         }
     };
@@ -298,15 +315,17 @@ async fn run_mqtt_authenticated_loop(params: MqttLoopParams<'_>) -> uptrakit_ser
     Ok(outcome)
 }
 
-/// Handle graceful shutdown: send Disconnecting message with active MQTT client list.
+/// Handle graceful shutdown or restart: send Disconnecting message with active MQTT client list.
 async fn handle_graceful_shutdown(
     conn: &mut ControllerConnection,
     tenant_mgr: &mut TenantManager,
+    reason: DisconnectReason,
+    outcome: LoopOutcome,
 ) -> LoopOutcome {
     // Notify controller with active MQTT client list
     let active = tenant_mgr.active_mqtt_client_ids();
     conn.send_best_effort(ServiceMessage::Disconnecting(DisconnectingPayload {
-        reason: DisconnectReason::Shutdown,
+        reason,
         active_mqtt_clients: active,
     }))
     .await;
@@ -315,5 +334,5 @@ async fn handle_graceful_shutdown(
     tenant_mgr.shutdown_all().await;
     tracing::info!("shutdown complete");
 
-    LoopOutcome::Shutdown
+    outcome
 }

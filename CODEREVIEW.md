@@ -173,8 +173,8 @@ enum + static registry)
 |---|---|---|
 | Critical | 1 (1 fixed) | ~~Type duplication across crates~~, closed provider system |
 | Major | 4 (3 fixed) | No service lifecycle abstraction, ~~no prelude~~, AppState construction, ~~overloaded SDK error types~~, monolithic controller run() |
-| Minor | ~17 (8 fixed) | ~~Closed enums without `#[non_exhaustive]`~~, duplicated code, hardcoded values, ~~inconsistent `FromStr`/`Display`~~, ~~string-typed fields~~, ~~duplicated secret masking~~ |
-| Info | ~15 | Missing derives, documentation gaps, ergonomic suggestions |
+| Minor | ~17 (9 fixed) | ~~Closed enums without `#[non_exhaustive]`~~, duplicated code, hardcoded values, ~~inconsistent `FromStr`/`Display`~~, ~~string-typed fields~~, ~~duplicated secret masking~~ |
+| Info | ~15 (1 fixed) | Missing derives, documentation gaps, ergonomic suggestions |
 
 ## Priority Recommendations
 
@@ -204,7 +204,7 @@ enum + static registry)
 | shared/types | [CODEREVIEW.md](crates/shared/types/CODEREVIEW.md) | ~~Closed `ProviderType` enum (TYP-03)~~ FIXED |
 | shared/macros | [CODEREVIEW.md](crates/shared/macros/CODEREVIEW.md) | Missing rootcause documentation (MAC-03) |
 | shared/wire | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) | ~~Type duplication (WIRE-04)~~ FIXED, ~~no `#[non_exhaustive]` (WIRE-05)~~ FIXED |
-| shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | ~~No prelude (WAT-06)~~ FIXED, ~~type duplication (WAT-07)~~ FIXED, ~~string fields (WAT-02, WAT-08, WAT-09)~~ FIXED |
+| shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | ~~No prelude (WAT-06)~~ FIXED, ~~type duplication (WAT-07)~~ FIXED, ~~string fields (WAT-02, WAT-03, WAT-08, WAT-09)~~ FIXED |
 | shared/db | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) | ~~Third copy of ServiceType (DB-05)~~ partially FIXED |
 | shared/command | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) | ~~ShellType duplication (CMD-03)~~ FIXED |
 | shared/directories | [CODEREVIEW.md](crates/shared/directories/CODEREVIEW.md) | No extensibility issues |
@@ -220,5 +220,5 @@ enum + static registry)
 | ui/cli | [CODEREVIEW.md](crates/ui/cli/CODEREVIEW.md) | Proves web-api-types is sufficient for clients |
 | core/agent | [CODEREVIEW.md](crates/core/agent/CODEREVIEW.md) | Enrollment boilerplate (AGENT-02) |
 | core/controller | [CODEREVIEW.md](crates/core/controller/CODEREVIEW.md) | Monolithic run() function |
-| core/mqtt | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) | Best service reference; enrollment boilerplate (MQTT-05); ~~MQTT-01, MQTT-02~~ FIXED |
-| frontend | [CODEREVIEW.md](frontend/CODEREVIEW.md) | (Separate frontend review) |
+| core/mqtt | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) | Best service reference; enrollment boilerplate (MQTT-05); ~~MQTT-01, MQTT-02, MQTT-04~~ FIXED |
+| frontend | [CODEREVIEW.md](frontend/CODEREVIEW.md) | ~~SEC-03, HA-03, HA-05, A11Y-01, ARCH-02, ARCH-04~~ FIXED |

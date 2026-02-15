@@ -9,10 +9,6 @@ pub fn default_auto_create() -> bool {
     true
 }
 
-pub fn default_email_verified_trusted() -> bool {
-    false
-}
-
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateOidcProviderRequest {
@@ -26,8 +22,6 @@ pub struct CreateOidcProviderRequest {
     pub scopes: String,
     #[serde(default = "default_auto_create")]
     pub auto_create_users: bool,
-    #[serde(default = "default_email_verified_trusted")]
-    pub email_verified_trusted: bool,
     pub role_claim_path: Option<String>,
     #[serde(default)]
     pub role_mapping: HashMap<String, String>,
@@ -44,7 +38,6 @@ pub struct UpdateOidcProviderRequest {
     pub client_secret: Option<String>,
     pub scopes: Option<String>,
     pub auto_create_users: Option<bool>,
-    pub email_verified_trusted: Option<bool>,
     pub role_claim_path: Option<String>,
     pub role_mapping: Option<HashMap<String, String>>,
 }
@@ -61,7 +54,6 @@ pub struct OidcProviderResponse {
     pub has_client_secret: bool,
     pub scopes: String,
     pub auto_create_users: bool,
-    pub email_verified_trusted: bool,
     pub role_claim_path: Option<String>,
     pub role_mapping: HashMap<String, String>,
     pub is_active: bool,

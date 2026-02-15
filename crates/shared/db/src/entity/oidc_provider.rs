@@ -71,7 +71,6 @@ pub struct Model {
     pub client_secret: crate::crypto::EncryptedString,
     pub scopes: String,
     pub auto_create_users: bool,
-    pub email_verified_trusted: bool,
     pub role_claim_path: Option<String>,
     #[sea_orm(column_type = "Json")]
     pub role_mapping: RoleMapping,

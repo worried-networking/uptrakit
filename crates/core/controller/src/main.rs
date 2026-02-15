@@ -450,7 +450,6 @@ async fn run(args: cli::Args) -> Result<()> {
                         client_secret: Set(encrypted_secret),
                         scopes: Set(scopes.to_string()),
                         auto_create_users: Set(true),
-                        email_verified_trusted: Set(false),
                         role_claim_path: Set(None),
                         role_mapping: Set(
                             uptrakit_shared_db::entity::oidc_provider::RoleMapping::default(),

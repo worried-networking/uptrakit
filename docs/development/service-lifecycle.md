@@ -55,7 +55,7 @@ Returns a `LoopOutcome`:
 | `Shutdown` | SIGINT/SIGTERM received | Exit the lifecycle cleanly |
 | `Reconnect` | Certificate rotated | Reconnect immediately (reset backoff) |
 | `Disconnected` | Connection closed | Reconnect with exponential backoff |
-| `Restart` | Service-specific restart (e.g. agent SIGHUP) | Exit the lifecycle |
+| `Restart` | Graceful restart via SIGHUP (agent and MQTT) | Exit the lifecycle |
 
 The return type uses a boxed future (`Pin<Box<dyn Future + Send + 'a>>`) to avoid higher-ranked lifetime
 issues that arise with `impl Future` in trait methods when the implementation captures references with

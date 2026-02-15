@@ -47,18 +47,11 @@ SEC-01) will execute.
 **Recommendation:** After fixing SEC-01, consider moving the theme script to a
 separate file and using a nonce or hash-based CSP instead of `unsafe-inline`.
 
-### SEC-03: OIDC authorize URL redirect not validated (LOW)
+### ~~SEC-03: OIDC authorize URL redirect not validated (LOW)~~ **FIXED**
 
-**File:** `src/lib/auth.ts:63`
-
-`handleOidcLogin` sets `window.location.href = authorize_url` where
-`authorize_url` comes from the backend API response. If the backend is
-compromised or a man-in-the-middle attack occurs, this could redirect to a
-malicious URL.
-
-**Recommendation:** Validate that `authorize_url` is an HTTPS URL before
-redirecting. This is a defense-in-depth measure since the API should already be
-trusted.
+**Status:** Resolved. `handleOidcLogin()` now validates that `authorize_url` starts with `https://`
+before redirecting. Non-HTTPS URLs throw an error. This mirrors the existing `isValidLogoUrl()`
+defense-in-depth pattern in `utils.ts`.
 
 ---
 
@@ -82,17 +75,12 @@ exponential backoff.
 exponential backoff (e.g. 3 retries with 1s, 2s, 4s delays). Non-idempotent
 requests (POST/PUT/DELETE) should not auto-retry.
 
-### HA-03: Network errors surface as unfriendly messages (MEDIUM)
+### ~~HA-03: Network errors surface as unfriendly messages (MEDIUM)~~ **FIXED**
 
-**File:** `src/lib/api.ts:83-129`
-
-When `fetch()` throws (network offline, DNS failure, TLS error), the error
-propagates as `TypeError: Failed to fetch`. Page-level catch blocks display this
-raw message to the user (e.g. `src/routes/hosts/+page.svelte:33`).
-
-**Recommendation:** Catch `TypeError` in `authenticatedFetch` or `request` and
-translate it into a user-friendly message like "Unable to connect to the server.
-Check your network connection."
+**Status:** Resolved. Both `request()` and `requestVoid()` now catch `TypeError` (network errors)
+and `DOMException` (timeout/abort) and translate them into user-friendly messages before propagating.
+Network errors surface as "Network error: Unable to connect to the server. Check your network
+connection." and timeouts as "Request timed out. Please try again."
 
 ### ~~HA-04: Token refresh treats all failures as auth expiry (MEDIUM)~~ **FIXED**
 
@@ -108,19 +96,10 @@ HTTP status code. The catch block in `authenticatedFetch` distinguishes:
 - `RefreshError` with status >= 500 — surfaces a server error, keeps session
 - All other failures (4xx auth errors) — clears token and redirects to login
 
-### HA-05: Inconsistent parallel-request error handling (MEDIUM)
+### ~~HA-05: Inconsistent parallel-request error handling (MEDIUM)~~ **FIXED**
 
-**Files:**
-- `src/routes/software/+page.svelte:64` - uses `Promise.all`
-- `src/routes/settings/+page.svelte:78` - uses `Promise.allSettled`
-- `src/routes/settings/global/+page.svelte:45` - uses `Promise.allSettled`
-
-The software page uses `Promise.all`, so a failure in either
-`getSoftwareItems()` or `getProviderConfigs()` causes both to fail. The settings
-pages correctly use `Promise.allSettled` for partial failure tolerance.
-
-**Recommendation:** Use `Promise.allSettled` consistently for pages that load
-multiple independent resources. Display which sections loaded and which failed.
+**Status:** Resolved. The software page now uses `Promise.allSettled()` for its parallel requests
+(`getSoftwareItems()` and `getProviderConfigs()`), matching the pattern used by the settings pages.
 
 ### HA-06: No offline/online detection (LOW)
 
@@ -195,21 +174,12 @@ data as props to each settings component. Each component manages its own
 internal state from the props it receives. This eliminates the need for
 `bind:this`, the `refsReady` flag, and the `$state(undefined!)` workaround.
 
-### ARCH-02: Missing `email_verified_trusted` toggle in OIDC form (MEDIUM)
+### ~~ARCH-02: Missing `email_verified_trusted` toggle in OIDC form (MEDIUM)~~ **FIXED**
 
-**File:** `src/routes/settings/OidcProvidersSettings.svelte:30-41`, `103-154`
-
-The `OidcProviderResponse` type includes `email_verified_trusted` (defined in
-`src/lib/types.ts:149`), and both `CreateOidcProviderRequest` (line 166) and
-`UpdateOidcProviderRequest` (line 333) accept it. However, the OIDC
-create/edit form does not include a checkbox for this field, and
-`saveOidcProvider()` never sends it.
-
-This means admins cannot configure whether to trust the provider's email
-verification claim, leaving it at the server default.
-
-**Recommendation:** Add an `email_verified_trusted` checkbox to the OIDC form
-and include it in both create and update payloads.
+**Status:** Resolved by removing the `email_verified_trusted` feature entirely across the full
+stack (DB entity, migration, backend types, frontend types, OIDC resolution logic). Auto-linking
+by email is no longer supported — users must be manually linked to OIDC accounts. The `AutoLink`
+resolution variant has been removed.
 
 ### ARCH-03: Software page hardcodes `perPage=500` for provider configs (LOW)
 
@@ -223,19 +193,12 @@ configs exist, some will be missing from the dropdown.
 dropdown, or document the hard limit. For most deployments this is acceptable,
 but the magic number should be extracted to a named constant.
 
-### ARCH-04: Client-side filtering with server-side pagination (MEDIUM)
+### ~~ARCH-04: Client-side filtering with server-side pagination (MEDIUM)~~ **FIXED**
 
-**File:** `src/routes/services/+page.svelte:28-29`, `34-44`
-
-The services page applies a `typeFilter` client-side (line 28-29) but loads data
-with server-side pagination (line 37). This means filtering by "Agents" or "MQTT
-Services" only filters the current page, not all services. A page with 20
-services might show 5 agents after filtering, while agents on other pages are
-invisible.
-
-**Recommendation:** Pass the `status` or type filter to the `getServices()` API
-call so the server paginates filtered results. If the API does not support type
-filtering, add it.
+**Status:** Resolved. `getServices()` now accepts an options object with `type`, `status`, `page`,
+and `perPage` parameters. The services page passes `typeFilter` as the `type` parameter so the
+server paginates filtered results. The redundant client-side `filteredServices` derived has been
+removed.
 
 ### ARCH-05: No route-level error boundaries (LOW)
 
@@ -313,17 +276,11 @@ code. If they are planned for future use, add a comment indicating that.
 
 ## 5. Coding Standards and Accessibility
 
-### A11Y-01: Action buttons lack `aria-label` (MEDIUM)
+### ~~A11Y-01: Action buttons lack `aria-label` (MEDIUM)~~ **FIXED**
 
-**Files:**
-- `src/routes/hosts/+page.svelte:156-162`
-- `src/routes/services/+page.svelte:221-228`
-
-The ellipsis action buttons (`&#8943;` / `⋯`) have no `aria-label`, so screen
-readers announce them as "button" with no context about their purpose.
-
-**Recommendation:** Add `aria-label="Actions for {entity.friendly_name}"` and
-`aria-haspopup="menu"` to each ellipsis button.
+**Status:** Resolved. Both the hosts page and services page action buttons now have
+`aria-label="Actions for {entity.friendly_name}"` attributes, providing screen readers with
+meaningful context.
 
 ### A11Y-02: Toast notifications lack ARIA live region (LOW)
 
@@ -398,25 +355,26 @@ settings pages do not.
 | ID | Finding | Effort |
 |--------|---------------------------------------------|--------|
 | ~~SEC-01~~ | ~~Fix XSS in ConfirmDialog `{@html}`~~ **FIXED** | ~~Small~~ |
+| ~~SEC-03~~ | ~~Validate OIDC authorize URL before redirect~~ **FIXED** | ~~Small~~ |
 
 ### Priority 2 - Backend Resilience (fix for production readiness)
 
 | ID | Finding | Effort |
 |--------|---------------------------------------------|---------|
 | ~~HA-01~~ | ~~Add request timeouts via AbortController~~ **FIXED** | ~~Medium~~ |
-| HA-03 | Translate network errors to friendly messages| Small |
+| ~~HA-03~~ | ~~Translate network errors to friendly messages~~ **FIXED** | ~~Small~~ |
 | ~~HA-04~~ | ~~Distinguish network vs auth failures on refresh~~ **FIXED** | ~~Medium~~ |
-| HA-05 | Use `Promise.allSettled` consistently | Small |
-| ARCH-04| Pass type filter to server in services page | Small |
+| ~~HA-05~~ | ~~Use `Promise.allSettled` consistently~~ **FIXED** | ~~Small~~ |
+| ~~ARCH-04~~ | ~~Pass type filter to server in services page~~ **FIXED** | ~~Small~~ |
 
 ### Priority 3 - Architecture and Quality (improve maintainability)
 
 | ID | Finding | Effort |
 |---------|----------------------------------------------|--------|
 | ARCH-01 | Replace `bind:this`+`load()` with props-down | Medium |
-| ARCH-02 | Add `email_verified_trusted` to OIDC form | Small |
+| ~~ARCH-02~~ | ~~Remove `email_verified_trusted` feature~~ **FIXED** | ~~Small~~ |
 | CQ-01 | Add tests for api.ts and utils.ts | Medium |
-| A11Y-01 | Add `aria-label` to action buttons | Small |
+| ~~A11Y-01~~ | ~~Add `aria-label` to action buttons~~ **FIXED** | ~~Small~~ |
 | ARCH-05 | Add `+error.svelte` error boundary | Small |
 
 ### Priority 4 - Nice to Have (polish)
