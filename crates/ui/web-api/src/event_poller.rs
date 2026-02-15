@@ -185,15 +185,6 @@ impl EventPoller {
         new_cursor
     }
 
-    /// Parse a `target_service_type` string from the DB into a wire `ServiceType`.
-    fn parse_service_type(s: &str) -> Option<uptrakit_internal_wire::ServiceType> {
-        let result = uptrakit_internal_wire::ServiceType::parse(s);
-        if result.is_none() {
-            tracing::warn!(value = %s, "unknown target_service_type in outbox event");
-        }
-        result
-    }
-
     /// Deliver a single event to the appropriate local service(s).
     ///
     /// Returns `true` if the message was delivered (or the target is not on
@@ -209,10 +200,21 @@ impl EventPoller {
             return self.deliver_controller_event(msg).await;
         }
 
-        match (
-            target_service_id,
-            target_service_type.and_then(Self::parse_service_type),
-        ) {
+        let parsed_service_type =
+            target_service_type.and_then(|service_type| match service_type
+                .parse::<uptrakit_internal_wire::ServiceType>(
+            ) {
+                Ok(parsed) => Some(parsed),
+                Err(_) => {
+                    tracing::warn!(
+                        value = %service_type,
+                        "unknown target_service_type in outbox event"
+                    );
+                    None
+                }
+            });
+
+        match (target_service_id, parsed_service_type) {
             // Targeted to a specific service
             (Some(id), _) => {
                 if self.registry.is_connected(&id).await {
@@ -236,7 +238,10 @@ impl EventPoller {
             // Targeted to SSH agent services
             (None, Some(uptrakit_internal_wire::ServiceType::SshAgent)) => {
                 self.registry
-                    .broadcast_by_type(uptrakit_shared_db::entity::service::ServiceType::SshAgent, msg)
+                    .broadcast_by_type(
+                        uptrakit_shared_db::entity::service::ServiceType::SshAgent,
+                        msg,
+                    )
                     .await;
                 true
             }

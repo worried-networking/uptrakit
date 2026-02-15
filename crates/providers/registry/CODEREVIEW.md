@@ -7,7 +7,7 @@ Provider dispatch and validation crate (~350 lines across 3 source files) acting
 ## Architecture
 
 - **Module structure**: `lib.rs` re-exports from `registry.rs` and `error.rs`.
-- **Public API surface**: `ProviderRegistry` struct with `create_provider()`, `validate_config()`, `validate_config_str()`, `mask_config_secrets()`, `mask_config_secrets_str()`, `restore_config_secrets()`, `restore_config_secrets_str()`, `parse_provider_type()`.
+- **Public API surface**: `ProviderRegistry` struct with `create_provider()`, `validate_config()`, `validate_config_str()`, `mask_config_secrets()`, `mask_config_secrets_str()`, `restore_config_secrets()`, `restore_config_secrets_str()`.
 - **Dependency choices**: Direct dependencies on all four provider crates (`github`, `docker-registry`, `proxmox-helper-scripts`, `homebrew`), plus `uptrakit-provider-core` and `uptrakit-shared-types`.
 - **Layering**: Consumed by `web-api` and `agent`. Acts as the single entry point for all provider operations.
 
@@ -41,7 +41,7 @@ Provider dispatch and validation crate (~350 lines across 3 source files) acting
 | PREG-01 | Critical | Extensibility | The registry is completely closed to external providers. `create_provider()`, `validate_config()`, `mask_config_secrets()`, and `restore_config_secrets()` all use `match` on the closed `ProviderType` enum. An external developer cannot register a new provider without forking this crate and modifying `uptrakit-shared-types::ProviderType`. | `src/registry.rs` |
 | PREG-02 | Major | Extensibility | Hard compile-time dependency on all provider crates. Every provider is unconditionally compiled into the registry. There are no Cargo feature gates to exclude unneeded providers, and no way to compile a minimal binary. Adding a provider with heavy dependencies (e.g., a cloud SDK) inflates all binaries. | `Cargo.toml:13-16` |
 | PREG-03 | Major | Extensibility | `ProviderRegistry` is a unit struct with all static methods -- there is no instance-based registry. Providers cannot be registered at runtime. To support external providers, the registry would need a `HashMap<String, Box<dyn ProviderFactory>>` and a `register()` method. | `src/registry.rs:18` |
-| ~~PREG-04~~ | ~~Minor~~ | ~~Code Quality~~ | ~~`parse_provider_type()` uses serde JSON hack as a parser.~~ **FIXED.** `ProviderType` now implements `FromStr`; `parse_provider_type()` and `validate_config_str()` use `str::parse()`. | `src/registry.rs` |
+| ~~PREG-04~~ | ~~Minor~~ | ~~Code Quality~~ | ~~Provider-type parsing used a serde JSON hack.~~ **FIXED.** `ProviderType` implements `FromStr`, and string-entry APIs use `str::parse()` directly. | `src/registry.rs` |
 | ~~PREG-05~~ | ~~Minor~~ | ~~Code Quality~~ | ~~Secret masking/restoration logic is duplicated across the `match` arms.~~ **FIXED.** Extracted `SecretMasking` trait in `provider-core` with default no-op implementations. All 4 config types implement the trait. Registry uses generic `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` helpers. | `src/registry.rs` |
 
 ## Recommendations

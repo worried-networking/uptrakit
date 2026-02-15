@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// MQTT connection transport protocol.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -6,10 +8,7 @@ use serde::{Deserialize, Serialize};
     feature = "sea-orm",
     derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
 )]
-#[cfg_attr(
-    feature = "sea-orm",
-    sea_orm(rs_type = "String", db_type = "Text")
-)]
+#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum MqttTransport {
@@ -28,15 +27,6 @@ impl MqttTransport {
         match self {
             Self::Tcp => "tcp",
             Self::Tls => "tls",
-        }
-    }
-
-    /// Parse from a DB / wire string.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "tcp" => Some(Self::Tcp),
-            "tls" => Some(Self::Tls),
-            _ => None,
         }
     }
 
@@ -71,16 +61,32 @@ impl MqttTransport {
     }
 }
 
-impl std::str::FromStr for MqttTransport {
-    type Err = String;
+/// Error returned when parsing an invalid MQTT transport string.
+#[derive(Debug)]
+pub struct ParseMqttTransportError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown transport: {s}"))
+impl fmt::Display for ParseMqttTransportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid mqtt transport value")
     }
 }
 
-impl std::fmt::Display for MqttTransport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl std::error::Error for ParseMqttTransportError {}
+
+impl FromStr for MqttTransport {
+    type Err = ParseMqttTransportError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "tcp" => Ok(Self::Tcp),
+            "tls" => Ok(Self::Tls),
+            _ => Err(ParseMqttTransportError),
+        }
+    }
+}
+
+impl fmt::Display for MqttTransport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
@@ -93,8 +99,8 @@ mod tests {
     fn round_trip_all_variants() {
         for transport in [MqttTransport::Tcp, MqttTransport::Tls] {
             let s = transport.as_str();
-            let parsed = MqttTransport::parse(s);
-            assert_eq!(parsed, Some(transport), "round-trip failed for {s}");
+            let parsed: MqttTransport = s.parse().unwrap();
+            assert_eq!(parsed, transport, "round-trip failed for {s}");
         }
     }
 
@@ -130,13 +136,6 @@ mod tests {
     fn tls_flags() {
         assert!(!MqttTransport::Tcp.requires_tls());
         assert!(MqttTransport::Tls.requires_tls());
-    }
-
-    #[test]
-    fn parse_unknown_returns_none() {
-        assert_eq!(MqttTransport::parse("unknown"), None);
-        assert_eq!(MqttTransport::parse(""), None);
-        assert_eq!(MqttTransport::parse("TCP"), None);
     }
 
     #[test]

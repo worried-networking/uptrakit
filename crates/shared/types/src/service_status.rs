@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -8,10 +9,7 @@ use serde::{Deserialize, Serialize};
     feature = "sea-orm",
     derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
 )]
-#[cfg_attr(
-    feature = "sea-orm",
-    sea_orm(rs_type = "String", db_type = "Text")
-)]
+#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceStatus {
@@ -41,17 +39,6 @@ impl ServiceStatus {
             Self::Deactivated => "deactivated",
         }
     }
-
-    /// Parses a string into a `ServiceStatus` variant.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(Self::Pending),
-            "approved" => Some(Self::Approved),
-            "rejected" => Some(Self::Rejected),
-            "deactivated" => Some(Self::Deactivated),
-            _ => None,
-        }
-    }
 }
 
 /// Error returned when parsing an invalid service status string.
@@ -66,11 +53,17 @@ impl fmt::Display for ParseServiceStatusError {
 
 impl std::error::Error for ParseServiceStatusError {}
 
-impl std::str::FromStr for ServiceStatus {
+impl FromStr for ServiceStatus {
     type Err = ParseServiceStatusError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or(ParseServiceStatusError)
+        match s {
+            "pending" => Ok(Self::Pending),
+            "approved" => Ok(Self::Approved),
+            "rejected" => Ok(Self::Rejected),
+            "deactivated" => Ok(Self::Deactivated),
+            _ => Err(ParseServiceStatusError),
+        }
     }
 }
 
@@ -105,26 +98,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_round_trip() {
-        for variant in [
-            ServiceStatus::Pending,
-            ServiceStatus::Approved,
-            ServiceStatus::Rejected,
-            ServiceStatus::Deactivated,
-        ] {
-            let s = variant.as_str();
-            let parsed = ServiceStatus::parse(s);
-            assert_eq!(parsed, Some(variant));
-        }
-    }
-
-    #[test]
-    fn parse_unknown_returns_none() {
-        assert_eq!(ServiceStatus::parse("unknown"), None);
-        assert_eq!(ServiceStatus::parse(""), None);
-    }
-
-    #[test]
     fn from_str_round_trip() {
         for variant in [
             ServiceStatus::Pending,
@@ -141,5 +114,6 @@ mod tests {
     #[test]
     fn from_str_invalid_returns_err() {
         assert!("unknown".parse::<ServiceStatus>().is_err());
+        assert!("".parse::<ServiceStatus>().is_err());
     }
 }

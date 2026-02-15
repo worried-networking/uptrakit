@@ -88,9 +88,9 @@ impl ProviderRegistry {
                 let provider = HomebrewProvider::new(homebrew_config);
                 Ok(Box::new(provider))
             }
-            _ => Err(report!(RegistryError::UnknownProviderType(
-                format!("{provider_type}")
-            ))),
+            _ => Err(report!(RegistryError::UnknownProviderType(format!(
+                "{provider_type}"
+            )))),
         }
     }
 
@@ -138,9 +138,9 @@ impl ProviderRegistry {
                     .map_err(|e| report!(RegistryError::ConfigValidation(e)))?;
                 Ok(())
             }
-            _ => Err(report!(RegistryError::UnknownProviderType(
-                format!("{provider_type}")
-            ))),
+            _ => Err(report!(RegistryError::UnknownProviderType(format!(
+                "{provider_type}"
+            )))),
         }
     }
 
@@ -190,7 +190,7 @@ impl ProviderRegistry {
         provider_type: &str,
         config: &serde_json::Value,
     ) -> serde_json::Value {
-        let Some(pt) = Self::parse_provider_type(provider_type) else {
+        let Ok(pt) = provider_type.parse::<ProviderType>() else {
             return config.clone();
         };
         Self::mask_config_secrets(pt, config)
@@ -228,23 +228,10 @@ impl ProviderRegistry {
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     ) {
-        let Some(pt) = Self::parse_provider_type(provider_type) else {
+        let Ok(pt) = provider_type.parse::<ProviderType>() else {
             return;
         };
         Self::restore_config_secrets(pt, incoming, existing)
-    }
-
-    /// Parse a provider type string into a `ProviderType` enum.
-    ///
-    /// # Arguments
-    ///
-    /// * `s` - The provider type string
-    ///
-    /// # Returns
-    ///
-    /// `Some(ProviderType)` if the string is valid, or `None` if unknown.
-    pub fn parse_provider_type(s: &str) -> Option<ProviderType> {
-        s.parse().ok()
     }
 }
 
@@ -255,22 +242,22 @@ mod tests {
     #[test]
     fn parse_known_provider_types() {
         assert_eq!(
-            ProviderRegistry::parse_provider_type("github_releases"),
+            "github_releases".parse::<ProviderType>().ok(),
             Some(ProviderType::GithubReleases)
         );
         assert_eq!(
-            ProviderRegistry::parse_provider_type("docker_registry"),
+            "docker_registry".parse::<ProviderType>().ok(),
             Some(ProviderType::DockerRegistry)
         );
         assert_eq!(
-            ProviderRegistry::parse_provider_type("proxmox_helper_scripts"),
+            "proxmox_helper_scripts".parse::<ProviderType>().ok(),
             Some(ProviderType::ProxmoxHelperScripts)
         );
         assert_eq!(
-            ProviderRegistry::parse_provider_type("homebrew"),
+            "homebrew".parse::<ProviderType>().ok(),
             Some(ProviderType::Homebrew)
         );
-        assert!(ProviderRegistry::parse_provider_type("unknown").is_none());
+        assert!("unknown".parse::<ProviderType>().is_err());
     }
 
     #[test]

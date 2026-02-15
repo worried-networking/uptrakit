@@ -31,7 +31,7 @@ The wire crate has several extensibility-related concerns:
 | ID | Title | Severity | Type | File |
 |---|---|---|---|---|
 | ~~[WIRE-01](#wire-01)~~ | ~~No close reason constants defined~~ **FIXED** | ~~High~~ | ~~Actionable~~ | `src/lib.rs` |
-| [WIRE-02](#wire-02) | `HookShell::parse()` duplicates `FromStr` | Low | Actionable | `src/lib.rs` |
+| [WIRE-02](#wire-02) | Duplicate string parsing path for `HookShell` | Low | Actionable | `src/lib.rs` |
 | ~~[WIRE-03](#wire-03)~~ | ~~AsyncAPI `active_mqtt_clients` items typed `string` not `uuid`~~ **FIXED** | ~~Low~~ | ~~Actionable~~ | `asyncapi.yaml` |
 
 ## Details
@@ -45,7 +45,7 @@ sender sites (web-api route handlers) and receiver sites (agent, MQTT) updated t
 
 ### WIRE-02
 
-**`HookShell::parse()` duplicates `FromStr`** -- **RESOLVED**
+**Duplicate `HookShell` string parsing path** -- **RESOLVED**
 
 - **Severity:** Low
 - **Type:** Actionable

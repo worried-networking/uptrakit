@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -8,10 +9,7 @@ use serde::{Deserialize, Serialize};
     feature = "sea-orm",
     derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
 )]
-#[cfg_attr(
-    feature = "sea-orm",
-    sea_orm(rs_type = "String", db_type = "Text")
-)]
+#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceType {
@@ -42,23 +40,30 @@ impl ServiceType {
             Self::SshAgent => "ssh_agent",
         }
     }
+}
 
-    /// Parses a string into a `ServiceType` variant.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "agent" => Some(Self::Agent),
-            "mqtt" => Some(Self::Mqtt),
-            "ssh_agent" => Some(Self::SshAgent),
-            _ => None,
-        }
+/// Error returned when parsing an invalid service type string.
+#[derive(Debug)]
+pub struct ParseServiceTypeError;
+
+impl fmt::Display for ParseServiceTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid service type value")
     }
 }
 
-impl std::str::FromStr for ServiceType {
-    type Err = String;
+impl std::error::Error for ParseServiceTypeError {}
+
+impl FromStr for ServiceType {
+    type Err = ParseServiceTypeError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown service type: {s}"))
+        match s {
+            "agent" => Ok(Self::Agent),
+            "mqtt" => Ok(Self::Mqtt),
+            "ssh_agent" => Ok(Self::SshAgent),
+            _ => Err(ParseServiceTypeError),
+        }
     }
 }
 
@@ -83,21 +88,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_round_trip() {
-        for variant in [ServiceType::Agent, ServiceType::Mqtt, ServiceType::SshAgent] {
-            let s = variant.as_str();
-            let parsed = ServiceType::parse(s);
-            assert_eq!(parsed, Some(variant));
-        }
-    }
-
-    #[test]
-    fn parse_unknown_returns_none() {
-        assert_eq!(ServiceType::parse("unknown"), None);
-        assert_eq!(ServiceType::parse(""), None);
-    }
-
-    #[test]
     fn from_str_round_trip() {
         for variant in [ServiceType::Agent, ServiceType::Mqtt, ServiceType::SshAgent] {
             let s = variant.as_str();
@@ -107,7 +97,8 @@ mod tests {
     }
 
     #[test]
-    fn from_str_unknown_returns_err() {
+    fn from_str_invalid_returns_err() {
         assert!("unknown".parse::<ServiceType>().is_err());
+        assert!("".parse::<ServiceType>().is_err());
     }
 }

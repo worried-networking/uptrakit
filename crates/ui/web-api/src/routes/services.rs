@@ -119,13 +119,13 @@ pub async fn list_services(
         .filter(service::Column::DeactivatedAt.is_null());
 
     if let Some(ref type_filter) = query.r#type
-        && let Some(db_type) = ServiceType::parse(type_filter)
+        && let Ok(db_type) = type_filter.parse::<ServiceType>()
     {
         q = q.filter(service::Column::ServiceType.eq(db_type));
     }
 
     if let Some(ref status_filter) = query.status
-        && let Some(db_status) = ServiceStatus::parse(status_filter)
+        && let Ok(db_status) = status_filter.parse::<ServiceStatus>()
     {
         q = q.filter(service::Column::Status.eq(db_status));
     }

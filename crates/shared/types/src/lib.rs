@@ -1,5 +1,5 @@
-pub mod hex;
 mod device_auth_status;
+pub mod hex;
 mod hook_shell;
 mod mqtt_connection_status;
 mod mqtt_transport;
@@ -11,12 +11,14 @@ mod service_type;
 mod session_token_type;
 
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
-pub use hook_shell::HookShell;
-pub use mqtt_connection_status::{MqttClientConnectionStatus, ParseMqttClientConnectionStatusError};
-pub use mqtt_transport::MqttTransport;
+pub use hook_shell::{HookShell, ParseHookShellError};
+pub use mqtt_connection_status::{
+    MqttClientConnectionStatus, ParseMqttClientConnectionStatusError,
+};
+pub use mqtt_transport::{MqttTransport, ParseMqttTransportError};
 pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
 pub use provider_types::{ParseProviderTypeError, ProviderType, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
-pub use service_type::ServiceType;
+pub use service_type::{ParseServiceTypeError, ServiceType};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};

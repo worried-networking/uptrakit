@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
 /// Shell type for hook execution in update payloads.
 ///
@@ -31,23 +33,30 @@ impl HookShell {
             Self::PowerShell => "powershell",
         }
     }
+}
 
-    /// Parses a string into a `HookShell` variant.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "bash" => Some(Self::Bash),
-            "sh" => Some(Self::Sh),
-            "powershell" => Some(Self::PowerShell),
-            _ => None,
-        }
+/// Error returned when parsing an invalid hook shell string.
+#[derive(Debug)]
+pub struct ParseHookShellError;
+
+impl fmt::Display for ParseHookShellError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid hook shell value")
     }
 }
 
-impl std::str::FromStr for HookShell {
-    type Err = String;
+impl std::error::Error for ParseHookShellError {}
+
+impl FromStr for HookShell {
+    type Err = ParseHookShellError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).ok_or_else(|| format!("unknown shell: {s}"))
+        match s {
+            "bash" => Ok(Self::Bash),
+            "sh" => Ok(Self::Sh),
+            "powershell" => Ok(Self::PowerShell),
+            _ => Err(ParseHookShellError),
+        }
     }
 }
 
@@ -72,21 +81,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_round_trip() {
-        for shell in [HookShell::Bash, HookShell::Sh, HookShell::PowerShell] {
-            let s = shell.as_str();
-            let parsed = HookShell::parse(s);
-            assert_eq!(parsed, Some(shell));
-        }
-    }
-
-    #[test]
-    fn parse_unknown_returns_none() {
-        assert_eq!(HookShell::parse("unknown"), None);
-        assert_eq!(HookShell::parse(""), None);
-    }
-
-    #[test]
     fn from_str_round_trip() {
         for shell in [HookShell::Bash, HookShell::Sh, HookShell::PowerShell] {
             let s = shell.as_str();
@@ -98,6 +92,7 @@ mod tests {
     #[test]
     fn from_str_unknown_returns_err() {
         assert!("zsh".parse::<HookShell>().is_err());
+        assert!("".parse::<HookShell>().is_err());
     }
 
     #[test]

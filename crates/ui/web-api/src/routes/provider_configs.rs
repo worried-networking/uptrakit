@@ -482,11 +482,29 @@ mod tests {
 
     #[test]
     fn parse_known_provider_types() {
-        assert!(ProviderRegistry::parse_provider_type("github_releases").is_some());
-        assert!(ProviderRegistry::parse_provider_type("proxmox_helper_scripts").is_some());
-        assert!(ProviderRegistry::parse_provider_type("docker_registry").is_some());
-        assert!(ProviderRegistry::parse_provider_type("homebrew").is_some());
-        assert!(ProviderRegistry::parse_provider_type("unknown").is_none());
+        let github_config = serde_json::json!({
+            "owner": "octocat",
+            "repo": "hello-world"
+        });
+        assert!(ProviderRegistry::validate_config_str("github_releases", &github_config).is_ok());
+
+        let proxmox_config = serde_json::json!({
+            "script_url": "https://example.com/update.sh"
+        });
+        assert!(
+            ProviderRegistry::validate_config_str("proxmox_helper_scripts", &proxmox_config)
+                .is_ok()
+        );
+
+        let docker_config = serde_json::json!({
+            "image": "nginx"
+        });
+        assert!(ProviderRegistry::validate_config_str("docker_registry", &docker_config).is_ok());
+
+        let homebrew_config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config_str("homebrew", &homebrew_config).is_ok());
+
+        assert!(ProviderRegistry::validate_config_str("unknown", &homebrew_config).is_err());
     }
 
     // --- Homebrew provider tests ---
