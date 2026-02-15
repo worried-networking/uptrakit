@@ -7,6 +7,7 @@
 	import { user, loading, initialize, handleLogout } from '$lib/auth';
 	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
 	import { getSystemAlerts } from '$lib/api';
+	import { isOnline } from '$lib/stores/network'; // Import the new store
 	import { Permission } from '$lib/types';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
@@ -123,6 +124,12 @@
 				{/if}
 			</div>
 		</header>
+
+		{#if !$isOnline}
+			<div class="preset-filled-warning-500 text-center p-2">
+				You are currently offline. Some features may not be available.
+			</div>
+		{/if}
 
 		<!-- Body -->
 		<div class="flex min-h-0 flex-1">

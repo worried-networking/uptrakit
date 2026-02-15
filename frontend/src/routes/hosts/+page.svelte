@@ -154,6 +154,7 @@
 								<div class="actions-menu">
 									<button
 										class="btn btn-sm preset-tonal"
+										aria-label="Actions for {host.friendly_name}"
 										onclick={(e) => {
 											e.stopPropagation();
 											toggleMenu(host.id, e.currentTarget);

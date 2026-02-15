@@ -224,6 +224,7 @@
 								<div class="actions-menu">
 									<button
 										class="btn btn-sm preset-tonal"
+										aria-label="Actions for {service.friendly_name}"
 										onclick={(e) => {
 											e.stopPropagation();
 											toggleMenu(service.id, e.currentTarget);
