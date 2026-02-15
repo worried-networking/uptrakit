@@ -18,6 +18,9 @@ pub enum CliError {
     #[error("Not logged in. Run `uptrakit-cli auth login` first.")]
     NotLoggedIn,
 
+    #[error("directory error: {0}")]
+    Directory(#[from] uptrakit_directories::DirectoryError),
+
     #[error("{0}")]
     Other(String),
 }
@@ -25,7 +28,8 @@ pub enum CliError {
 pub type Result<T> = std::result::Result<T, Report<CliError>>;
 
 impl_report_conversion! {
-    reqwest::Error     => CliError::Http,
-    std::io::Error     => CliError::Io,
-    serde_json::Error  => CliError::Json,
+    reqwest::Error                    => CliError::Http,
+    std::io::Error                    => CliError::Io,
+    serde_json::Error                 => CliError::Json,
+    uptrakit_directories::DirectoryError => CliError::Directory,
 }

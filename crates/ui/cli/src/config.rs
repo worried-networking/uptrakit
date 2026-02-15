@@ -1,7 +1,7 @@
-use crate::error::{CliError, Result};
+use crate::error::Result;
 use rootcause::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use uptrakit_directories::AppDirs;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -15,14 +15,13 @@ pub struct Credentials {
     pub token: Option<String>,
 }
 
-fn config_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map_err(|_| report!(CliError::Other("HOME environment variable not set".into())))?;
-    Ok(PathBuf::from(home).join(".config").join("uptrakit"))
+fn app_dirs() -> Result<AppDirs> {
+    AppDirs::resolve("cli", None, None).context_to()
 }
 
 pub fn load_config() -> Result<Config> {
-    let path = config_dir()?.join("config.json");
+    let dirs = app_dirs()?;
+    let path = dirs.config_path("config.json");
     if !path.exists() {
         return Ok(Config::default());
     }
@@ -31,16 +30,15 @@ pub fn load_config() -> Result<Config> {
 }
 
 pub fn save_config(config: &Config) -> Result<()> {
-    let dir = config_dir()?;
-    std::fs::create_dir_all(&dir).context_to()?;
-    let path = dir.join("config.json");
+    let dirs = app_dirs()?;
+    let path = dirs.config_path("config.json");
     let data = serde_json::to_string_pretty(config).context_to()?;
-    std::fs::write(&path, data).context_to()?;
-    Ok(())
+    uptrakit_directories::write_secure_file_str(&path, &data).context_to()
 }
 
 pub fn load_credentials() -> Result<Credentials> {
-    let path = config_dir()?.join("credentials.json");
+    let dirs = app_dirs()?;
+    let path = dirs.config_path("credentials.json");
     if !path.exists() {
         return Ok(Credentials::default());
     }
@@ -49,18 +47,8 @@ pub fn load_credentials() -> Result<Credentials> {
 }
 
 pub fn save_credentials(creds: &Credentials) -> Result<()> {
-    let dir = config_dir()?;
-    std::fs::create_dir_all(&dir).context_to()?;
-    let path = dir.join("credentials.json");
+    let dirs = app_dirs()?;
+    let path = dirs.config_path("credentials.json");
     let data = serde_json::to_string_pretty(creds).context_to()?;
-    std::fs::write(&path, &data).context_to()?;
-
-    // Set restrictive permissions on Unix
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).context_to()?;
-    }
-
-    Ok(())
+    uptrakit_directories::write_secure_file_str(&path, &data).context_to()
 }

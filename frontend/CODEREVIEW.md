@@ -94,18 +94,19 @@ raw message to the user (e.g. `src/routes/hosts/+page.svelte:33`).
 translate it into a user-friendly message like "Unable to connect to the server.
 Check your network connection."
 
-### HA-04: Token refresh treats all failures as auth expiry (MEDIUM)
+### ~~HA-04: Token refresh treats all failures as auth expiry (MEDIUM)~~ **FIXED**
 
-**File:** `src/lib/api.ts:120-125`
+~~**File:** `src/lib/api.ts:120-125`~~
 
-The catch block in `authenticatedFetch` after a failed token refresh clears the
-token and redirects to `/login` unconditionally. If the refresh endpoint fails
-due to a network error or 500 status, the user is logged out unnecessarily.
+~~The catch block in `authenticatedFetch` after a failed token refresh clears the
+token and redirects to `/login` unconditionally.~~
 
-**Recommendation:** Distinguish between auth failures (401, 403) and
-infrastructure failures (network error, 5xx). Only redirect to login for auth
-failures. For infrastructure failures, surface an error message and leave the
-session intact.
+**FIXED:** `refreshAccessToken()` now throws a typed `RefreshError` carrying the
+HTTP status code. The catch block in `authenticatedFetch` distinguishes:
+- `DOMException` (timeout/abort) — surfaces a retry message, keeps session
+- `TypeError` (network failure) — surfaces a connection error, keeps session
+- `RefreshError` with status >= 500 — surfaces a server error, keeps session
+- All other failures (4xx auth errors) — clears token and redirects to login
 
 ### HA-05: Inconsistent parallel-request error handling (MEDIUM)
 
@@ -404,7 +405,7 @@ settings pages do not.
 |--------|---------------------------------------------|---------|
 | ~~HA-01~~ | ~~Add request timeouts via AbortController~~ **FIXED** | ~~Medium~~ |
 | HA-03 | Translate network errors to friendly messages| Small |
-| HA-04 | Distinguish network vs auth failures on refresh| Medium |
+| ~~HA-04~~ | ~~Distinguish network vs auth failures on refresh~~ **FIXED** | ~~Medium~~ |
 | HA-05 | Use `Promise.allSettled` consistently | Small |
 | ARCH-04| Pass type filter to server in services page | Small |
 

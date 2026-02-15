@@ -11,7 +11,8 @@ pub const PROTOCOL_VERSION: u16 = 1;
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
-    HookShell, MqttTransport, ProviderType, ReleaseAsset, ReleaseInfo, ServiceType,
+    HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType, ProviderType,
+    ReleaseAsset, ReleaseInfo, ServiceType,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -33,24 +34,6 @@ impl std::fmt::Display for EnrollmentStatus {
     }
 }
 
-/// Connection status reported by the MQTT service for a specific client.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MqttClientConnectionStatus {
-    Online,
-    Offline,
-    Connecting,
-}
-
-impl std::fmt::Display for MqttClientConnectionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Online => f.write_str("online"),
-            Self::Offline => f.write_str("offline"),
-            Self::Connecting => f.write_str("connecting"),
-        }
-    }
-}
 
 /// A single hook command to execute on the agent.
 ///
@@ -418,17 +401,6 @@ pub struct VersionCheckResult {
 
 // --- Update execution messages ---
 
-/// Output stream source for UpdateOutput messages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputStreamType {
-    #[default]
-    Stdout,
-    Stderr,
-    PreHook,
-    PostHook,
-    System,
-}
 
 /// Final status of an update execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

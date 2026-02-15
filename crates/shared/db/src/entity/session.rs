@@ -1,5 +1,6 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
+use uptrakit_shared_types::SessionTokenType;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "sessions")]
@@ -11,7 +12,7 @@ pub struct Model {
     pub refresh_token_hash: String,
     pub auth_method: String,
     pub oidc_provider_id: Option<Uuid>,
-    pub token_type: String,
+    pub token_type: SessionTokenType,
     pub created_at: OffsetDateTime,
     pub expires_at: OffsetDateTime,
     pub revoked_at: Option<OffsetDateTime>,

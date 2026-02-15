@@ -1,52 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use thiserror::Error;
 
 use crate::mqtt_transport::MqttTransport;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum MqttClientConnectionStatus {
-    Online,
-    #[default]
-    Offline,
-    Connecting,
-}
-
-/// Error returned when parsing an invalid [`MqttClientConnectionStatus`] string.
-#[derive(Debug, Error)]
-#[error("invalid MQTT client connection status value")]
-pub struct ParseMqttClientConnectionStatusError;
-
-impl MqttClientConnectionStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Online => "online",
-            Self::Offline => "offline",
-            Self::Connecting => "connecting",
-        }
-    }
-}
-
-impl FromStr for MqttClientConnectionStatus {
-    type Err = ParseMqttClientConnectionStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "online" => Ok(Self::Online),
-            "offline" => Ok(Self::Offline),
-            "connecting" => Ok(Self::Connecting),
-            _ => Err(ParseMqttClientConnectionStatusError),
-        }
-    }
-}
-
-impl std::fmt::Display for MqttClientConnectionStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+// Re-export from shared-types for backward compatibility.
+pub use uptrakit_shared_types::{MqttClientConnectionStatus, ParseMqttClientConnectionStatusError};
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

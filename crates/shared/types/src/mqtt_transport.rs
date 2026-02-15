@@ -2,13 +2,23 @@ use serde::{Deserialize, Serialize};
 
 /// MQTT connection transport protocol.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "sea-orm",
+    derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
+)]
+#[cfg_attr(
+    feature = "sea-orm",
+    sea_orm(rs_type = "String", db_type = "Text")
+)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum MqttTransport {
     /// Plain TCP connection.
     #[default]
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "tcp"))]
     Tcp,
     /// TLS-encrypted connection.
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "tls"))]
     Tls,
 }
 

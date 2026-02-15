@@ -63,6 +63,21 @@ function authHeaders(): Record<string, string> {
 
 let refreshPromise: Promise<RefreshResponse> | null = null;
 
+/**
+ * Error thrown when the token refresh endpoint returns a non-OK response.
+ * Carries the HTTP status so callers can distinguish real auth failures (4xx)
+ * from transient server errors (5xx).
+ */
+class RefreshError extends Error {
+	public readonly status: number;
+
+	constructor(status: number) {
+		super(`Refresh failed (${status})`);
+		this.name = 'RefreshError';
+		this.status = status;
+	}
+}
+
 export async function refreshAccessToken(): Promise<RefreshResponse> {
 	const res = await fetch(`${BASE}/auth/refresh`, {
 		method: 'POST',
@@ -73,7 +88,7 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
 	});
 
 	if (!res.ok) {
-		throw new Error('Refresh failed');
+		throw new RefreshError(res.status);
 	}
 
 	return res.json();
@@ -132,8 +147,19 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 				},
 				signal: retryCombinedSignal
 			});
-		} catch {
-			// Refresh failed — clear token and redirect to login
+		} catch (refreshErr) {
+			// Network/timeout errors — keep session, surface the error
+			if (refreshErr instanceof DOMException && (refreshErr.name === 'TimeoutError' || refreshErr.name === 'AbortError')) {
+				throw new Error('Token refresh timed out. Please try again.');
+			}
+			if (refreshErr instanceof TypeError) {
+				throw new Error('Network error during token refresh. Check your connection.');
+			}
+			// Server errors (5xx) — keep session, don't force logout
+			if (refreshErr instanceof RefreshError && refreshErr.status >= 500) {
+				throw new Error('Server error during token refresh. Please try again later.');
+			}
+			// Real auth failures (4xx) — session is truly invalid
 			setAccessToken(null);
 			window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
 			throw new Error('Session expired');

@@ -7,7 +7,7 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_web_api_types::settings_mqtt::MqttClientConnectionStatus;
+use uptrakit_shared_db::{MqttClientConnectionStatus, MqttTransport};
 use uuid::Uuid;
 
 #[derive(Debug, Error)]
@@ -65,7 +65,7 @@ pub struct CreateMqttClientParams<'a> {
     pub tenant_id: Uuid,
     pub max_clients: u16,
     pub enabled: bool,
-    pub transport: &'a str,
+    pub transport: MqttTransport,
     pub host: &'a str,
     pub port: u16,
     pub client_id: &'a str,
@@ -101,7 +101,7 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         id: Set(Uuid::now_v7()),
         tenant_id: Set(tenant_id),
         enabled: Set(enabled),
-        transport: Set(transport.to_string()),
+        transport: Set(transport),
         host: Set(host.to_string()),
         port: Set(i32::from(port)),
         client_id: Set(client_id.to_string()),
@@ -113,7 +113,7 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
                 .context_to()?
         ),
         topic_prefix: Set(topic_prefix.to_string()),
-        connection_status: Set(MqttClientConnectionStatus::Offline.as_str().to_string()),
+        connection_status: Set(MqttClientConnectionStatus::Offline),
         status_updated_at: Set(now),
         created_at: Set(now),
         updated_at: Set(now),
@@ -127,7 +127,7 @@ pub struct UpdateMqttClientParams<'a> {
     pub db: &'a DatabaseConnection,
     pub existing: mqtt_client::Model,
     pub enabled: Option<bool>,
-    pub transport: Option<&'a str>,
+    pub transport: Option<MqttTransport>,
     pub host: Option<&'a str>,
     pub port: Option<u16>,
     pub client_id: Option<&'a str>,
@@ -157,7 +157,7 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
         model.enabled = Set(v);
     }
     if let Some(v) = transport {
-        model.transport = Set(v.to_string());
+        model.transport = Set(v);
     }
     if let Some(v) = host {
         model.host = Set(v.to_string());
@@ -208,7 +208,7 @@ pub async fn update_mqtt_client_status(
     };
 
     let mut model: mqtt_client::ActiveModel = existing.into();
-    model.connection_status = Set(status.as_str().to_string());
+    model.connection_status = Set(status);
     model.status_updated_at = Set(OffsetDateTime::now_utc());
     model.update(db).await.context_to()?;
 
@@ -233,7 +233,7 @@ pub async fn update_mqtt_clients_status(
             continue;
         };
         let mut model: mqtt_client::ActiveModel = existing.into();
-        model.connection_status = Set(status.as_str().to_string());
+        model.connection_status = Set(status);
         model.status_updated_at = Set(now);
         model.update(db).await.context_to()?;
         updated += 1;

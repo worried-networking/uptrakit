@@ -1,9 +1,13 @@
 use super::token::{generate_secure_token, generate_uuid, hash_token};
 use super::{AuthError, Result};
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+    TransactionTrait,
+};
 use time::{Duration, OffsetDateTime};
 use uptrakit_shared_db::entity::{prelude::*, session};
+use uptrakit_shared_db::SessionTokenType;
 
 /// Refresh token configuration constants
 const REFRESH_TOKEN_EXPIRY_DAYS: i64 = 7;
@@ -45,7 +49,7 @@ impl SessionService {
             refresh_token_hash: Set(token_hash),
             auth_method: Set(auth_method.kind().to_string()),
             oidc_provider_id: Set(auth_method.oidc_provider_id()),
-            token_type: Set("refresh_token".to_string()),
+            token_type: Set(SessionTokenType::RefreshToken),
             created_at: Set(now),
             expires_at: Set(expires_at),
             revoked_at: Set(None),
@@ -99,10 +103,14 @@ impl SessionService {
         let token_hash = hash_token(token);
         let now = OffsetDateTime::now_utc();
 
+        // Wrap find → revoke → insert in a transaction to prevent token-reuse
+        // races in multi-controller HA deployments.
+        let txn = self.db.begin().await.context_to()?;
+
         // Find the session by refresh token hash
         let session_model = Session::find()
             .filter(session::Column::RefreshTokenHash.eq(token_hash))
-            .one(&self.db)
+            .one(&txn)
             .await
             .context_to()?
             .ok_or_else(|| report!(AuthError::InvalidRefreshToken))?;
@@ -126,7 +134,7 @@ impl SessionService {
 
         let mut old_active: session::ActiveModel = session_model.into();
         old_active.revoked_at = Set(Some(now));
-        old_active.update(&self.db).await.context_to()?;
+        old_active.update(&txn).await.context_to()?;
 
         // Create new session with a fresh refresh token
         let auth_method = AuthMethod::from_session(&old_auth_method_str, old_oidc_provider_id)
@@ -142,14 +150,16 @@ impl SessionService {
             refresh_token_hash: Set(new_hash),
             auth_method: Set(old_auth_method_str),
             oidc_provider_id: Set(old_oidc_provider_id),
-            token_type: Set("refresh_token".to_string()),
+            token_type: Set(SessionTokenType::RefreshToken),
             created_at: Set(now),
             expires_at: Set(expires_at),
             revoked_at: Set(None),
             user_agent: Set(old_user_agent),
             ip_address: Set(old_ip_address),
         };
-        new_session.insert(&self.db).await.context_to()?;
+        new_session.insert(&txn).await.context_to()?;
+
+        txn.commit().await.context_to()?;
 
         let verified = VerifiedSession {
             user_id: old_user_id,
@@ -363,7 +373,7 @@ mod tests {
             refresh_token_hash: Set(token_hash),
             auth_method: Set("password".to_string()),
             oidc_provider_id: Set(None),
-            token_type: Set("refresh_token".to_string()),
+            token_type: Set(SessionTokenType::RefreshToken),
             created_at: Set(now),
             expires_at: Set(expired_at),
             revoked_at: Set(None),

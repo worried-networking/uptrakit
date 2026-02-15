@@ -10,7 +10,7 @@ use sea_orm::{
 use time::{OffsetDateTime, UtcDateTime};
 use uptrakit_internal_wire::{
     ControllerMessage, MqttTenantAssignmentsPayload, MqttTenantConfig,
-    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, MqttTransport, SecretString,
+    MqttTenantConfigUpdatedPayload, MqttTenantRevokedPayload, SecretString,
 };
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
 use uuid::Uuid;
@@ -689,7 +689,7 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
         mqtt_client_id: client.id,
         tenant_id: client.tenant_id,
         enabled: client.enabled,
-        transport: wire_mqtt_transport(&client.transport),
+        transport: client.transport,
         host: client.host.clone(),
         port: client.port as u16,
         client_id: client.client_id.clone(),
@@ -707,14 +707,6 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
     }
 }
 
-/// Convert a DB transport string to the wire protocol `MqttTransport`.
-fn wire_mqtt_transport(transport: &str) -> MqttTransport {
-    match transport {
-        "tls" => MqttTransport::Tls,
-        _ => MqttTransport::Tcp,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,6 +715,7 @@ mod tests {
         ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Schema,
     };
     use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease, tenant};
+    use uptrakit_shared_db::MqttTransport;
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -766,16 +759,14 @@ mod tests {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant_id),
             enabled: ActiveValue::Set(true),
-            transport: ActiveValue::Set("tcp".to_string()),
+            transport: ActiveValue::Set(MqttTransport::Tcp),
             host: ActiveValue::Set("broker.local".to_string()),
             port: ActiveValue::Set(1883),
             client_id: ActiveValue::Set("uptrakit-controller".to_string()),
             username: ActiveValue::Set(None),
             password: ActiveValue::Set(None),
             topic_prefix: ActiveValue::Set("uptrakit".to_string()),
-            connection_status: ActiveValue::Set(
-                MqttClientConnectionStatus::Offline.as_str().to_string(),
-            ),
+            connection_status: ActiveValue::Set(MqttClientConnectionStatus::Offline),
             status_updated_at: ActiveValue::Set(now),
             created_at: ActiveValue::Set(now),
             updated_at: ActiveValue::Set(now),

@@ -26,7 +26,6 @@ use super::service_ws::{
 use crate::AppState;
 use crate::routes::agents::{do_sign_csr, find_or_create_host_and_link, revoke_certificate};
 use sea_orm::sea_query::{Expr, ExprTrait};
-use uptrakit_internal_wire::OutputStreamType;
 use uptrakit_shared_db::entity::update_output_line;
 use uptrakit_shared_db::entity::update_output_line::Entity as UpdateOutputLine;
 
@@ -466,7 +465,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 let line = update_output_line::ActiveModel {
                                     id: Set(uuid::Uuid::now_v7()),
                                     update_history_id: Set(payload.update_history_id),
-                                    stream: Set(output_stream_label(payload.stream).to_string()),
+                                    stream: Set(payload.stream),
                                     output: Set(output_line),
                                     created_at: Set(time::OffsetDateTime::now_utc()),
                                 };
@@ -864,16 +863,6 @@ pub(crate) async fn run_agent_enrolled_loop(
                 return;
             }
         }
-    }
-}
-
-fn output_stream_label(stream: OutputStreamType) -> &'static str {
-    match stream {
-        OutputStreamType::Stdout => "stdout",
-        OutputStreamType::Stderr => "stderr",
-        OutputStreamType::PreHook => "pre_hook",
-        OutputStreamType::PostHook => "post_hook",
-        OutputStreamType::System => "system",
     }
 }
 

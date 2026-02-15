@@ -128,24 +128,16 @@ expiry (15 min)"*. When a user logs out on instance A, their JWT remains valid
 on instance B for up to 15 minutes. For deployments requiring immediate
 cross-instance revocation, a DB-backed denylist or shared cache would be needed.
 
-### MEDIUM: `rotate_refresh_token()` lacks transaction wrapping
+### ~~MEDIUM: `rotate_refresh_token()` lacks transaction wrapping~~ **FIXED**
 
-**Location:** `auth/session.rs`
+~~**Location:** `auth/session.rs`~~
 
-In a multi-instance scenario, if two instances process a rotation request for the
-same token simultaneously, both could read the same session. The hash-based
-lookup and sequential update make collision unlikely but not impossible.
+~~In a multi-instance scenario, if two instances process a rotation request for the
+same token simultaneously, both could read the same session.~~
 
-Other multi-step mutations in the codebase properly use
-`TransactionTrait::begin()`:
-
-- User registration: `routes/auth.rs:76`
-- OIDC callback: `routes/oidc_auth.rs:416`
-- OIDC registration: `routes/oidc_auth.rs:789`
-- Service merge: `routes/services.rs:481`
-- Software items: `routes/software_items.rs:287`
-- MQTT lease coordination: `mqtt_lease_coordinator.rs:93`,
-  `mqtt_lease_coordinator.rs:488`
+**FIXED:** The find → revoke → insert sequence is now wrapped in a
+`TransactionTrait::begin()` / `txn.commit()` block, matching the pattern used
+elsewhere in the codebase.
 
 ### LOW: Local fallback rate limiter is per-instance
 
@@ -160,20 +152,14 @@ applies when DB is unreachable, which is rare).
 
 **0 Critical, 0 High, 1 Medium, 3 Low**
 
-### MEDIUM: `ocsp.rs:260` -- year cast `dt.year() as u16`
+### ~~MEDIUM: `ocsp.rs:260` -- year cast `dt.year() as u16`~~ **FIXED**
 
-Could silently truncate for dates far in the future (year > 65535). Practically
-safe for OCSP responses in the 2020s-2030s, but a defensive check or
-`try_into()` would be more robust.
+~~Could silently truncate for dates far in the future (year > 65535).~~
 
-```rust
-der::DateTime::new(
-    dt.year() as u16,
-    dt.month() as u8,
-    // ...
-)
-.expect("valid datetime"),
-```
+**FIXED:** `make_ocsp_time()` now uses `u16::try_from(dt.year())` and
+`dt.month().into()` for safe conversions. `der::DateTime::new()` errors are
+propagated via `OcspError::DateConversion` instead of `.expect()`. The same fix
+was applied to the test OCSP responder in `controller/tests/`.
 
 ### LOW: `AppState` could benefit from sub-grouping
 

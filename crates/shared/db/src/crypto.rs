@@ -483,20 +483,21 @@ mod tests {
         use crate::entity::prelude::MqttClient;
         use sea_orm::{DbBackend, EntityTrait, MockDatabase};
         use time::OffsetDateTime;
+        use uptrakit_shared_types::{MqttClientConnectionStatus, MqttTransport};
         use uuid::Uuid;
 
         let model = mqtt_client::Model {
             id: Uuid::now_v7(),
             tenant_id: Uuid::now_v7(),
             enabled: true,
-            transport: "tcp".to_string(),
+            transport: MqttTransport::Tcp,
             host: "broker".to_string(),
             port: 1883,
             client_id: "uptrakit-controller".to_string(),
             username: None,
             password: None,
             topic_prefix: "uptrakit".to_string(),
-            connection_status: "offline".to_string(),
+            connection_status: MqttClientConnectionStatus::Offline,
             status_updated_at: OffsetDateTime::now_utc(),
             created_at: OffsetDateTime::now_utc(),
             updated_at: OffsetDateTime::now_utc(),

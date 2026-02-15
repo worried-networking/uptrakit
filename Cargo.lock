@@ -4801,6 +4801,7 @@ dependencies = [
  "time",
  "tokio",
  "uptrakit-build-info",
+ "uptrakit-directories",
  "uptrakit-shared-macros",
  "uptrakit-web-api-types",
 ]

@@ -319,3 +319,55 @@ poisoning is impossible with `panic = "abort"`.
 1. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
 1. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may
    encounter.
+
+## Database Enum Columns (`DeriveActiveEnum`)
+
+All entity columns that store a fixed set of string values must use a typed Rust enum with SeaORM's
+`DeriveActiveEnum` instead of `String`. This provides compile-time type safety and eliminates
+string parsing at query boundaries.
+
+### Pattern
+
+Define the enum in `uptrakit-shared-types` with feature-gated sea-orm derives, following the
+`DeviceAuthStatus` template:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "sea-orm", derive(strum::EnumIter, sea_orm::DeriveActiveEnum))]
+#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
+pub enum MyStatus {
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "active"))]
+    Active,
+    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "inactive"))]
+    Inactive,
+}
+```
+
+Also implement `FromStr`, `Display`, `as_str()`, and `Default` (see existing types for the full
+pattern). The entity model then uses the enum type directly:
+
+```rust
+pub struct Model {
+    pub status: MyStatus,  // NOT String
+}
+```
+
+### Existing typed enum columns
+
+| Entity | Column | Enum |
+| --- | --- | --- |
+| `mqtt_client` | `transport` | `MqttTransport` |
+| `mqtt_client` | `connection_status` | `MqttClientConnectionStatus` |
+| `session` | `token_type` | `SessionTokenType` |
+| `update_output_line` | `stream` | `OutputStreamType` |
+| `pending_device_flow` | `status` | `DeviceAuthStatus` |
+| `service` | `service_type` | `ServiceType` |
+| `service` | `status` | `ServiceStatus` |
+| `update_history` | `status` | `UpdateStatus` |
+
+### Re-exports
+
+`uptrakit-shared-db` re-exports all entity-relevant enums from `uptrakit-shared-types` for
+downstream convenience. Crates that depend on `uptrakit-shared-db` (like `uptrakit-web-api`) should
+import from `uptrakit_shared_db` rather than adding a direct dependency on `uptrakit-shared-types`.

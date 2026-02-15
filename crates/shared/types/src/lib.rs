@@ -1,16 +1,22 @@
 pub mod hex;
 mod device_auth_status;
 mod hook_shell;
+mod mqtt_connection_status;
 mod mqtt_transport;
+mod output_stream_type;
 mod provider_types;
 mod secret_string;
 mod service_status;
 mod service_type;
+mod session_token_type;
 
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
 pub use hook_shell::HookShell;
+pub use mqtt_connection_status::{MqttClientConnectionStatus, ParseMqttClientConnectionStatusError};
 pub use mqtt_transport::MqttTransport;
+pub use output_stream_type::{OutputStreamType, ParseOutputStreamTypeError};
 pub use provider_types::{ParseProviderTypeError, ProviderType, ReleaseAsset, ReleaseInfo};
 pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use service_type::ServiceType;
+pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};

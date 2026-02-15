@@ -6,7 +6,7 @@
 | OIDC | User login | External identity providers with auto-create or account linking. |
 | Device authorization | CLI login | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`). |
 | JWT access tokens | API requests | Short-lived tokens that carry resolved permissions (never stored). |
-| Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use, revoking the predecessor. |
+| Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. |
 | API tokens | Programmatic access | Long-lived, revocable bearer tokens stored in the database. |
 | mTLS client certs | Agent/MQTT connections | Issued after CSR approval and validated per connection. |
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |

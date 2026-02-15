@@ -45,6 +45,9 @@ enum OcspError {
 
     #[error("empty PEM data")]
     EmptyPemData,
+
+    #[error("date conversion error: {0}")]
+    DateConversion(String),
 }
 
 type OcspResult<T> = std::result::Result<T, Report<OcspError>>;
@@ -120,10 +123,10 @@ pub async fn build_ocsp_response(
         }
 
         let Some(ca_index) = matched_index else {
-            single_responses.push(build_single_response(
-                cert_id.clone(),
-                CertStatus::unknown(),
-            ));
+            match build_single_response(cert_id.clone(), CertStatus::unknown()) {
+                Ok(resp) => single_responses.push(resp),
+                Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+            }
             continue;
         };
 
@@ -145,11 +148,17 @@ pub async fn build_ocsp_response(
             Err(_) => return build_error_response(OcspResponseStatus::InternalError),
         };
 
-        single_responses.push(build_single_response(cert_id.clone(), status));
+        match build_single_response(cert_id.clone(), status) {
+            Ok(resp) => single_responses.push(resp),
+            Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+        }
     }
 
     // Build the response data
-    let now = make_ocsp_time(OffsetDateTime::now_utc());
+    let now = match make_ocsp_time(OffsetDateTime::now_utc()) {
+        Ok(t) => t,
+        Err(_) => return build_error_response(OcspResponseStatus::InternalError),
+    };
 
     let signer_index = selected_ca_index.or_else(|| {
         trusted
@@ -254,33 +263,30 @@ fn compute_key_hash(data: &[u8], oid: &const_oid::ObjectIdentifier) -> Option<Ve
 }
 
 /// Create an OcspGeneralizedTime from an OffsetDateTime.
-fn make_ocsp_time(dt: OffsetDateTime) -> OcspGeneralizedTime {
-    OcspGeneralizedTime::from(der::asn1::GeneralizedTime::from_date_time(
-        der::DateTime::new(
-            dt.year() as u16,
-            dt.month() as u8,
-            dt.day(),
-            dt.hour(),
-            dt.minute(),
-            dt.second(),
-        )
-        .expect("valid datetime"),
+fn make_ocsp_time(dt: OffsetDateTime) -> OcspResult<OcspGeneralizedTime> {
+    let year = u16::try_from(dt.year())
+        .map_err(|e| report!(OcspError::DateConversion(format!("year: {e}"))))?;
+    let month: u8 = dt.month().into();
+    let der_dt = der::DateTime::new(year, month, dt.day(), dt.hour(), dt.minute(), dt.second())
+        .map_err(|e| report!(OcspError::DateConversion(format!("DateTime: {e}"))))?;
+    Ok(OcspGeneralizedTime::from(
+        der::asn1::GeneralizedTime::from_date_time(der_dt),
     ))
 }
 
-fn build_single_response(cert_id: CertId, status: CertStatus) -> SingleResponse {
-    let now = make_ocsp_time(OffsetDateTime::now_utc());
+fn build_single_response(cert_id: CertId, status: CertStatus) -> OcspResult<SingleResponse> {
+    let now = make_ocsp_time(OffsetDateTime::now_utc())?;
     let next_update_time =
         OffsetDateTime::now_utc() + time::Duration::seconds(OCSP_CACHE_MAX_AGE_SECS);
-    let next_update = make_ocsp_time(next_update_time);
+    let next_update = make_ocsp_time(next_update_time)?;
 
-    SingleResponse {
+    Ok(SingleResponse {
         cert_id,
         cert_status: status,
         this_update: now,
         next_update: Some(next_update),
         single_extensions: None,
-    }
+    })
 }
 
 /// Look up certificate status in the database.
@@ -309,7 +315,7 @@ async fn lookup_cert_status(
 
     // Check if revoked
     if let Some(revoked_at) = cert.revoked_at {
-        let revocation_time = make_ocsp_time(revoked_at);
+        let revocation_time = make_ocsp_time(revoked_at)?;
 
         // Map our revocation reasons to CRL reasons
         let reason = cert.revocation_reason.as_ref().map(|r| match r {

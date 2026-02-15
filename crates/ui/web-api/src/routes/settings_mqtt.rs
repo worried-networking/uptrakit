@@ -17,7 +17,6 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, MqttClientCreatedPayload};
 use uptrakit_shared_db::entity::{mqtt_client, mqtt_lease};
-use uptrakit_web_api_types::mqtt_transport::MqttTransport;
 use uptrakit_web_api_types::mqtt_url::MqttUrl;
 
 pub use uptrakit_web_api_types::settings_mqtt::{
@@ -29,7 +28,7 @@ fn model_to_response(
     model: &mqtt_client::Model,
     connection_status: MqttClientConnectionStatus,
 ) -> MqttClientResponse {
-    let transport = model.transport.parse::<MqttTransport>().unwrap_or_default();
+    let transport = model.transport;
     let port = u16::try_from(model.port).unwrap_or(transport.default_port());
     let url = uptrakit_web_api_types::mqtt_url::build_url(transport, &model.host, port);
 
@@ -49,7 +48,7 @@ fn model_to_response(
 }
 
 fn parse_connection_status(model: &mqtt_client::Model) -> MqttClientConnectionStatus {
-    model.connection_status.parse::<MqttClientConnectionStatus>().unwrap_or_default()
+    model.connection_status
 }
 
 fn resolve_connection_status(
@@ -208,7 +207,7 @@ pub async fn create_mqtt_settings(
         tenant_id,
         max_clients,
         enabled,
-        transport: transport.as_str(),
+        transport,
         host: &host,
         port,
         client_id,
@@ -477,9 +476,7 @@ pub async fn update_mqtt_settings(
         (None, None, None)
     };
 
-    let transport = url_transport
-        .or(req.transport)
-        .map(|t| t.as_str().to_string());
+    let transport = url_transport.or(req.transport);
     let host = url_host.or(req.host.clone());
     let port = url_port.or(req.port);
 
@@ -521,7 +518,7 @@ pub async fn update_mqtt_settings(
         db: &state.db,
         existing,
         enabled: req.enabled,
-        transport: transport.as_deref(),
+        transport,
         host: host.as_deref(),
         port,
         client_id: req.client_id.as_deref(),
