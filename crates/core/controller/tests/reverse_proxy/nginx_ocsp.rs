@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use tempfile::TempDir;
 use testcontainers::core::wait::LogWaitStrategy;
 use testcontainers::core::{AccessMode, Host, IntoContainerPort, Mount, WaitFor};
@@ -24,6 +26,7 @@ async fn nginx_ocsp_rejects_revoked_cert() {
     let pki = TestPki::generate();
     let (revoked_cert_pem, revoked_key_pem, _revoked_id) = pki.generate_extra_agent_cert();
     let revoked_serial = extract_serial_hex(&revoked_cert_pem);
+    let host_gateway_ip = resolve_docker_host_gateway_ip();
 
     // Start test OCSP responder (HTTP)
     let ocsp = OcspResponder::start(&pki.ca_cert_pem, &pki.ca_key_pem, vec![revoked_serial]).await;
@@ -34,7 +37,7 @@ async fn nginx_ocsp_rejects_revoked_cert() {
     // Write Nginx config with explicit HTTP OCSP responder
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
-    write_nginx_ocsp_config(&tmp, server.port, ocsp.port());
+    write_nginx_ocsp_config(&tmp, &host_gateway_ip, server.port, ocsp.port());
 
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
@@ -111,13 +114,14 @@ async fn nginx_ocsp_rejects_revoked_cert() {
 #[ignore = "Docker integration test (nginx:latest). Run: cargo test -p uptrakit-controller reverse_proxy::nginx_ocsp -- --ignored"]
 async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
     let pki = TestPki::generate();
+    let host_gateway_ip = resolve_docker_host_gateway_ip();
 
     // Reserve a port so we can embed it in the AIA extension before starting
     // the OCSP responder. Bind, read the port, then drop the listener so the
     // responder can bind to the same port immediately after.
     let ocsp_port = reserve_port();
 
-    let aia_url = format!("http://host.docker.internal:{ocsp_port}/api/v1/pki/ocsp");
+    let aia_url = format!("http://{host_gateway_ip}:{ocsp_port}/api/v1/pki/ocsp");
 
     // Generate agent certs with AIA extension pointing to HTTP OCSP.
     let (valid_cert_pem, valid_key_pem, _valid_id) =
@@ -139,7 +143,7 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
 
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
-    write_nginx_ocsp_aia_config(&tmp, server.port);
+    write_nginx_ocsp_aia_config(&tmp, &host_gateway_ip, server.port);
 
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
@@ -213,11 +217,12 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
 #[ignore = "Docker integration test (nginx:latest). Run: cargo test -p uptrakit-controller reverse_proxy::nginx_ocsp -- --ignored"]
 async fn nginx_ocsp_aia_https_cannot_verify() {
     let pki = TestPki::generate();
+    let host_gateway_ip = resolve_docker_host_gateway_ip();
 
     // Reserve a port for the HTTPS OCSP responder.
     let ocsp_port = reserve_port();
 
-    let aia_url = format!("https://host.docker.internal:{ocsp_port}/api/v1/pki/ocsp");
+    let aia_url = format!("https://{host_gateway_ip}:{ocsp_port}/api/v1/pki/ocsp");
 
     let (valid_cert_pem, valid_key_pem, _valid_id) =
         pki.generate_extra_agent_cert_with_aia(&aia_url);
@@ -258,7 +263,7 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
 
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
-    write_nginx_ocsp_aia_config(&tmp, server.port);
+    write_nginx_ocsp_aia_config(&tmp, &host_gateway_ip, server.port);
 
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
@@ -339,11 +344,12 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
 #[ignore = "Docker integration test (nginx:latest). Run: cargo test -p uptrakit-controller reverse_proxy::nginx_ocsp -- --ignored"]
 async fn nginx_ocsp_rejects_https_ssl_ocsp_responder() {
     let pki = TestPki::generate();
+    let host_gateway_ip = resolve_docker_host_gateway_ip();
 
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
     // Port values don't matter — Nginx rejects the config before connecting.
-    write_nginx_ocsp_explicit_https_config(&tmp, 8443, 9443);
+    write_nginx_ocsp_explicit_https_config(&tmp, &host_gateway_ip, 8443, 9443);
 
     // Run `nginx -t` to test the config — should fail because Nginx rejects
     // https:// in ssl_ocsp_responder at parse time.
@@ -397,9 +403,7 @@ fn write_common_nginx_tls_files(tmp: &TempDir, pki: &TestPki) {
 
 /// Write Nginx config with explicit HTTP OCSP responder.
 ///
-/// Uses `__RESOLVER__` placeholder that `start_nginx_ocsp_container()` replaces
-/// with the actual DNS server from the container's `/etc/resolv.conf`.
-fn write_nginx_ocsp_config(tmp: &TempDir, backend_port: u16, ocsp_port: u16) {
+fn write_nginx_ocsp_config(tmp: &TempDir, host_gateway_ip: &str, backend_port: u16, ocsp_port: u16) {
     let config = format!(
         r#"
 server {{
@@ -415,13 +419,10 @@ server {{
     # OCSP checking for client certificates
     ssl_ocsp leaf;
     ssl_ocsp_cache shared:OCSP:10m;
-    ssl_ocsp_responder http://host.docker.internal:{ocsp_port}/;
-
-    # Resolver needed for ssl_ocsp — placeholder replaced at container startup
-    resolver __RESOLVER__ ipv6=off;
+    ssl_ocsp_responder http://{host_gateway_ip}:{ocsp_port}/;
 
     location / {{
-        proxy_pass https://host.docker.internal:{backend_port};
+        proxy_pass https://{host_gateway_ip}:{backend_port};
         proxy_ssl_verify off;
 
         proxy_set_header X-Forwarded-Client-Cert-Info "Subject=\"$ssl_client_s_dn\";SerialNumber=\"$ssl_client_serial\";Issuer=\"$ssl_client_i_dn\"";
@@ -443,8 +444,7 @@ server {{
 /// Write Nginx config with `ssl_ocsp leaf` only (no explicit responder).
 ///
 /// Nginx reads the OCSP responder URL from the client certificate's AIA extension.
-/// Uses `__RESOLVER__` placeholder for the resolver directive.
-fn write_nginx_ocsp_aia_config(tmp: &TempDir, backend_port: u16) {
+fn write_nginx_ocsp_aia_config(tmp: &TempDir, host_gateway_ip: &str, backend_port: u16) {
     let config = format!(
         r#"
 server {{
@@ -460,11 +460,8 @@ server {{
     # OCSP checking — no explicit responder; Nginx reads AIA from client cert
     ssl_ocsp leaf;
 
-    # Resolver needed for ssl_ocsp — placeholder replaced at container startup
-    resolver __RESOLVER__ ipv6=off;
-
     location / {{
-        proxy_pass https://host.docker.internal:{backend_port};
+        proxy_pass https://{host_gateway_ip}:{backend_port};
         proxy_ssl_verify off;
 
         proxy_set_header X-Forwarded-Client-Cert-Info "Subject=\"$ssl_client_s_dn\";SerialNumber=\"$ssl_client_serial\";Issuer=\"$ssl_client_i_dn\"";
@@ -487,7 +484,12 @@ server {{
 ///
 /// Nginx rejects `https://` in `ssl_ocsp_responder` at config parse time.
 /// This config is used by test 4 to verify Nginx's config validation.
-fn write_nginx_ocsp_explicit_https_config(tmp: &TempDir, backend_port: u16, ocsp_port: u16) {
+fn write_nginx_ocsp_explicit_https_config(
+    tmp: &TempDir,
+    host_gateway_ip: &str,
+    backend_port: u16,
+    ocsp_port: u16,
+) {
     let config = format!(
         r#"
 server {{
@@ -502,13 +504,13 @@ server {{
 
     # OCSP checking with https:// responder — Nginx rejects this at parse time.
     ssl_ocsp leaf;
-    ssl_ocsp_responder https://host.docker.internal:{ocsp_port}/;
+    ssl_ocsp_responder https://{host_gateway_ip}:{ocsp_port}/;
 
     # Resolver needed for ssl_ocsp
     resolver 127.0.0.11 ipv6=off;
 
     location / {{
-        proxy_pass https://host.docker.internal:{backend_port};
+        proxy_pass https://{host_gateway_ip}:{backend_port};
         proxy_ssl_verify off;
 
         proxy_set_header X-Forwarded-Client-Cert-Info "Subject=\"$ssl_client_s_dn\";SerialNumber=\"$ssl_client_serial\";Issuer=\"$ssl_client_i_dn\"";
@@ -548,11 +550,9 @@ fn build_client(
 
 /// Start an Nginx container for OCSP tests.
 ///
-/// This container dynamically resolves the DNS server from `/etc/resolv.conf`
-/// and replaces the `__RESOLVER__` placeholder in the Nginx config before
-/// starting Nginx. This is necessary because Nginx's `resolver` directive
-/// requires a DNS server address, and the correct address varies across Docker
-/// environments (Docker Desktop uses a different DNS than Docker Engine).
+/// The container still maps `host.docker.internal` to Docker's host gateway
+/// for consistency with other reverse-proxy tests, but OCSP configs in this
+/// file use the resolved gateway IP directly to avoid DNS-dependent failures.
 async fn start_nginx_ocsp_container(tmp: &TempDir) -> testcontainers::ContainerAsync<GenericImage> {
     GenericImage::new("nginx", "latest")
         .with_exposed_port(443u16.tcp())
@@ -562,21 +562,49 @@ async fn start_nginx_ocsp_container(tmp: &TempDir) -> testcontainers::ContainerA
                 tmp.path().to_str().expect("tmpdir path"),
                 "/etc/nginx/conf.d",
             )
-            .with_access_mode(AccessMode::ReadWrite),
+            .with_access_mode(AccessMode::ReadOnly),
         )
         .with_host("host.docker.internal", Host::HostGateway)
-        .with_cmd(vec![
-            "/bin/sh",
-            "-c",
-            // Read the first nameserver from /etc/resolv.conf and substitute
-            // it into the Nginx config. Then start Nginx normally.
-            "DNS=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf) && \
-             sed -i \"s|__RESOLVER__|$DNS|g\" /etc/nginx/conf.d/default.conf && \
-             exec nginx -g 'daemon off;'",
-        ])
         .start()
         .await
         .expect("start nginx OCSP container")
+}
+
+/// Resolve Docker's host-gateway IP as seen from containers.
+///
+/// Uses a short-lived container with `--add-host host.docker.internal:host-gateway`
+/// and reads `/etc/hosts` so OCSP URLs can use an IP literal instead of DNS.
+fn resolve_docker_host_gateway_ip() -> &'static str {
+    static DOCKER_HOST_GATEWAY_IP: OnceLock<String> = OnceLock::new();
+
+    DOCKER_HOST_GATEWAY_IP.get_or_init(|| {
+        let output = std::process::Command::new("docker")
+            .args([
+                "run",
+                "--rm",
+                "--add-host",
+                "host.docker.internal:host-gateway",
+                "nginx:latest",
+                "/bin/sh",
+                "-c",
+                "awk '/host\\.docker\\.internal/ {print $1; exit}' /etc/hosts",
+            ])
+            .output()
+            .expect("resolve docker host gateway IP");
+
+        assert!(
+            output.status.success(),
+            "failed to resolve docker host gateway IP.\nstderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert!(
+            !ip.is_empty(),
+            "docker host gateway IP resolution returned empty output"
+        );
+        ip
+    })
 }
 
 async fn get_nginx_port(container: &testcontainers::ContainerAsync<GenericImage>) -> u16 {
