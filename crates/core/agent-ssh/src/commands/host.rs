@@ -4,6 +4,7 @@ use rootcause::prelude::*;
 use uptrakit_shared_db::crypto::EncryptedString;
 
 use crate::cli::HostCommands;
+use crate::commands::bootstrap::{self, BootstrapParams};
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams, HostUpdates};
 use crate::ssh_key;
@@ -59,6 +60,34 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
             run_update(&db, params).await
         }
         HostCommands::Remove { name_or_id } => run_remove(&db, &name_or_id).await,
+        HostCommands::Bootstrap {
+            name,
+            hostname,
+            auth_username,
+            auth_password,
+            auth_private_key_file,
+            target_username,
+            target_private_key_file,
+            port,
+            host_key_fingerprint,
+        } => {
+            // The bootstrap command manages its own DB connection, so we
+            // drop the one opened above and delegate entirely.
+            drop(db);
+            let cli_params = BootstrapCliParams {
+                state_dir,
+                name,
+                hostname,
+                auth_username,
+                auth_password_flag: auth_password,
+                auth_private_key_file: auth_private_key_file.as_deref(),
+                target_username,
+                target_private_key_file: target_private_key_file.as_deref(),
+                port,
+                host_key_fingerprint,
+            };
+            run_bootstrap(cli_params).await
+        }
     }
 }
 
@@ -208,6 +237,66 @@ async fn run_remove(db: &sea_orm::DatabaseConnection, name_or_id: &str) -> Resul
     }
 
     Ok(())
+}
+
+/// Encapsulates bootstrap CLI parameters to avoid too many arguments.
+struct BootstrapCliParams<'a> {
+    state_dir: &'a Path,
+    name: String,
+    hostname: String,
+    auth_username: String,
+    auth_password_flag: bool,
+    auth_private_key_file: Option<&'a Path>,
+    target_username: Option<String>,
+    target_private_key_file: Option<&'a Path>,
+    port: i32,
+    host_key_fingerprint: Option<String>,
+}
+
+async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
+    // Validate that at least one auth method is provided.
+    if !p.auth_password_flag && p.auth_private_key_file.is_none() {
+        bail!(Error::InvalidInput(
+            "at least one of --auth-password or --auth-private-key-file is required".to_string()
+        ));
+    }
+
+    // Read auth credentials.
+    let auth_password = if p.auth_password_flag {
+        let password = rpassword::prompt_password("SSH password: ")
+            .map_err(|e| report!(Error::InvalidInput(format!("failed to read password: {e}"))))?;
+        Some(password)
+    } else {
+        None
+    };
+
+    let auth_private_key_pem = match p.auth_private_key_file {
+        Some(path) => Some(ssh_key::read_private_key(path)?),
+        None => None,
+    };
+
+    // Resolve target username.
+    let resolved_target = p.target_username.unwrap_or_else(|| p.auth_username.clone());
+
+    // Read or generate target key.
+    let target_private_key_pem = match p.target_private_key_file {
+        Some(path) => Some(ssh_key::read_private_key(path)?),
+        None => None,
+    };
+
+    let params = BootstrapParams {
+        name: p.name,
+        hostname: p.hostname,
+        port: p.port,
+        auth_username: p.auth_username,
+        auth_password,
+        auth_private_key_pem,
+        target_username: resolved_target,
+        target_private_key_pem,
+        host_key_fingerprint: p.host_key_fingerprint,
+    };
+
+    bootstrap::run_bootstrap(p.state_dir, params).await
 }
 
 fn format_timestamp(unix_ts: i64) -> String {

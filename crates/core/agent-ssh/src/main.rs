@@ -5,6 +5,7 @@ pub(crate) mod db;
 mod error;
 mod host_ops;
 mod ssh_key;
+mod ssh_transport;
 
 use clap::Parser;
 use rootcause::prelude::*;

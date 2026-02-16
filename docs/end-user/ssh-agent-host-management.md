@@ -76,6 +76,26 @@ uptrakit-agent-ssh host remove my-server --master-key-file /etc/uptrakit/master.
 
 Accepts either the host name or UUID. Returns an error if the host is not found.
 
+### Bootstrap a host
+
+For automated remote host setup (user creation, key deployment, sudoers), use
+the `host bootstrap` command:
+
+```bash
+uptrakit-agent-ssh host bootstrap \
+  --name my-server \
+  --hostname 192.168.1.100 \
+  --auth-username root \
+  --auth-password \
+  --master-key-file /etc/uptrakit/master.key
+```
+
+This connects to the remote host, creates a target user, deploys an SSH key,
+configures sudoers, verifies connectivity, and saves the host entry.
+
+For detailed options and troubleshooting, see
+[SSH Agent Bootstrap](ssh-agent-bootstrap.md).
+
 ## Supported Key Types
 
 | Key Type | PEM Format | Notes |
@@ -88,6 +108,7 @@ The key type is detected automatically from the PEM header and binary content. U
 
 ## Related Documentation
 
+- [SSH Agent Bootstrap](ssh-agent-bootstrap.md) -- automated remote host setup
 - [SSH Agent Architecture](../architecture/ssh-agent.md) -- architecture, database schema, and crate structure
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) -- encryption model and threat model
 - [Service Lifecycle](../development/service-lifecycle.md) -- `ServiceHandler` trait used by daemon mode

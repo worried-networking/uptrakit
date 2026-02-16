@@ -10,6 +10,9 @@ version.workspace = true
 base64 = "0.22"
 clap = { workspace = true }
 rootcause = { workspace = true }
+rpassword = "7"
+russh = { version = "0.57", default-features = false, features = ["aws-lc-rs"] }
+ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "rand_core", "std"] }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
 sha2 = { workspace = true }
@@ -19,6 +22,7 @@ tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uptrakit-command = { path = "../../shared/command" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }

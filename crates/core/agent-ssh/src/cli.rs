@@ -109,6 +109,51 @@ pub enum HostCommands {
         /// Host name or UUID.
         name_or_id: String,
     },
+
+    /// Bootstrap a remote host: create user, deploy SSH key, configure
+    /// sudoers, verify connectivity, and save the host entry.
+    Bootstrap {
+        /// Friendly name for this host (must be unique).
+        #[arg(long)]
+        name: String,
+
+        /// SSH hostname or IP address.
+        #[arg(long)]
+        hostname: String,
+
+        /// Username for initial SSH authentication.
+        #[arg(long)]
+        auth_username: String,
+
+        /// Read password from terminal (no echo) for initial authentication.
+        /// Mutually exclusive with --auth-private-key-file.
+        #[arg(long, conflicts_with = "auth_private_key_file")]
+        auth_password: bool,
+
+        /// Path to private key for initial authentication. Use `-` for stdin.
+        /// Mutually exclusive with --auth-password.
+        #[arg(long, conflicts_with = "auth_password")]
+        auth_private_key_file: Option<PathBuf>,
+
+        /// Username on the remote host for ongoing SSH access.
+        /// Defaults to --auth-username if not specified.
+        #[arg(long)]
+        target_username: Option<String>,
+
+        /// Path to a private key for the target user. Use `-` for stdin.
+        /// If omitted, a new Ed25519 keypair is generated.
+        #[arg(long)]
+        target_private_key_file: Option<PathBuf>,
+
+        /// SSH port.
+        #[arg(long, default_value = "22")]
+        port: i32,
+
+        /// Expected host key fingerprint (e.g., `SHA256:...`).
+        /// If omitted, trust-on-first-use is applied.
+        #[arg(long)]
+        host_key_fingerprint: Option<String>,
+    },
 }
 
 #[cfg(test)]
@@ -475,5 +520,139 @@ mod tests {
     fn version_flag_parses_without_other_flags() {
         let args = Args::try_parse_from(["uptrakit-agent-ssh", "--version"]).expect("should parse");
         assert!(args.common.version);
+    }
+
+    #[test]
+    fn host_bootstrap_with_password() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "--name",
+            "new-host",
+            "--hostname",
+            "10.0.0.5",
+            "--auth-username",
+            "admin",
+            "--auth-password",
+        ])
+        .expect("should parse bootstrap with password");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Bootstrap {
+                        name,
+                        hostname,
+                        auth_username,
+                        auth_password,
+                        auth_private_key_file,
+                        target_username,
+                        target_private_key_file,
+                        port,
+                        host_key_fingerprint,
+                    },
+            }) => {
+                assert_eq!(name, "new-host");
+                assert_eq!(hostname, "10.0.0.5");
+                assert_eq!(auth_username, "admin");
+                assert!(*auth_password);
+                assert!(auth_private_key_file.is_none());
+                assert!(target_username.is_none());
+                assert!(target_private_key_file.is_none());
+                assert_eq!(*port, 22);
+                assert!(host_key_fingerprint.is_none());
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_with_key_and_all_options() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "--name",
+            "prod-server",
+            "--hostname",
+            "192.168.1.50",
+            "--auth-username",
+            "root",
+            "--auth-private-key-file",
+            "/root/.ssh/id_ed25519",
+            "--target-username",
+            "uptrakit",
+            "--target-private-key-file",
+            "-",
+            "--port",
+            "2222",
+            "--host-key-fingerprint",
+            "SHA256:abc123",
+        ])
+        .expect("should parse bootstrap with all options");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Bootstrap {
+                        name,
+                        hostname,
+                        auth_username,
+                        auth_password,
+                        auth_private_key_file,
+                        target_username,
+                        target_private_key_file,
+                        port,
+                        host_key_fingerprint,
+                    },
+            }) => {
+                assert_eq!(name, "prod-server");
+                assert_eq!(hostname, "192.168.1.50");
+                assert_eq!(auth_username, "root");
+                assert!(!*auth_password);
+                assert_eq!(
+                    auth_private_key_file
+                        .as_ref()
+                        .map(|p| p.to_str().expect("path")),
+                    Some("/root/.ssh/id_ed25519")
+                );
+                assert_eq!(target_username.as_deref(), Some("uptrakit"));
+                assert_eq!(
+                    target_private_key_file
+                        .as_ref()
+                        .map(|p| p.to_str().expect("path")),
+                    Some("-")
+                );
+                assert_eq!(*port, 2222);
+                assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_password_and_key_conflict() {
+        let result = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "--name",
+            "test",
+            "--hostname",
+            "host",
+            "--auth-username",
+            "user",
+            "--auth-password",
+            "--auth-private-key-file",
+            "/key",
+        ]);
+        assert!(
+            result.is_err(),
+            "--auth-password and --auth-private-key-file should conflict"
+        );
     }
 }

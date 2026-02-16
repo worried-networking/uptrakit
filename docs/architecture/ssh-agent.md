@@ -11,9 +11,12 @@ The current implementation provides:
 - Controller-side enrollment and WebSocket dispatch for SSH agents
 - A standalone binary (`uptrakit-agent-ssh`) with the `ServiceHandler` trait
 - A local SQLite database for storing SSH host credentials (encrypted at rest)
-- CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove`)
+- CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove/bootstrap`)
+- SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
+- Ed25519 keypair generation for automated key deployment
+- A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
 
-SSH transport, provider execution over SSH, and UI configuration beyond the existing services API are not yet implemented.
+Provider execution over SSH and UI configuration beyond the existing services API are not yet implemented.
 
 ## Architecture Overview
 
@@ -99,6 +102,7 @@ directly on the local SQLite database.
 | `host show <name_or_id>` | Display detailed information for a specific host |
 | `host update <name_or_id>` | Update one or more fields of an existing host |
 | `host remove <name_or_id>` | Remove an SSH host from the local database |
+| `host bootstrap` | Automate remote host setup and save the host entry (see [Bootstrap](#bootstrap-workflow)) |
 
 Host identification accepts either the host's friendly name or UUID. The code tries UUID parse first, then falls back to a name lookup.
 
@@ -126,6 +130,31 @@ encryption.
 
 For detailed usage instructions, see [SSH Agent Host Management](../end-user/ssh-agent-host-management.md).
 
+### Bootstrap Workflow
+
+The `host bootstrap` subcommand automates the full remote host setup in a single
+command. It connects via SSH, creates a target user, deploys an SSH key,
+configures sudoers, verifies connectivity, and saves the host entry.
+
+```text
+1. VALIDATE INPUTS (username format, no DB name conflict)
+2. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
+3. CONNECT & AUTHENTICATE (password or key; TOFU or pinned host key)
+4. DETECT PRIVILEGES (root check, sudo -n true)
+5. REMOTE SETUP (create user, deploy authorized_keys, write sudoers)
+6. DISCONNECT auth session
+7. VERIFY (reconnect as target user, whoami + sudo -n true)
+8. SAVE TO DATABASE (encrypt key, store host entry)
+```
+
+The bootstrap command uses `russh` (pure Rust async SSH client) for SSH
+transport. Host key verification supports strict fingerprint pinning and
+trust-on-first-use (TOFU). Remote commands are constructed using
+`uptrakit_command::shell_escape()` to prevent shell injection.
+
+For detailed usage and troubleshooting, see
+[SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md).
+
 ## Crate Structure
 
 ```text
@@ -137,11 +166,13 @@ crates/core/agent-ssh/
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
     ├── client.rs        # Authenticated loop (ping/pong, cert renewal, local DB init)
     ├── error.rs         # Error types (rootcause + thiserror)
-    ├── ssh_key.rs       # SSH private key reading and key type auto-detection
+    ├── ssh_key.rs       # SSH private key reading, key type auto-detection, and Ed25519 keygen
+    ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command
     ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove)
     ├── commands/
     │   ├── mod.rs       # Command module declarations
-    │   └── host.rs      # Host subcommand handlers (dispatch, formatting, output)
+    │   ├── host.rs      # Host subcommand handlers (dispatch, formatting, output)
+    │   └── bootstrap.rs # Bootstrap workflow (remote setup, verification, DB save)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests
         ├── entity/
@@ -155,6 +186,7 @@ crates/core/agent-ssh/
 ## Related Documentation
 
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for CLI host management
+- [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — detailed bootstrap workflow and troubleshooting
 - [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — secret storage and threat model
 - [Wire Protocol](../api/wire-protocol.md) — `SshAgent` service type in enrollment

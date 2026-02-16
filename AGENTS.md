@@ -53,7 +53,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent (manages remote hosts over SSH); includes CLI host management subcommands (host add/list/show/update/remove) with SeaORM entity, CRUD ops, and SSH key auto-detection
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent (manages remote hosts over SSH); includes CLI host management subcommands (host add/list/show/update/remove/bootstrap) with SeaORM entity, CRUD ops, SSH key auto-detection, Ed25519 keygen, and SSH transport (russh)
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   │   └── src/scheduler/          #   Centralised DB-backed task scheduler (HA-safe optimistic locking)
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service

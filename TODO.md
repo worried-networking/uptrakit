@@ -381,20 +381,20 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [x] Create `crates/core/agent-ssh/` crate (`uptrakit-agent-ssh` binary)
 - [x] Reuse the existing wire protocol and WebSocket transport to the controller
 - [ ] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
-- [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove`)
+- [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove/bootstrap`)
 - [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
 - [ ] Clearly separate SSH transport logic from provider execution logic so providers remain transport-agnostic
 
 ### SSH Transport Layer
 
-- [ ] Key-based authentication only (no password auth)
+- [x] Password and key-based authentication (password auth supported for bootstrap; key-based for ongoing use)
 - [x] Support Ed25519 (preferred), RSA, and ECDSA keys (auto-detection from PEM content)
-- [ ] Strict host key verification (TOFU with persisted known_hosts, or pre-seeded fingerprints)
-- [ ] Reject connections on host key mismatch — never silently accept
+- [x] Strict host key verification (TOFU with persisted fingerprints, or pre-seeded fingerprints)
+- [x] Reject connections on host key mismatch — never silently accept
 - [ ] Connection pooling and multiplexing (reuse connections across checks and updates for the same host)
-- [ ] Configurable connection and command timeouts
+- [x] Configurable connection and command timeouts (30s default for bootstrap)
 - [ ] Jump host / bastion support for reaching hosts behind NAT or firewalls
-- [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update`)
+- [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update/bootstrap`)
 
 ### Remote Execution
 
@@ -414,9 +414,10 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 ### Security Considerations
 
-- [ ] Least-privilege SSH user on each managed host (e.g. `uptrakit`, mirrors the regular agent model)
+- [x] Least-privilege SSH user on each managed host (e.g. `uptrakit`, created by bootstrap; mirrors the regular agent model)
 - [ ] Sudo allowlist identical to regular agent: only specific update commands, NOPASSWD, no shell access
-- [ ] No shell injection: remote commands constructed from validated inputs, never string-interpolated
+  (bootstrap creates `NOPASSWD: ALL` — manual restriction recommended)
+- [x] No shell injection: remote commands constructed from validated inputs using `shell_escape()`, never string-interpolated
 - [x] SSH private keys stored on the machine running the SSH agent — never sent to the controller or exposed in API responses (encrypted at rest via `EncryptedString`)
 - [ ] Audit trail: log every SSH session (host, user, command, timestamp, exit code) without capturing secrets or key material
 - [ ] Limit concurrent SSH sessions per host and globally to prevent resource exhaustion on both the SSH agent and the remote hosts

@@ -4,6 +4,7 @@ use std::path::Path;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rootcause::prelude::*;
+use ssh_key::PrivateKey;
 
 use crate::db::entity::ssh_host::SshKeyType;
 use crate::error::Error;
@@ -207,6 +208,48 @@ fn read_openssh_string(data: &[u8], pos: usize) -> crate::error::Result<String> 
     })
 }
 
+/// Generate a new Ed25519 SSH keypair.
+///
+/// Returns `(private_pem, public_openssh)` where the private key is in
+/// OpenSSH PEM format and the public key is in `authorized_keys` format.
+pub fn generate_ed25519_keypair() -> crate::error::Result<(String, String)> {
+    let private_key =
+        PrivateKey::random(&mut ssh_key::rand_core::OsRng, ssh_key::Algorithm::Ed25519)
+            .map_err(|e| report!(Error::KeyGeneration(e.to_string())))?;
+
+    let private_pem = private_key
+        .to_openssh(ssh_key::LineEnding::LF)
+        .map_err(|e| {
+            report!(Error::KeyGeneration(format!(
+                "failed to encode private key: {e}"
+            )))
+        })?;
+
+    let public_openssh = private_key.public_key().to_openssh().map_err(|e| {
+        report!(Error::KeyGeneration(format!(
+            "failed to encode public key: {e}"
+        )))
+    })?;
+
+    Ok((private_pem.to_string(), public_openssh))
+}
+
+/// Extract the public key in `authorized_keys` format from a PEM-encoded
+/// private key.
+pub fn extract_public_key_openssh(pem_content: &str) -> crate::error::Result<String> {
+    let private_key = PrivateKey::from_openssh(pem_content).map_err(|e| {
+        report!(Error::UnsupportedKeyType(format!(
+            "failed to parse private key: {e}"
+        )))
+    })?;
+
+    private_key.public_key().to_openssh().map_err(|e| {
+        report!(Error::KeyGeneration(format!(
+            "failed to encode public key: {e}"
+        )))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +363,44 @@ oWQDYgAEkVQ4HWPH7wNHTLMMHK1FGY4GmUmqVE0gEN1vZJ3RLxdEJ/Rx/h3GX7y1
     fn write_openssh_string(buf: &mut Vec<u8>, data: &[u8]) {
         buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
         buf.extend_from_slice(data);
+    }
+
+    #[test]
+    fn generate_ed25519_keypair_roundtrip() {
+        let (private_pem, public_openssh) =
+            generate_ed25519_keypair().expect("should generate keypair");
+
+        // Private key should be OpenSSH format
+        assert!(private_pem.contains("BEGIN OPENSSH PRIVATE KEY"));
+        assert!(private_pem.contains("END OPENSSH PRIVATE KEY"));
+
+        // Public key should start with ssh-ed25519
+        assert!(public_openssh.starts_with("ssh-ed25519 "));
+
+        // Detect type should return Ed25519
+        let key_type = detect_key_type(&private_pem).expect("should detect type");
+        assert_eq!(key_type, SshKeyType::Ed25519);
+    }
+
+    #[test]
+    fn extract_public_key_from_generated() {
+        let (private_pem, public_openssh) =
+            generate_ed25519_keypair().expect("should generate keypair");
+
+        let extracted = extract_public_key_openssh(&private_pem).expect("should extract pubkey");
+        assert_eq!(extracted, public_openssh);
+    }
+
+    #[test]
+    fn extract_public_key_invalid_pem() {
+        let result = extract_public_key_openssh("not a valid PEM key");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn generate_keypair_unique() {
+        let (pem1, _) = generate_ed25519_keypair().expect("keypair 1");
+        let (pem2, _) = generate_ed25519_keypair().expect("keypair 2");
+        assert_ne!(pem1, pem2, "each keypair should be unique");
     }
 }

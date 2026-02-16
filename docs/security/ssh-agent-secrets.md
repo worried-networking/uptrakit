@@ -92,6 +92,55 @@ uptrakit-agent-ssh --url https://controller:8443 --allow-plaintext-secrets
 
 This stores SSH private keys as plaintext in the database and logs a warning. It must **never** be used in production.
 
+## Bootstrap Security Model
+
+The `host bootstrap` command introduces additional security considerations.
+
+### Transient credentials
+
+- **Auth passwords** are read from stdin via `rpassword` (no echo) and held only
+  in process memory for the duration of the bootstrap. They are never written to
+  disk or stored in the database.
+- **Generated Ed25519 keys** exist only in process memory until they are
+  encrypted with the master key and stored in the database. No key file is
+  written to disk.
+
+### Host key verification
+
+The bootstrap command supports two modes:
+
+| Mode | Flag | Security Level |
+| --- | --- | --- |
+| **Strict pinning** | `--host-key-fingerprint SHA256:...` | Strong — rejects mismatched keys |
+| **TOFU** (trust-on-first-use) | (omitted) | Weaker — accepts any key on first connection |
+
+When TOFU is used, the observed fingerprint is displayed to the operator and
+stored in the database for subsequent connections. The verification step (step 7)
+always uses strict pinning with the fingerprint from step 3.
+
+**Recommendation**: Use `--host-key-fingerprint` in production to prevent
+man-in-the-middle attacks during the initial connection. TOFU is acceptable for
+development and trusted networks.
+
+### Shell injection prevention
+
+All remote commands are constructed using `uptrakit_command::shell_escape()`,
+which wraps arguments in single quotes with proper escaping. Username validation
+enforces POSIX rules (`[a-z_][a-z0-9_-]*`, max 32 characters), further reducing
+injection risk.
+
+### Sudoers configuration
+
+The bootstrap command writes `/etc/sudoers.d/uptrakit-<target_username>` with:
+
+```text
+<target_username> ALL=(ALL) NOPASSWD: ALL
+```
+
+This grants unrestricted root access to the target user. Operators should review
+and restrict this file after bootstrapping to limit access to only the commands
+required by the update workflow.
+
 ## SSH Key Type Auto-Detection
 
 When a private key is provided via `--private-key-file`, the SSH agent
@@ -111,6 +160,7 @@ For details on how the CLI host management subcommands work, see [SSH Agent Host
 
 - [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture, database schema, and CLI subcommands
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for managing SSH hosts
+- [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — automated remote host setup and troubleshooting
 - [Secrets and Encryption](secrets-and-encryption.md) — controller's encryption model
 - [Cryptography](cryptography.md) — cryptographic primitives used across Uptrakit
 - [Filesystem and Dependency Security](filesystem-dependency-security.md) — secure file operations
