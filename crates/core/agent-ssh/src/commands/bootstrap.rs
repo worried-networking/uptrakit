@@ -30,6 +30,8 @@ pub struct BootstrapParams {
     pub auth_username: String,
     pub auth_password: Option<String>,
     pub auth_private_key_pem: Option<String>,
+    /// Use the local SSH agent for authentication (detected from `SSH_AUTH_SOCK`).
+    pub use_ssh_agent: bool,
     pub target_username: String,
     pub target_private_key_pem: Option<String>,
     pub host_key_fingerprint: Option<String>,
@@ -43,9 +45,15 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     validate_posix_username(&params.auth_username)?;
     validate_posix_username(&params.target_username)?;
 
-    if params.auth_password.is_none() && params.auth_private_key_pem.is_none() {
+    if params.auth_password.is_none()
+        && params.auth_private_key_pem.is_none()
+        && !params.use_ssh_agent
+    {
         bail!(Error::InvalidInput(
-            "at least one of --auth-password or --auth-private-key-file is required".to_string()
+            "no authentication method available: use --auth-password, \
+             --auth-private-key-file, or ensure SSH_AUTH_SOCK is set for \
+             SSH agent forwarding"
+                .to_string()
         ));
     }
 
@@ -77,10 +85,17 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     let key_type = ssh_key::detect_key_type(&target_private_pem)?;
 
     // 3. CONNECT & AUTHENTICATE (as auth_username)
-    let auth = match (&params.auth_password, &params.auth_private_key_pem) {
-        (Some(password), _) => AuthMethod::Password(password),
-        (_, Some(pem)) => AuthMethod::PrivateKey(pem),
-        _ => unreachable!("validated above"),
+    let auth = match (
+        &params.auth_password,
+        &params.auth_private_key_pem,
+        params.use_ssh_agent,
+    ) {
+        (Some(password), _, _) => AuthMethod::Password(password),
+        (_, Some(pem), _) => AuthMethod::PrivateKey(pem),
+        (_, _, true) => AuthMethod::Agent,
+        _ => bail!(Error::InvalidInput(
+            "no authentication method available".to_string()
+        )),
     };
 
     let port = u16::try_from(params.port).map_err(|_| {

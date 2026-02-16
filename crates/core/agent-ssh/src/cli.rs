@@ -125,10 +125,12 @@ pub enum HostCommands {
         #[arg(long)]
         auth_username: String,
 
-        /// Read password from terminal (no echo) for initial authentication.
+        /// Password for initial SSH authentication.
+        /// Use `--auth-password` (no value) to prompt securely at runtime.
+        /// Use `--auth-password <VALUE>` to pass the password inline.
         /// Mutually exclusive with --auth-private-key-file.
-        #[arg(long, conflicts_with = "auth_private_key_file")]
-        auth_password: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = None, conflicts_with = "auth_private_key_file")]
+        auth_password: Option<Option<String>>,
 
         /// Path to private key for initial authentication. Use `-` for stdin.
         /// Mutually exclusive with --auth-password.
@@ -523,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn host_bootstrap_with_password() {
+    fn host_bootstrap_with_password_prompt() {
         let args = Args::try_parse_from([
             "uptrakit-agent-ssh",
             "--allow-plaintext-secrets",
@@ -537,7 +539,7 @@ mod tests {
             "admin",
             "--auth-password",
         ])
-        .expect("should parse bootstrap with password");
+        .expect("should parse bootstrap with password prompt");
 
         match &args.command {
             Some(Commands::Host {
@@ -557,12 +559,83 @@ mod tests {
                 assert_eq!(name, "new-host");
                 assert_eq!(hostname, "10.0.0.5");
                 assert_eq!(auth_username, "admin");
-                assert!(*auth_password);
+                assert_eq!(
+                    *auth_password,
+                    Some(None),
+                    "--auth-password with no value should be Some(None)"
+                );
                 assert!(auth_private_key_file.is_none());
                 assert!(target_username.is_none());
                 assert!(target_private_key_file.is_none());
                 assert_eq!(*port, 22);
                 assert!(host_key_fingerprint.is_none());
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_with_password_inline() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "--name",
+            "new-host",
+            "--hostname",
+            "10.0.0.5",
+            "--auth-username",
+            "admin",
+            "--auth-password",
+            "mypass123",
+        ])
+        .expect("should parse bootstrap with inline password");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Bootstrap { auth_password, .. },
+            }) => {
+                assert_eq!(
+                    *auth_password,
+                    Some(Some("mypass123".to_string())),
+                    "--auth-password mypass123 should be Some(Some(\"mypass123\"))"
+                );
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_without_auth_flags() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "--name",
+            "new-host",
+            "--hostname",
+            "10.0.0.5",
+            "--auth-username",
+            "admin",
+        ])
+        .expect("should parse bootstrap without auth flags (agent fallback)");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Bootstrap {
+                        auth_password,
+                        auth_private_key_file,
+                        ..
+                    },
+            }) => {
+                assert!(
+                    auth_password.is_none(),
+                    "no --auth-password flag means None"
+                );
+                assert!(auth_private_key_file.is_none());
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
         }
@@ -612,7 +685,7 @@ mod tests {
                 assert_eq!(name, "prod-server");
                 assert_eq!(hostname, "192.168.1.50");
                 assert_eq!(auth_username, "root");
-                assert!(!*auth_password);
+                assert!(auth_password.is_none(), "key auth should have no password");
                 assert_eq!(
                     auth_private_key_file
                         .as_ref()

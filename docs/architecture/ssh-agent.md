@@ -139,13 +139,23 @@ configures sudoers, verifies connectivity, and saves the host entry.
 ```text
 1. VALIDATE INPUTS (username format, no DB name conflict)
 2. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
-3. CONNECT & AUTHENTICATE (password or key; TOFU or pinned host key)
+3. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned host key)
 4. DETECT PRIVILEGES (root check, sudo -n true)
 5. REMOTE SETUP (create user, deploy authorized_keys, write sudoers)
 6. DISCONNECT auth session
 7. VERIFY (reconnect as target user, whoami + sudo -n true)
 8. SAVE TO DATABASE (encrypt key, store host entry)
 ```
+
+The bootstrap command supports three authentication methods for step 3:
+
+- **Password** — `--auth-password` accepts an optional inline value
+  (`--auth-password mypass`) or prompts interactively when no value is given.
+- **Private key file** — `--auth-private-key-file <path>` reads a PEM key.
+- **SSH agent** — automatic fallback when neither flag is given and
+  `SSH_AUTH_SOCK` is set. Connects to the local SSH agent via
+  `russh::keys::agent::client::AgentClient`, enumerates identities, and tries
+  each key via `authenticate_publickey_with`.
 
 The bootstrap command uses `russh` (pure Rust async SSH client) for SSH
 transport. Host key verification supports strict fingerprint pinning and

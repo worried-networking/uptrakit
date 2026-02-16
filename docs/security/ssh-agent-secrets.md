@@ -98,9 +98,18 @@ The `host bootstrap` command introduces additional security considerations.
 
 ### Transient credentials
 
-- **Auth passwords** are read from stdin via `rpassword` (no echo) and held only
-  in process memory for the duration of the bootstrap. They are never written to
-  disk or stored in the database.
+- **Auth passwords (prompted)** are read from stdin via `rpassword` (no echo)
+  and held only in process memory for the duration of the bootstrap. They are
+  never written to disk or stored in the database.
+- **Auth passwords (inline)** passed as `--auth-password <VALUE>` are visible in
+  the process listing (`/proc/*/cmdline`) and may appear in shell history. Use
+  the prompted mode (`--auth-password` without a value) or SSH agent
+  authentication in environments where this is a concern.
+- **SSH agent keys** are used transiently via the `SSH_AUTH_SOCK` Unix socket.
+  Private key material never leaves the SSH agent process — the bootstrap
+  command only receives signatures. The agent connection is dropped when
+  authentication completes. See
+  [Secure Development](secure-development.md) for related guidance.
 - **Generated Ed25519 keys** exist only in process memory until they are
   encrypted with the master key and stored in the database. No key file is
   written to disk.

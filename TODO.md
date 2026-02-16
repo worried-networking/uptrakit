@@ -388,6 +388,8 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 ### SSH Transport Layer
 
 - [x] Password and key-based authentication (password auth supported for bootstrap; key-based for ongoing use)
+- [x] SSH agent forwarding support (automatic `SSH_AUTH_SOCK` detection as fallback when no explicit auth is given)
+- [x] Dual-mode `--auth-password` (accepts optional inline value or prompts interactively)
 - [x] Support Ed25519 (preferred), RSA, and ECDSA keys (auto-detection from PEM content)
 - [x] Strict host key verification (TOFU with persisted fingerprints, or pre-seeded fingerprints)
 - [x] Reject connections on host key mismatch — never silently accept

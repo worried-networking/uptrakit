@@ -305,6 +305,26 @@ skip = [
     { crate = "windows_x86_64_gnu@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
     { crate = "windows_x86_64_gnullvm@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
     { crate = "windows_x86_64_msvc@0.42.2", reason = "pulled by windows-targets@0.42.2 via jni" },
+
+    # crypto stack duplicates: older 0.10.x/0.1.x series pulled by argon2/russh/openidconnect
+    # crypto crates; newer 0.11.x/0.2.x used by the rest of the ecosystem. Will resolve when
+    # upstream crates converge on the newer RustCrypto releases.
+    { crate = "block-buffer@0.10.4", reason = "pulled by digest 0.10 (argon2, russh, openidconnect crypto); newer 0.11 used by digest 0.11" },
+    { crate = "crypto-common@0.1.6", reason = "pulled by digest 0.10; newer 0.2 used by digest 0.11" },
+    { crate = "digest@0.10.7", reason = "pulled by argon2, blake2, ecdsa, ed25519-dalek (russh/openidconnect); newer 0.11 used by sha2, hmac" },
+    { crate = "generic-array@0.14.9", reason = "pulled by crypto-common 0.1 (digest 0.10 chain); newer 1.x used by crypto-common 0.2" },
+    { crate = "const-oid@0.9.6", reason = "pulled by spki/pkcs8 0.7 (russh ssh-key chain); newer 0.10 used by spki/pkcs8 0.8" },
+    { crate = "sha1@0.10.6", reason = "pulled by openidconnect (oauth2); newer 0.11 used by russh" },
+    { crate = "signature@2.2.0", reason = "pulled by ecdsa/ed25519 (openidconnect); newer 3.x-rc used by russh crypto" },
+
+    # nix: 0.29 via uptrakit-agent-ssh, 0.31 via russh; waiting for russh to stabilize
+    { crate = "nix@0.29.0", reason = "pulled by uptrakit-agent-ssh; russh uses 0.31" },
+
+    # rand_core: 0.9 via rand 0.9, 0.10-rc via russh crypto stack
+    { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (uptrakit); russh crypto uses 0.10-rc" },
+
+    # windows-sys: 0.59 via nix 0.29, 0.61 via clap; 0.60 already skipped above
+    { crate = "windows-sys@0.59.0", reason = "pulled by nix 0.29; newer 0.60/0.61 used by tokio/clap" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive

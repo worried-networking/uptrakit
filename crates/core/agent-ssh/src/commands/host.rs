@@ -79,7 +79,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 name,
                 hostname,
                 auth_username,
-                auth_password_flag: auth_password,
+                auth_password,
                 auth_private_key_file: auth_private_key_file.as_deref(),
                 target_username,
                 target_private_key_file: target_private_key_file.as_deref(),
@@ -245,7 +245,8 @@ struct BootstrapCliParams<'a> {
     name: String,
     hostname: String,
     auth_username: String,
-    auth_password_flag: bool,
+    /// `None` = not passed, `Some(None)` = prompt, `Some(Some(pw))` = inline.
+    auth_password: Option<Option<String>>,
     auth_private_key_file: Option<&'a Path>,
     target_username: Option<String>,
     target_private_key_file: Option<&'a Path>,
@@ -254,21 +255,32 @@ struct BootstrapCliParams<'a> {
 }
 
 async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
-    // Validate that at least one auth method is provided.
-    if !p.auth_password_flag && p.auth_private_key_file.is_none() {
+    // Resolve password from the dual-mode flag.
+    let auth_password = match p.auth_password {
+        Some(Some(pw)) => Some(pw),
+        Some(None) => {
+            let password = rpassword::prompt_password("SSH password: ").map_err(|e| {
+                report!(Error::InvalidInput(format!("failed to read password: {e}")))
+            })?;
+            Some(password)
+        }
+        None => None,
+    };
+
+    // Detect SSH agent fallback: no password, no key file, SSH_AUTH_SOCK set.
+    let use_ssh_agent = auth_password.is_none()
+        && p.auth_private_key_file.is_none()
+        && std::env::var_os("SSH_AUTH_SOCK").is_some();
+
+    // Validate that at least one auth method is available.
+    if auth_password.is_none() && p.auth_private_key_file.is_none() && !use_ssh_agent {
         bail!(Error::InvalidInput(
-            "at least one of --auth-password or --auth-private-key-file is required".to_string()
+            "no authentication method available: use --auth-password, \
+             --auth-private-key-file, or ensure SSH_AUTH_SOCK is set for \
+             SSH agent forwarding"
+                .to_string()
         ));
     }
-
-    // Read auth credentials.
-    let auth_password = if p.auth_password_flag {
-        let password = rpassword::prompt_password("SSH password: ")
-            .map_err(|e| report!(Error::InvalidInput(format!("failed to read password: {e}"))))?;
-        Some(password)
-    } else {
-        None
-    };
 
     let auth_private_key_pem = match p.auth_private_key_file {
         Some(path) => Some(ssh_key::read_private_key(path)?),
@@ -291,6 +303,7 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         auth_username: p.auth_username,
         auth_password,
         auth_private_key_pem,
+        use_ssh_agent,
         target_username: resolved_target,
         target_private_key_pem,
         host_key_fingerprint: p.host_key_fingerprint,

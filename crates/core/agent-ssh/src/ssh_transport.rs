@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use rootcause::prelude::*;
 use russh::client::{self, Handle};
+use russh::keys::agent::client::AgentClient;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::{self};
 use russh::{ChannelMsg, Disconnect};
@@ -30,6 +31,8 @@ pub struct SshConnectionConfig {
 pub enum AuthMethod<'a> {
     Password(&'a str),
     PrivateKey(&'a str),
+    /// Authenticate using keys from the local SSH agent (`SSH_AUTH_SOCK`).
+    Agent,
 }
 
 /// Result of executing a remote command.
@@ -148,41 +151,91 @@ pub async fn connect_and_authenticate(
     })?;
 
     // Authenticate.
-    let auth_result = match auth {
-        AuthMethod::Password(password) => handle
-            .authenticate_password(username.to_string(), password.to_string())
-            .await
-            .map_err(|e| {
-                report!(Error::SshAuth(format!(
-                    "password authentication failed: {e}"
-                )))
-            })?,
+    match auth {
+        AuthMethod::Password(password) => {
+            let auth_result = handle
+                .authenticate_password(username.to_string(), password.to_string())
+                .await
+                .map_err(|e| {
+                    report!(Error::SshAuth(format!(
+                        "password authentication failed: {e}"
+                    )))
+                })?;
+            if !auth_result.success() {
+                bail!(Error::SshAuth(format!(
+                    "authentication failed for user '{username}'"
+                )));
+            }
+        }
         AuthMethod::PrivateKey(pem) => {
             let private_key = keys::decode_secret_key(pem, None).map_err(|e| {
                 report!(Error::SshAuth(format!("failed to decode private key: {e}")))
             })?;
             let key_with_alg = PrivateKeyWithHashAlg::new(Arc::new(private_key), None);
-            handle
+            let auth_result = handle
                 .authenticate_publickey(username.to_string(), key_with_alg)
                 .await
                 .map_err(|e| {
                     report!(Error::SshAuth(format!(
                         "public key authentication failed: {e}"
                     )))
-                })?
+                })?;
+            if !auth_result.success() {
+                bail!(Error::SshAuth(format!(
+                    "authentication failed for user '{username}'"
+                )));
+            }
         }
-    };
-
-    if !auth_result.success() {
-        bail!(Error::SshAuth(format!(
-            "authentication failed for user '{username}'"
-        )));
+        AuthMethod::Agent => {
+            authenticate_with_agent(&mut handle, username).await?;
+        }
     }
 
     Ok((SshSession { handle }, fp))
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
+
+/// Authenticate using keys from the local SSH agent.
+///
+/// Connects to the agent via `SSH_AUTH_SOCK`, enumerates identities, and tries
+/// each key until one succeeds or all are exhausted.
+async fn authenticate_with_agent<H: client::Handler>(
+    handle: &mut Handle<H>,
+    username: &str,
+) -> Result<()> {
+    let mut agent = AgentClient::connect_env().await.map_err(|e| {
+        report!(Error::SshAuth(format!(
+            "failed to connect to SSH agent: {e}"
+        )))
+    })?;
+
+    let identities = agent.request_identities().await.map_err(|e| {
+        report!(Error::SshAuth(format!(
+            "failed to list SSH agent identities: {e}"
+        )))
+    })?;
+
+    if identities.is_empty() {
+        bail!(Error::SshAuth("SSH agent has no keys loaded".to_string()));
+    }
+
+    for key in &identities {
+        let result = handle
+            .authenticate_publickey_with(username.to_string(), key.clone(), None, &mut agent)
+            .await
+            .map_err(|e| report!(Error::SshAuth(format!("SSH agent signing failed: {e}"))))?;
+
+        if result.success() {
+            return Ok(());
+        }
+    }
+
+    bail!(Error::SshAuth(format!(
+        "none of the {} SSH agent key(s) were accepted for user '{username}'",
+        identities.len()
+    )));
+}
 
 async fn exec_command_inner<H: client::Handler>(
     session: &Handle<H>,

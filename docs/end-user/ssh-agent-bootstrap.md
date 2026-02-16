@@ -14,9 +14,26 @@ the local database — all in one step.
 - The remote host must have `useradd`, `getent`, `visudo`, and standard POSIX
   utilities.
 
+## Authentication methods
+
+The bootstrap command supports three authentication methods. They are resolved in
+priority order:
+
+1. **`--auth-password <VALUE>`** — use the provided password directly.
+2. **`--auth-password`** (no value) — prompt for password via stdin (no echo).
+3. **`--auth-private-key-file <PATH>`** — read a PEM private key file.
+4. **SSH agent** (automatic fallback) — if neither `--auth-password` nor
+   `--auth-private-key-file` is provided and the `SSH_AUTH_SOCK` environment
+   variable is set, the bootstrap command connects to the local SSH agent,
+   enumerates its loaded keys, and tries each one.
+
+`--auth-password` and `--auth-private-key-file` are mutually exclusive. If
+neither flag is provided and `SSH_AUTH_SOCK` is not set, the command fails with
+an error listing all three options.
+
 ## Usage
 
-### Bootstrap with password authentication
+### Bootstrap with password prompt
 
 ```bash
 uptrakit-agent-ssh host bootstrap \
@@ -27,8 +44,23 @@ uptrakit-agent-ssh host bootstrap \
   --master-key-file /etc/uptrakit/master.key
 ```
 
-The `--auth-password` flag is a boolean flag (no value). You will be prompted to
-enter the password securely (no echo) at runtime.
+When `--auth-password` is passed without a value, you are prompted to enter the
+password securely (no echo) at runtime.
+
+### Bootstrap with inline password
+
+```bash
+uptrakit-agent-ssh host bootstrap \
+  --name my-server \
+  --hostname 192.168.1.100 \
+  --auth-username root \
+  --auth-password "my-secret-pass" \
+  --master-key-file /etc/uptrakit/master.key
+```
+
+When `--auth-password` is followed by a value, that value is used directly. Note
+that the password will be visible in your shell history and process listing. See
+[SSH Agent Secrets](../security/ssh-agent-secrets.md) for security implications.
 
 ### Bootstrap with key authentication
 
@@ -44,6 +76,20 @@ uptrakit-agent-ssh host bootstrap \
   --master-key-file /etc/uptrakit/master.key
 ```
 
+### Bootstrap with SSH agent
+
+```bash
+uptrakit-agent-ssh host bootstrap \
+  --name my-server \
+  --hostname 192.168.1.100 \
+  --auth-username admin \
+  --master-key-file /etc/uptrakit/master.key
+```
+
+When no `--auth-password` or `--auth-private-key-file` flag is given, the
+bootstrap command automatically detects the local SSH agent via `SSH_AUTH_SOCK`
+and tries each loaded key. No additional flags are needed.
+
 ### All flags
 
 | Flag | Required | Default | Description |
@@ -51,24 +97,22 @@ uptrakit-agent-ssh host bootstrap \
 | `--name` | Yes | — | Friendly name for the host (must be unique) |
 | `--hostname` | Yes | — | SSH hostname or IP address |
 | `--auth-username` | Yes | — | Username for the initial SSH connection |
-| `--auth-password` | No | — | Prompt for password (flag, no value) |
+| `--auth-password` | No | — | Password auth: no value = prompt, with value = use directly |
 | `--auth-private-key-file` | No | — | Path to PEM private key for authentication |
 | `--target-username` | No | `--auth-username` | Username for the managed account |
 | `--target-private-key-file` | No | (generated) | Path to PEM private key for the target user |
 | `--port` | No | 22 | SSH port |
 | `--host-key-fingerprint` | No | (TOFU) | Expected host key fingerprint (SHA-256) |
 
-`--auth-password` and `--auth-private-key-file` are mutually exclusive. At least
-one must be provided.
-
 ## What happens on the remote host
 
 The bootstrap command performs these steps in order:
 
 1. **Connect and authenticate** — Connects to the remote host using the
-   provided auth credentials. If `--host-key-fingerprint` is given, the host key
-   is verified strictly. Otherwise, TOFU (trust-on-first-use) is used and the
-   observed fingerprint is displayed and stored.
+   provided auth credentials (password, private key file, or SSH agent). If
+   `--host-key-fingerprint` is given, the host key is verified strictly.
+   Otherwise, TOFU (trust-on-first-use) is used and the observed fingerprint is
+   displayed and stored.
 
 2. **Detect privileges** — Checks whether the auth user is root (`id -u`). If
    not root, verifies that the auth user has passwordless sudo access.
@@ -145,6 +189,23 @@ observed during the initial connection. See
 implications of TOFU vs pinned fingerprints.
 
 ## Troubleshooting
+
+### "no authentication method available"
+
+No `--auth-password` or `--auth-private-key-file` flag was provided, and
+`SSH_AUTH_SOCK` is not set. Either pass an explicit auth flag or start your local
+SSH agent (`eval $(ssh-agent)` / `ssh-add`).
+
+### "SSH agent has no keys loaded"
+
+The SSH agent is running but has no identities. Add a key with `ssh-add` or pass
+`--auth-password` or `--auth-private-key-file` instead.
+
+### "none of the N SSH agent key(s) were accepted"
+
+The SSH agent has loaded keys but the remote host rejected all of them. Verify
+that one of the agent's keys is authorized on the remote host for the given
+username, or use a different auth method.
 
 ### "auth user does not have passwordless sudo access"
 
