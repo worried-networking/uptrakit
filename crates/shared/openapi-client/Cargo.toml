@@ -1,0 +1,21 @@
+[package]
+name = "uptrakit-openapi-client"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+description = "Typed HTTP client for the Uptrakit web API"
+
+[dependencies]
+reqwest = { workspace = true, features = ["query"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rootcause = { workspace = true }
+thiserror = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+uptrakit-shared-types = { workspace = true }
+uptrakit-web-api-types = { path = "../web-api-types" }
+
+[dev-dependencies]
+serde_urlencoded = "0.7"

@@ -2,6 +2,13 @@
 
 The controller exposes a REST API under `/api/v1/`. Most endpoints are authenticated with JWT access tokens and permission checks.
 
+## Typed API Client
+
+The `uptrakit-openapi-client` crate provides a typed HTTP client for all API endpoints listed below. The CLI uses
+this client exclusively. See [OpenAPI Client](../development/openapi-client.md) for usage details.
+
+Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `uptrakit-web-api-types`).
+
 ## Common Patterns
 
 - Responses use JSON envelopes with standard pagination (`limit`, `offset`, `total`).

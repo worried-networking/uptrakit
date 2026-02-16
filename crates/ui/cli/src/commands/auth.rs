@@ -1,4 +1,4 @@
-use crate::client::ApiClient;
+use crate::client::UptrakitClient;
 use crate::config::{
     Config, Credentials, load_config, load_credentials, save_config, save_credentials,
 };
@@ -6,6 +6,8 @@ use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use serde::Serialize;
+use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
+use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
 
 /// Serializable output for `auth status`.
 #[derive(Debug, Serialize)]
@@ -78,50 +80,24 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
     let client_name = format!("cli-{host}-{date}");
 
     // Start device authorization flow
-    let client = ApiClient::new(&server, None, insecure)?;
-    let start_body = serde_json::json!({ "client_name": client_name });
-
-    let (status, body) = client
-        .request("POST", "/api/v1/auth/device", Some(start_body))
-        .await?;
-
-    if status != 200 {
-        let msg = body
-            .as_str()
-            .unwrap_or("Failed to start device authorization")
-            .to_string();
-        bail!(CliError::Api {
-            status,
-            message: msg,
-        });
-    }
-
-    let device_code = body["device_code"]
-        .as_str()
-        .ok_or_else(|| report!(CliError::Other("No device_code in response".into())))?
-        .to_string();
-
-    let user_code = body["user_code"]
-        .as_str()
-        .ok_or_else(|| report!(CliError::Other("No user_code in response".into())))?;
-
-    let verification_url = body["verification_url"]
-        .as_str()
-        .ok_or_else(|| report!(CliError::Other("No verification_url in response".into())))?;
-
-    let interval = body["interval"].as_u64().unwrap_or(5);
-    let expires_in = body["expires_in"].as_u64().unwrap_or(600);
+    let client = UptrakitClient::new(&server, None, insecure).context_to()?;
+    let start_resp = client
+        .device_auth_start(&DeviceAuthStartRequest {
+            client_name: Some(client_name.clone()),
+        })
+        .await
+        .context_to()?;
 
     // Display the code and URL
     eprintln!();
     eprintln!("  Open this URL in your browser:");
-    eprintln!("  {}", verification_url);
+    eprintln!("  {}", start_resp.verification_url);
     eprintln!();
-    eprintln!("  And enter this code: {}", user_code);
+    eprintln!("  And enter this code: {}", start_resp.user_code);
     eprintln!();
 
     // Try to open the URL in the user's browser
-    if let Err(e) = open_url(verification_url) {
+    if let Err(e) = open_url(&start_resp.verification_url) {
         eprintln!("  (Could not open browser automatically: {})", e);
         eprintln!("  Please open the URL above manually.");
         eprintln!();
@@ -130,9 +106,10 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
     eprintln!("  Waiting for authorization...");
 
     // Poll for completion
-    let poll_client = ApiClient::new(&server, None, insecure)?;
+    let poll_client = UptrakitClient::new(&server, None, insecure).context_to()?;
     let start = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(expires_in);
+    let timeout = std::time::Duration::from_secs(start_resp.expires_in);
+    let interval = start_resp.interval;
 
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
@@ -141,53 +118,57 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
             bail!(CliError::Other("Device authorization timed out".into()));
         }
 
-        let poll_body = serde_json::json!({ "device_code": device_code });
-        let (poll_status, poll_resp) = poll_client
-            .request("POST", "/api/v1/auth/device/poll", Some(poll_body))
-            .await?;
+        let poll_result = poll_client
+            .device_auth_poll(&DeviceAuthPollRequest {
+                device_code: start_resp.device_code.clone(),
+            })
+            .await;
 
-        if poll_status == 429 {
-            // Rate limited, wait extra interval
-            tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-            continue;
-        }
+        let poll_resp = match poll_result {
+            Ok(resp) => resp,
+            Err(e) => {
+                if matches!(
+                    e.current_context(),
+                    uptrakit_openapi_client::ClientError::RateLimited
+                ) {
+                    // Rate limited, wait extra interval
+                    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+                    continue;
+                }
+                if matches!(
+                    e.current_context(),
+                    uptrakit_openapi_client::ClientError::NotFound(_)
+                ) {
+                    bail!(CliError::Other(
+                        "Device authorization session not found or expired".into(),
+                    ));
+                }
+                return Err(e.context_to());
+            }
+        };
 
-        if poll_status == 404 {
-            bail!(CliError::Other(
-                "Device authorization session not found or expired".into(),
-            ));
-        }
-
-        if poll_status != 200 {
-            let msg = poll_resp
-                .as_str()
-                .unwrap_or("Unexpected error during polling")
-                .to_string();
-            bail!(CliError::Api {
-                status: poll_status,
-                message: msg,
-            });
-        }
-
-        let flow_status = poll_resp["status"].as_str().unwrap_or("unknown");
+        let flow_status = poll_resp.status;
 
         match flow_status {
-            "pending" => continue,
-            "expired" => {
+            uptrakit_openapi_client::DeviceAuthStatus::Pending => continue,
+            uptrakit_openapi_client::DeviceAuthStatus::Expired => {
                 bail!(CliError::Other("Device authorization expired".into()));
             }
-            "authorized" => {
-                let api_token = poll_resp["token"]
-                    .as_str()
+            uptrakit_openapi_client::DeviceAuthStatus::Authorized => {
+                let api_token = poll_resp
+                    .token
                     .ok_or_else(|| report!(CliError::Other("No token in response".into())))?;
-                let token_name = poll_resp["token_name"].as_str().unwrap_or(&client_name);
+                let token_name = poll_resp
+                    .token_name
+                    .as_deref()
+                    .unwrap_or(&client_name);
 
                 // Store config and credentials
                 save_config(&Config {
                     server: Some(server.clone()),
                 })?;
                 save_credentials(&Credentials {
-                    token: Some(api_token.to_string()),
+                    token: Some(api_token),
                 })?;
 
                 eprintln!();
@@ -195,11 +176,6 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 println!("API token stored locally (name: {}).", token_name);
 
                 return Ok(());
-            }
-            other => {
-                bail!(CliError::Other(format!(
-                    "Unexpected device flow status: {other}"
-                )));
             }
         }
     }
@@ -213,27 +189,9 @@ pub async fn status(
     insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token, insecure)?;
+    let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
-    let (status, body) = client.request("GET", "/api/v1/auth/me", None).await?;
-
-    if status != 200 {
-        let msg = body
-            .as_str()
-            .unwrap_or("Failed to get user info")
-            .to_string();
-        bail!(CliError::Api {
-            status,
-            message: msg,
-        });
-    }
-
-    let user: uptrakit_web_api_types::auth::UserResponse =
-        serde_json::from_value(body).map_err(|e| {
-            report!(CliError::Other(format!(
-                "Failed to parse user response: {e}"
-            )))
-        })?;
+    let user = client.me().await.context_to()?;
 
     let permissions: Vec<String> = user.permissions.iter().map(|p| p.to_string()).collect();
 
@@ -270,30 +228,15 @@ pub async fn token_create(
     insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token, insecure)?;
+    let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
-    let create_body = serde_json::json!({ "name": name });
-    let (status, body) = client
-        .request("POST", "/api/v1/auth/api-tokens", Some(create_body))
-        .await?;
+    let resp = client
+        .create_api_token(&CreateApiTokenRequest {
+            name: name.to_string(),
+        })
+        .await
+        .context_to()?;
 
-    if status != 201 {
-        let msg = body
-            .as_str()
-            .unwrap_or("Failed to create token")
-            .to_string();
-        bail!(CliError::Api {
-            status,
-            message: msg,
-        });
-    }
-
-    let resp: uptrakit_web_api_types::api_tokens::CreateApiTokenResponse =
-        serde_json::from_value(body).map_err(|e| {
-            report!(CliError::Other(format!(
-                "Failed to parse token create response: {e}"
-            )))
-        })?;
     let id = resp.id;
     let new_token = resp.token;
 
@@ -320,26 +263,10 @@ pub async fn token_list(
     insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token, insecure)?;
+    let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
-    let (status, body) = client
-        .request("GET", "/api/v1/auth/api-tokens", None)
-        .await?;
+    let resp = client.list_api_tokens().await.context_to()?;
 
-    if status != 200 {
-        let msg = body.as_str().unwrap_or("Failed to list tokens").to_string();
-        bail!(CliError::Api {
-            status,
-            message: msg,
-        });
-    }
-
-    let resp: uptrakit_web_api_types::api_tokens::ApiTokenListResponse =
-        serde_json::from_value(body).map_err(|e| {
-            report!(CliError::Other(format!(
-                "Failed to parse token list response: {e}"
-            )))
-        })?;
     let entries: Vec<TokenEntry> = resp
         .tokens
         .iter()
@@ -388,21 +315,9 @@ pub async fn token_revoke(
     insecure: bool,
 ) -> Result<()> {
     let (server, token) = resolve_auth(server_override, token_override)?;
-    let client = ApiClient::with_token(&server, &token, insecure)?;
+    let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
-    let path = format!("/api/v1/auth/api-tokens/{id}");
-    let (status, body) = client.request("DELETE", &path, None).await?;
-
-    if status != 204 {
-        let msg = body
-            .as_str()
-            .unwrap_or("Failed to revoke token")
-            .to_string();
-        bail!(CliError::Api {
-            status,
-            message: msg,
-        });
-    }
+    client.revoke_api_token(id).await.context_to()?;
 
     let human = format!("Token {} revoked.\n", id);
     let data = TokenRevokeOutput {

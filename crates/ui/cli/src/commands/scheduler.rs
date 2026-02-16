@@ -1,7 +1,7 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
-use uptrakit_web_api_types::scheduler::{ScheduledTaskResponse, TriggerScheduledTaskResponse};
+use rootcause::prelude::*;
 
 /// List all scheduled tasks.
 pub async fn list(
@@ -12,7 +12,7 @@ pub async fn list(
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
 
-    let resp: Vec<ScheduledTaskResponse> = client.get("/api/v1/scheduler/tasks").await?;
+    let resp = client.list_scheduled_tasks().await.context_to()?;
 
     let mut human = String::new();
     if resp.is_empty() {
@@ -42,8 +42,7 @@ pub async fn show(
     insecure: bool,
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
-    let path = format!("/api/v1/scheduler/tasks/{id}");
-    let resp: ScheduledTaskResponse = client.get(&path).await?;
+    let resp = client.get_scheduled_task(id).await.context_to()?;
 
     let mut human = String::new();
     human.push_str(&format!("ID:         {}\n", resp.id));
@@ -75,8 +74,7 @@ pub async fn trigger(
     insecure: bool,
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
-    let path = format!("/api/v1/scheduler/tasks/{id}/trigger");
-    let resp: TriggerScheduledTaskResponse = client.post_empty(&path).await?;
+    let resp = client.trigger_scheduled_task(id).await.context_to()?;
 
     let human = if resp.triggered {
         format!("Task triggered: {}\n", resp.message)

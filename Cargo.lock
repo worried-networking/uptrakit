@@ -3649,6 +3649,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -5682,8 +5683,8 @@ dependencies = [
  "tokio",
  "uptrakit-build-info",
  "uptrakit-directories",
+ "uptrakit-openapi-client",
  "uptrakit-shared-macros",
- "uptrakit-web-api-types",
 ]
 
 [[package]]
@@ -5801,6 +5802,21 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-web-api-types",
  "uuid",
+]
+
+[[package]]
+name = "uptrakit-openapi-client"
+version = "0.0.1"
+dependencies = [
+ "reqwest 0.13.2",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "thiserror 2.0.18",
+ "uptrakit-shared-macros",
+ "uptrakit-shared-types",
+ "uptrakit-web-api-types",
 ]
 
 [[package]]

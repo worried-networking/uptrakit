@@ -1,8 +1,8 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
-use uptrakit_web_api_types::scheduler::{ScheduledTaskResponse, TriggerScheduledTaskResponse};
-use uptrakit_web_api_types::software_items::TriggerVersionCheckResponse;
+use rootcause::prelude::*;
+use uptrakit_openapi_client::types::scheduler::TriggerScheduledTaskResponse;
 
 /// Trigger a bulk version check by finding and triggering the `version_check` scheduler task.
 pub async fn all(
@@ -14,7 +14,7 @@ pub async fn all(
     let client = authenticated_client(server, token, insecure)?;
 
     // Find the version_check scheduler task
-    let tasks: Vec<ScheduledTaskResponse> = client.get("/api/v1/scheduler/tasks").await?;
+    let tasks = client.list_scheduled_tasks().await.context_to()?;
     let task = tasks.iter().find(|t| t.task_type == "version_check");
 
     let task = match task {
@@ -29,8 +29,10 @@ pub async fn all(
         }
     };
 
-    let path = format!("/api/v1/scheduler/tasks/{}/trigger", task.id);
-    let resp: TriggerScheduledTaskResponse = client.post_empty(&path).await?;
+    let resp = client
+        .trigger_scheduled_task(&task.id)
+        .await
+        .context_to()?;
 
     let human = if resp.triggered {
         format!("Version check triggered: {}\n", resp.message)
@@ -76,12 +78,15 @@ async fn check_item(
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
 
-    let path = match host_id {
-        Some(hid) => format!("/api/v1/software-items/{item_id}/hosts/{hid}/check-versions"),
-        None => format!("/api/v1/software-items/{item_id}/check-versions"),
+    let resp = match host_id {
+        Some(hid) => {
+            client
+                .check_versions_host(item_id, hid)
+                .await
+                .context_to()?
+        }
+        None => client.check_versions(item_id).await.context_to()?,
     };
-
-    let resp: TriggerVersionCheckResponse = client.post_empty(&path).await?;
 
     let human = format!(
         "Agents notified: {}\n{}\n",

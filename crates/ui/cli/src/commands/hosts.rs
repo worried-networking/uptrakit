@@ -1,8 +1,8 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
-use uptrakit_web_api_types::hosts::HostResponse;
-use uptrakit_web_api_types::pagination::PaginatedResponse;
+use rootcause::prelude::*;
+use uptrakit_openapi_client::types::pagination::PaginationParams;
 
 /// List all hosts (paginated).
 pub async fn list(
@@ -14,21 +14,8 @@ pub async fn list(
     per_page: Option<u64>,
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
-
-    let mut path = "/api/v1/hosts".to_string();
-    let mut params = Vec::new();
-    if let Some(p) = page {
-        params.push(format!("page={p}"));
-    }
-    if let Some(pp) = per_page {
-        params.push(format!("per_page={pp}"));
-    }
-    if !params.is_empty() {
-        path.push('?');
-        path.push_str(&params.join("&"));
-    }
-
-    let resp: PaginatedResponse<HostResponse> = client.get(&path).await?;
+    let params = PaginationParams { page, per_page };
+    let resp = client.list_hosts(&params).await.context_to()?;
 
     let mut human = String::new();
     if resp.items.is_empty() {
@@ -65,8 +52,7 @@ pub async fn show(
     insecure: bool,
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
-    let path = format!("/api/v1/hosts/{id}");
-    let resp: HostResponse = client.get(&path).await?;
+    let resp = client.get_host(id).await.context_to()?;
 
     let mut human = String::new();
     human.push_str(&format!("ID:           {}\n", resp.id));

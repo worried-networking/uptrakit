@@ -22,6 +22,7 @@ Uptrakit.
 | [Update Hooks](update-hooks.md) | Pre/post-update hook execution and configuration. |
 | [Command Executor](command-executor.md) | `CommandExecutor` trait, `CommandSpec`, and `LocalCommandExecutor` for transport-agnostic command dispatch. |
 | [Service Lifecycle](service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. |
+| [OpenAPI Client](openapi-client.md) | Typed HTTP client crate for the web API (`uptrakit-openapi-client`). |
 
 ## Related Documentation
 

@@ -38,3 +38,15 @@ impl_report_conversion! {
 }
 
 impl_report_conversion!(serde_yaml_ng::Error => CliError, |e| CliError::Yaml(e.to_string()));
+
+impl_report_conversion!(uptrakit_openapi_client::ClientError => CliError, |e| {
+    match e {
+        uptrakit_openapi_client::ClientError::Http(inner) => CliError::Http(inner),
+        uptrakit_openapi_client::ClientError::Json(inner) => CliError::Json(inner),
+        uptrakit_openapi_client::ClientError::Api { status, message } => CliError::Api { status, message },
+        uptrakit_openapi_client::ClientError::RateLimited => CliError::Api { status: 429, message: "Rate limited".to_string() },
+        uptrakit_openapi_client::ClientError::NotFound(msg) => CliError::Api { status: 404, message: msg },
+        uptrakit_openapi_client::ClientError::NotAuthenticated => CliError::NotLoggedIn,
+        uptrakit_openapi_client::ClientError::InvalidMethod(msg) => CliError::Other(format!("Invalid HTTP method: {msg}")),
+    }
+});

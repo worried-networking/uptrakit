@@ -55,6 +55,7 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 zeroize = { version = "1", features = ["derive"] }
 uptrakit-shared-macros = { path = "crates/shared/macros" }
 uptrakit-shared-types = { path = "crates/shared/types" }
+uptrakit-openapi-client = { path = "crates/shared/openapi-client" }
 
 [profile.release]
 opt-level = 3

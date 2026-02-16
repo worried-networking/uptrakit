@@ -36,6 +36,16 @@ certificate renewal) across controller instances using optimistic locking for HA
 Agents, SSH agents, and MQTT services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
 AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
+## OpenAPI Client
+
+The `uptrakit-openapi-client` crate (`crates/shared/openapi-client/`) provides a typed HTTP client for the Uptrakit web API. It wraps `reqwest` with compile-time type-safe endpoint methods using the shared request/response types from `uptrakit-web-api-types`. The CLI crate uses this client exclusively for all API communication. See [OpenAPI Client](docs/development/openapi-client.md) for details.
+
+Key design decisions:
+
+- **Hand-written, not code-generated** -- the shared types already exist in `uptrakit-web-api-types`; a code generator would duplicate them.
+- **Re-exports all types** -- downstream crates import types via `uptrakit_openapi_client::types::*` rather than depending on `uptrakit-web-api-types` directly.
+- **Typed error handling** -- `ClientError` enum with variants for HTTP, JSON, API, rate-limiting, not-found, and authentication errors, using `rootcause::Report` for context propagation.
+
 ## Service SDK
 
 The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared infrastructure for building Uptrakit services:

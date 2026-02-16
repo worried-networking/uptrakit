@@ -1,7 +1,8 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
-use uptrakit_web_api_types::software_items::TriggerUpdateResponse;
+use rootcause::prelude::*;
+use uptrakit_openapi_client::types::software_items::{ReleaseInfoRequest, TriggerUpdateRequest};
 
 /// Parameters for triggering an update.
 pub struct TriggerParams<'a> {
@@ -20,24 +21,28 @@ pub struct TriggerParams<'a> {
 pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
 
-    let path = format!(
-        "/api/v1/software-items/{}/hosts/{}/update",
-        params.item_id, params.host_id
-    );
+    let release_info = if params.release_tag.is_some() || params.release_url.is_some() {
+        Some(ReleaseInfoRequest {
+            tag: params
+                .release_tag
+                .unwrap_or(params.to_version)
+                .to_string(),
+            release_url: params.release_url.unwrap_or("").to_string(),
+            assets: vec![],
+        })
+    } else {
+        None
+    };
 
-    let mut body = serde_json::json!({
-        "to_version": params.to_version,
-    });
+    let req = TriggerUpdateRequest {
+        to_version: params.to_version.to_string(),
+        release_info,
+    };
 
-    if params.release_tag.is_some() || params.release_url.is_some() {
-        let release_info = serde_json::json!({
-            "tag": params.release_tag.unwrap_or(params.to_version),
-            "release_url": params.release_url.unwrap_or(""),
-        });
-        body["release_info"] = release_info;
-    }
-
-    let resp: TriggerUpdateResponse = client.post_json(&path, body).await?;
+    let resp = client
+        .trigger_update(params.item_id, params.host_id, &req)
+        .await
+        .context_to()?;
 
     let human = format!(
         "Update triggered.\n  History ID: {}\n  Status:     {:?}\n",

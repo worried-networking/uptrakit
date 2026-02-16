@@ -708,7 +708,8 @@ Making the system usable and maintainable.
 - [ ] Document all REST endpoints
 - [ ] Add request/response examples
 - [ ] Document WebSocket messages
-- [ ] Create API client libraries
+- [x] Create API client libraries
+  - [x] `uptrakit-openapi-client` typed HTTP client crate (used by CLI)
 
 ### User Documentation
 

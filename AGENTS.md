@@ -72,10 +72,11 @@ uptrakit/
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex, ServiceType (Agent, Mqtt, SshAgent), ServiceStatus, MqttTransport, HookShell, DeviceAuthStatus, MqttClientConnectionStatus, OutputStreamType, SessionTokenType — feature-gated: sea-orm, openapi)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
+│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client for the web API (re-exports web-api-types; used by CLI)
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler); ws module is pub(crate)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface (auth, hosts, software-items, check, update, history, scheduler commands; human/JSON/YAML output)
+│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface (auth, hosts, software-items, check, update, history, scheduler commands; human/JSON/YAML output; uses uptrakit-openapi-client for all API calls)
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
@@ -311,6 +312,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Command Executor](docs/development/command-executor.md)
 - [Update Hooks](docs/development/update-hooks.md)
 - [Service Lifecycle](docs/development/service-lifecycle.md)
+- [OpenAPI Client](docs/development/openapi-client.md)
 
 ### Architecture
 

@@ -1,8 +1,8 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
-use uptrakit_web_api_types::pagination::PaginatedResponse;
-use uptrakit_web_api_types::update_history::UpdateHistoryResponse;
+use rootcause::prelude::*;
+use uptrakit_openapi_client::types::update_history::UpdateHistoryQuery;
 
 /// Parameters for listing update history.
 pub struct ListParams<'a> {
@@ -21,29 +21,15 @@ pub struct ListParams<'a> {
 pub async fn list(params: ListParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
 
-    let mut path = "/api/v1/update-history".to_string();
-    let mut query = Vec::new();
-    if let Some(hid) = params.host_id {
-        query.push(format!("host_id={hid}"));
-    }
-    if let Some(sid) = params.software_item_id {
-        query.push(format!("software_item_id={sid}"));
-    }
-    if let Some(s) = params.status {
-        query.push(format!("status={s}"));
-    }
-    if let Some(p) = params.page {
-        query.push(format!("page={p}"));
-    }
-    if let Some(pp) = params.per_page {
-        query.push(format!("per_page={pp}"));
-    }
-    if !query.is_empty() {
-        path.push('?');
-        path.push_str(&query.join("&"));
-    }
+    let query = UpdateHistoryQuery {
+        host_id: params.host_id.map(|s| s.to_string()),
+        software_item_id: params.software_item_id.map(|s| s.to_string()),
+        status: params.status.map(|s| s.to_string()),
+        page: params.page,
+        per_page: params.per_page,
+    };
 
-    let resp: PaginatedResponse<UpdateHistoryResponse> = client.get(&path).await?;
+    let resp = client.list_update_history(&query).await.context_to()?;
 
     let mut human = String::new();
     if resp.items.is_empty() {
@@ -81,8 +67,7 @@ pub async fn show(
     insecure: bool,
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
-    let path = format!("/api/v1/update-history/{id}");
-    let resp: UpdateHistoryResponse = client.get(&path).await?;
+    let resp = client.get_update_history(id).await.context_to()?;
 
     let mut human = String::new();
     human.push_str(&format!("ID:            {}\n", resp.id));

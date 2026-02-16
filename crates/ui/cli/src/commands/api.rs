@@ -1,5 +1,4 @@
-use crate::client::ApiClient;
-use crate::config::{load_config, load_credentials};
+use crate::client::authenticated_client;
 use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_value};
 use rootcause::prelude::*;
@@ -15,20 +14,7 @@ pub async fn execute(
     format: OutputFormat,
     insecure: bool,
 ) -> Result<()> {
-    let config = load_config()?;
-    let creds = load_credentials()?;
-
-    let server = server_override
-        .map(|s| s.to_string())
-        .or(config.server)
-        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
-
-    let token = token_override
-        .map(|t| t.to_string())
-        .or(creds.token)
-        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
-
-    let client = ApiClient::with_token(&server, &token, insecure)?;
+    let client = authenticated_client(server_override, token_override, insecure)?;
 
     let body = match data {
         Some(json_str) => Some(
@@ -45,30 +31,30 @@ pub async fn execute(
         format!("/{path}")
     };
 
-    let (status, response) = client.request(method, &path, body).await?;
+    let resp = client.raw_request(method, &path, body).await.context_to()?;
 
     match format {
         OutputFormat::Human => {
-            eprintln!("HTTP {} {}", status, status_text(status));
-            if !response.is_null() {
-                print_value(format, &response)?;
+            eprintln!("HTTP {} {}", resp.status, status_text(resp.status));
+            if !resp.body.is_null() {
+                print_value(format, &resp.body)?;
             }
         }
         OutputFormat::Json | OutputFormat::Yaml => {
             let envelope = ApiResponse {
-                status,
-                status_text: status_text(status),
-                body: if response.is_null() {
+                status: resp.status,
+                status_text: status_text(resp.status),
+                body: if resp.body.is_null() {
                     None
                 } else {
-                    Some(response)
+                    Some(resp.body)
                 },
             };
             print_value(format, &serde_json::to_value(&envelope).context_to()?)?;
         }
     }
 
-    if status >= 400 {
+    if resp.status >= 400 {
         std::process::exit(1);
     }
 
