@@ -307,13 +307,13 @@ mod tests {
         let private_key = keys::decode_secret_key(&pem, None).expect("decode");
         let public_key = private_key.public_key();
 
-        let result = handler.check_server_key(&public_key).await.expect("check");
+        let result = handler.check_server_key(public_key).await.expect("check");
         assert!(result, "TOFU handler should accept any key");
 
         let fp = observed.lock().await;
         assert!(fp.is_some(), "fingerprint should be recorded");
         assert!(
-            fp.as_ref().map_or(false, |f| f.starts_with("SHA256:")),
+            fp.as_ref().is_some_and(|f| f.starts_with("SHA256:")),
             "fingerprint should start with SHA256:"
         );
     }
@@ -330,7 +330,7 @@ mod tests {
         let private_key = keys::decode_secret_key(&pem, None).expect("decode");
         let public_key = private_key.public_key();
 
-        let result = handler.check_server_key(&public_key).await.expect("check");
+        let result = handler.check_server_key(public_key).await.expect("check");
         assert!(!result, "pinned handler should reject mismatched key");
 
         let fp = observed.lock().await;
@@ -347,14 +347,14 @@ mod tests {
         let (pem, _) = crate::ssh_key::generate_ed25519_keypair().expect("keygen");
         let private_key = keys::decode_secret_key(&pem, None).expect("decode");
         let public_key = private_key.public_key();
-        let expected_fp = compute_fingerprint(&public_key);
+        let expected_fp = compute_fingerprint(public_key);
 
         let mut handler = BootstrapHandler {
             expected_fingerprint: Some(expected_fp.clone()),
             observed_fingerprint: Arc::clone(&observed),
         };
 
-        let result = handler.check_server_key(&public_key).await.expect("check");
+        let result = handler.check_server_key(public_key).await.expect("check");
         assert!(result, "pinned handler should accept matching key");
 
         let fp = observed.lock().await;
