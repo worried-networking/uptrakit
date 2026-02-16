@@ -137,10 +137,7 @@ pub fn spawn_denylist_cleanup(
 }
 
 /// Periodic settings version check for cross-instance cache invalidation.
-pub fn spawn_settings_reload(
-    token: CancellationToken,
-    app_state: Arc<AppState>,
-) -> JoinHandle<()> {
+pub fn spawn_settings_reload(token: CancellationToken, app_state: Arc<AppState>) -> JoinHandle<()> {
     let settings = app_state.settings.clone();
     let db = app_state.db.clone();
     let tid = app_state.default_tenant_id;
@@ -236,10 +233,7 @@ pub fn spawn_ca_reload(
 }
 
 /// Cross-controller notification delivery via event polling.
-pub fn spawn_event_poller(
-    token: CancellationToken,
-    app_state: Arc<AppState>,
-) -> JoinHandle<()> {
+pub fn spawn_event_poller(token: CancellationToken, app_state: Arc<AppState>) -> JoinHandle<()> {
     let event_poller = uptrakit_web_api::event_poller::EventPoller::new(
         app_state.db.clone(),
         app_state.service_connections.clone(),
@@ -293,9 +287,7 @@ pub fn spawn_ca_rotation(
             {
                 Ok(rotation) => {
                     if !rotation.rotated {
-                        tracing::info!(
-                            "CA rotation skipped (another controller already rotated)"
-                        );
+                        tracing::info!("CA rotation skipped (another controller already rotated)");
                         continue;
                     }
 
@@ -413,17 +405,17 @@ pub fn spawn_server_cert_renewal(
                     continue;
                 }
             };
-            let ca_issuer =
-                match rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            "failed to create CA issuer for server cert renewal"
-                        );
-                        continue;
-                    }
-                };
+            let ca_issuer = match rcgen::Issuer::from_ca_cert_pem(&snapshot.active_cert_pem, ca_key)
+            {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        "failed to create CA issuer for server cert renewal"
+                    );
+                    continue;
+                }
+            };
 
             let ca_bundle = crate::pki::CaBundle {
                 cert_pem: snapshot.active_cert_pem.clone(),

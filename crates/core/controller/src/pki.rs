@@ -757,8 +757,8 @@ fn generate_server_cert(ca: &CaBundle, extra_sans: &[String]) -> Result<ServerCe
         .distinguished_name
         .push(DnType::OrganizationName, "Uptrakit");
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after =
-        OffsetDateTime::now_utc() + time::Duration::days(crate::durations::SERVER_CERT_VALIDITY_DAYS);
+    params.not_after = OffsetDateTime::now_utc()
+        + time::Duration::days(crate::durations::SERVER_CERT_VALIDITY_DAYS);
 
     let cert = params
         .signed_by(&key_pair, &ca.issuer)

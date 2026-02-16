@@ -1,6 +1,6 @@
 use sea_orm::DatabaseConnection;
 use uptrakit_shared_db::entity::scheduled_task;
-use uptrakit_web_api::mqtt_lease_coordinator::{MqttLeaseCoordinator, MQTT_LEASE_STALE_AFTER};
+use uptrakit_web_api::mqtt_lease_coordinator::{MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use uptrakit_web_api::service_connections::ServiceConnectionRegistry;
 
 use crate::scheduler::executor::TaskExecutor;

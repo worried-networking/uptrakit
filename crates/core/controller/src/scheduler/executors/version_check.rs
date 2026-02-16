@@ -2,12 +2,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    RelationTrait,
+    ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
-use uptrakit_internal_wire::{
-    CheckVersionsPayload, ControllerMessage, VersionCheckAssignment,
-};
+use uptrakit_internal_wire::{CheckVersionsPayload, ControllerMessage, VersionCheckAssignment};
 use uptrakit_shared_db::entity::{
     host_software_item, provider_config, scheduled_task, service, service_host, software_item,
 };
@@ -124,7 +121,10 @@ impl VersionCheckExecutor {
             .column_as(software_item::Column::Id, "software_item_id")
             .column_as(software_item::Column::Name, "name")
             .column_as(provider_config::Column::ProviderType, "provider_type")
-            .column_as(software_item::Column::PackageIdentifier, "package_identifier")
+            .column_as(
+                software_item::Column::PackageIdentifier,
+                "package_identifier",
+            )
             .column_as(provider_config::Column::Config, "config")
             .column_as(software_item::Column::ConfigOverride, "config_override")
             .join(
@@ -139,10 +139,7 @@ impl VersionCheckExecutor {
                 JoinType::InnerJoin,
                 service_host::Relation::Host.def().rev(),
             )
-            .join(
-                JoinType::InnerJoin,
-                service_host::Relation::Service.def(),
-            )
+            .join(JoinType::InnerJoin, service_host::Relation::Service.def())
             .filter(software_item::Column::TenantId.eq(tenant_id))
             .filter(software_item::Column::Enabled.eq(true))
             .filter(software_item::Column::DeactivatedAt.is_null())

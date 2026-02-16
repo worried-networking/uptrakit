@@ -431,7 +431,10 @@ mod tests {
         let result = run_command_exec_quiet("false", &[], None).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err.current_context(), CommandError::CommandFailed(_)));
+        assert!(matches!(
+            err.current_context(),
+            CommandError::CommandFailed(_)
+        ));
     }
 
     #[tokio::test]

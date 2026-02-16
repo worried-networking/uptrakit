@@ -125,12 +125,7 @@ impl Scheduler {
             };
 
             // Try to claim the task (optimistic lock)
-            let claimed = match claim::try_claim(
-                &self.db,
-                task.id,
-                self.config.controller_id,
-            )
-            .await
+            let claimed = match claim::try_claim(&self.db, task.id, self.config.controller_id).await
             {
                 Ok(c) => c,
                 Err(e) => {

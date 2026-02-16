@@ -221,17 +221,12 @@ mod tests {
         .expect("insert tenant")
     }
 
-    async fn seed_task(
-        db: &DatabaseConnection,
-        tenant_id: Uuid,
-    ) -> scheduled_task::Model {
+    async fn seed_task(db: &DatabaseConnection, tenant_id: Uuid) -> scheduled_task::Model {
         let now = OffsetDateTime::now_utc();
         scheduled_task::ActiveModel {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant_id),
-            task_type: ActiveValue::Set(
-                scheduled_task::ScheduledTaskType::AuthCleanup,
-            ),
+            task_type: ActiveValue::Set(scheduled_task::ScheduledTaskType::AuthCleanup),
             cron_expression: ActiveValue::Set("*/5 * * * *".to_string()),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),
@@ -380,9 +375,7 @@ mod tests {
         let task = scheduled_task::ActiveModel {
             id: ActiveValue::Set(Uuid::now_v7()),
             tenant_id: ActiveValue::Set(tenant.id),
-            task_type: ActiveValue::Set(
-                scheduled_task::ScheduledTaskType::EventCleanup,
-            ),
+            task_type: ActiveValue::Set(scheduled_task::ScheduledTaskType::EventCleanup),
             cron_expression: ActiveValue::Set("0 * * * *".to_string()),
             enabled: ActiveValue::Set(true),
             task_config: ActiveValue::Set(None),

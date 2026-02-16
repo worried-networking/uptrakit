@@ -104,8 +104,7 @@ async fn run(args: cli::Args) -> Result<()> {
     tracing::info!("state directory: {}", app_dirs.state_dir().display());
 
     // Phase 3: Database
-    let (db_conn, default_tenant) =
-        startup::init_database(&args, app_dirs.state_dir()).await?;
+    let (db_conn, default_tenant) = startup::init_database(&args, app_dirs.state_dir()).await?;
     let default_tenant_id = default_tenant.id;
     tracing::info!(%default_tenant_id, "loaded default tenant");
 
@@ -150,8 +149,7 @@ async fn run(args: cli::Args) -> Result<()> {
     .await?;
 
     // Phase 10: JWT
-    let jwt_manager =
-        startup::init_jwt(&db_conn, default_tenant_id, app_dirs.state_dir()).await?;
+    let jwt_manager = startup::init_jwt(&db_conn, default_tenant_id, app_dirs.state_dir()).await?;
 
     // Destructure PKI runtime for distribution across AppState and tasks
     let startup::PkiRuntime {
@@ -174,8 +172,7 @@ async fn run(args: cli::Args) -> Result<()> {
         Arc::clone(&ca_key_store),
     ));
 
-    let oidc_flow_store =
-        uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
+    let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
     let account_link_store =
         uptrakit_web_api::auth::oidc_state::AccountLinkStore::new(db_conn.clone());
     let oidc_token_exchange_store =
@@ -184,8 +181,7 @@ async fn run(args: cli::Args) -> Result<()> {
         uptrakit_web_api::auth::oidc_state::OidcRegistrationStore::new(db_conn.clone());
     let device_flow_store =
         uptrakit_web_api::auth::device_flow::DeviceFlowStore::new(db_conn.clone());
-    let rate_limit_store =
-        uptrakit_web_api::auth::rate_limit::RateLimitStore::new(db_conn.clone());
+    let rate_limit_store = uptrakit_web_api::auth::rate_limit::RateLimitStore::new(db_conn.clone());
 
     let service_connections =
         uptrakit_web_api::service_connections::ServiceConnectionRegistry::new();
@@ -230,10 +226,7 @@ async fn run(args: cli::Args) -> Result<()> {
     bg.track_abort("crl-manager", crl_handle);
 
     // Token denylist cleanup (in-memory, per-instance — not in scheduler)
-    let h = tasks::spawn_denylist_cleanup(
-        bg.child_token(),
-        Arc::clone(&app_state.token_denylist),
-    );
+    let h = tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.token_denylist));
     bg.track("denylist-cleanup", h);
 
     let h = tasks::spawn_settings_reload(bg.child_token(), Arc::clone(&app_state));

@@ -22,30 +22,18 @@ pub use uptrakit_web_api_types::scheduler::{
 fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     ScheduledTaskResponse {
         id: m.id.to_string(),
-        task_type: m
-            .task_type
-            .to_value()
-            .to_string(),
+        task_type: m.task_type.to_value().to_string(),
         label: m.task_type.label().to_string(),
         cron_expression: m.cron_expression.clone(),
         enabled: m.enabled,
         task_config: m.task_config.clone(),
         last_run_at: m.last_run_at.and_then(|t| t.format(&Rfc3339).ok()),
-        next_run_at: m
-            .next_run_at
-            .format(&Rfc3339)
-            .unwrap_or_default(),
+        next_run_at: m.next_run_at.format(&Rfc3339).unwrap_or_default(),
         is_running: m.locked_by.is_some(),
         last_error: m.last_error.clone(),
         run_count: m.run_count,
-        created_at: m
-            .created_at
-            .format(&Rfc3339)
-            .unwrap_or_default(),
-        updated_at: m
-            .updated_at
-            .format(&Rfc3339)
-            .unwrap_or_default(),
+        created_at: m.created_at.format(&Rfc3339).unwrap_or_default(),
+        updated_at: m.updated_at.format(&Rfc3339).unwrap_or_default(),
     }
 }
 
@@ -302,10 +290,7 @@ fn normalize_cron(expr: &str) -> String {
     }
 }
 
-fn compute_next_run(
-    cron_expr: &str,
-    after: time::OffsetDateTime,
-) -> Option<time::OffsetDateTime> {
+fn compute_next_run(cron_expr: &str, after: time::OffsetDateTime) -> Option<time::OffsetDateTime> {
     let normalized = normalize_cron(cron_expr);
     let schedule = cron::Schedule::from_str(&normalized).ok()?;
     let after_chrono = chrono::DateTime::from_timestamp(after.unix_timestamp(), 0)?;

@@ -98,7 +98,10 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<()> {
 pub(crate) async fn init_database(
     args: &crate::cli::Args,
     state_dir: &std::path::Path,
-) -> crate::Result<(sea_orm::DatabaseConnection, uptrakit_shared_db::entity::tenant::Model)> {
+) -> crate::Result<(
+    sea_orm::DatabaseConnection,
+    uptrakit_shared_db::entity::tenant::Model,
+)> {
     let db_config = crate::db::DbConfig::from_args(args.db_url.clone(), state_dir)
         .context(AppError::Database)?;
     tracing::info!(
@@ -172,8 +175,7 @@ pub(crate) async fn verify_master_key(
             }
         }
         None => {
-            let token =
-                uptrakit_shared_db::crypto::create_key_verification_token().context_to()?;
+            let token = uptrakit_shared_db::crypto::create_key_verification_token().context_to()?;
             uptrakit_web_api::settings_store::upsert_setting(
                 db,
                 tenant_id,
@@ -629,8 +631,7 @@ pub(crate) async fn init_pki_runtime(
         // External CA — not managed
         let ca = pki::load_external_ca(ca_cert_path, ca_key_path).context(AppError::Pki)?;
         let trusted = vec![
-            pki::bundle_from_pem(ca.cert_pem.clone(), ca.key_pem.clone())
-                .context(AppError::Pki)?,
+            pki::bundle_from_pem(ca.cert_pem.clone(), ca.key_pem.clone()).context(AppError::Pki)?,
         ];
         pki::CaState {
             active: ca,
@@ -639,22 +640,17 @@ pub(crate) async fn init_pki_runtime(
             managed: false,
         }
     } else {
-        let mut state =
-            pki::load_or_init_managed_ca(db, tenant_id, reconciled.pki_addr.as_deref())
-                .await
-                .context(AppError::Pki)?;
+        let mut state = pki::load_or_init_managed_ca(db, tenant_id, reconciled.pki_addr.as_deref())
+            .await
+            .context(AppError::Pki)?;
 
         if pki::should_rotate_ca(&state.active.cert_pem) {
             tracing::info!("CA certificate is within rotation window, rotating now");
             let active_fp = pki::ca_fingerprint(&state.active.cert_pem).context(AppError::Pki)?;
-            let rotation = pki::rotate_managed_ca(
-                db,
-                tenant_id,
-                reconciled.pki_addr.as_deref(),
-                &active_fp,
-            )
-            .await
-            .context(AppError::Pki)?;
+            let rotation =
+                pki::rotate_managed_ca(db, tenant_id, reconciled.pki_addr.as_deref(), &active_fp)
+                    .await
+                    .context(AppError::Pki)?;
             state = rotation.state;
         }
 
@@ -808,12 +804,9 @@ pub(crate) async fn init_jwt(
         .await
         .context(AppError::Config("JWT key migration failed".into()))?;
 
-    let jwt_secret =
-        uptrakit_web_api::settings_store::load_or_generate_jwt_key(db, tenant_id)
-            .await
-            .context(AppError::Config(
-                "JWT key initialization failed".into(),
-            ))?;
+    let jwt_secret = uptrakit_web_api::settings_store::load_or_generate_jwt_key(db, tenant_id)
+        .await
+        .context(AppError::Config("JWT key initialization failed".into()))?;
 
     let jwt_manager = uptrakit_web_api::auth::jwt::JwtManager::from_secret(&jwt_secret);
     tracing::info!("JWT signing key initialized from database");
