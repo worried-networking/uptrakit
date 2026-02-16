@@ -14,9 +14,13 @@ use russh::keys::agent::client::AgentClient;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::{self};
 use russh::{ChannelMsg, Disconnect};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
+use uptrakit_command::{UpdateOutputLine, UpdateOutputStream};
 
 use crate::error::{Error, Result};
+
+/// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
+const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
 // ── Configuration types ──────────────────────────────────────────────
 
@@ -75,6 +79,90 @@ impl client::Handler for BootstrapHandler {
     }
 }
 
+// ── Line buffer ──────────────────────────────────────────────────────
+
+/// Converts arbitrary byte chunks from SSH channel data into
+/// line-delimited output, sending complete lines to an optional
+/// [`mpsc::Sender<UpdateOutputLine>`] in real time.
+pub(crate) struct LineBuffer {
+    /// Partial line not yet terminated by `\n`.
+    partial: String,
+    /// Accumulated full output (stdout or stderr).
+    accumulated: String,
+    /// Total bytes accumulated (for enforcing the output limit).
+    total_bytes: usize,
+    /// Which output stream this buffer represents.
+    stream: UpdateOutputStream,
+    /// Optional channel for streaming lines in real time.
+    sender: Option<mpsc::Sender<UpdateOutputLine>>,
+}
+
+impl LineBuffer {
+    /// Create a new `LineBuffer` for the given stream.
+    fn new(stream: UpdateOutputStream, sender: Option<mpsc::Sender<UpdateOutputLine>>) -> Self {
+        Self {
+            partial: String::new(),
+            accumulated: String::new(),
+            total_bytes: 0,
+            stream,
+            sender,
+        }
+    }
+
+    /// Push raw bytes into the buffer. Complete lines are sent to the
+    /// channel (if present) and appended to the accumulated output.
+    async fn push(&mut self, data: &[u8]) {
+        let text = String::from_utf8_lossy(data);
+        for ch in text.chars() {
+            if ch == '\n' {
+                // Complete line — send and accumulate.
+                if let Some(ref tx) = self.sender {
+                    let _ = tx
+                        .send(UpdateOutputLine {
+                            text: self.partial.clone(),
+                            stream: self.stream,
+                        })
+                        .await;
+                }
+                if self.total_bytes < MAX_OUTPUT_BYTES {
+                    self.accumulated.push_str(&self.partial);
+                    self.accumulated.push('\n');
+                    self.total_bytes += self.partial.len() + 1;
+                }
+                self.partial.clear();
+            } else {
+                self.partial.push(ch);
+            }
+        }
+    }
+
+    /// Flush any remaining partial line. Call once after the channel
+    /// closes to capture trailing output without a terminating newline.
+    async fn flush(&mut self) {
+        if !self.partial.is_empty() {
+            if let Some(ref tx) = self.sender {
+                let _ = tx
+                    .send(UpdateOutputLine {
+                        text: self.partial.clone(),
+                        stream: self.stream,
+                    })
+                    .await;
+            }
+            if self.total_bytes < MAX_OUTPUT_BYTES {
+                self.accumulated.push_str(&self.partial);
+                self.accumulated.push('\n');
+                self.total_bytes += self.partial.len() + 1;
+            }
+            self.partial.clear();
+        }
+    }
+
+    /// Consume the buffer and return the accumulated output.
+    fn into_output(self) -> String {
+        self.accumulated
+    }
+}
+
 // ── Session wrapper ──────────────────────────────────────────────────
 
 /// An authenticated SSH session. Wraps the russh [`Handle`] so the
@@ -86,7 +174,61 @@ pub struct SshSession {
 impl SshSession {
     /// Execute a command on the remote host and collect stdout/stderr.
     pub async fn exec_command(&self, command: &str) -> Result<RemoteCommandResult> {
-        exec_command_inner(&self.handle, command).await
+        self.exec_command_streaming(command, None).await
+    }
+
+    /// Execute a command on the remote host, optionally streaming output
+    /// lines through `output_tx` in real time.
+    pub async fn exec_command_streaming(
+        &self,
+        command: &str,
+        output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
+    ) -> Result<RemoteCommandResult> {
+        let mut channel =
+            self.handle
+                .channel_open_session()
+                .await
+                .map_err(|e| {
+                    report!(Error::SshCommand(format!(
+                        "failed to open session channel: {e}"
+                    )))
+                })?;
+
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
+
+        let mut stdout_buf =
+            LineBuffer::new(UpdateOutputStream::Stdout, output_tx.cloned());
+        let mut stderr_buf =
+            LineBuffer::new(UpdateOutputStream::Stderr, output_tx.cloned());
+        let mut exit_code: Option<u32> = None;
+
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { ref data } => {
+                    stdout_buf.push(data).await;
+                }
+                ChannelMsg::ExtendedData { ref data, ext: 1 } => {
+                    stderr_buf.push(data).await;
+                }
+                ChannelMsg::ExitStatus { exit_status } => {
+                    exit_code = Some(exit_status);
+                }
+                ChannelMsg::Eof | ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+
+        stdout_buf.flush().await;
+        stderr_buf.flush().await;
+
+        Ok(RemoteCommandResult {
+            stdout: stdout_buf.into_output(),
+            stderr: stderr_buf.into_output(),
+            exit_code: exit_code.unwrap_or(u32::MAX),
+        })
     }
 
     /// Disconnect the SSH session.
@@ -237,47 +379,6 @@ async fn authenticate_with_agent<H: client::Handler>(
     )));
 }
 
-async fn exec_command_inner<H: client::Handler>(
-    session: &Handle<H>,
-    command: &str,
-) -> Result<RemoteCommandResult> {
-    let mut channel = session.channel_open_session().await.map_err(|e| {
-        report!(Error::SshCommand(format!(
-            "failed to open session channel: {e}"
-        )))
-    })?;
-
-    channel
-        .exec(true, command)
-        .await
-        .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
-
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    let mut exit_code: Option<u32> = None;
-
-    while let Some(msg) = channel.wait().await {
-        match msg {
-            ChannelMsg::Data { ref data } => {
-                stdout.push_str(&String::from_utf8_lossy(data));
-            }
-            ChannelMsg::ExtendedData { ref data, ext: 1 } => {
-                stderr.push_str(&String::from_utf8_lossy(data));
-            }
-            ChannelMsg::ExitStatus { exit_status } => {
-                exit_code = Some(exit_status);
-            }
-            ChannelMsg::Eof | ChannelMsg::Close => break,
-            _ => {}
-        }
-    }
-
-    Ok(RemoteCommandResult {
-        stdout,
-        stderr,
-        exit_code: exit_code.unwrap_or(u32::MAX),
-    })
-}
 
 /// Compute the SHA-256 fingerprint of an SSH public key in `SHA256:...` format.
 fn compute_fingerprint(key: &russh::keys::ssh_key::PublicKey) -> String {
@@ -359,5 +460,96 @@ mod tests {
 
         let fp = observed.lock().await;
         assert_eq!(fp.as_deref(), Some(expected_fp.as_str()));
+    }
+
+    // ── LineBuffer tests ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn line_buffer_emits_complete_lines() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, Some(tx));
+
+        buf.push(b"hello\nworld\n").await;
+
+        let line1 = rx.recv().await.expect("should receive first line");
+        assert_eq!(line1.text, "hello");
+        assert_eq!(line1.stream, UpdateOutputStream::Stdout);
+
+        let line2 = rx.recv().await.expect("should receive second line");
+        assert_eq!(line2.text, "world");
+    }
+
+    #[tokio::test]
+    async fn line_buffer_holds_partial_lines() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, Some(tx));
+
+        buf.push(b"partial").await;
+
+        // No complete line yet — channel should be empty.
+        assert!(
+            rx.try_recv().is_err(),
+            "partial line should not be sent yet"
+        );
+
+        // Now complete the line.
+        buf.push(b" end\n").await;
+        let line = rx.recv().await.expect("should receive completed line");
+        assert_eq!(line.text, "partial end");
+    }
+
+    #[tokio::test]
+    async fn line_buffer_flush_emits_remaining() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let mut buf = LineBuffer::new(UpdateOutputStream::Stderr, Some(tx));
+
+        buf.push(b"trailing").await;
+        buf.flush().await;
+
+        let line = rx.recv().await.expect("flush should emit partial");
+        assert_eq!(line.text, "trailing");
+        assert_eq!(line.stream, UpdateOutputStream::Stderr);
+
+        let output = buf.into_output();
+        assert_eq!(output, "trailing\n");
+    }
+
+    #[tokio::test]
+    async fn line_buffer_respects_output_limit() {
+        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, None);
+
+        // Push data exceeding MAX_OUTPUT_BYTES (10 MB).
+        let big_line = "x".repeat(1_000_000);
+        for _ in 0..12 {
+            let mut data = big_line.clone();
+            data.push('\n');
+            buf.push(data.as_bytes()).await;
+        }
+
+        let output = buf.into_output();
+        assert!(
+            output.len() <= MAX_OUTPUT_BYTES + 1_000_001,
+            "output should respect the 10 MB limit (got {} bytes)",
+            output.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn line_buffer_works_without_sender() {
+        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, None);
+
+        buf.push(b"line1\nline2\n").await;
+        buf.flush().await;
+
+        let output = buf.into_output();
+        assert_eq!(output, "line1\nline2\n");
+    }
+
+    #[tokio::test]
+    async fn line_buffer_flush_noop_when_empty() {
+        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, None);
+        buf.flush().await;
+        let output = buf.into_output();
+        assert!(output.is_empty());
     }
 }

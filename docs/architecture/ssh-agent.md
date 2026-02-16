@@ -16,7 +16,7 @@ The current implementation provides:
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
 
-Provider execution over SSH and UI configuration beyond the existing services API are not yet implemented.
+UI configuration beyond the existing services API is not yet implemented.
 
 ## Architecture Overview
 
@@ -165,6 +165,46 @@ trust-on-first-use (TOFU). Remote commands are constructed using
 For detailed usage and troubleshooting, see
 [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md).
 
+## Command Execution over SSH
+
+The `SshCommandExecutor` (`ssh_executor.rs`) implements the `CommandExecutor` trait from
+`uptrakit-command`, enabling providers to run version detection and update commands on remote hosts
+transparently.
+
+### Architecture
+
+```text
+┌────────────────────┐      CommandSpec      ┌─────────────────────┐
+│  Provider          │ ────────────────────► │  SshCommandExecutor │
+│  (transport-       │      CommandOutput    │                     │
+│   agnostic)        │ ◄──────────────────── │  build_remote_      │
+└────────────────────┘                       │  command_string()   │
+                                             │        │            │
+                                             │        ▼            │
+                                             │  SshSession::       │
+                                             │  exec_command_      │
+                                             │  streaming()        │
+                                             └─────────────────────┘
+                                                      │
+                                                      │ russh channel
+                                                      ▼
+                                             ┌─────────────────────┐
+                                             │  Remote Host        │
+                                             └─────────────────────┘
+```
+
+### Key details
+
+- `build_remote_command_string()` shell-escapes all command components using
+  `uptrakit_command::shell_escape()` to prevent shell injection.
+- `exec_command_streaming()` uses `LineBuffer` to convert arbitrary byte chunks from SSH channel
+  data into line-delimited output, supporting real-time streaming via `mpsc::Sender<UpdateOutputLine>`.
+- A 10 MB output limit prevents OOM from runaway commands (matching `LocalCommandExecutor`).
+- Transport errors map to `CommandError::CommandSpawn` and non-zero exit codes map to
+  `CommandError::CommandFailed`, maintaining consistent error semantics across executors.
+
+For usage details, see [Command Executor](../development/command-executor.md).
+
 ## Crate Structure
 
 ```text
@@ -176,8 +216,9 @@ crates/core/agent-ssh/
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
     ├── client.rs        # Authenticated loop (ping/pong, cert renewal, local DB init)
     ├── error.rs         # Error types (rootcause + thiserror)
+    ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH)
     ├── ssh_key.rs       # SSH private key reading, key type auto-detection, and Ed25519 keygen
-    ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command
+    ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
     ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove)
     ├── commands/
     │   ├── mod.rs       # Command module declarations

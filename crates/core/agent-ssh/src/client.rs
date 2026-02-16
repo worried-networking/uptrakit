@@ -1,8 +1,10 @@
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
+use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
     CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
     ServiceMessage, now_millis,
@@ -11,9 +13,21 @@ use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
 use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
 
 use crate::error::{Error, Result};
+use crate::ssh_executor::SshCommandExecutor;
+use crate::ssh_transport::SshSession;
 
 /// Far-future delay used when no renewal is scheduled (30 days).
 const FAR_FUTURE: Duration = Duration::from_secs(30 * 24 * 3600);
+
+/// Create a [`CommandExecutor`] that runs commands on a remote host via
+/// the given SSH session.
+///
+/// This is the bridge between providers (transport-agnostic) and the SSH
+/// transport. Called when processing `CheckVersions`/`ExecuteUpdate` wire
+/// protocol messages for a specific host.
+pub fn create_ssh_executor(session: Arc<SshSession>) -> Arc<dyn CommandExecutor> {
+    Arc::new(SshCommandExecutor::new(session))
+}
 
 /// Compute how long until the renewal window opens.
 fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> Duration {
@@ -40,11 +54,12 @@ pub struct AuthenticatedLoopParams<'a> {
     pub state_dir: &'a std::path::Path,
 }
 
-/// Authenticated Ping/Pong event loop (mTLS connection) with renewal timer.
+/// Authenticated event loop (mTLS connection) with renewal timer.
 ///
-/// The SSH agent does not execute updates or check versions — it only
-/// maintains the connection, handles certificate lifecycle, and keeps
-/// the local database open for future SSH operations.
+/// Maintains the connection, handles certificate lifecycle, and keeps
+/// the local database open for SSH operations. Version checks and
+/// update execution over SSH will be added when the corresponding
+/// wire protocol handlers are implemented.
 pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Result<LoopOutcome> {
     let AuthenticatedLoopParams {
         host,
@@ -73,6 +88,10 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
         )))
     })?;
     tracing::debug!("local SSH host database initialized");
+
+    // Executor factory for per-host SSH command execution. Used when
+    // handling CheckVersions/ExecuteUpdate messages (future work).
+    let _executor_factory = create_ssh_executor;
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;

@@ -144,37 +144,64 @@ Use `CommandSpec::exec()` when running a known program with fixed arguments (avo
 interpretation). Use `CommandSpec::shell()` when the command requires shell features (pipes, variable
 expansion, compound statements).
 
-## Implementing a custom executor
+## `SshCommandExecutor`
 
-To run commands over a different transport (e.g., SSH), implement the `CommandExecutor` trait:
+The SSH-backed implementation lives in `crates/core/agent-ssh/src/ssh_executor.rs`. It runs commands
+on remote hosts via an `SshSession` from the SSH transport layer.
 
 ```rust
-pub struct SshCommandExecutor {
-    session: SshSession,
-}
+use std::sync::Arc;
+use uptrakit_command::{CommandExecutor, CommandSpec};
 
+// Create from an authenticated SSH session.
+let executor: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(session));
+
+// Use exactly like LocalCommandExecutor — providers are transport-agnostic.
+let output = executor
+    .execute_quiet(&CommandSpec::exec("uname", ["-r".to_string()]))
+    .await?;
+```
+
+### How it works
+
+1. `CommandSpec::resolve()` converts the spec to `(program, args)` regardless of mode. Shell mode
+   specs are resolved to `(shell_executable, ["-c", wrapped_command])`.
+2. `build_remote_command_string()` shell-escapes every component with `shell_escape()` and joins
+   them into a single command string. When `working_dir` is set, it prepends `cd '<dir>' && `.
+3. The command string is passed to `SshSession::exec_command_streaming()`, which runs it on the
+   remote host and optionally streams output lines through an `mpsc::Sender<UpdateOutputLine>`.
+4. Transport errors map to `CommandError::CommandSpawn` and non-zero exit codes map to
+   `CommandError::CommandFailed`, matching `LocalCommandExecutor` semantics.
+
+### Output limits
+
+Both `SshCommandExecutor` and `LocalCommandExecutor` enforce a 10 MB output limit to prevent OOM
+from runaway commands.
+
+## Implementing additional executors
+
+To run commands over a different transport, implement the `CommandExecutor` trait:
+
+```rust
 #[async_trait]
-impl CommandExecutor for SshCommandExecutor {
+impl CommandExecutor for MyExecutor {
     async fn execute(
         &self,
         spec: &CommandSpec,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<CommandOutput> {
         let (program, args) = spec.resolve();
-        // Execute over SSH, stream output through output_tx
-        // ...
+        // Run the command via your transport, stream output through output_tx
+        todo!()
     }
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> Result<CommandOutput> {
         let (program, args) = spec.resolve();
-        // Execute over SSH, accumulate output
-        // ...
+        // Run the command, accumulate output
+        todo!()
     }
 }
 ```
-
-`CommandSpec::resolve()` converts the spec to `(program, Vec<args>)` regardless of mode. Shell mode
-specs are resolved to `(shell_executable, ["-c", wrapped_command])`.
 
 ## Testing
 

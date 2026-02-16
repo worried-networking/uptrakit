@@ -94,6 +94,9 @@ impl_report_conversion!(russh::Error => Error, |e| Error::SshConnection(e.to_str
 // russh agent auth errors use String-based conversion (AgentAuthError wraps SendError + keys::Error).
 impl_report_conversion!(russh::AgentAuthError => Error, |e| Error::SshAuth(e.to_string()));
 
+// CommandError from uptrakit-command (used by SshCommandExecutor boundary crossing).
+impl_report_conversion!(uptrakit_command::CommandError => Error, |e| Error::SshCommand(e.to_string()));
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -402,7 +402,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 - [ ] Run provider detection commands on the remote host over SSH and parse output locally
 - [ ] Execute updates via sudo on the remote host (same sudo allowlist model as the regular agent)
-- [ ] Stream command output back for progress reporting
+- [x] Stream command output back for progress reporting
 - [ ] Enforce per-host update locking (no concurrent updates to the same host)
 - [ ] Timeout and kill long-running remote commands
 - [ ] Handle connection drops mid-command gracefully (report failure, do not leave orphan processes)
@@ -411,7 +411,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 - [ ] All agent-side providers must work over SSH (same commands, different transport)
 - [x] Provider trait uses a transport abstraction (`CommandExecutor`) so the same provider logic works for both local and SSH execution
-- [ ] Implement `SshCommandExecutor` that executes commands over SSH connections
+- [x] Implement `SshCommandExecutor` that executes commands over SSH connections
 - [ ] Provider-level capability flag indicating SSH compatibility
 
 ### Security Considerations
