@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use rootcause::prelude::*;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait,
 };
@@ -12,6 +13,7 @@ use uptrakit_shared_types::ProviderType;
 use uptrakit_web_api::notification_service::NotificationService;
 use uuid::Uuid;
 
+use crate::scheduler::error::SchedulerError;
 use crate::scheduler::executor::TaskExecutor;
 
 /// Sends `CheckVersions` messages to connected agents for installed-version detection.
@@ -46,10 +48,10 @@ struct AssignmentRow {
 
 #[async_trait::async_trait]
 impl TaskExecutor for VersionCheckExecutor {
-    async fn execute(&self, task: &scheduled_task::Model) -> Result<(), String> {
+    async fn execute(&self, task: &scheduled_task::Model) -> crate::scheduler::error::Result<()> {
         let tenant_id = task.tenant_id;
 
-        // Fetch all enabled software items joined through hosts → agents for this tenant.
+        // Fetch all enabled software items joined through hosts -> agents for this tenant.
         let rows = self.fetch_assignments(tenant_id).await?;
         if rows.is_empty() {
             tracing::debug!("no software items assigned to agents for version check");
@@ -59,8 +61,12 @@ impl TaskExecutor for VersionCheckExecutor {
         // Group by agent (service_id)
         let mut by_agent: HashMap<Uuid, Vec<VersionCheckAssignment>> = HashMap::new();
         for row in rows {
-            let provider_type = ProviderType::from_str(&row.provider_type)
-                .map_err(|_| format!("unknown provider type: {}", row.provider_type))?;
+            let provider_type = ProviderType::from_str(&row.provider_type).map_err(|_| {
+                report!(SchedulerError::Execution(format!(
+                    "unknown provider type: {}",
+                    row.provider_type
+                )))
+            })?;
             let config = match row.config_override {
                 Some(ovr) => merge_config(&row.config, &ovr),
                 None => row.config,
@@ -98,9 +104,12 @@ impl VersionCheckExecutor {
     /// Query enabled software items with their host-to-agent mapping.
     ///
     /// Returns one row per (agent_service_id, software_item) pair.
-    async fn fetch_assignments(&self, tenant_id: Uuid) -> Result<Vec<AssignmentRow>, String> {
-        // software_item → provider_config (for provider_type + config)
-        // software_item → host_software_item → host → service_host → service (agent)
+    async fn fetch_assignments(
+        &self,
+        tenant_id: Uuid,
+    ) -> crate::scheduler::error::Result<Vec<AssignmentRow>> {
+        // software_item -> provider_config (for provider_type + config)
+        // software_item -> host_software_item -> host -> service_host -> service (agent)
         //
         // We use a raw-ish select with joins since SeaORM's relation chaining
         // doesn't easily produce a flat tuple across 5 tables.
@@ -150,7 +159,7 @@ impl VersionCheckExecutor {
             .into_model::<Row>()
             .all(&self.db)
             .await
-            .map_err(|e| format!("failed to fetch version check assignments: {e}"))?;
+            .context_to::<SchedulerError>()?;
 
         Ok(rows
             .into_iter()

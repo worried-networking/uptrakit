@@ -40,7 +40,11 @@ impl CommandExecutor for SshCommandExecutor {
             .session
             .exec_command_streaming(&remote_cmd, Some(output_tx))
             .await
-            .map_err(|e| report!(CommandError::CommandSpawn(std::io::Error::other(e.to_string()))))?;
+            .map_err(|e| {
+                report!(CommandError::CommandSpawn(std::io::Error::other(
+                    e.to_string()
+                )))
+            })?;
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
@@ -61,7 +65,11 @@ impl CommandExecutor for SshCommandExecutor {
             .session
             .exec_command_streaming(&remote_cmd, None)
             .await
-            .map_err(|e| report!(CommandError::CommandSpawn(std::io::Error::other(e.to_string()))))?;
+            .map_err(|e| {
+                report!(CommandError::CommandSpawn(std::io::Error::other(
+                    e.to_string()
+                )))
+            })?;
 
         if result.exit_code != 0 {
             let exit_code = i32::try_from(result.exit_code).unwrap_or(-1);
@@ -114,7 +122,10 @@ mod tests {
 
     #[test]
     fn exec_with_spaces_in_args() {
-        let spec = CommandSpec::exec("docker", ["pull".to_string(), "my image:latest".to_string()]);
+        let spec = CommandSpec::exec(
+            "docker",
+            ["pull".to_string(), "my image:latest".to_string()],
+        );
         let result = build_remote_command_string(&spec);
         assert_eq!(result, "'docker' 'pull' 'my image:latest'");
     }
@@ -145,8 +156,7 @@ mod tests {
 
     #[test]
     fn with_working_dir() {
-        let spec =
-            CommandSpec::exec("ls", ["-la".to_string()]).with_working_dir("/opt/my app");
+        let spec = CommandSpec::exec("ls", ["-la".to_string()]).with_working_dir("/opt/my app");
         let result = build_remote_command_string(&spec);
         assert_eq!(result, "cd '/opt/my app' && 'ls' '-la'");
     }
@@ -155,7 +165,11 @@ mod tests {
     fn shell_injection_prevention() {
         let spec = CommandSpec::exec(
             "echo",
-            ["$(whoami)".to_string(), "; rm -rf /".to_string(), "`id`".to_string()],
+            [
+                "$(whoami)".to_string(),
+                "; rm -rf /".to_string(),
+                "`id`".to_string(),
+            ],
         );
         let result = build_remote_command_string(&spec);
         // All special characters are safely wrapped in single quotes.

@@ -21,6 +21,9 @@ pub enum CliError {
     #[error("directory error: {0}")]
     Directory(#[from] uptrakit_directories::DirectoryError),
 
+    #[error("YAML serialization error: {0}")]
+    Yaml(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -33,3 +36,5 @@ impl_report_conversion! {
     serde_json::Error                 => CliError::Json,
     uptrakit_directories::DirectoryError => CliError::Directory,
 }
+
+impl_report_conversion!(serde_yaml_ng::Error => CliError, |e| CliError::Yaml(e.to_string()));

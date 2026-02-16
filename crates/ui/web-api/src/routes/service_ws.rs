@@ -72,14 +72,18 @@ impl MessageRateLimiter {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Error)]
-enum ServiceWsError {
+pub(crate) enum ServiceWsError {
     #[error("database error: {0}")]
     Database(#[from] sea_orm::DbErr),
     #[error("invalid enrollment secret")]
     InvalidSecret,
+    #[error("message deserialization failed: {0}")]
+    Deserialize(String),
+    #[error("sequence validation failed: {0}")]
+    SequenceValidation(String),
 }
 
-type ServiceWsResult<T> = std::result::Result<T, Report<ServiceWsError>>;
+pub(crate) type ServiceWsResult<T> = std::result::Result<T, Report<ServiceWsError>>;
 
 impl_report_conversion!(sea_orm::DbErr => ServiceWsError::Database);
 
@@ -120,10 +124,12 @@ pub(crate) fn serialize_controller_msg(
 pub(crate) fn deserialize_service_msg(
     in_seq: &mut IncomingSeq,
     text: &str,
-) -> Result<ServiceMessage, String> {
-    let envelope: ServiceEnvelope =
-        serde_json::from_str(text).map_err(|e| format!("invalid message: {e}"))?;
-    in_seq.validate(envelope.seq).map_err(|e| e.to_string())?;
+) -> ServiceWsResult<ServiceMessage> {
+    let envelope: ServiceEnvelope = serde_json::from_str(text)
+        .map_err(|e| report!(ServiceWsError::Deserialize(format!("invalid message: {e}"))))?;
+    in_seq
+        .validate(envelope.seq)
+        .map_err(|e| report!(ServiceWsError::SequenceValidation(e.to_string())))?;
     Ok(envelope.message)
 }
 
@@ -769,12 +775,12 @@ async fn handle_anonymous(
                     Ok(m) => m,
                     Err(e) => {
                         tracing::debug!(error = %e, "invalid message from anonymous client");
-                        let code = if e.starts_with("sequence error:") {
-                            ErrorCode::SequenceError
-                        } else {
-                            ErrorCode::BadRequest
+                        let code = match e.current_context() {
+                            ServiceWsError::SequenceValidation(_) => ErrorCode::SequenceError,
+                            _ => ErrorCode::BadRequest,
                         };
-                        let err = ControllerMessage::Error(ErrorPayload { code, message: e });
+                        let message = e.to_string();
+                        let err = ControllerMessage::Error(ErrorPayload { code, message });
                         if let Some(json) = serialize_controller_msg(out_seq, err) {
                             let _ = sink.send(Message::Text(json.into())).await;
                         }

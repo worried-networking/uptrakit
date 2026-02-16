@@ -37,7 +37,7 @@ async fn nginx_ocsp_rejects_revoked_cert() {
     // Write Nginx config with explicit HTTP OCSP responder
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
-    write_nginx_ocsp_config(&tmp, &host_gateway_ip, server.port, ocsp.port());
+    write_nginx_ocsp_config(&tmp, host_gateway_ip, server.port, ocsp.port());
 
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
@@ -143,7 +143,7 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
 
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
-    write_nginx_ocsp_aia_config(&tmp, &host_gateway_ip, server.port);
+    write_nginx_ocsp_aia_config(&tmp, host_gateway_ip, server.port);
 
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
@@ -263,7 +263,7 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
 
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
-    write_nginx_ocsp_aia_config(&tmp, &host_gateway_ip, server.port);
+    write_nginx_ocsp_aia_config(&tmp, host_gateway_ip, server.port);
 
     let container = start_nginx_ocsp_container(&tmp).await;
     let proxy_port = get_nginx_port(&container).await;
@@ -349,7 +349,7 @@ async fn nginx_ocsp_rejects_https_ssl_ocsp_responder() {
     let tmp = TempDir::new().expect("tempdir");
     write_common_nginx_tls_files(&tmp, &pki);
     // Port values don't matter — Nginx rejects the config before connecting.
-    write_nginx_ocsp_explicit_https_config(&tmp, &host_gateway_ip, 8443, 9443);
+    write_nginx_ocsp_explicit_https_config(&tmp, host_gateway_ip, 8443, 9443);
 
     // Run `nginx -t` to test the config — should fail because Nginx rejects
     // https:// in ssl_ocsp_responder at parse time.

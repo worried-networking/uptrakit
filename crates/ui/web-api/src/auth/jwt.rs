@@ -39,31 +39,19 @@ impl JwtManager {
         let key_path = data_dir.join(KEY_FILE_NAME);
 
         let secret = if key_path.exists() {
-            std::fs::read(&key_path).map_err(|e| {
-                report!(AuthError::Internal(format!(
-                    "failed to read JWT signing key: {e}"
-                )))
-            })?
+            std::fs::read(&key_path).context_to::<AuthError>()?
         } else {
             let mut rng = rand::rng();
             let mut bytes = vec![0u8; KEY_LENGTH];
             rng.fill(&mut bytes[..]);
 
-            std::fs::write(&key_path, &bytes).map_err(|e| {
-                report!(AuthError::Internal(format!(
-                    "failed to write JWT signing key: {e}"
-                )))
-            })?;
+            std::fs::write(&key_path, &bytes).context_to::<AuthError>()?;
 
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
-                    .map_err(|e| {
-                        report!(AuthError::Internal(format!(
-                            "failed to set JWT key permissions: {e}"
-                        )))
-                    })?;
+                    .context_to::<AuthError>()?;
             }
 
             tracing::info!("generated new JWT signing key at {}", key_path.display());

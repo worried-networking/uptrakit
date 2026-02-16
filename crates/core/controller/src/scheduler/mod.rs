@@ -1,5 +1,6 @@
 pub mod claim;
 pub mod cron_utils;
+pub mod error;
 pub mod executor;
 pub mod executors;
 
@@ -165,7 +166,10 @@ impl Scheduler {
             let next_run_at = cron_utils::next_run_after(&task.cron_expression, now)
                 .unwrap_or_else(|| now + time::Duration::hours(1));
 
-            if let Err(e) = claim::release_claim(&self.db, task.id, next_run_at, &result).await {
+            // Convert typed error to string for DB storage (last_error column is Option<String>).
+            let db_result = result.as_ref().map(|_| ()).map_err(|e| e.to_string());
+
+            if let Err(e) = claim::release_claim(&self.db, task.id, next_run_at, &db_result).await {
                 tracing::warn!(
                     task_id = %task.id,
                     error = %e,

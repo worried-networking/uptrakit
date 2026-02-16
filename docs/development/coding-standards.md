@@ -231,9 +231,12 @@ fn validate(input: &str) -> Result<()> {
 
 ### Pattern 10: Decision guide — which context method to use
 
-| Scenario | Method | Effect | | --- | --- | --- | | Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl | | Wrap
-low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node | | Change error type in-place (1:1 mapping) |
-`.context_transform(\|e\| ...)` | Replace context, preserve children | | One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
+| Scenario | Method | Effect |
+| --- | --- | --- |
+| Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl |
+| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node |
+| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` | Replace context, preserve children |
+| One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
 | Guard clause / early return | `bail!(...)` | Return immediately |
 
 ### Pattern 11: Custom error helper methods
@@ -278,11 +281,39 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
 Note: `EncryptedString::new()` is fallible — it encrypts eagerly at construction time and returns `Result<Self, Report<CryptoError>>`. Callers must
 propagate the error via `.context_to()?`.
 
+### Pattern 14: Clap `value_parser` functions
+
+Clap's `#[arg(value_parser = ...)]` attribute requires `Result<T, String>`. Functions used as clap value parsers (e.g. `parse_pki_addr`,
+`parse_proxy`, `parsed_url`) are the only place where `Result<T, String>` is acceptable:
+
+```rust
+fn parse_my_value(s: &str) -> Result<MyType, String> {
+    // clap API mandates this signature
+    s.parse::<MyType>().map_err(|e| e.to_string())
+}
+```
+
+### Pattern 15: HTTP input validation helpers
+
+Thin validation functions that produce user-facing HTTP 400 error messages may return `Result<T, String>` when the string goes directly into an HTTP
+error response (e.g. `validate_provider_config_request`, `validate_homebrew_package_identifier`). These are display-only error strings, not propagated
+errors.
+
+### Pattern 16: Display fallbacks
+
+`unwrap_or_else` / `unwrap_or_default` used for non-critical display formatting (e.g. pretty-printing JSON with a `to_string()` fallback) are not error
+propagation and do not need typed errors:
+
+```rust
+let pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+```
+
 ### Anti-patterns
 
 These are error handling patterns that MUST NOT be used:
 
-- **`Result<T, String>`** — always define a typed error enum with `Report<E>`.
+- **`Result<T, String>`** — always define a typed error enum with `Report<E>`. Approved exceptions: Clap value parsers (Pattern 14), HTTP input
+  validation helpers (Pattern 15).
 - **`Result<T, (StatusCode, &str)>`** — use typed errors; map to HTTP status at the handler level.
 - **Reusing unrelated error variants** (e.g. `PkiError::Hostname` for a database error) — add a new variant.
 - **`format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to preserve the original error.

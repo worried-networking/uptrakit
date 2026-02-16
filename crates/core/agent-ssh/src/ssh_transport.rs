@@ -184,25 +184,19 @@ impl SshSession {
         command: &str,
         output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
     ) -> Result<RemoteCommandResult> {
-        let mut channel =
-            self.handle
-                .channel_open_session()
-                .await
-                .map_err(|e| {
-                    report!(Error::SshCommand(format!(
-                        "failed to open session channel: {e}"
-                    )))
-                })?;
+        let mut channel = self.handle.channel_open_session().await.map_err(|e| {
+            report!(Error::SshCommand(format!(
+                "failed to open session channel: {e}"
+            )))
+        })?;
 
         channel
             .exec(true, command)
             .await
             .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
 
-        let mut stdout_buf =
-            LineBuffer::new(UpdateOutputStream::Stdout, output_tx.cloned());
-        let mut stderr_buf =
-            LineBuffer::new(UpdateOutputStream::Stderr, output_tx.cloned());
+        let mut stdout_buf = LineBuffer::new(UpdateOutputStream::Stdout, output_tx.cloned());
+        let mut stderr_buf = LineBuffer::new(UpdateOutputStream::Stderr, output_tx.cloned());
         let mut exit_code: Option<u32> = None;
 
         while let Some(msg) = channel.wait().await {
@@ -378,7 +372,6 @@ async fn authenticate_with_agent<H: client::Handler>(
         identities.len()
     )));
 }
-
 
 /// Compute the SHA-256 fingerprint of an SSH public key in `SHA256:...` format.
 fn compute_fingerprint(key: &russh::keys::ssh_key::PublicKey) -> String {

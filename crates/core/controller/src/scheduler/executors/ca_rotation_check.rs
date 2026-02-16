@@ -31,7 +31,7 @@ impl CaRotationCheckExecutor {
 
 #[async_trait::async_trait]
 impl TaskExecutor for CaRotationCheckExecutor {
-    async fn execute(&self, _task: &scheduled_task::Model) -> Result<(), String> {
+    async fn execute(&self, _task: &scheduled_task::Model) -> crate::scheduler::error::Result<()> {
         let snapshot = self.ca_snapshot.borrow().clone();
         if pki::should_rotate_ca(&snapshot.active_cert_pem) {
             tracing::info!("CA certificate is within rotation window, triggering rotation");

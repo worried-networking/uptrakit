@@ -41,7 +41,7 @@ impl AuthCleanupExecutor {
 
 #[async_trait::async_trait]
 impl TaskExecutor for AuthCleanupExecutor {
-    async fn execute(&self, _task: &scheduled_task::Model) -> Result<(), String> {
+    async fn execute(&self, _task: &scheduled_task::Model) -> crate::scheduler::error::Result<()> {
         self.oidc_flow_store.cleanup_expired().await;
         self.account_link_store.cleanup_expired().await;
         self.oidc_token_exchange_store.cleanup_expired().await;

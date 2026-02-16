@@ -30,7 +30,7 @@ impl HomebrewConfig {
     ///
     /// Currently accepts all valid deserialized configs since there are no
     /// required fields beyond `package_type` which has a default.
-    pub fn validate(&self) -> std::result::Result<(), String> {
+    pub fn validate(&self) -> crate::error::Result<()> {
         Ok(())
     }
 }

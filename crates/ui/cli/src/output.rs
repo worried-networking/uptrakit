@@ -39,8 +39,7 @@ pub fn print_output<T: Serialize>(format: OutputFormat, human_text: &str, value:
             println!("{json}");
         }
         OutputFormat::Yaml => {
-            let yaml = serde_yaml_ng::to_string(value)
-                .map_err(|e| report!(CliError::Other(format!("YAML serialization error: {e}"))))?;
+            let yaml = serde_yaml_ng::to_string(value).context_to::<CliError>()?;
             print!("{yaml}");
         }
     }
@@ -65,8 +64,7 @@ pub fn print_value(format: OutputFormat, value: &serde_json::Value) -> Result<()
             println!("{json}");
         }
         OutputFormat::Yaml => {
-            let yaml = serde_yaml_ng::to_string(value)
-                .map_err(|e| report!(CliError::Other(format!("YAML serialization error: {e}"))))?;
+            let yaml = serde_yaml_ng::to_string(value).context_to::<CliError>()?;
             print!("{yaml}");
         }
     }

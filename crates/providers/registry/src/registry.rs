@@ -140,7 +140,7 @@ impl ProviderRegistry {
                     serde_json::from_value(config.clone()).context_to()?;
                 homebrew_config
                     .validate()
-                    .map_err(|e| report!(RegistryError::ConfigValidation(e)))?;
+                    .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;
                 Ok(())
             }
             _ => Err(report!(RegistryError::UnknownProviderType(format!(

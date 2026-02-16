@@ -91,6 +91,9 @@ pub enum AuthError {
     #[error("device flow already authorized")]
     DeviceFlowAlreadyAuthorized,
 
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -102,6 +105,7 @@ impl_report_conversion! {
     argon2::password_hash::Error => AuthError::PasswordHash,
     uuid::Error                 => AuthError::UuidParse,
     time::error::ComponentRange => AuthError::TimeError,
+    std::io::Error              => AuthError::Io,
 }
 
 impl_report_conversion!(argon2::Error => AuthError, |_| AuthError::Internal("argon2 error".to_string()));

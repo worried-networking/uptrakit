@@ -208,6 +208,10 @@ use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversio
   release.
 - String-based error variants for external types that don't impl `std::error::Error` (e.g. `aws_lc_rs::Unspecified`):
   `.map_err(|e| report!(Err::Variant(e.to_string())))`.
+- Clap `value_parser` functions — `Result<T, String>` is required by the clap API (Pattern 14).
+- HTTP input validation helpers — thin functions producing user-facing HTTP 400 error messages where the string goes
+  directly into `error_response()` (Pattern 15).
+- Display fallbacks — `unwrap_or_else` / `unwrap_or_default` for non-critical display/formatting (Pattern 16).
 
 Full details: [docs/development/coding-standards.md](docs/development/coding-standards.md).
 

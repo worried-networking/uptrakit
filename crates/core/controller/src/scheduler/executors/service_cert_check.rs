@@ -1,9 +1,11 @@
+use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{ControllerMessage, RequestCertRenewalPayload};
 use uptrakit_shared_db::entity::{scheduled_task, service_certificate};
 use uptrakit_web_api::notification_service::NotificationService;
 
+use crate::scheduler::error::SchedulerError;
 use crate::scheduler::executor::TaskExecutor;
 
 /// Default renewal window: request renewal when cert expires within this many days.
@@ -27,7 +29,7 @@ impl ServiceCertCheckExecutor {
 
 #[async_trait::async_trait]
 impl TaskExecutor for ServiceCertCheckExecutor {
-    async fn execute(&self, _task: &scheduled_task::Model) -> Result<(), String> {
+    async fn execute(&self, _task: &scheduled_task::Model) -> crate::scheduler::error::Result<()> {
         let now = OffsetDateTime::now_utc();
         let renewal_cutoff = now + time::Duration::days(RENEWAL_WINDOW_DAYS);
 
@@ -38,7 +40,7 @@ impl TaskExecutor for ServiceCertCheckExecutor {
             .filter(service_certificate::Column::NotAfter.gt(now))
             .all(&self.db)
             .await
-            .map_err(|e| format!("failed to query expiring certificates: {e}"))?;
+            .context_to::<SchedulerError>()?;
 
         if expiring.is_empty() {
             tracing::debug!("no service certificates approaching renewal");

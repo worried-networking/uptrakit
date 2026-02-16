@@ -18,6 +18,24 @@ use uptrakit_service_sdk::{
 
 use cli::{Args, Commands};
 
+// ---------------------------------------------------------------------------
+// Typed error for initialization helpers
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, thiserror::Error)]
+enum InitError {
+    #[error("{0}")]
+    Directory(String),
+    #[error("{0}")]
+    MasterKey(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Hex(String),
+}
+
+type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
+
 struct SshAgentHandler {
     state_dir: std::path::PathBuf,
 }
@@ -98,15 +116,15 @@ async fn main() {
         let filter = EnvFilter::from_default_env();
         tracing_subscriber::fmt().with_env_filter(filter).init();
 
-        if let Err(msg) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
-            eprintln!("error: {msg}");
+        if let Err(e) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
+            eprintln!("error: {e}");
             std::process::exit(1);
         }
 
         let state_dir = match resolve_state_dir_from_common(&args.common) {
             Ok(dir) => dir,
-            Err(msg) => {
-                eprintln!("error: {msg}");
+            Err(e) => {
+                eprintln!("error: {e}");
                 std::process::exit(1);
             }
         };
@@ -135,16 +153,16 @@ async fn main() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     // Initialize master encryption key for local SSH credential storage.
-    if let Err(msg) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
-        tracing::error!("{msg}");
+    if let Err(e) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
+        tracing::error!("{e}");
         std::process::exit(1);
     }
 
     // Resolve state directory early so we can pass it to the handler.
     let state_dir = match resolve_state_dir_from_common(&args.common) {
         Ok(dir) => dir,
-        Err(msg) => {
-            tracing::error!("{msg}");
+        Err(e) => {
+            tracing::error!("{e}");
             std::process::exit(1);
         }
     };
@@ -163,10 +181,12 @@ async fn main() {
 /// Resolve the state directory for this service.
 fn resolve_state_dir_from_common(
     common: &uptrakit_service_sdk::cli::CommonServiceArgs,
-) -> std::result::Result<std::path::PathBuf, String> {
-    let dirs = common
-        .resolve_dirs("agent-ssh")
-        .map_err(|e| format!("failed to resolve directories: {e}"))?;
+) -> InitResult<std::path::PathBuf> {
+    let dirs = common.resolve_dirs("agent-ssh").map_err(|e| {
+        report!(InitError::Directory(format!(
+            "failed to resolve directories: {e}"
+        )))
+    })?;
     Ok(dirs.state_dir().to_path_buf())
 }
 
@@ -174,7 +194,7 @@ fn resolve_state_dir_from_common(
 fn init_master_key(
     master_key_file: &Option<std::path::PathBuf>,
     allow_plaintext_secrets: bool,
-) -> std::result::Result<(), String> {
+) -> InitResult<()> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
     let key_hex = read_master_key_hex(master_key_file.as_deref(), env_val.as_deref())?;
 
@@ -187,8 +207,11 @@ fn init_master_key(
                 );
             }
             let key_bytes = parse_master_key_hex(&key_hex)?;
-            uptrakit_shared_db::crypto::init_master_key(key_bytes)
-                .map_err(|e| format!("failed to initialize master key: {e}"))?;
+            uptrakit_shared_db::crypto::init_master_key(key_bytes).map_err(|e| {
+                report!(InitError::MasterKey(format!(
+                    "failed to initialize master key: {e}"
+                )))
+            })?;
             tracing::info!("master encryption key initialized");
         }
         None => {
@@ -198,13 +221,13 @@ fn init_master_key(
                     This is for development only and is NOT safe for production."
                 );
             } else {
-                return Err(
+                bail!(InitError::MasterKey(
                     "master encryption key is required: set UPTRAKIT_MASTER_KEY env var \
                      (64-char hex string) or pass --master-key-file <path>. \
                      For development only, pass --allow-plaintext-secrets to run without \
                      encryption at rest."
                         .into(),
-                );
+                ));
             }
         }
     }
@@ -214,14 +237,9 @@ fn init_master_key(
 fn read_master_key_hex(
     master_key_file: Option<&std::path::Path>,
     env_val: Option<&str>,
-) -> std::result::Result<Option<String>, String> {
+) -> InitResult<Option<String>> {
     if let Some(key_file) = master_key_file {
-        let contents = std::fs::read_to_string(key_file).map_err(|e| {
-            format!(
-                "failed to read --master-key-file {}: {e}",
-                key_file.display()
-            )
-        })?;
+        let contents = std::fs::read_to_string(key_file).map_err(|e| report!(InitError::Io(e)))?;
         return Ok(Some(contents.trim().to_string()));
     }
 
@@ -232,14 +250,17 @@ fn read_master_key_hex(
     Ok(None)
 }
 
-fn parse_master_key_hex(key_hex: &str) -> std::result::Result<[u8; 32], String> {
-    let bytes = uptrakit_shared_types::hex::decode(key_hex)
-        .map_err(|e| format!("master key must be a 64-character hex string: {e}"))?;
+fn parse_master_key_hex(key_hex: &str) -> InitResult<[u8; 32]> {
+    let bytes = uptrakit_shared_types::hex::decode(key_hex).map_err(|e| {
+        report!(InitError::Hex(format!(
+            "master key must be a 64-character hex string: {e}"
+        )))
+    })?;
     let key_bytes: [u8; 32] = bytes.try_into().map_err(|v: Vec<u8>| {
-        format!(
+        report!(InitError::Hex(format!(
             "master key must be exactly 32 bytes (64 hex chars), got {} bytes",
             v.len()
-        )
+        )))
     })?;
     Ok(key_bytes)
 }

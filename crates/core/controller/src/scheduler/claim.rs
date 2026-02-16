@@ -1,7 +1,10 @@
+use rootcause::prelude::*;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, ExprTrait, QueryFilter};
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::scheduled_task;
 use uuid::Uuid;
+
+use super::error::{self, SchedulerError};
 
 /// Duration after which a locked task is considered stale and can be reclaimed.
 const STALE_CLAIM_SECONDS: i64 = 600; // 10 minutes
@@ -13,7 +16,7 @@ pub async fn try_claim(
     db: &DatabaseConnection,
     task_id: Uuid,
     controller_id: Uuid,
-) -> Result<bool, String> {
+) -> error::Result<bool> {
     let now = OffsetDateTime::now_utc();
 
     let result = scheduled_task::Entity::update_many()
@@ -29,18 +32,21 @@ pub async fn try_claim(
         .filter(scheduled_task::Column::LockedBy.is_null())
         .exec(db)
         .await
-        .map_err(|e| format!("failed to claim task: {e}"))?;
+        .context_to::<SchedulerError>()?;
 
     Ok(result.rows_affected == 1)
 }
 
 /// Release a task claim after execution, updating run metadata.
+///
+/// The `result` parameter is `Result<(), String>` because the `last_error` DB column
+/// is `Option<String>`. The caller converts typed errors to strings before calling.
 pub async fn release_claim(
     db: &DatabaseConnection,
     task_id: Uuid,
     next_run_at: OffsetDateTime,
     result: &Result<(), String>,
-) -> Result<(), String> {
+) -> error::Result<()> {
     let now = OffsetDateTime::now_utc();
     let last_error = match result {
         Ok(()) => None,
@@ -86,13 +92,13 @@ pub async fn release_claim(
         .filter(scheduled_task::Column::Id.eq(task_id))
         .exec(db)
         .await
-        .map_err(|e| format!("failed to release task claim: {e}"))?;
+        .context_to::<SchedulerError>()?;
 
     Ok(())
 }
 
 /// Find and release stale task claims (locked longer than the timeout).
-pub async fn recover_stale_claims(db: &DatabaseConnection) -> Result<u64, String> {
+pub async fn recover_stale_claims(db: &DatabaseConnection) -> error::Result<u64> {
     let cutoff = OffsetDateTime::now_utc() - time::Duration::seconds(STALE_CLAIM_SECONDS);
 
     let result = scheduled_task::Entity::update_many()
@@ -114,7 +120,7 @@ pub async fn recover_stale_claims(db: &DatabaseConnection) -> Result<u64, String
         .filter(scheduled_task::Column::LockedAt.lt(cutoff))
         .exec(db)
         .await
-        .map_err(|e| format!("failed to recover stale claims: {e}"))?;
+        .context_to::<SchedulerError>()?;
 
     Ok(result.rows_affected)
 }
@@ -123,7 +129,7 @@ pub async fn recover_stale_claims(db: &DatabaseConnection) -> Result<u64, String
 pub async fn release_all_claims(
     db: &DatabaseConnection,
     controller_id: Uuid,
-) -> Result<u64, String> {
+) -> error::Result<u64> {
     let result = scheduled_task::Entity::update_many()
         .col_expr(
             scheduled_task::Column::LockedBy,
@@ -136,7 +142,7 @@ pub async fn release_all_claims(
         .filter(scheduled_task::Column::LockedBy.eq(controller_id))
         .exec(db)
         .await
-        .map_err(|e| format!("failed to release all claims: {e}"))?;
+        .context_to::<SchedulerError>()?;
 
     Ok(result.rows_affected)
 }
@@ -145,7 +151,7 @@ pub async fn release_all_claims(
 pub async fn find_due_tasks(
     db: &DatabaseConnection,
     tenant_id: Uuid,
-) -> Result<Vec<scheduled_task::Model>, String> {
+) -> error::Result<Vec<scheduled_task::Model>> {
     let now = OffsetDateTime::now_utc();
 
     scheduled_task::Entity::find()
@@ -155,7 +161,7 @@ pub async fn find_due_tasks(
         .filter(scheduled_task::Column::NextRunAt.lte(now))
         .all(db)
         .await
-        .map_err(|e| format!("failed to find due tasks: {e}"))
+        .context_to::<SchedulerError>()
 }
 
 /// Set `next_run_at` to now for immediate execution on next poll cycle.
@@ -163,7 +169,7 @@ pub async fn find_due_tasks(
 /// This is an HA-safe alternative to the REST API's inline update: it can be
 /// called from within the controller process (e.g. future admin CLI).
 #[cfg(test)]
-pub async fn trigger_immediate(db: &DatabaseConnection, task_id: Uuid) -> Result<bool, String> {
+pub async fn trigger_immediate(db: &DatabaseConnection, task_id: Uuid) -> error::Result<bool> {
     let now = OffsetDateTime::now_utc();
 
     let result = scheduled_task::Entity::update_many()
@@ -178,7 +184,7 @@ pub async fn trigger_immediate(db: &DatabaseConnection, task_id: Uuid) -> Result
         .filter(scheduled_task::Column::Id.eq(task_id))
         .exec(db)
         .await
-        .map_err(|e| format!("failed to trigger task: {e}"))?;
+        .context_to::<SchedulerError>()?;
 
     Ok(result.rows_affected == 1)
 }
