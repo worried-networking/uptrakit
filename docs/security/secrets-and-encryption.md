@@ -43,7 +43,7 @@ Legacy plaintext detection allows old values to remain readable until rewritten.
 - A 256-bit master key is required in production via `UPTRAKIT_MASTER_KEY` (64 hex characters) or `--master-key-file`.
 - `init_master_key()` loads the key once at startup and caches it in a global `OnceLock`. It returns
   `Report<CryptoError>` — see the `CryptoError` enum in `crates/shared/db/src/crypto.rs` for the full set of typed error
-  variants (e.g. `AlreadyInitialized`, `NotInitialized`, `KeyCreation`, `Encryption`, `Decryption`).
+  variants (e.g. `AlreadyInitialized`, `NotInitialized`, `KeyCreation`, `Encryption`, `Decryption`, `MasterKeyMismatch`).
 - The key is never logged or exposed in API responses.
 - `--allow-plaintext-secrets` disables encryption (for development only) and logs a warning.
 
@@ -51,6 +51,27 @@ Legacy plaintext detection allows old values to remain readable until rewritten.
 | --- | --- |
 | `UPTRAKIT_MASTER_KEY` env var | 64-character hex string (32 bytes) |
 | `--master-key-file` CLI arg | Path to a file containing the 64-character hex key |
+
+### Master Key Verification (HA Safety)
+
+In multi-controller (HA) deployments, all instances must share the same master key. A misconfigured
+instance using a different key would silently fail to decrypt values encrypted by other instances.
+
+To prevent this, the controller performs **startup key verification**:
+
+1. On first startup (when no verification token exists), `create_key_verification_token()` encrypts a
+   known sentinel value (`uptrakit-master-key-ok-v1`) and stores the ciphertext in the
+   `crypto.master_key_verification` settings entry.
+2. On subsequent startups, `verify_key_verification_token()` reads the stored ciphertext, decrypts it,
+   and verifies it matches the expected sentinel. If decryption fails or the plaintext does not match,
+   the controller aborts with a `MasterKeyMismatch` error and a clear diagnostic message.
+
+This ensures that key mismatches are detected immediately at startup rather than surfacing as
+mysterious decryption failures at runtime. The verification token is stored as a global (non-tenant-scoped)
+setting under `SettingKey::MasterKeyVerification`.
+
+See also: [Cross-Controller Communication](../development/cross-controller-comm.md) for other HA
+considerations.
 
 ## Tokens and Secrets
 
@@ -66,5 +87,7 @@ Legacy plaintext detection allows old values to remain readable until rewritten.
 
 | File | Purpose |
 | --- | --- |
-| `crates/shared/db/src/crypto.rs` | `EncryptedString` type, `init_master_key()`, AES-256-GCM encrypt/decrypt |
+| `crates/shared/db/src/crypto.rs` | `EncryptedString` type, `init_master_key()`, AES-256-GCM encrypt/decrypt, key verification |
 | `crates/shared/types/src/secret_string.rs` | `SecretString` newtype with redacted Debug/Display |
+| `crates/ui/web-api/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
+| `crates/core/controller/src/startup.rs` | `verify_master_key()` — startup phase that validates the master key |

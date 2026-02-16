@@ -16,6 +16,24 @@ on `ProviderType`. Document provider behavior so the registry can continue to va
 
 `ProviderType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use `s.parse::<ProviderType>()` to convert strings (returns `ParseProviderTypeError` on failure). The string representations are: `github_releases`, `proxmox_helper_scripts`, `docker_registry`, `homebrew`.
 
+## Provider Trait: Required Methods
+
+The `Provider` trait (`crates/providers/core/src/traits.rs`) defines the contract for all provider
+implementations. Two methods are required (no default implementation):
+
+| Method | Signature | Description |
+| :--- | :--- | :--- |
+| `provider_type` | `fn provider_type(&self) -> ProviderType` | Returns the provider's type for introspection, logging, and telemetry. |
+| `capabilities` | `fn capabilities(&self) -> Vec<ProviderCapability>` | Declares which optional features the provider supports. |
+
+All other methods (`detect_installed_version`, `fetch_releases`, `execute_update`,
+`discover_software`, `refresh_package_index`) have default implementations that return
+errors or empty results, so providers override only what they support.
+
+When implementing a new provider, always return the correct `ProviderType` variant from
+`provider_type()`. This ensures that boxed `dyn Provider` objects can be introspected
+after creation by `ProviderRegistry::create_provider()`.
+
 ## Provider Architecture - Detailed
 
 Each software item is associated with a provider. A provider defines:

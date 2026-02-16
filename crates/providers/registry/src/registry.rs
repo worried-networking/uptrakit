@@ -402,6 +402,34 @@ mod tests {
     }
 
     #[test]
+    fn boxed_provider_preserves_type() {
+        let github_config = serde_json::json!({"owner": "octocat", "repo": "hello-world"});
+        let github = ProviderRegistry::create_provider(ProviderType::GithubReleases, &github_config)
+            .expect("create github");
+        assert_eq!(github.provider_type(), ProviderType::GithubReleases);
+
+        let docker_config = serde_json::json!({"image": "nginx"});
+        let docker =
+            ProviderRegistry::create_provider(ProviderType::DockerRegistry, &docker_config)
+                .expect("create docker");
+        assert_eq!(docker.provider_type(), ProviderType::DockerRegistry);
+
+        let proxmox_config = serde_json::json!({"script_url": "https://example.com/update.sh"});
+        let proxmox = ProviderRegistry::create_provider(
+            ProviderType::ProxmoxHelperScripts,
+            &proxmox_config,
+        )
+        .expect("create proxmox");
+        assert_eq!(proxmox.provider_type(), ProviderType::ProxmoxHelperScripts);
+
+        let homebrew_config = serde_json::json!({});
+        let homebrew =
+            ProviderRegistry::create_provider(ProviderType::Homebrew, &homebrew_config)
+                .expect("create homebrew");
+        assert_eq!(homebrew.provider_type(), ProviderType::Homebrew);
+    }
+
+    #[test]
     fn mask_config_secrets_homebrew() {
         let config = serde_json::json!({"package_type": "formula"});
         let masked = ProviderRegistry::mask_config_secrets(ProviderType::Homebrew, &config);

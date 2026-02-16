@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 
 use uptrakit_provider_core::command::{run_command, send_output, shell_escape};
 use uptrakit_provider_core::{
-    Provider, ProviderError, ReleaseAsset, ReleaseInfo, UpdateOutputLine, UpdateOutputStream,
-    UpstreamRelease, Version,
+    Provider, ProviderError, ProviderType, ReleaseAsset, ReleaseInfo, UpdateOutputLine,
+    UpdateOutputStream, UpstreamRelease, Version,
 };
 
 use crate::api_types::{GitHubApiError, GitHubRelease};
@@ -181,6 +181,10 @@ impl GitHubProvider {
 
 #[async_trait]
 impl Provider for GitHubProvider {
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::GithubReleases
+    }
+
     async fn fetch_releases(
         &self,
         _package_identifier: &str,

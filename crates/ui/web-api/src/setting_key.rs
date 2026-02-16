@@ -29,6 +29,7 @@ pub enum SettingKey {
     RegistrationRequireTokenForOidc,
     MqttMaxClientsPerTenant,
     JwtSigningKey,
+    MasterKeyVerification,
 }
 
 impl SettingKey {
@@ -56,6 +57,7 @@ impl SettingKey {
             Self::RegistrationRequireTokenForOidc => "registration.require_token_for_oidc",
             Self::MqttMaxClientsPerTenant => "mqtt.max_clients_per_tenant",
             Self::JwtSigningKey => "auth.jwt_signing_key",
+            Self::MasterKeyVerification => "crypto.master_key_verification",
         }
     }
 
@@ -85,6 +87,7 @@ impl SettingKey {
             "registration.require_token_for_oidc" => Some(Self::RegistrationRequireTokenForOidc),
             "mqtt.max_clients_per_tenant" => Some(Self::MqttMaxClientsPerTenant),
             "auth.jwt_signing_key" => Some(Self::JwtSigningKey),
+            "crypto.master_key_verification" => Some(Self::MasterKeyVerification),
             _ => None,
         }
     }
@@ -105,6 +108,7 @@ impl SettingKey {
                 | Self::MultiTenancyEnabled
                 | Self::MqttMaxClientsPerTenant
                 | Self::JwtSigningKey
+                | Self::MasterKeyVerification
         )
     }
 }

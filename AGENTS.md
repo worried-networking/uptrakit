@@ -65,14 +65,14 @@ uptrakit/
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
-│   │   ├── command/                    # uptrakit-command                       (lib)  — shell command execution (shell_escape, run_command_*)
+│   │   ├── command/                    # uptrakit-command                       (lib)  — shell command execution (shell_escape, run_command_*, run_command_*_quiet)
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex, ServiceType (Agent, Mqtt, SshAgent), ServiceStatus, MqttTransport, HookShell, DeviceAuthStatus, MqttClientConnectionStatus, OutputStreamType, SessionTokenType — feature-gated: sea-orm, openapi)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler)
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler); ws module is pub(crate)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
@@ -284,7 +284,7 @@ For more in-depth information on specific topics, refer to the following documen
 ### Security
 
 - [PKI and Certificate Lifecycle](docs/security/pki-certificates.md)
-- [Secrets Handling and Encryption](docs/security/secrets-and-encryption.md)
+- [Secrets Handling and Encryption](docs/security/secrets-and-encryption.md) (includes master key verification for HA safety)
 - [TOFU and TLS Hardening](docs/security/tofu-tls.md)
 - [Authentication and Authorization](docs/security/auth-and-authorization.md)
 - [Cryptography](docs/security/cryptography.md)

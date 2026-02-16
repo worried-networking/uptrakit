@@ -3,7 +3,9 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 
 use crate::error::{ProviderError, Result};
-use crate::types::{DiscoveredSoftware, ProviderCapability, ReleaseInfo, UpstreamRelease};
+use crate::types::{
+    DiscoveredSoftware, ProviderCapability, ProviderType, ReleaseInfo, UpstreamRelease,
+};
 use crate::version::Version;
 use uptrakit_command::UpdateOutputLine;
 
@@ -18,6 +20,12 @@ const NO_CAPABILITIES: &[ProviderCapability] = &[];
 /// empty results, or no capabilities.
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// Returns the provider type for this instance.
+    ///
+    /// Used for logging, telemetry, and debugging after a provider is boxed
+    /// as `Box<dyn Provider>` (which erases the concrete type).
+    fn provider_type(&self) -> ProviderType;
+
     /// Returns the capabilities supported by this provider instance.
     ///
     /// Default implementation returns an empty slice (no capabilities).
@@ -97,13 +105,21 @@ mod tests {
     struct StubProvider;
 
     #[async_trait]
-    impl Provider for StubProvider {}
+    impl Provider for StubProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::GithubReleases
+        }
+    }
 
     /// Provider with DiscoverLocalSoftware capability.
     struct DiscoveryProvider;
 
     #[async_trait]
     impl Provider for DiscoveryProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::GithubReleases
+        }
+
         fn capabilities(&self) -> &'static [ProviderCapability] {
             &[ProviderCapability::DiscoverLocalSoftware]
         }
@@ -114,6 +130,10 @@ mod tests {
 
     #[async_trait]
     impl Provider for RefreshProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::GithubReleases
+        }
+
         fn capabilities(&self) -> &'static [ProviderCapability] {
             &[ProviderCapability::RefreshPackageIndex]
         }

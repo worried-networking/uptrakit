@@ -15,6 +15,7 @@ a week.
 - Agents run as unprivileged users, execute updates via sudo allowlists, and connect outbound only.
 - The scheduler never runs automatic updates; all actions require user confirmation.
 - Secrets are encrypted at rest, never logged, and sensitive endpoints are rate limited.
+- Master key consistency is verified at startup to prevent silent decryption failures in HA deployments.
 
 ## Detailed guidance
 

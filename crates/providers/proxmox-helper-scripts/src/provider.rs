@@ -3,8 +3,8 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_provider_core::command::{run_command_exec, send_output};
 use uptrakit_provider_core::{
-    Provider, ProviderCapability, ProviderError, ReleaseInfo, Result, UpdateOutputLine,
-    UpdateOutputStream, Version,
+    Provider, ProviderCapability, ProviderError, ProviderType, ReleaseInfo, Result,
+    UpdateOutputLine, UpdateOutputStream, Version,
 };
 
 use crate::config::ProxmoxHelperScriptsConfig;
@@ -25,6 +25,10 @@ impl ProxmoxHelperScriptsProvider {
 
 #[async_trait]
 impl Provider for ProxmoxHelperScriptsProvider {
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::ProxmoxHelperScripts
+    }
+
     fn capabilities(&self) -> &'static [ProviderCapability] {
         &[ProviderCapability::DiscoverLocalSoftware]
     }

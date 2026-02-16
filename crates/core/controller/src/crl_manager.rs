@@ -232,7 +232,7 @@ impl CrlManager {
     /// Accepts an optional `CancellationToken` for graceful shutdown. When the
     /// token is cancelled, the task exits cleanly.
     pub async fn run(self: Arc<Self>, shutdown_token: Option<tokio_util::sync::CancellationToken>) {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut interval = tokio::time::interval(crate::durations::CRL_POLL_INTERVAL);
         // The first tick completes immediately — skip it since we already
         // built the initial CRL synchronously before starting.
         interval.tick().await;

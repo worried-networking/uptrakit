@@ -45,10 +45,10 @@ The `Provider` trait is **well-designed for third-party implementations**:
 | ID | Severity | Category | Description | File:Line |
 | --- | --- | --- | --- | --- |
 | ~~PCORE-01~~ | ~~Major~~ | ~~Extensibility~~ | ~~`execute_update` accepts `provider_config: &serde_json::Value` as raw JSON.~~ **FIXED.** Raw JSON parameter removed from `Provider::execute_update()`. All providers now use typed config fields (`self.config.install_command`, `self.config.restart_command`, `self.config.script_url`). | `src/traits.rs` |
-| PCORE-02 | Minor | Extensibility | No `provider_type()` or `name()` method on the `Provider` trait. External developers cannot ask a `Box<dyn Provider>` what type it represents, which is needed for logging, telemetry, and configuration introspection. | `src/traits.rs:30` |
+| ~~PCORE-02~~ | ~~Minor~~ | ~~Extensibility~~ | ~~No `provider_type()` or `name()` method on the `Provider` trait.~~ **FIXED.** `fn provider_type(&self) -> ProviderType` added as a required method on the `Provider` trait. All four providers implement it, returning their respective `ProviderType` variant. Test `boxed_provider_preserves_type()` added in `provider-registry`. | `src/traits.rs` |
 | PCORE-03 | Minor | Code Quality | `async_trait` is used for the `Provider` trait. With Rust edition 2024, native async traits are available. However, `async_trait` is still necessary for object safety with `Box<dyn Provider>`. This should be documented as a conscious choice. | `src/traits.rs:29` |
 | ~~PCORE-04~~ | ~~Info~~ | ~~Code Quality~~ | ~~`ProviderCapability` enum lacks `#[non_exhaustive]`.~~ **FIXED.** `#[non_exhaustive]` added to `ProviderCapability`. | `src/types.rs` |
 
 ## Verdict
 
-**Pass.** Well-structured abstraction crate with a clean re-export strategy and extensible trait design. The raw JSON `provider_config` parameter in `execute_update` (PCORE-01) is the most significant design concern. The missing `provider_type()` method (PCORE-02) would improve introspection for external consumers.
+**Pass.** Well-structured abstraction crate with a clean re-export strategy and extensible trait design. The raw JSON `provider_config` parameter in `execute_update` (PCORE-01) has been resolved. The `provider_type()` method (PCORE-02) has been added, enabling introspection on boxed providers.

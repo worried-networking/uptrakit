@@ -22,9 +22,8 @@ Remaining extensibility gaps:
 1. ~~**`EnrollmentError` is overloaded**~~ **FIXED** — restructured into 4 domain sub-enums (`TlsError`,
    `IdentityError`, `ProtocolError`, `CaError`) plus 5 top-level variants.
 
-2. **`WsStream` type alias leaks implementation details**: Exposes `tokio_tungstenite::WebSocketStream<
-   tokio_rustls::client::TlsStream<tokio::net::TcpStream>>`. Switching TLS libraries or transport would
-   break all consumers.
+2. ~~**`WsStream` type alias leaks implementation details**~~ **FIXED** — `ws` module changed to
+   `pub(crate)`, making `WsStream` and all internal functions crate-private.
 
 3. **Timeout constants are hardcoded**: `CONNECT_TIMEOUT` (30s), `RESPONSE_TIMEOUT` (60s),
    `APPROVAL_TIMEOUT` (30min) cannot be overridden by external consumers or CLI flags.
@@ -34,7 +33,7 @@ Remaining extensibility gaps:
 | ID | Title | Severity | Type | File |
 |---|---|---|---|---|
 | [SDK-03](#sdk-03) | `EnrollmentError` overloaded with 19 variants spanning 6 concerns | Medium | Actionable | `src/error.rs` |
-| [SDK-04](#sdk-04) | `WsStream` type alias leaks implementation details | Medium | Informational | `src/connection.rs` |
+| ~~[SDK-04](#sdk-04)~~ | ~~`WsStream` type alias leaks implementation details~~ **FIXED** | ~~Medium~~ | ~~Informational~~ | `src/ws.rs`, `src/lib.rs` |
 | [SDK-05](#sdk-05) | Timeout constants hardcoded with no override mechanism | Low | Informational | `src/ws.rs` |
 
 ## Details
@@ -50,18 +49,14 @@ updated with closure-based forms for leaf-type-to-top-level conversions. All con
 updated across 8 files. Helper methods (`is_receive_closed()`, `is_cert_expired()`) updated to match
 new paths.
 
-### SDK-04
+### ~~SDK-04~~ **FIXED**
 
-**`WsStream` type alias leaks implementation details**
+**~~`WsStream` type alias leaks implementation details~~**
 
-- **Severity:** Medium
-- **Type:** Informational
-- **File:** `src/connection.rs`
-
-**Description:** The public type alias `WsStream` exposes the exact TLS and transport stack:
-`tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>`.
-Switching TLS libraries or adding transport options (e.g., Unix sockets for testing) would break all
-consumers.
+**Status:** Resolved. The `ws` module visibility changed from `pub` to `pub(crate)`, making
+`WsStream` and all internal WebSocket functions (`connect_ws`, `send_enroll`, etc.) crate-private.
+External consumers access WebSocket functionality only through the `ServiceHandler` trait and
+`ControllerConnection` abstraction.
 
 ### SDK-05
 

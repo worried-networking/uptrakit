@@ -3,8 +3,8 @@ use rootcause::prelude::*;
 use tokio::sync::mpsc;
 use uptrakit_provider_core::command::{run_command_exec, send_output};
 use uptrakit_provider_core::{
-    DiscoveredSoftware, Provider, ProviderCapability, ProviderError, ReleaseInfo, Result,
-    UpdateOutputLine, UpdateOutputStream, UpstreamRelease, Version,
+    DiscoveredSoftware, Provider, ProviderCapability, ProviderError, ProviderType, ReleaseInfo,
+    Result, UpdateOutputLine, UpdateOutputStream, UpstreamRelease, Version,
 };
 
 use crate::config::{HomebrewConfig, HomebrewPackageType};
@@ -154,6 +154,10 @@ impl HomebrewProvider {
 
 #[async_trait]
 impl Provider for HomebrewProvider {
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::Homebrew
+    }
+
     fn capabilities(&self) -> &'static [ProviderCapability] {
         &[
             ProviderCapability::DiscoverLocalSoftware,

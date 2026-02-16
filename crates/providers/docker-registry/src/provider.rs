@@ -5,8 +5,8 @@ use tokio::sync::mpsc;
 
 use uptrakit_provider_core::command::{run_command, run_command_exec, send_output, shell_escape};
 use uptrakit_provider_core::{
-    Provider, ProviderError, ReleaseInfo, UpdateOutputLine, UpdateOutputStream, UpstreamRelease,
-    Version,
+    Provider, ProviderError, ProviderType, ReleaseInfo, UpdateOutputLine, UpdateOutputStream,
+    UpstreamRelease, Version,
 };
 
 use crate::config::{DockerRegistryConfig, TrackingMode};
@@ -86,6 +86,10 @@ impl DockerRegistryProvider {
 
 #[async_trait]
 impl Provider for DockerRegistryProvider {
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::DockerRegistry
+    }
+
     async fn fetch_releases(
         &self,
         _package_identifier: &str,

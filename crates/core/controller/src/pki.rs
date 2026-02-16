@@ -757,7 +757,8 @@ fn generate_server_cert(ca: &CaBundle, extra_sans: &[String]) -> Result<ServerCe
         .distinguished_name
         .push(DnType::OrganizationName, "Uptrakit");
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after = OffsetDateTime::now_utc() + time::Duration::days(90);
+    params.not_after =
+        OffsetDateTime::now_utc() + time::Duration::days(crate::durations::SERVER_CERT_VALIDITY_DAYS);
 
     let cert = params
         .signed_by(&key_pair, &ca.issuer)
@@ -835,7 +836,8 @@ pub fn should_rotate_ca(cert_pem: &str) -> bool {
     let Ok(not_after) = cert_not_after(cert_pem) else {
         return true;
     };
-    let threshold = OffsetDateTime::now_utc() + time::Duration::days(183);
+    let threshold =
+        OffsetDateTime::now_utc() + time::Duration::days(crate::durations::CA_ROTATION_WINDOW_DAYS);
     not_after <= threshold
 }
 
@@ -846,7 +848,8 @@ pub fn should_renew_server_cert(cert_pem: &str) -> bool {
     let Ok(not_after) = cert_not_after(cert_pem) else {
         return true;
     };
-    let threshold = OffsetDateTime::now_utc() + time::Duration::days(30);
+    let threshold = OffsetDateTime::now_utc()
+        + time::Duration::days(crate::durations::SERVER_CERT_RENEWAL_WINDOW_DAYS);
     not_after <= threshold
 }
 

@@ -172,8 +172,8 @@ enum + static registry)
 | Severity | Count | Key Themes |
 |---|---|---|
 | Critical | 1 (1 fixed) | ~~Type duplication across crates~~, closed provider system |
-| Major | 4 (3 fixed) | No service lifecycle abstraction, ~~no prelude~~, AppState construction, ~~overloaded SDK error types~~, monolithic controller run() |
-| Minor | ~17 (9 fixed) | ~~Closed enums without `#[non_exhaustive]`~~, duplicated code, hardcoded values, ~~inconsistent `FromStr`/`Display`~~, ~~string-typed fields~~, ~~duplicated secret masking~~ |
+| Major | 4 (4 fixed) | No service lifecycle abstraction, ~~no prelude~~, AppState construction, ~~overloaded SDK error types~~, ~~monolithic controller run()~~ |
+| Minor | ~17 (13 fixed) | ~~Closed enums without `#[non_exhaustive]`~~, ~~duplicated code~~, ~~hardcoded values~~, ~~inconsistent `FromStr`/`Display`~~, ~~string-typed fields~~, ~~duplicated secret masking~~, ~~no provider_type()~~, ~~channel-required command API~~, ~~leaked ws module~~ |
 | Info | ~15 (1 fixed) | Missing derives, documentation gaps, ergonomic suggestions |
 
 ## Priority Recommendations
@@ -205,12 +205,12 @@ enum + static registry)
 | shared/macros | [CODEREVIEW.md](crates/shared/macros/CODEREVIEW.md) | Missing rootcause documentation (MAC-03) |
 | shared/wire | [CODEREVIEW.md](crates/shared/wire/CODEREVIEW.md) | ~~Type duplication (WIRE-04)~~ FIXED, ~~no `#[non_exhaustive]` (WIRE-05)~~ FIXED |
 | shared/web-api-types | [CODEREVIEW.md](crates/shared/web-api-types/CODEREVIEW.md) | ~~No prelude (WAT-06)~~ FIXED, ~~type duplication (WAT-07)~~ FIXED, ~~string fields (WAT-02, WAT-03, WAT-08, WAT-09)~~ FIXED |
-| shared/db | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) | ~~Third copy of ServiceType (DB-05)~~ partially FIXED |
-| shared/command | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) | ~~ShellType duplication (CMD-03)~~ FIXED |
+| shared/db | [CODEREVIEW.md](crates/shared/db/CODEREVIEW.md) | ~~Third copy of ServiceType (DB-05)~~ partially FIXED, ~~master key mismatch (DB-02)~~ FIXED |
+| shared/command | [CODEREVIEW.md](crates/shared/command/CODEREVIEW.md) | ~~ShellType duplication (CMD-03)~~ FIXED, ~~channel-required API (CMD-04)~~ FIXED |
 | shared/directories | [CODEREVIEW.md](crates/shared/directories/CODEREVIEW.md) | No extensibility issues |
-| shared/service-sdk | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) | No ServiceHandler trait (SDK-02), ~~overloaded EnrollmentError (SDK-03)~~ FIXED |
+| shared/service-sdk | [CODEREVIEW.md](crates/shared/service-sdk/CODEREVIEW.md) | No ServiceHandler trait (SDK-02), ~~overloaded EnrollmentError (SDK-03)~~ FIXED, ~~leaked ws module (SDK-04)~~ FIXED |
 | shared/build-info | [CODEREVIEW.md](crates/shared/build-info/CODEREVIEW.md) | Missing Deserialize (BI-03) |
-| providers/core | [CODEREVIEW.md](crates/providers/core/CODEREVIEW.md) | ~~Raw JSON in execute_update (PCORE-01)~~ FIXED, ~~no `#[non_exhaustive]` (PCORE-04)~~ FIXED |
+| providers/core | [CODEREVIEW.md](crates/providers/core/CODEREVIEW.md) | ~~Raw JSON in execute_update (PCORE-01)~~ FIXED, ~~no provider_type() (PCORE-02)~~ FIXED, ~~no `#[non_exhaustive]` (PCORE-04)~~ FIXED |
 | providers/registry | [CODEREVIEW.md](crates/providers/registry/CODEREVIEW.md) | Closed registry (PREG-01), ~~duplicated secret masking (PREG-05)~~ FIXED |
 | providers/github | [CODEREVIEW.md](crates/providers/github/CODEREVIEW.md) | ~~Undocumented install_command (GH-01)~~ FIXED |
 | providers/docker-registry | [CODEREVIEW.md](crates/providers/docker-registry/CODEREVIEW.md) | ~~Undocumented restart_command (DOCK-01)~~ FIXED |
@@ -219,6 +219,6 @@ enum + static registry)
 | ui/web-api | [CODEREVIEW.md](crates/ui/web-api/CODEREVIEW.md) | AppState construction barrier |
 | ui/cli | [CODEREVIEW.md](crates/ui/cli/CODEREVIEW.md) | Proves web-api-types is sufficient for clients |
 | core/agent | [CODEREVIEW.md](crates/core/agent/CODEREVIEW.md) | Enrollment boilerplate (AGENT-02) |
-| core/controller | [CODEREVIEW.md](crates/core/controller/CODEREVIEW.md) | Monolithic run() function |
+| core/controller | [CODEREVIEW.md](crates/core/controller/CODEREVIEW.md) | ~~Monolithic run() function~~ FIXED, ~~hardcoded durations~~ FIXED |
 | core/mqtt | [CODEREVIEW.md](crates/core/mqtt/CODEREVIEW.md) | Best service reference; enrollment boilerplate (MQTT-05); ~~MQTT-01, MQTT-02, MQTT-04~~ FIXED |
 | frontend | [CODEREVIEW.md](frontend/CODEREVIEW.md) | ~~SEC-03, HA-03, HA-05, A11Y-01, ARCH-02, ARCH-04~~ FIXED |

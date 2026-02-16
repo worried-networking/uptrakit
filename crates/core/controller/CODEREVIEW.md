@@ -42,13 +42,18 @@
   `active_fingerprint` before swap) prevents concurrent rotations from
   conflicting; losing instances reload from DB.
 - **CRL management**: Version-gated polling with `AtomicI64`
-  (`crl_manager.rs:45`) + DB `revocation_version`. Each instance polls every 60s
-  (`crl_manager.rs:235`) and rebuilds CRL only when version changes; local
-  revocations optimistically bump the version (`crl_manager.rs:264`).
+  (`crl_manager.rs:45`) + DB `revocation_version`. Each instance polls at
+  `CRL_POLL_INTERVAL` (60s, `durations.rs`) and rebuilds CRL only when version
+  changes; local revocations optimistically bump the version (`crl_manager.rs:264`).
 - **Settings**: Atomic publish via `tokio::sync::watch`; cross-instance sync via
-  DB `settings_version` counter polled every 30s (`main.rs:817`, `main.rs:857`).
-- **Server cert renewal**: Only occurs when cert is within 30-day renewal window
-  (`pki.rs:834`); file-based locking via PKI directory.
+  DB `settings_version` counter polled at `SETTINGS_POLL_INTERVAL` (30s,
+  `durations.rs`) in `tasks.rs`.
+- **Server cert renewal**: Only occurs when cert is within
+  `SERVER_CERT_RENEWAL_WINDOW_DAYS` (30 days, `durations.rs`); file-based locking
+  via PKI directory.
+- **Master key verification**: On startup, a sentinel token is encrypted and
+  stored in the DB. Subsequent startups decrypt and verify the token, failing
+  with `MasterKeyMismatch` if the key does not match (`startup.rs`).
 
 ## Code Quality
 
@@ -68,9 +73,9 @@
 - No `unsafe` anywhere
 - No `panic!()` in production code
 - `unwrap()`/`.expect()` only on hardcoded constants:
-  - `main.rs:382` -- `.expect("valid default HTTPS addr")` on hardcoded
+  - `startup.rs` -- `.expect("valid default HTTPS addr")` on hardcoded
     `"[::]:8443"`
-  - `main.rs:532` -- `.expect("already validated")` on URL already validated by
+  - `startup.rs` -- `.expect("already validated")` on URL already validated by
     CLI parser
 - No raw SQL (all SeaORM)
 - Error handling consistently uses `thiserror` + `rootcause` +
@@ -79,7 +84,7 @@
 
 ## Findings
 
-**0 Critical, 0 High, 1 Medium, 2 Low**
+**0 Critical, 0 High, 1 Medium, 2 Low (2 fixed)**
 
 ### MEDIUM: `db/config.rs:65` -- safe but unclear `unwrap_or`
 
@@ -91,29 +96,20 @@ for clarity.
 url.split("://").next().unwrap_or("unknown")
 ```
 
-### LOW: Hardcoded durations could be named constants
+### ~~LOW: Hardcoded durations could be named constants~~ **FIXED**
 
-Multiple hardcoded durations are scattered across modules:
+**Status:** Resolved. All hardcoded durations extracted to named constants in
+`crates/core/controller/src/durations.rs`. Constants include `CA_ROTATION_WINDOW_DAYS`,
+`SERVER_CERT_RENEWAL_WINDOW_DAYS`, `SERVER_CERT_VALIDITY_DAYS`, `CRL_POLL_INTERVAL`,
+`SETTINGS_POLL_INTERVAL`, `CA_ROTATION_CHECK_INTERVAL`, `SERVER_CERT_RENEWAL_CHECK_INTERVAL`,
+`AUTH_CLEANUP_INTERVAL`, `BACKGROUND_TASK_SHUTDOWN_TIMEOUT`, and `RESTART_NOTIFICATION_SCATTER`.
+All modules (`pki.rs`, `crl_manager.rs`, `tasks.rs`) reference these constants.
 
-| Duration | Location | Value |
-|---|---|---|
-| CA expiry check | `pki.rs:823` | 183 days |
-| Server cert renewal window | `pki.rs:834` | 30 days |
-| Server cert validity | `pki.rs:750` | 90 days |
-| CRL polling interval | `crl_manager.rs:235` | 60s |
-| Settings polling interval | `main.rs:817`, `main.rs:857` | 30s |
-| CA rotation check interval | `main.rs:938` | 24h |
-| Shutdown task timeout | `main.rs:1254` | 5s |
-| Auth cleanup interval | `main.rs:789` | 300s |
+### ~~LOW: `reconcile_setting_vec()` duplicates logic pattern~~ **FIXED**
 
-Extracting these to named constants would improve maintainability.
-
-### LOW: `reconcile_setting_vec()` duplicates logic pattern
-
-`reconcile_setting_vec()` in `main.rs:1339` duplicates the match-arm structure
-from `reconcile::reconcile_setting()` in `reconcile.rs:47`. The `Vec<T>`
-specialisation is necessary (empty vec = "not provided"), but consolidation into
-`reconcile.rs` with a trait-based approach could reduce duplication.
+**Status:** Resolved as part of the controller refactor. `reconcile_setting_vec()` and
+`reconcile_socket_addr()` moved from `main.rs` to `startup.rs` alongside the reconciliation
+phase function, improving locality and reducing the monolithic `run()` function.
 
 ## Extensibility Assessment
 
@@ -122,21 +118,23 @@ the unique central server. However, several issues affect maintainability and
 would need to be addressed before the codebase could support embedded or
 alternative controller configurations.
 
-### MAJOR: `main.rs` has a monolithic ~1,200-line `run()` function
+### ~~MAJOR: `main.rs` has a monolithic ~1,200-line `run()` function~~ **FIXED**
 
-The `run()` function handles master key initialization, directory resolution,
-database setup, migrations, tenant loading, settings reconciliation, OIDC
-bootstrap, PKI initialization, CA rotation setup, CRL management, server
-certificate handling, JWT key migration, OIDC state stores, background task
-spawning, server startup, signal handling, and graceful shutdown -- all in a
-single function. This makes the controller extremely difficult for external
-developers to understand or adapt.
+**Status:** Resolved. The monolithic `run()` function has been decomposed into named
+phase functions across three new modules:
 
-**Recommendation:** Split `run()` into well-named initialization phases:
-`init_master_key()`, `init_database()`, `init_settings()`, `init_pki()`,
-`init_auth_stores()`, `spawn_background_tasks()`, `run_server()`.
+- **`durations.rs`** — Named constants for all timing values (CA rotation window,
+  CRL poll interval, settings poll interval, etc.)
+- **`startup.rs`** — Phase functions: `init_master_key()`, `init_database()`,
+  `verify_master_key()`, `reconcile_all_settings()`, `bootstrap_oidc()`,
+  `validate_configuration()`, `init_pki_runtime()`, `init_jwt()`. Intermediate
+  result structs: `ReconciledSettings`, `ValidatedConfig`, `PkiRuntime`.
+- **`tasks.rs`** — `BackgroundTasks` struct for coordinated shutdown, individual
+  `spawn_*` functions for each background task.
 
-### MINOR: Direct sea-orm entity operations for OIDC bootstrap in `main.rs`
+The `run()` function in `main.rs` is now ~260 lines with clear phase annotations.
+
+### MINOR: Direct sea-orm entity operations for OIDC bootstrap in `startup.rs`
 
 Lines ~388-495 contain raw `ActiveModel` operations for OIDC provider
 bootstrapping directly in `main.rs`. This logic should be in a dedicated module

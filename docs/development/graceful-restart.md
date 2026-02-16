@@ -37,3 +37,11 @@ notifies agents that the controller is restarting. Agents log the message and al
 their existing reconnect logic handles the rest.
 
 **Platform support:** `SO_REUSEPORT` is available on Linux, macOS, FreeBSD, and OpenBSD. Not available on Windows.
+
+**Key files:**
+
+| File | Purpose |
+| --- | --- |
+| `crates/core/controller/src/tasks.rs` | `BackgroundTasks` struct with coordinated shutdown sequence |
+| `crates/core/controller/src/durations.rs` | `BACKGROUND_TASK_SHUTDOWN_TIMEOUT` (5s), `RESTART_NOTIFICATION_SCATTER` (5s) |
+| `crates/core/controller/src/main.rs` | Signal handler setup (SIGTERM, SIGINT, SIGUSR1) and server event loop |

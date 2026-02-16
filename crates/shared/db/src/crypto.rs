@@ -42,6 +42,9 @@ pub enum CryptoError {
 
     #[error("decrypted value is not valid UTF-8: {0}")]
     InvalidUtf8(#[from] std::string::FromUtf8Error),
+
+    #[error("master key does not match existing encrypted data")]
+    MasterKeyMismatch,
 }
 
 pub type Result<T> = std::result::Result<T, Report<CryptoError>>;
@@ -66,6 +69,33 @@ pub fn init_master_key(key: [u8; 32]) -> Result<()> {
 /// Returns `true` if the master key has been initialized.
 pub fn master_key_available() -> bool {
     MASTER_KEY.get().is_some()
+}
+
+// ── Master key verification ──────────────────────────────────────────
+
+/// Sentinel plaintext used to verify master key consistency across HA instances.
+const KEY_VERIFICATION_SENTINEL: &str = "uptrakit-master-key-ok-v1";
+
+/// Create an encrypted verification token from the sentinel value.
+///
+/// The returned string should be stored in the settings table.
+/// On subsequent startups, call [`verify_key_verification_token`] with
+/// the stored value to ensure the same master key is in use.
+pub fn create_key_verification_token() -> Result<String> {
+    encrypt_value(KEY_VERIFICATION_SENTINEL)
+}
+
+/// Verify a stored key-verification token against the current master key.
+///
+/// Decrypts the token and checks that the plaintext matches the expected
+/// sentinel. Returns `Err(MasterKeyMismatch)` if decryption succeeds but
+/// the plaintext differs, or if decryption itself fails (wrong key).
+pub fn verify_key_verification_token(stored: &str) -> Result<()> {
+    match decrypt_value(stored) {
+        Ok(plaintext) if plaintext == KEY_VERIFICATION_SENTINEL => Ok(()),
+        Ok(_) => bail!(CryptoError::MasterKeyMismatch),
+        Err(_) => bail!(CryptoError::MasterKeyMismatch),
+    }
 }
 
 /// Prefix for encrypted values stored in the database.
@@ -473,6 +503,40 @@ mod tests {
         assert_eq!(
             result.expect("should be ok").expose_secret(),
             "old_password"
+        );
+    }
+
+    #[test]
+    fn test_key_verification_round_trip() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let token = create_key_verification_token().expect("should create token");
+        assert!(is_encrypted(&token));
+        assert!(verify_key_verification_token(&token).is_ok());
+    }
+
+    #[test]
+    fn test_key_verification_rejects_tampered_token() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let token = create_key_verification_token().expect("should create token");
+        // Tamper with the ciphertext
+        let hex_part = token.strip_prefix(ENC_PREFIX).expect("has prefix");
+        let mut raw = uptrakit_shared_types::hex::decode(hex_part).expect("valid hex");
+        if let Some(byte) = raw.last_mut() {
+            *byte ^= 0xFF;
+        }
+        let tampered = format!("{ENC_PREFIX}{}", uptrakit_shared_types::hex::encode(&raw));
+        let result = verify_key_verification_token(&tampered);
+        assert!(result.is_err());
+        assert!(
+            matches!(
+                result.unwrap_err().current_context(),
+                CryptoError::MasterKeyMismatch
+            ),
+            "expected MasterKeyMismatch"
         );
     }
 

@@ -7,7 +7,7 @@ pub mod error;
 pub mod identity;
 pub mod lifecycle;
 pub mod tls;
-pub mod ws;
+pub(crate) mod ws;
 
 pub use backoff::Backoff;
 pub use cert_handler::CertificateRenewalHandler;

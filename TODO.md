@@ -854,8 +854,8 @@ Items to consider for future versions but not currently prioritized:
 - [ ] Agent clustering
 - [ ] High availability for controller (auth flow stores are now DB-backed and HA-ready; settings cache uses version-gated periodic reload for
   cross-instance consistency; CRL rebuilds propagate cross-instance via `revocation_version` polling; cross-controller push notification delivery via
-  outbox pattern is implemented; JWT signing key is DB-backed and shared across instances; token denylist is per-instance — DB-backed HA sync
-  deferred)
+  outbox pattern is implemented; JWT signing key is DB-backed and shared across instances; master key mismatch detection via startup verification
+  token is implemented; token denylist is per-instance — DB-backed HA sync deferred)
 - [ ] Update preview/dry-run mode
 - [ ] Cost tracking for cloud-based updates
 - [ ] Compliance reporting (update audit trails)

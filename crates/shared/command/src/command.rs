@@ -2,6 +2,13 @@
 //!
 //! Provides safe command execution with output streaming, shell escaping,
 //! and fail-early shell settings.
+//!
+//! Each public function comes in two flavours:
+//! - **streaming** (`run_command_exec`, `run_command_with_shell`, `run_command`)
+//!   — requires an `&mpsc::Sender<UpdateOutputLine>` for real-time output.
+//! - **quiet** (`run_command_exec_quiet`, `run_command_with_shell_quiet`,
+//!   `run_command_quiet`) — no channel needed; output is accumulated and
+//!   returned as a `String`.
 
 use std::process::Stdio;
 
@@ -38,14 +45,15 @@ pub async fn send_output(
         .await;
 }
 
-/// Run a program directly with arguments (no shell interpretation).
+/// Core implementation shared by streaming and quiet variants.
 ///
-/// Returns the accumulated output and exit code on success.
-pub async fn run_command_exec(
+/// When `output_tx` is `Some`, each line is sent to the channel.
+/// When `None`, lines are still accumulated but not streamed.
+async fn run_command_exec_impl(
     program: &str,
     args: &[String],
     working_dir: Option<&str>,
-    output_tx: &mpsc::Sender<UpdateOutputLine>,
+    output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
 ) -> crate::Result<(String, i32)> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -72,17 +80,19 @@ pub async fn run_command_exec(
     let stdout_reader = BufReader::new(stdout);
     let stderr_reader = BufReader::new(stderr);
 
-    let output_tx_clone = output_tx.clone();
+    let stdout_tx = output_tx.cloned();
     let stdout_handle = tokio::spawn(async move {
         let mut lines = stdout_reader.lines();
         let mut output = String::new();
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = output_tx_clone
-                .send(UpdateOutputLine {
-                    text: line.clone(),
-                    stream: UpdateOutputStream::Stdout,
-                })
-                .await;
+            if let Some(ref tx) = stdout_tx {
+                let _ = tx
+                    .send(UpdateOutputLine {
+                        text: line.clone(),
+                        stream: UpdateOutputStream::Stdout,
+                    })
+                    .await;
+            }
             if output.len() < MAX_OUTPUT_BYTES {
                 output.push_str(&line);
                 output.push('\n');
@@ -91,17 +101,19 @@ pub async fn run_command_exec(
         output
     });
 
-    let output_tx_clone = output_tx.clone();
+    let stderr_tx = output_tx.cloned();
     let stderr_handle = tokio::spawn(async move {
         let mut lines = stderr_reader.lines();
         let mut output = String::new();
         while let Ok(Some(line)) = lines.next_line().await {
-            let _ = output_tx_clone
-                .send(UpdateOutputLine {
-                    text: line.clone(),
-                    stream: UpdateOutputStream::Stderr,
-                })
-                .await;
+            if let Some(ref tx) = stderr_tx {
+                let _ = tx
+                    .send(UpdateOutputLine {
+                        text: line.clone(),
+                        stream: UpdateOutputStream::Stderr,
+                    })
+                    .await;
+            }
             if output.len() < MAX_OUTPUT_BYTES {
                 output.push_str(&line);
                 output.push('\n');
@@ -139,6 +151,30 @@ pub async fn run_command_exec(
     }
 
     Ok((accumulated, exit_code))
+}
+
+/// Run a program directly with arguments (no shell interpretation).
+///
+/// Returns the accumulated output and exit code on success.
+pub async fn run_command_exec(
+    program: &str,
+    args: &[String],
+    working_dir: Option<&str>,
+    output_tx: &mpsc::Sender<UpdateOutputLine>,
+) -> crate::Result<(String, i32)> {
+    run_command_exec_impl(program, args, working_dir, Some(output_tx)).await
+}
+
+/// Run a program directly with arguments, without streaming output.
+///
+/// Equivalent to [`run_command_exec`] but does not require a channel.
+/// Output is still accumulated and returned.
+pub async fn run_command_exec_quiet(
+    program: &str,
+    args: &[String],
+    working_dir: Option<&str>,
+) -> crate::Result<(String, i32)> {
+    run_command_exec_impl(program, args, working_dir, None).await
 }
 
 /// Wrap a command with fail-early shell settings.
@@ -183,6 +219,19 @@ pub async fn run_command_with_shell(
     .await
 }
 
+/// Run a command with the specified shell, without streaming output.
+///
+/// Equivalent to [`run_command_with_shell`] but does not require a channel.
+pub async fn run_command_with_shell_quiet(
+    cmd: &str,
+    shell: ShellType,
+) -> crate::Result<(String, i32)> {
+    let wrapped_cmd = wrap_command_for_shell(cmd, shell);
+    let (shell_exec, shell_arg) = get_shell_args(shell);
+
+    run_command_exec_quiet(shell_exec, &[shell_arg.to_string(), wrapped_cmd], None).await
+}
+
 /// Run a shell command via bash and stream output (convenience wrapper).
 ///
 /// Returns the accumulated output on success.
@@ -191,6 +240,15 @@ pub async fn run_command(
     output_tx: &mpsc::Sender<UpdateOutputLine>,
 ) -> crate::Result<String> {
     let (output, _) = run_command_with_shell(cmd, ShellType::Bash, output_tx).await?;
+    Ok(output)
+}
+
+/// Run a shell command via bash, without streaming output.
+///
+/// Equivalent to [`run_command`] but does not require a channel.
+/// Returns the accumulated output on success.
+pub async fn run_command_quiet(cmd: &str) -> crate::Result<String> {
+    let (output, _) = run_command_with_shell_quiet(cmd, ShellType::Bash).await?;
     Ok(output)
 }
 
@@ -355,5 +413,58 @@ mod tests {
         assert!(result.is_err());
         rx.close();
         while rx.recv().await.is_some() {}
+    }
+
+    // -- Quiet variant tests --
+
+    #[tokio::test]
+    async fn run_command_exec_quiet_success() {
+        let result = run_command_exec_quiet("echo", &["hello quiet".to_string()], None).await;
+        assert!(result.is_ok());
+        let (output, exit_code) = result.expect("should succeed");
+        assert!(output.contains("hello quiet"));
+        assert_eq!(exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn run_command_exec_quiet_failure() {
+        let result = run_command_exec_quiet("false", &[], None).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.current_context(), CommandError::CommandFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn run_command_with_shell_quiet_success() {
+        let result = run_command_with_shell_quiet("echo 'quiet shell'", ShellType::Bash).await;
+        assert!(result.is_ok());
+        let (output, exit_code) = result.expect("should succeed");
+        assert!(output.contains("quiet shell"));
+        assert_eq!(exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn run_command_with_shell_quiet_failure() {
+        let result = run_command_with_shell_quiet("exit 7", ShellType::Bash).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err.current_context(), CommandError::CommandFailed(7)),
+            "Expected CommandFailed(7), got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_quiet_success() {
+        let result = run_command_quiet("echo 'quiet run'").await;
+        assert!(result.is_ok());
+        let output = result.expect("should succeed");
+        assert!(output.contains("quiet run"));
+    }
+
+    #[tokio::test]
+    async fn run_command_quiet_failure() {
+        let result = run_command_quiet("exit 3").await;
+        assert!(result.is_err());
     }
 }

@@ -64,3 +64,35 @@ pub async fn run_command(
         .await
         .context_to()
 }
+
+/// Run a program directly with arguments, without streaming output.
+///
+/// Equivalent to [`run_command_exec`] but does not require a channel.
+pub async fn run_command_exec_quiet(
+    program: &str,
+    args: &[String],
+    working_dir: Option<&str>,
+) -> crate::Result<(String, i32)> {
+    uptrakit_command::run_command_exec_quiet(program, args, working_dir)
+        .await
+        .context_to()
+}
+
+/// Run a command with the specified shell, without streaming output.
+///
+/// Equivalent to [`run_command_with_shell`] but does not require a channel.
+pub async fn run_command_with_shell_quiet(
+    cmd: &str,
+    shell: ShellType,
+) -> crate::Result<(String, i32)> {
+    uptrakit_command::run_command_with_shell_quiet(cmd, shell)
+        .await
+        .context_to()
+}
+
+/// Run a shell command via bash, without streaming output.
+///
+/// Equivalent to [`run_command`] but does not require a channel.
+pub async fn run_command_quiet(cmd: &str) -> crate::Result<String> {
+    uptrakit_command::run_command_quiet(cmd).await.context_to()
+}

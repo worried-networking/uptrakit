@@ -54,8 +54,8 @@ The crate is well-scoped as a leaf dependency. Two type-overlap issues affect cr
 | CMD-01 | Info | Code Quality | No timeout mechanism. Callers cannot kill stuck commands. The `MAX_OUTPUT_BYTES` cap prevents OOM but does not address hung processes. Timeout is the responsibility of the caller (agent/controller), but the absence of a built-in mechanism is worth noting. | `src/command.rs:41-142` |
 | CMD-02 | Info | Code Quality | `send_output()` ignores channel send failures (`let _ = output_tx.send(...)`). Intentional and correct (channel closure is not an error for the executor), but callers have no indication that output was dropped. | `src/command.rs:33-38` |
 | ~~CMD-03~~ | ~~Major~~ | ~~Extensibility~~ | ~~`ShellType` duplicates `HookShell` from the wire crate.~~ **FIXED.** `ShellType` replaced with `HookShell` from `shared-types`. The agent no longer needs manual mapping. | `src/types.rs` |
-| CMD-04 | Minor | Extensibility | All public execution functions require `mpsc::Sender<UpdateOutputLine>`. Simple use cases (e.g., running a command and collecting output) need unnecessary channel setup. A convenience wrapper `run_command_simple()` returning `String` would improve ergonomics. | `src/command.rs` |
+| ~~CMD-04~~ | ~~Minor~~ | ~~Extensibility~~ | ~~All public execution functions require `mpsc::Sender<UpdateOutputLine>`.~~ **FIXED.** Added `run_command_quiet()`, `run_command_with_shell_quiet()`, and `run_command_exec_quiet()` variants that collect output internally without requiring a channel. Tests added for all three quiet variants. | `src/command.rs` |
 
 ## Verdict
 
-**Pass.** Excellent security posture with multi-layered injection prevention and comprehensive tests. The `ShellType` duplication (CMD-03) is the main extensibility concern. Timeout management is left to callers by design.
+**Pass.** Excellent security posture with multi-layered injection prevention and comprehensive tests. The `ShellType` duplication (CMD-03) and channel-required API (CMD-04) have both been resolved. Timeout management is left to callers by design.
