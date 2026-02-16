@@ -403,7 +403,12 @@ fn write_common_nginx_tls_files(tmp: &TempDir, pki: &TestPki) {
 
 /// Write Nginx config with explicit HTTP OCSP responder.
 ///
-fn write_nginx_ocsp_config(tmp: &TempDir, host_gateway_ip: &str, backend_port: u16, ocsp_port: u16) {
+fn write_nginx_ocsp_config(
+    tmp: &TempDir,
+    host_gateway_ip: &str,
+    backend_port: u16,
+    ocsp_port: u16,
+) {
     let config = format!(
         r#"
 server {{
