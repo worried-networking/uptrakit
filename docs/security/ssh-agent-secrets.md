@@ -56,16 +56,21 @@ This design ensures that compromise of the controller's master key does not expo
 
 ### Protected Against
 
-| Threat | Mitigation | |---|---| | Database file theft | AES-256-GCM encryption with per-value random nonces | | Memory dump of DB values | Encrypted
-at rest; plaintext only in application memory during use | | Key reuse attacks | Random 12-byte nonce per encryption; same plaintext produces
-different ciphertext | | Tampering | GCM authentication tag detects any modification | | Controller compromise | Independent master key; controller
-never sees SSH private keys |
+| Threat | Mitigation |
+| --- | --- |
+| Database file theft | AES-256-GCM encryption with per-value random nonces |
+| Memory dump of DB values | Encrypted at rest; plaintext only in application memory during use |
+| Key reuse attacks | Random 12-byte nonce per encryption; same plaintext produces different ciphertext |
+| Tampering | GCM authentication tag detects any modification |
+| Controller compromise | Independent master key; controller never sees SSH private keys |
 
 ### Not Protected Against (Requires Additional Controls)
 
-| Threat | Required Control | |---|---| | Master key file theft | OS-level file permissions (0o600), restrict access to service user | | Root access
-on SSH agent host | Full-disk encryption, host hardening, access controls | | Memory dump of running process | Process isolation, no core dumps in
-production |
+| Threat | Required Control |
+| --- | --- |
+| Master key file theft | OS-level file permissions (0o600), restrict access to service user |
+| Root access on SSH agent host | Full-disk encryption, host hardening, access controls |
+| Memory dump of running process | Process isolation, no core dumps in production |
 
 ## File Permissions
 
@@ -87,9 +92,25 @@ uptrakit-agent-ssh --url https://controller:8443 --allow-plaintext-secrets
 
 This stores SSH private keys as plaintext in the database and logs a warning. It must **never** be used in production.
 
+## SSH Key Type Auto-Detection
+
+When a private key is provided via `--private-key-file`, the SSH agent
+automatically detects the key algorithm from the PEM content. Supported key
+types are **Ed25519** (preferred), **RSA**, and **ECDSA**. Detection works for:
+
+- **PKCS#1** (`BEGIN RSA PRIVATE KEY`) — RSA
+- **SEC1** (`BEGIN EC PRIVATE KEY`) — ECDSA
+- **OpenSSH** (`BEGIN OPENSSH PRIVATE KEY`) — algorithm extracted from the binary payload
+- **PKCS#8** (`BEGIN PRIVATE KEY`) — algorithm determined by OID inspection
+
+The detected key type is stored alongside the encrypted private key and displayed in host listings. Unrecognized key formats are rejected with an error.
+
+For details on how the CLI host management subcommands work, see [SSH Agent Host Management](../end-user/ssh-agent-host-management.md).
+
 ## Related Documentation
 
-- [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture and database schema
+- [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture, database schema, and CLI subcommands
+- [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for managing SSH hosts
 - [Secrets and Encryption](secrets-and-encryption.md) — controller's encryption model
 - [Cryptography](cryptography.md) — cryptographic primitives used across Uptrakit
 - [Filesystem and Dependency Security](filesystem-dependency-security.md) — secure file operations

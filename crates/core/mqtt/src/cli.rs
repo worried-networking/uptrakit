@@ -90,9 +90,11 @@ mod tests {
     }
 
     #[test]
-    fn url_required() {
-        let result = Args::try_parse_from(["uptrakit-mqtt"]);
-        assert!(result.is_err());
+    fn url_optional_at_parse_time() {
+        // `--url` is no longer required at the clap level; runtime validation
+        // in `run_service_lifecycle` / `parsed_url()` catches missing values.
+        let args = Args::try_parse_from(["uptrakit-mqtt"]).expect("should parse without --url");
+        assert!(args.common.url.is_none());
     }
 
     #[test]

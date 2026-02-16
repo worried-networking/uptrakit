@@ -1,3 +1,4 @@
+pub mod entity;
 pub mod migration;
 
 use std::path::Path;

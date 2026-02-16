@@ -1,0 +1,422 @@
+use rootcause::prelude::*;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+
+use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
+use crate::error::{Error, Result};
+
+/// Parameters for adding a new SSH host.
+pub struct AddHostParams {
+    pub name: String,
+    pub hostname: String,
+    pub port: i32,
+    pub username: String,
+    pub encrypted_key: uptrakit_shared_db::crypto::EncryptedString,
+    pub key_type: SshKeyType,
+    pub host_key_fingerprint: Option<String>,
+}
+
+/// Fields that can be updated on an SSH host.
+pub struct HostUpdates {
+    pub name: Option<String>,
+    pub hostname: Option<String>,
+    pub port: Option<i32>,
+    pub username: Option<String>,
+    pub private_key: Option<uptrakit_shared_db::crypto::EncryptedString>,
+    pub key_type: Option<SshKeyType>,
+    pub host_key_fingerprint: Option<Option<String>>,
+}
+
+/// Add a new SSH host to the database.
+pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<Model> {
+    // Check name uniqueness.
+    let existing = Entity::find()
+        .filter(Column::Name.eq(&params.name))
+        .one(db)
+        .await
+        .context_to::<Error>()?;
+    if existing.is_some() {
+        bail!(Error::HostNameConflict(params.name));
+    }
+
+    let now = now_unix_timestamp();
+    let id = uuid::Uuid::now_v7().to_string();
+
+    let model = ActiveModel {
+        id: Set(id),
+        name: Set(params.name),
+        hostname: Set(params.hostname),
+        port: Set(params.port),
+        username: Set(params.username),
+        private_key: Set(params.encrypted_key),
+        key_type: Set(params.key_type),
+        host_key_fingerprint: Set(params.host_key_fingerprint),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    let inserted = model.insert(db).await.context_to::<Error>()?;
+    Ok(inserted)
+}
+
+/// Find an SSH host by name or UUID.
+pub async fn find_host(db: &DatabaseConnection, name_or_id: &str) -> Result<Option<Model>> {
+    // Try UUID parse first.
+    if uuid::Uuid::try_parse(name_or_id).is_ok() {
+        let by_id = Entity::find_by_id(name_or_id.to_string())
+            .one(db)
+            .await
+            .context_to::<Error>()?;
+        if by_id.is_some() {
+            return Ok(by_id);
+        }
+    }
+
+    // Fall back to name lookup.
+    Entity::find()
+        .filter(Column::Name.eq(name_or_id))
+        .one(db)
+        .await
+        .context_to::<Error>()
+}
+
+/// List all SSH hosts.
+pub async fn list_hosts(db: &DatabaseConnection) -> Result<Vec<Model>> {
+    Entity::find().all(db).await.context_to::<Error>()
+}
+
+/// Remove an SSH host by name or UUID. Returns `true` if a row was deleted.
+pub async fn remove_host(db: &DatabaseConnection, name_or_id: &str) -> Result<bool> {
+    let host = find_host(db, name_or_id).await?;
+    match host {
+        Some(h) => {
+            let model: ActiveModel = h.into();
+            model.delete(db).await.context_to::<Error>()?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Update an SSH host by name or UUID.
+pub async fn update_host(
+    db: &DatabaseConnection,
+    name_or_id: &str,
+    updates: HostUpdates,
+) -> Result<Model> {
+    let host = find_host(db, name_or_id)
+        .await?
+        .ok_or_else(|| report!(Error::HostNotFound(name_or_id.to_string())))?;
+
+    // If renaming, check uniqueness (excluding self).
+    if let Some(ref new_name) = updates.name {
+        let conflict = Entity::find()
+            .filter(Column::Name.eq(new_name.as_str()))
+            .one(db)
+            .await
+            .context_to::<Error>()?;
+        if let Some(ref c) = conflict
+            && c.id != host.id
+        {
+            bail!(Error::HostNameConflict(new_name.clone()));
+        }
+    }
+
+    let mut model: ActiveModel = host.into();
+
+    if let Some(name) = updates.name {
+        model.name = Set(name);
+    }
+    if let Some(hostname) = updates.hostname {
+        model.hostname = Set(hostname);
+    }
+    if let Some(port) = updates.port {
+        model.port = Set(port);
+    }
+    if let Some(username) = updates.username {
+        model.username = Set(username);
+    }
+    if let Some(key) = updates.private_key {
+        model.private_key = Set(key);
+    }
+    if let Some(kt) = updates.key_type {
+        model.key_type = Set(kt);
+    }
+    if let Some(fp) = updates.host_key_fingerprint {
+        model.host_key_fingerprint = Set(fp);
+    }
+
+    model.updated_at = Set(now_unix_timestamp());
+
+    model.update(db).await.context_to::<Error>()
+}
+
+fn now_unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+
+    async fn setup_db() -> (tempfile::TempDir, DatabaseConnection) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = init_db(dir.path()).await.expect("init_db");
+        (dir, db)
+    }
+
+    fn test_encrypted_key() -> uptrakit_shared_db::crypto::EncryptedString {
+        uptrakit_shared_db::crypto::EncryptedString::new("test-key-content".to_string())
+            .expect("encrypt")
+    }
+
+    fn add_params(
+        name: &str,
+        hostname: &str,
+        port: i32,
+        username: &str,
+        key_type: SshKeyType,
+    ) -> AddHostParams {
+        AddHostParams {
+            name: name.to_string(),
+            hostname: hostname.to_string(),
+            port,
+            username: username.to_string(),
+            encrypted_key: test_encrypted_key(),
+            key_type,
+            host_key_fingerprint: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn add_and_find_host() {
+        let (_dir, db) = setup_db().await;
+
+        let host = add_host(
+            &db,
+            add_params("test-host", "192.168.1.1", 22, "root", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add_host");
+
+        assert_eq!(host.name, "test-host");
+        assert_eq!(host.hostname, "192.168.1.1");
+        assert_eq!(host.port, 22);
+
+        // Find by name.
+        let found = find_host(&db, "test-host")
+            .await
+            .expect("find_host")
+            .expect("should exist");
+        assert_eq!(found.id, host.id);
+
+        // Find by ID.
+        let found_by_id = find_host(&db, &host.id)
+            .await
+            .expect("find_host")
+            .expect("should exist");
+        assert_eq!(found_by_id.name, "test-host");
+    }
+
+    #[tokio::test]
+    async fn add_duplicate_name_fails() {
+        let (_dir, db) = setup_db().await;
+
+        add_host(
+            &db,
+            add_params("dup", "host1", 22, "user1", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("first add");
+
+        let result = add_host(
+            &db,
+            add_params("dup", "host2", 22, "user2", SshKeyType::Rsa),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err.current_context(), Error::HostNameConflict(name) if name == "dup"),
+            "expected HostNameConflict, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_hosts_empty_and_populated() {
+        let (_dir, db) = setup_db().await;
+
+        let list = list_hosts(&db).await.expect("list");
+        assert!(list.is_empty());
+
+        add_host(
+            &db,
+            add_params("h1", "host1", 22, "user", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        add_host(
+            &db,
+            add_params("h2", "host2", 2222, "user", SshKeyType::Rsa),
+        )
+        .await
+        .expect("add");
+
+        let list = list_hosts(&db).await.expect("list");
+        assert_eq!(list.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn remove_host_by_name() {
+        let (_dir, db) = setup_db().await;
+
+        add_host(
+            &db,
+            add_params("to-remove", "host1", 22, "user", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        let removed = remove_host(&db, "to-remove").await.expect("remove");
+        assert!(removed);
+
+        let found = find_host(&db, "to-remove").await.expect("find");
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_nonexistent_returns_false() {
+        let (_dir, db) = setup_db().await;
+        let removed = remove_host(&db, "nope").await.expect("remove");
+        assert!(!removed);
+    }
+
+    #[tokio::test]
+    async fn update_host_fields() {
+        let (_dir, db) = setup_db().await;
+
+        add_host(
+            &db,
+            add_params("updatable", "host1", 22, "user", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        let updated = update_host(
+            &db,
+            "updatable",
+            HostUpdates {
+                name: None,
+                hostname: Some("new-host".to_string()),
+                port: Some(2222),
+                username: None,
+                private_key: None,
+                key_type: None,
+                host_key_fingerprint: Some(Some("SHA256:abc123".to_string())),
+            },
+        )
+        .await
+        .expect("update");
+
+        assert_eq!(updated.hostname, "new-host");
+        assert_eq!(updated.port, 2222);
+        assert_eq!(
+            updated.host_key_fingerprint.as_deref(),
+            Some("SHA256:abc123")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_rename_conflict() {
+        let (_dir, db) = setup_db().await;
+
+        add_host(&db, add_params("host-a", "a", 22, "u", SshKeyType::Ed25519))
+            .await
+            .expect("add a");
+
+        add_host(&db, add_params("host-b", "b", 22, "u", SshKeyType::Ed25519))
+            .await
+            .expect("add b");
+
+        let result = update_host(
+            &db,
+            "host-a",
+            HostUpdates {
+                name: Some("host-b".to_string()),
+                hostname: None,
+                port: None,
+                username: None,
+                private_key: None,
+                key_type: None,
+                host_key_fingerprint: None,
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err.current_context(), Error::HostNameConflict(name) if name == "host-b"),
+            "expected HostNameConflict, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_nonexistent_fails() {
+        let (_dir, db) = setup_db().await;
+
+        let result = update_host(
+            &db,
+            "ghost",
+            HostUpdates {
+                name: None,
+                hostname: None,
+                port: None,
+                username: None,
+                private_key: None,
+                key_type: None,
+                host_key_fingerprint: None,
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.current_context(), Error::HostNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn rename_to_same_name_succeeds() {
+        let (_dir, db) = setup_db().await;
+
+        add_host(
+            &db,
+            add_params("same-name", "h", 22, "u", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add");
+
+        let updated = update_host(
+            &db,
+            "same-name",
+            HostUpdates {
+                name: Some("same-name".to_string()),
+                hostname: None,
+                port: None,
+                username: None,
+                private_key: None,
+                key_type: None,
+                host_key_fingerprint: None,
+            },
+        )
+        .await
+        .expect("rename to self should succeed");
+
+        assert_eq!(updated.name, "same-name");
+    }
+}

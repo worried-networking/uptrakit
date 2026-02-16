@@ -19,7 +19,7 @@ pub struct CommonServiceArgs {
 
     /// Controller URL (e.g., `https://controller:8443`).
     /// Port defaults to 443 if omitted.
-    #[arg(long, required_unless_present = "version")]
+    #[arg(long)]
     pub url: Option<String>,
 
     /// Trust the controller's TLS certificate on first connection (TOFU).

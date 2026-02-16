@@ -381,19 +381,20 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [x] Create `crates/core/agent-ssh/` crate (`uptrakit-agent-ssh` binary)
 - [x] Reuse the existing wire protocol and WebSocket transport to the controller
 - [ ] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
+- [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove`)
 - [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
 - [ ] Clearly separate SSH transport logic from provider execution logic so providers remain transport-agnostic
 
 ### SSH Transport Layer
 
 - [ ] Key-based authentication only (no password auth)
-- [ ] Support Ed25519 (preferred) and RSA keys
+- [x] Support Ed25519 (preferred), RSA, and ECDSA keys (auto-detection from PEM content)
 - [ ] Strict host key verification (TOFU with persisted known_hosts, or pre-seeded fingerprints)
 - [ ] Reject connections on host key mismatch — never silently accept
 - [ ] Connection pooling and multiplexing (reuse connections across checks and updates for the same host)
 - [ ] Configurable connection and command timeouts
 - [ ] Jump host / bastion support for reaching hosts behind NAT or firewalls
-- [ ] Support for custom SSH ports per host
+- [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update`)
 
 ### Remote Execution
 
@@ -416,7 +417,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [ ] Least-privilege SSH user on each managed host (e.g. `uptrakit`, mirrors the regular agent model)
 - [ ] Sudo allowlist identical to regular agent: only specific update commands, NOPASSWD, no shell access
 - [ ] No shell injection: remote commands constructed from validated inputs, never string-interpolated
-- [ ] SSH private keys stored on the machine running the SSH agent — never sent to the controller or exposed in API responses
+- [x] SSH private keys stored on the machine running the SSH agent — never sent to the controller or exposed in API responses (encrypted at rest via `EncryptedString`)
 - [ ] Audit trail: log every SSH session (host, user, command, timestamp, exit code) without capturing secrets or key material
 - [ ] Limit concurrent SSH sessions per host and globally to prevent resource exhaustion on both the SSH agent and the remote hosts
 - [ ] Host key fingerprints should be verifiable through the controller UI (display, not edit)

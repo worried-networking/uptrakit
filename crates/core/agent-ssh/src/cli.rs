@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use uptrakit_service_sdk::cli::CommonServiceArgs;
 
 #[derive(Parser, Debug)]
@@ -22,13 +22,100 @@ pub struct Args {
     /// This flag is for development only and logs a warning when used.
     #[arg(long)]
     pub allow_plaintext_secrets: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Manage SSH host entries in the local database.
+    Host {
+        #[command(subcommand)]
+        command: HostCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HostCommands {
+    /// Add a new SSH host.
+    Add {
+        /// Friendly name for this host (must be unique).
+        #[arg(long)]
+        name: String,
+
+        /// SSH hostname or IP address.
+        #[arg(long)]
+        hostname: String,
+
+        /// SSH port.
+        #[arg(long, default_value = "22")]
+        port: i32,
+
+        /// SSH username.
+        #[arg(long)]
+        username: String,
+
+        /// Path to the SSH private key file. Use `-` to read from stdin.
+        #[arg(long)]
+        private_key_file: PathBuf,
+
+        /// Expected host key fingerprint (e.g., `SHA256:...`).
+        #[arg(long)]
+        host_key_fingerprint: Option<String>,
+    },
+
+    /// List all SSH hosts.
+    List,
+
+    /// Show details of an SSH host (by name or UUID).
+    Show {
+        /// Host name or UUID.
+        name_or_id: String,
+    },
+
+    /// Update an SSH host (by name or UUID).
+    Update {
+        /// Host name or UUID to update.
+        name_or_id: String,
+
+        /// New friendly name.
+        #[arg(long)]
+        name: Option<String>,
+
+        /// New SSH hostname or IP address.
+        #[arg(long)]
+        hostname: Option<String>,
+
+        /// New SSH port.
+        #[arg(long)]
+        port: Option<i32>,
+
+        /// New SSH username.
+        #[arg(long)]
+        username: Option<String>,
+
+        /// Path to the new SSH private key file. Use `-` to read from stdin.
+        #[arg(long)]
+        private_key_file: Option<PathBuf>,
+
+        /// New expected host key fingerprint.
+        #[arg(long)]
+        host_key_fingerprint: Option<String>,
+    },
+
+    /// Remove an SSH host (by name or UUID).
+    Remove {
+        /// Host name or UUID.
+        name_or_id: String,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
-    use super::Args;
+    use super::*;
 
     #[test]
     fn defaults_parse() {
@@ -48,6 +135,216 @@ mod tests {
         assert!(!args.common.force_enroll);
         assert!(args.master_key_file.is_none());
         assert!(!args.allow_plaintext_secrets);
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn no_subcommand_is_daemon_mode() {
+        let args = Args::try_parse_from(["uptrakit-agent-ssh", "--url", "https://controller:8443"])
+            .expect("should parse");
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn host_add_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "add",
+            "--name",
+            "myhost",
+            "--hostname",
+            "192.168.1.1",
+            "--username",
+            "root",
+            "--private-key-file",
+            "/path/to/key",
+        ])
+        .expect("should parse host add");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Add {
+                        name,
+                        hostname,
+                        port,
+                        username,
+                        private_key_file,
+                        host_key_fingerprint,
+                    },
+            }) => {
+                assert_eq!(name, "myhost");
+                assert_eq!(hostname, "192.168.1.1");
+                assert_eq!(*port, 22);
+                assert_eq!(username, "root");
+                assert_eq!(private_key_file.to_str().expect("path"), "/path/to/key");
+                assert!(host_key_fingerprint.is_none());
+            }
+            other => panic!("expected Host Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_add_with_all_options() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "add",
+            "--name",
+            "myhost",
+            "--hostname",
+            "10.0.0.1",
+            "--port",
+            "2222",
+            "--username",
+            "deploy",
+            "--private-key-file",
+            "-",
+            "--host-key-fingerprint",
+            "SHA256:abc123",
+        ])
+        .expect("should parse");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Add {
+                        port,
+                        private_key_file,
+                        host_key_fingerprint,
+                        ..
+                    },
+            }) => {
+                assert_eq!(*port, 2222);
+                assert_eq!(private_key_file.to_str().expect("path"), "-");
+                assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+            }
+            other => panic!("expected Host Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_list_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "list",
+        ])
+        .expect("should parse host list");
+
+        assert!(matches!(
+            &args.command,
+            Some(Commands::Host {
+                command: HostCommands::List
+            })
+        ));
+    }
+
+    #[test]
+    fn host_show_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "show",
+            "my-server",
+        ])
+        .expect("should parse host show");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Show { name_or_id },
+            }) => {
+                assert_eq!(name_or_id, "my-server");
+            }
+            other => panic!("expected Host Show, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_update_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "update",
+            "my-server",
+            "--port",
+            "2222",
+            "--hostname",
+            "new-host",
+        ])
+        .expect("should parse host update");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Update {
+                        name_or_id,
+                        port,
+                        hostname,
+                        name,
+                        username,
+                        private_key_file,
+                        host_key_fingerprint,
+                    },
+            }) => {
+                assert_eq!(name_or_id, "my-server");
+                assert_eq!(*port, Some(2222));
+                assert_eq!(hostname.as_deref(), Some("new-host"));
+                assert!(name.is_none());
+                assert!(username.is_none());
+                assert!(private_key_file.is_none());
+                assert!(host_key_fingerprint.is_none());
+            }
+            other => panic!("expected Host Update, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_remove_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "remove",
+            "old-server",
+        ])
+        .expect("should parse host remove");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Remove { name_or_id },
+            }) => {
+                assert_eq!(name_or_id, "old-server");
+            }
+            other => panic!("expected Host Remove, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_list_without_url() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "--state-dir",
+            "/tmp/test",
+            "host",
+            "list",
+        ])
+        .expect("host list should parse without --url");
+
+        assert!(args.common.url.is_none());
+        assert!(matches!(
+            &args.command,
+            Some(Commands::Host {
+                command: HostCommands::List
+            })
+        ));
     }
 
     #[test]

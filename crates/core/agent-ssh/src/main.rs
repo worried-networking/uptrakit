@@ -1,7 +1,10 @@
 mod cli;
 mod client;
+mod commands;
 pub(crate) mod db;
 mod error;
+mod host_ops;
+mod ssh_key;
 
 use clap::Parser;
 use rootcause::prelude::*;
@@ -11,7 +14,7 @@ use uptrakit_service_sdk::{
     AuthenticatedContext, LoopOutcome, ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
 };
 
-use cli::Args;
+use cli::{Args, Commands};
 
 struct SshAgentHandler {
     state_dir: std::path::PathBuf,
@@ -87,6 +90,39 @@ async fn main() {
         return;
     }
 
+    // Host subcommands run with minimal tracing and no rustls provider.
+    if let Some(Commands::Host { command }) = args.command {
+        // Minimal tracing for CLI subcommands.
+        let filter = EnvFilter::from_default_env();
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+
+        if let Err(msg) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
+            eprintln!("error: {msg}");
+            std::process::exit(1);
+        }
+
+        let state_dir = match resolve_state_dir_from_common(&args.common) {
+            Ok(dir) => dir,
+            Err(msg) => {
+                eprintln!("error: {msg}");
+                std::process::exit(1);
+            }
+        };
+
+        if let Err(e) = commands::host::run(&state_dir, command).await {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // ── Daemon mode ─────────────────────────────────────────────────
+    // Validate that --url is provided for daemon mode.
+    if args.common.url.is_none() {
+        eprintln!("error: --url is required for daemon mode");
+        std::process::exit(1);
+    }
+
     let filter = match "uptrakit_agent_ssh=info".parse() {
         Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
         Err(_) => EnvFilter::from_default_env(),
@@ -97,13 +133,13 @@ async fn main() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     // Initialize master encryption key for local SSH credential storage.
-    if let Err(msg) = init_master_key(&args) {
+    if let Err(msg) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
         tracing::error!("{msg}");
         std::process::exit(1);
     }
 
     // Resolve state directory early so we can pass it to the handler.
-    let state_dir = match resolve_state_dir(&args) {
+    let state_dir = match resolve_state_dir_from_common(&args.common) {
         Ok(dir) => dir,
         Err(msg) => {
             tracing::error!("{msg}");
@@ -123,22 +159,26 @@ async fn main() {
 }
 
 /// Resolve the state directory for this service.
-fn resolve_state_dir(args: &Args) -> std::result::Result<std::path::PathBuf, String> {
-    let dirs = args
-        .common
+fn resolve_state_dir_from_common(
+    common: &uptrakit_service_sdk::cli::CommonServiceArgs,
+) -> std::result::Result<std::path::PathBuf, String> {
+    let dirs = common
         .resolve_dirs("agent-ssh")
         .map_err(|e| format!("failed to resolve directories: {e}"))?;
     Ok(dirs.state_dir().to_path_buf())
 }
 
 /// Initialize the master encryption key from CLI args or environment.
-fn init_master_key(args: &Args) -> std::result::Result<(), String> {
+fn init_master_key(
+    master_key_file: &Option<std::path::PathBuf>,
+    allow_plaintext_secrets: bool,
+) -> std::result::Result<(), String> {
     let env_val = std::env::var("UPTRAKIT_MASTER_KEY").ok();
-    let key_hex = read_master_key_hex(args.master_key_file.as_deref(), env_val.as_deref())?;
+    let key_hex = read_master_key_hex(master_key_file.as_deref(), env_val.as_deref())?;
 
     match key_hex {
         Some(key_hex) => {
-            if args.allow_plaintext_secrets {
+            if allow_plaintext_secrets {
                 tracing::warn!(
                     "--allow-plaintext-secrets is enabled. This flag is for development only; \
                     encryption remains enabled because a master key was provided."
@@ -150,7 +190,7 @@ fn init_master_key(args: &Args) -> std::result::Result<(), String> {
             tracing::info!("master encryption key initialized");
         }
         None => {
-            if args.allow_plaintext_secrets {
+            if allow_plaintext_secrets {
                 tracing::warn!(
                     "master encryption key not set; encryption at rest is disabled. \
                     This is for development only and is NOT safe for production."

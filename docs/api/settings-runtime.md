@@ -297,7 +297,7 @@ The agent and MQTT service share a common set of CLI flags via `CommonServiceArg
 | Flag | Env var | Default | Description |
 | --- | --- | --- | --- |
 | `--version` | | `false` | Print crate version and build metadata (enabled features, target/cfg/profile) and exit. |
-| `--url` | | (required) | Controller URL (e.g., `https://controller:8443`). Port defaults to 443. |
+| `--url` | | required for daemon mode | Controller URL (e.g., `https://controller:8443`). Port defaults to 443. Not required for local-only subcommands (e.g., `uptrakit-agent-ssh host`). |
 | `--tofu` | | `false` | Trust the controller's TLS certificate on first connection (TOFU) with signature verification via `TofuVerifier`. Conflicts with `--ca-cert` and `--pki-addr`. |
 | `--tofu-fingerprint` | | | SHA-256 fingerprint for TOFU verification (hex-encoded, with or without colons). Requires `--tofu`. When set, the fetched CA certificate's fingerprint is compared against this value before trusting it. |
 | `--ca-cert` | | | Path to a PEM-encoded CA certificate file |

@@ -20,6 +20,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Update Workflow](end-user/update-workflow.md) | Manual update lifecycle, hooks, and history links. See also: [Services and Operations](api/services-operations.md). |
 | [Home Assistant and MQTT](end-user/home-assistant-mqtt.md) | MQTT/Home Assistant integration notes. See also: [Auth Flows](api/auth-flows.md), [Services and Operations](api/services-operations.md). |
 | [Deployment Map](end-user/deployment-map.md) | Deployment navigation map and pointers. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
+| [SSH Agent Host Management](end-user/ssh-agent-host-management.md) | Managing SSH host entries via the `uptrakit-agent-ssh` CLI. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [SSH Agent Secrets](security/ssh-agent-secrets.md). |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 
 ## API and Protocol

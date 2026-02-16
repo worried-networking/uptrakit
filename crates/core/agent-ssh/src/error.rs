@@ -21,10 +21,18 @@ pub enum Error {
     #[error("database error: {0}")]
     Database(String),
 
-    // ── Master key ──────────────────────────────────────────────────
-    #[error("master key error: {0}")]
-    #[expect(dead_code, reason = "reserved for future SSH credential operations")]
-    MasterKey(String),
+    // ── Host management ─────────────────────────────────────────────
+    #[error("host not found: {0}")]
+    HostNotFound(String),
+
+    #[error("host name already exists: {0}")]
+    HostNameConflict(String),
+
+    #[error("unsupported SSH key type: {0}")]
+    UnsupportedKeyType(String),
+
+    #[error("crypto error: {0}")]
+    Crypto(String),
 }
 
 impl Error {
@@ -54,6 +62,9 @@ impl_report_conversion! {
     std::io::Error => Error::Io,
     uptrakit_directories::DirectoryError => Error::Directory,
 }
+
+// sea_orm::DbErr uses a String-based variant, so we use a closure conversion.
+impl_report_conversion!(sea_orm::DbErr => Error, |e| Error::Database(e.to_string()));
 
 #[cfg(test)]
 mod tests {
@@ -115,5 +126,17 @@ mod tests {
             !err.is_cert_expired(),
             "should not match CertificateExpired in unrelated variant"
         );
+    }
+
+    #[test]
+    fn host_not_found_display() {
+        let err = Error::HostNotFound("test".to_string());
+        assert_eq!(err.to_string(), "host not found: test");
+    }
+
+    #[test]
+    fn host_name_conflict_display() {
+        let err = Error::HostNameConflict("dup".to_string());
+        assert_eq!(err.to_string(), "host name already exists: dup");
     }
 }
