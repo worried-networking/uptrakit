@@ -24,8 +24,8 @@ not implemented.
 
 **~~Magic string WebSocket close reasons~~**
 
-**Status:** Resolved. Close reason constants from `uptrakit_internal_wire::close_reason` are now used
-in both pattern matches and sender sites. See [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01).
+**Status:** Resolved. The `CloseReason` enum from `uptrakit_internal_wire` is now used in both
+pattern matches and sender sites. See [WIRE-01](../../shared/wire/CODEREVIEW.md#wire-01).
 
 ### ~~MQTT-01~~ **FIXED**
 

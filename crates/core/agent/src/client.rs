@@ -1,10 +1,10 @@
 use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
-    ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
+    CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
     RenewCertificatePayload, ReportHostsPayload, ServiceMessage, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
-    close_reason, now_millis,
+    now_millis,
 };
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
 use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
@@ -372,11 +372,11 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                     None => {
                         // Connection closed — check close reason
                         match conn.close_reason() {
-                            Some(close_reason::CERTIFICATE_ROTATED) => {
+                            Some(CloseReason::CertificateRotated) => {
                                 tracing::info!("connection closed: certificate rotated");
                                 break LoopOutcome::Reconnect;
                             }
-                            Some(close_reason::CERTIFICATE_REVOKED) => {
+                            Some(CloseReason::CertificateRevoked) => {
                                 tracing::warn!("connection closed: certificate revoked");
                                 break LoopOutcome::Disconnected;
                             }

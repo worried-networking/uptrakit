@@ -9,7 +9,7 @@ use futures_util::{SinkExt, StreamExt};
 use rootcause::prelude::*;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
-    ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq, ServiceMessage,
+    CloseReason, ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq, ServiceMessage,
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
@@ -23,7 +23,7 @@ pub struct ControllerConnection {
     ws: WsStream,
     out_seq: OutgoingSeq,
     in_seq: IncomingSeq,
-    close_reason: Option<String>,
+    close_reason: Option<CloseReason>,
 }
 
 impl ControllerConnection {
@@ -111,7 +111,11 @@ impl ControllerConnection {
                 }
                 Some(Ok(Message::Pong(_))) => continue,
                 Some(Ok(Message::Close(frame))) => {
-                    self.close_reason = frame.as_ref().map(|f| f.reason.to_string());
+                    self.close_reason = frame.as_ref().map(|f| {
+                        f.reason
+                            .parse::<CloseReason>()
+                            .unwrap_or_else(|_| CloseReason::Unknown(f.reason.to_string()))
+                    });
                     log_close_frame(frame);
                     return Ok(None);
                 }
@@ -132,10 +136,10 @@ impl ControllerConnection {
 
     /// Get the close reason from the last WebSocket close frame, if any.
     ///
-    /// Used by the agent to distinguish "certificate rotated" from other
-    /// close reasons.
-    pub fn close_reason(&self) -> Option<&str> {
-        self.close_reason.as_deref()
+    /// Used by the agent to distinguish [`CloseReason::CertificateRotated`]
+    /// from other close reasons.
+    pub fn close_reason(&self) -> Option<&CloseReason> {
+        self.close_reason.as_ref()
     }
 
     /// Send a [`ServiceMessage`] on a best-effort basis.

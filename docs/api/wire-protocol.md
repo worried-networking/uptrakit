@@ -94,29 +94,32 @@ Each connection tracks per-direction counters; mismatched sequences cause the co
 ## WebSocket Close Reasons
 
 When the controller closes a WebSocket connection, it includes a reason string in the close frame. These
-reasons are defined as constants in the `uptrakit_internal_wire::close_reason` module to prevent
-mismatches between sender and receiver.
+reasons are defined as variants of the `CloseReason` enum in the `uptrakit_internal_wire::close_reason`
+module. The enum provides `Display` (for sending) and `FromStr` (for receiving) implementations that
+produce and parse the same wire strings. An `Unknown(String)` variant provides forward compatibility
+for strings not yet recognized by the receiver.
 
-| Constant | Value | Description |
+| Variant | Wire String | Description |
 | --- | --- | --- |
-| `CERTIFICATE_ROTATED` | `"certificate rotated"` | Service certificate was rotated; reconnect with new cert. |
-| `CERTIFICATE_REVOKED` | `"certificate revoked"` | Service certificate was revoked; re-enrollment required. |
-| `NO_VALID_CERTIFICATE` | `"no valid certificate"` | No valid client certificate presented. |
-| `INTERNAL_ERROR` | `"internal error"` | Unexpected server-side error. |
-| `CERTIFICATE_NOT_RECOGNIZED` | `"certificate not recognized"` | Client certificate not recognized by the controller. |
-| `SERVICE_DEACTIVATED` | `"service deactivated"` | Service has been deactivated by an administrator. |
-| `SERVICE_NOT_APPROVED` | `"service not approved"` | Service has not been approved for connection. |
-| `SERVICE_NOT_FOUND` | `"service not found"` | Service ID not found in the database. |
-| `ENROLLMENT_TIMEOUT` | `"enrollment timeout"` | Enrollment did not complete within the allowed time. |
-| `AGENT_VERSION_TOO_OLD` | `"agent version too old"` | Agent protocol version is below the minimum supported. |
-| `SUPERSEDED` | `"superseded by new connection"` | Another instance connected with the same service ID. |
-| `RATE_LIMIT_EXCEEDED` | `"rate limit exceeded"` | Connection rate limit exceeded. |
+| `CloseReason::CertificateRotated` | `"certificate rotated"` | Service certificate was rotated; reconnect with new cert. |
+| `CloseReason::CertificateRevoked` | `"certificate revoked"` | Service certificate was revoked; re-enrollment required. |
+| `CloseReason::NoValidCertificate` | `"no valid certificate"` | No valid client certificate presented. |
+| `CloseReason::InternalError` | `"internal error"` | Unexpected server-side error. |
+| `CloseReason::CertificateNotRecognized` | `"certificate not recognized"` | Client certificate not recognized by the controller. |
+| `CloseReason::ServiceDeactivated` | `"service deactivated"` | Service has been deactivated by an administrator. |
+| `CloseReason::ServiceNotApproved` | `"service not approved"` | Service has not been approved for connection. |
+| `CloseReason::ServiceNotFound` | `"service not found"` | Service ID not found in the database. |
+| `CloseReason::EnrollmentTimeout` | `"enrollment timeout"` | Enrollment did not complete within the allowed time. |
+| `CloseReason::VersionTooOld` | `"agent version too old"` | Agent protocol version is below the minimum supported. |
+| `CloseReason::Superseded` | `"superseded by new connection"` | Another instance connected with the same service ID. |
+| `CloseReason::RateLimitExceeded` | `"rate limit exceeded"` | Connection rate limit exceeded. |
+| `CloseReason::Unknown(String)` | *(any other string)* | Forward-compatible catch-all for unrecognized reasons. |
 
-Services should match on these constants (not raw strings) to determine reconnection behavior:
+Services should match on enum variants (not raw strings) to determine reconnection behavior:
 
-- `CERTIFICATE_ROTATED` → reconnect immediately with new certificate.
-- `CERTIFICATE_REVOKED` → stop; re-enrollment needed.
-- Other reasons → reconnect with backoff or terminate depending on severity.
+- `CloseReason::CertificateRotated` → reconnect immediately with new certificate.
+- `CloseReason::CertificateRevoked` → stop; re-enrollment needed.
+- Other variants → reconnect with backoff or terminate depending on severity.
 
 ## AsyncAPI Specification
 

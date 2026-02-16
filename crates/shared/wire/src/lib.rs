@@ -1,4 +1,5 @@
 pub mod close_reason;
+pub use close_reason::CloseReason;
 
 use std::fmt;
 

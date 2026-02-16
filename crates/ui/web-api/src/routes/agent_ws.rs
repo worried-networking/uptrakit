@@ -6,9 +6,9 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    ApprovedPayload, CertificatePayload, ControllerMessage, ErrorCode, ErrorPayload,
+    ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, ErrorCode, ErrorPayload,
     ExecuteUpdatePayload, IncomingSeq, OutgoingSeq, PingPayload, ProviderType, RejectedPayload,
-    ServiceMessage, UpdateFinalStatus, close_reason,
+    ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     available_version, host_software_item, provider_config, service_host as agent_host,
@@ -123,7 +123,7 @@ pub(crate) async fn handle_agent_authenticated(
                     }
                 };
                 if !rate_limiter.allow() {
-                    let _ = close_with_reason(sink, close_reason::RATE_LIMIT_EXCEEDED).await;
+                    let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
                     break;
                 }
                 match msg {
@@ -172,7 +172,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         if let Some(json) = serialize_controller_msg(out_seq, err) {
                                             let _ = sink.send(Message::Text(json.into())).await;
                                         }
-                                        let _ = close_with_reason(sink, close_reason::VERSION_TOO_OLD).await;
+                                        let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
                                         break;
                                     }
                                 };
@@ -194,7 +194,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     if let Some(json) = serialize_controller_msg(out_seq, err) {
                                         let _ = sink.send(Message::Text(json.into())).await;
                                     }
-                                    let _ = close_with_reason(sink, close_reason::VERSION_TOO_OLD).await;
+                                    let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
                                     break;
                                 }
 
@@ -279,7 +279,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         }
                                         state.revocation_notify.notify_one();
                                         tracing::info!(%agent_id, old_serial = %cert.serial, "certificate renewed, old cert revoked");
-                                        let _ = close_with_reason(sink, close_reason::CERTIFICATE_ROTATED).await;
+                                        let _ = close_with_reason(sink, CloseReason::CertificateRotated).await;
                                         break;
                                     }
                                     Err(e) => {
@@ -565,7 +565,7 @@ pub(crate) async fn handle_agent_authenticated(
             }
             _ = cancel_token.cancelled() => {
                 tracing::info!(%agent_id, "connection superseded by new registration");
-                let _ = close_with_reason(sink, close_reason::SUPERSEDED).await;
+                let _ = close_with_reason(sink, CloseReason::Superseded).await;
                 // Do NOT unregister — the new connection owns the registry entry.
                 return;
             }
@@ -662,7 +662,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                     }
                 };
                 if !rate_limiter.allow() {
-                    let _ = close_with_reason(sink, close_reason::RATE_LIMIT_EXCEEDED).await;
+                    let _ = close_with_reason(sink, CloseReason::RateLimitExceeded).await;
                     break;
                 }
 
@@ -859,7 +859,7 @@ pub(crate) async fn run_agent_enrolled_loop(
             }
             _ = cancel_token.cancelled() => {
                 tracing::info!(%agent_id, "enrolled connection superseded by new registration");
-                let _ = close_with_reason(sink, close_reason::SUPERSEDED).await;
+                let _ = close_with_reason(sink, CloseReason::Superseded).await;
                 return;
             }
         }

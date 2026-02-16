@@ -20,9 +20,10 @@ covers SIGINT, SIGTERM, and SIGHUP. The reconnection logic with backoff is robus
 
 **~~Magic string WebSocket close reasons~~**
 
-**Status:** Resolved. A `close_reason` module with 12 named constants was added to `uptrakit-internal-wire`.
-All sender sites (web-api route handlers) and receiver sites (agent `client.rs`, MQTT `main.rs`) now use
-these constants instead of bare string literals.
+**Status:** Resolved. A `CloseReason` enum with 12 known variants plus an `Unknown(String)` catch-all
+was added to `uptrakit-internal-wire`. All sender sites (web-api route handlers) and receiver sites
+(agent `client.rs`, MQTT `main.rs`, SSH agent `client.rs`) use typed `CloseReason` variants with
+exhaustive pattern matching instead of string comparisons.
 
 ### CROSS-02
 

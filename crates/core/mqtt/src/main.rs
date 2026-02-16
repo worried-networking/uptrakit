@@ -9,8 +9,8 @@ use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_internal_wire::{
-    ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
-    MqttRegisterPayload, PingPayload, ServiceMessage, close_reason, now_millis,
+    CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload,
+    MqttClientStatusPayload, MqttRegisterPayload, PingPayload, ServiceMessage, now_millis,
 };
 use uptrakit_service_sdk::{
     AuthenticatedContext, CertificateRenewalHandler, ControllerConnection, LoopOutcome,
@@ -244,11 +244,11 @@ async fn run_mqtt_authenticated_loop(
                     None => {
                         // Connection closed — check close reason
                         match conn.close_reason() {
-                            Some(close_reason::CERTIFICATE_ROTATED) => {
+                            Some(CloseReason::CertificateRotated) => {
                                 tracing::info!("connection closed: certificate rotated");
                                 break LoopOutcome::Reconnect;
                             }
-                            Some(close_reason::CERTIFICATE_REVOKED) => {
+                            Some(CloseReason::CertificateRevoked) => {
                                 tracing::warn!("connection closed: certificate revoked");
                                 break LoopOutcome::Disconnected;
                             }

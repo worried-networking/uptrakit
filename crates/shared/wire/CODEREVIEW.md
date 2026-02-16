@@ -40,8 +40,10 @@ The wire crate has several extensibility-related concerns:
 
 **~~No close reason constants defined~~**
 
-**Status:** Resolved. A `close_reason` module with 12 named constants added to the wire crate. All
-sender sites (web-api route handlers) and receiver sites (agent, MQTT) updated to use these constants.
+**Status:** Resolved. A `CloseReason` enum with 12 known variants plus an `Unknown(String)` catch-all
+was added to the wire crate (`close_reason` module). The enum provides `Display`, `FromStr`, and
+`as_str()` for wire-format compatibility. All sender sites (web-api route handlers) and receiver sites
+(agent, MQTT, SSH agent) use typed `CloseReason` variants instead of string constants.
 
 ### WIRE-02
 
