@@ -10,6 +10,8 @@ This folder contains entity-level architecture documentation for Uptrakit's core
 | [Host Entity](host-entity.md) | Host representation, `machine_id` tracking, and agent linking. |
 | [Software Item Entity](software-item-entity.md) | Software item definition, provider configuration, and host assignment. |
 | [Update History Entity](update-history-entity.md) | Immutable update history records and status tracking. |
+| [Scheduler](scheduler.md) | Centralised DB-backed task scheduler with HA-safe optimistic locking. |
+| [SSH Agent](ssh-agent.md) | SSH-backed agent architecture and local DB schema. |
 
 ## Related Documentation
 

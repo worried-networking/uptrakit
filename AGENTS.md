@@ -55,6 +55,7 @@ uptrakit/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
 │   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent (manages remote hosts over SSH)
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
+│   │   │   └── src/scheduler/          #   Centralised DB-backed task scheduler (HA-safe optimistic locking)
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
 │   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions, SecretMasking trait (re-exports shared types; delegates command execution to uptrakit-command)
@@ -311,6 +312,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Host Entity](docs/architecture/host-entity.md)
 - [Software Item Entity](docs/architecture/software-item-entity.md)
 - [Update History Entity](docs/architecture/update-history-entity.md)
+- [Scheduler](docs/architecture/scheduler.md)
 - [SSH Agent](docs/architecture/ssh-agent.md)
 
 ### API and Protocol

@@ -18,6 +18,7 @@ pub mod permission;
 pub mod provider_config;
 pub mod role;
 pub mod role_permission;
+pub mod scheduled_task;
 pub mod service;
 pub mod service_certificate;
 pub mod service_host;

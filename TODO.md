@@ -36,7 +36,7 @@ Essential infrastructure needed before feature development.
   - [x] Software items table (provider config, package identifier, config override, host assignments)
   - [x] Available versions table (software item ID, version, release date, extra metadata)
   - [x] Update history table (host ID, software item ID, from/to version, status, output, initiated_by)
-  - [ ] Scheduled checks table (software item ID, schedule, last run, next run)
+  - [x] Scheduled checks table (software item ID, schedule, last run, next run)
 - [x] Implement database migrations system
 - [x] Create database access layer with connection pooling
 - [x] Add database initialization on controller startup
@@ -216,18 +216,18 @@ Main functionality that delivers the core value proposition.
 
 ### Scheduling System
 
-- [ ] Design scheduling architecture
-  - [ ] Cron-like schedule expressions
-  - [ ] Next run time calculation
-  - [ ] Schedule persistence
-- [ ] Implement scheduler service
-  - [ ] Background task runner
-  - [ ] Scheduled check execution
-  - [ ] Schedule conflict resolution
+- [x] Design scheduling architecture
+  - [x] Cron-like schedule expressions
+  - [x] Next run time calculation
+  - [x] Schedule persistence
+- [x] Implement scheduler service
+  - [x] Background task runner
+  - [x] Scheduled check execution
+  - [x] Schedule conflict resolution
 - [ ] Add per-software-item schedule configuration
-- [ ] Implement global schedule defaults
-- [ ] Add schedule enable/disable functionality
-- [ ] Support manual trigger overrides
+- [x] Implement global schedule defaults
+- [x] Add schedule enable/disable functionality
+- [x] Support manual trigger overrides
 
 ### Concurrency Control
 
@@ -566,7 +566,7 @@ Comprehensive security hardening.
   - [ ] Secure backup storage
   - [ ] Recovery procedures documentation
 - [x] CA rotation automation
-  - [x] Rotation scheduling system (background task, 24h interval)
+  - [x] Rotation scheduling system (centralised scheduler, cron-based)
   - [x] Automated rotation execution (6-month window before expiry)
   - [ ] Rollback capability for failed rotations
 - [x] Multi-CA validation support

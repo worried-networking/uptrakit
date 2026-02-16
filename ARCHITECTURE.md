@@ -2,12 +2,14 @@
 
 Uptrakit is an agent-based toolkit: the **controller** orchestrates scheduling, hosts a Web UI/API, and checks upstream versions; **agents** run
 outbound-only, unprivileged daemons that report installed versions and execute user-approved updates; the **MQTT service** integrates with Home
-Assistant via MQTT; the **SSH agent** manages remote hosts over SSH (skeleton — see [SSH Agent Architecture](docs/architecture/ssh-agent.md)).
+Assistant via MQTT; the **SSH agent** manages remote hosts over SSH (skeleton -- see [SSH Agent Architecture](docs/architecture/ssh-agent.md)).
+
+A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates periodic tasks (version checks, cleanup, CA rotation checks, certificate renewal) across controller instances using optimistic locking for HA-safe exactly-once execution.
 
 ## Key references
 
 - Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update
-  history)
+  history, scheduler)
 
 - System architecture and operations: [docs/end-user/system-overview.md](docs/end-user/system-overview.md)
 

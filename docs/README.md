@@ -55,6 +55,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Host Entity](architecture/host-entity.md) | Host representation and `machine_id` tracking. See also: [Wire Protocol](api/wire-protocol.md). |
 | [Software Item Entity](architecture/software-item-entity.md) | Software item definition and provider configuration. See also: [Provider Guidelines](development/provider-guidelines.md). |
 | [Update History Entity](architecture/update-history-entity.md) | Immutable update history records. See also: [Update Workflow](end-user/update-workflow.md). |
+| [Scheduler](architecture/scheduler.md) | Centralised DB-backed task scheduler with HA-safe optimistic locking. See also: [HTTP Web API](api/http-web-api.md), [Cross-Controller Communication](development/cross-controller-comm.md). |
 | [SSH Agent](architecture/ssh-agent.md) | SSH-backed agent architecture, local DB schema, and self-managed encryption. See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [Service Lifecycle](development/service-lifecycle.md). |
 
 ## Development

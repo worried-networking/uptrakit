@@ -26,6 +26,9 @@ pub use super::permission::{Entity as Permission, Model as PermissionModel};
 pub use super::provider_config::{Entity as ProviderConfig, Model as ProviderConfigModel};
 pub use super::role::{Entity as Role, Model as RoleModel};
 pub use super::role_permission::{Entity as RolePermission, Model as RolePermissionModel};
+pub use super::scheduled_task::{
+    Entity as ScheduledTask, Model as ScheduledTaskModel, ScheduledTaskType,
+};
 pub use super::service::{Entity as Service, Model as ServiceModel, ServiceStatus, ServiceType};
 pub use super::service_certificate::{
     Entity as ServiceCertificate, Model as ServiceCertificateModel, RevocationReason,

@@ -9,6 +9,7 @@ pub mod ocsp;
 pub mod oidc_auth;
 pub mod oidc_providers;
 pub mod provider_configs;
+pub mod scheduler;
 pub mod server_cert;
 pub mod service_ws;
 pub mod services;

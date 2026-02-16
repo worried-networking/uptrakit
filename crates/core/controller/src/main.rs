@@ -6,6 +6,7 @@ mod migration;
 mod mtls_acceptor;
 mod pki;
 mod reconcile;
+mod scheduler;
 mod server;
 
 use std::fmt;
@@ -784,23 +785,18 @@ async fn run(args: cli::Args) -> Result<()> {
         token_denylist: Arc::clone(&token_denylist),
     });
 
-    // Spawn periodic cleanup for auth state stores (every 5 minutes)
-    let oidc_cleanup_token = shutdown_token.child_token();
-    let oidc_cleanup_handle = tokio::spawn(async move {
+    // Spawn periodic token denylist purge (per-controller, in-memory — every 5 minutes).
+    // DB-backed auth store cleanup is handled by the centralised scheduler.
+    let denylist_cleanup_token = shutdown_token.child_token();
+    let denylist_cleanup_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(300));
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    oidc_flow_store.cleanup_expired().await;
-                    account_link_store.cleanup_expired().await;
-                    oidc_token_exchange_store.cleanup_expired().await;
-                    oidc_registration_store.cleanup_expired().await;
-                    device_flow_store.cleanup_expired().await;
-                    rate_limit_store.cleanup_expired().await;
                     token_denylist.purge_expired().await;
                 }
-                _ = oidc_cleanup_token.cancelled() => {
-                    tracing::debug!("auth state cleanup task shutting down");
+                _ = denylist_cleanup_token.cancelled() => {
+                    tracing::debug!("token denylist cleanup task shutting down");
                     break;
                 }
             }
@@ -922,6 +918,68 @@ async fn run(args: cli::Args) -> Result<()> {
     );
     let event_poller_handle = tokio::spawn(event_poller.run(event_poller_token));
 
+    // Spawn centralised task scheduler (HA-safe via optimistic locking)
+    let scheduler_token = shutdown_token.child_token();
+    let scheduler_handle = {
+        use scheduler::executors::*;
+        use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
+
+        let mut sched = scheduler::Scheduler::new(
+            app_state.db.clone(),
+            scheduler::SchedulerConfig::new(controller_id, default_tenant_id),
+        );
+
+        sched.register(
+            ScheduledTaskType::AuthCleanup,
+            Box::new(auth_cleanup::AuthCleanupExecutor::new(
+                app_state.oidc_flow_store.clone(),
+                app_state.account_link_store.clone(),
+                app_state.oidc_token_exchange_store.clone(),
+                app_state.oidc_registration_store.clone(),
+                app_state.device_flow_store.clone(),
+                app_state.rate_limit_store.clone(),
+            )),
+        );
+        sched.register(
+            ScheduledTaskType::StaleLeaseCleanup,
+            Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
+                app_state.db.clone(),
+                service_connections.clone(),
+            )),
+        );
+        sched.register(
+            ScheduledTaskType::EventCleanup,
+            Box::new(event_cleanup::EventCleanupExecutor::new(
+                app_state.db.clone(),
+            )),
+        );
+        if ca_state.managed {
+            sched.register(
+                ScheduledTaskType::CaRotationCheck,
+                Box::new(ca_rotation_check::CaRotationCheckExecutor::new(
+                    ca_tx.subscribe(),
+                    Arc::clone(&ca_rotation_trigger),
+                )),
+            );
+        }
+        sched.register(
+            ScheduledTaskType::VersionCheck,
+            Box::new(version_check::VersionCheckExecutor::new(
+                app_state.db.clone(),
+                notification_service.clone(),
+            )),
+        );
+        sched.register(
+            ScheduledTaskType::ServiceCertCheck,
+            Box::new(service_cert_check::ServiceCertCheckExecutor::new(
+                app_state.db.clone(),
+                notification_service.clone(),
+            )),
+        );
+
+        tokio::spawn(sched.run(scheduler_token))
+    };
+
     // Spawn CA rotation background task (managed CAs only, every 24h or on API trigger)
     let ca_rotation_token = shutdown_token.child_token();
     let ca_rotation_handle = if ca_state.managed {
@@ -936,31 +994,19 @@ async fn run(args: cli::Args) -> Result<()> {
         let token = ca_rotation_token;
 
         Some(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(24 * 3600));
-            // Skip the first immediate tick
-            interval.tick().await;
-
+            // Periodic CA rotation checking is now handled by the centralised scheduler
+            // (CaRotationCheckExecutor), which fires `ca_rotation_trigger` when rotation
+            // is needed. This loop only listens for that trigger and API-initiated rotations.
             loop {
-                // Wait for either the periodic timer, an API-triggered rotation, or shutdown
-                let forced = tokio::select! {
-                    _ = interval.tick() => false,
-                    () = trigger.notified() => true,
+                tokio::select! {
+                    () = trigger.notified() => {}
                     _ = token.cancelled() => {
                         tracing::debug!("CA rotation task shutting down");
                         return;
                     }
                 };
 
-                if !forced {
-                    tracing::debug!("checking CA rotation status");
-                    let snapshot = ca_tx_for_task.borrow().clone();
-                    if !pki::should_rotate_ca(&snapshot.active_cert_pem) {
-                        continue;
-                    }
-                    tracing::info!("CA certificate is within rotation window, rotating");
-                } else {
-                    tracing::info!("CA rotation triggered via API");
-                }
+                tracing::info!("CA rotation triggered");
 
                 let current_pki_addr = settings_for_rotation.pki_addr();
                 let snapshot = ca_tx_for_task.borrow().clone();
@@ -1254,8 +1300,11 @@ async fn run(args: cli::Args) -> Result<()> {
     // Wait for event poller
     let _ = tokio::time::timeout(Duration::from_secs(5), event_poller_handle).await;
 
-    // Wait for cleanup task
-    let _ = tokio::time::timeout(Duration::from_secs(5), oidc_cleanup_handle).await;
+    // Wait for token denylist cleanup task
+    let _ = tokio::time::timeout(Duration::from_secs(5), denylist_cleanup_handle).await;
+
+    // Wait for scheduler
+    let _ = tokio::time::timeout(Duration::from_secs(5), scheduler_handle).await;
 
     // Wait for settings reload task
     let _ = tokio::time::timeout(Duration::from_secs(5), settings_reload_handle).await;

@@ -46,6 +46,8 @@ uuid = { workspace = true }
 sha2 = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
+cron = "0.15"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 nix = { version = "0.31", default-features = false, features = ["signal", "process"] }
 tokio-util = { workspace = true }
 zeroize = { workspace = true }

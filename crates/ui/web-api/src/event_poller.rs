@@ -57,18 +57,15 @@ impl EventPoller {
         );
 
         let mut poll_interval = tokio::time::interval(Duration::from_secs(1));
-        let mut cleanup_interval = tokio::time::interval(Duration::from_secs(300));
-        // Skip the first immediate ticks
+        // Skip the first immediate tick
         poll_interval.tick().await;
-        cleanup_interval.tick().await;
 
+        // NOTE: Event cleanup is handled by the centralised scheduler
+        // (EventCleanupExecutor). This loop only polls for new events.
         loop {
             tokio::select! {
                 _ = poll_interval.tick() => {
                     last_seen_id = self.poll_events(last_seen_id).await;
-                }
-                _ = cleanup_interval.tick() => {
-                    self.cleanup_old_events().await;
                 }
                 _ = token.cancelled() => {
                     tracing::debug!("event poller shutting down");
@@ -329,7 +326,11 @@ impl EventPoller {
     }
 
     /// Delete events older than the cleanup TTL.
-    async fn cleanup_old_events(&self) {
+    ///
+    /// This is public so the centralised scheduler (`EventCleanupExecutor`)
+    /// can run the same logic without duplicating it. The `EventPoller::run()`
+    /// loop itself no longer calls this directly.
+    pub async fn cleanup_old_events(&self) {
         let cutoff = OffsetDateTime::now_utc() - time::Duration::hours(EVENT_CLEANUP_TTL_HOURS);
         match controller_event::Entity::delete_many()
             .filter(controller_event::Column::CreatedAt.lt(cutoff))
