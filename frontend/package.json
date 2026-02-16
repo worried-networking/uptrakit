@@ -21,7 +21,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "jsdom": "^26.1.0",
     "svelte": "^5.49.2",
-    "svelte-check": "^4.3.6",
+    "svelte-check": "^4.4.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^2.1.9"
