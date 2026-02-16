@@ -4,12 +4,12 @@ Uptrakit is an agent-based toolkit: the **controller** orchestrates scheduling, 
 outbound-only, unprivileged daemons that report installed versions and execute user-approved updates; the **MQTT service** integrates with Home
 Assistant via MQTT; the **SSH agent** manages remote hosts over SSH (skeleton -- see [SSH Agent Architecture](docs/architecture/ssh-agent.md)).
 
-A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates periodic tasks (version checks, cleanup, CA rotation checks, certificate renewal) across controller instances using optimistic locking for HA-safe exactly-once execution.
+A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates periodic tasks (version checks, cleanup, CA rotation checks,
+certificate renewal) across controller instances using optimistic locking for HA-safe exactly-once execution.
 
 ## Key references
 
-- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update
-  history, scheduler)
+- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update history, scheduler)
 
 - System architecture and operations: [docs/end-user/system-overview.md](docs/end-user/system-overview.md)
 
@@ -31,21 +31,20 @@ A centralised [DB-backed scheduler](docs/architecture/scheduler.md) coordinates 
 
 ## Wire protocol
 
-Agents, SSH agents, and MQTT services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The AsyncAPI
-definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
+Agents, SSH agents, and MQTT services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The
+AsyncAPI definition lives at `crates/shared/wire/asyncapi.yaml` and is described in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 
 ## Service SDK
 
 The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared infrastructure for building Uptrakit services:
 
-- **Lifecycle**: The `ServiceHandler` trait and `run_service_lifecycle()` function encapsulate the full
-  bootstrap-enrollment-reconnect flow. New services implement three methods (`config()`, `enrollment_info()`,
-  `run_authenticated_loop()`) and get directory setup, identity management, CA bootstrap, enrollment with backoff,
-  and reconnection with backoff for free. See [Service Lifecycle](docs/development/service-lifecycle.md).
+- **Lifecycle**: The `ServiceHandler` trait and `run_service_lifecycle()` function encapsulate the full bootstrap-enrollment-reconnect flow. New
+  services implement three methods (`config()`, `enrollment_info()`, `run_authenticated_loop()`) and get directory setup, identity management, CA
+  bootstrap, enrollment with backoff, and reconnection with backoff for free. See [Service Lifecycle](docs/development/service-lifecycle.md).
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
 - **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust).
-- **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation,
-  Ping/Pong handling, and close-frame reason tracking. Used by both agent and MQTT service.
+- **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation, Ping/Pong handling, and
+  close-frame reason tracking. Used by both agent and MQTT service.
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
 - **CLI**: Common CLI arguments (`--url`, `--config-dir`, `--state-dir`, `--force-enroll`, etc.).

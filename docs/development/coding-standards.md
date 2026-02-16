@@ -18,9 +18,8 @@
 
 ## Public Enum Extensibility
 
-All public enums that may gain new variants must carry the `#[non_exhaustive]` attribute. This allows the
-project to evolve without semver-breaking changes for downstream consumers. External crates matching on
-these enums must include a wildcard `_ =>` arm.
+All public enums that may gain new variants must carry the `#[non_exhaustive]` attribute. This allows the project to evolve without semver-breaking
+changes for downstream consumers. External crates matching on these enums must include a wildcard `_ =>` arm.
 
 Enums currently annotated with `#[non_exhaustive]`:
 
@@ -28,8 +27,8 @@ Enums currently annotated with `#[non_exhaustive]`:
 - `ServiceMessage`, `ControllerMessage` (`wire`)
 - `ProviderCapability` (`provider-core`)
 
-When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly
-guaranteed to be closed (e.g., a two-variant boolean-like enum).
+When adding a new public enum, apply `#[non_exhaustive]` by default unless the enum is explicitly guaranteed to be closed (e.g., a two-variant
+boolean-like enum).
 
 ## Design Principles
 
@@ -46,8 +45,7 @@ security.
 
 ## String-to-Type Conversions
 
-All string-to-type conversions must use the standard `FromStr` trait. Do not add ad-hoc `parse(&str)` methods
-that serve the same purpose.
+All string-to-type conversions must use the standard `FromStr` trait. Do not add ad-hoc `parse(&str)` methods that serve the same purpose.
 
 ### Required pattern
 
@@ -74,10 +72,12 @@ impl FromStr for MyType {
 ### Conventions
 
 - **Error type naming:** `Parse{TypeName}Error` (e.g., `ParsePermissionError`, `ParseMqttTransportError`).
-- **Error derivation:** Use `thiserror::Error` in crates that depend on `thiserror`. In crates without `thiserror` (e.g., `uptrakit-internal-wire`), implement `Display` and `Error` manually.
+- **Error derivation:** Use `thiserror::Error` in crates that depend on `thiserror`. In crates without `thiserror` (e.g., `uptrakit-internal-wire`),
+  implement `Display` and `Error` manually.
 - **Call sites:** Prefer `s.parse::<MyType>()` over explicit `MyType::from_str(s)`.
 - **Fallible conversions with defaults:** Use `s.parse::<MyType>().unwrap_or_default()` when a default is acceptable.
-- **`from_url_scheme()` and similar:** Domain-specific parsers that convert from a different representation (e.g., URL schemes like `mqtt`/`mqtts` to `MqttTransport`) are not `FromStr` candidates and should remain as named methods.
+- **`from_url_scheme()` and similar:** Domain-specific parsers that convert from a different representation (e.g., URL schemes like `mqtt`/`mqtts` to
+  `MqttTransport`) are not `FromStr` candidates and should remain as named methods.
 
 ### Anti-pattern
 
@@ -85,15 +85,14 @@ impl FromStr for MyType {
 
 ## Error Handling - Detailed
 
-Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagation and
-[`thiserror`](https://github.com/dtolnay/thiserror) for error enum definition. Every module boundary must define its own
-error type following the patterns below.
+Use [`rootcause`](https://github.com/rootcause-rs/rootcause) for error propagation and [`thiserror`](https://github.com/dtolnay/thiserror) for error
+enum definition. Every module boundary must define its own error type following the patterns below.
 
 ### Import convention
 
-Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for
-`.context()` and `.context_to()`), and `IteratorExt`. When implementing `ReportConversion`, use the
-`impl_report_conversion!` macro from `uptrakit-shared-macros` (it handles the `ReportConversion` import internally):
+Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()` and
+`.context_to()`), and `IteratorExt`. When implementing `ReportConversion`, use the `impl_report_conversion!` macro from `uptrakit-shared-macros` (it
+handles the `ReportConversion` import internally):
 
 ```rust
 use rootcause::prelude::*;
@@ -129,8 +128,8 @@ Real example: [`crates/ui/web-api/src/auth/error.rs`](crates/ui/web-api/src/auth
 
 ### Pattern 2: Implement `ReportConversion` for cross-boundary error conversion
 
-When your module calls code that returns a different error type, implement `ReportConversion` so that `.context_to()`
-can convert automatically. Use the `impl_report_conversion!` macro from `uptrakit-shared-macros`:
+When your module calls code that returns a different error type, implement `ReportConversion` so that `.context_to()` can convert automatically. Use
+the `impl_report_conversion!` macro from `uptrakit-shared-macros`:
 
 ```rust
 use uptrakit_shared_macros::impl_report_conversion;
@@ -148,8 +147,8 @@ impl_report_conversion! {
 impl_report_conversion!(tungstenite::Error => MyError, |e| MyError::WebSocket(Box::new(e)));
 ```
 
-Each macro invocation expands to a full `impl<T> ReportConversion<Source, markers::Mutable, T> for Target` block with
-the appropriate `context_transform` call.
+Each macro invocation expands to a full `impl<T> ReportConversion<Source, markers::Mutable, T> for Target` block with the appropriate
+`context_transform` call.
 
 ### Pattern 3: Use `context_to()` in function bodies
 
@@ -165,8 +164,8 @@ let user = users::Entity::find_by_id(id)
 
 ### Pattern 4: Use `report!()` to create reports inside combinators
 
-`report!()` creates a `Report` value without returning. Use it inside `.ok_or_else()`, `.map_err()`, or when building a
-`Report` to store in a variable:
+`report!()` creates a `Report` value without returning. Use it inside `.ok_or_else()`, `.map_err()`, or when building a `Report` to store in a
+variable:
 
 ```rust
 let user = results
@@ -192,8 +191,7 @@ hostname::get()
     .context_transform(|e| PkiError::Hostname(e.to_string()))?;
 ```
 
-Unlike `.context()` which creates a parent node, `.context_transform()` replaces the context type in place (single-node
-structure).
+Unlike `.context()` which creates a parent node, `.context_transform()` replaces the context type in place (single-node structure).
 
 ### Pattern 7: `map_err` with `report!()` for one-off conversions
 
@@ -219,8 +217,8 @@ if let Err(e) = operation().await {
 
 ### Pattern 9: `bail!()` for early error returns
 
-`bail!(ErrorEnum::Variant(...))` is sugar for `return Err(report!(...))`. Use `bail!()` for guard-clause early returns.
-Use `report!()` only inside `.ok_or_else()`, `.map_err()`, or when building a `Report` without returning:
+`bail!(ErrorEnum::Variant(...))` is sugar for `return Err(report!(...))`. Use `bail!()` for guard-clause early returns. Use `report!()` only inside
+`.ok_or_else()`, `.map_err()`, or when building a `Report` without returning:
 
 ```rust
 fn validate(input: &str) -> Result<()> {
@@ -233,12 +231,9 @@ fn validate(input: &str) -> Result<()> {
 
 ### Pattern 10: Decision guide — which context method to use
 
-| Scenario | Method | Effect |
-| --- | --- | --- |
-| Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl |
-| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node |
-| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` | Replace context, preserve children |
-| One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
+| Scenario | Method | Effect | | --- | --- | --- | | Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl | | Wrap
+low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node | | Change error type in-place (1:1 mapping) |
+`.context_transform(\|e\| ...)` | Replace context, preserve children | | One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
 | Guard clause / early return | `bail!(...)` | Return immediately |
 
 ### Pattern 11: Custom error helper methods
@@ -253,13 +248,12 @@ impl MyError {
 }
 ```
 
-Real example: `crates/core/agent/src/error.rs` defines `is_receive_closed()` and `is_cert_expired()` for reconnect
-decision logic.
+Real example: `crates/core/agent/src/error.rs` defines `is_receive_closed()` and `is_cert_expired()` for reconnect decision logic.
 
 ### Pattern 12: External crates without `std::error::Error`
 
-When a source error type does not implement `std::error::Error` (e.g. `aws_lc_rs::Unspecified`, certain `rcgen` errors),
-string-based variants are acceptable. Use `.map_err(|e| report!(Err::Variant(e.to_string())))`:
+When a source error type does not implement `std::error::Error` (e.g. `aws_lc_rs::Unspecified`, certain `rcgen` errors), string-based variants are
+acceptable. Use `.map_err(|e| report!(Err::Variant(e.to_string())))`:
 
 ```rust
 UnboundKey::new(&AES_256_GCM, key_bytes)
@@ -268,9 +262,8 @@ UnboundKey::new(&AES_256_GCM, key_bytes)
 
 ### Pattern 13: Fixed-signature trait boundaries (SeaORM)
 
-SeaORM trait impls (`ValueType`, `TryGetable`) have mandated return types (`ValueTypeErr`, `TryGetError`). At these
-boundaries, convert typed errors via `.map_err()` to the required SeaORM error type. Internally, the helper functions
-still use `Report<CryptoError>`:
+SeaORM trait impls (`ValueType`, `TryGetable`) have mandated return types (`ValueTypeErr`, `TryGetError`). At these boundaries, convert typed errors
+via `.map_err()` to the required SeaORM error type. Internally, the helper functions still use `Report<CryptoError>`:
 
 ```rust
 impl sea_orm::sea_query::ValueType for EncryptedString {
@@ -282,8 +275,8 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
 }
 ```
 
-Note: `EncryptedString::new()` is fallible — it encrypts eagerly at construction time and returns
-`Result<Self, Report<CryptoError>>`. Callers must propagate the error via `.context_to()?`.
+Note: `EncryptedString::new()` is fallible — it encrypts eagerly at construction time and returns `Result<Self, Report<CryptoError>>`. Callers must
+propagate the error via `.context_to()?`.
 
 ### Anti-patterns
 
@@ -292,23 +285,21 @@ These are error handling patterns that MUST NOT be used:
 - **`Result<T, String>`** — always define a typed error enum with `Report<E>`.
 - **`Result<T, (StatusCode, &str)>`** — use typed errors; map to HTTP status at the handler level.
 - **Reusing unrelated error variants** (e.g. `PkiError::Hostname` for a database error) — add a new variant.
-- **`format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to
-  preserve the original error.
-- **Bare error enums without `Report`** — every boundary error type should use
-  `pub type Result<T> = std::result::Result<T, Report<MyError>>`.
+- **`format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to preserve the original error.
+- **Bare error enums without `Report`** — every boundary error type should use `pub type Result<T> = std::result::Result<T, Report<MyError>>`.
 - **`return Err(report!(...))`** — use `bail!(...)` instead for early returns.
 
 ### Mutex and RwLock locks
 
-The release profile uses `panic = "abort"`, so lock poisoning **cannot occur in production**. `.unwrap()` is allowed on
-`Mutex::lock()`, `RwLock::read()`, and `RwLock::write()`:
+The release profile uses `panic = "abort"`, so lock poisoning **cannot occur in production**. `.unwrap()` is allowed on `Mutex::lock()`,
+`RwLock::read()`, and `RwLock::write()`:
 
 ```rust
 let guard = store.lock().unwrap();
 ```
 
-Do NOT use `.map_err()` to convert `PoisonError` into an application error — this adds unnecessary complexity since
-poisoning is impossible with `panic = "abort"`.
+Do NOT use `.map_err()` to convert `PoisonError` into an application error — this adds unnecessary complexity since poisoning is impossible with
+`panic = "abort"`.
 
 ### Rules summary
 
@@ -317,19 +308,16 @@ poisoning is impossible with `panic = "abort"`.
 1. **Use structured context** -- prefer typed variants (`NotFound(String)`) over generic string errors.
 1. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.
 1. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
-1. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may
-   encounter.
+1. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may encounter.
 
 ## Database Enum Columns (`DeriveActiveEnum`)
 
-All entity columns that store a fixed set of string values must use a typed Rust enum with SeaORM's
-`DeriveActiveEnum` instead of `String`. This provides compile-time type safety and eliminates
-string parsing at query boundaries.
+All entity columns that store a fixed set of string values must use a typed Rust enum with SeaORM's `DeriveActiveEnum` instead of `String`. This
+provides compile-time type safety and eliminates string parsing at query boundaries.
 
 ### Pattern
 
-Define the enum in `uptrakit-shared-types` with feature-gated sea-orm derives, following the
-`DeviceAuthStatus` template:
+Define the enum in `uptrakit-shared-types` with feature-gated sea-orm derives, following the `DeviceAuthStatus` template:
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -344,8 +332,8 @@ pub enum MyStatus {
 }
 ```
 
-Also implement `FromStr`, `Display`, `as_str()`, and `Default` (see existing types for the full
-pattern). The entity model then uses the enum type directly:
+Also implement `FromStr`, `Display`, `as_str()`, and `Default` (see existing types for the full pattern). The entity model then uses the enum type
+directly:
 
 ```rust
 pub struct Model {
@@ -355,19 +343,13 @@ pub struct Model {
 
 ### Existing typed enum columns
 
-| Entity | Column | Enum |
-| --- | --- | --- |
-| `mqtt_client` | `transport` | `MqttTransport` |
-| `mqtt_client` | `connection_status` | `MqttClientConnectionStatus` |
-| `session` | `token_type` | `SessionTokenType` |
-| `update_output_line` | `stream` | `OutputStreamType` |
-| `pending_device_flow` | `status` | `DeviceAuthStatus` |
-| `service` | `service_type` | `ServiceType` |
-| `service` | `status` | `ServiceStatus` |
-| `update_history` | `status` | `UpdateStatus` |
+| Entity | Column | Enum | | --- | --- | --- | | `mqtt_client` | `transport` | `MqttTransport` | | `mqtt_client` | `connection_status` |
+`MqttClientConnectionStatus` | | `session` | `token_type` | `SessionTokenType` | | `update_output_line` | `stream` | `OutputStreamType` | |
+`pending_device_flow` | `status` | `DeviceAuthStatus` | | `service` | `service_type` | `ServiceType` | | `service` | `status` | `ServiceStatus` | |
+`update_history` | `status` | `UpdateStatus` |
 
 ### Re-exports
 
-`uptrakit-shared-db` re-exports all entity-relevant enums from `uptrakit-shared-types` for
-downstream convenience. Crates that depend on `uptrakit-shared-db` (like `uptrakit-web-api`) should
-import from `uptrakit_shared_db` rather than adding a direct dependency on `uptrakit-shared-types`.
+`uptrakit-shared-db` re-exports all entity-relevant enums from `uptrakit-shared-types` for downstream convenience. Crates that depend on
+`uptrakit-shared-db` (like `uptrakit-web-api`) should import from `uptrakit_shared_db` rather than adding a direct dependency on
+`uptrakit-shared-types`.

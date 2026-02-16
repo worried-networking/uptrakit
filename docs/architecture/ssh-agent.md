@@ -1,8 +1,7 @@
 # SSH-Backed Agent Architecture
 
-The SSH-backed agent (`uptrakit-agent-ssh`) is a new service type that connects to the controller
-over WebSocket (like the regular agent) but will execute version detection and updates on remote
-hosts over SSH instead of locally.
+The SSH-backed agent (`uptrakit-agent-ssh`) is a new service type that connects to the controller over WebSocket (like the regular agent) but will
+execute version detection and updates on remote hosts over SSH instead of locally.
 
 ## Current Scope (Skeleton)
 
@@ -13,8 +12,7 @@ This document describes the initial skeleton implementation, which provides:
 - A standalone binary (`uptrakit-agent-ssh`) with the `ServiceHandler` trait
 - A local SQLite database for storing SSH host credentials (encrypted at rest)
 
-The skeleton does **not** include SSH transport, provider execution over SSH, or UI configuration
-beyond the existing services API.
+The skeleton does **not** include SSH transport, provider execution over SSH, or UI configuration beyond the existing services API.
 
 ## Architecture Overview
 
@@ -30,21 +28,18 @@ beyond the existing services API.
 └──────────────────┘                            └────────────────────┘
 ```
 
-The SSH agent follows the same enrollment and connection lifecycle as the regular agent
-and MQTT service, using the shared `ServiceHandler` trait from `uptrakit-service-sdk`.
+The SSH agent follows the same enrollment and connection lifecycle as the regular agent and MQTT service, using the shared `ServiceHandler` trait from
+`uptrakit-service-sdk`.
 
 ## Self-Managed Encryption
 
 The SSH agent manages its own encryption key independently from the controller:
 
-| Component | Master Key | Encrypts |
-|---|---|---|
-| Controller | Controller's master key (`UPTRAKIT_MASTER_KEY`) | CA keys, OIDC secrets, MQTT passwords |
-| SSH Agent | SSH agent's master key (`UPTRAKIT_MASTER_KEY`) | SSH private keys in local SQLite |
+| Component | Master Key | Encrypts | |---|---|---| | Controller | Controller's master key (`UPTRAKIT_MASTER_KEY`) | CA keys, OIDC secrets, MQTT
+passwords | | SSH Agent | SSH agent's master key (`UPTRAKIT_MASTER_KEY`) | SSH private keys in local SQLite |
 
-Both use the same `init_master_key()` function from `uptrakit-shared-db::crypto` and the same
-`EncryptedString` type (AES-256-GCM), but with independent keys. The controller has no
-knowledge of the SSH agent's master key.
+Both use the same `init_master_key()` function from `uptrakit-shared-db::crypto` and the same `EncryptedString` type (AES-256-GCM), but with
+independent keys. The controller has no knowledge of the SSH agent's master key.
 
 ### Master Key Options
 
@@ -56,23 +51,14 @@ The SSH agent supports the same master key configuration as the controller:
 
 ## Local Database Schema
 
-The SSH agent uses a local SQLite database (`agent-ssh.db` in the state directory) with the
-following table:
+The SSH agent uses a local SQLite database (`agent-ssh.db` in the state directory) with the following table:
 
 ### `ssh_hosts`
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT (UUID) | Primary key |
-| `name` | TEXT | Friendly name for the host |
-| `hostname` | TEXT | SSH hostname or IP address |
-| `port` | INTEGER | SSH port (default: 22) |
-| `username` | TEXT | SSH username |
-| `private_key` | TEXT | `EncryptedString` — SSH private key (AES-256-GCM) |
-| `key_type` | TEXT | Key algorithm: `ed25519` or `rsa` |
-| `host_key_fingerprint` | TEXT | Known host key (SHA-256), nullable |
-| `created_at` | INTEGER | Unix timestamp |
-| `updated_at` | INTEGER | Unix timestamp |
+| Column | Type | Description | |---|---|---| | `id` | TEXT (UUID) | Primary key | | `name` | TEXT | Friendly name for the host | | `hostname` | TEXT
+| SSH hostname or IP address | | `port` | INTEGER | SSH port (default: 22) | | `username` | TEXT | SSH username | | `private_key` | TEXT |
+`EncryptedString` — SSH private key (AES-256-GCM) | | `key_type` | TEXT | Key algorithm: `ed25519` or `rsa` | | `host_key_fingerprint` | TEXT | Known
+host key (SHA-256), nullable | | `created_at` | INTEGER | Unix timestamp | | `updated_at` | INTEGER | Unix timestamp |
 
 ## Service Type Registration
 
