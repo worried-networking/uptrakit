@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@skeletonlabs/skeleton": "^4.11.0",
+    "@skeletonlabs/skeleton": "^4.12.0",
     "@skeletonlabs/skeleton-svelte": "^4.11.0",
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.50.2",
