@@ -11,10 +11,12 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
 ## Implementation
 
 - `OutputFormat` enum in `crates/ui/cli/src/output.rs` — derives `clap::ValueEnum` and `Default` (`Human`).
-- `print_output<T: Serialize>(format, human_text, value)` — for typed commands (`auth status`, `auth token *`).
+- `print_output<T: Serialize>(format, human_text, value)` — for typed commands (`auth status`, `auth token *`,
+  `hosts`, `software-items`, `check`, `update`, `history`, `scheduler`).
 - `print_value(format, &serde_json::Value)` — for the `api` command which works with raw JSON values.
-- Each structured command defines a serializable response struct (e.g. `AuthStatusOutput`, `TokenCreateOutput`,
-  `TokenListOutput`, `TokenRevokeOutput`) in `commands/auth.rs`.
+- Each structured command uses server response types from `uptrakit-web-api-types` (e.g. `HostResponse`,
+  `SoftwareItemResponse`, `UpdateHistoryResponse`, `ScheduledTaskResponse`) for JSON/YAML output while building
+  human-readable table/detail text for the human format.
 - `auth login` is interactive and does not support `--output`.
 
 ## Version metadata output
@@ -43,4 +45,9 @@ uptrakit-cli auth status                     # human-readable (default)
 uptrakit-cli auth status -o json             # compact JSON
 uptrakit-cli auth token list --output yaml   # YAML
 uptrakit-cli api GET /api/v1/auth/me -o json # compact JSON for raw API calls
+uptrakit-cli hosts list -o json              # hosts as JSON
+uptrakit-cli history list --status failed    # filtered human-readable list
+uptrakit-cli scheduler show <ID> -o yaml     # scheduler task as YAML
 ```
+
+For the full command reference see [CLI Usage Guide](../end-user/cli-usage.md).

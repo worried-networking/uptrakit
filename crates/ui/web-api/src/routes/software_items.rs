@@ -29,7 +29,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
 pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
     SoftwareItemHostSummary, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
-    TriggerUpdateStatus, UpdateSoftwareItemRequest,
+    TriggerUpdateStatus, TriggerVersionCheckResponse, UpdateSoftwareItemRequest,
 };
 
 // --- Helpers ---
@@ -1218,6 +1218,315 @@ pub async fn trigger_update(
         status,
     };
 
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+/// Trigger a version check for a specific software item across all assigned hosts.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/{id}/check-versions",
+    params(("id" = String, Path, description = "Software item UUID")),
+    responses(
+        (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 404, description = "Software item not found or no agents")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn check_versions(
+    State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
+    };
+
+    // Verify software item exists and is active
+    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+        Some(i) => i,
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+    };
+
+    // Load provider config
+    let provider_config =
+        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
+            .await
+        {
+            Some(c) => c,
+            None => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Provider config not found",
+                );
+            }
+        };
+
+    let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
+        serde_json::Value::String(provider_config.provider_type.clone()),
+    ) {
+        Ok(pt) => pt,
+        Err(_) => {
+            tracing::error!("Unknown provider type: {}", provider_config.provider_type);
+            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
+        }
+    };
+
+    let config = match item.config_override.as_ref() {
+        Some(ovr) => crate::update_hooks::merge_config(&provider_config.config, Some(ovr)),
+        None => provider_config.config.clone(),
+    };
+
+    // Find all hosts assigned to this software item that have agents
+    let links = match HostSoftwareItem::find()
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .all(&state.db)
+        .await
+    {
+        Ok(links) => links,
+        Err(e) => {
+            tracing::error!("Failed to load software item hosts: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if links.is_empty() {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "No hosts assigned to this software item",
+        );
+    }
+
+    let assignment = uptrakit_internal_wire::VersionCheckAssignment {
+        software_item_id: item_id,
+        name: item.name.clone(),
+        provider_type,
+        package_identifier: item.package_identifier.clone(),
+        config,
+    };
+
+    let mut agents_notified: u32 = 0;
+    // Deduplicate agents (multiple hosts may share the same agent)
+    let mut seen_agents = std::collections::HashSet::new();
+
+    for link in &links {
+        // Find agent linked to this host
+        let agent_link = match ServiceHost::find()
+            .filter(service_host::Column::HostId.eq(link.host_id))
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(l)) => l,
+            _ => continue,
+        };
+
+        if !seen_agents.insert(agent_link.service_id) {
+            continue;
+        }
+
+        // Verify agent exists and is approved
+        let agent = match Service::find_by_id(agent_link.service_id)
+            .filter(service::Column::DeactivatedAt.is_null())
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(a)) if a.status == service::ServiceStatus::Approved => a,
+            _ => continue,
+        };
+
+        let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
+            uptrakit_internal_wire::CheckVersionsPayload {
+                assignments: vec![assignment.clone()],
+            },
+        );
+        state.notification_service.send(&agent.id, msg).await;
+        agents_notified += 1;
+    }
+
+    if agents_notified == 0 {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "No approved agents found for assigned hosts",
+        );
+    }
+
+    let resp = TriggerVersionCheckResponse {
+        agents_notified,
+        message: format!(
+            "Version check triggered for '{}' on {agents_notified} agent(s)",
+            item.name
+        ),
+    };
+    (StatusCode::OK, Json(resp)).into_response()
+}
+
+/// Trigger a version check for a specific software item on a specific host.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/{id}/hosts/{host_id}/check-versions",
+    params(
+        ("id" = String, Path, description = "Software item UUID"),
+        ("host_id" = String, Path, description = "Host UUID")
+    ),
+    responses(
+        (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 404, description = "Software item, host, or agent not found")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn check_versions_host(
+    State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path((id, host_id_str)): Path<(String, String)>,
+) -> Response {
+    if !user.has_permission(Permission::ManageSettings) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
+    };
+
+    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
+    };
+
+    // Verify software item exists and is active
+    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+        Some(i) => i,
+        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+    };
+
+    // Verify host exists and belongs to tenant
+    match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Err(e) => {
+            tracing::error!("Failed to lookup host: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    // Verify host is assigned to software item
+    match HostSoftwareItem::find_by_id((host_id, item_id))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "Host is not assigned to this software item",
+            );
+        }
+        Err(e) => {
+            tracing::error!("Failed to check host-software-item link: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    }
+
+    // Find agent linked to host
+    let agent_link = match ServiceHost::find()
+        .filter(service_host::Column::HostId.eq(host_id))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(l)) => l,
+        Ok(None) => {
+            return error_response(StatusCode::NOT_FOUND, "No agent linked to this host");
+        }
+        Err(e) => {
+            tracing::error!("Failed to find agent for host: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Verify agent exists and is approved
+    let agent = match Service::find_by_id(agent_link.service_id)
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(a)) => {
+            if a.status != service::ServiceStatus::Approved {
+                return error_response(StatusCode::BAD_REQUEST, "Agent is not approved");
+            }
+            a
+        }
+        Ok(None) => {
+            return error_response(StatusCode::NOT_FOUND, "Agent not found or deactivated");
+        }
+        Err(e) => {
+            tracing::error!("Failed to lookup agent: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Load provider config
+    let provider_config =
+        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
+            .await
+        {
+            Some(c) => c,
+            None => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Provider config not found",
+                );
+            }
+        };
+
+    let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
+        serde_json::Value::String(provider_config.provider_type.clone()),
+    ) {
+        Ok(pt) => pt,
+        Err(_) => {
+            tracing::error!("Unknown provider type: {}", provider_config.provider_type);
+            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
+        }
+    };
+
+    let config = match item.config_override.as_ref() {
+        Some(ovr) => crate::update_hooks::merge_config(&provider_config.config, Some(ovr)),
+        None => provider_config.config.clone(),
+    };
+
+    let assignment = uptrakit_internal_wire::VersionCheckAssignment {
+        software_item_id: item_id,
+        name: item.name.clone(),
+        provider_type,
+        package_identifier: item.package_identifier.clone(),
+        config,
+    };
+
+    let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
+        uptrakit_internal_wire::CheckVersionsPayload {
+            assignments: vec![assignment],
+        },
+    );
+    state.notification_service.send(&agent.id, msg).await;
+
+    let resp = TriggerVersionCheckResponse {
+        agents_notified: 1,
+        message: format!("Version check triggered for '{}' on 1 agent", item.name),
+    };
     (StatusCode::OK, Json(resp)).into_response()
 }
 

@@ -167,7 +167,7 @@ let output = executor
 1. `CommandSpec::resolve()` converts the spec to `(program, args)` regardless of mode. Shell mode
    specs are resolved to `(shell_executable, ["-c", wrapped_command])`.
 2. `build_remote_command_string()` shell-escapes every component with `shell_escape()` and joins
-   them into a single command string. When `working_dir` is set, it prepends `cd '<dir>' && `.
+   them into a single command string. When `working_dir` is set, it prepends `cd '<dir>' &&`.
 3. The command string is passed to `SshSession::exec_command_streaming()`, which runs it on the
    remote host and optionally streams output lines through an `mpsc::Sender<UpdateOutputLine>`.
 4. Transport errors map to `CommandError::CommandSpawn` and non-zero exit codes map to

@@ -75,7 +75,7 @@ uptrakit/
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler); ws module is pub(crate)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface
+│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface (auth, hosts, software-items, check, update, history, scheduler commands; human/JSON/YAML output)
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
@@ -302,6 +302,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Quality Gates](docs/development/quality-gates.md)
 - [Commit Messages](docs/development/commit-messages.md)
 - [CLI Output Formatting](docs/development/cli-output.md)
+- [CLI Usage Guide](docs/end-user/cli-usage.md)
 - [Graceful Restart](docs/development/graceful-restart.md)
 - [Cross-Controller Communication](docs/development/cross-controller-comm.md)
 - [Coding Standards (Error Handling)](docs/development/coding-standards.md)

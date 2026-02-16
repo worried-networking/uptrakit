@@ -25,7 +25,7 @@ pub use crate::hosts::{HostAgentSummary, HostResponse};
 // ── Software items ───────────────────────────────────────────────────
 pub use crate::software_items::{
     SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
-    TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus,
+    TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus, TriggerVersionCheckResponse,
 };
 
 // ── Provider configs ─────────────────────────────────────────────────

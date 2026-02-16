@@ -269,10 +269,10 @@ Ways users interact with the system.
 ### Web API
 
 - [ ] Expand REST API beyond MQTT connection status
-  - [ ] List hosts endpoint
-  - [ ] List software items endpoint
-  - [ ] Get software item details endpoint
-  - [ ] Trigger version check endpoint
+  - [x] List hosts endpoint
+  - [x] List software items endpoint
+  - [x] Get software item details endpoint
+  - [x] Trigger version check endpoint (per-item and per-item-per-host)
   - [x] Trigger update endpoint (POST /api/v1/software-items/{id}/hosts/{host_id}/update)
   - [x] Get update history endpoint
   - [ ] Get system status endpoint
@@ -320,20 +320,21 @@ Ways users interact with the system.
   - [x] Polls for authorization completion
   - [x] Stores API token locally on success
 - [x] Auth status and API token management (`auth status`, `auth token create/list/revoke`)
-- [ ] Design CLI command structure
-  - [ ] `uptrakit-cli hosts` - list hosts
-  - [ ] `uptrakit-cli software` - list software
-  - [ ] `uptrakit-cli check` - trigger version check
-  - [ ] `uptrakit-cli update` - trigger update
-  - [ ] `uptrakit-cli history` - view update history
+- [x] Design CLI command structure
+  - [x] `uptrakit-cli hosts` - list and show hosts
+  - [x] `uptrakit-cli software-items` - list and show software items
+  - [x] `uptrakit-cli check` - trigger version checks (all, installed, available)
+  - [x] `uptrakit-cli update` - trigger update
+  - [x] `uptrakit-cli history` - view update history (list with filters, show)
+  - [x] `uptrakit-cli scheduler` - list, show, and trigger scheduled tasks
   - [ ] `uptrakit-cli status` - system status
   - [ ] `uptrakit-cli agent` - various commands proxied to the agent. Plus
     `uptrakit-cli agent install` to install the agent locally
   - [ ] `uptrakit-cli controller` - various commands proxied to the controller. Plus
     `uptrakit-cli agent install` to install the agent locally
-- [ ] Implement CLI commands
+- [x] Implement CLI commands (hosts, software-items, check, update, history, scheduler)
 - [x] Add output formatting (table, JSON, YAML)
-- [ ] Implement filtering and query options
+- [x] Implement filtering and query options (history filters by host, software item, status)
 - [ ] Add interactive mode for confirmations
 - [ ] Support configuration file for CLI
 

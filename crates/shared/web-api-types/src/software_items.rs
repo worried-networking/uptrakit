@@ -137,3 +137,13 @@ pub struct TriggerUpdateResponse {
     pub update_history_id: String,
     pub status: TriggerUpdateStatus,
 }
+
+/// Response when triggering a version check for a software item.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TriggerVersionCheckResponse {
+    /// Number of agents that were notified.
+    pub agents_notified: u32,
+    /// Human-readable status message.
+    pub message: String,
+}

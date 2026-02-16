@@ -55,6 +55,69 @@ Software items link to `provider_config`s and host associations via `host_softwa
 
 Update history records each attempt (`status`: `pending`, `in_progress`, `completed`, `failed`) and stores the full command output for auditing.
 
+## Software Item Version Check Endpoints
+
+These endpoints trigger granular per-item version checks. Both require the `ManageSettings` permission.
+
+### `POST /api/v1/software-items/{id}/check-versions`
+
+Trigger a version check for a specific software item across all assigned hosts. The controller identifies all
+hosts linked to the item, resolves their agents, and sends `CheckVersions` wire messages.
+
+**Path parameters**: `id` — software item UUID.
+
+**Response** (`200`): `TriggerVersionCheckResponse`
+
+```json
+{
+  "agents_notified": 3,
+  "message": "Version check triggered for 3 agent(s)"
+}
+```
+
+**Error responses**:
+
+- `404` — software item not found or not active.
+- `404` — no hosts assigned to the software item.
+
+### `POST /api/v1/software-items/{id}/hosts/{host_id}/check-versions`
+
+Trigger a version check for a specific software item on a specific host. Validates the item-host link and sends
+a `CheckVersions` message to the host's agent.
+
+**Path parameters**: `id` — software item UUID, `host_id` — host UUID.
+
+**Response** (`200`): `TriggerVersionCheckResponse`
+
+```json
+{
+  "agents_notified": 1,
+  "message": "Version check triggered for 1 agent(s)"
+}
+```
+
+**Error responses**:
+
+- `404` — software item not found or not active.
+- `404` — host not found.
+- `404` — host is not assigned to this software item.
+- `404` — no agent found for this host.
+
+### Response types
+
+Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
+
+| Type | Fields |
+| --- | --- |
+| `TriggerVersionCheckResponse` | `agents_notified` (u32), `message` (String) |
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/software_items.rs` | Route handlers (`check_versions`, `check_versions_host`) |
+| `crates/shared/web-api-types/src/software_items.rs` | Response type |
+
 ## Scheduler Endpoints
 
 All scheduler endpoints require the `ManageSettings` permission.

@@ -282,6 +282,8 @@ pub struct AppState {
         routes::software_items::assign_hosts,
         routes::software_items::unassign_host,
         routes::software_items::trigger_update,
+        routes::software_items::check_versions,
+        routes::software_items::check_versions_host,
         routes::settings_ca::rotate_ca,
         routes::scheduler::list_scheduled_tasks,
         routes::scheduler::get_scheduled_task,
@@ -362,6 +364,7 @@ pub struct AppState {
             routes::software_items::TriggerUpdateRequest,
             routes::software_items::TriggerUpdateResponse,
             routes::software_items::TriggerUpdateStatus,
+            routes::software_items::TriggerVersionCheckResponse,
             routes::settings_ca::RotateCaResponse,
             routes::scheduler::ScheduledTaskResponse,
             routes::scheduler::UpdateScheduledTaskRequest,
@@ -514,6 +517,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::software_items::assign_hosts))
         .routes(routes!(routes::software_items::unassign_host))
         .routes(routes!(routes::software_items::trigger_update))
+        .routes(routes!(routes::software_items::check_versions))
+        .routes(routes!(routes::software_items::check_versions_host))
         .routes(routes!(routes::scheduler::list_scheduled_tasks))
         .routes(routes!(routes::scheduler::get_scheduled_task))
         .routes(routes!(routes::scheduler::update_scheduled_task))
