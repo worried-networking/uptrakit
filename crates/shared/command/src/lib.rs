@@ -1,5 +1,6 @@
 pub mod command;
 pub mod error;
+pub mod executor;
 pub mod types;
 
 pub use command::{
@@ -7,4 +8,7 @@ pub use command::{
     run_command_with_shell, run_command_with_shell_quiet, send_output, shell_escape,
 };
 pub use error::{CommandError, Result};
+pub use executor::{
+    CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
+};
 pub use types::{ShellType, UpdateOutputLine, UpdateOutputStream};

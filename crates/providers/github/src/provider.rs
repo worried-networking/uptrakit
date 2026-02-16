@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
@@ -5,7 +7,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::mpsc;
 
-use uptrakit_provider_core::command::{run_command, send_output, shell_escape};
+use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_provider_core::{
     Provider, ProviderError, ProviderType, ReleaseAsset, ReleaseInfo, UpdateOutputLine,
     UpdateOutputStream, UpstreamRelease, Version,
@@ -24,13 +26,14 @@ pub struct GitHubProvider {
     client: reqwest::Client,
     config: GitHubConfig,
     asset_filters: Vec<Regex>,
+    executor: Arc<dyn CommandExecutor>,
 }
 
 impl GitHubProvider {
     /// Create a new `GitHubProvider` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles asset filter regexes.
-    pub fn new(config: GitHubConfig) -> Result<Self> {
+    pub fn new(config: GitHubConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(GitHubError::Configuration(e.to_string())))?;
@@ -84,6 +87,7 @@ impl GitHubProvider {
             client,
             config,
             asset_filters,
+            executor,
         })
     }
 
@@ -301,9 +305,13 @@ impl Provider for GitHubProvider {
             )
             .await;
 
-            match run_command(&cmd, output_tx).await {
+            match self
+                .executor
+                .execute(&CommandSpec::shell(&cmd), output_tx)
+                .await
+            {
                 Ok(cmd_output) => {
-                    output.push_str(&cmd_output);
+                    output.push_str(&cmd_output.output);
                 }
                 Err(e) => {
                     bail!(ProviderError::InstallFailed(e.to_string()));
@@ -328,6 +336,7 @@ mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
     use tokio::sync::mpsc;
+    use uptrakit_provider_core::LocalCommandExecutor;
 
     fn test_config() -> GitHubConfig {
         GitHubConfig {
@@ -342,8 +351,12 @@ mod tests {
         }
     }
 
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
+
     fn test_provider() -> GitHubProvider {
-        GitHubProvider::new(test_config()).expect("valid config")
+        GitHubProvider::new(test_config(), test_executor()).expect("valid config")
     }
 
     fn make_release(tag: &str, draft: bool, prerelease: bool) -> GitHubRelease {
@@ -388,7 +401,7 @@ mod tests {
     fn include_prerelease_when_configured() {
         let mut config = test_config();
         config.include_prereleases = true;
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
         let gh = make_release("v1.0.0-beta.1", false, true);
         let release = provider.convert_release(&gh).expect("should convert");
         assert!(release.is_prerelease);
@@ -415,7 +428,7 @@ mod tests {
     fn custom_tag_prefix() {
         let mut config = test_config();
         config.tag_strip_prefix = "release-".to_string();
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
         let gh = make_release("release-3.0.0", false, false);
         let release = provider.convert_release(&gh).expect("should convert");
         assert_eq!(release.version.as_str(), "3.0.0");
@@ -425,7 +438,7 @@ mod tests {
     fn asset_filtering() {
         let mut config = test_config();
         config.asset_patterns = vec![r".*\.tar\.gz$".to_string()];
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
 
         let gh = GitHubRelease {
             tag_name: "v1.0.0".to_string(),
@@ -507,7 +520,7 @@ mod tests {
     fn url_construction_custom_base() {
         let mut config = test_config();
         config.api_base_url = Some("https://ghe.corp.com/api/v3".to_string());
-        let provider = GitHubProvider::new(config).expect("valid config");
+        let provider = GitHubProvider::new(config, test_executor()).expect("valid config");
         let url = provider.releases_url();
         assert_eq!(
             url,
@@ -556,7 +569,7 @@ mod tests {
             asset_patterns: config.asset_patterns,
             install_command: config.install_command,
         };
-        assert!(GitHubProvider::new(config).is_err());
+        assert!(GitHubProvider::new(config, test_executor()).is_err());
     }
 
     #[tokio::test]

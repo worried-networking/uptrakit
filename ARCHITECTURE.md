@@ -24,6 +24,8 @@ certificate renewal) across controller instances using optimistic locking for HA
 
 - Provider development expectations: [docs/development/provider-guidelines.md](docs/development/provider-guidelines.md)
 
+- Command executor abstraction: [docs/development/command-executor.md](docs/development/command-executor.md)
+
 ## Project layout
 
 - Rust workspace (`resolver = "3"`) under `crates/*/*` for controller, agent, SSH agent, MQTT service, providers, shared libraries, and CLI/web API.

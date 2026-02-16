@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
-use uptrakit_provider_core::command::{run_command_exec, send_output};
+use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_provider_core::{
     DiscoveredSoftware, Provider, ProviderCapability, ProviderError, ProviderType, ReleaseInfo,
     Result, UpdateOutputLine, UpdateOutputStream, UpstreamRelease, Version,
@@ -15,12 +17,13 @@ use crate::config::{HomebrewConfig, HomebrewPackageType};
 /// is the Homebrew formula/cask name (e.g., `wget`, `firefox`).
 pub struct HomebrewProvider {
     config: HomebrewConfig,
+    executor: Arc<dyn CommandExecutor>,
 }
 
 impl HomebrewProvider {
     /// Create a new Homebrew provider with the given configuration.
-    pub fn new(config: HomebrewConfig) -> Self {
-        Self { config }
+    pub fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Self {
+        Self { config, executor }
     }
 
     /// Parse the installed version from `brew info --json=v2` output for a
@@ -167,8 +170,9 @@ impl Provider for HomebrewProvider {
 
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing Homebrew package index");
-        let (tx, _rx) = mpsc::channel(1);
-        let (_output, exit_code) = run_command_exec("brew", &["update".to_string()], None, &tx)
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec("brew", ["update".to_string()]))
             .await
             .map_err(|e| {
                 report!(ProviderError::ProviderInternal(format!(
@@ -176,8 +180,8 @@ impl Provider for HomebrewProvider {
                 )))
             })?;
 
-        if exit_code != 0 {
-            bail!(ProviderError::CommandFailed(exit_code));
+        if cmd_output.exit_code != 0 {
+            bail!(ProviderError::CommandFailed(cmd_output.exit_code));
         }
 
         tracing::info!("Homebrew package index refreshed");
@@ -189,29 +193,28 @@ impl Provider for HomebrewProvider {
             is_cask = self.is_cask(),
             "discovering installed Homebrew packages"
         );
-        let (tx, _rx) = mpsc::channel(1);
-        let (output, exit_code) = run_command_exec(
-            "brew",
-            &[
-                "info".to_string(),
-                "--installed".to_string(),
-                "--json=v2".to_string(),
-            ],
-            None,
-            &tx,
-        )
-        .await
-        .map_err(|e| {
-            report!(ProviderError::ProviderInternal(format!(
-                "brew info failed: {e}"
-            )))
-        })?;
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "brew",
+                [
+                    "info".to_string(),
+                    "--installed".to_string(),
+                    "--json=v2".to_string(),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                report!(ProviderError::ProviderInternal(format!(
+                    "brew info failed: {e}"
+                )))
+            })?;
 
-        if exit_code != 0 {
-            bail!(ProviderError::CommandFailed(exit_code));
+        if cmd_output.exit_code != 0 {
+            bail!(ProviderError::CommandFailed(cmd_output.exit_code));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
+        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
             report!(ProviderError::ProviderInternal(format!(
                 "failed to parse brew info JSON: {e}"
             )))
@@ -222,29 +225,28 @@ impl Provider for HomebrewProvider {
 
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
-        let (tx, _rx) = mpsc::channel(1);
-        let (output, exit_code) = run_command_exec(
-            "brew",
-            &[
-                "info".to_string(),
-                "--json=v2".to_string(),
-                package_identifier.to_string(),
-            ],
-            None,
-            &tx,
-        )
-        .await
-        .map_err(|e| {
-            report!(ProviderError::ProviderInternal(format!(
-                "brew info failed: {e}"
-            )))
-        })?;
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "brew",
+                [
+                    "info".to_string(),
+                    "--json=v2".to_string(),
+                    package_identifier.to_string(),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                report!(ProviderError::ProviderInternal(format!(
+                    "brew info failed: {e}"
+                )))
+            })?;
 
-        if exit_code != 0 {
-            bail!(ProviderError::CommandFailed(exit_code));
+        if cmd_output.exit_code != 0 {
+            bail!(ProviderError::CommandFailed(cmd_output.exit_code));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
+        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
             report!(ProviderError::ProviderInternal(format!(
                 "failed to parse brew info JSON: {e}"
             )))
@@ -258,29 +260,28 @@ impl Provider for HomebrewProvider {
 
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
-        let (tx, _rx) = mpsc::channel(1);
-        let (output, exit_code) = run_command_exec(
-            "brew",
-            &[
-                "info".to_string(),
-                "--json=v2".to_string(),
-                package_identifier.to_string(),
-            ],
-            None,
-            &tx,
-        )
-        .await
-        .map_err(|e| {
-            report!(ProviderError::ProviderInternal(format!(
-                "brew info failed: {e}"
-            )))
-        })?;
+        let cmd_output = self
+            .executor
+            .execute_quiet(&CommandSpec::exec(
+                "brew",
+                [
+                    "info".to_string(),
+                    "--json=v2".to_string(),
+                    package_identifier.to_string(),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                report!(ProviderError::ProviderInternal(format!(
+                    "brew info failed: {e}"
+                )))
+            })?;
 
-        if exit_code != 0 {
-            bail!(ProviderError::CommandFailed(exit_code));
+        if cmd_output.exit_code != 0 {
+            bail!(ProviderError::CommandFailed(cmd_output.exit_code));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&output).map_err(|e| {
+        let json: serde_json::Value = serde_json::from_str(&cmd_output.output).map_err(|e| {
             report!(ProviderError::ProviderInternal(format!(
                 "failed to parse brew info JSON: {e}"
             )))
@@ -358,10 +359,12 @@ impl Provider for HomebrewProvider {
         .await;
         output.push_str(&format!("Running: brew {}\n", args.join(" ")));
 
-        let (cmd_output, _exit_code) = run_command_exec("brew", &args, None, output_tx)
+        let cmd_output = self
+            .executor
+            .execute(&CommandSpec::exec("brew", args), output_tx)
             .await
             .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output);
+        output.push_str(&cmd_output.output);
 
         Ok(output)
     }
@@ -370,8 +373,13 @@ impl Provider for HomebrewProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_provider_core::LocalCommandExecutor;
 
     // ── Sample `brew info --json=v2` output for a formula ───────────────
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
 
     fn sample_formula_json() -> serde_json::Value {
         serde_json::json!({
@@ -577,7 +585,7 @@ mod tests {
 
     #[test]
     fn homebrew_provider_capabilities() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default());
+        let provider = HomebrewProvider::new(HomebrewConfig::default(), test_executor());
         assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
         assert!(provider.has_capability(ProviderCapability::RefreshPackageIndex));
         assert_eq!(provider.capabilities().len(), 2);
@@ -585,14 +593,14 @@ mod tests {
 
     #[tokio::test]
     async fn homebrew_provider_detect_installed_empty_identifier_fails() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default());
+        let provider = HomebrewProvider::new(HomebrewConfig::default(), test_executor());
         let result = provider.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn homebrew_provider_fetch_releases_empty_identifier_fails() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default());
+        let provider = HomebrewProvider::new(HomebrewConfig::default(), test_executor());
         let result = provider.fetch_releases("").await;
         assert!(result.is_err());
     }

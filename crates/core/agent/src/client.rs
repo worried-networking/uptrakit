@@ -253,6 +253,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                             ControllerMessage::CheckVersions(payload) => {
                                 tracing::info!(count = payload.assignments.len(), "received CheckVersions request");
 
+                                let executor: std::sync::Arc<dyn uptrakit_command::CommandExecutor> =
+                                    std::sync::Arc::new(uptrakit_command::LocalCommandExecutor);
+
                                 // Pre-refresh package indexes for provider types that support it.
                                 // Deduplicate by provider type so we only refresh once per type.
                                 {
@@ -264,6 +267,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                         if let Ok(provider) = uptrakit_provider_registry::ProviderRegistry::create_provider(
                                             assignment.provider_type.clone(),
                                             &assignment.config,
+                                            std::sync::Arc::clone(&executor),
                                         ) && provider.has_capability(uptrakit_provider_registry::ProviderCapability::RefreshPackageIndex) {
                                             tracing::info!(provider_type = %assignment.provider_type, "refreshing package index");
                                             if let Err(e) = provider.refresh_package_index().await {
@@ -276,23 +280,27 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
                                 use futures_util::stream::{self, StreamExt};
                                 let results: Vec<VersionCheckResult> = stream::iter(payload.assignments)
-                                    .map(|assignment| async move {
-                                        tracing::debug!(
-                                            software_item_id = %assignment.software_item_id,
-                                            name = %assignment.name,
-                                            provider_type = %assignment.provider_type,
-                                            "checking version"
-                                        );
-                                        let outcome = crate::version_check::check_version(
-                                            assignment.provider_type,
-                                            &assignment.config,
-                                            &assignment.package_identifier,
-                                        ).await;
-                                        VersionCheckResult {
-                                            software_item_id: assignment.software_item_id,
-                                            installed_version: outcome.installed_version,
-                                            latest_version: outcome.latest_version,
-                                            error: outcome.error,
+                                    .map(|assignment| {
+                                        let executor = std::sync::Arc::clone(&executor);
+                                        async move {
+                                            tracing::debug!(
+                                                software_item_id = %assignment.software_item_id,
+                                                name = %assignment.name,
+                                                provider_type = %assignment.provider_type,
+                                                "checking version"
+                                            );
+                                            let outcome = crate::version_check::check_version(
+                                                assignment.provider_type,
+                                                &assignment.config,
+                                                &assignment.package_identifier,
+                                                executor,
+                                            ).await;
+                                            VersionCheckResult {
+                                                software_item_id: assignment.software_item_id,
+                                                installed_version: outcome.installed_version,
+                                                latest_version: outcome.latest_version,
+                                                error: outcome.error,
+                                            }
                                         }
                                     })
                                     .buffer_unordered(8)

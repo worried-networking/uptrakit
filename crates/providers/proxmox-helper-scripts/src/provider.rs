@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
-use uptrakit_provider_core::command::{run_command_exec, send_output};
+use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_provider_core::{
     Provider, ProviderCapability, ProviderError, ProviderType, ReleaseInfo, Result,
     UpdateOutputLine, UpdateOutputStream, Version,
@@ -14,12 +16,13 @@ use crate::config::ProxmoxHelperScriptsConfig;
 /// Executes updates by running the helper script via `curl | bash`.
 pub struct ProxmoxHelperScriptsProvider {
     config: ProxmoxHelperScriptsConfig,
+    executor: Arc<dyn CommandExecutor>,
 }
 
 impl ProxmoxHelperScriptsProvider {
     /// Create a new Proxmox Helper Scripts provider with the given configuration.
-    pub fn new(config: ProxmoxHelperScriptsConfig) -> Self {
-        Self { config }
+    pub fn new(config: ProxmoxHelperScriptsConfig, executor: Arc<dyn CommandExecutor>) -> Self {
+        Self { config, executor }
     }
 }
 
@@ -57,20 +60,23 @@ impl Provider for ProxmoxHelperScriptsProvider {
 
         // Run the helper script via bash, passing the URL as a positional argument
         // (`$1`) to avoid shell interpretation of the URL string.
-        let (cmd_output, _exit_code) = run_command_exec(
-            "bash",
-            &[
-                "-c".to_string(),
-                "set -euo pipefail\ncurl -fsSL -- \"$1\" | bash -s -- --update".to_string(),
-                "--".to_string(),
-                script_url.to_string(),
-            ],
-            None,
-            output_tx,
-        )
-        .await
-        .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output);
+        let cmd_output = self
+            .executor
+            .execute(
+                &CommandSpec::exec(
+                    "bash",
+                    [
+                        "-c".to_string(),
+                        "set -euo pipefail\ncurl -fsSL -- \"$1\" | bash -s -- --update".to_string(),
+                        "--".to_string(),
+                        script_url.to_string(),
+                    ],
+                ),
+                output_tx,
+            )
+            .await
+            .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
 
         Ok(output)
     }
@@ -79,6 +85,11 @@ impl Provider for ProxmoxHelperScriptsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_provider_core::LocalCommandExecutor;
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
 
     fn test_config() -> ProxmoxHelperScriptsConfig {
         ProxmoxHelperScriptsConfig {
@@ -88,7 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
-        let provider = ProxmoxHelperScriptsProvider::new(test_config());
+        let provider = ProxmoxHelperScriptsProvider::new(test_config(), test_executor());
         let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }

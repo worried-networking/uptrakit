@@ -58,14 +58,14 @@ uptrakit/
 │   │   │   └── src/scheduler/          #   Centralised DB-backed task scheduler (HA-safe optimistic locking)
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
-│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions, SecretMasking trait (re-exports shared types; delegates command execution to uptrakit-command)
+│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions, SecretMasking trait (re-exports shared types and CommandExecutor from uptrakit-command)
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── homebrew/                   # uptrakit-provider-homebrew              (lib)  — Homebrew formulae/cask provider
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
-│   │   ├── command/                    # uptrakit-command                       (lib)  — shell command execution (shell_escape, run_command_*, run_command_*_quiet)
+│   │   ├── command/                    # uptrakit-command                       (lib)  — shell command execution, CommandExecutor trait + LocalCommandExecutor (injected into providers for transport-agnostic command dispatch)
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
@@ -303,6 +303,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Coding Standards (Error Handling)](docs/development/coding-standards.md)
 - [Testing Expectations](docs/development/testing.md)
 - [Provider Guidelines](docs/development/provider-guidelines.md)
+- [Command Executor](docs/development/command-executor.md)
 - [Update Hooks](docs/development/update-hooks.md)
 - [Service Lifecycle](docs/development/service-lifecycle.md)
 

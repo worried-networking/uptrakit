@@ -16,10 +16,14 @@
 //! - **Sh**: `set -eu` (exit on error, undefined vars)
 //! - **PowerShell** (future): `$ErrorActionPreference = 'Stop'`
 
+use std::sync::Arc;
+
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
-use uptrakit_command::{UpdateOutputLine, UpdateOutputStream};
+use uptrakit_command::{
+    CommandExecutor, LocalCommandExecutor, UpdateOutputLine, UpdateOutputStream,
+};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
@@ -81,9 +85,10 @@ pub async fn execute_update(
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateExecutionResult {
     let update_history_id = payload.update_history_id;
+    let executor: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
 
     // Detect current version (from_version)
-    let from_version = detect_current_version(&payload).await;
+    let from_version = detect_current_version(&payload, Arc::clone(&executor)).await;
 
     let mut accumulated_output = String::new();
     let mut final_error: Option<String> = None;
@@ -139,7 +144,7 @@ pub async fn execute_update(
         )
         .await;
 
-        match execute_provider_update(&payload, &output_tx).await {
+        match execute_provider_update(&payload, &output_tx, Arc::clone(&executor)).await {
             Ok(output) => {
                 append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
             }
@@ -198,7 +203,7 @@ pub async fn execute_update(
             )
             .await;
             // Detect new version after update
-            detect_current_version(&payload).await
+            detect_current_version(&payload, Arc::clone(&executor)).await
         }
         Ok(Err(e)) => {
             final_status = UpdateFinalStatus::Failed;
@@ -237,11 +242,15 @@ pub async fn execute_update(
 }
 
 /// Detect the current version of a software item by delegating to the provider registry.
-async fn detect_current_version(payload: &ExecuteUpdatePayload) -> Option<String> {
+async fn detect_current_version(
+    payload: &ExecuteUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
+) -> Option<String> {
     let outcome = crate::version_check::check_version(
         payload.provider_type.clone(),
         &payload.provider_config,
         &payload.package_identifier,
+        executor,
     )
     .await;
     if let Some(e) = outcome.error {
@@ -258,10 +267,14 @@ async fn detect_current_version(payload: &ExecuteUpdatePayload) -> Option<String
 async fn execute_provider_update(
     payload: &ExecuteUpdatePayload,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
+    executor: Arc<dyn CommandExecutor>,
 ) -> UpdateResult<String> {
-    let provider =
-        ProviderRegistry::create_provider(payload.provider_type.clone(), &payload.provider_config)
-            .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
+    let provider = ProviderRegistry::create_provider(
+        payload.provider_type.clone(),
+        &payload.provider_config,
+        executor,
+    )
+    .map_err(|e| report!(UpdateError::InstallFailed(e.to_string())))?;
 
     // Bridge provider output (UpdateOutputLine) -> agent output (UpdateOutputMessage)
     let (provider_tx, mut provider_rx) = mpsc::channel::<UpdateOutputLine>(100);
@@ -491,6 +504,10 @@ mod tests {
 
     // ── detect_current_version tests ────────────────────────────────────────
 
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
+
     #[tokio::test]
     async fn detect_current_version_delegates_to_provider() {
         let payload = ExecuteUpdatePayload {
@@ -507,7 +524,7 @@ mod tests {
             timeout_seconds: 60,
         };
         // The GitHub stub provider returns None for installed version.
-        let result = detect_current_version(&payload).await;
+        let result = detect_current_version(&payload, test_executor()).await;
         assert!(result.is_none());
     }
 
@@ -527,7 +544,7 @@ mod tests {
             timeout_seconds: 60,
         };
         // Invalid config should log a warning and return None.
-        let result = detect_current_version(&payload).await;
+        let result = detect_current_version(&payload, test_executor()).await;
         assert!(result.is_none());
     }
 }

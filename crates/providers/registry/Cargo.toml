@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 uptrakit-shared-types = { path = "../../shared/types" }
+uptrakit-command = { path = "../../shared/command" }
 uptrakit-provider-core = { path = "../core" }
 uptrakit-provider-github = { path = "../github" }
 uptrakit-provider-docker-registry = { path = "../docker-registry" }

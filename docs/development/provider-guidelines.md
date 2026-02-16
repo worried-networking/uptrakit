@@ -17,6 +17,16 @@ on `ProviderType`. Document provider behavior so the registry can continue to va
 `ProviderType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use `s.parse::<ProviderType>()` to convert strings (returns
 `ParseProviderTypeError` on failure). The string representations are: `github_releases`, `proxmox_helper_scripts`, `docker_registry`, `homebrew`.
 
+## Command Executor Injection
+
+Providers do not spawn processes directly. Instead, each provider receives an `Arc<dyn CommandExecutor>` at construction
+time and delegates all command execution through that trait. This decouples provider logic from the execution transport,
+enabling the same provider code to run commands locally (via `LocalCommandExecutor`) or remotely (e.g., over SSH in the
+future).
+
+See [Command Executor](command-executor.md) for the full trait reference, `CommandSpec` constructors, and guidance on
+implementing custom executors.
+
 ## Provider Trait: Required Methods
 
 The `Provider` trait (`crates/providers/core/src/traits.rs`) defines the contract for all provider implementations. Two methods are required (no
@@ -48,8 +58,9 @@ Provider crates:
 | Crate | Path | Purpose | | :----------------------------------------- | :----------------------------------------- |
 :-------------------------------------------------------------------------------------------------------------------- | | `uptrakit-shared-types` |
 `crates/shared/types/` | Canonical home for `ProviderType`, `ReleaseAsset`, and `ReleaseInfo` (plus `SecretString`, hex helpers). | |
-`uptrakit-command` | `crates/shared/command/` | Shell command execution and streaming utilities. | | `uptrakit-provider-core` |
-`crates/providers/core/` | Provider trait/abstractions; re-exports shared types; delegates commands. | | `uptrakit-provider-registry` |
+`uptrakit-command` | `crates/shared/command/` | Shell execution, `CommandExecutor` trait, `CommandSpec`, `LocalCommandExecutor`. | |
+`uptrakit-provider-core` |
+`crates/providers/core/` | Provider trait/abstractions; re-exports shared types and executor types. | | `uptrakit-provider-registry` |
 `crates/providers/registry/` | Centralized provider dispatch and validation; re-exports `ProviderType`. | | `uptrakit-provider-docker-registry` |
 `crates/providers/docker-registry/` | Docker/OCI Registry: tracks image tags. | | `uptrakit-provider-github` | `crates/providers/github/` | GitHub
 Releases: fetches metadata; agent installs. | | `uptrakit-provider-homebrew` | `crates/providers/homebrew/` | Homebrew: agent-side version tracking
@@ -58,7 +69,7 @@ helper scripts. |
 
 The **Provider Registry** crate centralizes all provider operations:
 
-- `ProviderRegistry::create_provider()` — creates `Provider` instances from `ProviderType` and config
+- `ProviderRegistry::create_provider()` — creates `Provider` instances from `ProviderType`, config, and an `Arc<dyn CommandExecutor>`
 - `ProviderRegistry::validate_config()` — validates provider configuration JSON
 - `ProviderRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for API responses (delegates to the `SecretMasking`
   trait implemented on each config struct)

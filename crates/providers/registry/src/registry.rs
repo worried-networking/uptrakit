@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use rootcause::prelude::*;
 
+use uptrakit_command::CommandExecutor;
 use uptrakit_provider_core::{Provider, ProviderType, SecretMasking};
 use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
@@ -38,18 +41,19 @@ fn restore_secrets_for<T: SecretMasking>(
 /// Provider registry for creating and validating providers.
 ///
 /// This struct provides a centralized API for:
-/// - Creating provider instances from type and config
+/// - Creating provider instances from type, config, and executor
 /// - Validating provider configuration
 /// - Masking and restoring secrets in configuration
 pub struct ProviderRegistry;
 
 impl ProviderRegistry {
-    /// Create a provider instance from provider type and config.
+    /// Create a provider instance from provider type, config, and executor.
     ///
     /// # Arguments
     ///
     /// * `provider_type` - The type of provider to create
     /// * `config` - Provider configuration as JSON
+    /// * `executor` - The command executor to inject into the provider
     ///
     /// # Returns
     ///
@@ -57,19 +61,20 @@ impl ProviderRegistry {
     pub fn create_provider(
         provider_type: ProviderType,
         config: &serde_json::Value,
+        executor: Arc<dyn CommandExecutor>,
     ) -> Result<Box<dyn Provider>> {
         match provider_type {
             ProviderType::GithubReleases => {
                 let github_config: GitHubConfig =
                     serde_json::from_value(config.clone()).context_to()?;
-                let provider = GitHubProvider::new(github_config)
+                let provider = GitHubProvider::new(github_config, executor)
                     .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::DockerRegistry => {
                 let docker_config: DockerRegistryConfig =
                     serde_json::from_value(config.clone()).context_to()?;
-                let provider = DockerRegistryProvider::new(docker_config)
+                let provider = DockerRegistryProvider::new(docker_config, executor)
                     .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
@@ -79,13 +84,13 @@ impl ProviderRegistry {
                 proxmox_config
                     .validate()
                     .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;
-                let provider = ProxmoxHelperScriptsProvider::new(proxmox_config);
+                let provider = ProxmoxHelperScriptsProvider::new(proxmox_config, executor);
                 Ok(Box::new(provider))
             }
             ProviderType::Homebrew => {
                 let homebrew_config: HomebrewConfig =
                     serde_json::from_value(config.clone()).context_to()?;
-                let provider = HomebrewProvider::new(homebrew_config);
+                let provider = HomebrewProvider::new(homebrew_config, executor);
                 Ok(Box::new(provider))
             }
             _ => Err(report!(RegistryError::UnknownProviderType(format!(
@@ -238,6 +243,11 @@ impl ProviderRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_command::LocalCommandExecutor;
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
 
     #[test]
     fn parse_known_provider_types() {
@@ -334,7 +344,11 @@ mod tests {
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let provider = ProviderRegistry::create_provider(ProviderType::GithubReleases, &config);
+        let provider = ProviderRegistry::create_provider(
+            ProviderType::GithubReleases,
+            &config,
+            test_executor(),
+        );
         assert!(provider.is_ok());
     }
 
@@ -343,29 +357,38 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let provider = ProviderRegistry::create_provider(ProviderType::DockerRegistry, &config);
+        let provider = ProviderRegistry::create_provider(
+            ProviderType::DockerRegistry,
+            &config,
+            test_executor(),
+        );
         assert!(provider.is_ok());
     }
 
     #[test]
     fn create_provider_proxmox() {
         let config = serde_json::json!({"script_url": "https://example.com/update.sh"});
-        let provider =
-            ProviderRegistry::create_provider(ProviderType::ProxmoxHelperScripts, &config);
+        let provider = ProviderRegistry::create_provider(
+            ProviderType::ProxmoxHelperScripts,
+            &config,
+            test_executor(),
+        );
         assert!(provider.is_ok());
     }
 
     #[test]
     fn create_provider_homebrew() {
         let config = serde_json::json!({});
-        let provider = ProviderRegistry::create_provider(ProviderType::Homebrew, &config);
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Homebrew, &config, test_executor());
         assert!(provider.is_ok());
     }
 
     #[test]
     fn create_provider_homebrew_cask() {
         let config = serde_json::json!({"package_type": "cask"});
-        let provider = ProviderRegistry::create_provider(ProviderType::Homebrew, &config);
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Homebrew, &config, test_executor());
         assert!(provider.is_ok());
     }
 
@@ -390,7 +413,9 @@ mod tests {
     #[test]
     fn homebrew_provider_capabilities() {
         let config = serde_json::json!({});
-        let provider = ProviderRegistry::create_provider(ProviderType::Homebrew, &config).unwrap();
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Homebrew, &config, test_executor())
+                .unwrap();
         assert!(
             provider
                 .has_capability(uptrakit_provider_core::ProviderCapability::DiscoverLocalSoftware)
@@ -404,26 +429,39 @@ mod tests {
     #[test]
     fn boxed_provider_preserves_type() {
         let github_config = serde_json::json!({"owner": "octocat", "repo": "hello-world"});
-        let github =
-            ProviderRegistry::create_provider(ProviderType::GithubReleases, &github_config)
-                .expect("create github");
+        let github = ProviderRegistry::create_provider(
+            ProviderType::GithubReleases,
+            &github_config,
+            test_executor(),
+        )
+        .expect("create github");
         assert_eq!(github.provider_type(), ProviderType::GithubReleases);
 
         let docker_config = serde_json::json!({"image": "nginx"});
-        let docker =
-            ProviderRegistry::create_provider(ProviderType::DockerRegistry, &docker_config)
-                .expect("create docker");
+        let docker = ProviderRegistry::create_provider(
+            ProviderType::DockerRegistry,
+            &docker_config,
+            test_executor(),
+        )
+        .expect("create docker");
         assert_eq!(docker.provider_type(), ProviderType::DockerRegistry);
 
         let proxmox_config = serde_json::json!({"script_url": "https://example.com/update.sh"});
-        let proxmox =
-            ProviderRegistry::create_provider(ProviderType::ProxmoxHelperScripts, &proxmox_config)
-                .expect("create proxmox");
+        let proxmox = ProviderRegistry::create_provider(
+            ProviderType::ProxmoxHelperScripts,
+            &proxmox_config,
+            test_executor(),
+        )
+        .expect("create proxmox");
         assert_eq!(proxmox.provider_type(), ProviderType::ProxmoxHelperScripts);
 
         let homebrew_config = serde_json::json!({});
-        let homebrew = ProviderRegistry::create_provider(ProviderType::Homebrew, &homebrew_config)
-            .expect("create homebrew");
+        let homebrew = ProviderRegistry::create_provider(
+            ProviderType::Homebrew,
+            &homebrew_config,
+            test_executor(),
+        )
+        .expect("create homebrew");
         assert_eq!(homebrew.provider_type(), ProviderType::Homebrew);
     }
 

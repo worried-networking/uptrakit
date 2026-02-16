@@ -49,7 +49,7 @@ pub async fn send_output(
 ///
 /// When `output_tx` is `Some`, each line is sent to the channel.
 /// When `None`, lines are still accumulated but not streamed.
-async fn run_command_exec_impl(
+pub(crate) async fn run_command_exec_impl(
     program: &str,
     args: &[String],
     working_dir: Option<&str>,
@@ -182,7 +182,7 @@ pub async fn run_command_exec_quiet(
 /// - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
 /// - **Sh**: `set -eu` (exit on error, undefined vars)
 /// - **PowerShell**: `$ErrorActionPreference = 'Stop'`
-fn wrap_command_for_shell(cmd: &str, shell: ShellType) -> String {
+pub(crate) fn wrap_command_for_shell(cmd: &str, shell: ShellType) -> String {
     match shell {
         ShellType::Bash => format!("set -euo pipefail\n{cmd}"),
         ShellType::Sh => format!("set -eu\n{cmd}"),
@@ -191,7 +191,7 @@ fn wrap_command_for_shell(cmd: &str, shell: ShellType) -> String {
 }
 
 /// Get the shell executable and arguments for a given shell type.
-fn get_shell_args(shell: ShellType) -> (&'static str, &'static str) {
+pub(crate) fn get_shell_args(shell: ShellType) -> (&'static str, &'static str) {
     match shell {
         ShellType::Bash => ("bash", "-c"),
         ShellType::Sh => ("sh", "-c"),

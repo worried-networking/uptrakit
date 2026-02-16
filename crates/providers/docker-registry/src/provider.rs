@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
 use tokio::sync::mpsc;
 
-use uptrakit_provider_core::command::{run_command, run_command_exec, send_output, shell_escape};
+use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_provider_core::{
     Provider, ProviderError, ProviderType, ReleaseInfo, UpdateOutputLine, UpdateOutputStream,
     UpstreamRelease, Version,
@@ -24,13 +26,14 @@ pub struct DockerRegistryProvider {
     config: DockerRegistryConfig,
     registry_client: RegistryClient,
     tag_filters: Vec<Regex>,
+    executor: Arc<dyn CommandExecutor>,
 }
 
 impl DockerRegistryProvider {
     /// Create a new `DockerRegistryProvider` from the given configuration.
     ///
     /// Validates the configuration and pre-compiles tag filter regexes.
-    pub fn new(config: DockerRegistryConfig) -> Result<Self> {
+    pub fn new(config: DockerRegistryConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
         config
             .validate()
             .map_err(|e| report!(DockerRegistryError::Configuration(e.to_string())))?;
@@ -53,6 +56,7 @@ impl DockerRegistryProvider {
             config,
             registry_client,
             tag_filters,
+            executor,
         })
     }
 
@@ -174,11 +178,15 @@ impl Provider for DockerRegistryProvider {
         // Pull the new image using direct exec (no shell) to prevent injection
         // via crafted image names or tag values.
         let image_ref = format!("{image}:{tag}");
-        let (cmd_output, _exit_code) =
-            run_command_exec("docker", &["pull".to_string(), image_ref], None, output_tx)
-                .await
-                .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output);
+        let cmd_output = self
+            .executor
+            .execute(
+                &CommandSpec::exec("docker", ["pull".to_string(), image_ref]),
+                output_tx,
+            )
+            .await
+            .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
+        output.push_str(&cmd_output.output);
 
         if let Some(ref cmd_str) = self.config.restart_command {
             let cmd = cmd_str
@@ -193,9 +201,13 @@ impl Provider for DockerRegistryProvider {
             )
             .await;
 
-            match run_command(&cmd, output_tx).await {
+            match self
+                .executor
+                .execute(&CommandSpec::shell(&cmd), output_tx)
+                .await
+            {
                 Ok(cmd_output) => {
-                    output.push_str(&cmd_output);
+                    output.push_str(&cmd_output.output);
                 }
                 Err(e) => {
                     bail!(ProviderError::InstallFailed(e.to_string()));
@@ -212,6 +224,11 @@ mod tests {
     use super::*;
     use crate::config::TrackingMode;
     use tokio::sync::mpsc;
+    use uptrakit_provider_core::LocalCommandExecutor;
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
 
     fn test_config() -> DockerRegistryConfig {
         DockerRegistryConfig {
@@ -231,7 +248,7 @@ mod tests {
     #[test]
     fn provider_creation_succeeds() {
         let config = test_config();
-        assert!(DockerRegistryProvider::new(config).is_ok());
+        assert!(DockerRegistryProvider::new(config, test_executor()).is_ok());
     }
 
     #[test]
@@ -248,7 +265,7 @@ mod tests {
             page_size: 100,
             restart_command: None,
         };
-        assert!(DockerRegistryProvider::new(config).is_err());
+        assert!(DockerRegistryProvider::new(config, test_executor()).is_err());
     }
 
     #[test]
@@ -265,13 +282,13 @@ mod tests {
             page_size: 100,
             restart_command: None,
         };
-        assert!(DockerRegistryProvider::new(config).is_err());
+        assert!(DockerRegistryProvider::new(config, test_executor()).is_err());
     }
 
     #[test]
     fn tags_to_releases_basic() {
         let config = test_config();
-        let provider = DockerRegistryProvider::new(config).expect("valid config");
+        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
         let tags = vec![
             "1.25.0".to_string(),
             "1.24.0".to_string(),
@@ -290,7 +307,7 @@ mod tests {
     fn tags_to_releases_with_prefix() {
         let mut config = test_config();
         config.tag_strip_prefix = "v".to_string();
-        let provider = DockerRegistryProvider::new(config).expect("valid config");
+        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
         let tags = vec!["v1.0.0".to_string(), "v2.0.0".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert_eq!(releases.len(), 2);
@@ -301,7 +318,7 @@ mod tests {
     #[test]
     fn tags_to_releases_no_semver_tags() {
         let config = test_config();
-        let provider = DockerRegistryProvider::new(config).expect("valid config");
+        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
         let tags = vec!["latest".to_string(), "alpine".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert!(releases.is_empty());
@@ -310,7 +327,7 @@ mod tests {
     #[test]
     fn tags_to_releases_release_url() {
         let config = test_config();
-        let provider = DockerRegistryProvider::new(config).expect("valid config");
+        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
         let tags = vec!["1.25.0".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert_eq!(releases.len(), 1);
@@ -322,7 +339,7 @@ mod tests {
     fn tags_to_releases_prerelease_detection() {
         let mut config = test_config();
         config.include_prereleases = true;
-        let provider = DockerRegistryProvider::new(config).expect("valid config");
+        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
         let tags = vec!["1.0.0".to_string(), "2.0.0-beta.1".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert_eq!(releases.len(), 2);
@@ -333,7 +350,7 @@ mod tests {
     #[test]
     fn tags_to_releases_no_release_notes_or_published_at() {
         let config = test_config();
-        let provider = DockerRegistryProvider::new(config).expect("valid config");
+        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
         let tags = vec!["1.0.0".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert!(releases[0].release_notes.is_none());
@@ -343,7 +360,8 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
-        let provider = DockerRegistryProvider::new(test_config()).expect("valid config");
+        let provider =
+            DockerRegistryProvider::new(test_config(), test_executor()).expect("valid config");
         let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }
@@ -358,7 +376,8 @@ mod tests {
             return;
         }
 
-        let provider = DockerRegistryProvider::new(test_config()).expect("valid config");
+        let provider =
+            DockerRegistryProvider::new(test_config(), test_executor()).expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let _result = provider
             .execute_update("hello-world", "latest", None, &tx)

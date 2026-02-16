@@ -4850,6 +4850,7 @@ dependencies = [
 name = "uptrakit-command"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "rootcause",
  "thiserror 2.0.18",
  "tokio",
@@ -5055,6 +5056,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uptrakit-command",
  "uptrakit-provider-core",
  "uptrakit-provider-docker-registry",
  "uptrakit-provider-github",

@@ -18,5 +18,10 @@ pub use version::Version;
 // Re-export command crate types (keeps existing imports working for provider crates)
 pub use uptrakit_command::{ShellType, UpdateOutputLine, UpdateOutputStream};
 
+// Re-export executor types for provider crate convenience
+pub use uptrakit_command::{
+    CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
+};
+
 // Re-export SecretString so provider crates use it via provider-core
 pub use uptrakit_shared_types::SecretString;

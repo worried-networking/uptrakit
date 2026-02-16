@@ -146,7 +146,7 @@ Essential infrastructure needed before feature development.
   - [x] Error handling patterns
 - [x] Create provider registry system
 - [x] Implement provider configuration mechanism
-- [ ] Add provider capability discovery
+- [x] Add provider capability discovery
 - [x] Design provider-specific configuration storage
 
 ______________________________________________________________________
@@ -407,7 +407,8 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 ### Provider Compatibility
 
 - [ ] All agent-side providers must work over SSH (same commands, different transport)
-- [ ] Provider trait may need a transport abstraction so the same provider logic works for both local and SSH execution
+- [x] Provider trait uses a transport abstraction (`CommandExecutor`) so the same provider logic works for both local and SSH execution
+- [ ] Implement `SshCommandExecutor` that executes commands over SSH connections
 - [ ] Provider-level capability flag indicating SSH compatibility
 
 ### Security Considerations

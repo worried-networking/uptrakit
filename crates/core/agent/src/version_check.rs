@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::ProviderType;
 use uptrakit_provider_registry::{ProviderCapability, ProviderRegistry};
 
@@ -22,8 +25,9 @@ pub async fn check_version(
     provider_type: ProviderType,
     config: &serde_json::Value,
     package_identifier: &str,
+    executor: Arc<dyn CommandExecutor>,
 ) -> VersionCheckOutcome {
-    let provider = match ProviderRegistry::create_provider(provider_type, config) {
+    let provider = match ProviderRegistry::create_provider(provider_type, config, executor) {
         Ok(p) => p,
         Err(e) => {
             return VersionCheckOutcome {
@@ -70,6 +74,11 @@ pub async fn check_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_command::LocalCommandExecutor;
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
+    }
 
     #[tokio::test]
     async fn check_version_github_stub_returns_none() {
@@ -77,8 +86,13 @@ mod tests {
             "owner": "octocat",
             "repo": "hello-world"
         });
-        let outcome =
-            check_version(ProviderType::GithubReleases, &config, "octocat/hello-world").await;
+        let outcome = check_version(
+            ProviderType::GithubReleases,
+            &config,
+            "octocat/hello-world",
+            test_executor(),
+        )
+        .await;
         // Stub implementation returns None for installed_version
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
@@ -90,7 +104,13 @@ mod tests {
         let config = serde_json::json!({
             "image": "nginx"
         });
-        let outcome = check_version(ProviderType::DockerRegistry, &config, "nginx").await;
+        let outcome = check_version(
+            ProviderType::DockerRegistry,
+            &config,
+            "nginx",
+            test_executor(),
+        )
+        .await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());
@@ -101,7 +121,13 @@ mod tests {
         let config = serde_json::json!({
             "script_url": "https://example.com/update.sh"
         });
-        let outcome = check_version(ProviderType::ProxmoxHelperScripts, &config, "example").await;
+        let outcome = check_version(
+            ProviderType::ProxmoxHelperScripts,
+            &config,
+            "example",
+            test_executor(),
+        )
+        .await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_none());
@@ -112,8 +138,13 @@ mod tests {
         let config = serde_json::json!({
             "invalid": "config"
         });
-        let outcome =
-            check_version(ProviderType::GithubReleases, &config, "octocat/hello-world").await;
+        let outcome = check_version(
+            ProviderType::GithubReleases,
+            &config,
+            "octocat/hello-world",
+            test_executor(),
+        )
+        .await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.error.is_some());
         assert!(outcome.error.unwrap().contains("failed to parse"));
@@ -122,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn check_version_homebrew_default_returns_none() {
         let config = serde_json::json!({});
-        let outcome = check_version(ProviderType::Homebrew, &config, "").await;
+        let outcome = check_version(ProviderType::Homebrew, &config, "", test_executor()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_some());
