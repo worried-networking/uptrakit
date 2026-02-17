@@ -116,6 +116,8 @@ pub struct Args {
     pub pki_http: Option<PkiHttpMode>,
 
     /// Path to the built frontend directory. Enables SPA serving.
+    /// Not available when the `embed-frontend` feature is enabled.
+    #[cfg(not(feature = "embed-frontend"))]
     #[arg(long)]
     pub static_dir: Option<PathBuf>,
 

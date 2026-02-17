@@ -258,6 +258,7 @@ Main functionality that delivers the core value proposition.
   - [x] `--shutdown-timeout-secs` configures drain timeout (default: 30)
   - [x] `ServerRestarting` wire message notifies agents (scattered to avoid thundering herd)
   - [x] Background tasks support `CancellationToken` for clean shutdown
+- [x] Embedded frontend (`embed-frontend` feature): compile the SvelteKit SPA into the controller binary via `rust-embed` for single-binary deployment
 - [ ] Certificate renewal on the controller through API must enable that certificate for new connections
 
 ______________________________________________________________________

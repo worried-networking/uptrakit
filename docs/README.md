@@ -81,6 +81,7 @@ This directory holds audience-specific documentation split into five sections, p
 | [Command Executor](development/command-executor.md) | `CommandExecutor` trait, `CommandSpec`, and `LocalCommandExecutor` for transport-agnostic command dispatch. See also: [Provider Guidelines](development/provider-guidelines.md), [SSH Agent](architecture/ssh-agent.md). |
 | [Service Lifecycle](development/service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. See also: [Services and Operations](api/services-operations.md). |
 | [OpenAPI Client](development/openapi-client.md) | Typed HTTP client for the web API (`uptrakit-openapi-client`). See also: [HTTP Web API](api/http-web-api.md), [CLI Usage](end-user/cli-usage.md). |
+| [Embedded Frontend](development/embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). See also: [Setup](development/setup.md), [Deployment Guides](end-user/deployment/README.md). |
 
 ## Deployment Guides
 

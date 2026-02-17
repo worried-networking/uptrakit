@@ -30,6 +30,9 @@ certificate renewal) across controller instances using optimistic locking for HA
 
 - Rust workspace (`resolver = "3"`) under `crates/*/*` for controller, agent, SSH agent, MQTT service, providers, shared libraries, and CLI/web API.
 - Frontend is a SvelteKit SPA in `frontend/` built with Tailwind CSS and Skeleton UI.
+  It can be served from the filesystem (`--static-dir` / auto-detection) or embedded into
+  the controller binary at compile time via the `embed-frontend` Cargo feature for
+  single-binary deployment.
 
 ## Wire protocol
 

@@ -51,3 +51,15 @@ cd frontend && npm run build
 ```
 
 The controller serves the static `frontend/build/` output at runtime.
+
+### Embedded frontend (single-binary)
+
+To build a self-contained controller binary with the frontend embedded:
+
+```bash
+cd frontend && npm ci && npm run build
+cargo build -p uptrakit-controller --features embed-frontend
+```
+
+The `--static-dir` flag is not available when this feature is enabled.
+See [Embedded Frontend](embedded-frontend.md) for details.

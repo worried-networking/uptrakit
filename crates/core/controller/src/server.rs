@@ -72,6 +72,12 @@ pub async fn run(cfg: ServerOptions) -> Result<()> {
             .route("/api", axum::routing::any(uptrakit_web_api::api_not_found))
             .fallback_service(ServeFile::new(index));
         router = router.fallback_service(ServeDir::new(dir).not_found_service(not_found));
+    } else {
+        #[cfg(feature = "embed-frontend")]
+        {
+            tracing::info!("serving embedded frontend");
+            router = router.fallback_service(crate::embedded_frontend::router());
+        }
     }
 
     let rustls_acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg.rustls_config);

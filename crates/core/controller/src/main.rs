@@ -3,6 +3,8 @@ mod cli;
 mod crl_manager;
 mod db;
 mod durations;
+#[cfg(feature = "embed-frontend")]
+mod embedded_frontend;
 mod migration;
 mod mtls_acceptor;
 mod pki;

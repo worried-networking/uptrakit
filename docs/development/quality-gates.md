@@ -16,6 +16,9 @@ cargo deny check                                                     # Validate 
 
 There shouldn't even be any warnings in the output of these commands.
 
+**Note:** `--all-features` includes `embed-frontend`, which requires `frontend/build/` to exist.
+Build the frontend first (`cd frontend && npm ci && npm run build`) before running `--all-features` checks.
+
 ### Reverse proxy-sensitive changes (mandatory)
 
 If the change can affect reverse proxy behavior, you must also run ignored reverse proxy integration tests:

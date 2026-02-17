@@ -13,6 +13,7 @@ db-all = ["db-sqlite", "db-postgres", "db-mysql", "uptrakit-web-api/db-all"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web-api/db-sqlite"]
 db-postgres = ["sea-orm/sqlx-postgres", "sea-orm-migration/sqlx-postgres", "uptrakit-web-api/db-postgres"]
 db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web-api/db-mysql"]
+embed-frontend = ["dep:rust-embed"]
 
 [dependencies]
 uptrakit-internal-wire = { path = "../../shared/wire" }
@@ -51,6 +52,7 @@ nix = { version = "0.31", default-features = false, features = ["signal", "proce
 tokio-util = { workspace = true }
 zeroize = { workspace = true }
 uptrakit-build-info = { path = "../../shared/build-info" }
+rust-embed = { version = "8", optional = true, features = ["mime-guess"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

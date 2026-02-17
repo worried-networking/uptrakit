@@ -14,6 +14,15 @@ This folder contains end-user deployment documentation for running Uptrakit behi
 | [Envoy](envoy.md) | Envoy reverse proxy configuration and XFCC header handling. |
 | [HAProxy](haproxy.md) | HAProxy reverse proxy configuration and CRL refresh strategy. |
 
+## Single-binary Deployment
+
+The controller can be built with the `embed-frontend` Cargo feature to embed
+the SvelteKit frontend directly into the binary. This eliminates the need to
+deploy the `frontend/build/` directory alongside the binary.
+
+See [Embedded Frontend](../../development/embedded-frontend.md) for build
+instructions.
+
 ## Related Documentation
 
 - End-user docs index: [`docs/end-user/README.md`](../README.md)

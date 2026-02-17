@@ -55,7 +55,8 @@ uptrakit/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
 │   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshCommandExecutor
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
-│   │   │   └── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
+│   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
+│   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
 │   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait + SecretMasking; re-exports tokio::sync::mpsc
@@ -98,6 +99,17 @@ uptrakit/
 ```
 
 All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
+
+### Controller feature flags
+
+| Feature | Default | Description |
+| --- | --- | --- |
+| `db-sqlite` | Yes | SQLite backend |
+| `db-postgres` | No | PostgreSQL backend |
+| `db-mysql` | No | MySQL backend |
+| `db-all` | No | All database backends |
+| `swagger-ui` | No | Swagger UI at `/swagger-ui` |
+| `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
 
 ## General MUST FOLLOW Rules for AI Coding Agents
 
@@ -320,6 +332,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Update Hooks](docs/development/update-hooks.md)
 - [Service Lifecycle](docs/development/service-lifecycle.md)
 - [OpenAPI Client](docs/development/openapi-client.md)
+- [Embedded Frontend](docs/development/embedded-frontend.md)
 
 ### Architecture
 

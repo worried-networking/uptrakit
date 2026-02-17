@@ -23,6 +23,7 @@ Uptrakit.
 | [Command Executor](command-executor.md) | `CommandExecutor` trait, `CommandSpec`, and `LocalCommandExecutor` for transport-agnostic command dispatch. |
 | [Service Lifecycle](service-lifecycle.md) | `ServiceHandler` trait and `run_service_lifecycle()` for building new services. |
 | [OpenAPI Client](openapi-client.md) | Typed HTTP client crate for the web API (`uptrakit-openapi-client`). |
+| [Embedded Frontend](embedded-frontend.md) | Building the controller with the frontend embedded in the binary (`embed-frontend` feature). |
 
 ## Related Documentation
 
