@@ -197,18 +197,48 @@ Prefix to strip before semver parsing. | | `include_prereleases` | bool | No | `
 
 ### Proxmox Helper Scripts provider (`uptrakit-provider-proxmox-helper-scripts`)
 
-Executes Proxmox VE community helper script updates via `curl | bash`.
+Manages software installed via [Proxmox VE community helper scripts](https://github.com/community-scripts/ProxmoxVE).
+Supports automatic discovery of PHS-managed software, installed version detection, and update execution via `curl | bash`.
 
 **Config fields (`ProxmoxHelperScriptsConfig`):**
 
 | Field | Type | Required | Default | Description | | :------------ | :----- | :------- | :------ |
 :-------------------------------------------------------- | | `script_url` | String | Yes | -- | URL of the helper script to execute for updates. |
 
-**Behaviour:**
+**Capabilities:** `DiscoverLocalSoftware`
 
-- Update execution runs `curl -fsSL -- "$script_url" | bash -s -- --update` with `set -euo pipefail`.
+**Discovery (`discover_software()`):**
+
+PHS containers created by community-scripts have a well-known update script at `/usr/bin/update` containing
+`curl | bash` invocations pointing at the community-scripts GitHub repository. The provider:
+
+1. Reads `/usr/bin/update` via `cat`.
+2. Parses the file for URLs matching `https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/{slug}.sh`.
+3. Validates each slug (`[a-z0-9][a-z0-9-]*`), deduplicates by slug.
+4. For each slug, attempts to read the version file at `$HOME/.{slug}`.
+5. Returns `DiscoveredSoftware` entries with `package_identifier` set to the slug, a display name derived from the slug,
+   the installed version (if found), and the script URL as `extra` metadata.
+
+If `/usr/bin/update` does not exist (not a PHS container), discovery returns an empty list without error.
+
+**Version detection (`detect_installed_version()`):**
+
+PHS scripts store the installed version in `$HOME/.{app_lc}` (e.g. `~/.booklore` contains `1.18.5`).
+The provider reads this file for the given `package_identifier` (which must be a valid slug). If the file
+does not exist or is empty, returns `None`.
+
+The `package_identifier` is validated against `[a-z0-9][a-z0-9-]*` to prevent path traversal.
+
+**Update execution:**
+
+- Runs `curl -fsSL -- "$script_url" | bash -s -- --update` with `set -euo pipefail`.
 - The `script_url` is passed as a positional argument to bash (not interpolated into the command string), preventing injection.
-- `detect_installed_version` returns `None` (version detection is not supported).
-- `fetch_releases` returns an empty list (upstream version checking is not supported).
+
+**Not supported:**
+
+- `fetch_releases` returns an error (upstream version checking is not implemented).
 
 **Security note:** The `curl | bash` pattern runs arbitrary remote code. The user must trust the script URL source.
+
+**Parsing is pure and testable:** All parsing logic (URL extraction, slug validation, version file parsing,
+display name generation) lives in the `discovery` module as pure functions with comprehensive unit tests.

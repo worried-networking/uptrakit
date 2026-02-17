@@ -161,7 +161,7 @@ Main functionality that delivers the core value proposition.
   - [ ] GitHub releases provider
   - [ ] System package managers (apt, yum, pacman)
   - [x] Docker container provider
-  - [ ] Proxmox Helper Scripts provider
+  - [x] Proxmox Helper Scripts provider
 - [ ] Add caching for detected versions
 - [ ] Implement periodic inventory scanning
 - [ ] Send version inventory to controller
@@ -187,8 +187,9 @@ Main functionality that delivers the core value proposition.
   - [x] Release notes extraction
   - [x] Pre-release handling
 - [ ] Implement Proxmox Helper Scripts provider
-  - [ ] Script version detection
-  - [ ] Script update mechanism
+  - [x] Script version detection
+  - [x] Script update mechanism
+  - [x] Software discovery (`discover_software()`)
   - [ ] Script integrity verification
 - [ ] Add system package manager provider
   - [ ] Support for multiple package managers

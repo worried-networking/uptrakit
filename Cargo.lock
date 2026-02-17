@@ -5999,6 +5999,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "uptrakit-provider-core",
 ]
 
