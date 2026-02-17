@@ -42,6 +42,7 @@ pub enum AuthMethod<'a> {
 }
 
 /// Result of executing a remote command.
+#[derive(Debug)]
 pub struct RemoteCommandResult {
     pub stdout: String,
     pub stderr: String,
@@ -212,7 +213,8 @@ impl SshSession {
                 ChannelMsg::ExitStatus { exit_status } => {
                     exit_code = Some(exit_status);
                 }
-                ChannelMsg::Eof | ChannelMsg::Close => break,
+                ChannelMsg::Eof => {}
+                ChannelMsg::Close => break,
                 _ => {}
             }
         }
