@@ -5,5 +5,6 @@ pub mod history;
 pub mod hosts;
 pub mod scheduler;
 pub mod services;
+pub mod settings;
 pub mod software_items;
 pub mod update;

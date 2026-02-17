@@ -76,7 +76,7 @@ uptrakit/
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, enrollment, identity, TLS, CA bootstrap
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface; uses openapi-client for all API calls
+│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface; uses openapi-client for all API calls (hosts, services, checks, updates, history, scheduler, settings)
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/

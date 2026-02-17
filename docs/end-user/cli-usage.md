@@ -1,7 +1,8 @@
 # CLI Usage Guide
 
 The `uptrakit-cli` binary provides a command-line interface for interacting with the Uptrakit controller. It
-supports authentication, resource inspection, version checks, update triggering, and scheduler management.
+supports authentication, resource inspection, version checks, update triggering, scheduler management, and
+server settings management.
 
 ## Global Options
 
@@ -173,6 +174,119 @@ uptrakit-cli scheduler trigger <TASK_ID>
 ```
 
 See also: [Scheduler](../architecture/scheduler.md), [HTTP Web API](../api/http-web-api.md).
+
+## Settings
+
+View and manage server settings: registration, authentication, certificates, network, MQTT, OIDC providers,
+and system alerts.
+
+### Combined overview
+
+```sh
+# Show all settings at a glance
+uptrakit-cli settings show
+```
+
+### Registration
+
+```sh
+uptrakit-cli settings registration show
+uptrakit-cli settings registration update --mode invite --token "my-secret"
+uptrakit-cli settings registration update --mode closed
+uptrakit-cli settings registration update --mode invite --require-token-for-oidc true
+```
+
+### Authentication
+
+```sh
+uptrakit-cli settings authentication show
+uptrakit-cli settings authentication update --password-auth-enabled false
+```
+
+### Certificates
+
+```sh
+uptrakit-cli settings certificates show
+uptrakit-cli settings certificates update --lifetime-days 365 --renewal-window-hours 72
+```
+
+### Network
+
+```sh
+uptrakit-cli settings network show
+uptrakit-cli settings network update --trusted-proxies "10.0.0.0/8,172.16.0.0/12"
+uptrakit-cli settings network update --real-ip-header X-Real-IP --https-addr 0.0.0.0:8443
+uptrakit-cli settings network update --extra-sans "alt.example.com,10.0.0.1"
+uptrakit-cli settings network update --pki-addr "https://pki.example.com"
+```
+
+The `--trusted-proxies` and `--extra-sans` flags accept comma-separated values.
+
+### CA rotation and server certificate renewal
+
+```sh
+uptrakit-cli settings rotate-ca
+uptrakit-cli settings renew-server-cert
+```
+
+### MQTT
+
+```sh
+# List and inspect MQTT client configurations
+uptrakit-cli settings mqtt list
+uptrakit-cli settings mqtt show <ID>
+
+# Create a new MQTT configuration
+uptrakit-cli settings mqtt create --url "mqtt://broker:1883" --enabled true
+uptrakit-cli settings mqtt create --host broker --port 8883 --transport tls --client-id uptrakit-1
+
+# Update an existing configuration
+uptrakit-cli settings mqtt update <ID> --enabled false
+uptrakit-cli settings mqtt update <ID> --host new-broker --port 8883
+
+# Delete a configuration
+uptrakit-cli settings mqtt delete <ID>
+
+# Manage MQTT client limit
+uptrakit-cli settings mqtt limit show
+uptrakit-cli settings mqtt limit update --max 10
+```
+
+### OIDC providers
+
+```sh
+# List and inspect OIDC providers
+uptrakit-cli settings oidc list
+uptrakit-cli settings oidc show <ID>
+
+# Create a provider (role-mapping is not supported via CLI; use `uptrakit-cli api` for that)
+uptrakit-cli settings oidc create \
+  --name "Google" \
+  --slug google \
+  --issuer-url "https://accounts.google.com" \
+  --client-id "cid-123" \
+  --client-secret "cs-456"
+
+# Update a provider
+uptrakit-cli settings oidc update <ID> --name "Google Workspace" --auto-create-users false
+
+# Delete a provider
+uptrakit-cli settings oidc delete <ID>
+
+# Activate / deactivate
+uptrakit-cli settings oidc activate <ID>
+uptrakit-cli settings oidc deactivate <ID>
+```
+
+### System alerts
+
+```sh
+uptrakit-cli settings alerts
+```
+
+See also: [Settings Runtime](../api/settings-runtime.md), [HTTP Web API](../api/http-web-api.md),
+[PKI and Certificate Lifecycle](../security/pki-certificates.md),
+[Auth and Authorization](../security/auth-and-authorization.md).
 
 ## Raw API Access
 
