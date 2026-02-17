@@ -3,6 +3,7 @@ mod client;
 mod commands;
 pub(crate) mod db;
 mod error;
+mod host_info;
 mod host_ops;
 mod ssh_config;
 mod ssh_executor;

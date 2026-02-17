@@ -216,13 +216,15 @@ pub(crate) async fn handle_agent_authenticated(
                                 }
 
                                 for host_info in &payload.hosts {
+                                    let host_hostname = host_info.hostname.as_deref().unwrap_or(&agent_model.hostname);
+                                    let host_ip = host_info.ip_address.as_deref().or(agent_model.ip_address.as_deref());
                                     if let Err(e) = find_or_create_host_and_link(
                                         &state.db,
                                         agent_model.tenant_id,
                                         agent_id,
                                         host_info,
-                                        &agent_model.hostname,
-                                        agent_model.ip_address.as_deref(),
+                                        host_hostname,
+                                        host_ip,
                                     ).await {
                                         tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host");
                                     }

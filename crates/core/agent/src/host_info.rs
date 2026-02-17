@@ -7,7 +7,38 @@ pub fn collect_host_info() -> HostInfo {
         os_type: Some(std::env::consts::OS.to_string()),
         os_version: read_os_version(),
         architecture: Some(std::env::consts::ARCH.to_string()),
+        hostname: read_hostname(),
+        ip_address: None, // Controller knows the connection IP from the service record.
     }
+}
+
+/// Read the system hostname.
+///
+/// Tries FQDN first (`hostname -f`), falls back to short hostname.
+fn read_hostname() -> Option<String> {
+    // Try FQDN first.
+    if let Ok(output) = std::process::Command::new("hostname")
+        .arg("-f")
+        .output()
+        && output.status.success()
+    {
+        let fqdn = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !fqdn.is_empty() {
+            return Some(fqdn);
+        }
+    }
+
+    // Fall back to short hostname.
+    if let Ok(output) = std::process::Command::new("hostname").output()
+        && output.status.success()
+    {
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+
+    None
 }
 
 /// Read the persistent machine identifier.
@@ -102,5 +133,9 @@ mod tests {
         assert_eq!(info.os_type.as_deref(), Some(std::env::consts::OS));
         // architecture should match the current arch
         assert_eq!(info.architecture.as_deref(), Some(std::env::consts::ARCH));
+        // hostname should be present on most systems
+        assert!(info.hostname.is_some(), "hostname should be detected");
+        // ip_address is intentionally None for the regular agent
+        assert_eq!(info.ip_address, None);
     }
 }

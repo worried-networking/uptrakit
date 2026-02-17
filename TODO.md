@@ -384,7 +384,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 
 - [x] Create `crates/core/agent-ssh/` crate (`uptrakit-agent-ssh` binary)
 - [x] Reuse the existing wire protocol and WebSocket transport to the controller
-- [ ] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
+- [x] The SSH agent manages one or more remote hosts — each appears as a separate host in the controller
 - [x] CLI subcommands for local SSH host management (`host add/list/show/update/remove/bootstrap`)
 - [ ] Configuration file defines target hosts (hostname, port, username, key path, sudo setup)
 - [ ] Clearly separate SSH transport logic from provider execution logic so providers remain transport-agnostic

@@ -1,5 +1,6 @@
+use std::collections::HashSet;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -10,6 +11,7 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_shared_db::entity::{
     service as ssh_agent_service, service_certificate as ssh_agent_service_certificate,
+    service_host as ssh_agent_host,
 };
 
 use rootcause::prelude::*;
@@ -21,6 +23,7 @@ use super::service_ws::{
     deserialize_service_msg, record_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
+use crate::routes::agents::find_or_create_host_and_link;
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -47,6 +50,14 @@ pub(crate) enum SshAgentWsError {
 type SshAgentWsResult<T> = std::result::Result<T, Report<SshAgentWsError>>;
 
 impl_report_conversion!(sea_orm::DbErr => SshAgentWsError::Database);
+
+/// Minimum SSH agent version required for connection.
+const MIN_AGENT_VERSION: &str = "0.0.1";
+
+/// Parsed minimum SSH agent version, validated once at first access.
+static MIN_AGENT_VER: LazyLock<semver::Version> = LazyLock::new(|| {
+    semver::Version::parse(MIN_AGENT_VERSION).expect("MIN_AGENT_VERSION must be valid semver")
+});
 
 // ---------------------------------------------------------------------------
 // Authenticated SSH agent handler (called from service_ws after shared auth)
@@ -94,6 +105,13 @@ pub(crate) async fn handle_ssh_agent_authenticated(
     }
 
     let mut rate_limiter = MessageRateLimiter::new(WS_MESSAGE_RATE_WINDOW, WS_MESSAGE_RATE_LIMIT);
+
+    // Cache host IDs linked to this SSH agent for future ownership validation.
+    // Refreshed on ReportHosts (which may link new hosts).
+    let mut linked_host_ids: HashSet<uuid::Uuid> =
+        load_ssh_agent_linked_host_ids(&state.db, service_id)
+            .await
+            .unwrap_or_default();
 
     // Enter operational loop.
     loop {
@@ -193,6 +211,98 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                     }
                                 }
                             }
+                            ServiceMessage::ReportHosts(payload) => {
+                                if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
+                                    tracing::warn!(
+                                        %service_id,
+                                        reported = payload.protocol_version,
+                                        expected = uptrakit_internal_wire::PROTOCOL_VERSION,
+                                        "SSH agent protocol version mismatch"
+                                    );
+                                }
+
+                                // Check agent version.
+                                let agent_ver = match semver::Version::parse(&payload.agent_version) {
+                                    Ok(v) => v,
+                                    Err(_) => {
+                                        tracing::warn!(
+                                            %service_id,
+                                            version = %payload.agent_version,
+                                            "SSH agent sent invalid version string"
+                                        );
+                                        let err = ControllerMessage::Error(ErrorPayload {
+                                            code: ErrorCode::AgentVersionTooOld,
+                                            message: format!(
+                                                "invalid agent version '{}', minimum required: {MIN_AGENT_VERSION}",
+                                                payload.agent_version
+                                            ),
+                                        });
+                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
+                                            let _ = sink.send(Message::Text(json.into())).await;
+                                        }
+                                        let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
+                                        break;
+                                    }
+                                };
+
+                                if agent_ver < *MIN_AGENT_VER {
+                                    tracing::warn!(
+                                        %service_id,
+                                        version = %payload.agent_version,
+                                        min_version = MIN_AGENT_VERSION,
+                                        "SSH agent version too old"
+                                    );
+                                    let err = ControllerMessage::Error(ErrorPayload {
+                                        code: ErrorCode::AgentVersionTooOld,
+                                        message: format!(
+                                            "SSH agent version {} is too old, minimum required: {MIN_AGENT_VERSION}",
+                                            payload.agent_version
+                                        ),
+                                    });
+                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
+                                        let _ = sink.send(Message::Text(json.into())).await;
+                                    }
+                                    let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
+                                    break;
+                                }
+
+                                // Look up SSH agent service from DB.
+                                let service_model = match ssh_agent_service::Entity::find_by_id(service_id)
+                                    .one(&state.db)
+                                    .await
+                                {
+                                    Ok(Some(s)) => s,
+                                    _ => continue,
+                                };
+
+                                // Update client_version in database.
+                                let mut active: ssh_agent_service::ActiveModel = service_model.clone().into();
+                                active.client_version = Set(Some(payload.agent_version.clone()));
+                                active.updated_at = Set(time::OffsetDateTime::now_utc());
+                                if let Err(e) = active.update(&state.db).await {
+                                    tracing::error!(error = %e, "failed to update SSH agent client_version");
+                                }
+
+                                for host_info in &payload.hosts {
+                                    let host_hostname = host_info.hostname.as_deref().unwrap_or(&service_model.hostname);
+                                    let host_ip = host_info.ip_address.as_deref().or(service_model.ip_address.as_deref());
+                                    if let Err(e) = find_or_create_host_and_link(
+                                        &state.db,
+                                        service_model.tenant_id,
+                                        service_id,
+                                        host_info,
+                                        host_hostname,
+                                        host_ip,
+                                    ).await {
+                                        tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host to SSH agent");
+                                    }
+                                }
+
+                                // Refresh cached host IDs (may have linked new hosts).
+                                if let Ok(ids) = load_ssh_agent_linked_host_ids(&state.db, service_id).await {
+                                    linked_host_ids = ids;
+                                }
+                            }
                             ServiceMessage::Disconnecting(payload) => {
                                 tracing::info!(
                                     %service_id,
@@ -232,6 +342,9 @@ pub(crate) async fn handle_ssh_agent_authenticated(
             }
         }
     }
+
+    // linked_host_ids will be used for update ownership validation (future work).
+    let _ = &linked_host_ids;
 
     state.service_connections.unregister(&service_id).await;
     tracing::debug!(%service_id, "authenticated SSH agent disconnected");
@@ -428,6 +541,20 @@ pub(crate) async fn handle_ssh_agent_enrolled(
 // ---------------------------------------------------------------------------
 // SSH agent enrollment helper (exposed for service_ws)
 // ---------------------------------------------------------------------------
+
+/// Load the set of host IDs linked to the given SSH agent service.
+async fn load_ssh_agent_linked_host_ids(
+    db: &sea_orm::DatabaseConnection,
+    service_id: uuid::Uuid,
+) -> SshAgentWsResult<HashSet<uuid::Uuid>> {
+    let links = ssh_agent_host::Entity::find()
+        .filter(ssh_agent_host::Column::ServiceId.eq(service_id))
+        .all(db)
+        .await
+        .context_to::<SshAgentWsError>()?;
+
+    Ok(links.into_iter().map(|l| l.host_id).collect())
+}
 
 pub(crate) struct SshAgentEnrollResult {
     pub service: ssh_agent_service::Model,

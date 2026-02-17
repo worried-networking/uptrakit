@@ -43,6 +43,10 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 `report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
+### SSH agent-specific (service -> controller)
+
+`report_hosts`
+
 ### MQTT-specific (service -> controller)
 
 `register`, `release_tenants`, `mqtt_client_status`
@@ -120,6 +124,23 @@ Services should match on enum variants (not raw strings) to determine reconnecti
 - `CloseReason::CertificateRotated` → reconnect immediately with new certificate.
 - `CloseReason::CertificateRevoked` → stop; re-enrollment needed.
 - Other variants → reconnect with backoff or terminate depending on severity.
+
+## `HostInfo` Fields
+
+The `HostInfo` struct (used inside `ReportHostsPayload.hosts`) contains:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `machine_id` | `String` | Persistent system identifier (required) |
+| `os_type` | `Option<String>` | Operating system type (e.g. `linux`, `macos`) |
+| `os_version` | `Option<String>` | OS version or pretty name |
+| `architecture` | `Option<String>` | CPU architecture (e.g. `x86_64`, `aarch64`) |
+| `hostname` | `Option<String>` | Machine hostname |
+| `ip_address` | `Option<String>` | IP address or hostname used to reach the host |
+
+The `hostname` and `ip_address` fields were added as part of the SSH agent host reporting feature. They use `#[serde(default)]` for backward compatibility -- agents that do not send these fields will have them default to `None` on the controller side. No protocol version bump is required.
+
+Both the regular agent and the SSH agent send `report_hosts`. The regular agent sets `hostname` from local system calls. The SSH agent sets `hostname` from the remote host's `hostname` command and `ip_address` from the SSH target address.
 
 ## AsyncAPI Specification
 

@@ -169,6 +169,12 @@ pub struct HostInfo {
     /// CPU architecture (e.g. "x86_64", "aarch64").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub architecture: Option<String>,
+    /// Hostname reported by the agent/host machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    /// Network address of the host (SSH target address for SSH agent hosts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>,
 }
 
 /// Payload for service enrollment request.
@@ -856,6 +862,8 @@ mod tests {
                 os_type: Some("linux".to_string()),
                 os_version: Some("Ubuntu 24.04 LTS".to_string()),
                 architecture: Some("x86_64".to_string()),
+                hostname: None,
+                ip_address: None,
             }],
             agent_version: "0.0.1".to_string(),
             protocol_version: PROTOCOL_VERSION,
@@ -877,12 +885,16 @@ mod tests {
                     os_type: Some("linux".to_string()),
                     os_version: None,
                     architecture: None,
+                    hostname: None,
+                    ip_address: None,
                 },
                 HostInfo {
                     machine_id: "host-b".to_string(),
                     os_type: Some("linux".to_string()),
                     os_version: Some("Debian 12".to_string()),
                     architecture: Some("aarch64".to_string()),
+                    hostname: None,
+                    ip_address: None,
                 },
             ],
             agent_version: "0.0.1".to_string(),
@@ -1648,6 +1660,8 @@ mod tests {
             os_type: Some("linux".to_string()),
             os_version: Some("Debian GNU/Linux 12 (bookworm)".to_string()),
             architecture: Some("aarch64".to_string()),
+            hostname: None,
+            ip_address: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let deserialized: HostInfo = serde_json::from_str(&json).unwrap();
@@ -1661,11 +1675,41 @@ mod tests {
             os_type: None,
             os_version: None,
             architecture: None,
+            hostname: None,
+            ip_address: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         assert_eq!(json, r#"{"machine_id":"unknown"}"#);
         let deserialized: HostInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn host_info_with_hostname_and_ip() {
+        let info = HostInfo {
+            machine_id: "abc-123".to_string(),
+            os_type: Some("linux".to_string()),
+            os_version: None,
+            architecture: None,
+            hostname: Some("web-01.example.com".to_string()),
+            ip_address: Some("10.0.0.5".to_string()),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains(r#""hostname":"web-01.example.com"#));
+        assert!(json.contains(r#""ip_address":"10.0.0.5"#));
+        let deserialized: HostInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, info);
+    }
+
+    #[test]
+    fn host_info_deserializes_without_new_fields() {
+        // Ensures backward compatibility: old agents that don't send hostname/ip_address
+        // still deserialize correctly (fields default to None).
+        let json = r#"{"machine_id":"legacy","os_type":"linux"}"#;
+        let info: HostInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.machine_id, "legacy");
+        assert_eq!(info.hostname, None);
+        assert_eq!(info.ip_address, None);
     }
 
     #[test]

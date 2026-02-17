@@ -1119,6 +1119,24 @@ components:
           examples:
             - x86_64
             - aarch64
+        hostname:
+          type: string
+          description: |
+            Hostname reported by the agent or remote host machine. For regular
+            agents this is the local FQDN; for SSH agents this is the remote
+            host's hostname. Optional — absent when the hostname cannot be read.
+          examples:
+            - web-01.example.com
+        ip_address:
+          type: string
+          description: |
+            Network address of the host. For SSH agent hosts this is the SSH
+            target address (hostname or IP from the local SSH host database).
+            Regular agents leave this absent — the controller uses the
+            connection source IP instead.
+          examples:
+            - 10.0.0.5
+            - web-01.internal
 
     reportHostsPayload:
       type: object
@@ -1143,9 +1161,9 @@ components:
           items:
             $ref: "#/components/schemas/hostInfo"
           description: |
-            One or more host machines managed by this service. Enables a single
-            service instance (e.g. a future SSH-backed agent) to report multiple
-            remote hosts.
+            One or more host machines managed by this service. A regular agent
+            reports a single local host; an SSH agent reports multiple remote
+            hosts by connecting to each over SSH and collecting system info.
         agent_version:
           type: string
           description: Agent binary version (semver format)

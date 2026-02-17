@@ -6,15 +6,17 @@ use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
-    CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
-    ServiceMessage, now_millis,
+    CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload, HostInfo, PingPayload,
+    ReportHostsPayload, ServiceMessage, now_millis,
 };
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
 use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
 
 use crate::error::{Error, Result};
+use crate::host_info::collect_remote_host_info;
+use crate::host_ops::list_hosts;
 use crate::ssh_executor::SshCommandExecutor;
-use crate::ssh_transport::SshSession;
+use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
 
 /// Far-future delay used when no renewal is scheduled (30 days).
 const FAR_FUTURE: Duration = Duration::from_secs(30 * 24 * 3600);
@@ -82,7 +84,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
         .context_to::<Error>()?;
 
     // Open (or create) the local SSH host database.
-    let _local_db = crate::db::init_db(state_dir).await.map_err(|e| {
+    let local_db = crate::db::init_db(state_dir).await.map_err(|e| {
         report!(Error::Database(format!(
             "failed to initialize local database: {e}"
         )))
@@ -92,6 +94,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     // Executor factory for per-host SSH command execution. Used when
     // handling CheckVersions/ExecuteUpdate messages (future work).
     let _executor_factory = create_ssh_executor;
+
+    // ── Report enrolled hosts to controller ──────────────────────────
+    report_enrolled_hosts(&local_db, &mut conn).await;
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
@@ -275,6 +280,86 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     let _ = conn.close().await;
 
     Ok(outcome)
+}
+
+/// Connect to each enrolled SSH host, collect system info, and send a
+/// `ReportHosts` message to the controller.
+///
+/// Errors for individual hosts are logged as warnings and skipped.
+async fn report_enrolled_hosts(
+    local_db: &sea_orm::DatabaseConnection,
+    conn: &mut ControllerConnection,
+) {
+    let hosts = match list_hosts(local_db).await {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to list SSH hosts for reporting");
+            return;
+        }
+    };
+
+    let mut host_infos: Vec<HostInfo> = Vec::with_capacity(hosts.len());
+
+    for host in &hosts {
+        tracing::debug!(host_name = %host.name, hostname = %host.hostname, "collecting host info");
+
+        let config = SshConnectionConfig {
+            hostname: host.hostname.clone(),
+            port: host.port as u16,
+            connect_timeout: Duration::from_secs(10),
+        };
+
+        let private_key_pem = host.private_key.expose_secret();
+        let auth = AuthMethod::PrivateKey(private_key_pem);
+
+        let (session, _fingerprint) = match crate::ssh_transport::connect_and_authenticate(
+            &config,
+            &host.username,
+            &auth,
+            host.host_key_fingerprint.as_deref(),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!(
+                    host_name = %host.name,
+                    hostname = %host.hostname,
+                    error = %e,
+                    "failed to connect to SSH host for reporting, skipping"
+                );
+                continue;
+            }
+        };
+
+        let mut info = collect_remote_host_info(&session).await;
+        // Set the SSH target address as the host's ip_address.
+        info.ip_address = Some(host.hostname.clone());
+
+        session.disconnect().await;
+
+        tracing::debug!(
+            host_name = %host.name,
+            machine_id = %info.machine_id,
+            hostname = ?info.hostname,
+            "collected remote host info"
+        );
+
+        host_infos.push(info);
+    }
+
+    let agent_version = env!("CARGO_PKG_VERSION").to_string();
+    let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
+        hosts: host_infos,
+        agent_version,
+        protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+    });
+
+    if let Err(e) = conn.send(msg).await {
+        tracing::warn!(error = %e, "failed to send ReportHosts message");
+    } else {
+        tracing::info!(host_count = hosts.len(), "reported enrolled hosts to controller");
+    }
 }
 
 /// Compute SHA-256 hex hash of the local CA certificate file.

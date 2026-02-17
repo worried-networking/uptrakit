@@ -15,6 +15,7 @@ The current implementation provides:
 - SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
+- Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info from each enrolled host over SSH and reports it to the controller
 
 UI configuration beyond the existing services API is not yet implemented.
 
@@ -222,6 +223,32 @@ transparently.
 
 For usage details, see [Command Executor](../development/command-executor.md).
 
+## Host Reporting
+
+On authenticated WebSocket connect, the SSH agent reports host information for all enrolled SSH hosts to the controller via the `ReportHosts` message.
+
+### Collection flow
+
+1. The SSH agent iterates over all hosts in its local SQLite database.
+2. For each host, it opens an SSH connection (using the stored credentials) and executes remote commands to collect:
+   - `machine_id` — `/etc/machine-id` (Linux) or `IOPlatformUUID` (macOS)
+   - `os_type` — `uname -s`
+   - `os_version` — `/etc/os-release` `PRETTY_NAME` (Linux) or `sw_vers` (macOS)
+   - `architecture` — `uname -m`
+   - `hostname` — `hostname` command on the remote host
+3. `ip_address` is set to the SSH target's hostname/address from the local database (not collected via a remote command).
+4. The collected `HostInfo` structs are assembled into a `ReportHostsPayload` and sent to the controller as a `ReportHosts` message.
+
+### Controller processing
+
+- The controller calls `find_or_create_host_and_link()` for each `HostInfo` in the payload.
+- Host entities are created or updated (matched by `machine_id`) and linked to the SSH agent service via the `service_hosts` junction table.
+- The `ip_address` and `hostname` fields on the `Host` entity are populated from the `HostInfo` if present.
+
+### Error handling
+
+Errors connecting to or collecting info from individual hosts are logged and skipped. A failure on one host does not prevent reporting for the remaining hosts. If all hosts fail, the agent sends a `ReportHosts` message with an empty host list.
+
 ## Crate Structure
 
 ```text
@@ -238,6 +265,7 @@ crates/core/agent-ssh/
     ├── ssh_key.rs       # SSH private key reading, key type auto-detection, and Ed25519 keygen
     ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs)
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
+    ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, os_version, architecture, hostname)
     ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove)
     ├── commands/
     │   ├── mod.rs       # Command module declarations
