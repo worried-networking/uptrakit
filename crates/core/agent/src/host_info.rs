@@ -17,9 +17,7 @@ pub fn collect_host_info() -> HostInfo {
 /// Tries FQDN first (`hostname -f`), falls back to short hostname.
 fn read_hostname() -> Option<String> {
     // Try FQDN first.
-    if let Ok(output) = std::process::Command::new("hostname")
-        .arg("-f")
-        .output()
+    if let Ok(output) = std::process::Command::new("hostname").arg("-f").output()
         && output.status.success()
     {
         let fqdn = String::from_utf8_lossy(&output.stdout).trim().to_string();

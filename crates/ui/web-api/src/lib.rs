@@ -390,19 +390,17 @@ struct ApiDoc;
         routes::oidc_providers::activate_provider,
         routes::oidc_providers::deactivate_provider,
     ),
-    components(
-        schemas(
-            routes::oidc_auth::AuthMethodsResponse,
-            routes::oidc_auth::OidcProviderInfo,
-            routes::oidc_auth::OidcAuthorizeResponse,
-            routes::oidc_auth::OidcLinkRequest,
-            routes::oidc_auth::OidcExchangeRequest,
-            routes::oidc_auth::OidcCompleteRegistrationRequest,
-            routes::oidc_providers::CreateOidcProviderRequest,
-            routes::oidc_providers::UpdateOidcProviderRequest,
-            routes::oidc_providers::OidcProviderResponse,
-        )
-    )
+    components(schemas(
+        routes::oidc_auth::AuthMethodsResponse,
+        routes::oidc_auth::OidcProviderInfo,
+        routes::oidc_auth::OidcAuthorizeResponse,
+        routes::oidc_auth::OidcLinkRequest,
+        routes::oidc_auth::OidcExchangeRequest,
+        routes::oidc_auth::OidcCompleteRegistrationRequest,
+        routes::oidc_providers::CreateOidcProviderRequest,
+        routes::oidc_providers::UpdateOidcProviderRequest,
+        routes::oidc_providers::OidcProviderResponse,
+    ))
 )]
 struct OidcApiDoc;
 

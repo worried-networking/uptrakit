@@ -316,8 +316,7 @@ pub async fn connect_and_authenticate(
             let hash_algs = rsa_hash_alg_candidates(private_key.algorithm());
             let mut success = false;
             for hash_alg in hash_algs {
-                let key_with_alg =
-                    PrivateKeyWithHashAlg::new(Arc::clone(&private_key), hash_alg);
+                let key_with_alg = PrivateKeyWithHashAlg::new(Arc::clone(&private_key), hash_alg);
                 let auth_result = handle
                     .authenticate_publickey(username.to_string(), key_with_alg)
                     .await
@@ -387,9 +386,7 @@ async fn authenticate_with_agent<H: client::Handler>(
                     &mut agent,
                 )
                 .await
-                .map_err(|e| {
-                    report!(Error::SshAuth(format!("SSH agent signing failed: {e}")))
-                })?;
+                .map_err(|e| report!(Error::SshAuth(format!("SSH agent signing failed: {e}"))))?;
 
             if result.success() {
                 accepted = true;

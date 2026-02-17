@@ -358,7 +358,10 @@ async fn report_enrolled_hosts(
     if let Err(e) = conn.send(msg).await {
         tracing::warn!(error = %e, "failed to send ReportHosts message");
     } else {
-        tracing::info!(host_count = hosts.len(), "reported enrolled hosts to controller");
+        tracing::info!(
+            host_count = hosts.len(),
+            "reported enrolled hosts to controller"
+        );
     }
 }
 

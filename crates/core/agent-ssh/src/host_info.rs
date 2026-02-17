@@ -36,7 +36,9 @@ pub async fn collect_remote_host_info(session: &SshSession) -> HostInfo {
 /// `"unknown"`.
 async fn read_remote_machine_id(session: &SshSession) -> String {
     // Linux: /etc/machine-id
-    if let Ok(result) = session.exec_command("cat /etc/machine-id 2>/dev/null").await
+    if let Ok(result) = session
+        .exec_command("cat /etc/machine-id 2>/dev/null")
+        .await
         && result.exit_code == 0
     {
         let trimmed = result.stdout.trim().to_string();
@@ -76,7 +78,9 @@ async fn read_remote_os_type(session: &SshSession) -> Option<String> {
 /// Tries `/etc/os-release` `PRETTY_NAME` (Linux), then `sw_vers` (macOS).
 async fn read_remote_os_version(session: &SshSession) -> Option<String> {
     // Linux: /etc/os-release
-    if let Ok(result) = session.exec_command("cat /etc/os-release 2>/dev/null").await
+    if let Ok(result) = session
+        .exec_command("cat /etc/os-release 2>/dev/null")
+        .await
         && result.exit_code == 0
         && let Some(pretty) = parse_pretty_name(&result.stdout)
     {
@@ -233,7 +237,8 @@ mod tests {
 
     #[test]
     fn parses_pretty_name_quoted() {
-        let content = "ID=debian\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nVERSION_ID=\"12\"";
+        let content =
+            "ID=debian\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nVERSION_ID=\"12\"";
         assert_eq!(
             parse_pretty_name(content),
             Some("Debian GNU/Linux 12 (bookworm)".to_string())

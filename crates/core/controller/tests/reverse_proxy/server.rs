@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use uptrakit_web_api::AppState;
 use uptrakit_web_api::auth::device_flow::DeviceFlowStore;
 use uptrakit_web_api::auth::jwt::JwtManager;
-#[cfg(feature = "oidc")]
 use uptrakit_web_api::auth::oidc_state::{
     AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
 };
@@ -200,14 +199,10 @@ async fn build_state(
         cert_signer: Arc::new(NoopCertSigner),
         service_connections,
         revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-        #[cfg(feature = "oidc")]
         oidc_flow_store: OidcFlowStore::new(db.clone()),
-        #[cfg(feature = "oidc")]
         account_link_store: AccountLinkStore::new(db.clone()),
         jwt: Arc::new(JwtManager::from_secret(b"test-secret-reverse-proxy")),
-        #[cfg(feature = "oidc")]
         oidc_token_exchange_store: OidcTokenExchangeStore::new(db.clone()),
-        #[cfg(feature = "oidc")]
         oidc_registration_store: OidcRegistrationStore::new(db.clone()),
         device_flow_store: DeviceFlowStore::new(db.clone()),
         rate_limit_store: RateLimitStore::new(db.clone()),
