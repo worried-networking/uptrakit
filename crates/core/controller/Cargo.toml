@@ -16,7 +16,6 @@ db-mysql = ["sea-orm/sqlx-mysql", "sea-orm-migration/sqlx-mysql", "uptrakit-web-
 
 [dependencies]
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-web-api-types = { path = "../../shared/web-api-types" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-web-api = { path = "../../ui/web-api" }
 uptrakit-directories = { path = "../../shared/directories" }
