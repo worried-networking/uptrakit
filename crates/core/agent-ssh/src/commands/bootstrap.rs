@@ -516,10 +516,7 @@ mod tests {
     #[test]
     fn cmd_create_user_with_sudo() {
         let cmd = cmd_create_user("uptrakit", true);
-        assert_eq!(
-            cmd,
-            "sudo useradd --create-home --shell /bin/sh 'uptrakit'"
-        );
+        assert_eq!(cmd, "sudo useradd --create-home --shell /bin/sh 'uptrakit'");
     }
 
     #[test]
@@ -579,12 +576,8 @@ mod tests {
 
     #[test]
     fn cmd_authorized_keys_includes_restrictions() {
-        let cmd = cmd_setup_authorized_keys(
-            "/home/svc",
-            "ssh-ed25519 AAAA... svc@host",
-            "svc",
-            false,
-        );
+        let cmd =
+            cmd_setup_authorized_keys("/home/svc", "ssh-ed25519 AAAA... svc@host", "svc", false);
         assert!(
             cmd.contains("no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519"),
             "authorized_keys entry must include restriction prefix: {cmd}"

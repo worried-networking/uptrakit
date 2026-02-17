@@ -727,11 +727,12 @@ mod tests {
 
         match &args.command {
             Some(Commands::Host {
-                command: HostCommands::Bootstrap {
-                    auth_username,
-                    target_username,
-                    ..
-                },
+                command:
+                    HostCommands::Bootstrap {
+                        auth_username,
+                        target_username,
+                        ..
+                    },
             }) => {
                 assert_eq!(auth_username, "root");
                 assert!(
