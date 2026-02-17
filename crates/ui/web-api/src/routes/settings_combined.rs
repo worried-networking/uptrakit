@@ -93,12 +93,24 @@ pub async fn get_combined_settings(
         .await,
         Ok(Some(_))
     );
+    let ssh_agent_configured = matches!(
+        load_setting(
+            &state.db,
+            state.default_tenant_id,
+            SettingKey::SshAgentEnrollmentTokenHash
+        )
+        .await,
+        Ok(Some(_))
+    );
     let enrollment_tokens = EnrollmentTokenStatusesResponse {
         agent: EnrollmentTokenStatusResponse {
             configured: agent_configured,
         },
         mqtt: EnrollmentTokenStatusResponse {
             configured: mqtt_configured,
+        },
+        ssh_agent: EnrollmentTokenStatusResponse {
+            configured: ssh_agent_configured,
         },
     };
 
@@ -139,6 +151,7 @@ mod tests {
         let enrollment_tokens = EnrollmentTokenStatusesResponse {
             agent: EnrollmentTokenStatusResponse { configured: true },
             mqtt: EnrollmentTokenStatusResponse { configured: false },
+            ssh_agent: EnrollmentTokenStatusResponse { configured: true },
         };
 
         let combined = build_combined_settings_response(
@@ -155,5 +168,6 @@ mod tests {
         assert_eq!(combined.agent_certificates.renewal_window_hours, 9);
         assert!(combined.enrollment_tokens.agent.configured);
         assert!(!combined.enrollment_tokens.mqtt.configured);
+        assert!(combined.enrollment_tokens.ssh_agent.configured);
     }
 }

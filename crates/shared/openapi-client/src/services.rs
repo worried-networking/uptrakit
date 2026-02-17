@@ -157,6 +157,13 @@ mod tests {
     }
 
     #[test]
+    fn enrollment_token_query_with_ssh_agent_type() {
+        let query = EnrollmentTokenQuery::from_service_type(Some(ServiceType::SshAgent));
+        let qs = serde_urlencoded::to_string(&query).expect("serialize");
+        assert_eq!(qs, "type=ssh_agent");
+    }
+
+    #[test]
     fn enrollment_token_query_without_type() {
         let query = EnrollmentTokenQuery::from_service_type(None);
         let qs = serde_urlencoded::to_string(&query).expect("serialize");

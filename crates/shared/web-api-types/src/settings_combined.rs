@@ -10,6 +10,7 @@ use crate::settings_auth::AuthenticationSettingsResponse;
 pub struct EnrollmentTokenStatusesResponse {
     pub agent: EnrollmentTokenStatusResponse,
     pub mqtt: EnrollmentTokenStatusResponse,
+    pub ssh_agent: EnrollmentTokenStatusResponse,
 }
 
 #[derive(Serialize, Deserialize)]

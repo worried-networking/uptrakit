@@ -124,6 +124,7 @@
 			agentCertificateRef.load(combined.agent_certificates);
 			enrollmentTokenRef.loadAgent(combined.enrollment_tokens.agent);
 			enrollmentTokenRef.loadMqtt(combined.enrollment_tokens.mqtt);
+			enrollmentTokenRef.loadSshAgent(combined.enrollment_tokens.ssh_agent);
 		} else {
 			// This error affects multiple refs, so set specific errors for each
 			const msg = results[0].reason instanceof Error ? results[0].reason.message : 'Failed to load combined settings.';

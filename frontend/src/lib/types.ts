@@ -47,7 +47,7 @@ export interface LoginRequest {
 	password: string;
 }
 
-export type ServiceType = 'agent' | 'mqtt';
+export type ServiceType = 'agent' | 'mqtt' | 'ssh_agent';
 
 export type ServiceStatus = 'pending' | 'approved' | 'rejected' | 'deactivated';
 
@@ -123,6 +123,7 @@ export interface EnrollmentTokenStatus {
 export interface EnrollmentTokenStatusesResponse {
 	agent: EnrollmentTokenStatus;
 	mqtt: EnrollmentTokenStatus;
+	ssh_agent: EnrollmentTokenStatus;
 }
 
 export interface CombinedSettingsResponse {

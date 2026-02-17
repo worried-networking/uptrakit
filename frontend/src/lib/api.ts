@@ -362,7 +362,7 @@ export function updateAgentCertificateSettings(
 }
 
 export function getEnrollmentTokenStatus(
-	type: 'agent' | 'mqtt' = 'agent'
+	type: 'agent' | 'mqtt' | 'ssh_agent' = 'agent'
 ): Promise<EnrollmentTokenStatus> {
 	return request(`/services/enrollment-token/status?type=${type}`);
 }
@@ -372,12 +372,12 @@ export function getCombinedSettings(): Promise<CombinedSettingsResponse> {
 }
 
 export function createEnrollmentToken(
-	type: 'agent' | 'mqtt' = 'agent'
+	type: 'agent' | 'mqtt' | 'ssh_agent' = 'agent'
 ): Promise<EnrollmentTokenResponse> {
 	return request(`/services/enrollment-token?type=${type}`, { method: 'POST' });
 }
 
-export function revokeEnrollmentToken(type: 'agent' | 'mqtt' = 'agent'): Promise<MessageResponse> {
+export function revokeEnrollmentToken(type: 'agent' | 'mqtt' | 'ssh_agent' = 'agent'): Promise<MessageResponse> {
 	return request(`/services/enrollment-token?type=${type}`, { method: 'DELETE' });
 }
 

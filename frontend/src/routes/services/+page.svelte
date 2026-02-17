@@ -141,7 +141,14 @@
 	} as const;
 
 	function formatServiceType(serviceType: ServiceType): string {
-		return serviceType === 'agent' ? 'Agent' : 'MQTT Service';
+		switch (serviceType) {
+			case 'agent':
+				return 'Agent';
+			case 'mqtt':
+				return 'MQTT Service';
+			case 'ssh_agent':
+				return 'SSH Agent';
+		}
 	}
 </script>
 
@@ -173,6 +180,12 @@
 			onclick={() => setFilter('mqtt')}
 		>
 			MQTT Services
+		</button>
+		<button
+			class="btn btn-sm {typeFilter === 'ssh_agent' ? 'preset-filled-primary-500' : 'preset-tonal'}"
+			onclick={() => setFilter('ssh_agent')}
+		>
+			SSH Agents
 		</button>
 	</div>
 
@@ -240,7 +253,7 @@
 						<td colspan={canManage ? 7 : 6} class="text-center py-8">
 							<p class="text-lg font-medium">No services registered yet</p>
 							<p class="mt-1 text-sm text-surface-500">
-								Agents and MQTT services appear here when they enroll with the controller.
+								Agents, MQTT services, and SSH agents appear here when they enroll with the controller.
 							</p>
 						</td>
 					</tr>
