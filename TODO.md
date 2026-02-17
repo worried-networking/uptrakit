@@ -328,7 +328,7 @@ Ways users interact with the system.
   - [x] `uptrakit history` - view update history (list with filters, show)
   - [x] `uptrakit services` - list, show, approve, reject, remove, merge services
   - [x] `uptrakit scheduler` - list, show, and trigger scheduled tasks
-  - [x] `uptrakit settings` - settings management (registration, authentication, certificates, network, MQTT, OIDC, CA rotation, server cert renewal, alerts)
+  - [x] `uptrakit settings` - settings management
   - [ ] `uptrakit status` - system status
   - [ ] `uptrakit agent` - various commands proxied to the agent. Plus
     `uptrakit agent install` to install the agent locally
