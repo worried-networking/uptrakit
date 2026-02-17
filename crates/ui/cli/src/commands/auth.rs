@@ -6,8 +6,8 @@ use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use serde::Serialize;
-use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
 use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
 
 /// Serializable output for `auth status`.

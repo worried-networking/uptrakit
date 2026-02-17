@@ -191,8 +191,8 @@ fn compute_config_hash(config: &MqttTenantConfig) -> u64 {
 mod tests {
     use super::*;
     use time::UtcDateTime;
-    use uptrakit_internal_wire::SecretString;
     use uptrakit_internal_wire::MqttTransport;
+    use uptrakit_internal_wire::SecretString;
 
     #[test]
     fn build_config_from_wire_correct() {

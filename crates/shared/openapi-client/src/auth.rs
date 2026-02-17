@@ -85,7 +85,9 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::auth::{LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest};
+    use uptrakit_web_api_types::auth::{
+        LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest,
+    };
     use uptrakit_web_api_types::device_auth::{
         DeviceAuthApproveRequest, DeviceAuthPollRequest, DeviceAuthStartRequest,
     };

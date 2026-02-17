@@ -75,7 +75,10 @@ pub async fn registration_show(
     let resp = client.get_registration_settings().await.context_to()?;
 
     let mut human = String::new();
-    human.push_str(&format!("Mode:                    {}\n", resp.mode.as_str()));
+    human.push_str(&format!(
+        "Mode:                    {}\n",
+        resp.mode.as_str()
+    ));
     human.push_str(&format!(
         "Require Token for OIDC:  {}\n",
         resp.require_token_for_oidc
@@ -110,7 +113,10 @@ pub async fn registration_update(params: RegistrationUpdateParams<'_>) -> Result
 
     let mut human = String::new();
     human.push_str("Registration settings updated.\n");
-    human.push_str(&format!("Mode:                    {}\n", resp.mode.as_str()));
+    human.push_str(&format!(
+        "Mode:                    {}\n",
+        resp.mode.as_str()
+    ));
     human.push_str(&format!(
         "Require Token for OIDC:  {}\n",
         resp.require_token_for_oidc
@@ -172,7 +178,10 @@ pub async fn certificates_show(
     let resp = client.get_agent_certificate_settings().await.context_to()?;
 
     let mut human = String::new();
-    human.push_str(&format!("Lifetime (days):         {}\n", resp.lifetime_days));
+    human.push_str(&format!(
+        "Lifetime (days):         {}\n",
+        resp.lifetime_days
+    ));
     human.push_str(&format!(
         "Renewal Window (hours):  {}\n",
         resp.renewal_window_hours
@@ -202,7 +211,10 @@ pub async fn certificates_update(
 
     let mut human = String::new();
     human.push_str("Certificate settings updated.\n");
-    human.push_str(&format!("Lifetime (days):         {}\n", resp.lifetime_days));
+    human.push_str(&format!(
+        "Lifetime (days):         {}\n",
+        resp.lifetime_days
+    ));
     human.push_str(&format!(
         "Renewal Window (hours):  {}\n",
         resp.renewal_window_hours
@@ -795,10 +807,7 @@ pub async fn alerts(
     if resp.alerts.is_empty() {
         human.push_str("No active alerts.\n");
     } else {
-        human.push_str(&format!(
-            "{:<10} {:<30} MESSAGE\n",
-            "SEVERITY", "TITLE"
-        ));
+        human.push_str(&format!("{:<10} {:<30} MESSAGE\n", "SEVERITY", "TITLE"));
         for alert in &resp.alerts {
             human.push_str(&format!(
                 "{:<10} {:<30} {}\n",

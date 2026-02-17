@@ -420,8 +420,7 @@ mod tests {
 
     #[test]
     fn user_response_round_trip() {
-        let user_id =
-            Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
         let user = UserResponse {
             id: user_id,
             email: "owner@example.com".to_string(),
@@ -455,8 +454,7 @@ mod tests {
 
     #[test]
     fn user_response_empty_permissions() {
-        let user_id =
-            Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("valid uuid");
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("valid uuid");
         let user = UserResponse {
             id: user_id,
             email: "viewer@example.com".to_string(),
@@ -472,8 +470,7 @@ mod tests {
 
     #[test]
     fn auth_response_round_trip() {
-        let user_id =
-            Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
+        let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
         let auth = AuthResponse {
             access_token: "eyJhbGciOiJIUzI1NiJ9.test".to_string(),
             refresh_token: "refresh-token-value".to_string(),
@@ -503,8 +500,7 @@ mod tests {
 
     #[test]
     fn agent_response_round_trip() {
-        let agent_id =
-            Uuid::parse_str("10000000-0000-0000-0000-000000000001").expect("valid uuid");
+        let agent_id = Uuid::parse_str("10000000-0000-0000-0000-000000000001").expect("valid uuid");
         let agent = AgentResponse {
             id: agent_id,
             hostname: "server-1.local".to_string(),
@@ -535,8 +531,7 @@ mod tests {
 
     #[test]
     fn agent_response_round_trip_with_none_optionals() {
-        let agent_id =
-            Uuid::parse_str("10000000-0000-0000-0000-000000000002").expect("valid uuid");
+        let agent_id = Uuid::parse_str("10000000-0000-0000-0000-000000000002").expect("valid uuid");
         let agent = AgentResponse {
             id: agent_id,
             hostname: "server-2.local".to_string(),

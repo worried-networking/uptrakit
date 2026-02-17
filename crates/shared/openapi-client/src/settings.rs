@@ -49,9 +49,7 @@ impl UptrakitClient {
     }
 
     /// Get agent certificate settings.
-    pub async fn get_agent_certificate_settings(
-        &self,
-    ) -> Result<AgentCertificateSettingsResponse> {
+    pub async fn get_agent_certificate_settings(&self) -> Result<AgentCertificateSettingsResponse> {
         self.get("/api/v1/settings/agent-certificates").await
     }
 

@@ -220,11 +220,7 @@ impl UptrakitClient {
         self.handle_empty_response(resp).await
     }
 
-    async fn put_json<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<T> {
+    async fn put_json<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self
             .http

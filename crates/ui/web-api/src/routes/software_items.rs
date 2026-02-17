@@ -292,10 +292,8 @@ pub async fn create_software_item(
         }
     };
 
-    let (provider_config_id, config) = match (
-        req.provider_config_id,
-        req.provider_config.as_ref(),
-    ) {
+    let (provider_config_id, config) = match (req.provider_config_id, req.provider_config.as_ref())
+    {
         (Some(provider_config_id), None) => {
             let config =
                 match find_active_provider_config(&txn, tenant.tenant_id, provider_config_id).await

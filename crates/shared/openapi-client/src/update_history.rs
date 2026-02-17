@@ -27,8 +27,7 @@ mod tests {
 
     #[test]
     fn update_history_query_serialization_with_filters() {
-        let host_id =
-            Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
+        let host_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
         let query = UpdateHistoryQuery {
             host_id: Some(host_id),
             software_item_id: None,

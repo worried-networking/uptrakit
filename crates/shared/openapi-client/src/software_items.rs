@@ -3,8 +3,8 @@ use crate::UptrakitClient;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
-    SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
-    TriggerVersionCheckResponse, UpdateSoftwareItemRequest,
+    SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse, TriggerVersionCheckResponse,
+    UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
@@ -136,10 +136,8 @@ mod tests {
 
     #[test]
     fn assign_hosts_request_serialization() {
-        let host1 =
-            Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
-        let host2 =
-            Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("valid uuid");
+        let host1 = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
+        let host2 = Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("valid uuid");
         let req = AssignHostsRequest {
             host_ids: vec![host1, host2],
         };

@@ -78,10 +78,7 @@ impl UptrakitClient {
     }
 
     /// Revoke the enrollment token for a service type.
-    pub async fn revoke_enrollment_token(
-        &self,
-        service_type: Option<ServiceType>,
-    ) -> Result<()> {
+    pub async fn revoke_enrollment_token(&self, service_type: Option<ServiceType>) -> Result<()> {
         let query = EnrollmentTokenQuery::from_service_type(service_type);
         self.delete_with_query("/api/v1/services/enrollment-token", &query)
             .await

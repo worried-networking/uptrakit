@@ -1033,23 +1033,21 @@ async fn main() {
                     fwd_cert_pem_header,
                     pki_addr,
                 } => {
-                    commands::settings::network_update(
-                        commands::settings::NetworkUpdateParams {
-                            server: cli.server.as_deref(),
-                            token: cli.token.as_deref(),
-                            format: cli.output,
-                            insecure,
-                            trusted_proxies: trusted_proxies
-                                .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
-                            real_ip_header,
-                            extra_sans: extra_sans
-                                .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
-                            https_addr,
-                            fwd_cert_info_header,
-                            fwd_cert_pem_header,
-                            pki_addr,
-                        },
-                    )
+                    commands::settings::network_update(commands::settings::NetworkUpdateParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        format: cli.output,
+                        insecure,
+                        trusted_proxies: trusted_proxies
+                            .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                        real_ip_header,
+                        extra_sans: extra_sans
+                            .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                        https_addr,
+                        fwd_cert_info_header,
+                        fwd_cert_pem_header,
+                        pki_addr,
+                    })
                     .await
                 }
             },
@@ -1373,8 +1371,8 @@ mod tests {
 
     #[test]
     fn hosts_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "hosts", "show", HOST_UUID])
-            .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "hosts", "show", HOST_UUID]).expect("should parse");
         match args.command {
             Some(Commands::Hosts {
                 command: HostsCommands::Show { id },
@@ -1587,8 +1585,8 @@ mod tests {
 
     #[test]
     fn history_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "history", "show", HIST_UUID])
-            .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "history", "show", HIST_UUID]).expect("should parse");
         match args.command {
             Some(Commands::History {
                 command: HistoryCommands::Show { id },
@@ -1601,8 +1599,7 @@ mod tests {
 
     #[test]
     fn scheduler_list_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "scheduler", "list"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "scheduler", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Scheduler {
@@ -1687,8 +1684,8 @@ mod tests {
 
     #[test]
     fn services_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "services", "show", SVC_UUID])
-            .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "services", "show", SVC_UUID]).expect("should parse");
         match args.command {
             Some(Commands::Services {
                 command: ServicesCommands::Show { id },
@@ -1743,14 +1740,8 @@ mod tests {
 
     #[test]
     fn services_merge_parses() {
-        let args = Cli::try_parse_from([
-            "uptrakit",
-            "services",
-            "merge",
-            TARGET_UUID,
-            SOURCE_UUID,
-        ])
-        .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "services", "merge", TARGET_UUID, SOURCE_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::Services {
                 command:
@@ -1791,8 +1782,7 @@ mod tests {
 
     #[test]
     fn settings_show_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "settings", "show"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "settings", "show"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -1882,9 +1872,10 @@ mod tests {
             Some(Commands::Settings {
                 command:
                     SettingsCommands::Authentication {
-                        command: AuthenticationCommands::Update {
-                            password_auth_enabled,
-                        },
+                        command:
+                            AuthenticationCommands::Update {
+                                password_auth_enabled,
+                            },
                     },
             }) => {
                 assert_eq!(password_auth_enabled, Some(false));
@@ -1940,8 +1931,8 @@ mod tests {
 
     #[test]
     fn settings_network_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "settings", "network", "show"])
-            .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "settings", "network", "show"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -1977,10 +1968,7 @@ mod tests {
                             },
                     },
             }) => {
-                assert_eq!(
-                    trusted_proxies.as_deref(),
-                    Some("10.0.0.0/8,172.16.0.0/12")
-                );
+                assert_eq!(trusted_proxies.as_deref(), Some("10.0.0.0/8,172.16.0.0/12"));
                 assert_eq!(real_ip_header.as_deref(), Some("X-Real-IP"));
             }
             _ => panic!("expected Settings Network Update"),
@@ -1989,8 +1977,8 @@ mod tests {
 
     #[test]
     fn settings_rotate_ca_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "settings", "rotate-ca"])
-            .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "settings", "rotate-ca"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -2098,10 +2086,7 @@ mod tests {
                     SettingsCommands::Mqtt {
                         command:
                             MqttCommands::Update {
-                                id,
-                                enabled,
-                                host,
-                                ..
+                                id, enabled, host, ..
                             },
                     },
             }) => {
@@ -2115,9 +2100,8 @@ mod tests {
 
     #[test]
     fn settings_mqtt_delete_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "settings", "mqtt", "delete", MQTT_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "delete", MQTT_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::Settings {
                 command:
@@ -2150,13 +2134,7 @@ mod tests {
     #[test]
     fn settings_mqtt_limit_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit",
-            "settings",
-            "mqtt",
-            "limit",
-            "update",
-            "--max",
-            "10",
+            "uptrakit", "settings", "mqtt", "limit", "update", "--max", "10",
         ])
         .expect("should parse");
         match args.command {
@@ -2287,9 +2265,8 @@ mod tests {
 
     #[test]
     fn settings_oidc_delete_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "settings", "oidc", "delete", OIDC_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "settings", "oidc", "delete", OIDC_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::Settings {
                 command:
@@ -2305,9 +2282,8 @@ mod tests {
 
     #[test]
     fn settings_oidc_activate_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "settings", "oidc", "activate", OIDC_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "settings", "oidc", "activate", OIDC_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::Settings {
                 command:
@@ -2323,9 +2299,8 @@ mod tests {
 
     #[test]
     fn settings_oidc_deactivate_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "settings", "oidc", "deactivate", OIDC_UUID])
-                .expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "settings", "oidc", "deactivate", OIDC_UUID])
+            .expect("should parse");
         match args.command {
             Some(Commands::Settings {
                 command:
@@ -2341,8 +2316,7 @@ mod tests {
 
     #[test]
     fn settings_alerts_parses() {
-        let args =
-            Cli::try_parse_from(["uptrakit", "settings", "alerts"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "settings", "alerts"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
