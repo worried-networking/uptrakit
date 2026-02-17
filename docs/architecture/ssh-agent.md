@@ -133,26 +133,36 @@ For detailed usage instructions, see [SSH Agent Host Management](../end-user/ssh
 ### Bootstrap Workflow
 
 The `host bootstrap` subcommand automates the full remote host setup in a single
-command. It connects via SSH, creates a target user, deploys an SSH key,
-configures sudoers, verifies connectivity, and saves the host entry.
+command. It accepts a positional target in standard SSH format
+(`[user@]host[:port]` or `ssh://[user@]host[:port]`) and resolves defaults from
+`~/.ssh/config`.
 
 ```text
-1. VALIDATE INPUTS (username format, no DB name conflict)
-2. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
-3. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned host key)
-4. DETECT PRIVILEGES (root check, sudo -n true)
-5. REMOTE SETUP (create user with /bin/sh shell, deploy authorized_keys with
+1. PARSE TARGET & RESOLVE DEFAULTS (target string → SSH config → $USER/port 22)
+2. VALIDATE INPUTS (username format, no DB name conflict)
+3. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
+4. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned host key)
+5. DETECT PRIVILEGES (root check, sudo -n true)
+6. REMOTE SETUP (create user with /bin/sh shell, deploy authorized_keys with
    no-pty/no-agent-forwarding/no-X11-forwarding restrictions, write sudoers)
-6. DISCONNECT auth session
-7. VERIFY (reconnect as target user, whoami + sudo -n true)
-8. SAVE TO DATABASE (encrypt key, store host entry)
+7. DISCONNECT auth session
+8. VERIFY (reconnect as target user, whoami + sudo -n true)
+9. SAVE TO DATABASE (encrypt key, store host entry)
 ```
 
-When `--auth-username` is `root` and `--target-username` is omitted, the target
+The resolution chain for each field:
+
+- **Username**: target string → `~/.ssh/config` `User` → `$USER`
+- **Port**: target string → `~/.ssh/config` `Port` → 22
+- **Hostname**: `~/.ssh/config` `HostName` → target hostname
+- **Host name** (`--name`): explicit flag → target hostname (before `HostName`
+  resolution)
+
+When the auth username is `root` and `--target-username` is omitted, the target
 username defaults to `uptrakit` (instead of reusing `root`) to ensure the
 managed account is a dedicated service user.
 
-The bootstrap command supports three authentication methods for step 3:
+The bootstrap command supports three authentication methods for step 4:
 
 - **Password** — `--auth-password` accepts an optional inline value
   (`--auth-password mypass`) or prompts interactively when no value is given.
@@ -165,7 +175,9 @@ The bootstrap command supports three authentication methods for step 3:
 The bootstrap command uses `russh` (pure Rust async SSH client) for SSH
 transport. Host key verification supports strict fingerprint pinning and
 trust-on-first-use (TOFU). Remote commands are constructed using
-`uptrakit_command::shell_escape()` to prevent shell injection.
+`uptrakit_command::shell_escape()` to prevent shell injection. SSH config
+parsing uses the `ssh2-config` crate with `ALLOW_UNKNOWN_FIELDS` to gracefully
+handle non-standard directives.
 
 For detailed usage and troubleshooting, see
 [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md).
@@ -221,13 +233,15 @@ crates/core/agent-ssh/
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
     ├── client.rs        # Authenticated loop (ping/pong, cert renewal, local DB init)
     ├── error.rs         # Error types (rootcause + thiserror)
+    ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH)
     ├── ssh_key.rs       # SSH private key reading, key type auto-detection, and Ed25519 keygen
+    ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs)
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
     ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove)
     ├── commands/
     │   ├── mod.rs       # Command module declarations
-    │   ├── host.rs      # Host subcommand handlers (dispatch, formatting, output)
+    │   ├── host.rs      # Host subcommand handlers (dispatch, SSH config resolution, formatting)
     │   └── bootstrap.rs # Bootstrap workflow (remote setup, verification, DB save)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests

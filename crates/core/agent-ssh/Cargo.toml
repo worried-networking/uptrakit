@@ -9,6 +9,7 @@ version.workspace = true
 [dependencies]
 base64 = "0.22"
 clap = { workspace = true }
+dirs = "6"
 rootcause = { workspace = true }
 rpassword = "7"
 russh = { version = "0.57", default-features = false, features = ["aws-lc-rs"] }
@@ -16,12 +17,14 @@ ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "r
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
 sha2 = { workspace = true }
+ssh2-config = "0.7"
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time"] }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+url = { workspace = true }
 uptrakit-command = { path = "../../shared/command" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }

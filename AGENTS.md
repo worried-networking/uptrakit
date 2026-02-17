@@ -53,7 +53,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshCommandExecutor
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshCommandExecutor, SshTarget parser, ~/.ssh/config resolution
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use rootcause::prelude::*;
-use uptrakit_provider_core::mpsc;
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output};
+use uptrakit_provider_core::mpsc;
 use uptrakit_provider_core::{
     DiscoveredSoftware, Provider, ProviderCapability, ProviderError, ProviderType, ReleaseInfo,
     Result, UpdateOutputLine, UpdateOutputStream, UpstreamRelease, Version,

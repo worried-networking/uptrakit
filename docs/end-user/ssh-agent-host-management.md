@@ -79,16 +79,18 @@ Accepts either the host name or UUID. Returns an error if the host is not found.
 ### Bootstrap a host
 
 For automated remote host setup (user creation, key deployment, sudoers), use
-the `host bootstrap` command:
+the `host bootstrap` command with a positional target in standard SSH format:
 
 ```bash
-uptrakit-agent-ssh host bootstrap \
-  --name my-server \
-  --hostname 192.168.1.100 \
-  --auth-username root \
+uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
   --auth-password \
   --master-key-file /etc/uptrakit/master.key
 ```
+
+The target accepts `[user@]host[:port]` or `ssh://[user@]host[:port]` format.
+The host name defaults to the target hostname (overridable with `--name`).
+Username, port, and hostname defaults are resolved from `~/.ssh/config` when not
+specified in the target.
 
 This connects to the remote host, creates a target user, deploys an SSH key,
 configures sudoers, verifies connectivity, and saves the host entry.

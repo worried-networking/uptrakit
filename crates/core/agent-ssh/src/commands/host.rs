@@ -7,6 +7,7 @@ use crate::cli::HostCommands;
 use crate::commands::bootstrap::{self, BootstrapParams};
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams, HostUpdates};
+use crate::ssh_config;
 use crate::ssh_key;
 
 /// Dispatch a host subcommand.
@@ -61,14 +62,12 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
         }
         HostCommands::Remove { name_or_id } => run_remove(&db, &name_or_id).await,
         HostCommands::Bootstrap {
+            target,
             name,
-            hostname,
-            auth_username,
             auth_password,
             auth_private_key_file,
             target_username,
             target_private_key_file,
-            port,
             host_key_fingerprint,
         } => {
             // The bootstrap command manages its own DB connection, so we
@@ -76,14 +75,12 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
             drop(db);
             let cli_params = BootstrapCliParams {
                 state_dir,
+                target,
                 name,
-                hostname,
-                auth_username,
                 auth_password,
                 auth_private_key_file: auth_private_key_file.as_deref(),
                 target_username,
                 target_private_key_file: target_private_key_file.as_deref(),
-                port,
                 host_key_fingerprint,
             };
             run_bootstrap(cli_params).await
@@ -242,19 +239,49 @@ async fn run_remove(db: &sea_orm::DatabaseConnection, name_or_id: &str) -> Resul
 /// Encapsulates bootstrap CLI parameters to avoid too many arguments.
 struct BootstrapCliParams<'a> {
     state_dir: &'a Path,
-    name: String,
-    hostname: String,
-    auth_username: String,
+    target: crate::ssh_target::SshTarget,
+    name: Option<String>,
     /// `None` = not passed, `Some(None)` = prompt, `Some(Some(pw))` = inline.
     auth_password: Option<Option<String>>,
     auth_private_key_file: Option<&'a Path>,
     target_username: Option<String>,
     target_private_key_file: Option<&'a Path>,
-    port: i32,
     host_key_fingerprint: Option<String>,
 }
 
 async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
+    // Resolve SSH config defaults for the target hostname.
+    let ssh_defaults = ssh_config::resolve_defaults(&p.target.hostname);
+
+    // Derive final values from: target string > SSH config > system defaults.
+    let auth_username = resolve_auth_username(
+        p.target.username.as_deref(),
+        ssh_defaults.username.as_deref(),
+    )?;
+
+    let port = p.target.port.or(ssh_defaults.port).unwrap_or(22);
+
+    let hostname = ssh_defaults
+        .hostname
+        .clone()
+        .unwrap_or_else(|| p.target.hostname.clone());
+
+    // Host name defaults to the original target hostname (before HostName
+    // resolution), so SSH aliases map naturally to host names.
+    let name = p.name.unwrap_or_else(|| p.target.hostname.clone());
+
+    // Log which defaults were applied.
+    log_resolved_defaults(
+        &p.target,
+        &ssh_defaults,
+        &auth_username,
+        port,
+        &hostname,
+        &name,
+    );
+
+    let port_i32 = i32::from(port);
+
     // Resolve password from the dual-mode flag.
     let auth_password = match p.auth_password {
         Some(Some(pw)) => Some(pw),
@@ -290,13 +317,11 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
     // Resolve target username.
     let resolved_target = match p.target_username {
         Some(name) => name,
-        None if p.auth_username == "root" => {
-            println!(
-                "NOTE: --auth-username is 'root'; defaulting --target-username to 'uptrakit'."
-            );
+        None if auth_username == "root" => {
+            println!("NOTE: auth username is 'root'; defaulting target username to 'uptrakit'.");
             "uptrakit".to_string()
         }
-        None => p.auth_username.clone(),
+        None => auth_username.clone(),
     };
 
     // Read or generate target key.
@@ -306,10 +331,10 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
     };
 
     let params = BootstrapParams {
-        name: p.name,
-        hostname: p.hostname,
-        port: p.port,
-        auth_username: p.auth_username,
+        name,
+        hostname,
+        port: port_i32,
+        auth_username,
         auth_password,
         auth_private_key_pem,
         use_ssh_agent,
@@ -319,6 +344,73 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
     };
 
     bootstrap::run_bootstrap(p.state_dir, params).await
+}
+
+/// Resolve the auth username from: target string > SSH config > system $USER.
+fn resolve_auth_username(
+    target_username: Option<&str>,
+    ssh_config_username: Option<&str>,
+) -> Result<String> {
+    if let Some(user) = target_username {
+        return Ok(user.to_string());
+    }
+    if let Some(user) = ssh_config_username {
+        return Ok(user.to_string());
+    }
+    if let Ok(user) = std::env::var("USER")
+        && !user.is_empty()
+    {
+        return Ok(user);
+    }
+    bail!(Error::InvalidInput(
+        "could not determine SSH username: specify it in the target \
+         (e.g. user@host), in ~/.ssh/config, or set the $USER environment variable"
+            .to_string()
+    ))
+}
+
+/// Log which defaults were applied during resolution.
+fn log_resolved_defaults(
+    target: &crate::ssh_target::SshTarget,
+    ssh_defaults: &ssh_config::SshConfigDefaults,
+    auth_username: &str,
+    port: u16,
+    hostname: &str,
+    name: &str,
+) {
+    // Username source.
+    if target.username.is_none() {
+        if ssh_defaults.username.is_some() {
+            tracing::info!(user = %auth_username, "using username from ~/.ssh/config");
+        } else {
+            tracing::info!(user = %auth_username, "using username from $USER");
+        }
+    }
+
+    // Port source.
+    if target.port.is_none() {
+        if ssh_defaults.port.is_some() {
+            tracing::info!(port = %port, "using port from ~/.ssh/config");
+        } else {
+            tracing::info!(port = %port, "using default port");
+        }
+    }
+
+    // Hostname resolution.
+    if ssh_defaults.hostname.is_some() {
+        tracing::info!(
+            alias = %target.hostname,
+            resolved = %hostname,
+            "resolved hostname from ~/.ssh/config HostName"
+        );
+    }
+
+    // Name derivation.
+    if target.hostname != name {
+        tracing::info!(name = %name, "using explicit --name");
+    } else {
+        tracing::info!(name = %name, "derived host name from target hostname");
+    }
 }
 
 fn format_timestamp(unix_ts: i64) -> String {

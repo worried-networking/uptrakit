@@ -31,29 +31,49 @@ priority order:
 neither flag is provided and `SSH_AUTH_SOCK` is not set, the command fails with
 an error listing all three options.
 
+## Target format
+
+The bootstrap command accepts a single positional `TARGET` argument in standard
+SSH address format:
+
+- `[user@]host[:port]` — plain format (e.g. `root@192.168.1.100`,
+  `myserver:2222`)
+- `ssh://[user@]host[:port]` — SSH URL format (e.g.
+  `ssh://root@192.168.1.100:22`)
+- IPv6 bracket notation: `[::1]`, `user@[::1]:22`,
+  `ssh://root@[::1]:2222`
+
+Values extracted from the target string (username, port) take precedence. When
+omitted from the target, the bootstrap command applies defaults in this order:
+
+1. **Username**: `~/.ssh/config` `User` directive, then `$USER` environment
+   variable
+2. **Port**: `~/.ssh/config` `Port` directive, then `22`
+3. **Hostname**: `~/.ssh/config` `HostName` directive (allows SSH aliases), then
+   the hostname from the target string
+
+The `--name` flag defaults to the target hostname (before `HostName`
+resolution), so SSH aliases map naturally to host names.
+
 ## Usage
 
 ### Bootstrap with password prompt
 
 ```bash
-uptrakit-agent-ssh host bootstrap \
-  --name my-server \
-  --hostname 192.168.1.100 \
-  --auth-username root \
+uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
   --auth-password \
   --master-key-file /etc/uptrakit/master.key
 ```
 
 When `--auth-password` is passed without a value, you are prompted to enter the
-password securely (no echo) at runtime.
+password securely (no echo) at runtime. The host name defaults to
+`192.168.1.100` (overridable with `--name`).
 
 ### Bootstrap with inline password
 
 ```bash
-uptrakit-agent-ssh host bootstrap \
+uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
   --name my-server \
-  --hostname 192.168.1.100 \
-  --auth-username root \
   --auth-password "my-secret-pass" \
   --master-key-file /etc/uptrakit/master.key
 ```
@@ -65,13 +85,9 @@ that the password will be visible in your shell history and process listing. See
 ### Bootstrap with key authentication
 
 ```bash
-uptrakit-agent-ssh host bootstrap \
-  --name my-server \
-  --hostname 192.168.1.100 \
-  --auth-username admin \
+uptrakit-agent-ssh host bootstrap admin@192.168.1.100:2222 \
   --auth-private-key-file ~/.ssh/id_ed25519 \
   --target-username uptrakit \
-  --port 2222 \
   --host-key-fingerprint "SHA256:abc123..." \
   --master-key-file /etc/uptrakit/master.key
 ```
@@ -79,10 +95,7 @@ uptrakit-agent-ssh host bootstrap \
 ### Bootstrap with SSH agent
 
 ```bash
-uptrakit-agent-ssh host bootstrap \
-  --name my-server \
-  --hostname 192.168.1.100 \
-  --auth-username admin \
+uptrakit-agent-ssh host bootstrap admin@192.168.1.100 \
   --master-key-file /etc/uptrakit/master.key
 ```
 
@@ -90,23 +103,56 @@ When no `--auth-password` or `--auth-private-key-file` flag is given, the
 bootstrap command automatically detects the local SSH agent via `SSH_AUTH_SOCK`
 and tries each loaded key. No additional flags are needed.
 
-### All flags
+### Bootstrap with SSH config alias
 
-| Flag | Required | Default | Description |
+If `~/.ssh/config` contains:
+
+```text
+Host myserver
+  User deploy
+  HostName 10.0.0.5
+  Port 2222
+```
+
+Then:
+
+```bash
+uptrakit-agent-ssh host bootstrap myserver \
+  --auth-password \
+  --master-key-file /etc/uptrakit/master.key
+```
+
+This resolves to `deploy@10.0.0.5:2222` with host name `myserver`.
+
+### All arguments and flags
+
+| Argument/Flag | Required | Default | Description |
 | --- | --- | --- | --- |
-| `--name` | Yes | — | Friendly name for the host (must be unique) |
-| `--hostname` | Yes | — | SSH hostname or IP address |
-| `--auth-username` | Yes | — | Username for the initial SSH connection |
+| `TARGET` (positional) | Yes | — | SSH target: `[user@]host[:port]` or `ssh://[user@]host[:port]` |
+| `--name` | No | target hostname | Friendly name for the host (must be unique) |
 | `--auth-password` | No | — | Password auth: no value = prompt, with value = use directly |
 | `--auth-private-key-file` | No | — | Path to PEM private key for authentication |
-| `--target-username` | No | `uptrakit` (when auth is `root`), else `--auth-username` | Username for the managed account |
+| `--target-username` | No | `uptrakit` (when auth is `root`), else auth username | Username for the managed account |
 | `--target-private-key-file` | No | (generated) | Path to PEM private key for the target user |
-| `--port` | No | 22 | SSH port |
 | `--host-key-fingerprint` | No | (TOFU) | Expected host key fingerprint (SHA-256) |
+
+## SSH config resolution
+
+The bootstrap command reads `~/.ssh/config` to fill in defaults for the target
+host. The following directives are supported:
+
+| Directive | Applies to |
+| --- | --- |
+| `User` | Auth username (when not specified in the target) |
+| `Port` | SSH port (when not specified in the target) |
+| `HostName` | Resolved hostname (allows SSH aliases like `myserver` → `10.0.0.5`) |
+
+Resolution never fails due to a missing or malformed SSH config — defaults are
+silently skipped.
 
 ## Root-aware target username default
 
-When `--auth-username` is `root` and `--target-username` is omitted, the
+When the auth username is `root` and `--target-username` is omitted, the
 bootstrap command defaults `--target-username` to `uptrakit` instead of reusing
 `root`. This ensures the managed account is a dedicated, unprivileged service
 user rather than the root account.
@@ -114,10 +160,10 @@ user rather than the root account.
 A notice is printed when this default is applied:
 
 ```text
-NOTE: --auth-username is 'root'; defaulting --target-username to 'uptrakit'.
+NOTE: auth username is 'root'; defaulting target username to 'uptrakit'.
 ```
 
-When `--auth-username` is any non-root user and `--target-username` is omitted,
+When the auth username is any non-root user and `--target-username` is omitted,
 the auth username is used as the target username (unchanged behavior).
 
 ## What happens on the remote host
@@ -191,7 +237,8 @@ the commands needed for your update workflow. See
 
 ## POSIX username requirements
 
-Both `--auth-username` and `--target-username` must be valid POSIX usernames:
+Both the auth username (from the target string or SSH config) and
+`--target-username` must be valid POSIX usernames:
 
 - Start with a lowercase letter or underscore
 - Contain only `a-z`, `0-9`, `_`, `-`
@@ -210,6 +257,12 @@ observed during the initial connection. See
 implications of TOFU vs pinned fingerprints.
 
 ## Troubleshooting
+
+### "could not determine SSH username"
+
+No username was found in the target string, `~/.ssh/config`, or the `$USER`
+environment variable. Specify the username in the target (e.g. `user@host`) or
+set the `$USER` environment variable.
 
 ### "no authentication method available"
 

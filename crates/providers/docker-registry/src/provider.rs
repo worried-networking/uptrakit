@@ -223,8 +223,8 @@ impl Provider for DockerRegistryProvider {
 mod tests {
     use super::*;
     use crate::config::TrackingMode;
-    use uptrakit_provider_core::mpsc;
     use uptrakit_provider_core::LocalCommandExecutor;
+    use uptrakit_provider_core::mpsc;
 
     fn test_executor() -> Arc<dyn CommandExecutor> {
         Arc::new(LocalCommandExecutor)

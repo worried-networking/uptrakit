@@ -103,7 +103,7 @@ The `host bootstrap` command introduces additional security considerations.
   never written to disk or stored in the database.
 - **Auth passwords (inline)** passed as `--auth-password <VALUE>` are visible in
   the process listing (`/proc/*/cmdline`) and may appear in shell history. Use
-  the prompted mode (`--auth-password` without a value) or SSH agent
+  the prompted mode (`--auth-password` without a value), key-based, or SSH agent
   authentication in environments where this is a concern.
 - **SSH agent keys** are used transiently via the `SSH_AUTH_SOCK` Unix socket.
   Private key material never leaves the SSH agent process — the bootstrap

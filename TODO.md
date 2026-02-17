@@ -400,7 +400,7 @@ where outbound-only WebSocket is not feasible but inbound SSH is available).
 - [ ] Connection pooling and multiplexing (reuse connections across checks and updates for the same host)
 - [x] Configurable connection and command timeouts (30s default for bootstrap)
 - [ ] Jump host / bastion support for reaching hosts behind NAT or firewalls
-- [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update/bootstrap`)
+- [x] Support for custom SSH ports per host (configurable via `--port` in `host add/update`, or via the target string in `host bootstrap`)
 
 ### Remote Execution
 

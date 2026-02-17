@@ -335,8 +335,8 @@ impl Provider for GitHubProvider {
 mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
-    use uptrakit_provider_core::mpsc;
     use uptrakit_provider_core::LocalCommandExecutor;
+    use uptrakit_provider_core::mpsc;
 
     fn test_config() -> GitHubConfig {
         GitHubConfig {

@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use uptrakit_service_sdk::cli::CommonServiceArgs;
 
+use crate::ssh_target::SshTarget;
+
 #[derive(Parser, Debug)]
 #[command(name = "uptrakit-agent-ssh")]
 #[command(about = "Uptrakit SSH-backed agent that manages remote hosts over SSH")]
@@ -112,18 +114,22 @@ pub enum HostCommands {
 
     /// Bootstrap a remote host: create user, deploy SSH key, configure
     /// sudoers, verify connectivity, and save the host entry.
+    ///
+    /// TARGET is an SSH address in one of these formats:
+    ///   [user@]host[:port]       e.g. root@example.com:22
+    ///   ssh://[user@]host[:port] e.g. ssh://root@example.com
+    ///
+    /// Defaults are resolved from ~/.ssh/config (User, Port, HostName)
+    /// and from the system username ($USER) as a final fallback.
     Bootstrap {
+        /// SSH connection target: [user@]host[:port] or ssh://[user@]host[:port].
+        #[arg(value_parser = parse_ssh_target)]
+        target: SshTarget,
+
         /// Friendly name for this host (must be unique).
+        /// Defaults to the hostname from the target.
         #[arg(long)]
-        name: String,
-
-        /// SSH hostname or IP address.
-        #[arg(long)]
-        hostname: String,
-
-        /// Username for initial SSH authentication.
-        #[arg(long)]
-        auth_username: String,
+        name: Option<String>,
 
         /// Password for initial SSH authentication.
         /// Use `--auth-password` (no value) to prompt securely at runtime.
@@ -138,8 +144,8 @@ pub enum HostCommands {
         auth_private_key_file: Option<PathBuf>,
 
         /// Username on the remote host for ongoing SSH access.
-        /// Defaults to 'uptrakit' when --auth-username is 'root',
-        /// otherwise defaults to --auth-username.
+        /// Defaults to 'uptrakit' when the auth username is 'root',
+        /// otherwise defaults to the auth username.
         #[arg(long)]
         target_username: Option<String>,
 
@@ -148,15 +154,16 @@ pub enum HostCommands {
         #[arg(long)]
         target_private_key_file: Option<PathBuf>,
 
-        /// SSH port.
-        #[arg(long, default_value = "22")]
-        port: i32,
-
         /// Expected host key fingerprint (e.g., `SHA256:...`).
         /// If omitted, trust-on-first-use is applied.
         #[arg(long)]
         host_key_fingerprint: Option<String>,
     },
+}
+
+/// Parse an SSH target string for clap's `value_parser`.
+fn parse_ssh_target(s: &str) -> Result<SshTarget, String> {
+    s.parse::<SshTarget>().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -532,12 +539,9 @@ mod tests {
             "--allow-plaintext-secrets",
             "host",
             "bootstrap",
+            "admin@10.0.0.5",
             "--name",
             "new-host",
-            "--hostname",
-            "10.0.0.5",
-            "--auth-username",
-            "admin",
             "--auth-password",
         ])
         .expect("should parse bootstrap with password prompt");
@@ -546,20 +550,19 @@ mod tests {
             Some(Commands::Host {
                 command:
                     HostCommands::Bootstrap {
+                        target,
                         name,
-                        hostname,
-                        auth_username,
                         auth_password,
                         auth_private_key_file,
                         target_username,
                         target_private_key_file,
-                        port,
                         host_key_fingerprint,
                     },
             }) => {
-                assert_eq!(name, "new-host");
-                assert_eq!(hostname, "10.0.0.5");
-                assert_eq!(auth_username, "admin");
+                assert_eq!(target.hostname, "10.0.0.5");
+                assert_eq!(target.username.as_deref(), Some("admin"));
+                assert!(target.port.is_none());
+                assert_eq!(name.as_deref(), Some("new-host"));
                 assert_eq!(
                     *auth_password,
                     Some(None),
@@ -568,7 +571,6 @@ mod tests {
                 assert!(auth_private_key_file.is_none());
                 assert!(target_username.is_none());
                 assert!(target_private_key_file.is_none());
-                assert_eq!(*port, 22);
                 assert!(host_key_fingerprint.is_none());
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
@@ -582,12 +584,7 @@ mod tests {
             "--allow-plaintext-secrets",
             "host",
             "bootstrap",
-            "--name",
-            "new-host",
-            "--hostname",
-            "10.0.0.5",
-            "--auth-username",
-            "admin",
+            "admin@10.0.0.5",
             "--auth-password",
             "mypass123",
         ])
@@ -614,12 +611,7 @@ mod tests {
             "--allow-plaintext-secrets",
             "host",
             "bootstrap",
-            "--name",
-            "new-host",
-            "--hostname",
-            "10.0.0.5",
-            "--auth-username",
-            "admin",
+            "admin@10.0.0.5",
         ])
         .expect("should parse bootstrap without auth flags (agent fallback)");
 
@@ -649,20 +641,15 @@ mod tests {
             "--allow-plaintext-secrets",
             "host",
             "bootstrap",
+            "root@192.168.1.50:2222",
             "--name",
             "prod-server",
-            "--hostname",
-            "192.168.1.50",
-            "--auth-username",
-            "root",
             "--auth-private-key-file",
             "/root/.ssh/id_ed25519",
             "--target-username",
             "uptrakit",
             "--target-private-key-file",
             "-",
-            "--port",
-            "2222",
             "--host-key-fingerprint",
             "SHA256:abc123",
         ])
@@ -672,20 +659,19 @@ mod tests {
             Some(Commands::Host {
                 command:
                     HostCommands::Bootstrap {
+                        target,
                         name,
-                        hostname,
-                        auth_username,
                         auth_password,
                         auth_private_key_file,
                         target_username,
                         target_private_key_file,
-                        port,
                         host_key_fingerprint,
                     },
             }) => {
-                assert_eq!(name, "prod-server");
-                assert_eq!(hostname, "192.168.1.50");
-                assert_eq!(auth_username, "root");
+                assert_eq!(target.hostname, "192.168.1.50");
+                assert_eq!(target.username.as_deref(), Some("root"));
+                assert_eq!(target.port, Some(2222));
+                assert_eq!(name.as_deref(), Some("prod-server"));
                 assert!(auth_password.is_none(), "key auth should have no password");
                 assert_eq!(
                     auth_private_key_file
@@ -700,7 +686,6 @@ mod tests {
                         .map(|p| p.to_str().expect("path")),
                     Some("-")
                 );
-                assert_eq!(*port, 2222);
                 assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
@@ -708,37 +693,85 @@ mod tests {
     }
 
     #[test]
-    fn host_bootstrap_root_auth_omits_target_username() {
+    fn host_bootstrap_target_only() {
         let args = Args::try_parse_from([
             "uptrakit-agent-ssh",
             "--allow-plaintext-secrets",
             "host",
             "bootstrap",
-            "--name",
-            "root-host",
-            "--hostname",
-            "10.0.0.1",
-            "--auth-username",
-            "root",
+            "root@10.0.0.1",
             "--auth-password",
             "pass",
         ])
-        .expect("should parse bootstrap with root auth and no target-username");
+        .expect("should parse bootstrap with target only");
 
         match &args.command {
             Some(Commands::Host {
                 command:
                     HostCommands::Bootstrap {
-                        auth_username,
+                        target,
+                        name,
                         target_username,
                         ..
                     },
             }) => {
-                assert_eq!(auth_username, "root");
+                assert_eq!(target.hostname, "10.0.0.1");
+                assert_eq!(target.username.as_deref(), Some("root"));
+                assert!(
+                    name.is_none(),
+                    "name should be None when not specified (defaulting happens in dispatch)"
+                );
                 assert!(
                     target_username.is_none(),
                     "target_username should be None at the CLI layer (defaulting happens in dispatch)"
                 );
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_ssh_url() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "ssh://deploy@myserver:2222",
+        ])
+        .expect("should parse bootstrap with SSH URL");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Bootstrap { target, .. },
+            }) => {
+                assert_eq!(target.hostname, "myserver");
+                assert_eq!(target.username.as_deref(), Some("deploy"));
+                assert_eq!(target.port, Some(2222));
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_host_only_target() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "myserver.example.com",
+        ])
+        .expect("should parse bootstrap with hostname-only target");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Bootstrap { target, name, .. },
+            }) => {
+                assert_eq!(target.hostname, "myserver.example.com");
+                assert!(target.username.is_none());
+                assert!(target.port.is_none());
+                assert!(name.is_none());
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
         }
@@ -751,12 +784,7 @@ mod tests {
             "--allow-plaintext-secrets",
             "host",
             "bootstrap",
-            "--name",
-            "test",
-            "--hostname",
-            "host",
-            "--auth-username",
-            "user",
+            "user@host",
             "--auth-password",
             "--auth-private-key-file",
             "/key",
