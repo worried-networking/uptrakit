@@ -21,7 +21,7 @@ uptrakit-web-api = { path = "../../ui/web-api" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-types = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "net", "io-util", "sync", "time"] }
 axum = { workspace = true }
 axum-server = { workspace = true }
 clap = { workspace = true }

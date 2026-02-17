@@ -23,4 +23,4 @@ uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

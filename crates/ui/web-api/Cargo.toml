@@ -23,7 +23,7 @@ cron = "0.15"
 futures-util = { workspace = true }
 http = { workspace = true }
 ipnet = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tower = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
@@ -67,7 +67,7 @@ tokio-util = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true }
 http-body-util = "0.1"
 strum = { workspace = true }

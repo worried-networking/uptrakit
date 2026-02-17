@@ -11,7 +11,8 @@ repository = "https://github.com/worried-networking/uptrakit"
 version = "0.0.1"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["full"] }
+# Version pinned here; features declared per-crate.
+tokio = { version = "1" }
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 clap = { version = "4", features = ["derive", "env"] }

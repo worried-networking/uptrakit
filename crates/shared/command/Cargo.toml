@@ -12,5 +12,5 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process", "io-util", "sync", "rt", "macros"] }
 uptrakit-shared-types = { workspace = true }
