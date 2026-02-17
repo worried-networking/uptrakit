@@ -17,6 +17,19 @@ on `ProviderType`. Document provider behavior so the registry can continue to va
 `ProviderType` implements `FromStr`, `Display`, and `as_str()` for string conversion. Use `s.parse::<ProviderType>()` to convert strings (returns
 `ParseProviderTypeError` on failure). The string representations are: `github_releases`, `proxmox_helper_scripts`, `docker_registry`, `homebrew`.
 
+## Dependencies and re-exports
+
+Provider crates should avoid unnecessary direct dependencies. The `uptrakit-provider-core` crate
+re-exports commonly needed types:
+
+- **`uptrakit_provider_core::mpsc`** — re-export of `tokio::sync::mpsc`. Use this instead of
+  depending on tokio directly. Tokio should only be in `[dev-dependencies]` (for `#[tokio::test]`).
+- **`uptrakit_provider_core::CommandExecutor`**, **`CommandSpec`**, etc. — re-exports from
+  `uptrakit-command`.
+- **`uptrakit_provider_core::SecretString`** — re-export from `uptrakit-shared-types`.
+
+See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
+
 ## Command Executor Injection
 
 Providers do not spawn processes directly. Instead, each provider receives an `Arc<dyn CommandExecutor>` at construction

@@ -58,7 +58,7 @@ uptrakit/
 │   │   │   └── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
-│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait + SecretMasking
+│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait + SecretMasking; re-exports tokio::sync::mpsc
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── homebrew/                   # uptrakit-provider-homebrew             (lib)  — Homebrew formulae/cask provider
@@ -72,7 +72,7 @@ uptrakit/
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types; feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types
+│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types, reqwest::Error
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, enrollment, identity, TLS, CA bootstrap
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol
 │   └── ui/

@@ -28,10 +28,11 @@ generate code that doesn't follow the project's strict coding standards
 (rootcause errors, no unwrap, no `#[allow]`).
 
 **Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as
-`types`, `DeviceAuthStatus` and `ServiceType` from `uptrakit-shared-types`, and
-`uuid::Uuid`. Downstream crates (e.g. the CLI) depend only on
-`uptrakit-openapi-client` and import types via
-`uptrakit_openapi_client::types::*` and `uptrakit_openapi_client::Uuid`.
+`types`, `DeviceAuthStatus` and `ServiceType` from `uptrakit-shared-types`,
+`uuid::Uuid`, and `reqwest::Error` as `ReqwestError`. Downstream crates
+(e.g. the CLI) depend only on `uptrakit-openapi-client` and import types via
+`uptrakit_openapi_client::types::*`, `uptrakit_openapi_client::Uuid`, and
+`uptrakit_openapi_client::ReqwestError`.
 
 **Full API coverage:** The client covers all JSON REST endpoints exposed by the
 web API. Excluded endpoints are WebSocket (`/api/v1/ws/service`), OIDC browser
