@@ -76,7 +76,7 @@ uptrakit/
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler); ws module is pub(crate)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface (auth, hosts, software-items, check, update, history, scheduler commands; human/JSON/YAML output; uses uptrakit-openapi-client for all API calls)
+│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface (auth, services, hosts, software-items, check, update, history, scheduler commands; human/JSON/YAML output; uses uptrakit-openapi-client for all API calls)
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/

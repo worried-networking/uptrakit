@@ -12,7 +12,7 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
 
 - `OutputFormat` enum in `crates/ui/cli/src/output.rs` — derives `clap::ValueEnum` and `Default` (`Human`).
 - `print_output<T: Serialize>(format, human_text, value)` — for typed commands (`auth status`, `auth token *`,
-  `hosts`, `software-items`, `check`, `update`, `history`, `scheduler`).
+  `hosts`, `services`, `software-items`, `check`, `update`, `history`, `scheduler`).
 - `print_value(format, &serde_json::Value)` — for the `api` command which works with raw JSON values.
 - Each structured command uses server response types from `uptrakit-web-api-types` (e.g. `HostResponse`,
   `SoftwareItemResponse`, `UpdateHistoryResponse`, `ScheduledTaskResponse`) for JSON/YAML output while building

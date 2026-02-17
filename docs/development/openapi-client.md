@@ -1,10 +1,16 @@
 # OpenAPI Client
 
-The `uptrakit-openapi-client` crate (`crates/shared/openapi-client/`) provides a typed HTTP client for the Uptrakit web API. It centralises URL construction, authentication, error handling, and JSON serialization behind compile-time type-safe methods.
+The `uptrakit-openapi-client` crate (`crates/shared/openapi-client/`) provides a
+typed HTTP client for the Uptrakit web API. It centralises URL construction,
+authentication, error handling, and JSON serialization behind compile-time
+type-safe methods.
 
 ## Motivation
 
-The CLI previously used a hand-rolled `ApiClient` that made raw `reqwest` calls with string-based URL construction, manual query parameter assembly, and `serde_json::Value`-based request/response handling. This was fragile: URL typos, missing query parameters, or type mismatches were caught only at runtime.
+The CLI previously used a hand-rolled `ApiClient` that made raw `reqwest` calls
+with string-based URL construction, manual query parameter assembly, and
+`serde_json::Value`-based request/response handling. This was fragile: URL typos,
+missing query parameters, or type mismatches were caught only at runtime.
 
 The typed client provides:
 
@@ -16,9 +22,15 @@ The typed client provides:
 
 ## Design decisions
 
-**Hand-written instead of code-generated:** `uptrakit-web-api-types` already provides all request/response types. A code generator would duplicate them and generate code that doesn't follow the project's strict coding standards (rootcause errors, no unwrap, no `#[allow]`).
+**Hand-written instead of code-generated:** `uptrakit-web-api-types` already
+provides all request/response types. A code generator would duplicate them and
+generate code that doesn't follow the project's strict coding standards
+(rootcause errors, no unwrap, no `#[allow]`).
 
-**Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as `types` and `DeviceAuthStatus` from `uptrakit-shared-types`. Downstream crates (e.g. the CLI) depend only on `uptrakit-openapi-client` and import types via `uptrakit_openapi_client::types::*`.
+**Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as
+`types` and `DeviceAuthStatus` from `uptrakit-shared-types`. Downstream crates
+(e.g. the CLI) depend only on `uptrakit-openapi-client` and import types via
+`uptrakit_openapi_client::types::*`.
 
 ## Crate structure
 
@@ -31,6 +43,7 @@ crates/shared/openapi-client/
     ├── auth.rs             # Device auth + user info endpoints
     ├── api_tokens.rs       # API token CRUD
     ├── hosts.rs            # Host list/get
+    ├── services.rs         # Service list/get/approve/reject/remove/merge
     ├── software_items.rs   # Software item list/get/check/update
     ├── update_history.rs   # Update history list/get
     └── scheduler.rs        # Scheduler task list/get/trigger
@@ -91,7 +104,11 @@ All methods return `Result<T>` which is `std::result::Result<T, rootcause::Repor
 
 ## Query parameter handling
 
-Type-safe query parameter serialization uses `reqwest::RequestBuilder::query()`. Since `PaginationParams`, `UpdateHistoryQuery`, etc. already implement `Serialize`, they are passed directly. `Option::None` fields are automatically skipped by `serde_urlencoded`.
+Type-safe query parameter serialization uses
+`reqwest::RequestBuilder::query()`. Since `PaginationParams`,
+`UpdateHistoryQuery`, etc. already implement `Serialize`, they are passed
+directly. `Option::None` fields are automatically skipped by
+`serde_urlencoded`.
 
 ## Available endpoint methods
 
@@ -111,6 +128,15 @@ Type-safe query parameter serialization uses `reqwest::RequestBuilder::query()`.
 
 - `list_hosts(&self, params) -> Result<PaginatedResponse<HostResponse>>`
 - `get_host(&self, id) -> Result<HostResponse>`
+
+### Services (`services.rs`)
+
+- `list_services(&self, query) -> Result<PaginatedResponse<ServiceResponse>>`
+- `get_service(&self, id) -> Result<ServiceResponse>`
+- `approve_service(&self, id) -> Result<ServiceResponse>`
+- `reject_service(&self, id) -> Result<ServiceResponse>`
+- `remove_service(&self, id) -> Result<MessageResponse>`
+- `merge_service(&self, target_id, req) -> Result<ServiceResponse>`
 
 ### Software items (`software_items.rs`)
 
@@ -135,7 +161,8 @@ Type-safe query parameter serialization uses `reqwest::RequestBuilder::query()`.
 
 1. Identify the request/response types in `uptrakit-web-api-types` (or add them if new).
 2. Add a method to `UptrakitClient` in the appropriate module file.
-3. Use the internal helpers (`get`, `get_with_query`, `post_json`, `post_empty`, `delete`).
+3. Use the internal helpers (`get`, `get_with_query`, `post_json`, `post_empty`,
+   `delete`, `delete_json`).
 4. Add a unit test for request serialization if the endpoint takes a request body.
 5. Update the CLI command to use the new typed method.
 

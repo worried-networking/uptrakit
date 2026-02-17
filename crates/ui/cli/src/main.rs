@@ -55,6 +55,11 @@ enum Commands {
         #[arg(long)]
         data: Option<String>,
     },
+    /// Manage services (agents, MQTT, SSH)
+    Services {
+        #[command(subcommand)]
+        command: ServicesCommands,
+    },
     /// Manage hosts
     Hosts {
         #[command(subcommand)]
@@ -223,6 +228,52 @@ enum HistoryCommands {
 }
 
 #[derive(Debug, Subcommand)]
+enum ServicesCommands {
+    /// List all services
+    List {
+        /// Filter by type (agent, mqtt, ssh_agent)
+        #[arg(long)]
+        r#type: Option<String>,
+        /// Filter by status (pending, approved, rejected, deactivated)
+        #[arg(long)]
+        status: Option<String>,
+        /// Page number (1-indexed)
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show service details
+    Show {
+        /// Service UUID
+        id: String,
+    },
+    /// Approve a pending service
+    Approve {
+        /// Service UUID
+        id: String,
+    },
+    /// Reject a pending service
+    Reject {
+        /// Service UUID
+        id: String,
+    },
+    /// Remove (deactivate) a service
+    Remove {
+        /// Service UUID
+        id: String,
+    },
+    /// Merge a source service into a target service
+    Merge {
+        /// Target service UUID (approved)
+        target_id: String,
+        /// Source service UUID (pending)
+        source_id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum SchedulerCommands {
     /// List scheduled tasks
     List,
@@ -324,6 +375,80 @@ async fn main() {
             )
             .await
         }
+        Commands::Services { command } => match command {
+            ServicesCommands::List {
+                r#type,
+                status,
+                page,
+                per_page,
+            } => {
+                commands::services::list(commands::services::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
+                    insecure,
+                    service_type: r#type.as_deref(),
+                    status: status.as_deref(),
+                    page,
+                    per_page,
+                })
+                .await
+            }
+            ServicesCommands::Show { id } => {
+                commands::services::show(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
+            }
+            ServicesCommands::Approve { id } => {
+                commands::services::approve(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
+            }
+            ServicesCommands::Reject { id } => {
+                commands::services::reject(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
+            }
+            ServicesCommands::Remove { id } => {
+                commands::services::remove(
+                    &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
+            }
+            ServicesCommands::Merge {
+                target_id,
+                source_id,
+            } => {
+                commands::services::merge(
+                    &target_id,
+                    &source_id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
+            }
+        },
         Commands::Hosts { command } => match command {
             HostsCommands::List { page, per_page } => {
                 commands::hosts::list(
@@ -807,6 +932,133 @@ mod tests {
                 assert_eq!(id, "task-123");
             }
             _ => panic!("expected Scheduler Trigger"),
+        }
+    }
+
+    #[test]
+    fn services_list_parses() {
+        let args = Cli::try_parse_from(["uptrakit-cli", "services", "list"]).expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Services {
+                command: ServicesCommands::List { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn services_list_with_filters() {
+        let args = Cli::try_parse_from([
+            "uptrakit-cli",
+            "services",
+            "list",
+            "--type",
+            "agent",
+            "--status",
+            "pending",
+            "--page",
+            "2",
+            "--per-page",
+            "50",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Services {
+                command:
+                    ServicesCommands::List {
+                        r#type,
+                        status,
+                        page,
+                        per_page,
+                    },
+            }) => {
+                assert_eq!(r#type.as_deref(), Some("agent"));
+                assert_eq!(status.as_deref(), Some("pending"));
+                assert_eq!(page, Some(2));
+                assert_eq!(per_page, Some(50));
+            }
+            _ => panic!("expected Services List"),
+        }
+    }
+
+    #[test]
+    fn services_show_parses() {
+        let args = Cli::try_parse_from(["uptrakit-cli", "services", "show", "svc-123"])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::Services {
+                command: ServicesCommands::Show { id },
+            }) => {
+                assert_eq!(id, "svc-123");
+            }
+            _ => panic!("expected Services Show"),
+        }
+    }
+
+    #[test]
+    fn services_approve_parses() {
+        let args = Cli::try_parse_from(["uptrakit-cli", "services", "approve", "svc-123"])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::Services {
+                command: ServicesCommands::Approve { id },
+            }) => {
+                assert_eq!(id, "svc-123");
+            }
+            _ => panic!("expected Services Approve"),
+        }
+    }
+
+    #[test]
+    fn services_reject_parses() {
+        let args = Cli::try_parse_from(["uptrakit-cli", "services", "reject", "svc-123"])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::Services {
+                command: ServicesCommands::Reject { id },
+            }) => {
+                assert_eq!(id, "svc-123");
+            }
+            _ => panic!("expected Services Reject"),
+        }
+    }
+
+    #[test]
+    fn services_remove_parses() {
+        let args = Cli::try_parse_from(["uptrakit-cli", "services", "remove", "svc-123"])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::Services {
+                command: ServicesCommands::Remove { id },
+            }) => {
+                assert_eq!(id, "svc-123");
+            }
+            _ => panic!("expected Services Remove"),
+        }
+    }
+
+    #[test]
+    fn services_merge_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit-cli",
+            "services",
+            "merge",
+            "target-123",
+            "source-456",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Services {
+                command:
+                    ServicesCommands::Merge {
+                        target_id,
+                        source_id,
+                    },
+            }) => {
+                assert_eq!(target_id, "target-123");
+                assert_eq!(source_id, "source-456");
+            }
+            _ => panic!("expected Services Merge"),
         }
     }
 

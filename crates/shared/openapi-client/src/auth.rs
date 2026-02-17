@@ -3,8 +3,7 @@ use crate::UptrakitClient;
 use rootcause::prelude::*;
 use uptrakit_web_api_types::auth::UserResponse;
 use uptrakit_web_api_types::device_auth::{
-    DeviceAuthPollRequest, DeviceAuthPollResponse, DeviceAuthStartRequest,
-    DeviceAuthStartResponse,
+    DeviceAuthPollRequest, DeviceAuthPollResponse, DeviceAuthStartRequest, DeviceAuthStartResponse,
 };
 
 impl UptrakitClient {

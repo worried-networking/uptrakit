@@ -34,6 +34,40 @@ uptrakit-cli auth token revoke <TOKEN_ID>
 
 See also: [Auth Flows](../api/auth-flows.md), [Auth and Authorization](../security/auth-and-authorization.md).
 
+## Services
+
+List, inspect, and manage services (agents, MQTT, SSH agents) registered
+with the controller.
+
+```sh
+# List all services (paginated)
+uptrakit-cli services list
+uptrakit-cli services list --page 2 --per-page 10
+
+# Filter by type or status
+uptrakit-cli services list --type agent
+uptrakit-cli services list --status pending
+uptrakit-cli services list --type mqtt --status approved
+
+# Show service details
+uptrakit-cli services show <SERVICE_ID>
+
+# Approve a pending service
+uptrakit-cli services approve <SERVICE_ID>
+
+# Reject a pending service
+uptrakit-cli services reject <SERVICE_ID>
+
+# Remove (deactivate) a service
+uptrakit-cli services remove <SERVICE_ID>
+
+# Merge a pending source service into an approved target service
+uptrakit-cli services merge <TARGET_ID> <SOURCE_ID>
+```
+
+See also: [Service Operations](../api/services-operations.md),
+[HTTP Web API](../api/http-web-api.md).
+
 ## Hosts
 
 List and inspect hosts registered with the controller.

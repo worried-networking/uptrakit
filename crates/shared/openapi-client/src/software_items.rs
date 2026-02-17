@@ -33,8 +33,7 @@ impl UptrakitClient {
         item_id: &str,
         host_id: &str,
     ) -> Result<TriggerVersionCheckResponse> {
-        let path =
-            format!("/api/v1/software-items/{item_id}/hosts/{host_id}/check-versions");
+        let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}/check-versions");
         self.post_empty(&path).await
     }
 

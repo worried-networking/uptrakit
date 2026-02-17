@@ -23,10 +23,7 @@ pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
 
     let release_info = if params.release_tag.is_some() || params.release_url.is_some() {
         Some(ReleaseInfoRequest {
-            tag: params
-                .release_tag
-                .unwrap_or(params.to_version)
-                .to_string(),
+            tag: params.release_tag.unwrap_or(params.to_version).to_string(),
             release_url: params.release_url.unwrap_or("").to_string(),
             assets: vec![],
         })

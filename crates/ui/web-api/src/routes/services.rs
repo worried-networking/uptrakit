@@ -161,6 +161,54 @@ pub async fn list_services(
         .into_response()
 }
 
+/// Get a single service by ID
+#[utoipa::path(
+    get,
+    path = "/api/v1/services/{id}",
+    params(
+        ("id" = String, Path, description = "Service UUID")
+    ),
+    responses(
+        (status = 200, description = "Service details", body = ServiceResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Service not found")
+    ),
+    tag = "Services",
+    security(("bearer_token" = []))
+)]
+pub async fn get_service(
+    State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+) -> Response {
+    if !user.has_permission(Permission::ViewAgents) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let service_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
+    };
+
+    let svc = match Service::find_by_id(service_id)
+        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
+        Err(e) => {
+            tracing::error!("DB error: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    (StatusCode::OK, Json(model_to_response(svc))).into_response()
+}
+
 /// Approve a pending service
 #[utoipa::path(
     post,

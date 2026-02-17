@@ -3,6 +3,7 @@ pub mod auth;
 pub mod error;
 pub mod hosts;
 pub mod scheduler;
+pub mod services;
 pub mod software_items;
 pub mod update_history;
 
@@ -130,11 +131,7 @@ impl UptrakitClient {
         self.handle_response(resp).await
     }
 
-    async fn post_json<T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &impl Serialize,
-    ) -> Result<T> {
+    async fn post_json<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self
             .http
@@ -166,13 +163,7 @@ impl UptrakitClient {
         body: &impl Serialize,
     ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .http
-            .post(&url)
-            .json(body)
-            .send()
-            .await
-            .context_to()?;
+        let resp = self.http.post(&url).json(body).send().await.context_to()?;
         self.handle_response(resp).await
     }
 
@@ -188,10 +179,19 @@ impl UptrakitClient {
         self.handle_empty_response(resp).await
     }
 
-    async fn handle_response<T: DeserializeOwned>(
-        &self,
-        resp: reqwest::Response,
-    ) -> Result<T> {
+    async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .http
+            .delete(&url)
+            .bearer_auth(self.token_or_err()?)
+            .send()
+            .await
+            .context_to()?;
+        self.handle_response(resp).await
+    }
+
+    async fn handle_response<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
         let status = resp.status().as_u16();
         if status == 429 {
             bail!(ClientError::RateLimited);
@@ -271,15 +271,15 @@ mod tests {
 
     #[test]
     fn base_url_trailing_slash_is_trimmed() {
-        let client = UptrakitClient::new("https://example.com/", None, false)
-            .expect("client creation");
+        let client =
+            UptrakitClient::new("https://example.com/", None, false).expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 
     #[test]
     fn base_url_without_trailing_slash_is_unchanged() {
-        let client = UptrakitClient::new("https://example.com", None, false)
-            .expect("client creation");
+        let client =
+            UptrakitClient::new("https://example.com", None, false).expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 
@@ -292,8 +292,8 @@ mod tests {
 
     #[test]
     fn new_without_token_stores_none() {
-        let client = UptrakitClient::new("https://example.com", None, false)
-            .expect("client creation");
+        let client =
+            UptrakitClient::new("https://example.com", None, false).expect("client creation");
         assert!(client.token.is_none());
     }
 
@@ -306,8 +306,8 @@ mod tests {
 
     #[test]
     fn token_or_err_returns_error_when_absent() {
-        let client = UptrakitClient::new("https://example.com", None, false)
-            .expect("client creation");
+        let client =
+            UptrakitClient::new("https://example.com", None, false).expect("client creation");
         let err = client.token_or_err().unwrap_err();
         assert!(
             matches!(err.current_context(), ClientError::NotAuthenticated),

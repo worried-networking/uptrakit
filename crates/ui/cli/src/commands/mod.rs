@@ -4,5 +4,6 @@ pub mod check;
 pub mod history;
 pub mod hosts;
 pub mod scheduler;
+pub mod services;
 pub mod software_items;
 pub mod update;

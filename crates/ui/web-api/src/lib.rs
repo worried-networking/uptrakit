@@ -239,6 +239,7 @@ pub struct AppState {
         routes::settings_auth::get_authentication_settings,
         routes::settings_auth::update_authentication_settings,
         routes::services::list_services,
+        routes::services::get_service,
         routes::services::approve_service,
         routes::services::reject_service,
         routes::services::deactivate_service,
@@ -473,7 +474,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ))
         .routes(routes!(routes::services::approve_service))
         .routes(routes!(routes::services::reject_service))
-        .routes(routes!(routes::services::deactivate_service))
+        .routes(routes!(
+            routes::services::get_service,
+            routes::services::deactivate_service
+        ))
         .routes(routes!(routes::services::merge_service))
         .routes(routes!(routes::system_alerts::get_system_alerts))
         .routes(routes!(routes::server_cert::renew_server_certificate))

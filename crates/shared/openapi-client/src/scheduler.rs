@@ -15,10 +15,7 @@ impl UptrakitClient {
     }
 
     /// Trigger immediate execution of a scheduled task.
-    pub async fn trigger_scheduled_task(
-        &self,
-        id: &str,
-    ) -> Result<TriggerScheduledTaskResponse> {
+    pub async fn trigger_scheduled_task(&self, id: &str) -> Result<TriggerScheduledTaskResponse> {
         let path = format!("/api/v1/scheduler/tasks/{id}/trigger");
         self.post_empty(&path).await
     }

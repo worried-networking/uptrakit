@@ -158,10 +158,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 let api_token = poll_resp
                     .token
                     .ok_or_else(|| report!(CliError::Other("No token in response".into())))?;
-                let token_name = poll_resp
-                    .token_name
-                    .as_deref()
-                    .unwrap_or(&client_name);
+                let token_name = poll_resp.token_name.as_deref().unwrap_or(&client_name);
 
                 // Store config and credentials
                 save_config(&Config {

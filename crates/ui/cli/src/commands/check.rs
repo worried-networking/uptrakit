@@ -29,10 +29,7 @@ pub async fn all(
         }
     };
 
-    let resp = client
-        .trigger_scheduled_task(&task.id)
-        .await
-        .context_to()?;
+    let resp = client.trigger_scheduled_task(&task.id).await.context_to()?;
 
     let human = if resp.triggered {
         format!("Version check triggered: {}\n", resp.message)
@@ -79,12 +76,10 @@ async fn check_item(
     let client = authenticated_client(server, token, insecure)?;
 
     let resp = match host_id {
-        Some(hid) => {
-            client
-                .check_versions_host(item_id, hid)
-                .await
-                .context_to()?
-        }
+        Some(hid) => client
+            .check_versions_host(item_id, hid)
+            .await
+            .context_to()?,
         None => client.check_versions(item_id).await.context_to()?,
     };
 

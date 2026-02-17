@@ -2,7 +2,11 @@
 
 ## Agents
 
-- `/api/v1/services` lists all agents and MQTT services (approve, reject, delete, merge).
+- `/api/v1/services` lists all agents and MQTT services.
+- `/api/v1/services/{id}` retrieves a single service by UUID.
+- `/api/v1/services/{id}/approve`, `/api/v1/services/{id}/reject`,
+  `DELETE /api/v1/services/{id}`, and `/api/v1/services/{target_id}/merge`
+  manage the service lifecycle (approve, reject, deactivate, merge).
 - `/api/v1/agents/{agent_id}/version-check` instructs the controller to send `check_versions` over WebSocket.
 - `/api/v1/agents/{agent_id}/execute-update` triggers `execute_update` with the software item ID(s).
 - `/api/v1/update-history` provides audit logs for updates; each row tracks `status`, `output`, `initiated_by`, and `tenant_id`.

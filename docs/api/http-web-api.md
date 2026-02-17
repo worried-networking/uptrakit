@@ -41,7 +41,12 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 
 ## Services and Software Items
 
-- `/api/v1/services`: manage agents/MQTT services (list, approve, reject, merge).
+- `GET /api/v1/services`: list services with optional type/status filters.
+- `GET /api/v1/services/{id}`: get a single service by UUID.
+- `POST /api/v1/services/{id}/approve`: approve a pending service.
+- `POST /api/v1/services/{id}/reject`: reject a pending service.
+- `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
+- `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `/api/v1/services/enrollment-token`: manage enrollment tokens for agents or MQTT services.
 - `/api/v1/software-items`: CRUD endpoints for software items tied to provider configs.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.

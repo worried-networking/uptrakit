@@ -326,6 +326,7 @@ Ways users interact with the system.
   - [x] `uptrakit-cli check` - trigger version checks (all, installed, available)
   - [x] `uptrakit-cli update` - trigger update
   - [x] `uptrakit-cli history` - view update history (list with filters, show)
+  - [x] `uptrakit-cli services` - list, show, approve, reject, remove, merge services
   - [x] `uptrakit-cli scheduler` - list, show, and trigger scheduled tasks
   - [ ] `uptrakit-cli status` - system status
   - [ ] `uptrakit-cli agent` - various commands proxied to the agent. Plus
