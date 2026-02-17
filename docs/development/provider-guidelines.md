@@ -102,8 +102,8 @@ pub trait SecretMasking: Serialize + DeserializeOwned {
 }
 ```
 
-Providers with no secrets (Homebrew, Proxmox Helper Scripts) use the default no-op implementations. Providers with secrets (GitHub, Docker Registry)
-override both methods with field-level masking logic.
+Providers with no secrets (Homebrew) use the default no-op implementations. Providers with secrets (GitHub, Docker Registry, Proxmox Helper Scripts
+when GitHub config is present) override both methods with field-level masking logic.
 
 The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that deserialize the JSON config, apply the trait
 methods, and re-serialize. This eliminates duplicated deserialize-method-serialize boilerplate per provider.
@@ -202,10 +202,11 @@ Supports automatic discovery of PHS-managed software, installed version detectio
 
 **Config fields (`ProxmoxHelperScriptsConfig`):**
 
-| Field | Type | Required | Default | Description | | :------------ | :----- | :------- | :------ |
-:-------------------------------------------------------- | | `script_url` | String | Yes | -- | URL of the helper script to execute for updates. |
+| Field | Type | Required | Default | Description | | :------------ | :-------------------------- | :------- | :------ |
+:-------------------------------------------------------- | | `script_url` | String | Yes | -- | URL of the helper script to execute for updates. | |
+`github` | `Option<GitHubReleaseSource>` | No | `null` | GitHub release source for upstream version detection (see below). |
 
-**Capabilities:** `DiscoverLocalSoftware`
+**Capabilities:** `DiscoverLocalSoftware`, conditionally `RefreshPackageIndex` (when `github` config is present)
 
 **Discovery (`discover_software()`):**
 
@@ -234,9 +235,34 @@ The `package_identifier` is validated against `[a-z0-9][a-z0-9-]*` to prevent pa
 - Runs `curl -fsSL -- "$script_url" | bash -s -- --update` with `set -euo pipefail`.
 - The `script_url` is passed as a positional argument to bash (not interpolated into the command string), preventing injection.
 
-**Not supported:**
+**Upstream version detection via GitHub (`github` config):**
 
-- `fetch_releases` returns an error (upstream version checking is not implemented).
+Many PHS-installed applications are distributed via GitHub Releases (e.g., BookLore, Crafty Controller).
+When the optional `github` field is present in the config, the provider gains the `RefreshPackageIndex` capability
+and delegates `fetch_releases()` to an internal `GitHubProvider` instance. The `refresh_package_index()` method
+is a no-op since the GitHub API doesn't require a local index refresh.
+
+Since different PHS apps have different upstream GitHub repos, the `github` field is typically provided via
+per-item `config_override` (merged by the agent at runtime). Example `config_override`:
+
+```json
+{
+  "github": {
+    "owner": "BookLore",
+    "repo": "BookLore"
+  }
+}
+```
+
+| Field | Type | Required | Default | Description |
+| :-------------------- | :------------ | :------- | :------ | :-------------------------------------------------------- |
+| `owner` | String | Yes | -- | GitHub repository owner (user or organization). |
+| `repo` | String | Yes | -- | GitHub repository name. |
+| `auth_token` | String | No | `null` | Personal access token (private repos or higher rate limits). |
+| `tag_strip_prefix` | String | No | `"v"` | Prefix to strip from tag names to extract version strings. |
+| `include_prereleases` | bool | No | `false` | Whether to include pre-release versions. |
+
+Without the `github` field, `fetch_releases()` returns an error (upstream version checking is unavailable).
 
 **Security note:** The `curl | bash` pattern runs arbitrary remote code. The user must trust the script URL source.
 

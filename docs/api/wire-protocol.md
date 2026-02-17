@@ -138,9 +138,13 @@ The `HostInfo` struct (used inside `ReportHostsPayload.hosts`) contains:
 | `hostname` | `Option<String>` | Machine hostname |
 | `ip_address` | `Option<String>` | IP address or hostname used to reach the host |
 
-The `hostname` and `ip_address` fields were added as part of the SSH agent host reporting feature. They use `#[serde(default)]` for backward compatibility -- agents that do not send these fields will have them default to `None` on the controller side. No protocol version bump is required.
+The `hostname` and `ip_address` fields were added as part of the SSH agent host reporting feature.
+They use `#[serde(default)]` for backward compatibility -- agents that do not send these fields
+will have them default to `None` on the controller side. No protocol version bump is required.
 
-Both the regular agent and the SSH agent send `report_hosts`. The regular agent sets `hostname` from local system calls. The SSH agent sets `hostname` from the remote host's `hostname` command and `ip_address` from the SSH target address.
+Both the regular agent and the SSH agent send `report_hosts`. The regular agent sets `hostname`
+from local system calls. The SSH agent sets `hostname` from the remote host's `hostname` command
+and `ip_address` from the SSH target address.
 
 ## AsyncAPI Specification
 

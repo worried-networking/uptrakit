@@ -84,7 +84,8 @@ impl ProviderRegistry {
                 proxmox_config
                     .validate()
                     .map_err(|e| report!(RegistryError::ConfigValidation(e.to_string())))?;
-                let provider = ProxmoxHelperScriptsProvider::new(proxmox_config, executor);
+                let provider = ProxmoxHelperScriptsProvider::new(proxmox_config, executor)
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
                 Ok(Box::new(provider))
             }
             ProviderType::Homebrew => {
@@ -374,6 +375,87 @@ mod tests {
             test_executor(),
         );
         assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn create_provider_proxmox_with_github() {
+        let config = serde_json::json!({
+            "script_url": "https://example.com/update.sh",
+            "github": {
+                "owner": "BookLore",
+                "repo": "BookLore"
+            }
+        });
+        let provider = ProviderRegistry::create_provider(
+            ProviderType::ProxmoxHelperScripts,
+            &config,
+            test_executor(),
+        );
+        assert!(provider.is_ok());
+        let provider = provider.expect("create");
+        assert!(
+            provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::RefreshPackageIndex)
+        );
+    }
+
+    #[test]
+    fn create_provider_proxmox_with_invalid_github_fails() {
+        let config = serde_json::json!({
+            "script_url": "https://example.com/update.sh",
+            "github": {
+                "owner": "",
+                "repo": "BookLore"
+            }
+        });
+        let result = ProviderRegistry::create_provider(
+            ProviderType::ProxmoxHelperScripts,
+            &config,
+            test_executor(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mask_config_secrets_proxmox_with_github() {
+        let config = serde_json::json!({
+            "script_url": "https://example.com/update.sh",
+            "github": {
+                "owner": "owner",
+                "repo": "repo",
+                "auth_token": "ghp_secret"
+            }
+        });
+        let masked =
+            ProviderRegistry::mask_config_secrets(ProviderType::ProxmoxHelperScripts, &config);
+        assert_eq!(masked["github"]["auth_token"], "***");
+        assert_eq!(masked["github"]["owner"], "owner");
+    }
+
+    #[test]
+    fn restore_config_secrets_proxmox_with_github() {
+        let mut incoming = serde_json::json!({
+            "script_url": "https://example.com/update.sh",
+            "github": {
+                "owner": "owner",
+                "repo": "repo",
+                "auth_token": "***"
+            }
+        });
+        let existing = serde_json::json!({
+            "script_url": "https://example.com/update.sh",
+            "github": {
+                "owner": "owner",
+                "repo": "repo",
+                "auth_token": "ghp_real_token"
+            }
+        });
+        ProviderRegistry::restore_config_secrets(
+            ProviderType::ProxmoxHelperScripts,
+            &mut incoming,
+            &existing,
+        );
+        assert_eq!(incoming["github"]["auth_token"], "ghp_real_token");
     }
 
     #[test]

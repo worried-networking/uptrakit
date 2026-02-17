@@ -63,7 +63,7 @@ uptrakit/
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── homebrew/                   # uptrakit-provider-homebrew             (lib)  — Homebrew formulae/cask provider
-│   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery, version detection, updates)
+│   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery, version detection, updates, optional GitHub-based upstream version detection)
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor
@@ -159,8 +159,9 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Agents run unprivileged.** They run as a dedicated user (e.g. `uptrakit`). Only specific update commands are
    granted `NOPASSWD` sudo access.
 1. **Provider split.** Most providers resolve upstream versions on the controller and installed versions on the agent.
-   Providers with a local package index (e.g. Homebrew) resolve both on the agent via `RefreshPackageIndex` +
-   `fetch_releases()` and report `latest_version` in `VersionCheckResult`. Keep this boundary clear.
+   Providers with a local package index (e.g. Homebrew) or delegated upstream source (e.g. PHS with GitHub config)
+   resolve both on the agent via `RefreshPackageIndex` + `fetch_releases()` and report `latest_version` in
+   `VersionCheckResult`. Keep this boundary clear.
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
    treated as untrusted input.
 1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials.

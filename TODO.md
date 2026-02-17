@@ -173,7 +173,7 @@ Main functionality that delivers the core value proposition.
   - [x] GitHub releases API integration
   - [ ] Package repository API integration
   - [x] Docker registry API integration (semver tag filtering + digest tracking)
-  - [ ] Proxmox Helper Scripts repository check
+  - [x] Proxmox Helper Scripts repository check
 - [x] Add version comparison logic per provider
 - [ ] Implement channel support (stable, beta, nightly)
 - [ ] Cache available versions with TTL

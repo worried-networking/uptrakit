@@ -6001,6 +6001,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-provider-core",
+ "uptrakit-provider-github",
 ]
 
 [[package]]

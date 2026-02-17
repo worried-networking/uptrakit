@@ -320,6 +320,9 @@ skip = [
     # nix: 0.29 via uptrakit-agent-ssh, 0.31 via russh; waiting for russh to stabilize
     { crate = "nix@0.29.0", reason = "pulled by uptrakit-agent-ssh; russh uses 0.31" },
 
+    # openssl-probe: 0.1.6 via git2 (ssh2-config build dep), 0.2.1 via rustls-native-certs
+    { crate = "openssl-probe@0.1.6", reason = "pulled by git2 (ssh2-config build dep); newer 0.2.1 used by rustls-native-certs" },
+
     # rand_core: 0.9 via rand 0.9, 0.10-rc via russh crypto stack
     { crate = "rand_core@0.9.5", reason = "pulled by rand 0.9 (uptrakit); russh crypto uses 0.10-rc" },
 

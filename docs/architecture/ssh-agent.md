@@ -15,7 +15,8 @@ The current implementation provides:
 - SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
-- Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info from each enrolled host over SSH and reports it to the controller
+- Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info
+  from each enrolled host over SSH and reports it to the controller
 
 UI configuration beyond the existing services API is not yet implemented.
 
@@ -247,7 +248,9 @@ On authenticated WebSocket connect, the SSH agent reports host information for a
 
 ### Error handling
 
-Errors connecting to or collecting info from individual hosts are logged and skipped. A failure on one host does not prevent reporting for the remaining hosts. If all hosts fail, the agent sends a `ReportHosts` message with an empty host list.
+Errors connecting to or collecting info from individual hosts are logged and skipped. A failure
+on one host does not prevent reporting for the remaining hosts. If all hosts fail, the agent
+sends a `ReportHosts` message with an empty host list.
 
 ## Crate Structure
 
