@@ -3,6 +3,7 @@ pub mod authentication;
 pub mod device_flow;
 pub mod error;
 pub mod jwt;
+#[cfg(feature = "oidc")]
 pub mod oidc_state;
 pub mod password;
 pub mod permissions;

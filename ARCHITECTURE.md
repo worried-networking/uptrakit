@@ -47,6 +47,17 @@ methods using the shared request/response types from `uptrakit-web-api-types`. T
 uses this client exclusively for all API communication.
 See [OpenAPI Client](docs/development/openapi-client.md) for details.
 
+## Optional OIDC support
+
+OpenID Connect (OIDC) authentication is gated behind the `oidc` Cargo feature on `uptrakit-web-api`
+(enabled by default, propagated via the controller's `oidc` feature). When disabled, the
+`openidconnect` crate and its heavy transitive tree (`oauth2`, `reqwest` 0.12, RSA/EC crypto,
+`rand` 0.8, `thiserror` v1, `base64` 0.21) are excluded from the build. OIDC DB entities
+(`oidc_provider`, `user_oidc_link`), `AuthMethod::Oidc`, and the `require_token_for_oidc`
+setting field remain unconditional — they carry no `openidconnect` types. Without the feature,
+OIDC API routes, OpenAPI schemas, and rate-limit entries are omitted, and disabling password
+authentication returns an error stating OIDC support is not available.
+
 Key design decisions:
 
 - **Hand-written, not code-generated** -- the shared types already exist in `uptrakit-web-api-types`; a code generator would duplicate them.

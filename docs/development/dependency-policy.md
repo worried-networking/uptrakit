@@ -16,6 +16,21 @@ surface area explicit. When adding tokio usage to a crate:
 2. If tokio is only used in tests, put it in `[dev-dependencies]` with `macros` and `rt`.
 3. Binary crates that need `#[tokio::main]` require `macros` and `rt-multi-thread`.
 
+## Feature-gated optional dependencies
+
+Heavy dependencies that are only needed for specific functionality are gated behind Cargo
+features so builds that do not need them avoid the compile-time and binary-size cost:
+
+| Feature | Crate | Dependency gated | Default |
+| --- | --- | --- | --- |
+| `oidc` | `uptrakit-web-api` | `openidconnect` (+ transitive `oauth2`, `reqwest` 0.12, RSA/EC crypto) | enabled |
+| `oidc` | `uptrakit-controller` | Propagates `uptrakit-web-api/oidc` | enabled |
+| `embed-frontend` | `uptrakit-controller` | `rust-embed` + embedded SvelteKit build | disabled |
+
+When adding a new optional dependency, gate it with `dep:crate_name` in the feature definition
+and use `#[cfg(feature = "...")]` on all code paths that reference it (imports, struct fields,
+route registrations, OpenAPI schemas, rate-limit entries, and test helpers).
+
 ## Re-export strategy
 
 Where a shared crate already depends on a heavy crate, prefer re-exporting specific types rather

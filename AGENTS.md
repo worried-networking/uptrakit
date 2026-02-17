@@ -108,8 +108,20 @@ All crates use **edition = "2024"**. Some specify `rust-version = "1.91"`.
 | `db-postgres` | No | PostgreSQL backend |
 | `db-mysql` | No | MySQL backend |
 | `db-all` | No | All database backends |
+| `oidc` | Yes | OpenID Connect authentication support. Disabling removes the `openidconnect` crate and all OIDC routes/stores, significantly reducing compile-time dependencies. Propagates to `uptrakit-web-api/oidc`. |
 | `swagger-ui` | No | Swagger UI at `/swagger-ui` |
 | `embed-frontend` | No | Embeds the SvelteKit frontend build into the binary via `rust-embed`. Requires `frontend/build/` to exist at compile time. Removes the `--static-dir` CLI argument. See [Embedded Frontend](docs/development/embedded-frontend.md). |
+
+### Web-API feature flags
+
+| Feature | Default | Description |
+| --- | --- | --- |
+| `oidc` | Yes | OpenID Connect authentication. Gates the `openidconnect` dependency and all OIDC-specific modules (`oidc_auth`, `oidc_providers`, `oidc_state`), routes, OpenAPI schemas, rate limit entries, and `AppState` stores. Non-OIDC types (`AuthMethod::Oidc`, `require_token_for_oidc`, OIDC DB entities) remain unconditional. |
+| `swagger-ui` | No | Swagger UI at `/swagger-ui` |
+| `db-sqlite` | No | SQLite backend |
+| `db-postgres` | No | PostgreSQL backend |
+| `db-mysql` | No | MySQL backend |
+| `db-all` | No | All database backends |
 
 ## General MUST FOLLOW Rules for AI Coding Agents
 

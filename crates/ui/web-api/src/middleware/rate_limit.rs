@@ -21,7 +21,7 @@ struct EndpointRateLimit {
 }
 
 static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLock::new(|| {
-    HashMap::from([
+    let map = HashMap::from([
         (
             "/api/v1/auth/login",
             EndpointRateLimit {
@@ -70,31 +70,39 @@ static RATE_LIMITS: LazyLock<HashMap<&'static str, EndpointRateLimit>> = LazyLoc
                 fail_closed: true,
             },
         ),
-        (
+    ]);
+
+    #[cfg(feature = "oidc")]
+    let map = {
+        let mut map = map;
+        map.insert(
             "/api/v1/auth/oidc/exchange",
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
                 fail_closed: true,
             },
-        ),
-        (
+        );
+        map.insert(
             "/api/v1/auth/oidc/link",
             EndpointRateLimit {
                 max_requests: 10,
                 window_secs: 60,
                 fail_closed: true,
             },
-        ),
-        (
+        );
+        map.insert(
             "/api/v1/auth/oidc/complete-registration",
             EndpointRateLimit {
                 max_requests: 5,
                 window_secs: 60,
                 fail_closed: true,
             },
-        ),
-    ])
+        );
+        map
+    };
+
+    map
 });
 
 struct LocalRateLimitEntry {
@@ -209,17 +217,21 @@ mod tests {
 
     #[test]
     fn rate_limited_paths_list() {
-        let expected = [
+        let mut expected = vec![
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/auth/refresh",
             "/api/v1/auth/device",
             "/api/v1/auth/device/poll",
             "/api/v1/auth/device/approve",
+        ];
+
+        #[cfg(feature = "oidc")]
+        expected.extend_from_slice(&[
             "/api/v1/auth/oidc/exchange",
             "/api/v1/auth/oidc/link",
             "/api/v1/auth/oidc/complete-registration",
-        ];
+        ]);
 
         for path in &expected {
             assert!(

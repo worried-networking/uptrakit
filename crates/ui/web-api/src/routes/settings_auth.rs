@@ -8,10 +8,14 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
-use uptrakit_shared_db::entity::oidc_provider;
-use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_shared_db::entity::prelude::AuthMethod;
+#[cfg(feature = "oidc")]
+use {
+    sea_orm::{ColumnTrait, EntityTrait, QueryFilter},
+    uptrakit_shared_db::entity::oidc_provider,
+    uptrakit_shared_db::entity::prelude::OidcProvider,
+};
 
 pub use uptrakit_web_api_types::settings_auth::{
     AuthenticationSettingsResponse, UpdateAuthenticationSettingsRequest,
@@ -76,18 +80,29 @@ pub async fn update_authentication_settings(
             }
 
             // Safety: at least one auth method must remain
-            let active_providers = OidcProvider::find()
-                .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
-                .filter(oidc_provider::Column::IsActive.eq(true))
-                .filter(oidc_provider::Column::DeletedAt.is_null())
-                .all(&state.db)
-                .await
-                .unwrap_or_default();
+            #[cfg(feature = "oidc")]
+            {
+                let active_providers = OidcProvider::find()
+                    .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
+                    .filter(oidc_provider::Column::IsActive.eq(true))
+                    .filter(oidc_provider::Column::DeletedAt.is_null())
+                    .all(&state.db)
+                    .await
+                    .unwrap_or_default();
 
-            if active_providers.is_empty() {
+                if active_providers.is_empty() {
+                    return error_response(
+                        StatusCode::CONFLICT,
+                        "Cannot disable password authentication with no active OIDC providers",
+                    );
+                }
+            }
+
+            #[cfg(not(feature = "oidc"))]
+            {
                 return error_response(
                     StatusCode::CONFLICT,
-                    "Cannot disable password authentication with no active OIDC providers",
+                    "Cannot disable password authentication: OIDC support is not enabled",
                 );
             }
         }

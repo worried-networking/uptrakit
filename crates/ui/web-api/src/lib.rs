@@ -33,6 +33,7 @@ use utoipa_axum::routes;
 
 use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
+#[cfg(feature = "oidc")]
 use auth::oidc_state::{
     AccountLinkStore, OidcFlowStore, OidcRegistrationStore, OidcTokenExchangeStore,
 };
@@ -169,14 +170,18 @@ pub struct AppState {
     /// Notify channel: fire after any certificate revocation to trigger CRL rebuild.
     pub revocation_notify: Arc<tokio::sync::Notify>,
     /// Database-backed store for pending OIDC authorization flows.
+    #[cfg(feature = "oidc")]
     pub oidc_flow_store: OidcFlowStore,
     /// Database-backed store for pending OIDC account links.
+    #[cfg(feature = "oidc")]
     pub account_link_store: AccountLinkStore,
     /// JWT signing/validation manager for access tokens.
     pub jwt: Arc<JwtManager>,
     /// Database-backed store for pending OIDC token exchanges.
+    #[cfg(feature = "oidc")]
     pub oidc_token_exchange_store: OidcTokenExchangeStore,
     /// Database-backed store for pending OIDC registrations (token-gated).
+    #[cfg(feature = "oidc")]
     pub oidc_registration_store: OidcRegistrationStore,
     /// Database-backed store for pending device authorization flows.
     pub device_flow_store: DeviceFlowStore,
@@ -200,7 +205,7 @@ pub struct AppState {
     pub token_denylist: Arc<auth::token_denylist::TokenDenylist>,
 }
 
-/// OpenAPI documentation
+/// OpenAPI documentation (core — always available)
 #[derive(OpenApi)]
 #[openapi(
     tags(
@@ -220,19 +225,6 @@ pub struct AppState {
         routes::auth::logout,
         routes::auth::me,
         routes::auth::refresh,
-        routes::oidc_auth::auth_methods,
-        routes::oidc_auth::oidc_authorize,
-        routes::oidc_auth::oidc_callback,
-        routes::oidc_auth::oidc_link,
-        routes::oidc_auth::oidc_exchange,
-        routes::oidc_auth::oidc_complete_registration,
-        routes::oidc_providers::create_provider,
-        routes::oidc_providers::list_providers,
-        routes::oidc_providers::get_provider,
-        routes::oidc_providers::update_provider,
-        routes::oidc_providers::delete_provider,
-        routes::oidc_providers::activate_provider,
-        routes::oidc_providers::deactivate_provider,
         routes::settings::get_registration_settings,
         routes::settings::update_registration_settings,
         routes::settings_combined::get_combined_settings,
@@ -303,15 +295,6 @@ pub struct AppState {
             routes::auth::AuthResponse,
             routes::auth::RefreshResponse,
             routes::auth::UserResponse,
-            routes::oidc_auth::AuthMethodsResponse,
-            routes::oidc_auth::OidcProviderInfo,
-            routes::oidc_auth::OidcAuthorizeResponse,
-            routes::oidc_auth::OidcLinkRequest,
-            routes::oidc_auth::OidcExchangeRequest,
-            routes::oidc_auth::OidcCompleteRegistrationRequest,
-            routes::oidc_providers::CreateOidcProviderRequest,
-            routes::oidc_providers::UpdateOidcProviderRequest,
-            routes::oidc_providers::OidcProviderResponse,
             routes::settings::RegistrationSettingsResponse,
             routes::settings::UpdateRegistrationSettingsRequest,
             routes::settings_auth::AuthenticationSettingsResponse,
@@ -388,6 +371,41 @@ pub struct AppState {
 )]
 struct ApiDoc;
 
+/// OIDC-specific OpenAPI paths and schemas, merged conditionally.
+#[cfg(feature = "oidc")]
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        routes::oidc_auth::auth_methods,
+        routes::oidc_auth::oidc_authorize,
+        routes::oidc_auth::oidc_callback,
+        routes::oidc_auth::oidc_link,
+        routes::oidc_auth::oidc_exchange,
+        routes::oidc_auth::oidc_complete_registration,
+        routes::oidc_providers::create_provider,
+        routes::oidc_providers::list_providers,
+        routes::oidc_providers::get_provider,
+        routes::oidc_providers::update_provider,
+        routes::oidc_providers::delete_provider,
+        routes::oidc_providers::activate_provider,
+        routes::oidc_providers::deactivate_provider,
+    ),
+    components(
+        schemas(
+            routes::oidc_auth::AuthMethodsResponse,
+            routes::oidc_auth::OidcProviderInfo,
+            routes::oidc_auth::OidcAuthorizeResponse,
+            routes::oidc_auth::OidcLinkRequest,
+            routes::oidc_auth::OidcExchangeRequest,
+            routes::oidc_auth::OidcCompleteRegistrationRequest,
+            routes::oidc_providers::CreateOidcProviderRequest,
+            routes::oidc_providers::UpdateOidcProviderRequest,
+            routes::oidc_providers::OidcProviderResponse,
+        )
+    )
+)]
+struct OidcApiDoc;
+
 struct SecurityAddon;
 
 impl utoipa::Modify for SecurityAddon {
@@ -459,13 +477,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             routes::settings_agent_certs::get_agent_certificate_settings,
             routes::settings_agent_certs::update_agent_certificate_settings
         ))
-        .routes(routes!(routes::oidc_providers::create_provider))
-        .routes(routes!(routes::oidc_providers::list_providers))
-        .routes(routes!(routes::oidc_providers::get_provider))
-        .routes(routes!(routes::oidc_providers::update_provider))
-        .routes(routes!(routes::oidc_providers::delete_provider))
-        .routes(routes!(routes::oidc_providers::activate_provider))
-        .routes(routes!(routes::oidc_providers::deactivate_provider))
         .routes(routes!(routes::services::list_services))
         .routes(routes!(routes::services::enrollment_token_status))
         .routes(routes!(
@@ -535,20 +546,40 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         ));
 
     // All OpenAPI routes merged into a single router so the spec is complete
-    let (api_router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+    let openapi = ApiDoc::openapi();
+
+    #[cfg(feature = "oidc")]
+    let openapi = {
+        let mut openapi = openapi;
+        openapi.merge(OidcApiDoc::openapi());
+        openapi
+    };
+
+    let base_router = OpenApiRouter::with_openapi(openapi)
         .routes(routes!(routes::auth::register))
         .routes(routes!(routes::auth::login))
         .routes(routes!(routes::auth::refresh))
+        .routes(routes!(routes::device_auth::device_auth_start))
+        .routes(routes!(routes::device_auth::device_auth_poll))
+        .merge(auth_routes);
+
+    #[cfg(feature = "oidc")]
+    let base_router = base_router
         .routes(routes!(routes::oidc_auth::auth_methods))
         .routes(routes!(routes::oidc_auth::oidc_authorize))
         .routes(routes!(routes::oidc_auth::oidc_callback))
         .routes(routes!(routes::oidc_auth::oidc_link))
         .routes(routes!(routes::oidc_auth::oidc_exchange))
         .routes(routes!(routes::oidc_auth::oidc_complete_registration))
-        .routes(routes!(routes::device_auth::device_auth_start))
-        .routes(routes!(routes::device_auth::device_auth_poll))
-        .merge(auth_routes)
-        .split_for_parts();
+        .routes(routes!(routes::oidc_providers::create_provider))
+        .routes(routes!(routes::oidc_providers::list_providers))
+        .routes(routes!(routes::oidc_providers::get_provider))
+        .routes(routes!(routes::oidc_providers::update_provider))
+        .routes(routes!(routes::oidc_providers::delete_provider))
+        .routes(routes!(routes::oidc_providers::activate_provider))
+        .routes(routes!(routes::oidc_providers::deactivate_provider));
+
+    let (api_router, api) = base_router.split_for_parts();
 
     let mut router = api_router
         .route("/api/v1/ws/service", get(routes::service_ws::service_ws))
@@ -736,14 +767,18 @@ mod tests {
             cert_signer: Arc::new(NoopCertSigner),
             service_connections,
             revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
+            #[cfg(feature = "oidc")]
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+            #[cfg(feature = "oidc")]
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
             jwt: Arc::new(crate::auth::jwt::JwtManager::from_secret(
                 b"test-secret-lib",
             )),
+            #[cfg(feature = "oidc")]
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
                 db.clone(),
             ),
+            #[cfg(feature = "oidc")]
             oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
                 db.clone(),
             ),

@@ -7,7 +7,8 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["db-sqlite"]
+default = ["db-sqlite", "oidc"]
+oidc = ["uptrakit-web-api/oidc"]
 swagger-ui = ["uptrakit-web-api/swagger-ui"]
 db-all = ["db-sqlite", "db-postgres", "db-mysql", "uptrakit-web-api/db-all"]
 db-sqlite = ["sea-orm/sqlx-sqlite", "sea-orm-migration/sqlx-sqlite", "uptrakit-web-api/db-sqlite"]

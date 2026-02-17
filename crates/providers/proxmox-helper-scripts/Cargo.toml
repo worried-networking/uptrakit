@@ -12,7 +12,6 @@ uptrakit-provider-core = { path = "../core" }
 rootcause = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

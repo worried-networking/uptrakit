@@ -1,9 +1,14 @@
 use crate::SettingKey;
 use crate::auth::Result;
 use crate::settings_store::{RawSettings, RawSettingsExt, upsert_setting};
+#[cfg(feature = "oidc")]
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::ConnectionTrait;
+#[cfg(feature = "oidc")]
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+#[cfg(feature = "oidc")]
 use time::OffsetDateTime;
+#[cfg(feature = "oidc")]
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
 };
@@ -47,6 +52,7 @@ impl AuthenticationSettings {
 }
 
 /// Result of resolving an OIDC-authenticated user.
+#[cfg(feature = "oidc")]
 pub enum OidcUserResolution {
     /// Found via existing link -> auto-login.
     LinkedUser(uuid::Uuid),
@@ -68,6 +74,7 @@ pub enum OidcUserResolution {
 }
 
 /// Parameters for [`resolve_oidc_user`].
+#[cfg(feature = "oidc")]
 pub struct OidcUserParams<'a, C: ConnectionTrait> {
     pub db: &'a C,
     pub tenant_id: uuid::Uuid,
@@ -90,6 +97,7 @@ pub struct OidcUserParams<'a, C: ConnectionTrait> {
 ///    c. Has password_hash -> `LinkViaPasswordRequired`.
 ///    d. Otherwise -> `EmailNotVerified` (manual linking required).
 /// 3. Not found: auto_create -> create user + link -> `NewUser`. Else -> `NotAllowed`.
+#[cfg(feature = "oidc")]
 pub async fn resolve_oidc_user<C: ConnectionTrait>(
     params: OidcUserParams<'_, C>,
 ) -> Result<OidcUserResolution> {
@@ -222,6 +230,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
 }
 
 /// Sync OIDC roles for a user based on provider configuration and ID token claims.
+#[cfg(feature = "oidc")]
 pub async fn sync_oidc_roles(
     db: &impl ConnectionTrait,
     tenant_id: uuid::Uuid,
@@ -297,6 +306,7 @@ pub async fn sync_oidc_roles(
 }
 
 /// Extract mapped local role names from OIDC claims without touching the DB.
+#[cfg(feature = "oidc")]
 pub fn extract_mapped_roles(
     provider: &oidc_provider::Model,
     claims: &serde_json::Value,
@@ -329,6 +339,7 @@ pub fn extract_mapped_roles(
 }
 
 /// Navigate a JSON value via a dot-separated path.
+#[cfg(feature = "oidc")]
 pub fn navigate_json_path<'a>(
     value: &'a serde_json::Value,
     path: &str,

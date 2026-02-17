@@ -3,7 +3,7 @@
 | Method | Scope | Details |
 | --- | --- | --- |
 | Password (Argon2id) | User login | Local accounts with hashed passwords. |
-| OIDC | User login | External identity providers with auto-create or account linking. |
+| OIDC | User login | External identity providers with auto-create or account linking. Requires the `oidc` Cargo feature (enabled by default). |
 | Device authorization | CLI login | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`). |
 | JWT access tokens | API requests | Short-lived tokens that carry resolved permissions (never stored). |
 | Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. |

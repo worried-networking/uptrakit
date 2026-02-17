@@ -6,7 +6,9 @@ pub mod device_auth;
 pub mod health;
 pub mod hosts;
 pub mod ocsp;
+#[cfg(feature = "oidc")]
 pub mod oidc_auth;
+#[cfg(feature = "oidc")]
 pub mod oidc_providers;
 pub mod provider_configs;
 pub mod scheduler;

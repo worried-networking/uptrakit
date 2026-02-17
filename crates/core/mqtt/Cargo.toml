@@ -23,7 +23,6 @@ uptrakit-shared-macros = { workspace = true }
 rumqttc = { version = "0.25.1" }
 rustls = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
@@ -36,6 +35,7 @@ uptrakit-build-info = { path = "../../shared/build-info" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+time = { workspace = true }
 tokio-tungstenite = { workspace = true }
 
 [build-dependencies]

@@ -268,11 +268,15 @@ mod tests {
         Arc::new(AppState {
             ca_snapshot: ca_rx,
             ca_key_store,
+            #[cfg(feature = "oidc")]
             oidc_flow_store: crate::auth::oidc_state::OidcFlowStore::new(db.clone()),
+            #[cfg(feature = "oidc")]
             account_link_store: crate::auth::oidc_state::AccountLinkStore::new(db.clone()),
+            #[cfg(feature = "oidc")]
             oidc_token_exchange_store: crate::auth::oidc_state::OidcTokenExchangeStore::new(
                 db.clone(),
             ),
+            #[cfg(feature = "oidc")]
             oidc_registration_store: crate::auth::oidc_state::OidcRegistrationStore::new(
                 db.clone(),
             ),

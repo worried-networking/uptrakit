@@ -57,6 +57,14 @@ authenticate even when password auth is disabled (OIDC-only environments).
 - Long-lived, revocable tokens stored in `api_tokens` table.
 - Treat them like passwords; never log them and avoid reusing them across services.
 
+## OIDC Feature Availability
+
+OIDC authentication is available only when the `oidc` Cargo feature is enabled on
+`uptrakit-web-api` (default). Without it, OIDC routes (`/api/v1/auth/oidc/*`) are not
+registered, OIDC OpenAPI schemas are omitted, and disabling password authentication returns
+an error stating OIDC support is not available. Password-based and device authorization
+flows remain fully functional regardless of the feature flag.
+
 ## MQTT Enrollment
 
 - MQTT services enroll via `/api/v1/services/enrollment-token?type=mqtt`.
