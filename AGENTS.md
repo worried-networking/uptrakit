@@ -53,30 +53,30 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent (manages remote hosts over SSH); includes CLI host management subcommands (host add/list/show/update/remove/bootstrap) with SeaORM entity, CRUD ops, SSH key auto-detection, Ed25519 keygen, SSH transport (russh), and SshCommandExecutor (CommandExecutor impl for remote command execution)
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshCommandExecutor
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
-│   │   │   └── src/scheduler/          #   Centralised DB-backed task scheduler (HA-safe optimistic locking)
+│   │   │   └── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   └── mqtt/                       # uptrakit-mqtt                          (bin)  — standalone MQTT service
 │   ├── providers/
-│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait/abstractions, SecretMasking trait (re-exports shared types and CommandExecutor from uptrakit-command)
+│   │   ├── core/                       # uptrakit-provider-core                 (lib)  — provider trait + SecretMasking
 │   │   ├── docker-registry/            # uptrakit-provider-docker-registry      (lib)  — Docker/OCI Registry provider
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
-│   │   ├── homebrew/                   # uptrakit-provider-homebrew              (lib)  — Homebrew formulae/cask provider
+│   │   ├── homebrew/                   # uptrakit-provider-homebrew             (lib)  — Homebrew formulae/cask provider
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
-│   │   ├── command/                    # uptrakit-command                       (lib)  — shell command execution, CommandExecutor trait + LocalCommandExecutor (injected into providers for transport-agnostic command dispatch)
+│   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
-│   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
-│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex, ServiceType (Agent, Mqtt, SshAgent), ServiceStatus, MqttTransport, HookShell, DeviceAuthStatus, MqttClientConnectionStatus, OutputStreamType, SessionTokenType — feature-gated: sea-orm, openapi)
+│   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
+│   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types; feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client for the web API; full REST endpoint coverage across 16 modules (auth, api_tokens, health, hosts, oidc_auth, oidc_providers, pki, provider_configs, scheduler, services, settings, settings_mqtt, software_items, system_alerts, update_history); re-exports web-api-types; used by CLI
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler); ws module is pub(crate)
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
+│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, enrollment, identity, TLS, CA bootstrap
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface (auth, services, hosts, software-items, check, update, history, scheduler commands; human/JSON/YAML output; uses uptrakit-openapi-client for all API calls)
+│       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface; uses openapi-client for all API calls
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
