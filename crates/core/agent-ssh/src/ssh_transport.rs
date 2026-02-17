@@ -12,6 +12,8 @@ use rootcause::prelude::*;
 use russh::client::{self, Handle};
 use russh::keys::agent::client::AgentClient;
 use russh::keys::key::PrivateKeyWithHashAlg;
+use russh::keys::ssh_key::Algorithm;
+use russh::keys::ssh_key::HashAlg;
 use russh::keys::{self};
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::{Mutex, mpsc};
@@ -304,19 +306,30 @@ pub async fn connect_and_authenticate(
             }
         }
         AuthMethod::PrivateKey(pem) => {
-            let private_key = keys::decode_secret_key(pem, None).map_err(|e| {
+            let private_key = Arc::new(keys::decode_secret_key(pem, None).map_err(|e| {
                 report!(Error::SshAuth(format!("failed to decode private key: {e}")))
-            })?;
-            let key_with_alg = PrivateKeyWithHashAlg::new(Arc::new(private_key), None);
-            let auth_result = handle
-                .authenticate_publickey(username.to_string(), key_with_alg)
-                .await
-                .map_err(|e| {
-                    report!(Error::SshAuth(format!(
-                        "public key authentication failed: {e}"
-                    )))
-                })?;
-            if !auth_result.success() {
+            })?);
+            // RSA keys need explicit hash algorithm negotiation. Modern servers
+            // (OpenSSH 8.8+) reject the legacy "ssh-rsa" (SHA-1) algorithm.
+            let hash_algs = rsa_hash_alg_candidates(private_key.algorithm());
+            let mut success = false;
+            for hash_alg in hash_algs {
+                let key_with_alg =
+                    PrivateKeyWithHashAlg::new(Arc::clone(&private_key), hash_alg);
+                let auth_result = handle
+                    .authenticate_publickey(username.to_string(), key_with_alg)
+                    .await
+                    .map_err(|e| {
+                        report!(Error::SshAuth(format!(
+                            "public key authentication failed: {e}"
+                        )))
+                    })?;
+                if auth_result.success() {
+                    success = true;
+                    break;
+                }
+            }
+            if !success {
                 bail!(Error::SshAuth(format!(
                     "authentication failed for user '{username}'"
                 )));
@@ -357,12 +370,32 @@ async fn authenticate_with_agent<H: client::Handler>(
     }
 
     for key in &identities {
-        let result = handle
-            .authenticate_publickey_with(username.to_string(), key.clone(), None, &mut agent)
-            .await
-            .map_err(|e| report!(Error::SshAuth(format!("SSH agent signing failed: {e}"))))?;
+        // RSA keys need explicit hash algorithm negotiation. Modern servers
+        // (OpenSSH 8.8+) reject the legacy "ssh-rsa" (SHA-1) algorithm.
+        // Try SHA-512, then SHA-256, matching OpenSSH client behavior.
+        let hash_algs = rsa_hash_alg_candidates(key.algorithm());
 
-        if result.success() {
+        let mut accepted = false;
+        for hash_alg in hash_algs {
+            let result = handle
+                .authenticate_publickey_with(
+                    username.to_string(),
+                    key.clone(),
+                    hash_alg,
+                    &mut agent,
+                )
+                .await
+                .map_err(|e| {
+                    report!(Error::SshAuth(format!("SSH agent signing failed: {e}")))
+                })?;
+
+            if result.success() {
+                accepted = true;
+                break;
+            }
+        }
+
+        if accepted {
             return Ok(());
         }
     }
@@ -371,6 +404,26 @@ async fn authenticate_with_agent<H: client::Handler>(
         "none of the {} SSH agent key(s) were accepted for user '{username}'",
         identities.len()
     )));
+}
+
+/// Return the hash algorithm candidates to try for a given key algorithm.
+///
+/// For RSA keys, modern servers (OpenSSH 8.8+) reject `ssh-rsa` (SHA-1) and
+/// require `rsa-sha2-512` or `rsa-sha2-256`. We try SHA-512 first (strongest),
+/// then SHA-256, matching OpenSSH client negotiation order.
+///
+/// For non-RSA keys (Ed25519, ECDSA), hash algorithm selection is not
+/// applicable, so we return a single `None` entry.
+fn rsa_hash_alg_candidates(algorithm: Algorithm) -> Vec<Option<HashAlg>> {
+    if matches!(algorithm, Algorithm::Rsa { .. }) {
+        vec![
+            Some(HashAlg::Sha512),
+            Some(HashAlg::Sha256),
+            None, // legacy ssh-rsa fallback
+        ]
+    } else {
+        vec![None]
+    }
 }
 
 /// Compute the SHA-256 fingerprint of an SSH public key in `SHA256:...` format.
