@@ -9,14 +9,14 @@ description = "Shared HTTP request/response types for the Uptrakit web API"
 
 [features]
 default = []
-openapi = ["dep:utoipa"]
+openapi = ["dep:utoipa", "uptrakit-shared-types/openapi"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uptrakit-internal-wire = { path = "../wire" }
-uptrakit-shared-types = { workspace = true, features = ["openapi"] }
+uptrakit-shared-types = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 utoipa = { workspace = true, optional = true }
 
