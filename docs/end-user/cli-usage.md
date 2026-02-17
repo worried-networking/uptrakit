@@ -1,6 +1,6 @@
 # CLI Usage Guide
 
-The `uptrakit-cli` binary provides a command-line interface for interacting with the Uptrakit controller. It
+The `uptrakit` binary provides a command-line interface for interacting with the Uptrakit controller. It
 supports authentication, resource inspection, version checks, update triggering, scheduler management, and
 server settings management.
 
@@ -22,15 +22,15 @@ Before using most commands you must authenticate. The CLI uses a device authoriz
 
 ```sh
 # Log in via browser
-uptrakit-cli auth login
+uptrakit auth login
 
 # Check current auth status
-uptrakit-cli auth status
+uptrakit auth status
 
 # Manage API tokens
-uptrakit-cli auth token create --name "ci-token"
-uptrakit-cli auth token list
-uptrakit-cli auth token revoke <TOKEN_ID>
+uptrakit auth token create --name "ci-token"
+uptrakit auth token list
+uptrakit auth token revoke <TOKEN_ID>
 ```
 
 See also: [Auth Flows](../api/auth-flows.md), [Auth and Authorization](../security/auth-and-authorization.md).
@@ -42,28 +42,28 @@ with the controller.
 
 ```sh
 # List all services (paginated)
-uptrakit-cli services list
-uptrakit-cli services list --page 2 --per-page 10
+uptrakit services list
+uptrakit services list --page 2 --per-page 10
 
 # Filter by type or status
-uptrakit-cli services list --type agent
-uptrakit-cli services list --status pending
-uptrakit-cli services list --type mqtt --status approved
+uptrakit services list --type agent
+uptrakit services list --status pending
+uptrakit services list --type mqtt --status approved
 
 # Show service details
-uptrakit-cli services show <SERVICE_ID>
+uptrakit services show <SERVICE_ID>
 
 # Approve a pending service
-uptrakit-cli services approve <SERVICE_ID>
+uptrakit services approve <SERVICE_ID>
 
 # Reject a pending service
-uptrakit-cli services reject <SERVICE_ID>
+uptrakit services reject <SERVICE_ID>
 
 # Remove (deactivate) a service
-uptrakit-cli services remove <SERVICE_ID>
+uptrakit services remove <SERVICE_ID>
 
 # Merge a pending source service into an approved target service
-uptrakit-cli services merge <TARGET_ID> <SOURCE_ID>
+uptrakit services merge <TARGET_ID> <SOURCE_ID>
 ```
 
 See also: [Service Operations](../api/services-operations.md),
@@ -75,11 +75,11 @@ List and inspect hosts registered with the controller.
 
 ```sh
 # List all hosts (paginated)
-uptrakit-cli hosts list
-uptrakit-cli hosts list --page 2 --per-page 10
+uptrakit hosts list
+uptrakit hosts list --page 2 --per-page 10
 
 # Show host details
-uptrakit-cli hosts show <HOST_ID>
+uptrakit hosts show <HOST_ID>
 ```
 
 See also: [Host Entity](../architecture/host-entity.md).
@@ -90,11 +90,11 @@ List and inspect software items configured on the controller.
 
 ```sh
 # List all software items (paginated)
-uptrakit-cli software-items list
-uptrakit-cli software-items list --page 1 --per-page 50
+uptrakit software-items list
+uptrakit software-items list --page 1 --per-page 50
 
 # Show software item details (includes host assignments and version info)
-uptrakit-cli software-items show <ITEM_ID>
+uptrakit software-items show <ITEM_ID>
 ```
 
 See also: [Software Item Entity](../architecture/software-item-entity.md).
@@ -105,15 +105,15 @@ Trigger version checks to discover installed and available versions.
 
 ```sh
 # Trigger bulk version check (all items, all hosts via scheduler)
-uptrakit-cli check all
+uptrakit check all
 
 # Trigger version check for a specific software item (all assigned hosts)
-uptrakit-cli check installed <ITEM_ID>
-uptrakit-cli check available <ITEM_ID>
+uptrakit check installed <ITEM_ID>
+uptrakit check available <ITEM_ID>
 
 # Scope to a specific host
-uptrakit-cli check installed <ITEM_ID> --host <HOST_ID>
-uptrakit-cli check available <ITEM_ID> --host <HOST_ID>
+uptrakit check installed <ITEM_ID> --host <HOST_ID>
+uptrakit check available <ITEM_ID> --host <HOST_ID>
 ```
 
 `check installed` and `check available` use the same API endpoint (the agent checks both installed and available versions). They are separated for clarity.
@@ -128,10 +128,10 @@ Trigger a software update on a specific host. Updates are always manual and user
 
 ```sh
 # Trigger an update
-uptrakit-cli update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0"
+uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0"
 
 # With optional release metadata
-uptrakit-cli update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" \
+uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" \
   --release-tag "v2.0.0" \
   --release-url "https://github.com/example/repo/releases/tag/v2.0.0"
 ```
@@ -144,16 +144,16 @@ View the history of updates across hosts and software items.
 
 ```sh
 # List all update history (paginated)
-uptrakit-cli history list
+uptrakit history list
 
 # Filter by host, software item, or status
-uptrakit-cli history list --host <HOST_ID>
-uptrakit-cli history list --software-item <ITEM_ID>
-uptrakit-cli history list --status completed
-uptrakit-cli history list --host <HOST_ID> --status failed --page 1 --per-page 5
+uptrakit history list --host <HOST_ID>
+uptrakit history list --software-item <ITEM_ID>
+uptrakit history list --status completed
+uptrakit history list --host <HOST_ID> --status failed --page 1 --per-page 5
 
 # Show details for a specific history entry
-uptrakit-cli history show <HISTORY_ID>
+uptrakit history show <HISTORY_ID>
 ```
 
 See also: [Update History Entity](../architecture/update-history-entity.md).
@@ -164,13 +164,13 @@ Inspect and trigger scheduled tasks (version checks, cleanup, CA rotation).
 
 ```sh
 # List all scheduled tasks
-uptrakit-cli scheduler list
+uptrakit scheduler list
 
 # Show task details
-uptrakit-cli scheduler show <TASK_ID>
+uptrakit scheduler show <TASK_ID>
 
 # Trigger immediate execution
-uptrakit-cli scheduler trigger <TASK_ID>
+uptrakit scheduler trigger <TASK_ID>
 ```
 
 See also: [Scheduler](../architecture/scheduler.md), [HTTP Web API](../api/http-web-api.md).
@@ -184,40 +184,40 @@ and system alerts.
 
 ```sh
 # Show all settings at a glance
-uptrakit-cli settings show
+uptrakit settings show
 ```
 
 ### Registration
 
 ```sh
-uptrakit-cli settings registration show
-uptrakit-cli settings registration update --mode invite --token "my-secret"
-uptrakit-cli settings registration update --mode closed
-uptrakit-cli settings registration update --mode invite --require-token-for-oidc true
+uptrakit settings registration show
+uptrakit settings registration update --mode invite --token "my-secret"
+uptrakit settings registration update --mode closed
+uptrakit settings registration update --mode invite --require-token-for-oidc true
 ```
 
 ### Authentication
 
 ```sh
-uptrakit-cli settings authentication show
-uptrakit-cli settings authentication update --password-auth-enabled false
+uptrakit settings authentication show
+uptrakit settings authentication update --password-auth-enabled false
 ```
 
 ### Certificates
 
 ```sh
-uptrakit-cli settings certificates show
-uptrakit-cli settings certificates update --lifetime-days 365 --renewal-window-hours 72
+uptrakit settings certificates show
+uptrakit settings certificates update --lifetime-days 365 --renewal-window-hours 72
 ```
 
 ### Network
 
 ```sh
-uptrakit-cli settings network show
-uptrakit-cli settings network update --trusted-proxies "10.0.0.0/8,172.16.0.0/12"
-uptrakit-cli settings network update --real-ip-header X-Real-IP --https-addr 0.0.0.0:8443
-uptrakit-cli settings network update --extra-sans "alt.example.com,10.0.0.1"
-uptrakit-cli settings network update --pki-addr "https://pki.example.com"
+uptrakit settings network show
+uptrakit settings network update --trusted-proxies "10.0.0.0/8,172.16.0.0/12"
+uptrakit settings network update --real-ip-header X-Real-IP --https-addr 0.0.0.0:8443
+uptrakit settings network update --extra-sans "alt.example.com,10.0.0.1"
+uptrakit settings network update --pki-addr "https://pki.example.com"
 ```
 
 The `--trusted-proxies` and `--extra-sans` flags accept comma-separated values.
@@ -225,42 +225,42 @@ The `--trusted-proxies` and `--extra-sans` flags accept comma-separated values.
 ### CA rotation and server certificate renewal
 
 ```sh
-uptrakit-cli settings rotate-ca
-uptrakit-cli settings renew-server-cert
+uptrakit settings rotate-ca
+uptrakit settings renew-server-cert
 ```
 
 ### MQTT
 
 ```sh
 # List and inspect MQTT client configurations
-uptrakit-cli settings mqtt list
-uptrakit-cli settings mqtt show <ID>
+uptrakit settings mqtt list
+uptrakit settings mqtt show <ID>
 
 # Create a new MQTT configuration
-uptrakit-cli settings mqtt create --url "mqtt://broker:1883" --enabled true
-uptrakit-cli settings mqtt create --host broker --port 8883 --transport tls --client-id uptrakit-1
+uptrakit settings mqtt create --url "mqtt://broker:1883" --enabled true
+uptrakit settings mqtt create --host broker --port 8883 --transport tls --client-id uptrakit-1
 
 # Update an existing configuration
-uptrakit-cli settings mqtt update <ID> --enabled false
-uptrakit-cli settings mqtt update <ID> --host new-broker --port 8883
+uptrakit settings mqtt update <ID> --enabled false
+uptrakit settings mqtt update <ID> --host new-broker --port 8883
 
 # Delete a configuration
-uptrakit-cli settings mqtt delete <ID>
+uptrakit settings mqtt delete <ID>
 
 # Manage MQTT client limit
-uptrakit-cli settings mqtt limit show
-uptrakit-cli settings mqtt limit update --max 10
+uptrakit settings mqtt limit show
+uptrakit settings mqtt limit update --max 10
 ```
 
 ### OIDC providers
 
 ```sh
 # List and inspect OIDC providers
-uptrakit-cli settings oidc list
-uptrakit-cli settings oidc show <ID>
+uptrakit settings oidc list
+uptrakit settings oidc show <ID>
 
-# Create a provider (role-mapping is not supported via CLI; use `uptrakit-cli api` for that)
-uptrakit-cli settings oidc create \
+# Create a provider (role-mapping is not supported via CLI; use `uptrakit api` for that)
+uptrakit settings oidc create \
   --name "Google" \
   --slug google \
   --issuer-url "https://accounts.google.com" \
@@ -268,20 +268,20 @@ uptrakit-cli settings oidc create \
   --client-secret "cs-456"
 
 # Update a provider
-uptrakit-cli settings oidc update <ID> --name "Google Workspace" --auto-create-users false
+uptrakit settings oidc update <ID> --name "Google Workspace" --auto-create-users false
 
 # Delete a provider
-uptrakit-cli settings oidc delete <ID>
+uptrakit settings oidc delete <ID>
 
 # Activate / deactivate
-uptrakit-cli settings oidc activate <ID>
-uptrakit-cli settings oidc deactivate <ID>
+uptrakit settings oidc activate <ID>
+uptrakit settings oidc deactivate <ID>
 ```
 
 ### System alerts
 
 ```sh
-uptrakit-cli settings alerts
+uptrakit settings alerts
 ```
 
 See also: [Settings Runtime](../api/settings-runtime.md), [HTTP Web API](../api/http-web-api.md),
@@ -293,9 +293,9 @@ See also: [Settings Runtime](../api/settings-runtime.md), [HTTP Web API](../api/
 For advanced use, the `api` command lets you call any REST endpoint directly.
 
 ```sh
-uptrakit-cli api GET /api/v1/auth/me
-uptrakit-cli api POST /api/v1/software-items --data '{"name":"test"}'
-uptrakit-cli api GET /api/v1/hosts -o json
+uptrakit api GET /api/v1/auth/me
+uptrakit api POST /api/v1/software-items --data '{"name":"test"}'
+uptrakit api GET /api/v1/hosts -o json
 ```
 
 ## Output Formats
@@ -307,8 +307,8 @@ All commands support three output formats via `--output` / `-o`:
 - **`yaml`**: YAML output for configuration workflows.
 
 ```sh
-uptrakit-cli hosts list -o json | jq '.[].id'
-uptrakit-cli scheduler show <TASK_ID> -o yaml
+uptrakit hosts list -o json | jq '.[].id'
+uptrakit scheduler show <TASK_ID> -o yaml
 ```
 
 See also: [CLI Output Formatting](../development/cli-output.md).

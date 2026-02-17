@@ -153,7 +153,7 @@ These are non-negotiable design constraints. Do not violate them.
    documentation. Any changes to the agent-controller wire protocol must be documented in
    `crates/shared/wire/asyncapi.yaml` and reflected in [docs/api/wire-protocol.md](docs/api/wire-protocol.md).
 1. **Version/build metadata contract is unified.** All workspace binaries (`uptrakit-controller`, `uptrakit-agent`,
-   `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit-cli`) must expose consistent `--version` metadata output. Enabled features are derived at
+   `uptrakit-agent-ssh`, `uptrakit-mqtt`, `uptrakit`) must expose consistent `--version` metadata output. Enabled features are derived at
    build time from `CARGO_CFG_FEATURE` via `uptrakit_build_info::emit_enabled_features_env()` and passed through
    `UPTRAKIT_BUILD_ENABLED_FEATURES`; do not hardcode feature lists per binary.
 1. **Do not add any `#[allow()]`** without explicit confirmation. There are currently no approved exceptions in the

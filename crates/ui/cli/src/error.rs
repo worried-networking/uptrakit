@@ -15,7 +15,7 @@ pub enum CliError {
     #[error("API error ({status}): {message}")]
     Api { status: u16, message: String },
 
-    #[error("Not logged in. Run `uptrakit-cli auth login` first.")]
+    #[error("Not logged in. Run `uptrakit auth login` first.")]
     NotLoggedIn,
 
     #[error("directory error: {0}")]

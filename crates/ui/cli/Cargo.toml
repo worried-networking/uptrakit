@@ -6,6 +6,10 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "uptrakit"
+path = "src/main.rs"
+
 [dependencies]
 clap = { workspace = true }
 tokio = { workspace = true }

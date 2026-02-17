@@ -9,7 +9,7 @@ use output::OutputFormat;
 use uptrakit_build_info::BuildInfo;
 
 #[derive(Debug, Parser)]
-#[command(name = "uptrakit-cli", about = "Uptrakit CLI")]
+#[command(name = "uptrakit", about = "Uptrakit CLI")]
 #[command(disable_version_flag = true)]
 struct Cli {
     /// Show crate version and build metadata
@@ -607,7 +607,7 @@ async fn main() {
     let cli = Cli::parse();
     if cli.version {
         let build_info = BuildInfo::current(
-            "uptrakit-cli",
+            "uptrakit",
             env!("CARGO_PKG_VERSION"),
             option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
         );
@@ -1314,14 +1314,14 @@ mod tests {
 
     #[test]
     fn version_parses_without_subcommand() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "--version"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "--version"]).expect("should parse");
         assert!(args.version);
         assert!(args.command.is_none());
     }
 
     #[test]
     fn hosts_list_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "hosts", "list"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "hosts", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Hosts {
@@ -1333,7 +1333,7 @@ mod tests {
     #[test]
     fn hosts_list_with_pagination() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "hosts",
             "list",
             "--page",
@@ -1355,7 +1355,7 @@ mod tests {
 
     #[test]
     fn hosts_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "hosts", "show", "abc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "hosts", "show", "abc-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Hosts {
@@ -1370,7 +1370,7 @@ mod tests {
     #[test]
     fn software_items_list_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "software-items", "list"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "software-items", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::SoftwareItems {
@@ -1381,7 +1381,7 @@ mod tests {
 
     #[test]
     fn software_items_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "software-items", "show", "item-123"])
+        let args = Cli::try_parse_from(["uptrakit", "software-items", "show", "item-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::SoftwareItems {
@@ -1395,7 +1395,7 @@ mod tests {
 
     #[test]
     fn check_all_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "check", "all"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "check", "all"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Check {
@@ -1406,7 +1406,7 @@ mod tests {
 
     #[test]
     fn check_installed_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "check", "installed", "item-1"])
+        let args = Cli::try_parse_from(["uptrakit", "check", "installed", "item-1"])
             .expect("should parse");
         match args.command {
             Some(Commands::Check {
@@ -1422,7 +1422,7 @@ mod tests {
     #[test]
     fn check_installed_with_host_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "check",
             "installed",
             "item-1",
@@ -1443,7 +1443,7 @@ mod tests {
 
     #[test]
     fn check_available_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "check", "available", "item-2"])
+        let args = Cli::try_parse_from(["uptrakit", "check", "available", "item-2"])
             .expect("should parse");
         match args.command {
             Some(Commands::Check {
@@ -1459,7 +1459,7 @@ mod tests {
     #[test]
     fn update_trigger_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "update",
             "trigger",
             "item-1",
@@ -1492,7 +1492,7 @@ mod tests {
     #[test]
     fn update_trigger_with_release_info_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "update",
             "trigger",
             "item-1",
@@ -1526,7 +1526,7 @@ mod tests {
 
     #[test]
     fn history_list_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "history", "list"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "history", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::History {
@@ -1538,7 +1538,7 @@ mod tests {
     #[test]
     fn history_list_with_filters() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "history",
             "list",
             "--host",
@@ -1569,7 +1569,7 @@ mod tests {
 
     #[test]
     fn history_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "history", "show", "hist-123"])
+        let args = Cli::try_parse_from(["uptrakit", "history", "show", "hist-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::History {
@@ -1584,7 +1584,7 @@ mod tests {
     #[test]
     fn scheduler_list_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "scheduler", "list"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "scheduler", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Scheduler {
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn scheduler_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "scheduler", "show", "task-123"])
+        let args = Cli::try_parse_from(["uptrakit", "scheduler", "show", "task-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Scheduler {
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[test]
     fn scheduler_trigger_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "scheduler", "trigger", "task-123"])
+        let args = Cli::try_parse_from(["uptrakit", "scheduler", "trigger", "task-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Scheduler {
@@ -1623,7 +1623,7 @@ mod tests {
 
     #[test]
     fn services_list_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "services", "list"]).expect("should parse");
+        let args = Cli::try_parse_from(["uptrakit", "services", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Services {
@@ -1635,7 +1635,7 @@ mod tests {
     #[test]
     fn services_list_with_filters() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "services",
             "list",
             "--type",
@@ -1669,7 +1669,7 @@ mod tests {
 
     #[test]
     fn services_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "services", "show", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "show", "svc-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
@@ -1683,7 +1683,7 @@ mod tests {
 
     #[test]
     fn services_approve_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "services", "approve", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "approve", "svc-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
@@ -1697,7 +1697,7 @@ mod tests {
 
     #[test]
     fn services_reject_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "services", "reject", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "reject", "svc-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
@@ -1711,7 +1711,7 @@ mod tests {
 
     #[test]
     fn services_remove_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "services", "remove", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "remove", "svc-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
@@ -1726,7 +1726,7 @@ mod tests {
     #[test]
     fn services_merge_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "services",
             "merge",
             "target-123",
@@ -1751,7 +1751,7 @@ mod tests {
     #[test]
     fn global_options_parse_with_commands() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "--server",
             "https://example.com",
             "--token",
@@ -1774,7 +1774,7 @@ mod tests {
     #[test]
     fn settings_show_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "show"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "settings", "show"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -1785,7 +1785,7 @@ mod tests {
 
     #[test]
     fn settings_registration_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "registration", "show"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "registration", "show"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -1800,7 +1800,7 @@ mod tests {
     #[test]
     fn settings_registration_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "registration",
             "update",
@@ -1837,7 +1837,7 @@ mod tests {
 
     #[test]
     fn settings_authentication_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "authentication", "show"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "authentication", "show"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -1852,7 +1852,7 @@ mod tests {
     #[test]
     fn settings_authentication_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "authentication",
             "update",
@@ -1877,7 +1877,7 @@ mod tests {
 
     #[test]
     fn settings_certificates_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "certificates", "show"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "certificates", "show"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -1892,7 +1892,7 @@ mod tests {
     #[test]
     fn settings_certificates_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "certificates",
             "update",
@@ -1922,7 +1922,7 @@ mod tests {
 
     #[test]
     fn settings_network_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "network", "show"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "network", "show"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -1937,7 +1937,7 @@ mod tests {
     #[test]
     fn settings_network_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "network",
             "update",
@@ -1971,7 +1971,7 @@ mod tests {
 
     #[test]
     fn settings_rotate_ca_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "rotate-ca"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "rotate-ca"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -1983,7 +1983,7 @@ mod tests {
 
     #[test]
     fn settings_renew_server_cert_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "renew-server-cert"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "renew-server-cert"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -1996,7 +1996,7 @@ mod tests {
     #[test]
     fn settings_mqtt_list_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "mqtt", "list"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "settings", "mqtt", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -2009,7 +2009,7 @@ mod tests {
 
     #[test]
     fn settings_mqtt_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "mqtt", "show", "mqtt-123"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "show", "mqtt-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2027,7 +2027,7 @@ mod tests {
     #[test]
     fn settings_mqtt_create_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "mqtt",
             "create",
@@ -2063,7 +2063,7 @@ mod tests {
     #[test]
     fn settings_mqtt_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "mqtt",
             "update",
@@ -2098,7 +2098,7 @@ mod tests {
     #[test]
     fn settings_mqtt_delete_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "mqtt", "delete", "mqtt-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "mqtt", "delete", "mqtt-123"])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2115,7 +2115,7 @@ mod tests {
 
     #[test]
     fn settings_mqtt_limit_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "mqtt", "limit", "show"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "limit", "show"])
             .expect("should parse");
         assert!(matches!(
             args.command,
@@ -2132,7 +2132,7 @@ mod tests {
     #[test]
     fn settings_mqtt_limit_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "mqtt",
             "limit",
@@ -2160,7 +2160,7 @@ mod tests {
     #[test]
     fn settings_oidc_list_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "oidc", "list"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "list"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -2173,7 +2173,7 @@ mod tests {
 
     #[test]
     fn settings_oidc_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit-cli", "settings", "oidc", "show", "oidc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "oidc", "show", "oidc-123"])
             .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2191,7 +2191,7 @@ mod tests {
     #[test]
     fn settings_oidc_create_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "oidc",
             "create",
@@ -2235,7 +2235,7 @@ mod tests {
     #[test]
     fn settings_oidc_update_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "oidc",
             "update",
@@ -2270,7 +2270,7 @@ mod tests {
     #[test]
     fn settings_oidc_delete_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "oidc", "delete", "oidc-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "delete", "oidc-123"])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2288,7 +2288,7 @@ mod tests {
     #[test]
     fn settings_oidc_activate_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "oidc", "activate", "oidc-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "activate", "oidc-123"])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2306,7 +2306,7 @@ mod tests {
     #[test]
     fn settings_oidc_deactivate_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "oidc", "deactivate", "oidc-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "deactivate", "oidc-123"])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2324,7 +2324,7 @@ mod tests {
     #[test]
     fn settings_alerts_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit-cli", "settings", "alerts"]).expect("should parse");
+            Cli::try_parse_from(["uptrakit", "settings", "alerts"]).expect("should parse");
         assert!(matches!(
             args.command,
             Some(Commands::Settings {
@@ -2336,7 +2336,7 @@ mod tests {
     #[test]
     fn settings_registration_update_rejects_invalid_mode() {
         let result = Cli::try_parse_from([
-            "uptrakit-cli",
+            "uptrakit",
             "settings",
             "registration",
             "update",

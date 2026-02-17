@@ -321,19 +321,19 @@ Ways users interact with the system.
   - [x] Stores API token locally on success
 - [x] Auth status and API token management (`auth status`, `auth token create/list/revoke`)
 - [x] Design CLI command structure
-  - [x] `uptrakit-cli hosts` - list and show hosts
-  - [x] `uptrakit-cli software-items` - list and show software items
-  - [x] `uptrakit-cli check` - trigger version checks (all, installed, available)
-  - [x] `uptrakit-cli update` - trigger update
-  - [x] `uptrakit-cli history` - view update history (list with filters, show)
-  - [x] `uptrakit-cli services` - list, show, approve, reject, remove, merge services
-  - [x] `uptrakit-cli scheduler` - list, show, and trigger scheduled tasks
-  - [x] `uptrakit-cli settings` - settings management (registration, authentication, certificates, network, MQTT, OIDC, CA rotation, server cert renewal, alerts)
-  - [ ] `uptrakit-cli status` - system status
-  - [ ] `uptrakit-cli agent` - various commands proxied to the agent. Plus
-    `uptrakit-cli agent install` to install the agent locally
-  - [ ] `uptrakit-cli controller` - various commands proxied to the controller. Plus
-    `uptrakit-cli agent install` to install the agent locally
+  - [x] `uptrakit hosts` - list and show hosts
+  - [x] `uptrakit software-items` - list and show software items
+  - [x] `uptrakit check` - trigger version checks (all, installed, available)
+  - [x] `uptrakit update` - trigger update
+  - [x] `uptrakit history` - view update history (list with filters, show)
+  - [x] `uptrakit services` - list, show, approve, reject, remove, merge services
+  - [x] `uptrakit scheduler` - list, show, and trigger scheduled tasks
+  - [x] `uptrakit settings` - settings management (registration, authentication, certificates, network, MQTT, OIDC, CA rotation, server cert renewal, alerts)
+  - [ ] `uptrakit status` - system status
+  - [ ] `uptrakit agent` - various commands proxied to the agent. Plus
+    `uptrakit agent install` to install the agent locally
+  - [ ] `uptrakit controller` - various commands proxied to the controller. Plus
+    `uptrakit agent install` to install the agent locally
 - [x] Implement CLI commands (hosts, software-items, check, update, history, scheduler)
 - [x] Add output formatting (table, JSON, YAML)
 - [x] Implement filtering and query options (history filters by host, software item, status)

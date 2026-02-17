@@ -21,7 +21,7 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
 
 ## Version metadata output
 
-`uptrakit-cli --version` prints crate/build metadata and supports all output formats:
+`uptrakit --version` prints crate/build metadata and supports all output formats:
 
 - `--output human` (default): deterministic line-based `key: value` output.
 - `--output json`: compact JSON.
@@ -30,9 +30,9 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
 Examples:
 
 ```sh
-uptrakit-cli --version
-uptrakit-cli --version --output json
-uptrakit-cli --version --output yaml
+uptrakit --version
+uptrakit --version --output json
+uptrakit --version --output yaml
 ```
 
 Service/controller binaries (`uptrakit-agent`, `uptrakit-mqtt`, `uptrakit-controller`) also expose
@@ -41,13 +41,13 @@ Service/controller binaries (`uptrakit-agent`, `uptrakit-mqtt`, `uptrakit-contro
 ## Example usage
 
 ```sh
-uptrakit-cli auth status                     # human-readable (default)
-uptrakit-cli auth status -o json             # compact JSON
-uptrakit-cli auth token list --output yaml   # YAML
-uptrakit-cli api GET /api/v1/auth/me -o json # compact JSON for raw API calls
-uptrakit-cli hosts list -o json              # hosts as JSON
-uptrakit-cli history list --status failed    # filtered human-readable list
-uptrakit-cli scheduler show <ID> -o yaml     # scheduler task as YAML
+uptrakit auth status                     # human-readable (default)
+uptrakit auth status -o json             # compact JSON
+uptrakit auth token list --output yaml   # YAML
+uptrakit api GET /api/v1/auth/me -o json # compact JSON for raw API calls
+uptrakit hosts list -o json              # hosts as JSON
+uptrakit history list --status failed    # filtered human-readable list
+uptrakit scheduler show <ID> -o yaml     # scheduler task as YAML
 ```
 
 For the full command reference see [CLI Usage Guide](../end-user/cli-usage.md).
