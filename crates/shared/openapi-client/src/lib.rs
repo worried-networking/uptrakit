@@ -33,6 +33,10 @@ pub use uptrakit_shared_types::ServiceType;
 /// without adding a direct `uuid` dependency.
 pub use uuid::Uuid;
 
+/// Re-export `reqwest::Error` so that downstream crates (e.g. the CLI)
+/// do not need a direct dependency on `reqwest`.
+pub use reqwest::Error as ReqwestError;
+
 use rootcause::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;

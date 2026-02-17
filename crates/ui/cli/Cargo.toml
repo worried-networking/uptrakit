@@ -15,7 +15,6 @@ clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-reqwest = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }

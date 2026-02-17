@@ -4,7 +4,7 @@ use uptrakit_shared_macros::impl_report_conversion;
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] uptrakit_openapi_client::ReqwestError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -31,10 +31,10 @@ pub enum CliError {
 pub type Result<T> = std::result::Result<T, Report<CliError>>;
 
 impl_report_conversion! {
-    reqwest::Error                    => CliError::Http,
-    std::io::Error                    => CliError::Io,
-    serde_json::Error                 => CliError::Json,
-    uptrakit_directories::DirectoryError => CliError::Directory,
+    uptrakit_openapi_client::ReqwestError => CliError::Http,
+    std::io::Error                        => CliError::Io,
+    serde_json::Error                     => CliError::Json,
+    uptrakit_directories::DirectoryError  => CliError::Directory,
 }
 
 impl_report_conversion!(serde_yaml_ng::Error => CliError, |e| CliError::Yaml(e.to_string()));
