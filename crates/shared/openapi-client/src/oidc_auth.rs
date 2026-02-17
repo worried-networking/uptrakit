@@ -4,12 +4,13 @@ use uptrakit_web_api_types::auth::AuthResponse;
 use uptrakit_web_api_types::oidc_auth::{
     OidcAuthorizeResponse, OidcCompleteRegistrationRequest, OidcExchangeRequest, OidcLinkRequest,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// Get the OIDC authorization URL for a provider.
     ///
     /// This endpoint does not require authentication.
-    pub async fn oidc_authorize(&self, provider_id: &str) -> Result<OidcAuthorizeResponse> {
+    pub async fn oidc_authorize(&self, provider_id: &Uuid) -> Result<OidcAuthorizeResponse> {
         let path = format!("/api/v1/auth/oidc/{provider_id}/authorize");
         self.get_unauth(&path).await
     }

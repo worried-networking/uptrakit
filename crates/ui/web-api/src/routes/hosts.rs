@@ -283,7 +283,7 @@ fn format_rfc3339(dt: OffsetDateTime) -> String {
 
 fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostResponse {
     HostResponse {
-        id: h.id.to_string(),
+        id: h.id,
         machine_id: h.machine_id,
         hostname: h.hostname,
         friendly_name: h.friendly_name,
@@ -337,7 +337,7 @@ async fn load_host_agents(
     agents
         .into_iter()
         .map(|agent| HostAgentSummary {
-            id: agent.id.to_string(),
+            id: agent.id,
             friendly_name: agent.friendly_name,
             status: match agent.status {
                 agent::ServiceStatus::Pending => ServiceStatus::Pending,

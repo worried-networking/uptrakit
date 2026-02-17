@@ -43,6 +43,7 @@ mod tests {
     use crate::update_history::UpdateStatus;
     use strum::IntoEnumIterator;
     use uptrakit_shared_types::DeviceAuthStatus;
+    use uuid::Uuid;
 
     // ── 1. Permission enum round-trip ─────────────────────────────────────
 
@@ -293,7 +294,7 @@ mod tests {
     fn create_software_item_request_default_enabled() {
         let json = serde_json::json!({
             "name": "Node.js",
-            "provider_config_id": "some-uuid"
+            "provider_config_id": "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
         });
         let req: CreateSoftwareItemRequest = serde_json::from_value(json).unwrap();
         assert!(req.enabled);
@@ -303,7 +304,7 @@ mod tests {
     fn create_software_item_request_explicit_enabled_false() {
         let json = serde_json::json!({
             "name": "Node.js",
-            "provider_config_id": "some-uuid",
+            "provider_config_id": "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6",
             "enabled": false
         });
         let req: CreateSoftwareItemRequest = serde_json::from_value(json).unwrap();
@@ -419,8 +420,10 @@ mod tests {
 
     #[test]
     fn user_response_round_trip() {
+        let user_id =
+            Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
         let user = UserResponse {
-            id: "usr-001".to_string(),
+            id: user_id,
             email: "owner@example.com".to_string(),
             first_name: "Owner".to_string(),
             last_name: "User".to_string(),
@@ -435,7 +438,7 @@ mod tests {
         let json = serde_json::to_string(&user).unwrap();
         let deserialized: UserResponse = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.id, "usr-001");
+        assert_eq!(deserialized.id, user_id);
         assert_eq!(deserialized.email, "owner@example.com");
         assert_eq!(deserialized.first_name, "Owner");
         assert_eq!(deserialized.last_name, "User");
@@ -452,8 +455,10 @@ mod tests {
 
     #[test]
     fn user_response_empty_permissions() {
+        let user_id =
+            Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("valid uuid");
         let user = UserResponse {
-            id: "usr-002".to_string(),
+            id: user_id,
             email: "viewer@example.com".to_string(),
             first_name: "View".to_string(),
             last_name: "Only".to_string(),
@@ -467,13 +472,15 @@ mod tests {
 
     #[test]
     fn auth_response_round_trip() {
+        let user_id =
+            Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
         let auth = AuthResponse {
             access_token: "eyJhbGciOiJIUzI1NiJ9.test".to_string(),
             refresh_token: "refresh-token-value".to_string(),
             expires_in: 3600,
             token_type: "Bearer".to_string(),
             user: UserResponse {
-                id: "usr-001".to_string(),
+                id: user_id,
                 email: "admin@example.com".to_string(),
                 first_name: "Admin".to_string(),
                 last_name: "User".to_string(),
@@ -487,7 +494,7 @@ mod tests {
         assert_eq!(deserialized.refresh_token, "refresh-token-value");
         assert_eq!(deserialized.expires_in, 3600);
         assert_eq!(deserialized.token_type, "Bearer");
-        assert_eq!(deserialized.user.id, "usr-001");
+        assert_eq!(deserialized.user.id, user_id);
         assert_eq!(deserialized.user.email, "admin@example.com");
         assert_eq!(deserialized.user.permissions.len(), 2);
         assert_eq!(deserialized.user.permissions[0], Permission::ViewSettings);
@@ -496,8 +503,10 @@ mod tests {
 
     #[test]
     fn agent_response_round_trip() {
+        let agent_id =
+            Uuid::parse_str("10000000-0000-0000-0000-000000000001").expect("valid uuid");
         let agent = AgentResponse {
-            id: "agent-001".to_string(),
+            id: agent_id,
             hostname: "server-1.local".to_string(),
             friendly_name: "Production Server 1".to_string(),
             ip_address: Some("192.168.1.10".to_string()),
@@ -510,7 +519,7 @@ mod tests {
         let json = serde_json::to_string(&agent).unwrap();
         let deserialized: AgentResponse = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.id, "agent-001");
+        assert_eq!(deserialized.id, agent_id);
         assert_eq!(deserialized.hostname, "server-1.local");
         assert_eq!(deserialized.friendly_name, "Production Server 1");
         assert_eq!(deserialized.ip_address.as_deref(), Some("192.168.1.10"));
@@ -526,8 +535,10 @@ mod tests {
 
     #[test]
     fn agent_response_round_trip_with_none_optionals() {
+        let agent_id =
+            Uuid::parse_str("10000000-0000-0000-0000-000000000002").expect("valid uuid");
         let agent = AgentResponse {
-            id: "agent-002".to_string(),
+            id: agent_id,
             hostname: "server-2.local".to_string(),
             friendly_name: "Staging Server".to_string(),
             ip_address: None,
@@ -540,7 +551,7 @@ mod tests {
         let json = serde_json::to_string(&agent).unwrap();
         let deserialized: AgentResponse = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.id, "agent-002");
+        assert_eq!(deserialized.id, agent_id);
         assert!(deserialized.ip_address.is_none());
         assert_eq!(deserialized.status, AgentStatus::Pending);
         assert_eq!(deserialized.agent_version, "unknown");

@@ -3,6 +3,7 @@ use crate::UptrakitClient;
 use uptrakit_web_api_types::api_tokens::{
     ApiTokenListResponse, CreateApiTokenRequest, CreateApiTokenResponse,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// Create a new API token.
@@ -19,7 +20,7 @@ impl UptrakitClient {
     }
 
     /// Revoke an API token by ID.
-    pub async fn revoke_api_token(&self, id: &str) -> Result<()> {
+    pub async fn revoke_api_token(&self, id: &Uuid) -> Result<()> {
         let path = format!("/api/v1/auth/api-tokens/{id}");
         self.delete(&path).await
     }

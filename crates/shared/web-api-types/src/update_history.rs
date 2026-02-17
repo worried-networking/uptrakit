@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -43,8 +44,8 @@ impl std::str::FromStr for UpdateStatus {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct UpdateHistoryQuery {
-    pub host_id: Option<String>,
-    pub software_item_id: Option<String>,
+    pub host_id: Option<Uuid>,
+    pub software_item_id: Option<Uuid>,
     pub status: Option<String>,
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
@@ -64,10 +65,10 @@ impl UpdateHistoryQuery {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHistoryResponse {
-    pub id: String,
-    pub host_id: String,
+    pub id: Uuid,
+    pub host_id: Uuid,
     pub host_name: String,
-    pub software_item_id: String,
+    pub software_item_id: Uuid,
     pub software_item_name: String,
     pub from_version: Option<String>,
     pub to_version: String,

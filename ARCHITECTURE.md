@@ -48,8 +48,11 @@ Key design decisions:
 
 - **Hand-written, not code-generated** -- the shared types already exist in `uptrakit-web-api-types`; a code generator would duplicate them.
 - **Re-exports all types** -- downstream crates import types via
-  `uptrakit_openapi_client::types::*` rather than depending on
-  `uptrakit-web-api-types` directly.
+  `uptrakit_openapi_client::types::*` and `uptrakit_openapi_client::Uuid`
+  rather than depending on `uptrakit-web-api-types` or `uuid` directly.
+- **UUID type safety** -- all entity ID parameters use `&Uuid` (not `&str`)
+  and all response ID fields are `Uuid` (not `String`), providing compile-time
+  validation of identifiers across the API boundary.
 - **Typed error handling** -- `ClientError` enum with variants for HTTP, JSON,
   API, rate-limiting, not-found, and authentication errors, using
   `rootcause::Report` for context propagation.

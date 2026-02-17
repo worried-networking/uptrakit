@@ -23,7 +23,7 @@ uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-command = { path = "../../shared/command" }
 uptrakit-provider-registry = { path = "../../providers/registry" }
 uptrakit-build-info = { path = "../../shared/build-info" }

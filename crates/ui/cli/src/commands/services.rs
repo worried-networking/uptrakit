@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::services::{ListServicesQuery, MergeAgentRequest};
 
 /// Parameters for listing services.
@@ -57,7 +58,7 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single service.
 pub async fn show(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -89,7 +90,7 @@ pub async fn show(
 
 /// Approve a pending service.
 pub async fn approve(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -108,7 +109,7 @@ pub async fn approve(
 
 /// Reject a pending service.
 pub async fn reject(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -127,7 +128,7 @@ pub async fn reject(
 
 /// Remove (deactivate) a service.
 pub async fn remove(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -143,8 +144,8 @@ pub async fn remove(
 
 /// Merge a source service into a target service.
 pub async fn merge(
-    target_id: &str,
-    source_id: &str,
+    target_id: &Uuid,
+    source_id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -152,7 +153,7 @@ pub async fn merge(
 ) -> Result<()> {
     let client = authenticated_client(server, token, insecure)?;
     let req = MergeAgentRequest {
-        source_id: source_id.to_string(),
+        source_id: *source_id,
     };
     let resp = client.merge_service(target_id, &req).await.context_to()?;
 

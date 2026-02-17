@@ -4,6 +4,7 @@ use uptrakit_web_api_types::settings_mqtt::{
     CreateMqttClientRequest, MqttClientResponse, MqttLimitResponse, UpdateMqttClientRequest,
     UpdateMqttLimitRequest,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// List all MQTT client configurations.
@@ -33,7 +34,7 @@ impl UptrakitClient {
     }
 
     /// Get a single MQTT client configuration by ID.
-    pub async fn get_mqtt_settings(&self, id: &str) -> Result<MqttClientResponse> {
+    pub async fn get_mqtt_settings(&self, id: &Uuid) -> Result<MqttClientResponse> {
         let path = format!("/api/v1/settings/mqtt/{id}");
         self.get(&path).await
     }
@@ -41,7 +42,7 @@ impl UptrakitClient {
     /// Update an existing MQTT client configuration.
     pub async fn update_mqtt_settings(
         &self,
-        id: &str,
+        id: &Uuid,
         req: &UpdateMqttClientRequest,
     ) -> Result<MqttClientResponse> {
         let path = format!("/api/v1/settings/mqtt/{id}");
@@ -49,7 +50,7 @@ impl UptrakitClient {
     }
 
     /// Delete an MQTT client configuration.
-    pub async fn delete_mqtt_settings(&self, id: &str) -> Result<()> {
+    pub async fn delete_mqtt_settings(&self, id: &Uuid) -> Result<()> {
         let path = format!("/api/v1/settings/mqtt/{id}");
         self.delete(&path).await
     }

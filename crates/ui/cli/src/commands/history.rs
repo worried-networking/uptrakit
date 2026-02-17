@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::update_history::UpdateHistoryQuery;
 
 /// Parameters for listing update history.
@@ -10,8 +11,8 @@ pub struct ListParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
-    pub host_id: Option<&'a str>,
-    pub software_item_id: Option<&'a str>,
+    pub host_id: Option<Uuid>,
+    pub software_item_id: Option<Uuid>,
     pub status: Option<&'a str>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
@@ -22,8 +23,8 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
 
     let query = UpdateHistoryQuery {
-        host_id: params.host_id.map(|s| s.to_string()),
-        software_item_id: params.software_item_id.map(|s| s.to_string()),
+        host_id: params.host_id,
+        software_item_id: params.software_item_id,
         status: params.status.map(|s| s.to_string()),
         page: params.page,
         per_page: params.per_page,
@@ -60,7 +61,7 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single update history entry.
 pub async fn show(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,

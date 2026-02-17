@@ -1,5 +1,6 @@
 use crate::permissions::Permission;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -76,7 +77,7 @@ pub struct RefreshResponse {
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UserResponse {
-    pub id: String,
+    pub id: Uuid,
     pub email: String,
     pub first_name: String,
     pub last_name: String,

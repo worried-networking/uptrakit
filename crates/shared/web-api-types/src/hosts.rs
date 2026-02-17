@@ -1,10 +1,11 @@
 use crate::services::ServiceStatus;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostResponse {
-    pub id: String,
+    pub id: Uuid,
     pub machine_id: String,
     pub hostname: String,
     pub friendly_name: String,
@@ -21,7 +22,7 @@ pub struct HostResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostAgentSummary {
-    pub id: String,
+    pub id: Uuid,
     pub friendly_name: String,
     pub status: ServiceStatus,
 }

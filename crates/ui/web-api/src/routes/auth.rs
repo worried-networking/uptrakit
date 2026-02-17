@@ -177,7 +177,7 @@ pub async fn register(
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: UserResponse {
-            id: user_id.to_string(),
+            id: user_id,
             email: req.email,
             first_name: req.first_name,
             last_name: req.last_name,
@@ -295,7 +295,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: UserResponse {
-            id: user.id.to_string(),
+            id: user.id,
             email: user.email,
             first_name: user.first_name,
             last_name: user.last_name,
@@ -669,7 +669,7 @@ pub async fn me(
     };
 
     let response = UserResponse {
-        id: user.id.to_string(),
+        id: user.id,
         email: user.email,
         first_name: user.first_name,
         last_name: user.last_name,

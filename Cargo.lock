@@ -5685,6 +5685,7 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-openapi-client",
  "uptrakit-shared-macros",
+ "uuid",
 ]
 
 [[package]]
@@ -5817,6 +5818,7 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uptrakit-web-api-types",
+ "uuid",
 ]
 
 [[package]]
@@ -6062,6 +6064,7 @@ dependencies = [
  "uptrakit-internal-wire",
  "uptrakit-shared-types",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]

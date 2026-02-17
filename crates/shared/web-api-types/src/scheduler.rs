@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Response for a single scheduled task.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ScheduledTaskResponse {
-    pub id: String,
+    pub id: Uuid,
     pub task_type: String,
     pub label: String,
     pub cron_expression: String,

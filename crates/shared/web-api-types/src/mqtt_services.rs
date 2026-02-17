@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Status of an MQTT service instance in the enrollment/approval workflow.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -46,7 +47,7 @@ impl FromStr for MqttServiceStatus {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MqttServiceResponse {
-    pub id: String,
+    pub id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
     pub status: MqttServiceStatus,
@@ -66,7 +67,7 @@ pub struct ListMqttServicesQuery {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MqttEnrollmentTokenResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub token: String,
     pub expires_at: Option<String>,
@@ -78,7 +79,7 @@ pub struct MqttEnrollmentTokenResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MqttEnrollmentTokenListResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub expires_at: Option<String>,
     pub uses_remaining: Option<i32>,

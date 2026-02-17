@@ -16,6 +16,7 @@ thiserror = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-web-api-types = { path = "../web-api-types" }
+uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 serde_urlencoded = "0.7"

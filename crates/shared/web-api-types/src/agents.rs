@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -41,7 +42,7 @@ impl FromStr for AgentStatus {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AgentResponse {
-    pub id: String,
+    pub id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
     pub ip_address: Option<String>,
@@ -79,5 +80,5 @@ pub struct EnrollmentTokenStatusResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MergeAgentRequest {
-    pub source_id: String,
+    pub source_id: Uuid,
 }

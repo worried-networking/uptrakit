@@ -7,6 +7,7 @@ use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use serde::Serialize;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
 
 /// Serializable output for `auth status`.
@@ -209,7 +210,7 @@ pub async fn status(
         first_name: user.first_name,
         last_name: user.last_name,
         email: user.email,
-        user_id: user.id,
+        user_id: user.id.to_string(),
         permissions,
     };
 
@@ -245,7 +246,7 @@ pub async fn token_create(
     human.push_str("Store this token securely - it will not be shown again.\n");
 
     let data = TokenCreateOutput {
-        id,
+        id: id.to_string(),
         token: new_token,
     };
 
@@ -274,7 +275,7 @@ pub async fn token_list(
                 "active"
             };
             TokenEntry {
-                id: t.id.clone(),
+                id: t.id.to_string(),
                 name: t.name.clone(),
                 created_at: t.created_at.clone(),
                 status: status_str.to_string(),
@@ -305,7 +306,7 @@ pub async fn token_list(
 
 /// Revoke an API token.
 pub async fn token_revoke(
-    id: &str,
+    id: &Uuid,
     server_override: Option<&str>,
     token_override: Option<&str>,
     format: OutputFormat,

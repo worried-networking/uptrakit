@@ -32,7 +32,7 @@ tracing-subscriber = { workspace = true }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-web-api-types = { path = "../../shared/web-api-types" }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-build-info = { path = "../../shared/build-info" }
 
 [dev-dependencies]

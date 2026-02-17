@@ -29,6 +29,10 @@ pub use uptrakit_shared_types::DeviceAuthStatus;
 /// since it is used by the enrollment token API.
 pub use uptrakit_shared_types::ServiceType;
 
+/// Re-export `Uuid` so that downstream crates can use the exact same type
+/// without adding a direct `uuid` dependency.
+pub use uuid::Uuid;
+
 use rootcause::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;

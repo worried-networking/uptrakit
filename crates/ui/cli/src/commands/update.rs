@@ -2,12 +2,13 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::software_items::{ReleaseInfoRequest, TriggerUpdateRequest};
 
 /// Parameters for triggering an update.
 pub struct TriggerParams<'a> {
-    pub item_id: &'a str,
-    pub host_id: &'a str,
+    pub item_id: &'a Uuid,
+    pub host_id: &'a Uuid,
     pub to_version: &'a str,
     pub release_tag: Option<&'a str>,
     pub release_url: Option<&'a str>,

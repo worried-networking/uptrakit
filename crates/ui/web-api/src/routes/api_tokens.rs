@@ -37,7 +37,7 @@ pub async fn create_api_token(
         Ok(created) => {
             let format = time::format_description::well_known::Rfc3339;
             let response = CreateApiTokenResponse {
-                id: created.id.to_string(),
+                id: created.id,
                 token: created.plaintext_token,
                 created_at: created.created_at.format(&format).unwrap_or_default(),
             };
@@ -74,7 +74,7 @@ pub async fn list_api_tokens(
                 tokens: tokens
                     .into_iter()
                     .map(|t| ApiTokenResponse {
-                        id: t.id.to_string(),
+                        id: t.id,
                         name: t.name,
                         created_at: t.created_at.format(&format).unwrap_or_default(),
                         last_used_at: t.last_used_at.and_then(|dt| dt.format(&format).ok()),

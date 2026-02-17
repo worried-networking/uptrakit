@@ -19,7 +19,7 @@ time = { workspace = true }
 tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["sea-orm"] }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
 
 [dev-dependencies]
 sea-orm = { workspace = true, features = ["mock"] }

@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use uptrakit_openapi_client::Uuid;
 
 /// List all scheduled tasks.
 pub async fn list(
@@ -35,7 +36,7 @@ pub async fn list(
 
 /// Show details for a single scheduled task.
 pub async fn show(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -67,7 +68,7 @@ pub async fn show(
 
 /// Trigger immediate execution of a scheduled task.
 pub async fn trigger(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,

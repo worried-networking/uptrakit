@@ -24,7 +24,7 @@ pub use uptrakit_web_api_types::oidc_providers::{
 
 fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse {
     OidcProviderResponse {
-        id: m.id.to_string(),
+        id: m.id,
         name: m.name,
         slug: m.slug,
         logo_url: m.logo_url,

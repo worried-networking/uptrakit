@@ -3,6 +3,7 @@ use crate::UptrakitClient;
 use uptrakit_web_api_types::oidc_providers::{
     CreateOidcProviderRequest, OidcProviderResponse, UpdateOidcProviderRequest,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// Create a new OIDC provider.
@@ -19,7 +20,7 @@ impl UptrakitClient {
     }
 
     /// Get a single OIDC provider by ID.
-    pub async fn get_oidc_provider(&self, id: &str) -> Result<OidcProviderResponse> {
+    pub async fn get_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse> {
         let path = format!("/api/v1/settings/oidc-providers/{id}");
         self.get(&path).await
     }
@@ -27,7 +28,7 @@ impl UptrakitClient {
     /// Update an existing OIDC provider.
     pub async fn update_oidc_provider(
         &self,
-        id: &str,
+        id: &Uuid,
         req: &UpdateOidcProviderRequest,
     ) -> Result<OidcProviderResponse> {
         let path = format!("/api/v1/settings/oidc-providers/{id}");
@@ -35,19 +36,19 @@ impl UptrakitClient {
     }
 
     /// Delete an OIDC provider.
-    pub async fn delete_oidc_provider(&self, id: &str) -> Result<()> {
+    pub async fn delete_oidc_provider(&self, id: &Uuid) -> Result<()> {
         let path = format!("/api/v1/settings/oidc-providers/{id}");
         self.delete(&path).await
     }
 
     /// Activate an OIDC provider.
-    pub async fn activate_oidc_provider(&self, id: &str) -> Result<OidcProviderResponse> {
+    pub async fn activate_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse> {
         let path = format!("/api/v1/settings/oidc-providers/{id}/activate");
         self.post_empty(&path).await
     }
 
     /// Deactivate an OIDC provider.
-    pub async fn deactivate_oidc_provider(&self, id: &str) -> Result<OidcProviderResponse> {
+    pub async fn deactivate_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse> {
         let path = format!("/api/v1/settings/oidc-providers/{id}/deactivate");
         self.post_empty(&path).await
     }

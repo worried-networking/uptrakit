@@ -16,6 +16,12 @@ Every command accepts these global flags:
 | `-o`, `--output <FORMAT>` | Output format: `human` (default), `json`, `yaml` |
 | `--version` | Show version and build metadata |
 
+## Entity IDs
+
+All entity ID arguments (host IDs, service IDs, software item IDs, task IDs,
+etc.) must be valid UUIDs. The CLI validates UUID format at parse time and
+rejects invalid values immediately with a descriptive error message.
+
 ## Authentication
 
 Before using most commands you must authenticate. The CLI uses a device authorization flow (RFC 8628).

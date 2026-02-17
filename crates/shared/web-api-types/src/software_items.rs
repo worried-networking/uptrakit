@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::provider_configs::CreateProviderConfigRequest;
 
@@ -12,7 +13,7 @@ pub struct CreateSoftwareItemRequest {
     /// Display name (e.g. "Node.js").
     pub name: String,
     /// UUID of the provider config to use.
-    pub provider_config_id: Option<String>,
+    pub provider_config_id: Option<Uuid>,
     /// Inline provider config to create (mutually exclusive with provider_config_id).
     pub provider_config: Option<CreateProviderConfigRequest>,
     /// Provider-specific identifier within the source. Defaults to "" if omitted.
@@ -38,15 +39,15 @@ pub struct UpdateSoftwareItemRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssignHostsRequest {
     /// List of host UUIDs to assign.
-    pub host_ids: Vec<String>,
+    pub host_ids: Vec<Uuid>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
-    pub provider_config_id: String,
+    pub provider_config_id: Uuid,
     pub provider_config_name: String,
     pub provider_type: String,
     pub package_identifier: String,
@@ -61,9 +62,9 @@ pub struct SoftwareItemResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemDetailResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
-    pub provider_config_id: String,
+    pub provider_config_id: Uuid,
     pub provider_config_name: String,
     pub provider_type: String,
     pub package_identifier: String,
@@ -79,7 +80,7 @@ pub struct SoftwareItemDetailResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SoftwareItemHostSummary {
-    pub host_id: String,
+    pub host_id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
     pub installed_version: Option<String>,
@@ -134,7 +135,7 @@ pub struct TriggerUpdateRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TriggerUpdateResponse {
-    pub update_history_id: String,
+    pub update_history_id: Uuid,
     pub status: TriggerUpdateStatus,
 }
 

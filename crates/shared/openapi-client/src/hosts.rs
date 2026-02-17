@@ -2,6 +2,7 @@ use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// List hosts with pagination.
@@ -13,19 +14,19 @@ impl UptrakitClient {
     }
 
     /// Get a single host by ID.
-    pub async fn get_host(&self, id: &str) -> Result<HostResponse> {
+    pub async fn get_host(&self, id: &Uuid) -> Result<HostResponse> {
         let path = format!("/api/v1/hosts/{id}");
         self.get(&path).await
     }
 
     /// Update a host (e.g. change its friendly name).
-    pub async fn update_host(&self, id: &str, req: &UpdateHostRequest) -> Result<HostResponse> {
+    pub async fn update_host(&self, id: &Uuid, req: &UpdateHostRequest) -> Result<HostResponse> {
         let path = format!("/api/v1/hosts/{id}");
         self.put_json(&path, req).await
     }
 
     /// Deactivate (remove) a host.
-    pub async fn deactivate_host(&self, id: &str) -> Result<HostMessageResponse> {
+    pub async fn deactivate_host(&self, id: &Uuid) -> Result<HostMessageResponse> {
         let path = format!("/api/v1/hosts/{id}");
         self.delete_json(&path).await
     }

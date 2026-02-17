@@ -3,6 +3,7 @@ use crate::UptrakitClient;
 use uptrakit_web_api_types::scheduler::{
     ScheduledTaskResponse, TriggerScheduledTaskResponse, UpdateScheduledTaskRequest,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// List all scheduled tasks.
@@ -11,7 +12,7 @@ impl UptrakitClient {
     }
 
     /// Get a single scheduled task by ID.
-    pub async fn get_scheduled_task(&self, id: &str) -> Result<ScheduledTaskResponse> {
+    pub async fn get_scheduled_task(&self, id: &Uuid) -> Result<ScheduledTaskResponse> {
         let path = format!("/api/v1/scheduler/tasks/{id}");
         self.get(&path).await
     }
@@ -19,7 +20,7 @@ impl UptrakitClient {
     /// Update a scheduled task (cron expression, enabled state, or config).
     pub async fn update_scheduled_task(
         &self,
-        id: &str,
+        id: &Uuid,
         req: &UpdateScheduledTaskRequest,
     ) -> Result<ScheduledTaskResponse> {
         let path = format!("/api/v1/scheduler/tasks/{id}");
@@ -27,7 +28,7 @@ impl UptrakitClient {
     }
 
     /// Trigger immediate execution of a scheduled task.
-    pub async fn trigger_scheduled_task(&self, id: &str) -> Result<TriggerScheduledTaskResponse> {
+    pub async fn trigger_scheduled_task(&self, id: &Uuid) -> Result<TriggerScheduledTaskResponse> {
         let path = format!("/api/v1/scheduler/tasks/{id}/trigger");
         self.post_empty(&path).await
     }

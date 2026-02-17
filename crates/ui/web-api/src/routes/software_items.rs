@@ -44,9 +44,9 @@ fn build_list_response(
     host_count: u64,
 ) -> SoftwareItemResponse {
     SoftwareItemResponse {
-        id: item.id.to_string(),
+        id: item.id,
         name: item.name,
-        provider_config_id: item.provider_config_id.to_string(),
+        provider_config_id: item.provider_config_id,
         provider_config_name: config.name.clone(),
         provider_type: config.provider_type.clone(),
         package_identifier: item.package_identifier,
@@ -66,9 +66,9 @@ fn build_detail_response(
     hosts: Vec<SoftwareItemHostSummary>,
 ) -> SoftwareItemDetailResponse {
     SoftwareItemDetailResponse {
-        id: item.id.to_string(),
+        id: item.id,
         name: item.name,
-        provider_config_id: item.provider_config_id.to_string(),
+        provider_config_id: item.provider_config_id,
         provider_config_name: config.name.clone(),
         provider_type: config.provider_type.clone(),
         package_identifier: item.package_identifier,
@@ -189,7 +189,7 @@ async fn load_item_hosts(
             .await
         {
             summaries.push(SoftwareItemHostSummary {
-                host_id: h.id.to_string(),
+                host_id: h.id,
                 hostname: h.hostname,
                 friendly_name: h.friendly_name,
                 installed_version: link.installed_version,
@@ -215,10 +215,10 @@ enum ConfigOverrideError {
 }
 
 fn validate_provider_config_selection(
-    provider_config_id: Option<&str>,
-    provider_config: bool,
+    has_provider_config_id: bool,
+    has_provider_config: bool,
 ) -> Result<(), &'static str> {
-    match (provider_config_id.is_some(), provider_config) {
+    match (has_provider_config_id, has_provider_config) {
         (true, false) => Ok(()),
         (false, true) => Ok(()),
         (true, true) => Err("Provide either provider_config_id or provider_config, not both"),
@@ -278,7 +278,7 @@ pub async fn create_software_item(
     }
 
     if let Err(e) = validate_provider_config_selection(
-        req.provider_config_id.as_deref(),
+        req.provider_config_id.is_some(),
         req.provider_config.is_some(),
     ) {
         return error_response(StatusCode::BAD_REQUEST, e);
@@ -293,19 +293,10 @@ pub async fn create_software_item(
     };
 
     let (provider_config_id, config) = match (
-        req.provider_config_id.as_deref(),
+        req.provider_config_id,
         req.provider_config.as_ref(),
     ) {
-        (Some(id), None) => {
-            let provider_config_id = match uuid::Uuid::parse_str(id) {
-                Ok(id) => id,
-                Err(_) => {
-                    return error_response(
-                        StatusCode::BAD_REQUEST,
-                        "Invalid provider_config_id UUID",
-                    );
-                }
-            };
+        (Some(provider_config_id), None) => {
             let config =
                 match find_active_provider_config(&txn, tenant.tenant_id, provider_config_id).await
                 {
@@ -796,17 +787,7 @@ pub async fn assign_hosts(
 
     let now = OffsetDateTime::now_utc();
 
-    for host_id_str in &req.host_ids {
-        let host_id = match uuid::Uuid::parse_str(host_id_str) {
-            Ok(id) => id,
-            Err(_) => {
-                return error_response(
-                    StatusCode::BAD_REQUEST,
-                    format!("Invalid host UUID: {host_id_str}"),
-                );
-            }
-        };
-
+    for &host_id in &req.host_ids {
         // Verify host exists and is active
         let host_exists = Host::find_by_id(host_id)
             .filter(host::Column::DeactivatedAt.is_null())
@@ -818,11 +799,11 @@ pub async fn assign_hosts(
             Ok(None) => {
                 return error_response(
                     StatusCode::BAD_REQUEST,
-                    format!("Host {host_id_str} not found or deactivated"),
+                    format!("Host {host_id} not found or deactivated"),
                 );
             }
             Err(e) => {
-                tracing::error!("Failed to check host {host_id_str}: {e}");
+                tracing::error!("Failed to check host {host_id}: {e}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         }
@@ -847,7 +828,7 @@ pub async fn assign_hosts(
                     linked_at: Set(now),
                 };
                 if let Err(e) = link.insert(&state.db).await {
-                    tracing::error!("Failed to link host {host_id_str} to software item: {e}");
+                    tracing::error!("Failed to link host {host_id} to software item: {e}");
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error",
@@ -855,7 +836,7 @@ pub async fn assign_hosts(
                 }
             }
             Err(e) => {
-                tracing::error!("Failed to check existing link for host {host_id_str}: {e}");
+                tracing::error!("Failed to check existing link for host {host_id}: {e}");
                 return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
             }
         }
@@ -1214,7 +1195,7 @@ pub async fn trigger_update(
     };
 
     let resp = TriggerUpdateResponse {
-        update_history_id: update_history_id.to_string(),
+        update_history_id,
         status,
     };
 
@@ -1600,7 +1581,7 @@ mod tests {
             deactivated_at: None,
         };
         let hosts = vec![SoftwareItemHostSummary {
-            host_id: uuid::Uuid::now_v7().to_string(),
+            host_id: uuid::Uuid::now_v7(),
             hostname: "web-01".to_string(),
             friendly_name: "Web Server 1".to_string(),
             installed_version: Some("7.2.4".to_string()),
@@ -1721,14 +1702,14 @@ mod tests {
 
     #[test]
     fn validate_provider_config_selection_requires_one() {
-        assert!(validate_provider_config_selection(None, false).is_err());
-        assert!(validate_provider_config_selection(Some("id"), true).is_err());
+        assert!(validate_provider_config_selection(false, false).is_err());
+        assert!(validate_provider_config_selection(true, true).is_err());
     }
 
     #[test]
     fn validate_provider_config_selection_accepts_one() {
-        assert!(validate_provider_config_selection(Some("id"), false).is_ok());
-        assert!(validate_provider_config_selection(None, true).is_ok());
+        assert!(validate_provider_config_selection(true, false).is_ok());
+        assert!(validate_provider_config_selection(false, true).is_ok());
     }
 
     #[test]

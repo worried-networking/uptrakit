@@ -21,7 +21,7 @@ pub use uptrakit_web_api_types::scheduler::{
 
 fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     ScheduledTaskResponse {
-        id: m.id.to_string(),
+        id: m.id,
         task_type: m.task_type.to_value().to_string(),
         label: m.task_type.label().to_string(),
         cron_expression: m.cron_expression.clone(),

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uptrakit_shared_types::ProviderType;
+use uuid::Uuid;
 
 pub fn default_enabled() -> bool {
     true
@@ -29,7 +30,7 @@ pub struct UpdateProviderConfigRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ProviderConfigResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub provider_type: String,
     /// Provider-specific configuration with secrets masked.

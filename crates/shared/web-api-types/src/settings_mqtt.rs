@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::mqtt_transport::MqttTransport;
 
@@ -20,7 +21,7 @@ pub struct UpdateMqttLimitRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MqttClientResponse {
-    pub id: String,
+    pub id: Uuid,
     pub enabled: bool,
     pub transport: MqttTransport,
     pub host: String,

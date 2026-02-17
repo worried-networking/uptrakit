@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginationParams;
 
 /// List all software items (paginated).
@@ -42,7 +43,7 @@ pub async fn list(
 
 /// Show details for a single software item.
 pub async fn show(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,

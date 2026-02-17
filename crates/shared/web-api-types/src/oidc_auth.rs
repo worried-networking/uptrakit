@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcProviderInfo {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub slug: String,
     pub logo_url: Option<String>,

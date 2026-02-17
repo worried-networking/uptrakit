@@ -7,6 +7,7 @@ mod output;
 use clap::{CommandFactory, Parser, Subcommand};
 use output::OutputFormat;
 use uptrakit_build_info::BuildInfo;
+use uptrakit_openapi_client::Uuid;
 
 #[derive(Debug, Parser)]
 #[command(name = "uptrakit", about = "Uptrakit CLI")]
@@ -123,7 +124,7 @@ enum TokenCommands {
     /// Revoke an API token
     Revoke {
         /// Token ID to revoke
-        id: String,
+        id: Uuid,
     },
 }
 
@@ -141,7 +142,7 @@ enum HostsCommands {
     /// Show host details
     Show {
         /// Host UUID
-        id: String,
+        id: Uuid,
     },
 }
 
@@ -159,7 +160,7 @@ enum SoftwareItemsCommands {
     /// Show software item details
     Show {
         /// Software item UUID
-        id: String,
+        id: Uuid,
     },
 }
 
@@ -170,18 +171,18 @@ enum CheckCommands {
     /// Trigger installed version check for a software item
     Installed {
         /// Software item UUID
-        item_id: String,
+        item_id: Uuid,
         /// Optionally scope to a specific host
         #[arg(long)]
-        host: Option<String>,
+        host: Option<Uuid>,
     },
     /// Trigger available version check for a software item
     Available {
         /// Software item UUID
-        item_id: String,
+        item_id: Uuid,
         /// Optionally scope to a specific host
         #[arg(long)]
-        host: Option<String>,
+        host: Option<Uuid>,
     },
 }
 
@@ -190,9 +191,9 @@ enum UpdateCommands {
     /// Trigger an update for a software item on a host
     Trigger {
         /// Software item UUID
-        item_id: String,
+        item_id: Uuid,
         /// Host UUID
-        host_id: String,
+        host_id: Uuid,
         /// Target version to update to
         #[arg(long)]
         to_version: String,
@@ -211,10 +212,10 @@ enum HistoryCommands {
     List {
         /// Filter by host UUID
         #[arg(long)]
-        host: Option<String>,
+        host: Option<Uuid>,
         /// Filter by software item UUID
         #[arg(long)]
-        software_item: Option<String>,
+        software_item: Option<Uuid>,
         /// Filter by status (pending, in_progress, completed, failed)
         #[arg(long)]
         status: Option<String>,
@@ -228,7 +229,7 @@ enum HistoryCommands {
     /// Show update history details
     Show {
         /// Update history UUID
-        id: String,
+        id: Uuid,
     },
 }
 
@@ -252,29 +253,29 @@ enum ServicesCommands {
     /// Show service details
     Show {
         /// Service UUID
-        id: String,
+        id: Uuid,
     },
     /// Approve a pending service
     Approve {
         /// Service UUID
-        id: String,
+        id: Uuid,
     },
     /// Reject a pending service
     Reject {
         /// Service UUID
-        id: String,
+        id: Uuid,
     },
     /// Remove (deactivate) a service
     Remove {
         /// Service UUID
-        id: String,
+        id: Uuid,
     },
     /// Merge a source service into a target service
     Merge {
         /// Target service UUID (approved)
-        target_id: String,
+        target_id: Uuid,
         /// Source service UUID (pending)
-        source_id: String,
+        source_id: Uuid,
     },
 }
 
@@ -285,12 +286,12 @@ enum SchedulerCommands {
     /// Show scheduled task details
     Show {
         /// Task UUID
-        id: String,
+        id: Uuid,
     },
     /// Trigger immediate execution of a scheduled task
     Trigger {
         /// Task UUID
-        id: String,
+        id: Uuid,
     },
 }
 
@@ -417,8 +418,8 @@ enum MqttCommands {
     List,
     /// Show MQTT client configuration details
     Show {
-        /// MQTT configuration ID
-        id: String,
+        /// MQTT configuration UUID
+        id: Uuid,
     },
     /// Create a new MQTT client configuration
     Create {
@@ -452,8 +453,8 @@ enum MqttCommands {
     },
     /// Update an MQTT client configuration
     Update {
-        /// MQTT configuration ID
-        id: String,
+        /// MQTT configuration UUID
+        id: Uuid,
         /// MQTT URL
         #[arg(long)]
         url: Option<String>,
@@ -484,8 +485,8 @@ enum MqttCommands {
     },
     /// Delete an MQTT client configuration
     Delete {
-        /// MQTT configuration ID
-        id: String,
+        /// MQTT configuration UUID
+        id: Uuid,
     },
     /// MQTT client limit management
     Limit {
@@ -512,8 +513,8 @@ enum OidcCommands {
     List,
     /// Show OIDC provider details
     Show {
-        /// OIDC provider ID
-        id: String,
+        /// OIDC provider UUID
+        id: Uuid,
     },
     /// Create a new OIDC provider
     Create {
@@ -547,8 +548,8 @@ enum OidcCommands {
     },
     /// Update an OIDC provider
     Update {
-        /// OIDC provider ID
-        id: String,
+        /// OIDC provider UUID
+        id: Uuid,
         /// Provider display name
         #[arg(long)]
         name: Option<String>,
@@ -579,18 +580,18 @@ enum OidcCommands {
     },
     /// Delete an OIDC provider
     Delete {
-        /// OIDC provider ID
-        id: String,
+        /// OIDC provider UUID
+        id: Uuid,
     },
     /// Activate an OIDC provider
     Activate {
-        /// OIDC provider ID
-        id: String,
+        /// OIDC provider UUID
+        id: Uuid,
     },
     /// Deactivate an OIDC provider
     Deactivate {
-        /// OIDC provider ID
-        id: String,
+        /// OIDC provider UUID
+        id: Uuid,
     },
 }
 
@@ -821,7 +822,7 @@ async fn main() {
             CheckCommands::Installed { item_id, host } => {
                 commands::check::installed(
                     &item_id,
-                    host.as_deref(),
+                    host.as_ref(),
                     cli.server.as_deref(),
                     cli.token.as_deref(),
                     cli.output,
@@ -832,7 +833,7 @@ async fn main() {
             CheckCommands::Available { item_id, host } => {
                 commands::check::available(
                     &item_id,
-                    host.as_deref(),
+                    host.as_ref(),
                     cli.server.as_deref(),
                     cli.token.as_deref(),
                     cli.output,
@@ -876,8 +877,8 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
-                    host_id: host.as_deref(),
-                    software_item_id: software_item.as_deref(),
+                    host_id: host,
+                    software_item_id: software_item,
                     status: status.as_deref(),
                     page,
                     per_page,
@@ -1312,6 +1313,23 @@ mod tests {
     use super::*;
     use clap::Parser;
 
+    /// Test UUID constants for readability.
+    const HOST_UUID: &str = "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6";
+    const ITEM_UUID: &str = "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6";
+    const SVC_UUID: &str = "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6";
+    const TASK_UUID: &str = "d1d2d3d4-e1e2-f1f2-a1a2-b1b2b3b4b5b6";
+    const HIST_UUID: &str = "e1e2e3e4-f1f2-a1a2-b1b2-c1c2c3c4c5c6";
+    const MQTT_UUID: &str = "01020304-0506-0708-090a-0b0c0d0e0f10";
+    const OIDC_UUID: &str = "11121314-1516-1718-191a-1b1c1d1e1f20";
+    const ITEM_UUID_2: &str = "a0a0a0a0-b0b0-c0c0-d0d0-e0e0e0e0e0e1";
+    const TARGET_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000001";
+    const SOURCE_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000002";
+
+    /// Parse a UUID constant (safe in tests).
+    fn uuid(s: &str) -> Uuid {
+        s.parse().expect("test UUID constant should be valid")
+    }
+
     #[test]
     fn version_parses_without_subcommand() {
         let args = Cli::try_parse_from(["uptrakit", "--version"]).expect("should parse");
@@ -1355,13 +1373,13 @@ mod tests {
 
     #[test]
     fn hosts_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "hosts", "show", "abc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "hosts", "show", HOST_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Hosts {
                 command: HostsCommands::Show { id },
             }) => {
-                assert_eq!(id, "abc-123");
+                assert_eq!(id, uuid(HOST_UUID));
             }
             _ => panic!("expected Hosts Show"),
         }
@@ -1381,13 +1399,13 @@ mod tests {
 
     #[test]
     fn software_items_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "software-items", "show", "item-123"])
+        let args = Cli::try_parse_from(["uptrakit", "software-items", "show", ITEM_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::SoftwareItems {
                 command: SoftwareItemsCommands::Show { id },
             }) => {
-                assert_eq!(id, "item-123");
+                assert_eq!(id, uuid(ITEM_UUID));
             }
             _ => panic!("expected SoftwareItems Show"),
         }
@@ -1406,13 +1424,13 @@ mod tests {
 
     #[test]
     fn check_installed_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "check", "installed", "item-1"])
+        let args = Cli::try_parse_from(["uptrakit", "check", "installed", ITEM_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Check {
                 command: CheckCommands::Installed { item_id, host },
             }) => {
-                assert_eq!(item_id, "item-1");
+                assert_eq!(item_id, uuid(ITEM_UUID));
                 assert!(host.is_none());
             }
             _ => panic!("expected Check Installed"),
@@ -1425,17 +1443,17 @@ mod tests {
             "uptrakit",
             "check",
             "installed",
-            "item-1",
+            ITEM_UUID,
             "--host",
-            "host-1",
+            HOST_UUID,
         ])
         .expect("should parse");
         match args.command {
             Some(Commands::Check {
                 command: CheckCommands::Installed { item_id, host },
             }) => {
-                assert_eq!(item_id, "item-1");
-                assert_eq!(host.as_deref(), Some("host-1"));
+                assert_eq!(item_id, uuid(ITEM_UUID));
+                assert_eq!(host, Some(uuid(HOST_UUID)));
             }
             _ => panic!("expected Check Installed"),
         }
@@ -1443,13 +1461,13 @@ mod tests {
 
     #[test]
     fn check_available_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "check", "available", "item-2"])
+        let args = Cli::try_parse_from(["uptrakit", "check", "available", ITEM_UUID_2])
             .expect("should parse");
         match args.command {
             Some(Commands::Check {
                 command: CheckCommands::Available { item_id, host },
             }) => {
-                assert_eq!(item_id, "item-2");
+                assert_eq!(item_id, uuid(ITEM_UUID_2));
                 assert!(host.is_none());
             }
             _ => panic!("expected Check Available"),
@@ -1462,8 +1480,8 @@ mod tests {
             "uptrakit",
             "update",
             "trigger",
-            "item-1",
-            "host-1",
+            ITEM_UUID,
+            HOST_UUID,
             "--to-version",
             "2.0.0",
         ])
@@ -1479,8 +1497,8 @@ mod tests {
                         release_url,
                     },
             }) => {
-                assert_eq!(item_id, "item-1");
-                assert_eq!(host_id, "host-1");
+                assert_eq!(item_id, uuid(ITEM_UUID));
+                assert_eq!(host_id, uuid(HOST_UUID));
                 assert_eq!(to_version, "2.0.0");
                 assert!(release_tag.is_none());
                 assert!(release_url.is_none());
@@ -1495,8 +1513,8 @@ mod tests {
             "uptrakit",
             "update",
             "trigger",
-            "item-1",
-            "host-1",
+            ITEM_UUID,
+            HOST_UUID,
             "--to-version",
             "2.0.0",
             "--release-tag",
@@ -1542,9 +1560,9 @@ mod tests {
             "history",
             "list",
             "--host",
-            "host-1",
+            HOST_UUID,
             "--software-item",
-            "item-1",
+            ITEM_UUID,
             "--status",
             "completed",
         ])
@@ -1559,8 +1577,8 @@ mod tests {
                         ..
                     },
             }) => {
-                assert_eq!(host.as_deref(), Some("host-1"));
-                assert_eq!(software_item.as_deref(), Some("item-1"));
+                assert_eq!(host, Some(uuid(HOST_UUID)));
+                assert_eq!(software_item, Some(uuid(ITEM_UUID)));
                 assert_eq!(status.as_deref(), Some("completed"));
             }
             _ => panic!("expected History List"),
@@ -1569,13 +1587,13 @@ mod tests {
 
     #[test]
     fn history_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "history", "show", "hist-123"])
+        let args = Cli::try_parse_from(["uptrakit", "history", "show", HIST_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::History {
                 command: HistoryCommands::Show { id },
             }) => {
-                assert_eq!(id, "hist-123");
+                assert_eq!(id, uuid(HIST_UUID));
             }
             _ => panic!("expected History Show"),
         }
@@ -1595,13 +1613,13 @@ mod tests {
 
     #[test]
     fn scheduler_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "scheduler", "show", "task-123"])
+        let args = Cli::try_parse_from(["uptrakit", "scheduler", "show", TASK_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Scheduler {
                 command: SchedulerCommands::Show { id },
             }) => {
-                assert_eq!(id, "task-123");
+                assert_eq!(id, uuid(TASK_UUID));
             }
             _ => panic!("expected Scheduler Show"),
         }
@@ -1609,13 +1627,13 @@ mod tests {
 
     #[test]
     fn scheduler_trigger_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "scheduler", "trigger", "task-123"])
+        let args = Cli::try_parse_from(["uptrakit", "scheduler", "trigger", TASK_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Scheduler {
                 command: SchedulerCommands::Trigger { id },
             }) => {
-                assert_eq!(id, "task-123");
+                assert_eq!(id, uuid(TASK_UUID));
             }
             _ => panic!("expected Scheduler Trigger"),
         }
@@ -1669,13 +1687,13 @@ mod tests {
 
     #[test]
     fn services_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "services", "show", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "show", SVC_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
                 command: ServicesCommands::Show { id },
             }) => {
-                assert_eq!(id, "svc-123");
+                assert_eq!(id, uuid(SVC_UUID));
             }
             _ => panic!("expected Services Show"),
         }
@@ -1683,13 +1701,13 @@ mod tests {
 
     #[test]
     fn services_approve_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "services", "approve", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "approve", SVC_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
                 command: ServicesCommands::Approve { id },
             }) => {
-                assert_eq!(id, "svc-123");
+                assert_eq!(id, uuid(SVC_UUID));
             }
             _ => panic!("expected Services Approve"),
         }
@@ -1697,13 +1715,13 @@ mod tests {
 
     #[test]
     fn services_reject_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "services", "reject", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "reject", SVC_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
                 command: ServicesCommands::Reject { id },
             }) => {
-                assert_eq!(id, "svc-123");
+                assert_eq!(id, uuid(SVC_UUID));
             }
             _ => panic!("expected Services Reject"),
         }
@@ -1711,13 +1729,13 @@ mod tests {
 
     #[test]
     fn services_remove_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "services", "remove", "svc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "services", "remove", SVC_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Services {
                 command: ServicesCommands::Remove { id },
             }) => {
-                assert_eq!(id, "svc-123");
+                assert_eq!(id, uuid(SVC_UUID));
             }
             _ => panic!("expected Services Remove"),
         }
@@ -1729,8 +1747,8 @@ mod tests {
             "uptrakit",
             "services",
             "merge",
-            "target-123",
-            "source-456",
+            TARGET_UUID,
+            SOURCE_UUID,
         ])
         .expect("should parse");
         match args.command {
@@ -1741,8 +1759,8 @@ mod tests {
                         source_id,
                     },
             }) => {
-                assert_eq!(target_id, "target-123");
-                assert_eq!(source_id, "source-456");
+                assert_eq!(target_id, uuid(TARGET_UUID));
+                assert_eq!(source_id, uuid(SOURCE_UUID));
             }
             _ => panic!("expected Services Merge"),
         }
@@ -2009,7 +2027,7 @@ mod tests {
 
     #[test]
     fn settings_mqtt_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "show", "mqtt-123"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "mqtt", "show", MQTT_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2018,7 +2036,7 @@ mod tests {
                         command: MqttCommands::Show { id },
                     },
             }) => {
-                assert_eq!(id, "mqtt-123");
+                assert_eq!(id, uuid(MQTT_UUID));
             }
             _ => panic!("expected Settings Mqtt Show"),
         }
@@ -2067,7 +2085,7 @@ mod tests {
             "settings",
             "mqtt",
             "update",
-            "mqtt-123",
+            MQTT_UUID,
             "--enabled",
             "false",
             "--host",
@@ -2087,7 +2105,7 @@ mod tests {
                             },
                     },
             }) => {
-                assert_eq!(id, "mqtt-123");
+                assert_eq!(id, uuid(MQTT_UUID));
                 assert_eq!(enabled, Some(false));
                 assert_eq!(host.as_deref(), Some("new-broker"));
             }
@@ -2098,7 +2116,7 @@ mod tests {
     #[test]
     fn settings_mqtt_delete_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit", "settings", "mqtt", "delete", "mqtt-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "mqtt", "delete", MQTT_UUID])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2107,7 +2125,7 @@ mod tests {
                         command: MqttCommands::Delete { id },
                     },
             }) => {
-                assert_eq!(id, "mqtt-123");
+                assert_eq!(id, uuid(MQTT_UUID));
             }
             _ => panic!("expected Settings Mqtt Delete"),
         }
@@ -2173,7 +2191,7 @@ mod tests {
 
     #[test]
     fn settings_oidc_show_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "settings", "oidc", "show", "oidc-123"])
+        let args = Cli::try_parse_from(["uptrakit", "settings", "oidc", "show", OIDC_UUID])
             .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2182,7 +2200,7 @@ mod tests {
                         command: OidcCommands::Show { id },
                     },
             }) => {
-                assert_eq!(id, "oidc-123");
+                assert_eq!(id, uuid(OIDC_UUID));
             }
             _ => panic!("expected Settings Oidc Show"),
         }
@@ -2239,7 +2257,7 @@ mod tests {
             "settings",
             "oidc",
             "update",
-            "oidc-123",
+            OIDC_UUID,
             "--name",
             "Google Workspace",
             "--auto-create-users",
@@ -2259,7 +2277,7 @@ mod tests {
                             },
                     },
             }) => {
-                assert_eq!(id, "oidc-123");
+                assert_eq!(id, uuid(OIDC_UUID));
                 assert_eq!(name.as_deref(), Some("Google Workspace"));
                 assert_eq!(auto_create_users, Some(false));
             }
@@ -2270,7 +2288,7 @@ mod tests {
     #[test]
     fn settings_oidc_delete_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit", "settings", "oidc", "delete", "oidc-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "delete", OIDC_UUID])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2279,7 +2297,7 @@ mod tests {
                         command: OidcCommands::Delete { id },
                     },
             }) => {
-                assert_eq!(id, "oidc-123");
+                assert_eq!(id, uuid(OIDC_UUID));
             }
             _ => panic!("expected Settings Oidc Delete"),
         }
@@ -2288,7 +2306,7 @@ mod tests {
     #[test]
     fn settings_oidc_activate_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit", "settings", "oidc", "activate", "oidc-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "activate", OIDC_UUID])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2297,7 +2315,7 @@ mod tests {
                         command: OidcCommands::Activate { id },
                     },
             }) => {
-                assert_eq!(id, "oidc-123");
+                assert_eq!(id, uuid(OIDC_UUID));
             }
             _ => panic!("expected Settings Oidc Activate"),
         }
@@ -2306,7 +2324,7 @@ mod tests {
     #[test]
     fn settings_oidc_deactivate_parses() {
         let args =
-            Cli::try_parse_from(["uptrakit", "settings", "oidc", "deactivate", "oidc-123"])
+            Cli::try_parse_from(["uptrakit", "settings", "oidc", "deactivate", OIDC_UUID])
                 .expect("should parse");
         match args.command {
             Some(Commands::Settings {
@@ -2315,7 +2333,7 @@ mod tests {
                         command: OidcCommands::Deactivate { id },
                     },
             }) => {
-                assert_eq!(id, "oidc-123");
+                assert_eq!(id, uuid(OIDC_UUID));
             }
             _ => panic!("expected Settings Oidc Deactivate"),
         }
@@ -2343,6 +2361,12 @@ mod tests {
             "--mode",
             "invalid",
         ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_uuid_for_id_arguments() {
+        let result = Cli::try_parse_from(["uptrakit", "hosts", "show", "not-a-uuid"]);
         assert!(result.is_err());
     }
 }

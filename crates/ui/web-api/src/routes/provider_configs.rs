@@ -45,7 +45,7 @@ pub(crate) fn validate_provider_config_request(
 
 fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigResponse {
     ProviderConfigResponse {
-        id: m.id.to_string(),
+        id: m.id,
         name: m.name,
         provider_type: m.provider_type.clone(),
         config: ProviderRegistry::mask_config_secrets_str(&m.provider_type, &m.config),

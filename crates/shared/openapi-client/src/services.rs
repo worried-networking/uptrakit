@@ -7,6 +7,7 @@ use uptrakit_web_api_types::services::{
     EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
     MessageResponse, ServiceResponse,
 };
+use uuid::Uuid;
 
 /// Query parameter for enrollment token endpoints.
 #[derive(Serialize)]
@@ -33,25 +34,25 @@ impl UptrakitClient {
     }
 
     /// Get a single service by ID.
-    pub async fn get_service(&self, id: &str) -> Result<ServiceResponse> {
+    pub async fn get_service(&self, id: &Uuid) -> Result<ServiceResponse> {
         let path = format!("/api/v1/services/{id}");
         self.get(&path).await
     }
 
     /// Approve a pending service.
-    pub async fn approve_service(&self, id: &str) -> Result<ServiceResponse> {
+    pub async fn approve_service(&self, id: &Uuid) -> Result<ServiceResponse> {
         let path = format!("/api/v1/services/{id}/approve");
         self.post_empty(&path).await
     }
 
     /// Reject a pending service.
-    pub async fn reject_service(&self, id: &str) -> Result<ServiceResponse> {
+    pub async fn reject_service(&self, id: &Uuid) -> Result<ServiceResponse> {
         let path = format!("/api/v1/services/{id}/reject");
         self.post_empty(&path).await
     }
 
     /// Deactivate (remove) a service.
-    pub async fn remove_service(&self, id: &str) -> Result<MessageResponse> {
+    pub async fn remove_service(&self, id: &Uuid) -> Result<MessageResponse> {
         let path = format!("/api/v1/services/{id}");
         self.delete_json(&path).await
     }
@@ -59,7 +60,7 @@ impl UptrakitClient {
     /// Merge a pending source service into an approved target service.
     pub async fn merge_service(
         &self,
-        target_id: &str,
+        target_id: &Uuid,
         req: &MergeAgentRequest,
     ) -> Result<ServiceResponse> {
         let path = format!("/api/v1/services/{target_id}/merge");
@@ -102,6 +103,7 @@ mod tests {
     use super::EnrollmentTokenQuery;
     use uptrakit_shared_types::ServiceType;
     use uptrakit_web_api_types::services::{ListServicesQuery, MergeAgentRequest};
+    use uuid::Uuid;
 
     #[test]
     fn list_services_query_serialization_with_all_fields() {
@@ -132,8 +134,10 @@ mod tests {
 
     #[test]
     fn merge_agent_request_serialization() {
+        let source_uuid =
+            Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("valid uuid");
         let req = MergeAgentRequest {
-            source_id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+            source_id: source_uuid,
         };
         let json = serde_json::to_string(&req).expect("serialize");
         assert!(json.contains("550e8400-e29b-41d4-a716-446655440000"));

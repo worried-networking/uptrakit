@@ -31,7 +31,7 @@ uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-build-info = { path = "../../shared/build-info" }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
 sea-orm-migration = { version = "2.0.0-rc.32", default-features = false, features = ["runtime-tokio-rustls", "sqlx-sqlite"] }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
 async-trait = { workspace = true }
 zeroize = { workspace = true }
 

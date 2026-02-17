@@ -66,7 +66,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
     let oidc_providers: Vec<OidcProviderInfo> = providers
         .into_iter()
         .map(|p| OidcProviderInfo {
-            id: p.id.to_string(),
+            id: p.id,
             name: p.name,
             slug: p.slug,
             logo_url: p.logo_url,
@@ -695,7 +695,7 @@ pub async fn oidc_exchange(
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
-            id: user.id.to_string(),
+            id: user.id,
             email: user.email,
             first_name: user.first_name,
             last_name: user.last_name,
@@ -942,7 +942,7 @@ pub async fn oidc_complete_registration(
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
-            id: user.id.to_string(),
+            id: user.id,
             email: user.email,
             first_name: user.first_name,
             last_name: user.last_name,
@@ -1148,7 +1148,7 @@ pub async fn oidc_link(
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
-            id: user.id.to_string(),
+            id: user.id,
             email: user.email,
             first_name: user.first_name,
             last_name: user.last_name,

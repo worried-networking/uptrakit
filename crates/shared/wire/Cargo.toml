@@ -11,7 +11,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
 uptrakit-shared-types = { workspace = true }
 
 [lints.rust]

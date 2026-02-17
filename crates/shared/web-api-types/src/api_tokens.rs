@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -9,7 +10,7 @@ pub struct CreateApiTokenRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateApiTokenResponse {
-    pub id: String,
+    pub id: Uuid,
     pub token: String,
     pub created_at: String,
 }
@@ -17,7 +18,7 @@ pub struct CreateApiTokenResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ApiTokenResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub created_at: String,
     pub last_used_at: Option<String>,

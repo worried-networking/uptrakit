@@ -4,6 +4,7 @@ use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// Create a new provider configuration.
@@ -24,7 +25,7 @@ impl UptrakitClient {
     }
 
     /// Get a single provider configuration by ID.
-    pub async fn get_provider_config(&self, id: &str) -> Result<ProviderConfigResponse> {
+    pub async fn get_provider_config(&self, id: &Uuid) -> Result<ProviderConfigResponse> {
         let path = format!("/api/v1/provider-configs/{id}");
         self.get(&path).await
     }
@@ -32,7 +33,7 @@ impl UptrakitClient {
     /// Update an existing provider configuration.
     pub async fn update_provider_config(
         &self,
-        id: &str,
+        id: &Uuid,
         req: &UpdateProviderConfigRequest,
     ) -> Result<ProviderConfigResponse> {
         let path = format!("/api/v1/provider-configs/{id}");
@@ -40,7 +41,7 @@ impl UptrakitClient {
     }
 
     /// Delete a provider configuration.
-    pub async fn delete_provider_config(&self, id: &str) -> Result<()> {
+    pub async fn delete_provider_config(&self, id: &Uuid) -> Result<()> {
         let path = format!("/api/v1/provider-configs/{id}");
         self.delete(&path).await
     }

@@ -165,7 +165,9 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Keep the openapi-client in sync with web-api endpoints.** Any web-api endpoint addition or change
    must be reflected in the `uptrakit-openapi-client` crate: new endpoints get client methods, changed
    signatures/response types are updated, removed endpoints have their client methods removed. Excluded
-   endpoints: WebSocket, OIDC browser callback, OCSP binary protocol. See
+   endpoints: WebSocket, OIDC browser callback, OCSP binary protocol. All entity ID parameters must use
+   `&Uuid` (not `&str`), and all response ID fields must be `Uuid` (not `String`) — the only exception
+   is `SystemAlert::id` which uses hardcoded string identifiers. See
    [docs/development/openapi-client.md](docs/development/openapi-client.md) for the full method reference.
 1. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. Follow the error handling
    requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors

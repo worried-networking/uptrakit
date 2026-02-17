@@ -28,10 +28,10 @@ generate code that doesn't follow the project's strict coding standards
 (rootcause errors, no unwrap, no `#[allow]`).
 
 **Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as
-`types`, `DeviceAuthStatus` from `uptrakit-shared-types`, and `ServiceType` from
-`uptrakit-shared-types`. Downstream crates (e.g. the CLI) depend only on
+`types`, `DeviceAuthStatus` and `ServiceType` from `uptrakit-shared-types`, and
+`uuid::Uuid`. Downstream crates (e.g. the CLI) depend only on
 `uptrakit-openapi-client` and import types via
-`uptrakit_openapi_client::types::*`.
+`uptrakit_openapi_client::types::*` and `uptrakit_openapi_client::Uuid`.
 
 **Full API coverage:** The client covers all JSON REST endpoints exposed by the
 web API. Excluded endpoints are WebSocket (`/api/v1/ws/service`), OIDC browser
@@ -81,14 +81,20 @@ The `insecure` parameter disables TLS certificate verification (development only
 
 ### Typed endpoint methods
 
-Each endpoint module implements methods on `UptrakitClient`:
+Each endpoint module implements methods on `UptrakitClient`. All ID parameters
+use `&Uuid` instead of `&str`, providing compile-time validation:
 
 ```rust
+use uptrakit_openapi_client::{UptrakitClient, Uuid};
 use uptrakit_openapi_client::types::pagination::PaginationParams;
 
 let params = PaginationParams { page: Some(1), per_page: Some(20) };
 let resp = client.list_hosts(&params).await?;
 // resp is PaginatedResponse<HostResponse> — fully typed
+
+let host_id: Uuid = "019...".parse().expect("valid UUID");
+let host = client.get_host(&host_id).await?;
+// host.id is Uuid, not String
 ```
 
 ### Raw request escape hatch
@@ -99,6 +105,25 @@ For the CLI `api` command that allows arbitrary API calls:
 let resp = client.raw_request("GET", "/api/v1/some/path", None).await?;
 // resp.status: u16, resp.body: serde_json::Value
 ```
+
+## UUID type safety
+
+All entity ID parameters across the client use `&Uuid` rather than `&str`.
+This enforces valid UUIDs at compile time and eliminates runtime parsing errors
+from invalid ID strings.
+
+**Re-exported type:** `uptrakit_openapi_client::Uuid` is a re-export of
+`uuid::Uuid`. Downstream crates (e.g. the CLI) do not need a direct dependency
+on the `uuid` crate — they import `Uuid` from the openapi-client.
+
+**Response types:** All entity ID fields in `uptrakit-web-api-types` response
+structs (e.g. `HostResponse::id`, `ServiceResponse::id`,
+`SoftwareItemResponse::id`) are `Uuid`, not `String`. The only exception is
+`SystemAlert::id`, which uses hardcoded string identifiers (not database UUIDs).
+
+**Feature gating:** The `uuid` dependency in both `openapi-client` and
+`web-api-types` uses only the `serde` feature — these crates never generate
+UUIDs (the `v7` feature is only needed by crates that create new entities).
 
 ## Error handling
 
@@ -145,7 +170,7 @@ directly. `Option::None` fields are automatically skipped by
 
 - `create_api_token(&self, req) -> Result<CreateApiTokenResponse>`
 - `list_api_tokens(&self) -> Result<ApiTokenListResponse>`
-- `revoke_api_token(&self, id) -> Result<()>`
+- `revoke_api_token(&self, id: &Uuid) -> Result<()>`
 
 ### Health (`health.rs`)
 
@@ -154,13 +179,13 @@ directly. `Option::None` fields are automatically skipped by
 ### Hosts (`hosts.rs`)
 
 - `list_hosts(&self, params) -> Result<PaginatedResponse<HostResponse>>`
-- `get_host(&self, id) -> Result<HostResponse>`
-- `update_host(&self, id, req) -> Result<HostResponse>`
-- `deactivate_host(&self, id) -> Result<HostMessageResponse>`
+- `get_host(&self, id: &Uuid) -> Result<HostResponse>`
+- `update_host(&self, id: &Uuid, req) -> Result<HostResponse>`
+- `deactivate_host(&self, id: &Uuid) -> Result<HostMessageResponse>`
 
 ### OIDC auth (`oidc_auth.rs`)
 
-- `oidc_authorize(&self, provider_id) -> Result<OidcAuthorizeResponse>` -- unauthenticated
+- `oidc_authorize(&self, provider_id: &Uuid) -> Result<OidcAuthorizeResponse>` -- unauthenticated
 - `oidc_exchange(&self, req) -> Result<AuthResponse>` -- unauthenticated
 - `oidc_link(&self, req) -> Result<AuthResponse>`
 - `oidc_complete_registration(&self, req) -> Result<AuthResponse>` -- unauthenticated
@@ -169,11 +194,11 @@ directly. `Option::None` fields are automatically skipped by
 
 - `create_oidc_provider(&self, req) -> Result<OidcProviderResponse>`
 - `list_oidc_providers(&self) -> Result<Vec<OidcProviderResponse>>`
-- `get_oidc_provider(&self, id) -> Result<OidcProviderResponse>`
-- `update_oidc_provider(&self, id, req) -> Result<OidcProviderResponse>`
-- `delete_oidc_provider(&self, id) -> Result<()>`
-- `activate_oidc_provider(&self, id) -> Result<OidcProviderResponse>`
-- `deactivate_oidc_provider(&self, id) -> Result<OidcProviderResponse>`
+- `get_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse>`
+- `update_oidc_provider(&self, id: &Uuid, req) -> Result<OidcProviderResponse>`
+- `delete_oidc_provider(&self, id: &Uuid) -> Result<()>`
+- `activate_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse>`
+- `deactivate_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse>`
 
 ### PKI (`pki.rs`)
 
@@ -184,25 +209,25 @@ directly. `Option::None` fields are automatically skipped by
 
 - `create_provider_config(&self, req) -> Result<ProviderConfigResponse>`
 - `list_provider_configs(&self, params) -> Result<PaginatedResponse<ProviderConfigResponse>>`
-- `get_provider_config(&self, id) -> Result<ProviderConfigResponse>`
-- `update_provider_config(&self, id, req) -> Result<ProviderConfigResponse>`
-- `delete_provider_config(&self, id) -> Result<()>`
+- `get_provider_config(&self, id: &Uuid) -> Result<ProviderConfigResponse>`
+- `update_provider_config(&self, id: &Uuid, req) -> Result<ProviderConfigResponse>`
+- `delete_provider_config(&self, id: &Uuid) -> Result<()>`
 
 ### Scheduler (`scheduler.rs`)
 
 - `list_scheduled_tasks(&self) -> Result<Vec<ScheduledTaskResponse>>`
-- `get_scheduled_task(&self, id) -> Result<ScheduledTaskResponse>`
-- `update_scheduled_task(&self, id, req) -> Result<ScheduledTaskResponse>`
-- `trigger_scheduled_task(&self, id) -> Result<TriggerScheduledTaskResponse>`
+- `get_scheduled_task(&self, id: &Uuid) -> Result<ScheduledTaskResponse>`
+- `update_scheduled_task(&self, id: &Uuid, req) -> Result<ScheduledTaskResponse>`
+- `trigger_scheduled_task(&self, id: &Uuid) -> Result<TriggerScheduledTaskResponse>`
 
 ### Services (`services.rs`)
 
 - `list_services(&self, query) -> Result<PaginatedResponse<ServiceResponse>>`
-- `get_service(&self, id) -> Result<ServiceResponse>`
-- `approve_service(&self, id) -> Result<ServiceResponse>`
-- `reject_service(&self, id) -> Result<ServiceResponse>`
-- `remove_service(&self, id) -> Result<MessageResponse>`
-- `merge_service(&self, target_id, req) -> Result<ServiceResponse>`
+- `get_service(&self, id: &Uuid) -> Result<ServiceResponse>`
+- `approve_service(&self, id: &Uuid) -> Result<ServiceResponse>`
+- `reject_service(&self, id: &Uuid) -> Result<ServiceResponse>`
+- `remove_service(&self, id: &Uuid) -> Result<MessageResponse>`
+- `merge_service(&self, target_id: &Uuid, req) -> Result<ServiceResponse>`
 - `create_enrollment_token(&self, service_type) -> Result<EnrollmentTokenResponse>`
 - `revoke_enrollment_token(&self, service_type) -> Result<()>`
 - `enrollment_token_status(&self, service_type) -> Result<EnrollmentTokenStatusResponse>`
@@ -227,22 +252,22 @@ directly. `Option::None` fields are automatically skipped by
 - `create_mqtt_settings(&self, req) -> Result<MqttClientResponse>`
 - `get_mqtt_limit(&self) -> Result<MqttLimitResponse>`
 - `update_mqtt_limit(&self, req) -> Result<MqttLimitResponse>`
-- `get_mqtt_settings(&self, id) -> Result<MqttClientResponse>`
-- `update_mqtt_settings(&self, id, req) -> Result<MqttClientResponse>`
-- `delete_mqtt_settings(&self, id) -> Result<()>`
+- `get_mqtt_settings(&self, id: &Uuid) -> Result<MqttClientResponse>`
+- `update_mqtt_settings(&self, id: &Uuid, req) -> Result<MqttClientResponse>`
+- `delete_mqtt_settings(&self, id: &Uuid) -> Result<()>`
 
 ### Software items (`software_items.rs`)
 
 - `list_software_items(&self, params) -> Result<PaginatedResponse<SoftwareItemResponse>>`
-- `get_software_item(&self, id) -> Result<SoftwareItemDetailResponse>`
+- `get_software_item(&self, id: &Uuid) -> Result<SoftwareItemDetailResponse>`
 - `create_software_item(&self, req) -> Result<SoftwareItemResponse>`
-- `update_software_item(&self, id, req) -> Result<SoftwareItemResponse>`
-- `delete_software_item(&self, id) -> Result<()>`
-- `assign_hosts(&self, id, req) -> Result<SoftwareItemDetailResponse>`
-- `unassign_host(&self, item_id, host_id) -> Result<()>`
-- `check_versions(&self, item_id) -> Result<TriggerVersionCheckResponse>`
-- `check_versions_host(&self, item_id, host_id) -> Result<TriggerVersionCheckResponse>`
-- `trigger_update(&self, item_id, host_id, req) -> Result<TriggerUpdateResponse>`
+- `update_software_item(&self, id: &Uuid, req) -> Result<SoftwareItemResponse>`
+- `delete_software_item(&self, id: &Uuid) -> Result<()>`
+- `assign_hosts(&self, id: &Uuid, req) -> Result<SoftwareItemDetailResponse>`
+- `unassign_host(&self, item_id: &Uuid, host_id: &Uuid) -> Result<()>`
+- `check_versions(&self, item_id: &Uuid) -> Result<TriggerVersionCheckResponse>`
+- `check_versions_host(&self, item_id: &Uuid, host_id: &Uuid) -> Result<TriggerVersionCheckResponse>`
+- `trigger_update(&self, item_id: &Uuid, host_id: &Uuid, req) -> Result<TriggerUpdateResponse>`
 
 ### System alerts (`system_alerts.rs`)
 
@@ -251,7 +276,7 @@ directly. `Option::None` fields are automatically skipped by
 ### Update history (`update_history.rs`)
 
 - `list_update_history(&self, query) -> Result<PaginatedResponse<UpdateHistoryResponse>>`
-- `get_update_history(&self, id) -> Result<UpdateHistoryResponse>`
+- `get_update_history(&self, id: &Uuid) -> Result<UpdateHistoryResponse>`
 
 ## Internal helpers
 
@@ -276,7 +301,9 @@ The `UptrakitClient` provides these internal HTTP methods used by endpoint modul
 ## Adding a new endpoint
 
 1. Identify the request/response types in `uptrakit-web-api-types` (or add them if new).
+   - All entity ID fields in response types must be `Uuid`, not `String` (except `SystemAlert::id`).
 2. Add a method to `UptrakitClient` in the appropriate module file.
+   - All ID parameters must use `&Uuid`, not `&str`.
 3. Use the internal helpers listed above.
 4. Add a unit test for request serialization if the endpoint takes a request body or query params.
 5. Update the CLI command to use the new typed method.

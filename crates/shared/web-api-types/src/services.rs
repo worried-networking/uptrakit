@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 // Canonical types from shared-types with feature-gated OpenAPI derives.
 pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus, ServiceType};
@@ -7,7 +8,7 @@ pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus, ServiceT
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ServiceResponse {
-    pub id: String,
+    pub id: Uuid,
     pub service_type: ServiceType,
     pub hostname: String,
     pub friendly_name: String,

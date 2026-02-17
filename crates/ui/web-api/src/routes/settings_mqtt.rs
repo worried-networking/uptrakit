@@ -33,7 +33,7 @@ fn model_to_response(
     let url = uptrakit_web_api_types::mqtt_url::build_url(transport, &model.host, port);
 
     MqttClientResponse {
-        id: model.id.to_string(),
+        id: model.id,
         enabled: model.enabled,
         transport,
         host: model.host.clone(),

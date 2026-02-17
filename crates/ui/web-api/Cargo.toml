@@ -33,7 +33,7 @@ time = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 thiserror = { workspace = true }
-uuid = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-shared-db = { path = "../../shared/db" }
 uptrakit-internal-wire = { path = "../../shared/wire" }

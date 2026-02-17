@@ -43,7 +43,7 @@ fn format_rfc3339(dt: OffsetDateTime) -> String {
 fn model_to_response(m: service::Model) -> ServiceResponse {
     // DB and API types are now the same canonical type from shared-types.
     ServiceResponse {
-        id: m.id.to_string(),
+        id: m.id,
         service_type: m.service_type,
         hostname: m.hostname,
         friendly_name: m.friendly_name,
@@ -489,10 +489,7 @@ pub async fn merge_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid target service ID"),
     };
 
-    let source_uuid = match uuid::Uuid::parse_str(&body.source_id) {
-        Ok(id) => id,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid source service ID"),
-    };
+    let source_uuid = body.source_id;
 
     if target_uuid == source_uuid {
         return error_response(StatusCode::BAD_REQUEST, "Cannot merge service into itself");
@@ -1020,7 +1017,7 @@ mod tests {
             axum::Extension(auth_user),
             Path(target.id.to_string()),
             Json(MergeAgentRequest {
-                source_id: source.id.to_string(),
+                source_id: source.id,
             }),
         )
         .await;

@@ -4,6 +4,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::oidc_providers::{
     CreateOidcProviderRequest, UpdateOidcProviderRequest,
 };
@@ -376,7 +377,7 @@ pub async fn mqtt_list(
 
 /// Show a single MQTT client configuration.
 pub async fn mqtt_show(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -458,7 +459,7 @@ pub struct MqttUpdateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
-    pub id: String,
+    pub id: Uuid,
     pub url: Option<String>,
     pub transport: Option<String>,
     pub host: Option<String>,
@@ -507,7 +508,7 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
 
 /// Delete an MQTT client configuration.
 pub async fn mqtt_delete(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -592,7 +593,7 @@ pub async fn oidc_list(
 
 /// Show a single OIDC provider.
 pub async fn oidc_show(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -683,7 +684,7 @@ pub struct OidcUpdateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
-    pub id: String,
+    pub id: Uuid,
     pub name: Option<String>,
     pub slug: Option<String>,
     pub logo_url: Option<String>,
@@ -727,7 +728,7 @@ pub async fn oidc_update(params: OidcUpdateParams<'_>) -> Result<()> {
 
 /// Delete an OIDC provider.
 pub async fn oidc_delete(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -744,7 +745,7 @@ pub async fn oidc_delete(
 
 /// Activate an OIDC provider.
 pub async fn oidc_activate(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,
@@ -763,7 +764,7 @@ pub async fn oidc_activate(
 
 /// Deactivate an OIDC provider.
 pub async fn oidc_deactivate(
-    id: &str,
+    id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
     format: OutputFormat,

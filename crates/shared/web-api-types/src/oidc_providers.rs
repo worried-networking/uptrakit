@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 pub fn default_scopes() -> String {
     "openid email profile groups".to_string()
@@ -45,7 +46,7 @@ pub struct UpdateOidcProviderRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcProviderResponse {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub slug: String,
     pub logo_url: Option<String>,

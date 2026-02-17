@@ -22,6 +22,7 @@ thiserror = { workspace = true }
 hostname = { workspace = true }
 time = { workspace = true }
 uptrakit-openapi-client = { path = "../../shared/openapi-client" }
+uuid = { workspace = true }
 serde_yaml_ng = "0.10"
 uptrakit-build-info = { path = "../../shared/build-info" }
 uptrakit-directories = { path = "../../shared/directories" }

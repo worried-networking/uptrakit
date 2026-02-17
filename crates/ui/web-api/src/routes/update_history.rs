@@ -44,10 +44,10 @@ fn build_response(
     output: String,
 ) -> UpdateHistoryResponse {
     UpdateHistoryResponse {
-        id: record.id.to_string(),
-        host_id: record.host_id.to_string(),
+        id: record.id,
+        host_id: record.host_id,
         host_name,
-        software_item_id: record.software_item_id.to_string(),
+        software_item_id: record.software_item_id,
         software_item_name,
         from_version: record.from_version.clone(),
         to_version: record.to_version.clone(),
@@ -175,24 +175,12 @@ pub async fn list_update_history(
 
     let mut q = UpdateHistory::find().filter(update_history::Column::HostId.is_in(host_ids));
 
-    if let Some(ref host_id_str) = query.host_id {
-        match uuid::Uuid::parse_str(host_id_str) {
-            Ok(id) => {
-                q = q.filter(update_history::Column::HostId.eq(id));
-            }
-            Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host_id UUID"),
-        }
+    if let Some(host_id) = query.host_id {
+        q = q.filter(update_history::Column::HostId.eq(host_id));
     }
 
-    if let Some(ref si_id_str) = query.software_item_id {
-        match uuid::Uuid::parse_str(si_id_str) {
-            Ok(id) => {
-                q = q.filter(update_history::Column::SoftwareItemId.eq(id));
-            }
-            Err(_) => {
-                return error_response(StatusCode::BAD_REQUEST, "Invalid software_item_id UUID");
-            }
-        }
+    if let Some(software_item_id) = query.software_item_id {
+        q = q.filter(update_history::Column::SoftwareItemId.eq(software_item_id));
     }
 
     if let Some(ref status) = query.status {

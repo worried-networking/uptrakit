@@ -6,6 +6,7 @@ use uptrakit_web_api_types::software_items::{
     SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
     TriggerVersionCheckResponse, UpdateSoftwareItemRequest,
 };
+use uuid::Uuid;
 
 impl UptrakitClient {
     /// List software items with pagination.
@@ -17,7 +18,7 @@ impl UptrakitClient {
     }
 
     /// Get a single software item by ID (detailed view with host info).
-    pub async fn get_software_item(&self, id: &str) -> Result<SoftwareItemDetailResponse> {
+    pub async fn get_software_item(&self, id: &Uuid) -> Result<SoftwareItemDetailResponse> {
         let path = format!("/api/v1/software-items/{id}");
         self.get(&path).await
     }
@@ -33,7 +34,7 @@ impl UptrakitClient {
     /// Update an existing software item.
     pub async fn update_software_item(
         &self,
-        id: &str,
+        id: &Uuid,
         req: &UpdateSoftwareItemRequest,
     ) -> Result<SoftwareItemResponse> {
         let path = format!("/api/v1/software-items/{id}");
@@ -41,7 +42,7 @@ impl UptrakitClient {
     }
 
     /// Delete a software item.
-    pub async fn delete_software_item(&self, id: &str) -> Result<()> {
+    pub async fn delete_software_item(&self, id: &Uuid) -> Result<()> {
         let path = format!("/api/v1/software-items/{id}");
         self.delete(&path).await
     }
@@ -49,7 +50,7 @@ impl UptrakitClient {
     /// Assign hosts to a software item.
     pub async fn assign_hosts(
         &self,
-        id: &str,
+        id: &Uuid,
         req: &AssignHostsRequest,
     ) -> Result<SoftwareItemDetailResponse> {
         let path = format!("/api/v1/software-items/{id}/hosts");
@@ -57,13 +58,13 @@ impl UptrakitClient {
     }
 
     /// Unassign a host from a software item.
-    pub async fn unassign_host(&self, item_id: &str, host_id: &str) -> Result<()> {
+    pub async fn unassign_host(&self, item_id: &Uuid, host_id: &Uuid) -> Result<()> {
         let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}");
         self.delete(&path).await
     }
 
     /// Trigger a version check for a software item across all assigned hosts.
-    pub async fn check_versions(&self, item_id: &str) -> Result<TriggerVersionCheckResponse> {
+    pub async fn check_versions(&self, item_id: &Uuid) -> Result<TriggerVersionCheckResponse> {
         let path = format!("/api/v1/software-items/{item_id}/check-versions");
         self.post_empty(&path).await
     }
@@ -71,8 +72,8 @@ impl UptrakitClient {
     /// Trigger a version check for a software item on a specific host.
     pub async fn check_versions_host(
         &self,
-        item_id: &str,
-        host_id: &str,
+        item_id: &Uuid,
+        host_id: &Uuid,
     ) -> Result<TriggerVersionCheckResponse> {
         let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}/check-versions");
         self.post_empty(&path).await
@@ -81,8 +82,8 @@ impl UptrakitClient {
     /// Trigger an update for a software item on a specific host.
     pub async fn trigger_update(
         &self,
-        item_id: &str,
-        host_id: &str,
+        item_id: &Uuid,
+        host_id: &Uuid,
         req: &TriggerUpdateRequest,
     ) -> Result<TriggerUpdateResponse> {
         let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}/update");
@@ -96,12 +97,15 @@ mod tests {
         AssignHostsRequest, CreateSoftwareItemRequest, ReleaseInfoRequest, TriggerUpdateRequest,
         UpdateSoftwareItemRequest,
     };
+    use uuid::Uuid;
 
     #[test]
     fn create_software_item_request_serialization() {
+        let config_id =
+            Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
-            provider_config_id: Some("config-uuid-1".to_string()),
+            provider_config_id: Some(config_id),
             provider_config: None,
             package_identifier: Some("nodejs/node".to_string()),
             config_override: None,
@@ -109,7 +113,10 @@ mod tests {
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js");
-        assert_eq!(json["provider_config_id"], "config-uuid-1");
+        assert_eq!(
+            json["provider_config_id"],
+            "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+        );
         assert_eq!(json["package_identifier"], "nodejs/node");
         assert_eq!(json["enabled"], true);
     }
@@ -129,14 +136,18 @@ mod tests {
 
     #[test]
     fn assign_hosts_request_serialization() {
+        let host1 =
+            Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
+        let host2 =
+            Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("valid uuid");
         let req = AssignHostsRequest {
-            host_ids: vec!["host-1".to_string(), "host-2".to_string()],
+            host_ids: vec![host1, host2],
         };
         let json = serde_json::to_value(&req).expect("serialize");
         let ids = json["host_ids"].as_array().expect("array");
         assert_eq!(ids.len(), 2);
-        assert_eq!(ids[0], "host-1");
-        assert_eq!(ids[1], "host-2");
+        assert_eq!(ids[0], "11111111-1111-1111-1111-111111111111");
+        assert_eq!(ids[1], "22222222-2222-2222-2222-222222222222");
     }
 
     #[test]
