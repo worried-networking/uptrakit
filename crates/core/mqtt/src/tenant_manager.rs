@@ -192,7 +192,7 @@ mod tests {
     use super::*;
     use time::UtcDateTime;
     use uptrakit_internal_wire::SecretString;
-    use uptrakit_web_api_types::mqtt_transport::MqttTransport;
+    use uptrakit_internal_wire::MqttTransport;
 
     #[test]
     fn build_config_from_wire_correct() {

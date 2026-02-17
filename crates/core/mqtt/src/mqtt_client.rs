@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::MqttClientConnectionStatus;
 use uptrakit_shared_macros::impl_report_conversion;
-use uptrakit_web_api_types::mqtt_transport::MqttTransport;
+use uptrakit_internal_wire::MqttTransport;
 
 /// Configuration for connecting to an MQTT broker.
 pub struct MqttConfig {

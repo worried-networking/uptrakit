@@ -38,7 +38,7 @@ uptrakit-shared-types (leaf -- no internal deps)
     |
     +-- uptrakit-agent (depends on: service-sdk, wire, command, provider-registry, shared-types, build-info)
     |
-    +-- uptrakit-mqtt (depends on: service-sdk, wire, web-api-types, build-info)
+    +-- uptrakit-mqtt (depends on: service-sdk, wire, build-info)
     |
     +-- uptrakit-controller (depends on: web-api, shared-db, wire, web-api-types, directories, shared-types, build-info)
     |
