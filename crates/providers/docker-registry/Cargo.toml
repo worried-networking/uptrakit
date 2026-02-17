@@ -12,7 +12,6 @@ uptrakit-provider-core = { path = "../core" }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-time = { workspace = true, features = ["parsing"] }
 thiserror = { workspace = true }
 rootcause = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
