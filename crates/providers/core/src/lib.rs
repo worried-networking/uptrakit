@@ -25,3 +25,6 @@ pub use uptrakit_command::{
 
 // Re-export SecretString so provider crates use it via provider-core
 pub use uptrakit_shared_types::SecretString;
+
+// Re-export tokio::sync::mpsc so provider crates don't need a direct tokio dependency
+pub use tokio::sync::mpsc;

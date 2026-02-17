@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use regex::Regex;
 use rootcause::prelude::*;
-use tokio::sync::mpsc;
+use uptrakit_provider_core::mpsc;
 
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_provider_core::{
@@ -223,7 +223,7 @@ impl Provider for DockerRegistryProvider {
 mod tests {
     use super::*;
     use crate::config::TrackingMode;
-    use tokio::sync::mpsc;
+    use uptrakit_provider_core::mpsc;
     use uptrakit_provider_core::LocalCommandExecutor;
 
     fn test_executor() -> Arc<dyn CommandExecutor> {

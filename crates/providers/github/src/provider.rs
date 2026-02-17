@@ -5,7 +5,7 @@ use regex::Regex;
 use rootcause::prelude::*;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::sync::mpsc;
+use uptrakit_provider_core::mpsc;
 
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_provider_core::{
@@ -335,7 +335,7 @@ impl Provider for GitHubProvider {
 mod tests {
     use super::*;
     use crate::api_types::{GitHubAsset, GitHubRelease};
-    use tokio::sync::mpsc;
+    use uptrakit_provider_core::mpsc;
     use uptrakit_provider_core::LocalCommandExecutor;
 
     fn test_config() -> GitHubConfig {

@@ -19,7 +19,6 @@ uptrakit-shared-macros = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
 url = { workspace = true }
 
 [dev-dependencies]
