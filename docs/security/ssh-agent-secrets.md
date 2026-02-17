@@ -138,6 +138,24 @@ which wraps arguments in single quotes with proper escaping. Username validation
 enforces POSIX rules (`[a-z_][a-z0-9_-]*`, max 32 characters), further reducing
 injection risk.
 
+### Authorized keys hardening
+
+The public key deployed to `~target/.ssh/authorized_keys` is prefixed with SSH
+restrictions:
+
+```text
+no-pty,no-agent-forwarding,no-X11-forwarding <key>
+```
+
+These prevent interactive terminal allocation (`no-pty`), SSH agent forwarding
+(`no-agent-forwarding`), and X11 forwarding (`no-X11-forwarding`) through the
+managed account. Non-interactive command execution (what the agent uses) remains
+fully functional.
+
+The target user is created with `/bin/sh` as its login shell (not `/bin/bash`),
+further limiting the attack surface for a service account that only needs
+non-interactive command execution.
+
 ### Sudoers configuration
 
 The bootstrap command writes `/etc/sudoers.d/uptrakit-<target_username>` with:

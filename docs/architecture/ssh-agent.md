@@ -141,11 +141,16 @@ configures sudoers, verifies connectivity, and saves the host entry.
 2. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
 3. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned host key)
 4. DETECT PRIVILEGES (root check, sudo -n true)
-5. REMOTE SETUP (create user, deploy authorized_keys, write sudoers)
+5. REMOTE SETUP (create user with /bin/sh shell, deploy authorized_keys with
+   no-pty/no-agent-forwarding/no-X11-forwarding restrictions, write sudoers)
 6. DISCONNECT auth session
 7. VERIFY (reconnect as target user, whoami + sudo -n true)
 8. SAVE TO DATABASE (encrypt key, store host entry)
 ```
+
+When `--auth-username` is `root` and `--target-username` is omitted, the target
+username defaults to `uptrakit` (instead of reusing `root`) to ensure the
+managed account is a dedicated service user.
 
 The bootstrap command supports three authentication methods for step 3:
 

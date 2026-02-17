@@ -99,10 +99,26 @@ and tries each loaded key. No additional flags are needed.
 | `--auth-username` | Yes | — | Username for the initial SSH connection |
 | `--auth-password` | No | — | Password auth: no value = prompt, with value = use directly |
 | `--auth-private-key-file` | No | — | Path to PEM private key for authentication |
-| `--target-username` | No | `--auth-username` | Username for the managed account |
+| `--target-username` | No | `uptrakit` (when auth is `root`), else `--auth-username` | Username for the managed account |
 | `--target-private-key-file` | No | (generated) | Path to PEM private key for the target user |
 | `--port` | No | 22 | SSH port |
 | `--host-key-fingerprint` | No | (TOFU) | Expected host key fingerprint (SHA-256) |
+
+## Root-aware target username default
+
+When `--auth-username` is `root` and `--target-username` is omitted, the
+bootstrap command defaults `--target-username` to `uptrakit` instead of reusing
+`root`. This ensures the managed account is a dedicated, unprivileged service
+user rather than the root account.
+
+A notice is printed when this default is applied:
+
+```text
+NOTE: --auth-username is 'root'; defaulting --target-username to 'uptrakit'.
+```
+
+When `--auth-username` is any non-root user and `--target-username` is omitted,
+the auth username is used as the target username (unchanged behavior).
 
 ## What happens on the remote host
 
@@ -119,12 +135,17 @@ The bootstrap command performs these steps in order:
 
 3. **Create target user** (if different from auth user) — Checks whether the
    target user exists (`id -u`). If not, creates it with `useradd --create-home
-   --shell /bin/bash`.
+   --shell /bin/sh`. The `/bin/sh` shell is used because the managed account
+   only needs non-interactive command execution.
 
 4. **Deploy SSH key** — If `--target-private-key-file` is omitted, generates a
    new Ed25519 keypair in memory. Appends the public key to
-   `~target/.ssh/authorized_keys` with proper permissions (`700` for `.ssh`,
-   `600` for `authorized_keys`).
+   `~target/.ssh/authorized_keys` with SSH restrictions
+   (`no-pty,no-agent-forwarding,no-X11-forwarding`) and proper permissions
+   (`700` for `.ssh`, `600` for `authorized_keys`). The restrictions prevent
+   interactive terminal allocation, SSH agent forwarding, and X11 forwarding
+   through the managed account while allowing the non-interactive command
+   execution that the agent requires.
 
 5. **Configure sudoers** — Writes
    `/etc/sudoers.d/uptrakit-<target_username>` with `ALL=(ALL) NOPASSWD: ALL`

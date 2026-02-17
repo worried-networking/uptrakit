@@ -288,7 +288,16 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
     };
 
     // Resolve target username.
-    let resolved_target = p.target_username.unwrap_or_else(|| p.auth_username.clone());
+    let resolved_target = match p.target_username {
+        Some(name) => name,
+        None if p.auth_username == "root" => {
+            println!(
+                "NOTE: --auth-username is 'root'; defaulting --target-username to 'uptrakit'."
+            );
+            "uptrakit".to_string()
+        }
+        None => p.auth_username.clone(),
+    };
 
     // Read or generate target key.
     let target_private_key_pem = match p.target_private_key_file {

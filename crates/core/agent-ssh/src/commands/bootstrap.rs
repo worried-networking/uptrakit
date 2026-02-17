@@ -388,9 +388,9 @@ fn cmd_check_user_exists(username: &str, use_sudo: bool) -> String {
 fn cmd_create_user(username: &str, use_sudo: bool) -> String {
     let escaped = uptrakit_command::shell_escape(username);
     if use_sudo {
-        format!("sudo useradd --create-home --shell /bin/bash {escaped}")
+        format!("sudo useradd --create-home --shell /bin/sh {escaped}")
     } else {
-        format!("useradd --create-home --shell /bin/bash {escaped}")
+        format!("useradd --create-home --shell /bin/sh {escaped}")
     }
 }
 
@@ -403,9 +403,17 @@ fn cmd_detect_home(username: &str, use_sudo: bool) -> String {
     }
 }
 
+/// SSH restrictions applied to `authorized_keys` entries.
+///
+/// These prevent interactive terminal allocation, SSH agent forwarding, and
+/// X11 forwarding through the managed account while allowing non-interactive
+/// command execution that the agent requires.
+const AUTHORIZED_KEYS_RESTRICTIONS: &str = "no-pty,no-agent-forwarding,no-X11-forwarding";
+
 fn cmd_setup_authorized_keys(home: &str, pubkey: &str, owner: &str, use_sudo: bool) -> String {
     let escaped_home = uptrakit_command::shell_escape(home);
-    let escaped_pubkey = uptrakit_command::shell_escape(pubkey);
+    let restricted_key = format!("{AUTHORIZED_KEYS_RESTRICTIONS} {pubkey}");
+    let escaped_pubkey = uptrakit_command::shell_escape(&restricted_key);
     let escaped_owner = uptrakit_command::shell_escape(owner);
     let ssh_dir = format!("{home}/.ssh");
     let escaped_ssh_dir = uptrakit_command::shell_escape(&ssh_dir);
@@ -510,14 +518,14 @@ mod tests {
         let cmd = cmd_create_user("uptrakit", true);
         assert_eq!(
             cmd,
-            "sudo useradd --create-home --shell /bin/bash 'uptrakit'"
+            "sudo useradd --create-home --shell /bin/sh 'uptrakit'"
         );
     }
 
     #[test]
     fn cmd_create_user_without_sudo() {
         let cmd = cmd_create_user("uptrakit", false);
-        assert_eq!(cmd, "useradd --create-home --shell /bin/bash 'uptrakit'");
+        assert_eq!(cmd, "useradd --create-home --shell /bin/sh 'uptrakit'");
     }
 
     #[test]
@@ -566,5 +574,20 @@ mod tests {
         assert!(cmd.contains("tee -a"));
         assert!(cmd.contains("chmod 600"));
         assert!(cmd.contains("chown -R"));
+        assert!(cmd.contains("no-pty"));
+    }
+
+    #[test]
+    fn cmd_authorized_keys_includes_restrictions() {
+        let cmd = cmd_setup_authorized_keys(
+            "/home/svc",
+            "ssh-ed25519 AAAA... svc@host",
+            "svc",
+            false,
+        );
+        assert!(
+            cmd.contains("no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519"),
+            "authorized_keys entry must include restriction prefix: {cmd}"
+        );
     }
 }

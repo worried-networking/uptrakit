@@ -138,7 +138,8 @@ pub enum HostCommands {
         auth_private_key_file: Option<PathBuf>,
 
         /// Username on the remote host for ongoing SSH access.
-        /// Defaults to --auth-username if not specified.
+        /// Defaults to 'uptrakit' when --auth-username is 'root',
+        /// otherwise defaults to --auth-username.
         #[arg(long)]
         target_username: Option<String>,
 
@@ -701,6 +702,42 @@ mod tests {
                 );
                 assert_eq!(*port, 2222);
                 assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_root_auth_omits_target_username() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "--name",
+            "root-host",
+            "--hostname",
+            "10.0.0.1",
+            "--auth-username",
+            "root",
+            "--auth-password",
+            "pass",
+        ])
+        .expect("should parse bootstrap with root auth and no target-username");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Bootstrap {
+                    auth_username,
+                    target_username,
+                    ..
+                },
+            }) => {
+                assert_eq!(auth_username, "root");
+                assert!(
+                    target_username.is_none(),
+                    "target_username should be None at the CLI layer (defaulting happens in dispatch)"
+                );
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
         }
