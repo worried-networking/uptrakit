@@ -174,11 +174,15 @@ async fn run(args: cli::Args) -> Result<()> {
         Arc::clone(&ca_key_store),
     ));
 
+    #[cfg(feature = "oidc")]
     let oidc_flow_store = uptrakit_web_api::auth::oidc_state::OidcFlowStore::new(db_conn.clone());
+    #[cfg(feature = "oidc")]
     let account_link_store =
         uptrakit_web_api::auth::oidc_state::AccountLinkStore::new(db_conn.clone());
+    #[cfg(feature = "oidc")]
     let oidc_token_exchange_store =
         uptrakit_web_api::auth::oidc_state::OidcTokenExchangeStore::new(db_conn.clone());
+    #[cfg(feature = "oidc")]
     let oidc_registration_store =
         uptrakit_web_api::auth::oidc_state::OidcRegistrationStore::new(db_conn.clone());
     let device_flow_store =
@@ -203,10 +207,14 @@ async fn run(args: cli::Args) -> Result<()> {
         cert_signer,
         service_connections: service_connections.clone(),
         revocation_notify,
+        #[cfg(feature = "oidc")]
         oidc_flow_store,
+        #[cfg(feature = "oidc")]
         account_link_store,
         jwt: Arc::new(jwt_manager),
+        #[cfg(feature = "oidc")]
         oidc_token_exchange_store,
+        #[cfg(feature = "oidc")]
         oidc_registration_store,
         device_flow_store,
         rate_limit_store,
@@ -261,9 +269,13 @@ async fn run(args: cli::Args) -> Result<()> {
         sched.register(
             ScheduledTaskType::AuthCleanup,
             Box::new(auth_cleanup::AuthCleanupExecutor::new(
+                #[cfg(feature = "oidc")]
                 app_state.oidc_flow_store.clone(),
+                #[cfg(feature = "oidc")]
                 app_state.account_link_store.clone(),
+                #[cfg(feature = "oidc")]
                 app_state.oidc_token_exchange_store.clone(),
+                #[cfg(feature = "oidc")]
                 app_state.oidc_registration_store.clone(),
                 app_state.device_flow_store.clone(),
                 app_state.rate_limit_store.clone(),
