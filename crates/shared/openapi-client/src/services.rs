@@ -1,9 +1,27 @@
 use crate::Result;
 use crate::UptrakitClient;
+use serde::Serialize;
+use uptrakit_shared_types::ServiceType;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{
-    ListServicesQuery, MergeAgentRequest, MessageResponse, ServiceResponse,
+    EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
+    MessageResponse, ServiceResponse,
 };
+
+/// Query parameter for enrollment token endpoints.
+#[derive(Serialize)]
+struct EnrollmentTokenQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    r#type: Option<String>,
+}
+
+impl EnrollmentTokenQuery {
+    fn from_service_type(service_type: Option<ServiceType>) -> Self {
+        Self {
+            r#type: service_type.map(|t| t.as_str().to_string()),
+        }
+    }
+}
 
 impl UptrakitClient {
     /// List services with optional filters and pagination.
@@ -47,10 +65,42 @@ impl UptrakitClient {
         let path = format!("/api/v1/services/{target_id}/merge");
         self.post_json(&path, req).await
     }
+
+    /// Create an enrollment token for a service type.
+    pub async fn create_enrollment_token(
+        &self,
+        service_type: Option<ServiceType>,
+    ) -> Result<EnrollmentTokenResponse> {
+        let query = EnrollmentTokenQuery::from_service_type(service_type);
+        self.post_empty_with_query("/api/v1/services/enrollment-token", &query)
+            .await
+    }
+
+    /// Revoke the enrollment token for a service type.
+    pub async fn revoke_enrollment_token(
+        &self,
+        service_type: Option<ServiceType>,
+    ) -> Result<()> {
+        let query = EnrollmentTokenQuery::from_service_type(service_type);
+        self.delete_with_query("/api/v1/services/enrollment-token", &query)
+            .await
+    }
+
+    /// Check if an enrollment token is configured for a service type.
+    pub async fn enrollment_token_status(
+        &self,
+        service_type: Option<ServiceType>,
+    ) -> Result<EnrollmentTokenStatusResponse> {
+        let query = EnrollmentTokenQuery::from_service_type(service_type);
+        self.get_with_query("/api/v1/services/enrollment-token/status", &query)
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::EnrollmentTokenQuery;
+    use uptrakit_shared_types::ServiceType;
     use uptrakit_web_api_types::services::{ListServicesQuery, MergeAgentRequest};
 
     #[test]
@@ -89,5 +139,26 @@ mod tests {
         assert!(json.contains("550e8400-e29b-41d4-a716-446655440000"));
         let parsed: MergeAgentRequest = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(parsed.source_id, req.source_id);
+    }
+
+    #[test]
+    fn enrollment_token_query_with_agent_type() {
+        let query = EnrollmentTokenQuery::from_service_type(Some(ServiceType::Agent));
+        let qs = serde_urlencoded::to_string(&query).expect("serialize");
+        assert_eq!(qs, "type=agent");
+    }
+
+    #[test]
+    fn enrollment_token_query_with_mqtt_type() {
+        let query = EnrollmentTokenQuery::from_service_type(Some(ServiceType::Mqtt));
+        let qs = serde_urlencoded::to_string(&query).expect("serialize");
+        assert_eq!(qs, "type=mqtt");
+    }
+
+    #[test]
+    fn enrollment_token_query_without_type() {
+        let query = EnrollmentTokenQuery::from_service_type(None);
+        let qs = serde_urlencoded::to_string(&query).expect("serialize");
+        assert!(qs.is_empty());
     }
 }

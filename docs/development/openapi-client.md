@@ -28,9 +28,15 @@ generate code that doesn't follow the project's strict coding standards
 (rootcause errors, no unwrap, no `#[allow]`).
 
 **Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as
-`types` and `DeviceAuthStatus` from `uptrakit-shared-types`. Downstream crates
-(e.g. the CLI) depend only on `uptrakit-openapi-client` and import types via
+`types`, `DeviceAuthStatus` from `uptrakit-shared-types`, and `ServiceType` from
+`uptrakit-shared-types`. Downstream crates (e.g. the CLI) depend only on
+`uptrakit-openapi-client` and import types via
 `uptrakit_openapi_client::types::*`.
+
+**Full API coverage:** The client covers all JSON REST endpoints exposed by the
+web API. Excluded endpoints are WebSocket (`/api/v1/ws/service`), OIDC browser
+callback (`/api/v1/auth/oidc/callback`), and OCSP binary protocol endpoints
+(`/api/v1/pki/ocsp`).
 
 ## Crate structure
 
@@ -40,13 +46,21 @@ crates/shared/openapi-client/
 └── src/
     ├── lib.rs              # UptrakitClient struct, builder, re-exports, internal helpers
     ├── error.rs            # ClientError enum, Result type
-    ├── auth.rs             # Device auth + user info endpoints
+    ├── auth.rs             # Auth (register, login, refresh, logout, device auth, auth methods)
     ├── api_tokens.rs       # API token CRUD
-    ├── hosts.rs            # Host list/get
-    ├── services.rs         # Service list/get/approve/reject/remove/merge
-    ├── software_items.rs   # Software item list/get/check/update
-    ├── update_history.rs   # Update history list/get
-    └── scheduler.rs        # Scheduler task list/get/trigger
+    ├── health.rs           # Health check endpoint
+    ├── hosts.rs            # Host list/get/update/deactivate
+    ├── oidc_auth.rs        # OIDC auth flows (authorize, exchange, link, complete registration)
+    ├── oidc_providers.rs   # OIDC provider CRUD + activate/deactivate
+    ├── pki.rs              # PKI endpoints (CA cert, CRL download)
+    ├── provider_configs.rs # Provider configuration CRUD
+    ├── scheduler.rs        # Scheduler task list/get/update/trigger
+    ├── services.rs         # Service list/get/approve/reject/remove/merge + enrollment tokens
+    ├── settings.rs         # Settings (registration, auth, certs, network, CA, server cert)
+    ├── settings_mqtt.rs    # MQTT client settings CRUD + limit management
+    ├── software_items.rs   # Software item CRUD + host assignment + version check/update
+    ├── system_alerts.rs    # System alerts
+    └── update_history.rs   # Update history list/get
 ```
 
 ## Client usage
@@ -102,6 +116,9 @@ The `ClientError` enum covers all failure modes:
 
 All methods return `Result<T>` which is `std::result::Result<T, rootcause::Report<ClientError>>`. The CLI maps these to `CliError` variants via `impl_report_conversion!`.
 
+HTTP status code checks use `reqwest::StatusCode` constants and helper methods
+(`is_client_error()`, `is_server_error()`) rather than raw integer comparisons.
+
 ## Query parameter handling
 
 Type-safe query parameter serialization uses
@@ -114,8 +131,14 @@ directly. `Option::None` fields are automatically skipped by
 
 ### Auth (`auth.rs`)
 
+- `register(&self, req) -> Result<AuthResponse>` -- unauthenticated
+- `login(&self, req) -> Result<AuthResponse>` -- unauthenticated
+- `refresh(&self, req) -> Result<RefreshResponse>` -- unauthenticated
+- `logout(&self, req) -> Result<()>`
+- `auth_methods(&self) -> Result<AuthMethodsResponse>` -- unauthenticated
 - `device_auth_start(&self, req) -> Result<DeviceAuthStartResponse>` -- unauthenticated
 - `device_auth_poll(&self, req) -> Result<DeviceAuthPollResponse>` -- unauthenticated, returns `ClientError::RateLimited` on 429
+- `device_auth_approve(&self, req) -> Result<DeviceAuthApproveResponse>`
 - `me(&self) -> Result<UserResponse>`
 
 ### API tokens (`api_tokens.rs`)
@@ -124,10 +147,53 @@ directly. `Option::None` fields are automatically skipped by
 - `list_api_tokens(&self) -> Result<ApiTokenListResponse>`
 - `revoke_api_token(&self, id) -> Result<()>`
 
+### Health (`health.rs`)
+
+- `healthz(&self) -> Result<String>` -- unauthenticated, returns `"ok"`
+
 ### Hosts (`hosts.rs`)
 
 - `list_hosts(&self, params) -> Result<PaginatedResponse<HostResponse>>`
 - `get_host(&self, id) -> Result<HostResponse>`
+- `update_host(&self, id, req) -> Result<HostResponse>`
+- `deactivate_host(&self, id) -> Result<HostMessageResponse>`
+
+### OIDC auth (`oidc_auth.rs`)
+
+- `oidc_authorize(&self, provider_id) -> Result<OidcAuthorizeResponse>` -- unauthenticated
+- `oidc_exchange(&self, req) -> Result<AuthResponse>` -- unauthenticated
+- `oidc_link(&self, req) -> Result<AuthResponse>`
+- `oidc_complete_registration(&self, req) -> Result<AuthResponse>` -- unauthenticated
+
+### OIDC providers (`oidc_providers.rs`)
+
+- `create_oidc_provider(&self, req) -> Result<OidcProviderResponse>`
+- `list_oidc_providers(&self) -> Result<Vec<OidcProviderResponse>>`
+- `get_oidc_provider(&self, id) -> Result<OidcProviderResponse>`
+- `update_oidc_provider(&self, id, req) -> Result<OidcProviderResponse>`
+- `delete_oidc_provider(&self, id) -> Result<()>`
+- `activate_oidc_provider(&self, id) -> Result<OidcProviderResponse>`
+- `deactivate_oidc_provider(&self, id) -> Result<OidcProviderResponse>`
+
+### PKI (`pki.rs`)
+
+- `ca_cert(&self) -> Result<String>` -- unauthenticated, returns PEM
+- `ca_crl(&self) -> Result<String>` -- unauthenticated, returns PEM
+
+### Provider configs (`provider_configs.rs`)
+
+- `create_provider_config(&self, req) -> Result<ProviderConfigResponse>`
+- `list_provider_configs(&self, params) -> Result<PaginatedResponse<ProviderConfigResponse>>`
+- `get_provider_config(&self, id) -> Result<ProviderConfigResponse>`
+- `update_provider_config(&self, id, req) -> Result<ProviderConfigResponse>`
+- `delete_provider_config(&self, id) -> Result<()>`
+
+### Scheduler (`scheduler.rs`)
+
+- `list_scheduled_tasks(&self) -> Result<Vec<ScheduledTaskResponse>>`
+- `get_scheduled_task(&self, id) -> Result<ScheduledTaskResponse>`
+- `update_scheduled_task(&self, id, req) -> Result<ScheduledTaskResponse>`
+- `trigger_scheduled_task(&self, id) -> Result<TriggerScheduledTaskResponse>`
 
 ### Services (`services.rs`)
 
@@ -137,34 +203,92 @@ directly. `Option::None` fields are automatically skipped by
 - `reject_service(&self, id) -> Result<ServiceResponse>`
 - `remove_service(&self, id) -> Result<MessageResponse>`
 - `merge_service(&self, target_id, req) -> Result<ServiceResponse>`
+- `create_enrollment_token(&self, service_type) -> Result<EnrollmentTokenResponse>`
+- `revoke_enrollment_token(&self, service_type) -> Result<()>`
+- `enrollment_token_status(&self, service_type) -> Result<EnrollmentTokenStatusResponse>`
+
+### Settings (`settings.rs`)
+
+- `get_combined_settings(&self) -> Result<CombinedSettingsResponse>`
+- `get_registration_settings(&self) -> Result<RegistrationSettingsResponse>`
+- `update_registration_settings(&self, req) -> Result<RegistrationSettingsResponse>`
+- `get_authentication_settings(&self) -> Result<AuthenticationSettingsResponse>`
+- `update_authentication_settings(&self, req) -> Result<AuthenticationSettingsResponse>`
+- `get_agent_certificate_settings(&self) -> Result<AgentCertificateSettingsResponse>`
+- `update_agent_certificate_settings(&self, req) -> Result<AgentCertificateSettingsResponse>`
+- `get_network_settings(&self) -> Result<NetworkSettingsResponse>`
+- `update_network_settings(&self, req) -> Result<NetworkSettingsResponse>`
+- `rotate_ca(&self) -> Result<RotateCaResponse>`
+- `renew_server_certificate(&self) -> Result<RenewServerCertResponse>`
+
+### Settings MQTT (`settings_mqtt.rs`)
+
+- `list_mqtt_settings(&self) -> Result<Vec<MqttClientResponse>>`
+- `create_mqtt_settings(&self, req) -> Result<MqttClientResponse>`
+- `get_mqtt_limit(&self) -> Result<MqttLimitResponse>`
+- `update_mqtt_limit(&self, req) -> Result<MqttLimitResponse>`
+- `get_mqtt_settings(&self, id) -> Result<MqttClientResponse>`
+- `update_mqtt_settings(&self, id, req) -> Result<MqttClientResponse>`
+- `delete_mqtt_settings(&self, id) -> Result<()>`
 
 ### Software items (`software_items.rs`)
 
 - `list_software_items(&self, params) -> Result<PaginatedResponse<SoftwareItemResponse>>`
 - `get_software_item(&self, id) -> Result<SoftwareItemDetailResponse>`
+- `create_software_item(&self, req) -> Result<SoftwareItemResponse>`
+- `update_software_item(&self, id, req) -> Result<SoftwareItemResponse>`
+- `delete_software_item(&self, id) -> Result<()>`
+- `assign_hosts(&self, id, req) -> Result<SoftwareItemDetailResponse>`
+- `unassign_host(&self, item_id, host_id) -> Result<()>`
 - `check_versions(&self, item_id) -> Result<TriggerVersionCheckResponse>`
 - `check_versions_host(&self, item_id, host_id) -> Result<TriggerVersionCheckResponse>`
 - `trigger_update(&self, item_id, host_id, req) -> Result<TriggerUpdateResponse>`
+
+### System alerts (`system_alerts.rs`)
+
+- `get_system_alerts(&self) -> Result<SystemAlertsResponse>`
 
 ### Update history (`update_history.rs`)
 
 - `list_update_history(&self, query) -> Result<PaginatedResponse<UpdateHistoryResponse>>`
 - `get_update_history(&self, id) -> Result<UpdateHistoryResponse>`
 
-### Scheduler (`scheduler.rs`)
+## Internal helpers
 
-- `list_scheduled_tasks(&self) -> Result<Vec<ScheduledTaskResponse>>`
-- `get_scheduled_task(&self, id) -> Result<ScheduledTaskResponse>`
-- `trigger_scheduled_task(&self, id) -> Result<TriggerScheduledTaskResponse>`
+The `UptrakitClient` provides these internal HTTP methods used by endpoint modules:
+
+| Helper | Auth | Description |
+| --- | --- | --- |
+| `get<T>(path)` | yes | GET with JSON response |
+| `get_with_query<T>(path, query)` | yes | GET with query params |
+| `get_unauth<T>(path)` | no | GET without auth |
+| `get_text_unauth(path)` | no | GET returning raw text (PKI, health) |
+| `post_json<T>(path, body)` | yes | POST with JSON body |
+| `post_empty<T>(path)` | yes | POST without body |
+| `post_empty_with_query<T>(path, query)` | yes | POST with query params, no body |
+| `post_json_unauth<T>(path, body)` | no | POST without auth |
+| `post_json_no_content(path, body)` | yes | POST expecting 204 No Content |
+| `put_json<T>(path, body)` | yes | PUT with JSON body |
+| `delete(path)` | yes | DELETE expecting empty response |
+| `delete_json<T>(path)` | yes | DELETE with JSON response |
+| `delete_with_query(path, query)` | yes | DELETE with query params |
 
 ## Adding a new endpoint
 
 1. Identify the request/response types in `uptrakit-web-api-types` (or add them if new).
 2. Add a method to `UptrakitClient` in the appropriate module file.
-3. Use the internal helpers (`get`, `get_with_query`, `post_json`, `post_empty`,
-   `delete`, `delete_json`).
-4. Add a unit test for request serialization if the endpoint takes a request body.
+3. Use the internal helpers listed above.
+4. Add a unit test for request serialization if the endpoint takes a request body or query params.
 5. Update the CLI command to use the new typed method.
+6. Update this documentation to list the new method.
+
+## Keeping the client in sync
+
+The openapi-client must mirror the web API:
+
+- **New endpoint** in `web-api` -> add a corresponding client method.
+- **Changed request/response types** -> update the client method signature.
+- **Removed endpoint** -> remove the client method.
 
 ## Testing
 

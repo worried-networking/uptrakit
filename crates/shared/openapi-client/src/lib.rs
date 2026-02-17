@@ -1,10 +1,18 @@
 pub mod api_tokens;
 pub mod auth;
 pub mod error;
+pub mod health;
 pub mod hosts;
+pub mod oidc_auth;
+pub mod oidc_providers;
+pub mod pki;
+pub mod provider_configs;
 pub mod scheduler;
 pub mod services;
+pub mod settings;
+pub mod settings_mqtt;
 pub mod software_items;
+pub mod system_alerts;
 pub mod update_history;
 
 pub use error::{ClientError, Result};
@@ -16,6 +24,10 @@ pub use uptrakit_web_api_types as types;
 /// Re-export `DeviceAuthStatus` from `uptrakit-shared-types` for convenience,
 /// since it appears in `DeviceAuthPollResponse::status`.
 pub use uptrakit_shared_types::DeviceAuthStatus;
+
+/// Re-export `ServiceType` from `uptrakit-shared-types` for convenience,
+/// since it is used by the enrollment token API.
+pub use uptrakit_shared_types::ServiceType;
 
 use rootcause::prelude::*;
 use serde::Serialize;
@@ -191,39 +203,140 @@ impl UptrakitClient {
         self.handle_response(resp).await
     }
 
+    async fn delete_with_query(&self, path: &str, query: &impl Serialize) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .http
+            .delete(&url)
+            .bearer_auth(self.token_or_err()?)
+            .query(query)
+            .send()
+            .await
+            .context_to()?;
+        self.handle_empty_response(resp).await
+    }
+
+    async fn put_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &impl Serialize,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .http
+            .put(&url)
+            .bearer_auth(self.token_or_err()?)
+            .json(body)
+            .send()
+            .await
+            .context_to()?;
+        self.handle_response(resp).await
+    }
+
+    async fn post_empty_with_query<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &impl Serialize,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(self.token_or_err()?)
+            .query(query)
+            .send()
+            .await
+            .context_to()?;
+        self.handle_response(resp).await
+    }
+
+    /// POST with JSON body, expecting a 204 No Content response.
+    async fn post_json_no_content(&self, path: &str, body: &impl Serialize) -> Result<()> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(self.token_or_err()?)
+            .json(body)
+            .send()
+            .await
+            .context_to()?;
+        self.handle_empty_response(resp).await
+    }
+
+    /// GET without authentication (for public endpoints).
+    async fn get_unauth<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self.http.get(&url).send().await.context_to()?;
+        self.handle_response(resp).await
+    }
+
+    /// GET without authentication, returning the raw response body as text.
+    async fn get_text_unauth(&self, path: &str) -> Result<String> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self.http.get(&url).send().await.context_to()?;
+        self.handle_text_response(resp).await
+    }
+
     async fn handle_response<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
-        let status = resp.status().as_u16();
-        if status == 429 {
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             bail!(ClientError::RateLimited);
         }
         let text = resp.text().await.context_to()?;
-        if status == 404 {
+        if status == reqwest::StatusCode::NOT_FOUND {
             let message = extract_error_message(&text);
             bail!(ClientError::NotFound(message));
         }
-        if status >= 400 {
+        if status.is_client_error() || status.is_server_error() {
             let message = extract_error_message(&text);
-            bail!(ClientError::Api { status, message });
+            bail!(ClientError::Api {
+                status: status.as_u16(),
+                message,
+            });
         }
         serde_json::from_str(&text).context_to()
     }
 
     async fn handle_empty_response(&self, resp: reqwest::Response) -> Result<()> {
-        let status = resp.status().as_u16();
-        if status == 429 {
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             bail!(ClientError::RateLimited);
         }
-        if status == 404 {
+        if status == reqwest::StatusCode::NOT_FOUND {
             let text = resp.text().await.context_to()?;
             let message = extract_error_message(&text);
             bail!(ClientError::NotFound(message));
         }
-        if status >= 400 {
+        if status.is_client_error() || status.is_server_error() {
             let text = resp.text().await.context_to()?;
             let message = extract_error_message(&text);
-            bail!(ClientError::Api { status, message });
+            bail!(ClientError::Api {
+                status: status.as_u16(),
+                message,
+            });
         }
         Ok(())
+    }
+
+    async fn handle_text_response(&self, resp: reqwest::Response) -> Result<String> {
+        let status = resp.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            bail!(ClientError::RateLimited);
+        }
+        let text = resp.text().await.context_to()?;
+        if status == reqwest::StatusCode::NOT_FOUND {
+            let message = extract_error_message(&text);
+            bail!(ClientError::NotFound(message));
+        }
+        if status.is_client_error() || status.is_server_error() {
+            let message = extract_error_message(&text);
+            bail!(ClientError::Api {
+                status: status.as_u16(),
+                message,
+            });
+        }
+        Ok(text)
     }
 }
 

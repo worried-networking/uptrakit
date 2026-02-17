@@ -72,7 +72,7 @@ uptrakit/
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared declarative macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types (ProviderType, ReleaseAsset, ReleaseInfo, SecretString, hex, ServiceType (Agent, Mqtt, SshAgent), ServiceStatus, MqttTransport, HookShell, DeviceAuthStatus, MqttClientConnectionStatus, OutputStreamType, SessionTokenType — feature-gated: sea-orm, openapi)
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
-│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client for the web API (re-exports web-api-types; used by CLI)
+│   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client for the web API; full REST endpoint coverage across 16 modules (auth, api_tokens, health, hosts, oidc_auth, oidc_providers, pki, provider_configs, scheduler, services, settings, settings_mqtt, software_items, system_alerts, update_history); re-exports web-api-types; used by CLI
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — shared service SDK (lifecycle, enrollment, identity, TLS, CA bootstrap, CLI, ControllerConnection, CertificateRenewalHandler); ws module is pub(crate)
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service<->controller wire protocol
 │   └── ui/
@@ -162,6 +162,11 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Use `FromStr` for all string-to-type conversions.** Do not add ad-hoc `parse(&str)` methods. Follow the pattern in
    [docs/development/coding-standards.md](docs/development/coding-standards.md) (section "String-to-Type Conversions"):
    typed `Parse{TypeName}Error`, `impl FromStr`, and `s.parse::<MyType>()` at call sites.
+1. **Keep the openapi-client in sync with web-api endpoints.** Any web-api endpoint addition or change
+   must be reflected in the `uptrakit-openapi-client` crate: new endpoints get client methods, changed
+   signatures/response types are updated, removed endpoints have their client methods removed. Excluded
+   endpoints: WebSocket, OIDC browser callback, OCSP binary protocol. See
+   [docs/development/openapi-client.md](docs/development/openapi-client.md) for the full method reference.
 1. **Do not use `unsafe`, `unwrap` or `panic!`.** Always prefer safe and graceful solutions. Follow the error handling
    requirements in [docs/development/coding-standards.md](docs/development/coding-standards.md): define typed errors
    with `thiserror` and attach/propagate context with `rootcause` (including match-with-fallback and serialization
