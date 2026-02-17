@@ -146,6 +146,10 @@ impl VersionCheckExecutor {
             )
             .join(
                 JoinType::InnerJoin,
+                host_software_item::Relation::Host.def(),
+            )
+            .join(
+                JoinType::InnerJoin,
                 service_host::Relation::Host.def().rev(),
             )
             .join(JoinType::InnerJoin, service_host::Relation::Service.def())
