@@ -189,6 +189,11 @@ fn resolve_state_dir_from_common(
             "failed to resolve directories: {e}"
         )))
     })?;
+    dirs.ensure_state_dir().map_err(|e| {
+        report!(InitError::Directory(format!(
+            "failed to ensure state directory: {e}"
+        )))
+    })?;
     Ok(dirs.state_dir().to_path_buf())
 }
 

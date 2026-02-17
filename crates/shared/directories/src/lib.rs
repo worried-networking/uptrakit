@@ -126,6 +126,11 @@ impl AppDirs {
         &self.state
     }
 
+    /// Ensure state directory exists with secure permissions (700).
+    pub fn ensure_state_dir(&self) -> Result<()> {
+        create_secure_dir(&self.state)
+    }
+
     /// Ensure both directories exist with secure permissions (700).
     pub fn ensure_dirs(&self) -> Result<()> {
         create_secure_dir(&self.config)?;
