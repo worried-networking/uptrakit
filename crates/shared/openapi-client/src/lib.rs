@@ -59,10 +59,18 @@ pub struct UptrakitClient {
 }
 
 impl UptrakitClient {
+    /// Default connect timeout for the HTTP client (10 seconds).
+    const DEFAULT_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// Default request timeout for the HTTP client (30 seconds).
+    const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
     /// Create a new client. Pass `token: None` for unauthenticated endpoints
     /// (e.g. device auth start/poll).
     pub fn new(base_url: &str, token: Option<&str>, insecure: bool) -> Result<Self> {
-        let mut builder = reqwest::Client::builder();
+        let mut builder = reqwest::Client::builder()
+            .connect_timeout(Self::DEFAULT_CONNECT_TIMEOUT)
+            .timeout(Self::DEFAULT_REQUEST_TIMEOUT);
         if insecure {
             builder = builder.tls_danger_accept_invalid_certs(true);
         }

@@ -215,7 +215,15 @@ fn build_error_response(status: OcspResponseStatus) -> Vec<u8> {
         OcspResponseStatus::InternalError => OcspResponse::internal_error(),
         _ => OcspResponse::internal_error(),
     };
-    response.to_der().unwrap_or_default()
+    match response.to_der() {
+        Ok(der) => der,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to DER-encode OCSP error response");
+            // Hardcoded DER-encoded OCSPResponse { status: internalError(2) }.
+            // Used as ultimate fallback when DER encoding itself fails.
+            vec![0x30, 0x03, 0x0a, 0x01, 0x02]
+        }
+    }
 }
 
 /// Build the responder ID from the CA public key bytes.
@@ -564,5 +572,14 @@ mod tests {
     fn format_serial_hex_works() {
         assert_eq!(format_serial_hex(&[0x01, 0x0a, 0xff]), "010aff");
         assert_eq!(format_serial_hex(&[0x00]), "00");
+    }
+
+    #[test]
+    fn hardcoded_internal_error_der_is_valid() {
+        // Verify the hardcoded fallback DER bytes parse to an InternalError response.
+        let fallback_der: &[u8] = &[0x30, 0x03, 0x0a, 0x01, 0x02];
+        let response = OcspResponse::from_der(fallback_der).unwrap();
+        assert_eq!(response.response_status, OcspResponseStatus::InternalError);
+        assert!(response.response_bytes.is_none());
     }
 }

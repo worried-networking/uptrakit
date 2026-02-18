@@ -61,29 +61,11 @@ so deployments can opt into only the providers they need.
 
 ### Medium
 
-#### M1: Manual error conversion reconstructs `EnrollmentError` variants
+#### ~~M1: Manual error conversion reconstructs `EnrollmentError` variants~~ (FIXED)
 
-**File:** `src/main.rs:58-76`
-
-The `ServiceHandler::run_authenticated_loop` implementation manually
-reconstructs `EnrollmentError` variants from the agent's internal `Error`
-type. This is fragile because it duplicates the error classification logic
-(is_cert_expired, is_receive_closed) and creates new error instances that
-lose the original error chain.
-
-```rust
-if ctx.is_cert_expired() {
-    Err(report!(uptrakit_service_sdk::EnrollmentError::Tls(
-        uptrakit_service_sdk::TlsError::Rustls(rustls::Error::AlertReceived(
-            rustls::AlertDescription::CertificateExpired,
-        ))
-    )))
-```
-
-**Recommendation:** Consider a conversion function on the SDK side that
-accepts the semantic flags (cert expired, receive closed) and an error
-message, or implement a `From` conversion that preserves the error context.
-The agent-ssh crate (`src/main.rs`) likely has the same pattern.
+**Resolution:** Added `EnrollmentError::from_agent_error(cert_expired, receive_closed, msg)`
+in the service SDK. Both agent and agent-ssh now use this helper instead of
+manually constructing fake `EnrollmentError` variants.
 
 #### ~~M2: In-flight update task panic handled but not propagated~~ (FIXED)
 

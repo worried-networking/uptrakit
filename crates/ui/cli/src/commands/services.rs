@@ -77,7 +77,7 @@ pub async fn show(
     }
     human.push_str(&format!("Status:        {}\n", resp.status));
     if let Some(ref ver) = resp.client_version {
-        human.push_str(&format!("Client Version:{}\n", ver));
+        human.push_str(&format!("Client Version: {}\n", ver));
     }
     if let Some(ref seen) = resp.last_seen_at {
         human.push_str(&format!("Last Seen:     {}\n", seen));

@@ -84,21 +84,12 @@ impl ServiceHandler for SshAgentHandler {
                 Ok(outcome) => Ok(outcome),
                 Err(e) => {
                     let ctx = e.current_context();
-                    if ctx.is_cert_expired() {
-                        Err(report!(uptrakit_service_sdk::EnrollmentError::Tls(
-                            uptrakit_service_sdk::TlsError::Rustls(rustls::Error::AlertReceived(
-                                rustls::AlertDescription::CertificateExpired,
-                            ))
-                        )))
-                    } else if ctx.is_receive_closed() {
-                        Err(report!(uptrakit_service_sdk::EnrollmentError::Protocol(
-                            uptrakit_service_sdk::ProtocolError::ReceiveClosed
-                        )))
-                    } else {
-                        Err(report!(uptrakit_service_sdk::EnrollmentError::Protocol(
-                            uptrakit_service_sdk::ProtocolError::Enrollment(e.to_string())
-                        )))
-                    }
+                    let sdk_err = uptrakit_service_sdk::EnrollmentError::from_agent_error(
+                        ctx.is_cert_expired(),
+                        ctx.is_receive_closed(),
+                        e.to_string(),
+                    );
+                    Err(report!(sdk_err))
                 }
             }
         })

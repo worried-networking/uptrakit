@@ -13,15 +13,10 @@ improvement area is resiliency (timeouts and optional retry strategy).
 
 ## Code Quality Findings
 
-### O-1 (Medium): Missing request/connect timeouts
+### ~~O-1 (Medium): Missing request/connect timeouts~~ (FIXED)
 
-**Location:** `crates/shared/openapi-client/src/lib.rs`
-
-`reqwest::Client` is built without explicit connect/request timeouts. Hanging
-network operations can block CLI and automation flows indefinitely.
-
-**Suggested fix:** Configure `.connect_timeout(...)` and `.timeout(...)` on the
-client builder (or make them configurable).
+**Resolution:** Added `connect_timeout(10s)` and `timeout(30s)` to the
+`reqwest::Client` builder in `UptrakitClient::new()`.
 
 ### O-2 (Medium): 429 handling lacks actionable retry metadata
 

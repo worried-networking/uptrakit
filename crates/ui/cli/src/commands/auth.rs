@@ -1,6 +1,6 @@
-use crate::client::UptrakitClient;
+use crate::client::{UptrakitClient, resolve_server_and_token};
 use crate::config::{
-    Config, Credentials, load_config, load_credentials, save_config, save_credentials,
+    Config, Credentials, load_config, save_config, save_credentials,
 };
 use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
@@ -17,14 +17,14 @@ pub struct AuthStatusOutput {
     pub first_name: String,
     pub last_name: String,
     pub email: String,
-    pub user_id: String,
+    pub user_id: Uuid,
     pub permissions: Vec<String>,
 }
 
 /// Serializable output for `auth token create`.
 #[derive(Debug, Serialize)]
 pub struct TokenCreateOutput {
-    pub id: String,
+    pub id: Uuid,
     pub token: String,
 }
 
@@ -37,7 +37,7 @@ pub struct TokenListOutput {
 /// A single token entry in `auth token list`.
 #[derive(Debug, Serialize)]
 pub struct TokenEntry {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub created_at: String,
     pub status: String,
@@ -46,7 +46,7 @@ pub struct TokenEntry {
 /// Serializable output for `auth token revoke`.
 #[derive(Debug, Serialize)]
 pub struct TokenRevokeOutput {
-    pub id: String,
+    pub id: Uuid,
     pub revoked: bool,
 }
 
@@ -191,7 +191,7 @@ pub async fn status(
     format: OutputFormat,
     insecure: bool,
 ) -> Result<()> {
-    let (server, token) = resolve_auth(server_override, token_override)?;
+    let (server, token) = resolve_server_and_token(server_override, token_override)?;
     let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
     let user = client.me().await.context_to()?;
@@ -215,7 +215,7 @@ pub async fn status(
         first_name: user.first_name,
         last_name: user.last_name,
         email: user.email,
-        user_id: user.id.to_string(),
+        user_id: user.id,
         permissions,
     };
 
@@ -230,7 +230,7 @@ pub async fn token_create(
     format: OutputFormat,
     insecure: bool,
 ) -> Result<()> {
-    let (server, token) = resolve_auth(server_override, token_override)?;
+    let (server, token) = resolve_server_and_token(server_override, token_override)?;
     let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
     let resp = client
@@ -251,7 +251,7 @@ pub async fn token_create(
     human.push_str("Store this token securely - it will not be shown again.\n");
 
     let data = TokenCreateOutput {
-        id: id.to_string(),
+        id,
         token: new_token,
     };
 
@@ -265,7 +265,7 @@ pub async fn token_list(
     format: OutputFormat,
     insecure: bool,
 ) -> Result<()> {
-    let (server, token) = resolve_auth(server_override, token_override)?;
+    let (server, token) = resolve_server_and_token(server_override, token_override)?;
     let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
     let resp = client.list_api_tokens().await.context_to()?;
@@ -280,7 +280,7 @@ pub async fn token_list(
                 "active"
             };
             TokenEntry {
-                id: t.id.to_string(),
+                id: t.id,
                 name: t.name.clone(),
                 created_at: t.created_at.clone(),
                 status: status_str.to_string(),
@@ -317,39 +317,18 @@ pub async fn token_revoke(
     format: OutputFormat,
     insecure: bool,
 ) -> Result<()> {
-    let (server, token) = resolve_auth(server_override, token_override)?;
+    let (server, token) = resolve_server_and_token(server_override, token_override)?;
     let client = UptrakitClient::with_token(&server, &token, insecure).context_to()?;
 
     client.revoke_api_token(id).await.context_to()?;
 
     let human = format!("Token {} revoked.\n", id);
     let data = TokenRevokeOutput {
-        id: id.to_string(),
+        id: *id,
         revoked: true,
     };
 
     print_output(format, &human, &data)
-}
-
-/// Resolve server and token from overrides or stored config.
-fn resolve_auth(
-    server_override: Option<&str>,
-    token_override: Option<&str>,
-) -> Result<(String, String)> {
-    let config = load_config()?;
-    let creds = load_credentials()?;
-
-    let server = server_override
-        .map(|s| s.to_string())
-        .or(config.server)
-        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
-
-    let token = token_override
-        .map(|t| t.to_string())
-        .or(creds.token)
-        .ok_or_else(|| report!(CliError::NotLoggedIn))?;
-
-    Ok((server, token))
 }
 
 fn prompt(msg: &str) -> Result<String> {
@@ -411,45 +390,50 @@ mod tests {
 
     #[test]
     fn auth_status_output_serialization() {
+        let user_id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid");
         let output = AuthStatusOutput {
             server: "https://example.com".to_string(),
             first_name: "John".to_string(),
             last_name: "Doe".to_string(),
             email: "john@example.com".to_string(),
-            user_id: "abc-123".to_string(),
+            user_id,
             permissions: vec!["view_settings".to_string(), "manage_agents".to_string()],
         };
         let json = serde_json::to_string(&output).expect("serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(parsed["server"], "https://example.com");
         assert_eq!(parsed["first_name"], "John");
+        assert_eq!(parsed["user_id"], user_id.to_string());
         assert_eq!(parsed["permissions"][0], "view_settings");
     }
 
     #[test]
     fn token_create_output_serialization() {
+        let id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").expect("uuid");
         let output = TokenCreateOutput {
-            id: "tok-1".to_string(),
+            id,
             token: "secret-value".to_string(),
         };
         let json = serde_json::to_string(&output).expect("serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
-        assert_eq!(parsed["id"], "tok-1");
+        assert_eq!(parsed["id"], id.to_string());
         assert_eq!(parsed["token"], "secret-value");
     }
 
     #[test]
     fn token_list_output_serialization() {
+        let id1 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").expect("uuid");
+        let id2 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").expect("uuid");
         let output = TokenListOutput {
             tokens: vec![
                 TokenEntry {
-                    id: "tok-1".to_string(),
+                    id: id1,
                     name: "my-token".to_string(),
                     created_at: "2025-01-01T00:00:00Z".to_string(),
                     status: "active".to_string(),
                 },
                 TokenEntry {
-                    id: "tok-2".to_string(),
+                    id: id2,
                     name: "old-token".to_string(),
                     created_at: "2024-06-15T12:00:00Z".to_string(),
                     status: "revoked".to_string(),
@@ -509,13 +493,14 @@ mod tests {
 
     #[test]
     fn token_revoke_output_serialization() {
+        let id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").expect("uuid");
         let output = TokenRevokeOutput {
-            id: "tok-1".to_string(),
+            id,
             revoked: true,
         };
         let json = serde_json::to_string(&output).expect("serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
-        assert_eq!(parsed["id"], "tok-1");
+        assert_eq!(parsed["id"], id.to_string());
         assert_eq!(parsed["revoked"], true);
     }
 }

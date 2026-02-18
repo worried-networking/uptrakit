@@ -43,7 +43,7 @@ pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
         .context_to()?;
 
     let human = format!(
-        "Update triggered.\n  History ID: {}\n  Status:     {:?}\n",
+        "Update triggered.\n  History ID: {}\n  Status:     {}\n",
         resp.update_history_id, resp.status
     );
 

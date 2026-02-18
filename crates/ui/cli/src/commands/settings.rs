@@ -245,7 +245,7 @@ pub async fn network_show(
     ));
     human.push_str(&format!("HTTPS Address:       {}\n", resp.https_addr));
     human.push_str(&format!(
-        "Fwd Cert Info Header:{}\n",
+        "Fwd Cert Info Header: {}\n",
         resp.forwarded_client_cert_info_header
             .as_deref()
             .unwrap_or("-")
@@ -306,7 +306,7 @@ pub async fn network_update(params: NetworkUpdateParams<'_>) -> Result<()> {
     ));
     human.push_str(&format!("HTTPS Address:       {}\n", resp.https_addr));
     human.push_str(&format!(
-        "Fwd Cert Info Header:{}\n",
+        "Fwd Cert Info Header: {}\n",
         resp.forwarded_client_cert_info_header
             .as_deref()
             .unwrap_or("-")
@@ -625,7 +625,7 @@ pub async fn oidc_show(
     human.push_str(&format!("Client ID:        {}\n", resp.client_id));
     human.push_str(&format!("Has Secret:       {}\n", resp.has_client_secret));
     human.push_str(&format!("Scopes:           {}\n", resp.scopes));
-    human.push_str(&format!("Auto Create Users:{}\n", resp.auto_create_users));
+    human.push_str(&format!("Auto Create Users: {}\n", resp.auto_create_users));
     if let Some(ref path) = resp.role_claim_path {
         human.push_str(&format!("Role Claim Path:  {}\n", path));
     }

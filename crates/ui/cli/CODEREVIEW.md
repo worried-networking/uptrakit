@@ -101,17 +101,11 @@ and replaced with `item()`. CLI tests updated to match.
 
 ---
 
-### A-2: Duplicated auth resolution logic [MEDIUM]
+### ~~A-2: Duplicated auth resolution logic~~ [FIXED]
 
-**File:** `src/commands/auth.rs:330-348` vs `src/client.rs:8-27`
-
-The `resolve_auth()` function in `auth.rs` duplicates the server/token resolution logic
-that already exists in `client.rs::authenticated_client()`. Both load config and credentials,
-apply overrides, and fail with `CliError::NotLoggedIn`.
-
-**Recommendation:** Extract a `resolve_server_and_token()` function in `config.rs` or
-`client.rs` that returns `(String, String)`, and have both `authenticated_client()` and
-`auth::resolve_auth()` use it.
+**Resolution:** Extracted `resolve_server_and_token()` into `client.rs`. Both
+`authenticated_client()` and `auth.rs` (formerly `resolve_auth()`) now use
+the shared function. The private `resolve_auth()` function was removed.
 
 ---
 
@@ -131,31 +125,21 @@ when a function takes more than 4 parameters.
 
 ## 3. Code Quality
 
-### Q-1: Human output formatting has inconsistent spacing after colons [MEDIUM]
+### ~~Q-1: Human output formatting has inconsistent spacing after colons~~ [FIXED]
 
-Several "show" commands have misaligned label-value pairs where the space after the colon is
-missing:
+**Resolution:** Added missing spaces after colons in `hosts.rs`, `services.rs`,
+and `settings.rs` (5 locations).
 
-| File | Line | Current | Expected |
-| --- | --- | --- | --- |
-| `hosts.rs` | 61 | `"Friendly Name:{}\n"` | `"Friendly Name: {}\n"` |
-| `services.rs` | 80 | `"Client Version:{}\n"` | `"Client Version: {}\n"` |
-| `settings.rs` | 249 | `"Fwd Cert Info Header:{}\n"` | `"Fwd Cert Info Header: {}\n"` |
-| `settings.rs` | 309 | `"Fwd Cert Info Header:{}\n"` | `"Fwd Cert Info Header: {}\n"` |
-| `settings.rs` | 628 | `"Auto Create Users:{}\n"` | `"Auto Create Users: {}\n"` |
+### ~~Q-2: Auth output types use `String` instead of `Uuid` for IDs~~ [FIXED]
 
-### Q-2: Auth output types use `String` instead of `Uuid` for IDs [MEDIUM]
+**Resolution:** Changed `user_id`, `id` fields in `AuthStatusOutput`, `TokenCreateOutput`,
+`TokenEntry`, and `TokenRevokeOutput` from `String` to `Uuid`. Updated all construction
+sites and tests.
 
-**File:** `src/commands/auth.rs:14-51`
+### ~~Q-3: `update::trigger` human output uses `{:?}` (Debug format) for status~~ [FIXED]
 
-Per AGENTS.md rule 16: "All entity ID parameters must use `&Uuid` (not `&str`), and all
-response ID fields must be `Uuid` (not `String`)."
-
-### Q-3: `update::trigger` human output uses `{:?}` (Debug format) for status [MEDIUM]
-
-**File:** `src/commands/update.rs:46-47`
-
-The `{:?}` format will print the Rust Debug representation instead of human-readable output.
+**Resolution:** Changed `{:?}` to `{}` in `update.rs` and added `Display` impl for
+`TriggerUpdateStatus` in `web-api-types`.
 
 ### Q-4: `status_text()` in `api.rs` has limited coverage [LOW]
 
@@ -220,10 +204,10 @@ Low priority since types are only used within the crate.
 | Priority | ID | Description |
 | --- | --- | --- |
 | ~~1~~ | ~~A-1~~ | ~~Fix or collapse `check installed`/`check available`~~ (FIXED) |
-| 2 | Q-1 | Fix human output spacing inconsistencies |
-| 3 | Q-2 | Use `Uuid` for auth output ID fields |
-| 4 | Q-3 | Fix Debug format in update trigger output |
-| 5 | A-2 | Extract shared auth resolution logic |
+| ~~2~~ | ~~Q-1~~ | ~~Fix human output spacing inconsistencies~~ (FIXED) |
+| ~~3~~ | ~~Q-2~~ | ~~Use `Uuid` for auth output ID fields~~ (FIXED) |
+| ~~4~~ | ~~Q-3~~ | ~~Fix Debug format in update trigger output~~ (FIXED) |
+| ~~5~~ | ~~A-2~~ | ~~Extract shared auth resolution logic~~ (FIXED) |
 | 6 | S-2 | Add environment variable support for token/server |
 | ~~7~~ | ~~S-3~~ | ~~Validate URL before opening in browser~~ (FIXED) |
 | 8 | A-3 | Standardize parameter passing (struct vs loose) |

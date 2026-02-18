@@ -102,17 +102,10 @@ disabling TOFU. Document the TOFU behavior in security documentation.
 
 ### Medium — Code Quality
 
-#### M1: Error conversion in `ServiceHandler` impl duplicates agent pattern
+#### ~~M1: Error conversion in `ServiceHandler` impl duplicates agent pattern~~ (FIXED)
 
-**File:** `src/main.rs`
-
-Like the agent crate (agent `src/main.rs:58-76`), the SSH agent's
-`ServiceHandler::run_authenticated_loop` likely reconstructs
-`EnrollmentError` variants manually. This duplicates the same fragile
-pattern.
-
-**Recommendation:** See agent crate finding M1. A shared conversion utility
-in the service-sdk would eliminate this duplication.
+**Resolution:** Added `EnrollmentError::from_agent_error(cert_expired, receive_closed, msg)`
+in the service SDK. Both agent and agent-ssh now use this shared helper.
 
 #### M2: Several error variants use `String` for foreign errors
 

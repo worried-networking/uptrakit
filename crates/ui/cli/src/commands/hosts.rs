@@ -58,7 +58,7 @@ pub async fn show(
     let mut human = String::new();
     human.push_str(&format!("ID:           {}\n", resp.id));
     human.push_str(&format!("Hostname:     {}\n", resp.hostname));
-    human.push_str(&format!("Friendly Name:{}\n", resp.friendly_name));
+    human.push_str(&format!("Friendly Name: {}\n", resp.friendly_name));
     human.push_str(&format!("Machine ID:   {}\n", resp.machine_id));
     if let Some(ref os) = resp.os_type {
         human.push_str(&format!("OS:           {}\n", os));
