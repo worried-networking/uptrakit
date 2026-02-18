@@ -51,6 +51,9 @@ pub enum DirectoryError {
 
     #[error("home directory could not be determined")]
     NoHomeDir,
+
+    #[error("invalid path component: {reason}")]
+    PathTraversal { reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, Report<DirectoryError>>;
@@ -139,26 +142,70 @@ impl AppDirs {
     }
 
     /// Get a path within the config directory.
-    pub fn config_path(&self, name: &str) -> PathBuf {
-        self.config.join(name)
+    ///
+    /// Returns `Err` if `name` contains path separators, `..` components,
+    /// or is an absolute path.
+    pub fn config_path(&self, name: &str) -> Result<PathBuf> {
+        validate_path_name(name)?;
+        Ok(self.config.join(name))
     }
 
     /// Get a path within the state directory.
-    pub fn state_path(&self, name: &str) -> PathBuf {
-        self.state.join(name)
+    ///
+    /// Returns `Err` if `name` contains path separators, `..` components,
+    /// or is an absolute path.
+    pub fn state_path(&self, name: &str) -> Result<PathBuf> {
+        validate_path_name(name)?;
+        Ok(self.state.join(name))
     }
 }
 
+/// Validate that a path component name is safe for use with `config_path`/`state_path`.
+///
+/// Rejects names containing path separators (`/`, `\`), parent directory
+/// traversal (`..`), or absolute path prefixes.
+fn validate_path_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!(DirectoryError::PathTraversal {
+            reason: "name must not be empty".into(),
+        });
+    }
+
+    if name.contains('/') || name.contains('\\') {
+        bail!(DirectoryError::PathTraversal {
+            reason: format!("name must not contain path separators: {name:?}"),
+        });
+    }
+
+    if name == ".." || name == "." {
+        bail!(DirectoryError::PathTraversal {
+            reason: format!("name must not be a relative path component: {name:?}"),
+        });
+    }
+
+    let path = Path::new(name);
+    if path.is_absolute() {
+        bail!(DirectoryError::PathTraversal {
+            reason: format!("name must not be an absolute path: {name:?}"),
+        });
+    }
+
+    Ok(())
+}
+
 /// Expand `~` prefix to the user's home directory.
+///
+/// Uses `std::path::Component`-based matching to avoid lossy string
+/// conversion, preserving non-UTF-8 path components on Unix.
 pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
-    let s = path.to_string_lossy();
-    if let Some(stripped) = s.strip_prefix("~/") {
-        let home = home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))?;
-        Ok(home.join(stripped))
-    } else if s == "~" {
-        home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))
-    } else {
-        Ok(path.to_path_buf())
+    let mut components = path.components();
+    match components.next() {
+        Some(std::path::Component::Normal(first)) if first == "~" => {
+            let home = home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))?;
+            let rest: PathBuf = components.collect();
+            Ok(home.join(rest))
+        }
+        _ => Ok(path.to_path_buf()),
     }
 }
 
@@ -503,8 +550,51 @@ mod tests {
         let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path()))
             .expect("should resolve");
 
-        assert_eq!(dirs.config_path("ca.crt"), temp.path().join("ca.crt"));
-        assert_eq!(dirs.state_path("db.sqlite"), temp.path().join("db.sqlite"));
+        assert_eq!(
+            dirs.config_path("ca.crt").expect("valid name"),
+            temp.path().join("ca.crt")
+        );
+        assert_eq!(
+            dirs.state_path("db.sqlite").expect("valid name"),
+            temp.path().join("db.sqlite")
+        );
+    }
+
+    #[test]
+    fn config_path_rejects_traversal() {
+        let temp = TempDir::new().expect("temp dir");
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path()))
+            .expect("should resolve");
+
+        assert!(dirs.config_path("..").is_err());
+        assert!(dirs.config_path(".").is_err());
+        assert!(dirs.config_path("../etc/passwd").is_err());
+        assert!(dirs.config_path("foo/bar").is_err());
+        assert!(dirs.config_path("foo\\bar").is_err());
+        assert!(dirs.config_path("").is_err());
+    }
+
+    #[test]
+    fn state_path_rejects_traversal() {
+        let temp = TempDir::new().expect("temp dir");
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path()))
+            .expect("should resolve");
+
+        assert!(dirs.state_path("..").is_err());
+        assert!(dirs.state_path("sub/dir").is_err());
+        assert!(dirs.state_path("").is_err());
+    }
+
+    #[test]
+    fn config_path_accepts_valid_names() {
+        let temp = TempDir::new().expect("temp dir");
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path()))
+            .expect("should resolve");
+
+        assert!(dirs.config_path("ca.crt").is_ok());
+        assert!(dirs.config_path("db.sqlite").is_ok());
+        assert!(dirs.config_path("config.json").is_ok());
+        assert!(dirs.config_path(".hidden").is_ok());
     }
 
     #[tokio::test]

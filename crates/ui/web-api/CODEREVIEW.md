@@ -22,8 +22,8 @@ non-standard lock-poisoning pattern. No critical issues.
 | --- | --- | --- | --- | --- | --- |
 | W-1 | Medium | Safety | `routes/ocsp.rs:42` | `unwrap_or_default()` on `percent_decode_str().decode_utf8()`. If percent-decoded bytes are invalid UTF-8, this silently produces an empty string. Downstream base64 decode then fails and returns a `malformedRequest` OCSP response, so the end behavior is correct, but the error path is unclear and makes debugging harder. | Return the `malformedRequest` response directly on UTF-8 decode failure with a `tracing::debug!` log, instead of falling through to the base64 path. |
 | W-2 | Medium | Safety | `ocsp.rs:218` | `response.to_der().unwrap_or_default()` in `build_error_response`. If DER encoding of an error OCSP response fails, the client receives an empty body with `application/ocsp-response` content type. | Return an HTTP 500 status instead of a zero-length OCSP body, or log the DER failure at `error` level so it is observable. |
-| W-3 | Medium | Standards | `middleware/rate_limit.rs:121-123` | `.unwrap_or_else(\|poisoned\| poisoned.into_inner())` on `Mutex::lock()`. Per AGENTS.md, the approved exception for mutex locks is `.unwrap()` only, since `panic = "abort"` in the release profile makes lock poisoning impossible. The explicit poisoned-state recovery is non-standard and misleading. | Replace with `.unwrap()` to match the approved exception pattern. |
-| W-4 | Low | Code Quality | `middleware/require_auth.rs:100,107,110,133,136,144` | Error messages contain trailing `\n` characters (e.g., `"Invalid or revoked API token\n"`). These newlines end up in JSON response bodies, which is non-standard. | Remove trailing `\n` from all `AuthFailure` string literals. |
+| W-3 | ~~Medium~~ | ~~Standards~~ | ~~`middleware/rate_limit.rs:121-123`~~ | ~~RESOLVED: `.unwrap_or_else(\|poisoned\| poisoned.into_inner())` replaced with `.unwrap()` per approved exception pattern.~~ | ~~Done~~ |
+| W-4 | ~~Low~~ | ~~Code Quality~~ | ~~`middleware/require_auth.rs`~~ | ~~RESOLVED: Trailing `\n` removed from all six `AuthFailure` string literals.~~ | ~~Done~~ |
 | W-5 | Low | Code Quality | `routes/api_tokens.rs:42,79` | `format(&format).unwrap_or_default()` for timestamp formatting. Acceptable per Pattern 16 (display fallback), but a failed format produces an empty string. | Consider `.unwrap_or_else(\|_\| dt.to_string())` for a more informative ISO 8601 fallback. |
 | W-6 | Low | Code Quality | `routes/scheduler.rs:31,35,36` | Same timestamp formatting pattern as W-5 with `unwrap_or_default()`. | Same suggestion: use `.to_string()` as fallback instead of empty string. |
 | W-7 | Info | Security | `auth/refresh_cookie.rs:16` | `SameSite=Strict; HttpOnly; Secure` cookie attributes are correctly set. CSRF protection is properly handled via `SameSite=Strict`. | None needed. |
@@ -137,4 +137,4 @@ This would:
 | `impl_report_conversion!` at boundaries | Pass | `ocsp.rs`, `auth/error.rs`, `cert_signer.rs` |
 | Secrets never logged | Pass | Error messages sanitized; key material redacted in Debug impls |
 | OpenAPI annotations | Pass | All routes annotated with `#[utoipa::path]` |
-| Mutex `.unwrap()` pattern | **Finding W-3** | One instance uses `unwrap_or_else` instead of `.unwrap()` |
+| Mutex `.unwrap()` pattern | Pass | All instances use `.unwrap()` per approved exception |

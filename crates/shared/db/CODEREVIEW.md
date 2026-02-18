@@ -118,21 +118,15 @@ These tokens are used as primary keys, so hashing would require a lookup-by-hash
 `EncryptedString` would break lookups (random nonces). This is a design constraint requiring careful thought -- consider
 storing a hash in a separate indexed column for lookup.
 
-### MEDIUM: Master key not zeroized in memory
+### ~~MEDIUM: Master key not zeroized in memory~~ RESOLVED
 
-**File:** `src/crypto.rs`, line 58
+Resolved: Master key is now wrapped in `Zeroizing<[u8; 32]>` from the `zeroize` crate. `init_master_key()` accepts
+`Zeroizing<[u8; 32]>`. Defense-in-depth since `OnceLock` has `'static` lifetime.
 
-The raw key bytes `[u8; 32]` are stored in a `OnceLock`. If process memory is dumped (core dump, swap), the key is
-exposed. Consider using `Zeroizing<[u8; 32]>` from the `zeroize` crate. Since `OnceLock` never drops, this is
-defense-in-depth, not critical.
+### ~~MEDIUM: `EncryptedString::new()` dev-mode fallback lacks warning~~ RESOLVED
 
-### MEDIUM: `EncryptedString::new()` dev-mode fallback lacks warning
-
-**File:** `src/crypto.rs`, lines 222-231
-
-When `master_key_available()` returns `false`, plaintext is stored directly. While this is controlled by the
-`--allow-plaintext-secrets` flag at startup, no `tracing::warn!` is emitted when this fallback path is taken, making it
-invisible in production logs.
+Resolved: `tracing::warn!("master key not configured; storing value as plaintext (development mode)")` is now emitted
+when the plaintext fallback path is taken.
 
 ### LOW: HA race condition on first token creation
 
@@ -141,12 +135,10 @@ If two instances start simultaneously and neither has a stored verification toke
 the other may not detect the mismatch until restart. Consider using an INSERT-or-fail pattern (not upsert) for initial
 token creation.
 
-### LOW: Key verification error discards root cause
+### ~~LOW: Key verification error discards root cause~~ RESOLVED
 
-**File:** `src/crypto.rs`, line 97
-
-The `Err(_)` branch in `verify_key_verification_token` discards the original decryption error, returning only
-`MasterKeyMismatch`. For diagnostics, consider logging the underlying error at `debug` level before returning.
+Resolved: The `Err` branch in `verify_key_verification_token` now logs the underlying decryption error at `debug` level
+via `tracing::debug!(error = %e, "key verification decryption failed")` before returning `MasterKeyMismatch`.
 
 ### LOW: No nonce collision documentation
 
@@ -221,7 +213,7 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | `unwrap`/`panic` | PASS | Zero in production code |
 | PKCE verifier | PASS | Now encrypted with `EncryptedString` |
 | Bearer token storage | **MEDIUM** | Plaintext PKs for pending flows |
-| Master key memory | **MEDIUM** | Not zeroized; defense-in-depth concern |
+| Master key memory | PASS       | Wrapped in `Zeroizing<[u8; 32]>` (defense-in-depth) |
 | RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
 | HA safety | GOOD | Verification works; minor race on first creation |
 | Extensibility | FAIR | All 34 entities in one crate; needs feature gating |

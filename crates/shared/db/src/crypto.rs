@@ -12,6 +12,7 @@ use rootcause::prelude::*;
 use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 use uptrakit_shared_types::SecretString;
+use zeroize::Zeroizing;
 
 /// Errors originating from encryption/decryption operations.
 #[derive(Debug, Error)]
@@ -55,12 +56,19 @@ impl_report_conversion! {
 }
 
 /// Global master encryption key (32 bytes for AES-256).
-static MASTER_KEY: OnceLock<[u8; 32]> = OnceLock::new();
+///
+/// Wrapped in `Zeroizing` so that the key material is scrubbed from memory
+/// if the value is ever dropped (defense-in-depth — `OnceLock` statics have
+/// `'static` lifetime and are not normally dropped).
+static MASTER_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 
 /// Initialize the global master key. Must be called once at startup.
 ///
+/// The key bytes are wrapped in [`Zeroizing`] so that any intermediate copy
+/// is scrubbed when dropped.
+///
 /// Returns `Err` if the key has already been initialized.
-pub fn init_master_key(key: [u8; 32]) -> Result<()> {
+pub fn init_master_key(key: Zeroizing<[u8; 32]>) -> Result<()> {
     MASTER_KEY
         .set(key)
         .map_err(|_| report!(CryptoError::AlreadyInitialized))
@@ -94,7 +102,10 @@ pub fn verify_key_verification_token(stored: &str) -> Result<()> {
     match decrypt_value(stored) {
         Ok(plaintext) if plaintext == KEY_VERIFICATION_SENTINEL => Ok(()),
         Ok(_) => bail!(CryptoError::MasterKeyMismatch),
-        Err(_) => bail!(CryptoError::MasterKeyMismatch),
+        Err(e) => {
+            tracing::debug!(error = %e, "key verification decryption failed");
+            bail!(CryptoError::MasterKeyMismatch)
+        }
     }
 }
 
@@ -114,7 +125,7 @@ fn encrypt_value(plaintext: &str) -> Result<String> {
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
 
-    let unbound = UnboundKey::new(&AES_256_GCM, key_bytes)
+    let unbound = UnboundKey::new(&AES_256_GCM, key_bytes.as_slice())
         .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
     let key = LessSafeKey::new(unbound);
 
@@ -166,7 +177,7 @@ fn decrypt_value(stored: &str) -> Result<String> {
         .map_err(|_| report!(CryptoError::InvalidNonce))?;
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
-    let unbound = UnboundKey::new(&AES_256_GCM, key_bytes)
+    let unbound = UnboundKey::new(&AES_256_GCM, key_bytes.as_slice())
         .map_err(|e| report!(CryptoError::KeyCreation(e.to_string())))?;
     let key = LessSafeKey::new(unbound);
 
@@ -223,6 +234,9 @@ impl EncryptedString {
         let db_value = if master_key_available() {
             encrypt_value(&plaintext)?
         } else {
+            tracing::warn!(
+                "master key not configured; storing value as plaintext (development mode)"
+            );
             plaintext.clone()
         };
         Ok(Self {
@@ -349,7 +363,7 @@ mod tests {
     /// Initialize a test key. Since OnceLock can only be set once,
     /// subsequent calls in the same process are no-ops.
     fn ensure_test_key() {
-        let key = [0x42u8; 32];
+        let key = Zeroizing::new([0x42u8; 32]);
         let _ = init_master_key(key);
     }
 

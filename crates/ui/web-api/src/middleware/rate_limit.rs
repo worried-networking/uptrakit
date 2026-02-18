@@ -120,7 +120,7 @@ fn check_local_fallback(key: &str, max_requests: i32, window_secs: i64) -> RateL
     let max = max_requests.max(0) as u32;
     let mut guard = FALLBACK_LIMITS
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap();
 
     if let Some(entry) = guard.get_mut(key) {
         if now.duration_since(entry.window_start) >= window {
@@ -293,7 +293,7 @@ mod tests {
         let key = "test:127.0.0.1";
         let _ = FALLBACK_LIMITS
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap()
             .remove(key);
 
         let limit = check_local_fallback(key, 2, 60);

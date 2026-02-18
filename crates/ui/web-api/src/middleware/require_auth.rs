@@ -97,17 +97,17 @@ async fn authenticate_api_token(
     let (user_id, _token_id) = service
         .verify_token(token)
         .await
-        .map_err(|_| AuthFailure::Unauthorized("Invalid or revoked API token\n"))?;
+        .map_err(|_| AuthFailure::Unauthorized("Invalid or revoked API token"))?;
 
     // Check user is active
     let user = User::find_by_id(user_id)
         .one(&state.db)
         .await
         .map_err(|_| AuthFailure::InternalError)?
-        .ok_or(AuthFailure::Unauthorized("User not found\n"))?;
+        .ok_or(AuthFailure::Unauthorized("User not found"))?;
 
     if !user.is_active {
-        return Err(AuthFailure::Forbidden("User is deactivated\n"));
+        return Err(AuthFailure::Forbidden("User is deactivated"));
     }
 
     // Fetch permissions from DB
@@ -130,10 +130,10 @@ async fn authenticate_jwt(
     let claims = state
         .jwt
         .decode_access_token(token)
-        .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token\n"))?;
+        .map_err(|_| AuthFailure::Unauthorized("Invalid or expired token"))?;
 
     let user_id = uuid::Uuid::parse_str(&claims.sub)
-        .map_err(|_| AuthFailure::Unauthorized("Invalid token subject\n"))?;
+        .map_err(|_| AuthFailure::Unauthorized("Invalid token subject"))?;
 
     // Check token denylist (immediate revocation on logout / deactivation)
     if state
@@ -141,7 +141,7 @@ async fn authenticate_jwt(
         .is_denied(&claims.jti, &user_id, claims.iat)
         .await
     {
-        return Err(AuthFailure::Unauthorized("Token has been revoked\n"));
+        return Err(AuthFailure::Unauthorized("Token has been revoked"));
     }
 
     let auth_method = if claims.auth_method == "oidc" {

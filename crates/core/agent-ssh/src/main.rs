@@ -215,7 +215,8 @@ fn init_master_key(
                 );
             }
             let key_bytes = parse_master_key_hex(&key_hex)?;
-            uptrakit_shared_db::crypto::init_master_key(key_bytes).map_err(|e| {
+            uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new(key_bytes))
+                .map_err(|e| {
                 report!(InitError::MasterKey(format!(
                     "failed to initialize master key: {e}"
                 )))

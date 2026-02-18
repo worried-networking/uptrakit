@@ -1429,7 +1429,7 @@ mod tests {
         use uptrakit_shared_db::entity::tenant;
 
         // EncryptedString requires a master key for DB writes
-        let _ = uptrakit_shared_db::crypto::init_master_key([0x42u8; 32]);
+        let _ = uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new([0x42u8; 32]));
 
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
         let db = Database::connect(opt).await.map_err(|e| e.to_string())?;

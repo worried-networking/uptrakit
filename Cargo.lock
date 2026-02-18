@@ -6075,6 +6075,7 @@ dependencies = [
  "uptrakit-shared-macros",
  "uptrakit-shared-types",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

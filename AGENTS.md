@@ -303,6 +303,8 @@ Unix, eliminating TOCTOU windows):
 - `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- writes file with 0o600 permissions (sync)
 - `write_secure_file_async(path, data)` / `write_secure_file_str_async(path, str)` -- async variants via tokio
 - `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
+- `AppDirs::config_path(name)` / `AppDirs::state_path(name)` -- returns `Result<PathBuf>` after validating `name`
+  against path traversal (rejects path separators, `..`, `.`, empty strings, absolute paths)
 - `AppDirs::ensure_dirs()` -- creates both directories with secure permissions
 
 All crates writing sensitive files (private keys, certificates, CA bundles) **must** use these helpers instead of raw

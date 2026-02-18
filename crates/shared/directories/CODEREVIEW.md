@@ -33,44 +33,16 @@ while only `target` gets `0o700`.
 **Recommendation:** Either iterate through each path component and create them individually with `0o700`, or document
 that callers must ensure parent directories exist.
 
-### MEDIUM / SECURITY: `config_path` and `state_path` do not sanitize the `name` argument
+### ~~MEDIUM / SECURITY: `config_path` and `state_path` do not sanitize the `name` argument~~ RESOLVED
 
-**File:** `src/lib.rs`, lines 142-149
+Resolved: `config_path` and `state_path` now validate `name` via `validate_path_name()`, rejecting path separators,
+`..`, `.`, empty strings, and absolute paths. Returns `Result<PathBuf>` with `DirectoryError::PathTraversal` on
+violation. Tests added.
 
-```rust
-pub fn config_path(&self, name: &str) -> PathBuf {
-    self.config.join(name)
-}
-```
+### ~~MEDIUM: `to_string_lossy()` can corrupt non-UTF-8 paths in `expand_tilde`~~ RESOLVED
 
-If `name` contains `..` components or an absolute path, `PathBuf::join` will traverse outside the intended directory or
-replace the base path entirely. Currently, callers use only hardcoded string literals, so this is not immediately
-exploitable. As a shared library, defensive validation would be prudent.
-
-**Recommendation:** Add validation that `name` does not contain path separators or `..` components.
-
-### MEDIUM: `to_string_lossy()` can corrupt non-UTF-8 paths in `expand_tilde`
-
-**File:** `src/lib.rs`, line 155
-
-`to_string_lossy()` replaces invalid Unicode sequences with U+FFFD. On Unix, paths can contain non-UTF-8 bytes, so this
-function could silently corrupt such paths.
-
-**Recommendation:** Use `OsStr`-based operations instead of lossy string conversion:
-
-```rust
-pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
-    let mut components = path.components();
-    if let Some(std::path::Component::Normal(first)) = components.next() {
-        if first == "~" {
-            let home = home_dir().ok_or_else(|| report!(DirectoryError::NoHomeDir))?;
-            let rest: PathBuf = components.collect();
-            return Ok(home.join(rest));
-        }
-    }
-    Ok(path.to_path_buf())
-}
-```
+Resolved: `expand_tilde` rewritten using `std::path::Component`-based matching, avoiding lossy string conversion
+entirely. Non-UTF-8 path components are preserved on Unix.
 
 ### MEDIUM: Sync `create_secure_dir` called from async context
 
@@ -142,7 +114,7 @@ sync writes.
 | ----------------------- | ---------- | ---------------------------------------------------------- |
 | File permission setting | GOOD       | Atomic at creation time for files; TOCTOU gap for dirs     |
 | TOCTOU                  | PASS       | `create_secure_dir` verifies/sets permissions on existing dirs |
-| Path traversal          | **MEDIUM** | `config_path`/`state_path` accept unsanitized names        |
+| Path traversal          | PASS       | `config_path`/`state_path` validate names via `validate_path_name()` |
 | Error handling          | PASS       | rootcause/thiserror with contextual path information       |
 | `unwrap`/`panic`        | PASS       | Zero in production code                                    |
 | Cross-platform          | FAIR       | Permission hardening is Unix-only; docs say "cross-platform" |

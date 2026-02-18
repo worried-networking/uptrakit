@@ -67,7 +67,8 @@ pub(crate) fn init_master_key(args: &crate::cli::Args) -> crate::Result<()> {
                 );
             }
             let key_bytes = parse_master_key_hex(&key_hex)?;
-            uptrakit_shared_db::crypto::init_master_key(key_bytes).context_to()?;
+            uptrakit_shared_db::crypto::init_master_key(zeroize::Zeroizing::new(key_bytes))
+                .context_to()?;
             tracing::info!("master encryption key initialized");
         }
         None => {

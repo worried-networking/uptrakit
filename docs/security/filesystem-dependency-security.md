@@ -13,6 +13,22 @@
 - All crates that write sensitive files (`controller/pki`, `service-sdk/identity`, `agent/client`) delegate to the
   `uptrakit-directories` crate rather than using raw `fs::write` / `tokio::fs::write`.
 
+## Path Traversal Prevention
+
+`AppDirs::config_path()` and `AppDirs::state_path()` validate the `name` argument before joining it to the base
+directory. The `validate_path_name()` function rejects:
+
+- Empty strings
+- Names containing path separators (`/` or `\`)
+- Relative path components (`.` or `..`)
+- Absolute paths
+
+This prevents path traversal attacks where a malicious or malformed name could escape the intended config/state
+directory via `..` components or by replacing the base path entirely (since `PathBuf::join` with an absolute path
+discards the base). Both methods return `Result<PathBuf>` with a `DirectoryError::PathTraversal` error on violation.
+
+See also: [Secrets Handling and Encryption](secrets-and-encryption.md) for master key zeroization.
+
 ## Dependency Security
 
 - `cargo-deny` runs in CI to check RustSec advisories, license compliance, and dependency anomalies.
