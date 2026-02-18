@@ -126,7 +126,7 @@ pub(crate) fn deserialize_service_msg(
     text: &str,
 ) -> ServiceWsResult<ServiceMessage> {
     let envelope: ServiceEnvelope = serde_json::from_str(text)
-        .map_err(|e| report!(ServiceWsError::Deserialize(format!("invalid message: {e}"))))?;
+        .context_transform(|e| ServiceWsError::Deserialize(format!("invalid message: {e}")))?;
     in_seq
         .validate(envelope.seq)
         .map_err(|e| report!(ServiceWsError::SequenceValidation(e.to_string())))?;

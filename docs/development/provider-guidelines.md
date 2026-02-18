@@ -129,6 +129,28 @@ macro handles the dispatch automatically.
 All provider `new()` constructors must return `Result<Self, Report<ProviderError>>` so the registry can handle
 instantiation failures uniformly. The constructor should validate its configuration before returning.
 
+### Bidirectional error conversion
+
+Every provider crate defines its own error enum (e.g., `DockerRegistryError`, `GitHubError`) and implements **bidirectional** `impl_report_conversion!`
+between the provider-specific error and the shared `ProviderError`:
+
+```rust
+use uptrakit_shared_macros::impl_report_conversion;
+
+// Provider-specific → shared (for the registry to propagate errors)
+impl_report_conversion!(DockerRegistryError => ProviderError, |e| ProviderError::ProviderInternal(e.to_string()));
+
+// Shared → provider-specific (for providers calling shared code that returns ProviderError)
+impl_report_conversion!(ProviderError => DockerRegistryError, |e| DockerRegistryError::Configuration(e.to_string()));
+```
+
+This bidirectional pattern allows:
+
+- The provider registry to convert provider errors into `ProviderError` when dispatching.
+- Provider implementations to call shared code (e.g., from `uptrakit-provider-core`) and convert `ProviderError` back into their local error type.
+
+When adding a new provider, always implement both directions.
+
 The agent crate imports `uptrakit-command` for shell execution and `uptrakit-provider-registry` for provider dispatch — it does not depend on
 `uptrakit-provider-core` directly. The web-api crate imports `uptrakit-provider-registry` (not `uptrakit-provider-core`). The wire protocol crate
 (`uptrakit-internal-wire`) imports `ProviderType`, `ReleaseAsset`, and `ReleaseInfo` directly from `uptrakit-shared-types`, keeping it free of

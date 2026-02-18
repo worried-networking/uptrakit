@@ -2,9 +2,8 @@ use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
     CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
-    ReportHostsPayload, ServiceMessage, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
-    now_millis,
+    ReportHostsPayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload, now_millis,
 };
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
 use uptrakit_service_sdk::{

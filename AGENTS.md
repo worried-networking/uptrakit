@@ -208,7 +208,7 @@ Every boundary (crate or module) must define its own typed error enum. Here is t
 **Required imports:**
 
 ```rust
-use rootcause::prelude::*;      // Report, report!, bail!, ResultExt, etc.
+use rootcause::prelude::*;      // Report, markers, report!, bail!, ResultExt, IteratorExt, handlers, IntoRootcause
 use thiserror::Error;            // #[derive(Debug, Error)]
 use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversions
 ```

@@ -92,7 +92,7 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .map_err(|e| report!(DockerRegistryError::Request(format!("GET failed: {e}"))))?;
+                .context_transform(|e| DockerRegistryError::Request(format!("GET failed: {e}")))?;
 
             if response.status() != reqwest::StatusCode::UNAUTHORIZED {
                 return self.handle_response(response).await;
@@ -107,7 +107,7 @@ impl RegistryClient {
             .get(url)
             .send()
             .await
-            .map_err(|e| report!(DockerRegistryError::Request(format!("GET failed: {e}"))))?;
+            .context_transform(|e| DockerRegistryError::Request(format!("GET failed: {e}")))?;
 
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www_auth = response
@@ -125,10 +125,8 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .map_err(|e| {
-                    report!(DockerRegistryError::Request(format!(
-                        "GET retry failed: {e}"
-                    )))
+                .context_transform(|e| {
+                    DockerRegistryError::Request(format!("GET retry failed: {e}"))
                 })?;
 
             return self.handle_response(retry_response).await;
@@ -149,7 +147,7 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .map_err(|e| report!(DockerRegistryError::Request(format!("HEAD failed: {e}"))))?;
+                .context_transform(|e| DockerRegistryError::Request(format!("HEAD failed: {e}")))?;
 
             if response.status() != reqwest::StatusCode::UNAUTHORIZED {
                 return self.extract_digest(response).await;
@@ -164,7 +162,7 @@ impl RegistryClient {
             .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT)
             .send()
             .await
-            .map_err(|e| report!(DockerRegistryError::Request(format!("HEAD failed: {e}"))))?;
+            .context_transform(|e| DockerRegistryError::Request(format!("HEAD failed: {e}")))?;
 
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www_auth = response
@@ -183,10 +181,8 @@ impl RegistryClient {
                 .bearer_auth(&token)
                 .send()
                 .await
-                .map_err(|e| {
-                    report!(DockerRegistryError::Request(format!(
-                        "HEAD retry failed: {e}"
-                    )))
+                .context_transform(|e| {
+                    DockerRegistryError::Request(format!("HEAD retry failed: {e}"))
                 })?;
 
             return self.extract_digest(retry_response).await;

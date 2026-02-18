@@ -356,7 +356,11 @@ fn validate_posix_username(username: &str) -> Result<()> {
     }
 
     let mut chars = username.chars();
-    let first = chars.next().expect("non-empty validated above");
+    let Some(first) = chars.next() else {
+        bail!(Error::InvalidInput(
+            "username must not be empty".to_string()
+        ));
+    };
     if !first.is_ascii_lowercase() && first != '_' {
         bail!(Error::InvalidInput(format!(
             "username '{username}' must start with a lowercase letter or underscore"

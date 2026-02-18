@@ -118,9 +118,7 @@ fn check_local_fallback(key: &str, max_requests: i32, window_secs: i64) -> RateL
     let now = Instant::now();
     let window = Duration::from_secs(window_secs as u64);
     let max = max_requests.max(0) as u32;
-    let mut guard = FALLBACK_LIMITS
-        .lock()
-        .unwrap();
+    let mut guard = FALLBACK_LIMITS.lock().unwrap();
 
     if let Some(entry) = guard.get_mut(key) {
         if now.duration_since(entry.window_start) >= window {
@@ -291,10 +289,7 @@ mod tests {
     #[test]
     fn local_fallback_enforces_limits() {
         let key = "test:127.0.0.1";
-        let _ = FALLBACK_LIMITS
-            .lock()
-            .unwrap()
-            .remove(key);
+        let _ = FALLBACK_LIMITS.lock().unwrap().remove(key);
 
         let limit = check_local_fallback(key, 2, 60);
         assert!(matches!(limit, RateLimitOutcome::Allowed));

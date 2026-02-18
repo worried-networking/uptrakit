@@ -404,7 +404,11 @@ pub(crate) async fn reconcile_all_settings(
         args.https_addr,
         uptrakit_web_api::settings::DEFAULT_HTTPS_ADDR
             .parse()
-            .expect("valid default HTTPS addr"),
+            .map_err(|_| {
+                report!(AppError::Config(
+                    "invalid default HTTPS address constant".to_string(),
+                ))
+            })?,
         force,
     )
     .await?;

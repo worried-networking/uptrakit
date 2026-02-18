@@ -176,7 +176,9 @@ fn parse_host_port(s: &str) -> Result<(String, Option<u16>), ParseSshTargetError
         if colon_count == 0 {
             Ok((s.to_string(), None))
         } else if colon_count == 1 {
-            let (host, port_str) = s.rsplit_once(':').expect("colon exists");
+            let Some((host, port_str)) = s.rsplit_once(':') else {
+                return Ok((s.to_string(), None));
+            };
             let port = parse_port(port_str)?;
             Ok((host.to_string(), Some(port)))
         } else {

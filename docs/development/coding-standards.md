@@ -2,7 +2,7 @@
 
 ## Error Handling - Overview
 
-- Wrap errors in `rootcause::Report` and define a `Result<T>` alias per boundary (e.g. `pub type Result<T> = Report<MyError>`).
+- Wrap errors in `rootcause::Report` and define a `Result<T>` alias per boundary (e.g. `pub type Result<T> = std::result::Result<T, Report<MyError>>`).
 - Use `thiserror::Error` with `#[derive(Debug, Error)]` to describe failures.
 - Implement `ReportConversion` (via `impl_report_conversion!`) for all downstream errors and prefer `.context_to()?` to preserve the chain.
 - Use `report!()` for creating new reports and `bail!()` for early returns.
@@ -90,9 +90,10 @@ enum definition. Every module boundary must define its own error type following 
 
 ### Import convention
 
-Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()` and
-`.context_to()`), and `IteratorExt`. When implementing `ReportConversion`, use the `impl_report_conversion!` macro from `uptrakit-shared-macros` (it
-handles the `ReportConversion` import internally):
+Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()`,
+`.context_to()`, and `.context_transform()`), `IteratorExt` (for `collect_reports()`), `handlers` (report handler configuration), and
+`IntoRootcause` (for converting plain `Result<T, E>` into `Result<T, Report<E>>`). When implementing `ReportConversion`, use the
+`impl_report_conversion!` macro from `uptrakit-shared-macros` (it handles the `ReportConversion` import internally):
 
 ```rust
 use rootcause::prelude::*;
@@ -319,6 +320,53 @@ These are error handling patterns that MUST NOT be used:
 - **`format!("error: {e}")` losing the error chain** — use `#[from]`, `context_transform()`, or `context_to()` to preserve the original error.
 - **Bare error enums without `Report`** — every boundary error type should use `pub type Result<T> = std::result::Result<T, Report<MyError>>`.
 - **`return Err(report!(...))`** — use `bail!(...)` instead for early returns.
+
+### Pattern 17: Batch error collection with `IteratorExt`
+
+The `IteratorExt` trait (from `rootcause::prelude`) provides `collect_reports()` for collecting results from iterators where individual items may fail.
+Instead of short-circuiting on the first error, `collect_reports()` accumulates all successes and all failures, allowing batch validation scenarios to
+report every problem at once:
+
+```rust
+let (successes, errors): (Vec<_>, Vec<_>) = items
+    .into_iter()
+    .map(|item| validate(item))
+    .collect_reports();
+```
+
+### Pattern 18: Orphan rule limitation for `IntoResponse`
+
+Due to Rust's orphan rule, downstream crates cannot implement `impl IntoResponse for Report<E>` because both `IntoResponse` (from `axum`) and
+`Report` (from `rootcause`) are foreign types. At HTTP handler call sites, handle errors inline instead:
+
+```rust
+pub async fn my_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match do_work(&state).await {
+        Ok(result) => Json(result).into_response(),
+        Err(report) => {
+            tracing::error!(error = %report, "operation failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+```
+
+### Pattern 19: Error assertion in tests with `current_context()`
+
+Use `current_context()` with `matches!()` to assert specific error variants in tests without matching on internal string messages:
+
+```rust
+#[test]
+fn rejects_empty_input() {
+    let err = parse("").unwrap_err();
+    assert!(
+        matches!(err.current_context(), MyError::Validation(_)),
+        "expected Validation error, got: {err}"
+    );
+}
+```
+
+This is more resilient than string matching because it survives error message changes.
 
 ### Mutex and RwLock locks
 

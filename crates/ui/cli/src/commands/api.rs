@@ -17,10 +17,7 @@ pub async fn execute(
     let client = authenticated_client(server_override, token_override, insecure)?;
 
     let body = match data {
-        Some(json_str) => Some(
-            serde_json::from_str(json_str)
-                .map_err(|e| report!(CliError::Other(format!("Invalid JSON data: {e}"))))?,
-        ),
+        Some(json_str) => Some(serde_json::from_str(json_str).context_to()?),
         None => None,
     };
 

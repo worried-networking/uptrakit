@@ -165,8 +165,7 @@ mod tests {
         let role_mapping = RoleMapping(map.clone());
 
         let json = serde_json::to_value(&role_mapping).expect("serialization is infallible");
-        let deserialized: RoleMapping =
-            serde_json::from_value(json).expect("should deserialize");
+        let deserialized: RoleMapping = serde_json::from_value(json).expect("should deserialize");
         assert_eq!(deserialized.0, map);
     }
 }

@@ -1300,7 +1300,6 @@ mod tests {
     const HIST_UUID: &str = "e1e2e3e4-f1f2-a1a2-b1b2-c1c2c3c4c5c6";
     const MQTT_UUID: &str = "01020304-0506-0708-090a-0b0c0d0e0f10";
     const OIDC_UUID: &str = "11121314-1516-1718-191a-1b1c1d1e1f20";
-    const ITEM_UUID_2: &str = "a0a0a0a0-b0b0-c0c0-d0d0-e0e0e0e0e0e1";
     const TARGET_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000001";
     const SOURCE_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000002";
 
@@ -1418,10 +1417,9 @@ mod tests {
 
     #[test]
     fn check_item_with_host_parses() {
-        let args = Cli::try_parse_from([
-            "uptrakit", "check", "item", ITEM_UUID, "--host", HOST_UUID,
-        ])
-        .expect("should parse");
+        let args =
+            Cli::try_parse_from(["uptrakit", "check", "item", ITEM_UUID, "--host", HOST_UUID])
+                .expect("should parse");
         match args.command {
             Some(Commands::Check {
                 command: CheckCommands::Item { item_id, host },
