@@ -80,12 +80,27 @@ Releases: fetches metadata; agent installs. | | `uptrakit-provider-homebrew` | `
 and updates. | | `uptrakit-provider-proxmox-helper-scripts` | `crates/providers/proxmox-helper-scripts/` | Proxmox VE: auto-discovers and manages
 helper scripts. |
 
-The **Provider Registry** crate centralizes all provider operations:
+The **Provider Registry** crate centralizes all provider operations using a `register_providers!` macro that generates
+all dispatch methods from a single declaration:
 
-- `ProviderRegistry::create_provider()` — creates `Provider` instances from `ProviderType`, config, and an `Arc<dyn CommandExecutor>`
-- `ProviderRegistry::validate_config()` — validates provider configuration JSON
-- `ProviderRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for API responses (delegates to the `SecretMasking`
-  trait implemented on each config struct)
+```rust
+register_providers! {
+    GithubReleases => { config: GitHubConfig, provider: GitHubProvider },
+    DockerRegistry => { config: DockerRegistryConfig, provider: DockerRegistryProvider },
+    ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, provider: ProxmoxHelperScriptsProvider },
+    Homebrew => { config: HomebrewConfig, provider: HomebrewProvider },
+}
+```
+
+The macro generates four methods:
+
+- `ProviderRegistry::create_provider()` — deserializes config, validates it, and instantiates the provider.
+- `ProviderRegistry::validate_config()` — deserializes and validates provider configuration JSON.
+- `ProviderRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for API responses
+  (delegates to the `SecretMasking` trait implemented on each config struct).
+
+To add a new provider, add a single entry to the `register_providers!` invocation. The macro generates all match arms
+for all four methods automatically, eliminating the need to update multiple match blocks manually.
 
 ### Secret masking with the `SecretMasking` trait
 
@@ -108,11 +123,11 @@ when GitHub config is present) override both methods with field-level masking lo
 The registry uses generic helpers `mask_secrets_for::<T>()` and `restore_secrets_for::<T>()` that deserialize the JSON config, apply the trait
 methods, and re-serialize. This eliminates duplicated deserialize-method-serialize boilerplate per provider.
 
-When adding a new provider with secrets, implement `SecretMasking` on your config struct. The registry match arms become one-liners:
+When adding a new provider with secrets, implement `SecretMasking` on your config struct. The `register_providers!`
+macro handles the dispatch automatically.
 
-```rust
-ProviderType::MyProvider => mask_secrets_for::<MyProviderConfig>(config),
-```
+All provider `new()` constructors must return `Result<Self, Report<ProviderError>>` so the registry can handle
+instantiation failures uniformly. The constructor should validate its configuration before returning.
 
 The agent crate imports `uptrakit-command` for shell execution and `uptrakit-provider-registry` for provider dispatch — it does not depend on
 `uptrakit-provider-core` directly. The web-api crate imports `uptrakit-provider-registry` (not `uptrakit-provider-core`). The wire protocol crate

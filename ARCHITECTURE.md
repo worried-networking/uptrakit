@@ -82,6 +82,9 @@ The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared 
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
 - **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust).
 - **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation, Ping/Pong handling, and
-  close-frame reason tracking. Used by both agent and MQTT service.
+  close-frame reason tracking. Used by both agent and MQTT service. Sequence validation is performed before full message deserialization to ensure
+  unrecognized messages do not cause sequence mismatches.
+- **CertificateRenewalHandler**: Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`,
+  `compute_renewal_delay`) used by all three service types for proactive certificate renewal.
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
 - **CLI**: Common CLI arguments (`--url`, `--config-dir`, `--state-dir`, `--force-enroll`, etc.).

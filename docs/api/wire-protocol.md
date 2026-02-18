@@ -70,6 +70,10 @@ Every envelope (`ServiceEnvelope` / `ControllerEnvelope`) carries a monotonicall
 Each connection tracks per-direction counters; mismatched sequences cause the connection to close with
 `ErrorCode::SequenceError`.
 
+Sequence validation is performed before full message deserialization. When a message has a valid sequence number but
+an unrecognized type (e.g., from a newer protocol version), the sequence counter is correctly advanced and the message
+is silently skipped. This ensures that unknown message types do not cause sequence mismatches on subsequent messages.
+
 ## Connection Limits
 
 | Limit | Value | Description |
@@ -83,6 +87,8 @@ Each connection tracks per-direction counters; mismatched sequences cause the co
 | Approval timeout (client) | 30 minutes | The `wait_for_approval` loop times out after 30 minutes. The caller retries the enrollment flow on timeout. |
 
 ## Error Codes
+
+The `ErrorCode` enum is marked `#[non_exhaustive]` — new codes may be added in future protocol versions. Consumers should include a wildcard match arm.
 
 | Code | Description |
 | --- | --- |
@@ -145,6 +151,18 @@ will have them default to `None` on the controller side. No protocol version bum
 Both the regular agent and the SSH agent send `report_hosts`. The regular agent sets `hostname`
 from local system calls. The SSH agent sets `hostname` from the remote host's `hostname` command
 and `ip_address` from the SSH target address.
+
+## Forward Compatibility
+
+Several wire protocol enums are marked `#[non_exhaustive]` to allow adding new variants without breaking downstream
+consumers:
+
+- `ErrorCode` — new error codes may be added.
+- `EnrollmentStatus` — new enrollment statuses may be added.
+- `UpdateFinalStatus` — new update result statuses may be added.
+- `DisconnectReason` — new disconnect reasons may be added.
+
+Consumers matching on these enums must include a wildcard (`_`) arm to handle unknown variants gracefully.
 
 ## AsyncAPI Specification
 

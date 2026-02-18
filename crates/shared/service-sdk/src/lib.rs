@@ -10,7 +10,10 @@ pub mod tls;
 pub(crate) mod ws;
 
 pub use backoff::Backoff;
-pub use cert_handler::CertificateRenewalHandler;
+pub use cert_handler::{
+    CertificateRenewalHandler, FAR_FUTURE, compute_renewal_delay, create_renewal_sleep,
+    update_renewal_schedule,
+};
 pub use connection::ControllerConnection;
 pub use error::{
     CaError, EnrollmentError, IdentityError, ProtocolError, Result, TlsError,

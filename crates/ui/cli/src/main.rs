@@ -168,16 +168,8 @@ enum SoftwareItemsCommands {
 enum CheckCommands {
     /// Trigger bulk version check (all items, all hosts)
     All,
-    /// Trigger installed version check for a software item
-    Installed {
-        /// Software item UUID
-        item_id: Uuid,
-        /// Optionally scope to a specific host
-        #[arg(long)]
-        host: Option<Uuid>,
-    },
-    /// Trigger available version check for a software item
-    Available {
+    /// Trigger version check for a software item
+    Item {
         /// Software item UUID
         item_id: Uuid,
         /// Optionally scope to a specific host
@@ -819,19 +811,8 @@ async fn main() {
                 )
                 .await
             }
-            CheckCommands::Installed { item_id, host } => {
-                commands::check::installed(
-                    &item_id,
-                    host.as_ref(),
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
-                    insecure,
-                )
-                .await
-            }
-            CheckCommands::Available { item_id, host } => {
-                commands::check::available(
+            CheckCommands::Item { item_id, host } => {
+                commands::check::item(
                     &item_id,
                     host.as_ref(),
                     cli.server.as_deref(),
@@ -1421,54 +1402,34 @@ mod tests {
     }
 
     #[test]
-    fn check_installed_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "check", "installed", ITEM_UUID])
-            .expect("should parse");
+    fn check_item_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "check", "item", ITEM_UUID]).expect("should parse");
         match args.command {
             Some(Commands::Check {
-                command: CheckCommands::Installed { item_id, host },
+                command: CheckCommands::Item { item_id, host },
             }) => {
                 assert_eq!(item_id, uuid(ITEM_UUID));
                 assert!(host.is_none());
             }
-            _ => panic!("expected Check Installed"),
+            _ => panic!("expected Check Item"),
         }
     }
 
     #[test]
-    fn check_installed_with_host_parses() {
+    fn check_item_with_host_parses() {
         let args = Cli::try_parse_from([
-            "uptrakit",
-            "check",
-            "installed",
-            ITEM_UUID,
-            "--host",
-            HOST_UUID,
+            "uptrakit", "check", "item", ITEM_UUID, "--host", HOST_UUID,
         ])
         .expect("should parse");
         match args.command {
             Some(Commands::Check {
-                command: CheckCommands::Installed { item_id, host },
+                command: CheckCommands::Item { item_id, host },
             }) => {
                 assert_eq!(item_id, uuid(ITEM_UUID));
                 assert_eq!(host, Some(uuid(HOST_UUID)));
             }
-            _ => panic!("expected Check Installed"),
-        }
-    }
-
-    #[test]
-    fn check_available_parses() {
-        let args = Cli::try_parse_from(["uptrakit", "check", "available", ITEM_UUID_2])
-            .expect("should parse");
-        match args.command {
-            Some(Commands::Check {
-                command: CheckCommands::Available { item_id, host },
-            }) => {
-                assert_eq!(item_id, uuid(ITEM_UUID_2));
-                assert!(host.is_none());
-            }
-            _ => panic!("expected Check Available"),
+            _ => panic!("expected Check Item"),
         }
     }
 

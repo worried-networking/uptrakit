@@ -162,15 +162,44 @@ Then delegate the three controller messages inside the `select!` loop:
 `None` means continue, `Some` means break | | `Certificate` | `handle_certificate(&mut self, identity, payload)` | `Result<LoopOutcome>` — `Reconnect`
 on success, `Disconnected` if no pending key |
 
-For timer-based renewal (agent only), call `initiate_renewal` directly:
+For timer-based proactive renewal, use the SDK-provided helpers instead of implementing the timer manually:
 
 ```rust
-let csr_pem = cert_handler.initiate_renewal(identity)?;
-conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload { csr_pem })).await?;
+use uptrakit_service_sdk::{create_renewal_sleep, update_renewal_schedule};
+
+// Before the message loop:
+let mut renewal_sleep = create_renewal_sleep();
+
+// In the ServiceSettings handler:
+update_renewal_schedule(&mut renewal_sleep, cert_not_after_ts, settings.renewal_window_hours);
+
+// In tokio::select!:
+_ = &mut renewal_sleep => {
+    if let Some(o) = cert_handler.handle_renewal_timer(identity, &mut conn, &mut renewal_sleep).await {
+        break o;
+    }
+}
 ```
 
+The `handle_renewal_timer` method handles CSR generation, sending the `RenewCertificate` message, and resetting the
+timer to far-future. It returns `Some(LoopOutcome)` on failure (the caller should break) or `None` on success.
+
 `initiate_renewal` extracts the service ID from `identity`, generates a fresh ECDSA P-256 keypair and CSR, stores the private key internally, and
-returns the CSR PEM to send to the controller.
+returns the CSR PEM to send to the controller. It is called internally by `handle_renewal_timer` and
+`handle_request_cert_renewal`, and can also be called directly if custom renewal logic is needed.
+
+### Renewal timer helpers
+
+The SDK provides shared helper functions for proactive certificate renewal timers:
+
+| Function | Purpose |
+| --- | --- |
+| `create_renewal_sleep()` | Creates a pinned `Sleep` initialized to `FAR_FUTURE` (30 days). |
+| `update_renewal_schedule(sleep, cert_not_after_ts, window_hours)` | Resets the timer based on certificate expiry and renewal window. |
+| `compute_renewal_delay(cert_not_after_ts, window_hours)` | Computes the delay until the renewal window opens. |
+| `handle_renewal_timer(identity, conn, renewal_sleep)` | Initiates renewal, sends CSR, and resets timer. |
+
+All three service types (agent, SSH agent, MQTT) use these helpers for consistent renewal behavior.
 
 ### Internal state
 

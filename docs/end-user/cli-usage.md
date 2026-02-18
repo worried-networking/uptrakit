@@ -114,15 +114,13 @@ Trigger version checks to discover installed and available versions.
 uptrakit check all
 
 # Trigger version check for a specific software item (all assigned hosts)
-uptrakit check installed <ITEM_ID>
-uptrakit check available <ITEM_ID>
+uptrakit check item <ITEM_ID>
 
 # Scope to a specific host
-uptrakit check installed <ITEM_ID> --host <HOST_ID>
-uptrakit check available <ITEM_ID> --host <HOST_ID>
+uptrakit check item <ITEM_ID> --host <HOST_ID>
 ```
 
-`check installed` and `check available` use the same API endpoint (the agent checks both installed and available versions). They are separated for clarity.
+`check item` triggers a version check for a specific software item. The agent checks both installed and available versions in a single operation.
 
 `check all` finds the `version_check` scheduler task and triggers it.
 

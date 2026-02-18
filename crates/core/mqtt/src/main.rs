@@ -14,7 +14,8 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_service_sdk::{
     AuthenticatedContext, CertificateRenewalHandler, ControllerConnection, LoopOutcome,
-    ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
+    ServiceConfig, ServiceEnrollmentInfo, ServiceHandler, create_renewal_sleep,
+    update_renewal_schedule,
 };
 
 use crate::tenant_manager::TenantManager;
@@ -159,6 +160,12 @@ async fn run_mqtt_authenticated_loop(
     // RequestCertRenewal, Certificate) and the pending renewal key.
     let mut cert_handler = CertificateRenewalHandler::new();
 
+    // Track certificate expiry for the proactive renewal timer.
+    let cert_not_after_ts = identity.cert_not_after_ms();
+
+    // Renewal timer — initially far-future, reset when ServiceSettings arrives.
+    let mut renewal_sleep = create_renewal_sleep();
+
     tracing::info!("connecting to controller (authenticated)");
     let mut conn = ControllerConnection::connect(host, port, &tls_connector, None).await?;
 
@@ -222,6 +229,11 @@ async fn run_mqtt_authenticated_loop(
                                 "controller protocol version mismatch"
                             );
                         }
+                        update_renewal_schedule(
+                            &mut renewal_sleep,
+                            cert_not_after_ts,
+                            settings.renewal_window_hours,
+                        );
                     }
                     Some(ControllerMessage::CaBundleUpdated(payload)) => {
                         cert_handler.handle_ca_bundle_updated(identity, &payload).await;
@@ -279,6 +291,11 @@ async fn run_mqtt_authenticated_loop(
                 tracing::trace!(service_ts, "sending ping");
                 conn.send(ServiceMessage::Ping(PingPayload { service_ts }))
                     .await?;
+            }
+            _ = &mut renewal_sleep => {
+                if let Some(o) = cert_handler.handle_renewal_timer(identity, &mut conn, &mut renewal_sleep).await {
+                    break o;
+                }
             }
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("received SIGINT, initiating graceful shutdown");

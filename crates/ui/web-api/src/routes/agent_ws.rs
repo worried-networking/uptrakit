@@ -491,7 +491,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 let mut active: update_history::ActiveModel = record.clone().into();
                                 active.status = Set(match payload.status {
                                     UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
-                                    UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
+                                    UpdateFinalStatus::Failed | _ => update_history::UpdateStatus::Failed,
                                 });
                                 active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
                                 let capped_output = if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {

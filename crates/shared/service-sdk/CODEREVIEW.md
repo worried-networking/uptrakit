@@ -60,32 +60,13 @@ let (host, port) = args
 (or an `InitError` sub-enum) for pre-protocol initialization failures. This
 preserves semantic error matching.
 
-#### M2: `recv()` silently ignores unrecognized controller messages
+#### ~~M2: `recv()` silently ignores unrecognized controller messages~~ (FIXED)
 
-**File:** `src/connection.rs:80-87`
-
-When a `ControllerEnvelope` fails to deserialize (e.g., a new message type
-from a newer controller), the connection logs at `debug` level and continues.
-While this provides forward compatibility, the consumed sequence number means
-the next valid message will have a gap, causing a sequence validation failure
-(line 88-92) that terminates the connection.
-
-```rust
-Err(e) => {
-    tracing::debug!("ignoring unrecognized controller message: {e}");
-    continue;  // But seq was never validated, so next message will fail
-}
-```
-
-Actually, looking more carefully: the sequence is only validated *after*
-successful deserialization (line 88), so an unrecognized message does not
-advance the sequence counter. The controller still increments its outgoing
-counter, so the next recognized message will have a higher-than-expected
-sequence number.
-
-**Recommendation:** Consider validating the sequence number from raw JSON
-before full deserialization (extract `seq` field first), or documenting that
-unrecognized messages will cause a sequence mismatch and connection reset.
+**Resolution:** Sequence validation is now performed before full message
+deserialization using a minimal `SeqOnly` struct that extracts just the
+`seq` field. This ensures unrecognized messages correctly advance the
+sequence counter without causing mismatches on subsequent messages. Applied
+to both text and binary message handlers.
 
 ### Low
 

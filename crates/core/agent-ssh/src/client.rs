@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,16 +9,16 @@ use uptrakit_internal_wire::{
     ReportHostsPayload, ServiceMessage, now_millis,
 };
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
-use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
+use uptrakit_service_sdk::{
+    CertificateRenewalHandler, ControllerConnection, LoopOutcome, create_renewal_sleep,
+    update_renewal_schedule,
+};
 
 use crate::error::{Error, Result};
 use crate::host_info::collect_remote_host_info;
 use crate::host_ops::list_hosts;
 use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig, SshSession};
-
-/// Far-future delay used when no renewal is scheduled (30 days).
-const FAR_FUTURE: Duration = Duration::from_secs(30 * 24 * 3600);
 
 /// Create a [`CommandExecutor`] that runs commands on a remote host via
 /// the given SSH session.
@@ -29,18 +28,6 @@ const FAR_FUTURE: Duration = Duration::from_secs(30 * 24 * 3600);
 /// protocol messages for a specific host.
 pub fn create_ssh_executor(session: Arc<SshSession>) -> Arc<dyn CommandExecutor> {
     Arc::new(SshCommandExecutor::new(session))
-}
-
-/// Compute how long until the renewal window opens.
-fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> Duration {
-    match cert_not_after_ts {
-        Some(not_after) => {
-            let renew_at = not_after - i64::from(window_hours) * 3600 * 1000;
-            let delay_ms = (renew_at - now_millis()).max(0) as u64;
-            Duration::from_millis(delay_ms)
-        }
-        None => FAR_FUTURE,
-    }
 }
 
 /// Parameters for [`run_authenticated_loop`].
@@ -107,7 +94,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     ping_interval.tick().await;
 
     // Renewal timer — initially far-future, reset when ServiceSettings arrives.
-    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
+    let mut renewal_sleep = create_renewal_sleep();
 
     let mut cert_handler = CertificateRenewalHandler::new();
 
@@ -128,23 +115,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                     .context_to::<Error>()?;
             }
             _ = &mut renewal_sleep => {
-                tracing::info!("renewal window reached, requesting certificate renewal");
-                let csr_pem = match cert_handler.initiate_renewal(identity) {
-                    Ok(csr) => csr,
-                    Err(e) => {
-                        tracing::error!(error = %e, "cannot renew certificate");
-                        break LoopOutcome::Disconnected;
-                    }
-                };
-                conn.send(ServiceMessage::RenewCertificate(uptrakit_internal_wire::RenewCertificatePayload {
-                    csr_pem,
-                }))
-                .await
-                .context_to::<Error>()?;
-                // Reset to far-future so it doesn't fire again.
-                renewal_sleep.as_mut().reset(
-                    tokio::time::Instant::now() + FAR_FUTURE
-                );
+                if let Some(o) = cert_handler.handle_renewal_timer(identity, &mut conn, &mut renewal_sleep).await {
+                    break o;
+                }
             }
             msg = conn.recv() => {
                 match msg.context_to::<Error>()? {
@@ -179,12 +152,10 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                     );
                                 }
                                 shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
-                                renewal_sleep.as_mut().reset(
-                                    tokio::time::Instant::now()
-                                        + compute_renewal_delay(
-                                            cert_not_after_ts,
-                                            settings.renewal_window_hours,
-                                        ),
+                                update_renewal_schedule(
+                                    &mut renewal_sleep,
+                                    cert_not_after_ts,
+                                    settings.renewal_window_hours,
                                 );
 
                                 // Check if CA bundle is stale.
@@ -391,48 +362,6 @@ async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── compute_renewal_delay ───────────────────────────────────────────
-
-    #[test]
-    fn renewal_delay_no_cert() {
-        let delay = compute_renewal_delay(None, 168);
-        assert_eq!(delay, FAR_FUTURE);
-    }
-
-    #[test]
-    fn renewal_delay_future_cert() {
-        let thirty_days_ms = 30 * 24 * 3600 * 1000_i64;
-        let not_after = now_millis() + thirty_days_ms;
-        let delay = compute_renewal_delay(Some(not_after), 168);
-        let twenty_three_days = Duration::from_millis(23 * 24 * 3600 * 1000);
-        assert!(delay >= twenty_three_days - Duration::from_secs(1));
-        assert!(delay <= twenty_three_days + Duration::from_secs(1));
-    }
-
-    #[test]
-    fn renewal_delay_already_in_window() {
-        let three_days_ms = 3 * 24 * 3600 * 1000_i64;
-        let not_after = now_millis() + three_days_ms;
-        let delay = compute_renewal_delay(Some(not_after), 168);
-        assert_eq!(delay, Duration::ZERO);
-    }
-
-    #[test]
-    fn renewal_delay_expired_cert() {
-        let not_after = now_millis() - 1000;
-        let delay = compute_renewal_delay(Some(not_after), 168);
-        assert_eq!(delay, Duration::ZERO);
-    }
-
-    #[test]
-    fn renewal_delay_zero_window() {
-        let one_hour_ms = 3600 * 1000_i64;
-        let not_after = now_millis() + one_hour_ms;
-        let delay = compute_renewal_delay(Some(not_after), 0);
-        assert!(delay >= Duration::from_secs(3599));
-        assert!(delay <= Duration::from_secs(3601));
-    }
 
     // ── compute_local_ca_hash ───────────────────────────────────────────
 

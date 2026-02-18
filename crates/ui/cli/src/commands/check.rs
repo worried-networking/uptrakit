@@ -41,32 +41,8 @@ pub async fn all(
     print_output(format, &human, &resp)
 }
 
-/// Trigger an installed version check for a specific software item.
-pub async fn installed(
-    item_id: &Uuid,
-    host_id: Option<&Uuid>,
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    check_item(item_id, host_id, server, token, format, insecure).await
-}
-
-/// Trigger an available version check for a specific software item.
-pub async fn available(
-    item_id: &Uuid,
-    host_id: Option<&Uuid>,
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    check_item(item_id, host_id, server, token, format, insecure).await
-}
-
-/// Shared implementation: both `installed` and `available` use the same API endpoint.
-async fn check_item(
+/// Trigger a version check for a specific software item.
+pub async fn item(
     item_id: &Uuid,
     host_id: Option<&Uuid>,
     server: Option<&str>,

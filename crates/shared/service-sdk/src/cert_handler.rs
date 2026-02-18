@@ -4,17 +4,69 @@
 //! `CaBundleUpdated`, `RequestCertRenewal`, and `Certificate` controller
 //! messages. Both the agent and MQTT service delegate to this handler instead
 //! of duplicating the same logic.
+//!
+//! This module also provides shared helpers for proactive certificate renewal
+//! timers:
+//!
+//! - [`FAR_FUTURE`] — default delay when no renewal is scheduled.
+//! - [`compute_renewal_delay`] — calculates how long until the renewal window.
+//! - [`create_renewal_sleep`] — creates a pinned `Sleep` initialized to
+//!   [`FAR_FUTURE`].
+//! - [`update_renewal_schedule`] — resets a pinned `Sleep` based on
+//!   certificate expiry and renewal window.
+
+use std::pin::Pin;
+use std::time::Duration;
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     CaBundleUpdatedPayload, CertificatePayload, RenewCertificatePayload, RequestCertRenewalPayload,
-    ServiceMessage,
+    ServiceMessage, now_millis,
 };
 
 use crate::connection::ControllerConnection;
 use crate::error::{EnrollmentError, IdentityError, Result};
 use crate::identity::{ServiceIdentityState, generate_keypair_and_csr};
 use crate::lifecycle::LoopOutcome;
+
+/// Far-future delay used when no renewal is scheduled (30 days).
+pub const FAR_FUTURE: Duration = Duration::from_secs(30 * 24 * 3600);
+
+/// Compute how long until the renewal window opens.
+///
+/// Returns [`FAR_FUTURE`] when `cert_not_after_ts` is `None` (no certificate
+/// known). Returns `Duration::ZERO` when the renewal window is already open
+/// or the certificate has expired.
+pub fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> Duration {
+    match cert_not_after_ts {
+        Some(not_after) => {
+            let renew_at = not_after - i64::from(window_hours) * 3600 * 1000;
+            let delay_ms = (renew_at - now_millis()).max(0) as u64;
+            Duration::from_millis(delay_ms)
+        }
+        None => FAR_FUTURE,
+    }
+}
+
+/// Create a pinned `Sleep` future initialized to [`FAR_FUTURE`].
+///
+/// Use [`update_renewal_schedule`] to reset it when `ServiceSettings`
+/// arrives.
+pub fn create_renewal_sleep() -> Pin<Box<tokio::time::Sleep>> {
+    Box::pin(tokio::time::sleep(FAR_FUTURE))
+}
+
+/// Reset the renewal timer based on the certificate's `not_after` timestamp
+/// and the renewal window in hours.
+pub fn update_renewal_schedule(
+    sleep: &mut Pin<Box<tokio::time::Sleep>>,
+    cert_not_after_ts: Option<i64>,
+    window_hours: u16,
+) {
+    sleep.as_mut().reset(
+        tokio::time::Instant::now() + compute_renewal_delay(cert_not_after_ts, window_hours),
+    );
+}
 
 /// Handles certificate lifecycle controller messages shared across all service
 /// types.
@@ -142,6 +194,45 @@ impl CertificateRenewalHandler {
         self.pending_renewal_key = Some(key_pem);
         Ok(csr_pem)
     }
+
+    /// Handle the proactive renewal timer firing: initiate renewal, send CSR,
+    /// and reset the timer to [`FAR_FUTURE`].
+    ///
+    /// Returns `Some(LoopOutcome)` if the renewal cannot be initiated or sent
+    /// (the caller should `break` the loop). Returns `None` on success.
+    ///
+    /// This is the recommended way to handle the `_ = &mut renewal_sleep`
+    /// branch in `tokio::select!`. The timer itself is passed in because
+    /// `tokio::select!` borrows `self` mutably at the same time.
+    pub async fn handle_renewal_timer(
+        &mut self,
+        identity: &ServiceIdentityState,
+        conn: &mut ControllerConnection,
+        renewal_sleep: &mut Pin<Box<tokio::time::Sleep>>,
+    ) -> Option<LoopOutcome> {
+        tracing::info!("renewal window reached, requesting certificate renewal");
+        let csr_pem = match self.initiate_renewal(identity) {
+            Ok(csr) => csr,
+            Err(e) => {
+                tracing::error!(error = %e, "cannot renew certificate");
+                return Some(LoopOutcome::Disconnected);
+            }
+        };
+        if let Err(e) = conn
+            .send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
+                csr_pem,
+            }))
+            .await
+        {
+            tracing::error!(error = %e, "failed to send renewal request");
+            return Some(LoopOutcome::Disconnected);
+        }
+        // Reset to far-future so it doesn't fire again.
+        renewal_sleep
+            .as_mut()
+            .reset(tokio::time::Instant::now() + FAR_FUTURE);
+        None
+    }
 }
 
 impl Default for CertificateRenewalHandler {
@@ -154,6 +245,50 @@ impl Default for CertificateRenewalHandler {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    // ── compute_renewal_delay ───────────────────────────────────────────
+
+    #[test]
+    fn renewal_delay_no_cert() {
+        let delay = compute_renewal_delay(None, 168);
+        assert_eq!(delay, FAR_FUTURE);
+    }
+
+    #[test]
+    fn renewal_delay_future_cert() {
+        let thirty_days_ms = 30 * 24 * 3600 * 1000_i64;
+        let not_after = now_millis() + thirty_days_ms;
+        let delay = compute_renewal_delay(Some(not_after), 168);
+        let twenty_three_days = Duration::from_millis(23 * 24 * 3600 * 1000);
+        assert!(delay >= twenty_three_days - Duration::from_secs(1));
+        assert!(delay <= twenty_three_days + Duration::from_secs(1));
+    }
+
+    #[test]
+    fn renewal_delay_already_in_window() {
+        let three_days_ms = 3 * 24 * 3600 * 1000_i64;
+        let not_after = now_millis() + three_days_ms;
+        let delay = compute_renewal_delay(Some(not_after), 168);
+        assert_eq!(delay, Duration::ZERO);
+    }
+
+    #[test]
+    fn renewal_delay_expired_cert() {
+        let not_after = now_millis() - 1000;
+        let delay = compute_renewal_delay(Some(not_after), 168);
+        assert_eq!(delay, Duration::ZERO);
+    }
+
+    #[test]
+    fn renewal_delay_zero_window() {
+        let one_hour_ms = 3600 * 1000_i64;
+        let not_after = now_millis() + one_hour_ms;
+        let delay = compute_renewal_delay(Some(not_after), 0);
+        assert!(delay >= Duration::from_secs(3599));
+        assert!(delay <= Duration::from_secs(3601));
+    }
+
+    // ── CertificateRenewalHandler ──────────────────────────────────────
 
     #[tokio::test]
     async fn initiate_renewal_returns_csr() {

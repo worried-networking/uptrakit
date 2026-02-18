@@ -75,22 +75,13 @@ subsequent `TenantAssignments`), or document that this message is handled
 server-side only and the MQTT service receives assignments via
 `TenantAssignments`.
 
-#### M3: No proactive certificate renewal timer
+#### ~~M3: No proactive certificate renewal timer~~ (FIXED)
 
-**File:** `src/main.rs:142-320`
-
-Unlike the agent (`crates/core/agent/src/client.rs:94-95, 161-178`), the
-MQTT service does not set up a renewal timer based on
-`ServiceSettings.renewal_window_hours`. It only responds to
-`RequestCertRenewal` from the controller.
-
-This means certificate renewal depends entirely on the controller sending
-a `RequestCertRenewal` message. If the controller fails to send this
-message (e.g., controller restart during the renewal window), the MQTT
-service's certificate may expire.
-
-**Recommendation:** Add a renewal timer matching the agent's implementation
-to ensure the MQTT service can proactively renew certificates.
+**Resolution:** Added proactive certificate renewal timer using the shared
+`create_renewal_sleep()`, `update_renewal_schedule()`, and
+`handle_renewal_timer()` helpers from the service-sdk. The MQTT service
+now renews certificates independently of controller-pushed
+`RequestCertRenewal` messages, matching the agent's behavior.
 
 ### Low
 

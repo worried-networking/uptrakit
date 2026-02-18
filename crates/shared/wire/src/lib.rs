@@ -20,6 +20,7 @@ pub use uptrakit_shared_types::SecretString;
 
 /// Enrollment status returned in the `Enrolled` message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum EnrollmentStatus {
     Pending,
@@ -271,6 +272,7 @@ mod utc_datetime_millis {
 
 /// Machine-readable error code sent in `ErrorPayload`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// Malformed or unexpected message from the service.
@@ -409,6 +411,7 @@ pub struct VersionCheckResult {
 
 /// Final status of an update execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateFinalStatus {
     Completed,
@@ -478,6 +481,7 @@ pub struct UpdateResultPayload {
 
 /// Reason for service disconnection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum DisconnectReason {
     /// SIGTERM/SIGINT - clean exit.

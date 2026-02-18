@@ -7,6 +7,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use rootcause::prelude::*;
+use serde::Deserialize;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
     CloseReason, ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq, ServiceMessage,
@@ -14,6 +15,15 @@ use uptrakit_internal_wire::{
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
 use crate::ws::{WsStream, connect_ws, is_peer_closed, log_close_frame};
+
+/// Minimal envelope used to extract the sequence number before full
+/// deserialization. This lets us advance the incoming sequence counter even
+/// when the message payload cannot be parsed (e.g. a new variant the service
+/// doesn't know about yet).
+#[derive(Deserialize)]
+struct SeqOnly {
+    seq: u64,
+}
 
 /// Authenticated WebSocket connection to the controller.
 ///
@@ -78,6 +88,17 @@ impl ControllerConnection {
         loop {
             match self.ws.next().await {
                 Some(Ok(Message::Text(text))) => {
+                    // Extract and validate the sequence number first, before
+                    // attempting to deserialize the full message. This ensures
+                    // the counter stays in sync even when the payload contains
+                    // an unknown variant.
+                    let seq_only: SeqOnly =
+                        serde_json::from_str(&text).context_to::<EnrollmentError>()?;
+                    if let Err(e) = self.in_seq.validate(seq_only.seq) {
+                        bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+                            format!("sequence validation failed: {e}")
+                        )));
+                    }
                     let envelope: ControllerEnvelope = match serde_json::from_str(&text) {
                         Ok(env) => env,
                         Err(e) => {
@@ -85,21 +106,23 @@ impl ControllerConnection {
                             continue;
                         }
                     };
-                    if let Err(e) = self.in_seq.validate(envelope.seq) {
-                        bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
-                            format!("sequence validation failed: {e}")
-                        )));
-                    }
                     return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Binary(data))) => {
-                    let envelope: ControllerEnvelope =
+                    let seq_only: SeqOnly =
                         serde_json::from_slice(&data).context_to::<EnrollmentError>()?;
-                    if let Err(e) = self.in_seq.validate(envelope.seq) {
+                    if let Err(e) = self.in_seq.validate(seq_only.seq) {
                         bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(
                             format!("sequence validation failed: {e}")
                         )));
                     }
+                    let envelope: ControllerEnvelope = match serde_json::from_slice(&data) {
+                        Ok(env) => env,
+                        Err(e) => {
+                            tracing::debug!("ignoring unrecognized controller binary message: {e}");
+                            continue;
+                        }
+                    };
                     return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Ping(data))) => {

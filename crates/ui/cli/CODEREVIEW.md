@@ -98,34 +98,11 @@ insecurely.
 
 ## 2. Architecture
 
-### A-1: `check::installed` and `check::available` are functionally identical [HIGH]
+### ~~A-1: `check::installed` and `check::available` are functionally identical~~ [FIXED]
 
-**File:** `src/commands/check.rs:44-66`
-
-Both `installed()` and `available()` delegate to `check_item()` with identical arguments
-and no distinguishing logic. The two subcommands appear to exist for semantic UX purposes
-but call the exact same API endpoint, making the distinction misleading to users.
-
-```rust
-pub async fn installed(...) -> Result<()> {
-    check_item(item_id, host_id, server, token, format, insecure).await
-}
-
-pub async fn available(...) -> Result<()> {
-    check_item(item_id, host_id, server, token, format, insecure).await
-}
-```
-
-**Impact:** A user running `uptrakit check installed <id>` expects only an installed-version
-check, but gets the same behavior as `check available`. This is either:
-
-- A **missing feature**: the API endpoint should accept a `check_type` parameter, or
-  separate endpoints should exist.
-- **Dead differentiation**: if the API intentionally handles both in one call, the CLI
-  should expose a single `check item` subcommand instead of two aliases.
-
-**Recommendation:** Either differentiate the behavior (pass a check-type parameter to the
-API) or collapse into a single `check item` subcommand.
+**Resolution:** Collapsed `check installed` and `check available` into a single
+`check item` subcommand. The `installed()` and `available()` functions were removed
+and replaced with `item()`. CLI tests updated to match.
 
 ---
 
@@ -247,7 +224,7 @@ Low priority since types are only used within the crate.
 
 | Priority | ID | Description |
 | --- | --- | --- |
-| 1 | A-1 | Fix or collapse `check installed`/`check available` |
+| ~~1~~ | ~~A-1~~ | ~~Fix or collapse `check installed`/`check available`~~ (FIXED) |
 | 2 | Q-1 | Fix human output spacing inconsistencies |
 | 3 | Q-2 | Use `Uuid` for auth output ID fields |
 | 4 | Q-3 | Fix Debug format in update trigger output |

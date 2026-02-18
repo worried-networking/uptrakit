@@ -60,40 +60,22 @@ within the crate.
 **Recommendation:** Use `#[derive(Debug, thiserror::Error)]` with
 `#[error("sequence error: expected {expected}, received {received}")]`.
 
-#### M2: `ErrorCode` lacks `#[non_exhaustive]`
+#### ~~M2: `ErrorCode` lacks `#[non_exhaustive]`~~ (FIXED)
 
-**File:** `src/lib.rs:273-292`
+**Resolution:** Added `#[non_exhaustive]` to `ErrorCode`.
 
-Per coding standards, public enums that may gain new variants must carry
-`#[non_exhaustive]`. `ErrorCode` is likely to gain new codes (e.g.,
-`RateLimitExceeded`, `VersionMismatch`). The enum is already used across crate
-boundaries.
+#### ~~M3: `EnrollmentStatus` lacks `#[non_exhaustive]`~~ (FIXED)
 
-**Recommendation:** Add `#[non_exhaustive]` to `ErrorCode`.
+**Resolution:** Added `#[non_exhaustive]` to `EnrollmentStatus`.
 
-#### M3: `EnrollmentStatus` lacks `#[non_exhaustive]`
+#### ~~M4: `UpdateFinalStatus` lacks `#[non_exhaustive]`~~ (FIXED)
 
-**File:** `src/lib.rs:22-27`
+**Resolution:** Added `#[non_exhaustive]` to `UpdateFinalStatus`. External consumers
+(e.g., `agent_ws.rs`) now include wildcard match arms.
 
-Same reasoning as M2. Could gain variants such as `Rejected` or `Suspended`.
+#### ~~M5: `DisconnectReason` lacks `#[non_exhaustive]`~~ (FIXED)
 
-**Recommendation:** Add `#[non_exhaustive]` to `EnrollmentStatus`.
-
-#### M4: `UpdateFinalStatus` lacks `#[non_exhaustive]`
-
-**File:** `src/lib.rs:411-416`
-
-Could gain variants like `Cancelled` or `TimedOut`.
-
-**Recommendation:** Add `#[non_exhaustive]` to `UpdateFinalStatus`.
-
-#### M5: `DisconnectReason` lacks `#[non_exhaustive]`
-
-**File:** `src/lib.rs:480-487`
-
-Could gain new disconnect reasons beyond `Shutdown` and `Restart`.
-
-**Recommendation:** Add `#[non_exhaustive]` to `DisconnectReason`.
+**Resolution:** Added `#[non_exhaustive]` to `DisconnectReason`.
 
 ### Low
 

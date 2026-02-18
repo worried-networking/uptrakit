@@ -949,7 +949,10 @@ components:
           enum:
             - pending
             - approved
-          description: Initial service status (approved if valid enrollment token provided)
+          description: |
+            Initial service status (approved if valid enrollment token provided).
+            This enum is non-exhaustive — new statuses may be added in future
+            protocol versions.
           examples:
             - pending
 
@@ -1083,7 +1086,10 @@ components:
             - internal_error
             - agent_version_too_old
             - sequence_error
-          description: Machine-readable error code
+          description: |
+            Machine-readable error code. This enum is non-exhaustive —
+            new codes may be added in future protocol versions. Consumers
+            should handle unknown values gracefully.
         message:
           type: string
           description: Human-readable error description
@@ -1467,7 +1473,10 @@ components:
       enum:
         - completed
         - failed
-      description: Final status of an update execution
+      description: |
+        Final status of an update execution. This enum is non-exhaustive —
+        new statuses may be added in future protocol versions. Consumers
+        should treat unknown values as `failed`.
 
     releaseAsset:
       type: object
@@ -1780,7 +1789,8 @@ components:
         - shutdown
         - restart
       description: |
-        Reason for service disconnection.
+        Reason for service disconnection. This enum is non-exhaustive —
+        new reasons may be added in future protocol versions.
         - `shutdown`: SIGTERM/SIGINT received — clean exit
         - `restart`: SIGHUP received — will reconnect after external restart
 

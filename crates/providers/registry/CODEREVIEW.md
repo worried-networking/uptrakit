@@ -10,25 +10,11 @@ provider implementations.
 
 ## Findings
 
-### Critical: hardcoded match arms for every operation
+### ~~Critical: hardcoded match arms for every operation~~ (FIXED)
 
-**Location:** `src/registry.rs`
-
-Four public methods contain exhaustive `match provider_type` arms that must be updated for every
-new provider:
-
-| Method | Lines | Purpose |
-| --- | --- | --- |
-| `create_provider()` | 66-101 | Instantiate a provider from JSON config |
-| `validate_config()` | 114-151 | Validate provider configuration |
-| `mask_config_secrets()` | 183-192 | Mask secrets for API responses |
-| `restore_config_secrets()` | 214-229 | Restore masked secrets from existing config |
-
-Plus the string-based convenience wrappers (`validate_config_str`, `mask_config_secrets_str`,
-`restore_config_secrets_str`) that delegate to the above.
-
-**Impact:** Adding a new provider requires modifying **4+ match arms** in this file, plus adding
-the crate to `Cargo.toml`. This is error-prone and violates the open/closed principle.
+**Resolution:** Replaced all four match blocks with a `register_providers!` declarative macro.
+Adding a new provider now requires a single entry in the macro invocation. All provider
+`new()` constructors now consistently return `Result<Self>` and validate their config.
 
 ### Significant: no dynamic provider registration mechanism
 

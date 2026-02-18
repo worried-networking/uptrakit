@@ -2,29 +2,17 @@ use rootcause::prelude::*;
 use sha2::{Digest, Sha256};
 use uptrakit_internal_wire::{
     CloseReason, ControllerMessage, DisconnectReason, DisconnectingPayload, PingPayload,
-    RenewCertificatePayload, ReportHostsPayload, ServiceMessage, UpdateOutputPayload,
+    ReportHostsPayload, ServiceMessage, UpdateOutputPayload,
     UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
     now_millis,
 };
 use uptrakit_service_sdk::ca::{CaTlsMode, fetch_ca_certificate};
-use uptrakit_service_sdk::{CertificateRenewalHandler, ControllerConnection, LoopOutcome};
+use uptrakit_service_sdk::{
+    CertificateRenewalHandler, ControllerConnection, LoopOutcome, create_renewal_sleep,
+    update_renewal_schedule,
+};
 
 use crate::error::{Error, Result};
-
-/// Far-future delay used when no renewal is scheduled (30 days).
-const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
-
-/// Compute how long until the renewal window opens.
-fn compute_renewal_delay(cert_not_after_ts: Option<i64>, window_hours: u16) -> std::time::Duration {
-    match cert_not_after_ts {
-        Some(not_after) => {
-            let renew_at = not_after - i64::from(window_hours) * 3600 * 1000;
-            let delay_ms = (renew_at - now_millis()).max(0) as u64;
-            std::time::Duration::from_millis(delay_ms)
-        }
-        None => FAR_FUTURE,
-    }
-}
 
 /// State for an in-flight update execution.
 struct InFlightUpdate {
@@ -57,7 +45,6 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
         cert_not_after_ts,
         identity,
     } = params;
-    use std::pin::Pin;
     use std::time::Duration;
 
     const PING_INTERVAL: Duration = Duration::from_secs(300);
@@ -93,8 +80,8 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     let mut ping_interval = tokio::time::interval(PING_INTERVAL);
     ping_interval.tick().await;
 
-    // Renewal timer — initially far-future, reset when AgentSettings arrives
-    let mut renewal_sleep: Pin<Box<tokio::time::Sleep>> = Box::pin(tokio::time::sleep(FAR_FUTURE));
+    // Renewal timer — initially far-future, reset when ServiceSettings arrives.
+    let mut renewal_sleep = create_renewal_sleep();
 
     // Handles certificate lifecycle messages (CaBundleUpdated,
     // RequestCertRenewal, Certificate) and timer-based renewal.
@@ -161,23 +148,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                     .context_to::<Error>()?;
             }
             _ = &mut renewal_sleep => {
-                tracing::info!("renewal window reached, requesting certificate renewal");
-                let csr_pem = match cert_handler.initiate_renewal(identity) {
-                    Ok(csr) => csr,
-                    Err(e) => {
-                        tracing::error!(error = %e, "cannot renew certificate");
-                        break LoopOutcome::Disconnected;
-                    }
-                };
-                conn.send(ServiceMessage::RenewCertificate(RenewCertificatePayload {
-                    csr_pem,
-                }))
-                .await
-                .context_to::<Error>()?;
-                // Reset to far-future so it doesn't fire again
-                renewal_sleep.as_mut().reset(
-                    tokio::time::Instant::now() + FAR_FUTURE
-                );
+                if let Some(o) = cert_handler.handle_renewal_timer(identity, &mut conn, &mut renewal_sleep).await {
+                    break o;
+                }
             }
             msg = conn.recv() => {
                 match msg.context_to::<Error>()? {
@@ -212,12 +185,10 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                                     );
                                 }
                                 shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
-                                renewal_sleep.as_mut().reset(
-                                    tokio::time::Instant::now()
-                                        + compute_renewal_delay(
-                                            cert_not_after_ts,
-                                            settings.renewal_window_hours,
-                                        ),
+                                update_renewal_schedule(
+                                    &mut renewal_sleep,
+                                    cert_not_after_ts,
+                                    settings.renewal_window_hours,
                                 );
 
                                 // Check if CA bundle is stale
@@ -589,56 +560,6 @@ async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_internal_wire::now_millis;
-
-    // ── compute_renewal_delay ───────────────────────────────────────────
-
-    #[test]
-    fn renewal_delay_no_cert() {
-        // When no cert_not_after is known, return FAR_FUTURE.
-        let delay = compute_renewal_delay(None, 168);
-        assert_eq!(delay, FAR_FUTURE);
-    }
-
-    #[test]
-    fn renewal_delay_future_cert() {
-        // Cert expires in 30 days, window is 7 days (168h) → delay ≈ 23 days.
-        let thirty_days_ms = 30 * 24 * 3600 * 1000_i64;
-        let not_after = now_millis() + thirty_days_ms;
-        let delay = compute_renewal_delay(Some(not_after), 168);
-        let twenty_three_days = std::time::Duration::from_millis(23 * 24 * 3600 * 1000);
-        // Should be roughly 23 days (±1 second for timing jitter).
-        assert!(delay >= twenty_three_days - std::time::Duration::from_secs(1));
-        assert!(delay <= twenty_three_days + std::time::Duration::from_secs(1));
-    }
-
-    #[test]
-    fn renewal_delay_already_in_window() {
-        // Cert expires in 3 days, window is 168h (7 days) → already past, delay = 0.
-        let three_days_ms = 3 * 24 * 3600 * 1000_i64;
-        let not_after = now_millis() + three_days_ms;
-        let delay = compute_renewal_delay(Some(not_after), 168);
-        assert_eq!(delay, std::time::Duration::ZERO);
-    }
-
-    #[test]
-    fn renewal_delay_expired_cert() {
-        // Cert already expired → delay is 0 (clamped via max(0)).
-        let not_after = now_millis() - 1000;
-        let delay = compute_renewal_delay(Some(not_after), 168);
-        assert_eq!(delay, std::time::Duration::ZERO);
-    }
-
-    #[test]
-    fn renewal_delay_zero_window() {
-        // Window of 0 hours → renew only at exact expiry time.
-        let one_hour_ms = 3600 * 1000_i64;
-        let not_after = now_millis() + one_hour_ms;
-        let delay = compute_renewal_delay(Some(not_after), 0);
-        // Should be roughly 1 hour.
-        assert!(delay >= std::time::Duration::from_secs(3599));
-        assert!(delay <= std::time::Duration::from_secs(3601));
-    }
 
     // ── compute_local_ca_hash ───────────────────────────────────────────
 

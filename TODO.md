@@ -325,7 +325,7 @@ Ways users interact with the system.
 - [x] Design CLI command structure
   - [x] `uptrakit hosts` - list and show hosts
   - [x] `uptrakit software-items` - list and show software items
-  - [x] `uptrakit check` - trigger version checks (all, installed, available)
+  - [x] `uptrakit check` - trigger version checks (all, item)
   - [x] `uptrakit update` - trigger update
   - [x] `uptrakit history` - view update history (list with filters, show)
   - [x] `uptrakit services` - list, show, approve, reject, remove, merge services

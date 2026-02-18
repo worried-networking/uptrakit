@@ -22,8 +22,11 @@ pub struct HomebrewProvider {
 
 impl HomebrewProvider {
     /// Create a new Homebrew provider with the given configuration.
-    pub fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Self {
-        Self { config, executor }
+    pub fn new(config: HomebrewConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+        config
+            .validate()
+            .map_err(|e| report!(ProviderError::Configuration(e.to_string())))?;
+        Ok(Self { config, executor })
     }
 
     /// Parse the installed version from `brew info --json=v2` output for a
@@ -585,7 +588,8 @@ mod tests {
 
     #[test]
     fn homebrew_provider_capabilities() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default(), test_executor());
+        let provider =
+            HomebrewProvider::new(HomebrewConfig::default(), test_executor()).expect("create");
         assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
         assert!(provider.has_capability(ProviderCapability::RefreshPackageIndex));
         assert_eq!(provider.capabilities().len(), 2);
@@ -593,14 +597,16 @@ mod tests {
 
     #[tokio::test]
     async fn homebrew_provider_detect_installed_empty_identifier_fails() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default(), test_executor());
+        let provider =
+            HomebrewProvider::new(HomebrewConfig::default(), test_executor()).expect("create");
         let result = provider.detect_installed_version("").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn homebrew_provider_fetch_releases_empty_identifier_fails() {
-        let provider = HomebrewProvider::new(HomebrewConfig::default(), test_executor());
+        let provider =
+            HomebrewProvider::new(HomebrewConfig::default(), test_executor()).expect("create");
         let result = provider.fetch_releases("").await;
         assert!(result.is_err());
     }
