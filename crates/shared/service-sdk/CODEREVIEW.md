@@ -41,24 +41,12 @@ types and store them as strings.
 
 ### Medium
 
-#### M1: Non-semantic error variant reuse for lifecycle initialization failures
+#### ~~M1: Non-semantic error variant reuse for lifecycle initialization failures~~ (FIXED)
 
-**File:** `src/lifecycle.rs:106-120`
-
-URL parsing and directory creation failures are mapped to
-`ProtocolError::Enrollment(e.to_string())`, which is semantically incorrect.
-These are initialization errors, not protocol/enrollment errors. This can
-confuse error-handling callers that match on `ProtocolError::Enrollment`.
-
-```rust
-let (host, port) = args
-    .parsed_url()
-    .map_err(|s| report!(EnrollmentError::Protocol(ProtocolError::Enrollment(s))))?;
-```
-
-**Recommendation:** Add a dedicated `EnrollmentError::Init(String)` variant
-(or an `InitError` sub-enum) for pre-protocol initialization failures. This
-preserves semantic error matching.
+**Resolution:** Added `ProtocolError::Init(String)` variant for pre-protocol
+initialization failures (URL parsing, directory creation). Updated
+`lifecycle.rs` to use `ProtocolError::Init(...)` instead of
+`ProtocolError::Enrollment(...)` for these cases.
 
 #### ~~M2: `recv()` silently ignores unrecognized controller messages~~ (FIXED)
 

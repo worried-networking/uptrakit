@@ -103,20 +103,20 @@ pub async fn run_service_lifecycle(
     // Parse URL early.
     let (host, port) = args
         .parsed_url()
-        .map_err(|s| report!(EnrollmentError::Protocol(ProtocolError::Enrollment(s))))?;
+        .map_err(|s| report!(EnrollmentError::Protocol(ProtocolError::Init(s))))?;
     let base_url = args.base_url();
     let pki_addr = args.pki_addr();
 
     // Resolve application directories.
     let app_dirs = args.resolve_dirs(config.dir_name).map_err(|e| {
-        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(
+        report!(EnrollmentError::Protocol(ProtocolError::Init(
             e.to_string()
         )))
     })?;
     app_dirs.ensure_dirs().map_err(|e| {
-        report!(EnrollmentError::Protocol(ProtocolError::Enrollment(
-            format!("failed to create directories: {e}")
-        )))
+        report!(EnrollmentError::Protocol(ProtocolError::Init(format!(
+            "failed to create directories: {e}"
+        ))))
     })?;
     tracing::info!("config directory: {}", app_dirs.config_dir().display());
     tracing::info!("state directory: {}", app_dirs.state_dir().display());

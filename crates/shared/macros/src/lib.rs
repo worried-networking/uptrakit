@@ -46,6 +46,9 @@
 ///
 /// # Multiple conversions
 ///
+/// **Note:** Closure-based transforms must be written as separate single
+/// invocations and cannot be mixed in the multi-conversion syntax.
+///
 /// ```ignore
 /// impl_report_conversion! {
 ///     sea_orm::DbErr => MyError::Database,

@@ -85,27 +85,11 @@ accepts the semantic flags (cert expired, receive closed) and an error
 message, or implement a `From` conversion that preserves the error context.
 The agent-ssh crate (`src/main.rs`) likely has the same pattern.
 
-#### M2: In-flight update task panic handled but not propagated
+#### ~~M2: In-flight update task panic handled but not propagated~~ (FIXED)
 
-**File:** `src/client.rs:460-472`
-
-When the update task panics (caught by `JoinError`), the agent sends a
-failure result to the controller and logs an error, but the panic message
-from `JoinError` is not included in the error sent to the controller.
-
-```rust
-Err(e) => {
-    tracing::error!(error = %e, "update task panicked");
-    conn.send_best_effort(ServiceMessage::UpdateResult(UpdateResultPayload {
-        ...
-        error: Some("Update task panicked".to_string()),
-    })).await;
-}
-```
-
-**Recommendation:** Include the panic message in the error sent to the
-controller: `Some(format!("Update task panicked: {e}"))`. This aids
-debugging.
+**Resolution:** Changed error message to include the `JoinError` details:
+`Some(format!("Update task panicked: {e}"))`. The controller now receives
+the actual panic message for debugging.
 
 ### Low
 

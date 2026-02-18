@@ -217,14 +217,27 @@ fn home_dir() -> Option<PathBuf> {
 /// Create a directory with secure permissions (700).
 ///
 /// On Unix, uses `DirBuilder` with mode `0o700` so newly created directories
-/// get correct permissions atomically. After creation, verifies and corrects
-/// permissions on the final path component via `set_dir_permissions()` to
-/// ensure pre-existing directories are not left with overly permissive modes.
-/// Creates parent directories as needed.
+/// get correct permissions atomically. After creation, walks all path
+/// components from the first newly created ancestor down to the leaf and
+/// calls `set_dir_permissions()` on each to ensure intermediate directories
+/// also have `0o700` (the stdlib `DirBuilder::recursive(true)` only applies
+/// the mode to the leaf). Creates parent directories as needed.
 pub fn create_secure_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
+
+        // Find the deepest ancestor that already exists before creating anything.
+        let first_existing = {
+            let mut ancestor = path.to_path_buf();
+            while !ancestor.exists() {
+                if !ancestor.pop() {
+                    break;
+                }
+            }
+            ancestor
+        };
+
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -235,9 +248,24 @@ pub fn create_secure_dir(path: &Path) -> Result<()> {
                     source: e,
                 })
             })?;
-        // Ensure the target directory has 0o700 even if it already existed
-        // with different permissions.
+
+        // Always fix the leaf's permissions (covers pre-existing dirs with wrong mode).
         set_dir_permissions(path)?;
+
+        // Also fix any newly created intermediate directories between the
+        // first pre-existing ancestor and the leaf. DirBuilder::recursive
+        // only applies the mode to the leaf; intermediates get default
+        // permissions (typically 0o755 after umask).
+        if first_existing != path {
+            let mut current = path.to_path_buf();
+            while let Some(parent) = current.parent().map(|p| p.to_path_buf()) {
+                if parent == first_existing {
+                    break;
+                }
+                set_dir_permissions(&parent)?;
+                current = parent;
+            }
+        }
     }
 
     #[cfg(not(unix))]
@@ -493,6 +521,23 @@ mod tests {
 
         let mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
         assert_eq!(mode, 0o700, "permissions should be corrected to 0o700");
+    }
+
+    #[test]
+    fn create_secure_dir_sets_intermediate_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        // Create a deeply nested path where intermediate dirs don't exist yet
+        let leaf = temp.path().join("a").join("b").join("c");
+
+        create_secure_dir(&leaf).expect("should create");
+
+        // Verify all intermediate directories have 0o700
+        for component in ["a", "a/b", "a/b/c"] {
+            let dir = temp.path().join(component);
+            assert!(dir.is_dir(), "{component} should be a directory");
+            let mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "{component} should have 0o700 permissions");
+        }
     }
 
     #[test]

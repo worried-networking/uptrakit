@@ -37,6 +37,9 @@ impl std::error::Error for DecodeError {}
 
 /// Decode a hex string into bytes.
 pub fn decode(s: &str) -> Result<Vec<u8>, DecodeError> {
+    if !s.is_ascii() {
+        return Err(DecodeError::InvalidChar);
+    }
     if !s.len().is_multiple_of(2) {
         return Err(DecodeError::OddLength);
     }
@@ -88,6 +91,14 @@ mod tests {
     #[test]
     fn decode_invalid_char() {
         assert_eq!(decode("zz"), Err(DecodeError::InvalidChar));
+    }
+
+    #[test]
+    fn decode_non_ascii_multibyte() {
+        // Multi-byte UTF-8 input must not panic (would slice mid-character without guard)
+        assert_eq!(decode("caf\u{00e9}"), Err(DecodeError::InvalidChar));
+        assert_eq!(decode("\u{1f600}\u{1f600}"), Err(DecodeError::InvalidChar));
+        assert_eq!(decode("\u{4e16}\u{754c}"), Err(DecodeError::InvalidChar));
     }
 
     #[test]

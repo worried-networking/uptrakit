@@ -38,6 +38,9 @@ authenticate even when password auth is disabled (OIDC-only environments).
   entropy, formatted `XXXX-XXXX`.
 - **Rate limiting**: all public auth endpoints (including device/poll) are rate-limited via the unified
   `api_rate_limits` DB table; see the "API rate limiting" section below.
+- **URL scheme validation**: the CLI validates that the `verification_url` uses `https://` (or `http://` when
+  `--insecure` is active) before opening it in the user's browser. This prevents a compromised server from triggering
+  dangerous URL schemes (e.g., `file://`, `javascript:`).
 - **One-time use**: consuming an authorized flow removes it atomically; a second poll gets 404.
 - **10-minute expiry**: flows auto-expire; cleanup runs every 5 minutes alongside OIDC state cleanup.
 - **Database-backed store**: all pending device flow state is persisted to the `pending_device_flows` table (shared with

@@ -19,19 +19,11 @@ The entire crate is a single `src/lib.rs` file providing:
 
 ## Findings
 
-### MEDIUM: Recursive `DirBuilder` applies mode only to leaf directory
+### ~~MEDIUM: Recursive `DirBuilder` applies mode only to leaf directory~~ RESOLVED
 
-**File:** `src/lib.rs`, lines 183-186
-
-When `recursive(true)` is used, `DirBuilder` applies the specified `mode` only to the **leaf** directory. Intermediate
-directories are created with the default mode (typically `0o777` masked by umask). This is documented Rust stdlib
-behavior.
-
-If `create_secure_dir("/a/b/c/target")` is called and `/a/b/c` does not exist, `/a/b/c` could be created with `0o755`
-while only `target` gets `0o700`.
-
-**Recommendation:** Either iterate through each path component and create them individually with `0o700`, or document
-that callers must ensure parent directories exist.
+**Resolution:** `create_secure_dir` now walks all newly created intermediate directories between the first pre-existing
+ancestor and the leaf, calling `set_dir_permissions()` on each to ensure `0o700`. The leaf is always fixed as well
+(covers pre-existing directories with wrong permissions). Test added.
 
 ### ~~MEDIUM / SECURITY: `config_path` and `state_path` do not sanitize the `name` argument~~ RESOLVED
 

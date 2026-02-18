@@ -8,3 +8,6 @@ edition = "2024"
 
 [dependencies]
 rootcause.workspace = true
+
+[dev-dependencies]
+thiserror.workspace = true

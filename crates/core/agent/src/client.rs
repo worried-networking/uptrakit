@@ -456,7 +456,7 @@ async fn send_update_result(
                 from_version: None,
                 to_version: None,
                 output: String::new(),
-                error: Some("Update task panicked".to_string()),
+                error: Some(format!("Update task panicked: {e}")),
             }))
             .await;
         }

@@ -6083,6 +6083,7 @@ name = "uptrakit-shared-macros"
 version = "0.0.1"
 dependencies = [
  "rootcause",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

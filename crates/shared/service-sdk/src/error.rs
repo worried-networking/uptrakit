@@ -37,6 +37,8 @@ pub enum IdentityError {
 /// Enrollment protocol and connection errors.
 #[derive(Debug, Error)]
 pub enum ProtocolError {
+    #[error("initialization failed: {0}")]
+    Init(String),
     #[error("connection closed by controller")]
     ReceiveClosed,
     #[error("unexpected message type")]

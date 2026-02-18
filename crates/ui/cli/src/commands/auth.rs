@@ -97,8 +97,13 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
     eprintln!("  And enter this code: {}", start_resp.user_code);
     eprintln!();
 
-    // Try to open the URL in the user's browser
-    if let Err(e) = open_url(&start_resp.verification_url) {
+    // Validate URL scheme before opening in browser (prevents malicious schemes
+    // like file:// or javascript:// from a compromised server).
+    if let Err(e) = validate_url_scheme(&start_resp.verification_url, insecure) {
+        eprintln!("  (URL validation failed: {})", e);
+        eprintln!("  Please verify and open the URL above manually.");
+        eprintln!();
+    } else if let Err(e) = open_url(&start_resp.verification_url) {
         eprintln!("  (Could not open browser automatically: {})", e);
         eprintln!("  Please open the URL above manually.");
         eprintln!();
@@ -364,6 +369,23 @@ fn chrono_date() -> String {
     )
 }
 
+/// Validate that a URL uses a safe scheme before opening in a browser.
+///
+/// Only `https://` URLs are allowed by default. When `allow_http` is true,
+/// `http://` URLs are also accepted (for `--insecure` mode).
+/// Returns an error for any other scheme (e.g. `file://`, `javascript:`).
+fn validate_url_scheme(url: &str, allow_http: bool) -> std::result::Result<(), CliError> {
+    if url.starts_with("https://") {
+        return Ok(());
+    }
+    if allow_http && url.starts_with("http://") {
+        return Ok(());
+    }
+    Err(CliError::Other(format!(
+        "refusing to open URL with untrusted scheme: {url}"
+    )))
+}
+
 /// Open a URL in the user's default browser.
 fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
@@ -455,6 +477,34 @@ mod tests {
         assert!(parts[0].chars().all(|c| c.is_ascii_digit()));
         assert!(parts[1].chars().all(|c| c.is_ascii_digit()));
         assert!(parts[2].chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn validate_url_scheme_https_allowed() {
+        assert!(validate_url_scheme("https://example.com/auth", false).is_ok());
+        assert!(validate_url_scheme("https://example.com/auth", true).is_ok());
+    }
+
+    #[test]
+    fn validate_url_scheme_http_requires_insecure() {
+        assert!(validate_url_scheme("http://example.com/auth", false).is_err());
+        assert!(validate_url_scheme("http://example.com/auth", true).is_ok());
+    }
+
+    #[test]
+    fn validate_url_scheme_rejects_dangerous_schemes() {
+        assert!(validate_url_scheme("file:///etc/passwd", false).is_err());
+        assert!(validate_url_scheme("file:///etc/passwd", true).is_err());
+        assert!(validate_url_scheme("javascript:alert(1)", false).is_err());
+        assert!(validate_url_scheme("ftp://example.com", false).is_err());
+        assert!(validate_url_scheme("data:text/html,<h1>hi</h1>", false).is_err());
+    }
+
+    #[test]
+    fn validate_url_scheme_rejects_empty_and_relative() {
+        assert!(validate_url_scheme("", false).is_err());
+        assert!(validate_url_scheme("/path/only", false).is_err());
+        assert!(validate_url_scheme("example.com", false).is_err());
     }
 
     #[test]

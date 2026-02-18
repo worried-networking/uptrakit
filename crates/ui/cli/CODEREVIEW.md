@@ -69,17 +69,12 @@ The `--server` flag has the same concern to a lesser degree (add `UPTRAKIT_SERVE
 
 ---
 
-### S-3: No URL validation before opening in browser [MEDIUM]
+### ~~S-3: No URL validation before opening in browser~~ [FIXED]
 
-**File:** `src/commands/auth.rs:368-384`
-
-The `open_url()` function passes the `verification_url` directly to OS shell commands
-(`open`, `xdg-open`, `cmd /C start`). While this URL comes from the server's device auth
-response, a compromised server could return a malicious URL (e.g., `file:///etc/passwd` or
-a `javascript:` scheme).
-
-**Recommendation:** Validate that the URL starts with `https://` (or `http://` in insecure
-mode) before passing to the OS command.
+**Resolution:** Added `validate_url_scheme()` function that allows only `https://` URLs
+(or `http://` when `--insecure` is active). The validation runs before `open_url()` in the
+device auth login flow. Dangerous schemes (`file://`, `javascript:`, etc.) are rejected.
+Tests added.
 
 ---
 
@@ -230,7 +225,7 @@ Low priority since types are only used within the crate.
 | 4 | Q-3 | Fix Debug format in update trigger output |
 | 5 | A-2 | Extract shared auth resolution logic |
 | 6 | S-2 | Add environment variable support for token/server |
-| 7 | S-3 | Validate URL before opening in browser |
+| ~~7~~ | ~~S-3~~ | ~~Validate URL before opening in browser~~ (FIXED) |
 | 8 | A-3 | Standardize parameter passing (struct vs loose) |
 | 9 | C-1 | Call `ensure_dirs()` in config operations |
 | 10 | C-2 | Add tests for formatting and error paths |

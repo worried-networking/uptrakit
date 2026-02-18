@@ -224,7 +224,7 @@ All other errors propagate up and terminate the lifecycle.
 
 | Sub-enum | Domain | Example variants | |---|---|---| | `TlsError` | TLS/certificate errors | `Config`, `Rustls`, `NoCertificates`,
 `CertificateParse`, `Pem`, `InvalidDnsName` | | `IdentityError` | Identity/enrollment state | `KeypairGeneration`, `CsrGeneration`, `NotEnrolled`,
-`NotCertified` | | `ProtocolError` | Wire protocol/enrollment flow | `ReceiveClosed`, `UnexpectedMessage`, `Enrollment`, `EnrollmentRejected`,
+`NotCertified` | | `ProtocolError` | Wire protocol/enrollment flow | `Init`, `ReceiveClosed`, `UnexpectedMessage`, `Enrollment`, `EnrollmentRejected`,
 timeouts | | `CaError` | CA certificate operations | `Fetch`, `CertFile` |
 
 Top-level variants (`Io`, `Json`, `WebSocket`, `HttpUri`, `Directory`) remain directly on `EnrollmentError`. Services can match on categories (e.g.,

@@ -148,15 +148,10 @@ risk if the two diverge. The test `display_matches_as_str` catches this today, b
 Only `MqttTransport` marks `as_str` as `const fn`. No other type does. Either all `as_str` methods on `Copy` enums
 should be `const fn` or none should.
 
-### LOW: Hex `decode` could panic on non-ASCII multi-byte UTF-8
+### ~~LOW: Hex `decode` could panic on non-ASCII multi-byte UTF-8~~ RESOLVED
 
-**File:** `src/hex.rs`, line 44
-
-`&s[i..i + 2]` is byte-offset slicing on a `&str`. For valid hex strings (ASCII), this is safe. For multi-byte UTF-8
-input, this could theoretically panic on an invalid slice boundary, though `from_str_radix` would catch the invalid
-character first in most cases.
-
-**Recommendation:** Add an early `if !s.is_ascii() { return Err(DecodeError::InvalidChar); }` guard.
+**Resolution:** Added an early `if !s.is_ascii()` guard before byte-offset slicing in `decode()`. Multi-byte UTF-8
+input now returns `Err(DecodeError::InvalidChar)` instead of panicking. Test added.
 
 ### INFORMATIONAL: `PartialEq` on `SecretString` is timing-sensitive
 

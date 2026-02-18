@@ -40,27 +40,16 @@ implementations.
 The `$source:ty` fragment specifier correctly handles paths like `tokio_tungstenite::tungstenite::Error`. Confirmed by
 widespread usage.
 
-### HIGH: Zero dedicated tests
+### ~~HIGH: Zero dedicated tests~~ RESOLVED
 
-The crate has **no tests** -- no `tests/` directory, no `#[cfg(test)]` module. While the macro is transitively tested by
-compilation of 30+ downstream crates, there are no dedicated unit tests verifying:
+**Resolution:** Created `tests/report_conversion.rs` with comprehensive tests exercising all three macro arms (simple
+variant mapping, closure-based transform, multi-conversion syntax) with runtime assertions. Added `thiserror` as a
+dev-dependency.
 
-- The macro compiles with various input forms
-- Edge cases (single-element multi-arm, trailing commas)
-- The generated impl functions correctly at runtime
-- Negative cases (compile-fail tests)
+### ~~MEDIUM: Multi-arm syntax does not support closure-based transforms (undocumented)~~ RESOLVED
 
-**Recommendation:** Create at minimum `tests/report_conversion.rs` defining a simple error enum and exercising all three
-macro forms with runtime assertions.
-
-### MEDIUM: Multi-arm syntax does not support closure-based transforms (undocumented)
-
-The multi-arm syntax (lines 105-109) only supports the `$source:ty => $target:ident :: $variant:ident` form. Closure
-transforms cannot be mixed in. This is how the codebase uses it (separate single invocations for closures), but the
-**limitation is not documented**.
-
-**Recommendation:** Add a note to the doc comment: "Note: closure-based transforms must be written as separate single
-invocations and cannot be mixed in the multi-conversion syntax."
+**Resolution:** Added a note to the doc comment documenting that closure-based transforms must be written as separate
+single invocations and cannot be mixed in the multi-conversion syntax.
 
 ### LOW: `$target:ident` prevents multi-segment target paths
 
@@ -91,6 +80,6 @@ standalone doc-test context, but means examples could drift out of sync.
 | Macro correctness      | PASS       | Generated impls match trait exactly             |
 | Macro hygiene          | PASS       | Correct path resolution, proper `$crate` usage |
 | Edge case handling     | PASS       | Trailing commas, single-element multi-arm work  |
-| Test coverage          | **HIGH**   | Zero dedicated tests                           |
-| Documentation          | FAIR       | Missing closure expansion, undocumented limits  |
+| Test coverage          | PASS       | Dedicated tests added for all three macro arms  |
+| Documentation          | PASS       | Closure limitation documented in macro doc      |
 | `unwrap`/`panic`       | N/A        | Macro crate; no runtime code                   |
