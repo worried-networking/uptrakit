@@ -25,7 +25,40 @@ object-safe, enabling `Arc<dyn CommandExecutor>` usage.
 
 ---
 
-## Findings
+## Extensibility Findings
+
+### Minor: ShellType is an unnecessary alias
+
+**Location:** `src/types.rs:20`
+
+```rust
+pub type ShellType = uptrakit_shared_types::HookShell;
+```
+
+This creates two names for the same type (`ShellType` and `HookShell`), adding cognitive overhead.
+Downstream crates must decide which name to use, and documentation references become inconsistent.
+
+**Recommendation:** Remove the `ShellType` alias and use `HookShell` directly. Re-export it from
+the command crate for convenience if needed, but preserve the canonical name.
+
+### Minor: UpdateOutputStream duplicates a subset of OutputStreamType
+
+**Location:** `src/types.rs:13-17`
+
+`UpdateOutputStream` (2 variants: `Stdout`, `Stderr`) duplicates a subset of `OutputStreamType`
+(5 variants: `Stdout`, `Stderr`, `PreHook`, `PostHook`, `System`) from `shared-types`. The
+comment explains that agent-level streams remain in the agent crate, but this design splits one
+logical concept across two types in two crates.
+
+**Impact:** Code that converts between these types needs manual mapping. If a new stream type is
+added, both enums may need updating.
+
+**Recommendation:** Consolidate into a single `OutputStreamType` used everywhere. The command
+crate can use the shared-types variant directly; agent-level code simply uses additional variants.
+
+---
+
+## Code Quality Findings
 
 ### PASS: Shell injection prevention
 
@@ -116,3 +149,4 @@ documenting explicitly.
 | Dependencies        | PASS   | Minimal dependency set; all workspace-managed                    |
 | Test coverage       | PASS   | 37 tests covering success/failure paths, injection, all variants |
 | `unwrap`/`panic`    | PASS   | Zero in production code                                          |
+| Extensibility       | GOOD   | Well-designed trait; minor type duplication issues               |

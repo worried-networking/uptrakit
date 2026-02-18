@@ -26,6 +26,31 @@ rules are satisfied.
 | C-4 | Info | HA | `tasks.rs:128` | Token denylist periodic purge is correctly invoked from `spawn_denylist_cleanup` on `AUTH_CLEANUP_INTERVAL`. No issue. | None needed. |
 | C-5 | Info | Architecture | Overall | Excellent module separation, sophisticated startup phases, proper HA patterns with optimistic locking, graceful shutdown. | None needed. |
 
+## Extensibility Review
+
+No critical extensibility issues.
+
+### Observation: does not directly depend on provider-registry
+
+The controller depends on `uptrakit-web-api`, which in turn depends on
+`uptrakit-provider-registry`. The controller itself does not import or use the registry directly.
+Provider-related operations are delegated to the web-api layer. This is a clean separation.
+
+### Extensibility positives
+
+- **Well-structured startup phases** with 10 distinct phases and explicit intermediate types
+  (`ReconciledSettings`, `ValidatedConfig`, `PkiRuntime`). Each phase has a clear input/output
+  contract.
+- **HA-safe scheduler** with optimistic locking via database claims and stale claim recovery.
+  Multiple controller instances can run concurrently without duplicate task execution.
+- **`TaskExecutor` trait** for scheduler task types -- new scheduled tasks can be added by
+  implementing the trait and registering the executor.
+- **Graceful shutdown** via signal handlers (`SIGTERM`, `SIGINT`, `SIGUSR1`).
+- **SO_REUSEPORT support** for zero-downtime restarts.
+- **Feature-gated database backends** (`db-sqlite`, `db-postgres`, `db-mysql`) propagated cleanly
+  to `web-api` and `sea-orm`.
+- **Master key verification** at startup ensures HA instances share the same encryption key.
+
 ## Strengths
 
 - **Zero `unsafe`, zero `#[allow()]`, zero non-test `unwrap()`/`panic!()`.**

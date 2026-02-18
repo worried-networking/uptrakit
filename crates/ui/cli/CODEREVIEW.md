@@ -21,12 +21,30 @@ code quality inconsistencies, and a semantic bug in the `check` command.
 ### Severity Legend
 
 | Severity | Meaning |
-|----------|---------|
+| --- | --- |
 | **CRITICAL** | Security vulnerability or data loss risk; must fix before merge |
 | **HIGH** | Significant bug or design flaw; should fix before merge |
 | **MEDIUM** | Code quality, consistency, or correctness issue; fix soon |
 | **LOW** | Minor improvement or style inconsistency; fix at convenience |
 | **INFO** | Observation or suggestion; no action required |
+
+---
+
+## Extensibility Review
+
+### Clean dependency chain
+
+The CLI depends only on `uptrakit-openapi-client`, `uptrakit-build-info`, and
+`uptrakit-directories`. No server, database, wire, or provider dependencies.
+
+### Extensibility positives
+
+- **Demonstrates the intended external developer experience** -- if the CLI can do everything
+  through `openapi-client`, so can any external application.
+- **Uses `openapi-client::types::*`** for all request/response types, validating the re-export
+  strategy.
+- **Device flow authentication** demonstrates the headless auth pattern for external tools.
+- Serves as a living integration test for the `openapi-client` API surface.
 
 ---
 
@@ -157,10 +175,6 @@ The `resolve_auth()` function in `auth.rs` duplicates the server/token resolutio
 that already exists in `client.rs::authenticated_client()`. Both load config and credentials,
 apply overrides, and fail with `CliError::NotLoggedIn`.
 
-The auth module needs the raw `(server, token)` strings for display (e.g., in `auth status`
-output), which is why it doesn't use `authenticated_client()` directly. However, the
-resolution logic should be factored into a shared function that both can call.
-
 **Recommendation:** Extract a `resolve_server_and_token()` function in `config.rs` or
 `client.rs` that returns `(String, String)`, and have both `authenticated_client()` and
 `auth::resolve_auth()` use it.
@@ -172,14 +186,12 @@ resolution logic should be factored into a shared function that both can call.
 Some commands use parameter structs while others use 5-7 loose parameters:
 
 | Pattern | Commands |
-|---------|----------|
+| --- | --- |
 | **Parameter struct** | `services::list`, `history::list`, `update::trigger`, `settings::registration_update`, `settings::network_update`, `settings::mqtt_create`, `settings::mqtt_update`, `settings::oidc_create`, `settings::oidc_update` |
 | **Loose parameters** | `hosts::list` (6 params), `hosts::show` (5), `software_items::list` (6), `software_items::show` (5), `scheduler::show` (5), `scheduler::trigger` (5), `check::installed` (6), `check::available` (6), most settings show/simple commands |
 
 **Recommendation:** Adopt a consistent convention. The simplest rule: use a parameter struct
-when a function takes more than 4 parameters (the `server`, `token`, `format`, `insecure`
-"context" group counts as 4 already, so any command with additional parameters should use a
-struct).
+when a function takes more than 4 parameters.
 
 ---
 
@@ -194,24 +206,9 @@ if resp.status >= 400 {
 ```
 
 This bypasses Rust's normal cleanup (Drop implementations, buffered I/O flush) and is
-inconsistent with the rest of the crate which propagates errors via `Result<()>`. The
-function already returns `Ok(())` after this check, so the exit is the only way to signal
-failure for HTTP errors.
+inconsistent with the rest of the crate which propagates errors via `Result<()>`.
 
-**Recommendation:** Return a `CliError` instead:
-
-```rust
-if resp.status >= 400 {
-    bail!(CliError::Api {
-        status: resp.status,
-        message: status_text(resp.status).to_string(),
-    });
-}
-```
-
-Note: The human/JSON output is already printed before this point, so the user sees the
-response body. The error propagation would then produce the `Error:` line from main's
-error handler.
+**Recommendation:** Return a `CliError` instead.
 
 ---
 
@@ -223,119 +220,37 @@ Several "show" commands have misaligned label-value pairs where the space after 
 missing:
 
 | File | Line | Current | Expected |
-|------|------|---------|----------|
+| --- | --- | --- | --- |
 | `hosts.rs` | 61 | `"Friendly Name:{}\n"` | `"Friendly Name: {}\n"` |
 | `services.rs` | 80 | `"Client Version:{}\n"` | `"Client Version: {}\n"` |
 | `settings.rs` | 249 | `"Fwd Cert Info Header:{}\n"` | `"Fwd Cert Info Header: {}\n"` |
 | `settings.rs` | 309 | `"Fwd Cert Info Header:{}\n"` | `"Fwd Cert Info Header: {}\n"` |
 | `settings.rs` | 628 | `"Auto Create Users:{}\n"` | `"Auto Create Users: {}\n"` |
 
-These break the visual alignment that other fields maintain.
-
----
-
 ### Q-2: Auth output types use `String` instead of `Uuid` for IDs [MEDIUM]
 
 **File:** `src/commands/auth.rs:14-51`
 
-The serializable output structs use `String` for ID fields:
-
-```rust
-pub struct AuthStatusOutput {
-    pub user_id: String,  // should be Uuid
-    // ...
-}
-pub struct TokenCreateOutput {
-    pub id: String,  // should be Uuid
-    // ...
-}
-pub struct TokenEntry {
-    pub id: String,  // should be Uuid
-    // ...
-}
-pub struct TokenRevokeOutput {
-    pub id: String,  // should be Uuid
-    // ...
-}
-```
-
-Per the project's coding standards (AGENTS.md rule 16): "All entity ID parameters must use
-`&Uuid` (not `&str`), and all response ID fields must be `Uuid` (not `String`)."
-
----
+Per AGENTS.md rule 16: "All entity ID parameters must use `&Uuid` (not `&str`), and all
+response ID fields must be `Uuid` (not `String`)."
 
 ### Q-3: `update::trigger` human output uses `{:?}` (Debug format) for status [MEDIUM]
 
 **File:** `src/commands/update.rs:46-47`
 
-```rust
-let human = format!(
-    "Update triggered.\n  History ID: {}\n  Status:     {:?}\n",
-    resp.update_history_id, resp.status
-);
-```
-
-The `{:?}` format will print the Rust Debug representation of the status enum (e.g.,
-`Pending` instead of `pending`). Human output should use Display formatting.
-
-**Recommendation:** Use `{}` or the status type's `as_str()`/`Display` implementation
-for human-readable output.
-
----
+The `{:?}` format will print the Rust Debug representation instead of human-readable output.
 
 ### Q-4: `status_text()` in `api.rs` has limited coverage [LOW]
 
-**File:** `src/commands/api.rs:71-84`
-
-The function only maps 9 HTTP status codes and returns `""` for anything else. Common codes
-missing include:
-
-- 202 Accepted
-- 301 Moved Permanently
-- 302 Found
-- 422 Unprocessable Entity
-- 429 Too Many Requests
-- 502 Bad Gateway
-- 503 Service Unavailable
-
-**Recommendation:** Either expand the list or use a well-known crate (`http::StatusCode`)
-for canonical reason phrases.
-
----
+The function only maps 9 HTTP status codes and returns `""` for anything else.
 
 ### Q-5: `api.rs` mixes stderr and stdout for Human format [LOW]
 
-**File:** `src/commands/api.rs:37-41`
-
-```rust
-OutputFormat::Human => {
-    eprintln!("HTTP {} {}", resp.status, status_text(resp.status));
-    if !resp.body.is_null() {
-        print_value(format, &resp.body)?; // prints to stdout
-    }
-}
-```
-
-The status line goes to stderr while the body goes to stdout. While this can be useful for
-piping (body only goes to stdout), it's inconsistent with other commands where all human
-output goes to stdout. This should either be documented as intentional or made consistent.
-
----
+Status line goes to stderr while body goes to stdout. Should be documented or made consistent.
 
 ### Q-6: `TokenEntry::created_at` and `TokenEntry::status` use raw strings [LOW]
 
-**File:** `src/commands/auth.rs:39-44`
-
-```rust
-pub struct TokenEntry {
-    pub created_at: String,  // should be typed datetime
-    pub status: String,      // should be enum
-}
-```
-
-The `status` field is computed from `revoked_at.is_some()` and could be a typed enum
-(`Active` | `Revoked`). The `created_at` field comes from the API as a string, so keeping
-it as `String` is acceptable but loses type safety.
+Could use typed datetime and enum respectively.
 
 ---
 
@@ -343,22 +258,11 @@ it as `String` is acceptable but loses type safety.
 
 ### H-1: No timeout configuration for API calls [LOW]
 
-The CLI inherits reqwest's default timeouts. Long-running operations (large history queries,
-slow networks) can cause the CLI to hang indefinitely.
-
-**Recommendation:** Consider adding a `--timeout` global flag (default 30s) passed to the
-client builder.
-
----
+The CLI inherits reqwest's default timeouts. Consider adding a `--timeout` global flag.
 
 ### H-2: No retry logic for transient API failures [INFO]
 
-Regular API calls have no retry logic. The device auth polling loop handles rate limiting
-correctly, but standard CRUD operations fail immediately on transient network errors (DNS
-resolution, TCP timeouts, 502/503 responses).
-
-For a CLI tool, this is acceptable (the user can retry manually), but it's worth noting for
-future improvement if the CLI is used in automated scripts.
+Acceptable for a CLI tool; user can retry manually.
 
 ---
 
@@ -368,79 +272,36 @@ future improvement if the CLI is used in automated scripts.
 
 **File:** `src/config.rs:22-54`
 
-The `load_config()`, `save_config()`, `load_credentials()`, and `save_credentials()`
-functions do not call `dirs.ensure_dirs()` before accessing the config/state directories.
-While `write_secure_file_str` creates parent directories, `load_config/load_credentials`
-rely on `path.exists()` which would return false if the directory doesn't exist. This is
-functionally correct (returns default) but `save_config` could fail on a fresh install if
-the directory doesn't exist yet.
-
-**Note:** `write_secure_file_str` in `uptrakit-directories` does create parent directories,
-so this is not a bug but an inconsistency with other binaries that explicitly call
-`ensure_dirs()`.
-
----
+Not a bug but inconsistent with other binaries that explicitly call `ensure_dirs()`.
 
 ### C-2: Missing test coverage for command execution logic [MEDIUM]
 
-The test suite (`main.rs:1309-2346`, `output.rs:74-138`, `auth.rs:386-471`) covers:
-
-- CLI argument parsing (extensive, 60+ tests)
-- Output serialization (JSON/YAML round-trips)
-- Date formatting
-
-However, there are no tests for:
-
-- Error path behavior (what happens when the API returns errors)
-- Config/credential file loading edge cases
-- Output formatting logic for human-readable output
-- The `authenticated_client` construction logic
-
-The command handlers themselves are hard to unit-test due to async API calls, but the
-formatting logic (human string construction) could be tested independently.
-
----
+60+ tests for CLI argument parsing, but no tests for error paths, config loading, or
+formatting logic.
 
 ### C-3: No `#[non_exhaustive]` on public output structs [LOW]
 
-**File:** `src/commands/auth.rs:14-51`
-
-The `AuthStatusOutput`, `TokenCreateOutput`, `TokenListOutput`, `TokenEntry`, and
-`TokenRevokeOutput` structs are `pub` but not `#[non_exhaustive]`. Per the project's coding
-standards, public enums should have `#[non_exhaustive]`. While the standard specifically
-mentions enums, applying the same principle to public structs used as serialized output
-prevents breaking changes when fields are added.
-
-**Note:** These types are currently only used within the crate, so this is low priority.
+Low priority since types are only used within the crate.
 
 ---
 
 ## 6. Positive Observations
 
-The following aspects are well-implemented:
-
 - **Error handling** follows project conventions perfectly: typed `CliError` with `thiserror`,
-  `Result<T>` alias with `rootcause::Report`, and `impl_report_conversion!` for all
-  cross-boundary conversions.
-- **Secure file operations** use `uptrakit_directories::write_secure_file_str` for all
-  credential and config persistence (0o600 permissions, atomic creation).
-- **Token secrecy** is well maintained: tokens are never logged, and the newly created token
-  is intentionally shown once with a "store securely" warning.
-- **Build info** follows the unified version/build metadata contract using
-  `uptrakit_build_info`.
-- **Typed API client** properly leverages `uptrakit-openapi-client` for all operations,
-  avoiding raw HTTP calls (except the intentional `api` escape hatch).
+  `Result<T>` alias with `rootcause::Report`, and `impl_report_conversion!`.
+- **Secure file operations** use `uptrakit_directories::write_secure_file_str`.
+- **Token secrecy** is well maintained: tokens never logged, shown once with "store securely" warning.
+- **Build info** follows the unified version/build metadata contract.
 - **Device auth flow** correctly handles polling with rate limiting, timeout, and expiry.
-- **CLI parsing tests** are comprehensive with 60+ test cases covering all subcommands.
+- **CLI parsing tests** are comprehensive with 60+ test cases.
 - **Output format support** (Human/JSON/YAML) is consistent across all commands.
-- **UUID parameters** are parsed by clap at the type level, preventing invalid input.
 
 ---
 
 ## Fix Priority
 
 | Priority | ID | Description |
-|----------|----|-------------|
+| --- | --- | --- |
 | 1 | S-1 | Move credentials to state directory |
 | 2 | A-1 | Fix or collapse `check installed`/`check available` |
 | 3 | A-4 | Remove `process::exit(1)` from api.rs |

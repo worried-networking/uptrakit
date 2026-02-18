@@ -17,7 +17,55 @@ gated for `openapi` (utoipa schema generation).
 
 ---
 
-## Findings
+## Extensibility Findings
+
+### Critical: AgentStatus duplicates ServiceStatus with a missing variant
+
+**Location:** `src/agents.rs:9-13`
+
+`AgentStatus` has 3 variants (`Pending`, `Approved`, `Rejected`), while the canonical
+`ServiceStatus` in `shared-types` has 4 variants (`Pending`, `Approved`, `Rejected`,
+`Deactivated`). The missing `Deactivated` variant means deactivated agents cannot be represented
+in API responses.
+
+**Impact:** API clients cannot distinguish between a non-existent agent and a deactivated one.
+The type system provides no compile-time guarantee that all agent states are handled.
+
+### Critical: MqttServiceStatus is an exact duplicate of ServiceStatus
+
+**Location:** `src/mqtt_services.rs:10-15`
+
+`MqttServiceStatus` (`Pending`, `Approved`, `Rejected`, `Deactivated`) has identical variants to
+`ServiceStatus` from `shared-types`. Each has its own `as_str()`, `FromStr`, serde derives, and
+parse error type. This is pure duplication with no semantic difference.
+
+**Impact:** Two parallel type hierarchies for the same concept create maintenance burden and
+confusion. Changes to service status semantics must be applied in multiple places.
+
+**Recommendation:** Remove both `AgentStatus` and `MqttServiceStatus`. Use the canonical
+`ServiceStatus` from `shared-types` directly in `AgentResponse` and `MqttServiceResponse`.
+
+### Significant: dependency on uptrakit-internal-wire leaks wire types to API clients
+
+**Location:** `Cargo.toml:18`
+
+This crate depends on `uptrakit-internal-wire`. The dependency exists because `update_hooks.rs`
+re-exports `HookShell` from the wire crate:
+
+```rust
+pub use uptrakit_internal_wire::HookShell;  // src/update_hooks.rs:96
+```
+
+Since `HookShell` originates in `shared-types` and is merely re-exported through the wire crate,
+this dependency is unnecessary. API client applications that depend on `web-api-types` transitively
+compile the wire protocol crate even though they never use wire protocol messages.
+
+**Recommendation:** Import `HookShell` directly from `uptrakit-shared-types` instead of from
+`uptrakit-internal-wire`. If no other wire types are used, remove the wire dependency entirely.
+
+---
+
+## Code Quality Findings
 
 ### HIGH: No field validation on request types
 
@@ -25,16 +73,16 @@ None of the request types perform input validation. This is the most significant
 
 **Critical examples:**
 
-| Type                            | Field              | Issue                                   |
-| ------------------------------- | ------------------ | --------------------------------------- |
-| `RegisterRequest`               | `email`            | No format validation                    |
-| `RegisterRequest`               | `password`         | No minimum length (OpenAPI says min 8)  |
-| `LoginRequest`                  | `email`, `password` | No validation                          |
-| `CreateOidcProviderRequest`     | `issuer_url`       | No URL format validation                |
-| `CreateOidcProviderRequest`     | `slug`             | No slug format validation               |
-| `UpdateScheduledTaskRequest`    | `cron_expression`  | No format validation                    |
-| `UpdateNetworkSettingsRequest`  | `trusted_proxies`  | No IP/CIDR format validation            |
-| `CreateSoftwareItemRequest`     | mutual exclusivity | `provider_config_id` / `provider_config` not enforced |
+| Type | Field | Issue |
+| --- | --- | --- |
+| `RegisterRequest` | `email` | No format validation |
+| `RegisterRequest` | `password` | No minimum length (OpenAPI says min 8) |
+| `LoginRequest` | `email`, `password` | No validation |
+| `CreateOidcProviderRequest` | `issuer_url` | No URL format validation |
+| `CreateOidcProviderRequest` | `slug` | No slug format validation |
+| `UpdateScheduledTaskRequest` | `cron_expression` | No format validation |
+| `UpdateNetworkSettingsRequest` | `trusted_proxies` | No IP/CIDR format validation |
+| `CreateSoftwareItemRequest` | mutual exclusivity | `provider_config_id` / `provider_config` not enforced |
 
 **Exception:** `update_hooks.rs` provides proper `validate()` methods -- this is the gold standard the rest should
 follow.
@@ -64,8 +112,6 @@ implementations that redact secrets.
 
 Most response structs serialize `null` for `None` values. `DeviceAuthPollResponse` and `ErrorResponse` skip `None`
 entirely. Both approaches are valid, but inconsistency within the same API confuses consumers.
-
-**Recommendation:** Pick one convention and apply consistently.
 
 ### MEDIUM: `UpdateMqttClientRequest` type mismatch between `username` and `password`
 
@@ -111,14 +157,6 @@ Should be consolidated.
 
 `MessageResponse` in `agents.rs`, `HostMessageResponse` in `hosts.rs`, and similar single-`message` structs in
 `server_cert.rs` and `settings_ca.rs`. Consider a single generic `MessageResponse`.
-
-### LOW: `AgentResponse` / `AgentStatus` partially superseded by `ServiceResponse` / `ServiceStatus`
-
-If migrating to unified services, the old agent-specific types should be deprecated or removed.
-
-### LOW: `MqttServiceStatus` duplicates `ServiceStatus`
-
-`mqtt_services.rs` defines `MqttServiceStatus` with the same variants as `ServiceStatus` from shared-types.
 
 ### LOW: Timestamps as `String` instead of typed datetime
 
@@ -175,16 +213,30 @@ serialization. 16 thorough tests.
 
 ---
 
+## Extensibility Positives
+
+- **Clean module organization** -- 30+ modules organized by domain (auth, services, hosts,
+  settings, etc.).
+- **Comprehensive prelude** re-exporting the most commonly used types.
+- **Feature-gated OpenAPI derives** (`#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]`)
+  keep the base crate lightweight for non-OpenAPI consumers.
+- **No server-side logic** -- pure DTOs with serde derives, exactly as intended.
+- **Pagination types** (`PaginationParams`, `PaginatedResponse`) are well-designed and reusable.
+
+---
+
 ## Summary
 
-| Category               | Status     | Notes                                                       |
-| ---------------------- | ---------- | ----------------------------------------------------------- |
-| Input validation       | **HIGH**   | No validation on request types (except update hooks)        |
-| Secret handling        | **HIGH**   | Plain `String` for passwords/tokens in request types        |
-| OpenAPI correctness    | FAIR       | One wrong derive; missing derives on hooks types            |
-| Serialization          | GOOD       | Correct attributes; minor consistency issues                |
-| Pagination             | PASS       | Well-implemented and well-tested                            |
-| Permission model       | FAIR       | Very coarse (5 variants); many resources not covered        |
-| Test coverage          | FAIR       | 114 tests, but many modules have zero coverage              |
-| `unwrap`/`panic`       | PASS       | Zero in production code                                     |
-| Type safety            | FAIR       | Several `String` fields where typed enums would be better   |
+| Category | Status | Notes |
+| --- | --- | --- |
+| Input validation | **HIGH** | No validation on request types (except update hooks) |
+| Secret handling | **HIGH** | Plain `String` for passwords/tokens in request types |
+| Type duplication | **Critical** | AgentStatus/MqttServiceStatus duplicate ServiceStatus |
+| Wire dependency | **Significant** | Unnecessary wire crate dependency leaks to API clients |
+| OpenAPI correctness | FAIR | One wrong derive; missing derives on hooks types |
+| Serialization | GOOD | Correct attributes; minor consistency issues |
+| Pagination | PASS | Well-implemented and well-tested |
+| Permission model | FAIR | Very coarse (5 variants); many resources not covered |
+| Test coverage | FAIR | 114 tests, but many modules have zero coverage |
+| `unwrap`/`panic` | PASS | Zero in production code |
+| Type safety | FAIR | Several `String` fields where typed enums would be better |

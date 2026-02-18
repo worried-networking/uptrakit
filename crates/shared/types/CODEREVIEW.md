@@ -17,7 +17,51 @@ dependencies -- it is a leaf crate.
 
 ---
 
-## Findings
+## Extensibility Findings
+
+### Significant: ProviderType enum is centralized
+
+**Location:** `src/provider_types.rs`
+
+The `ProviderType` enum is defined here with 4 variants (`GithubReleases`,
+`ProxmoxHelperScripts`, `DockerRegistry`, `Homebrew`). It is `#[non_exhaustive]`, which is good
+for forward compatibility, but `FromStr` is hardcoded with an exhaustive match. External
+developers cannot add a new provider type without modifying this file and recompiling the entire
+workspace.
+
+**Impact:** Every new provider requires a change to this foundational crate, which triggers a
+full workspace rebuild.
+
+### Significant: ServiceType enum is centralized
+
+**Location:** `src/service_type.rs`
+
+The `ServiceType` enum (`Agent`, `Mqtt`, `SshAgent`) has the same extensibility limitation. A
+developer creating a new service type (e.g., a Kubernetes operator service) must modify this file.
+
+### Minor: OutputStreamType has 5 variants but command crate defines its own 2-variant subset
+
+**Location:** `src/output_stream_type.rs`
+
+`OutputStreamType` has 5 variants: `Stdout`, `Stderr`, `PreHook`, `PostHook`, `System`. The
+`uptrakit-command` crate defines a separate `UpdateOutputStream` enum with only `Stdout` and
+`Stderr`. The comment in the command crate says "PreHook, PostHook, System remain in the agent
+crate." This splits one logical concept across two crates and two types.
+
+### Extensibility recommendation
+
+For `ProviderType` and `ServiceType`, consider:
+
+1. **String-based identifiers** with a validation registry -- external developers register their
+   types at startup without modifying shared-types.
+2. **A trait-based approach** where each provider/service self-identifies via a string, and the
+   enum is only used for known built-in types with a fallback `Custom(String)` variant.
+3. **Consolidate output stream types** -- either move all 5 variants to the command crate or use
+   `OutputStreamType` everywhere and remove `UpdateOutputStream`.
+
+---
+
+## Code Quality Findings
 
 ### PASS: SecretString zeroize on drop
 
@@ -82,11 +126,11 @@ struct for consistency.
 
 ### LOW: Inconsistent `as_str` receiver (`&self` vs `self`)
 
-| Type                            | Receiver              |
-| ------------------------------- | --------------------- |
-| Most types                      | `as_str(&self)`       |
-| `MqttClientConnectionStatus`    | `as_str(self)` (by value) |
-| `MqttTransport`                 | `as_str(self)` (by value, `const fn`) |
+| Type | Receiver |
+| --- | --- |
+| Most types | `as_str(&self)` |
+| `MqttClientConnectionStatus` | `as_str(self)` (by value) |
+| `MqttTransport` | `as_str(self)` (by value, `const fn`) |
 
 For `Copy` types this is functionally identical, but the API inconsistency is confusing.
 
@@ -133,12 +177,13 @@ explaining the reasoning would help.
 
 ## Summary
 
-| Category            | Status | Notes                                                       |
-| ------------------- | ------ | ----------------------------------------------------------- |
-| Security            | GOOD   | SecretString well-implemented; minor Clone/Serialize concerns |
-| Correctness         | PASS   | All tests pass, all round-trips verified                    |
-| Consistency         | FAIR   | Several small inconsistencies across type definitions       |
-| Feature flags       | GOOD   | Correctly gated; minor intentional omissions                |
-| Serialization       | PASS   | All strategies correct; sea-orm values align                |
-| Test quality        | PASS   | 76 tests with thorough coverage                            |
-| `unwrap`/`panic`    | PASS   | Zero in production code                                     |
+| Category | Status | Notes |
+| --- | --- | --- |
+| Security | GOOD | SecretString well-implemented; minor Clone/Serialize concerns |
+| Correctness | PASS | All tests pass, all round-trips verified |
+| Consistency | FAIR | Several small inconsistencies across type definitions |
+| Feature flags | GOOD | Correctly gated; minor intentional omissions |
+| Serialization | PASS | All strategies correct; sea-orm values align |
+| Test quality | PASS | 76 tests with thorough coverage |
+| `unwrap`/`panic` | PASS | Zero in production code |
+| Extensibility | FAIR | Centralized enums block external provider/service types |

@@ -16,7 +16,7 @@ comprehensive authentication, and complete OpenAPI annotations. A few
 medium-severity items were found, mostly around silent error fallbacks and a
 non-standard lock-poisoning pattern. No critical issues.
 
-## Findings
+## Code Quality Findings
 
 | # | Severity | Category | Location | Description | Suggested fix |
 | --- | --- | --- | --- | --- | --- |
@@ -26,9 +26,77 @@ non-standard lock-poisoning pattern. No critical issues.
 | W-4 | Low | Code Quality | `middleware/require_auth.rs:100,107,110,133,136,144` | Error messages contain trailing `\n` characters (e.g., `"Invalid or revoked API token\n"`). These newlines end up in JSON response bodies, which is non-standard. | Remove trailing `\n` from all `AuthFailure` string literals. |
 | W-5 | Low | Code Quality | `routes/api_tokens.rs:42,79` | `format(&format).unwrap_or_default()` for timestamp formatting. Acceptable per Pattern 16 (display fallback), but a failed format produces an empty string. | Consider `.unwrap_or_else(\|_\| dt.to_string())` for a more informative ISO 8601 fallback. |
 | W-6 | Low | Code Quality | `routes/scheduler.rs:31,35,36` | Same timestamp formatting pattern as W-5 with `unwrap_or_default()`. | Same suggestion: use `.to_string()` as fallback instead of empty string. |
-| W-7 | Info | Security | `auth/refresh_cookie.rs:16` | `SameSite=Strict; HttpOnly; Secure` cookie attributes are correctly set. CSRF protection is properly handled via `SameSite=Strict` (browser will not attach the cookie on cross-origin requests). No additional CSRF token is needed. | None needed. |
-| W-8 | Info | Architecture | `lib.rs` | No CORS middleware present. This is correct by design since the SvelteKit frontend is served from the same origin (same-origin policy applies). | None needed. Document the assumption in the architecture docs if not already present. |
-| W-9 | Info | Testing | `ocsp.rs:515` | `panic!("expected ResponderID::ByKey")` appears inside a `#[cfg(test)]` function. This is test-only code and acceptable for assertions. | None needed. |
+| W-7 | Info | Security | `auth/refresh_cookie.rs:16` | `SameSite=Strict; HttpOnly; Secure` cookie attributes are correctly set. CSRF protection is properly handled via `SameSite=Strict`. | None needed. |
+| W-8 | Info | Architecture | `lib.rs` | No CORS middleware present. Correct by design since the SvelteKit frontend is served from the same origin. | None needed. |
+| W-9 | Info | Testing | `ocsp.rs:515` | `panic!("expected ResponderID::ByKey")` in `#[cfg(test)]` function. Acceptable for test assertions. | None needed. |
+
+## Extensibility Findings
+
+### Significant: routes directly import DB entities
+
+**Location:** Route handlers throughout `src/routes/`
+
+Route handlers directly import and query SeaORM entity models:
+
+```rust
+use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_shared_db::entity::provider_config;
+```
+
+For example, `routes/provider_configs.rs` constructs `provider_config::ActiveModel` directly in
+request handlers, and `routes/hosts.rs` imports `host`, `service`, and `service_host` entities
+for multi-table queries.
+
+**Impact:** Database schema changes directly break API handlers. There is no data access layer
+to absorb schema evolution. This makes it harder for external developers to understand the API
+layer without also understanding the database schema.
+
+### Significant: AppState exposes raw DatabaseConnection
+
+**Location:** `src/lib.rs:157-163`
+
+```rust
+pub struct AppState {
+    pub db: DatabaseConnection,
+    // ...
+}
+```
+
+Any handler with access to `AppState` can execute arbitrary database queries. There is no
+query scoping, no repository pattern, and no abstraction boundary between the API layer and the
+database.
+
+**Impact:** Multi-tenancy isolation relies on manual tenant ID filtering in every query. A missed
+filter could leak data across tenants. External developers extending the API must understand the
+full entity schema and tenant isolation patterns.
+
+### Minor: provider registry used directly in handlers
+
+**Location:** `src/routes/provider_configs.rs`
+
+The `ProviderRegistry` is called directly in route handlers for `validate_config()`,
+`mask_config_secrets_str()`, and `restore_config_secrets_str()`. It is not injected via `AppState`.
+
+**Impact:** Acceptable for current architecture but limits future flexibility.
+
+### Extensibility recommendation: data access layer
+
+Consider introducing a repository or data-access pattern:
+
+```rust
+pub trait ProviderConfigRepository: Send + Sync {
+    async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<ProviderConfigResponse>;
+    async fn create(&self, tenant_id: Uuid, req: CreateProviderConfigRequest) -> Result<ProviderConfigResponse>;
+    // ...
+}
+```
+
+This would:
+
+1. Decouple route handlers from the database schema.
+2. Centralize tenant isolation logic.
+3. Make it easier for external developers to understand the API without studying SeaORM entities.
+4. Enable testing routes with mock repositories.
 
 ## Strengths
 
@@ -41,7 +109,6 @@ non-standard lock-poisoning pattern. No critical issues.
   unavailable.
 - **Token denylist with periodic purge.**
   `TokenDenylist` provides immediate JWT revocation on logout/deactivation.
-  Periodic purge called from controller (`tasks.rs:128`).
 - **Complete OpenAPI annotations on all routes.**
   Every public endpoint has `#[utoipa::path]` with request/response schemas,
   security requirements, and tags.
@@ -54,6 +121,8 @@ non-standard lock-poisoning pattern. No critical issues.
 - **Well-designed AppState** (`lib.rs:156-206`).
   Clean separation of public CA snapshot (clonable, debuggable) from private
   key store (non-Clone, non-Debug, behind `RwLock`).
+- **Feature-gated OIDC** -- `#[cfg(feature = "oidc")]` cleanly gates all OIDC functionality.
+- **30+ route modules** organized by domain with consistent patterns.
 
 ## AGENTS.md compliance checklist
 

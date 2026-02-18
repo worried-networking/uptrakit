@@ -20,6 +20,54 @@ The crate has two layers:
 
 ---
 
+## Extensibility Findings
+
+### Significant: all 34 entities in one crate
+
+**Location:** `src/entity/`
+
+The crate contains 34 entity models spanning the entire system:
+
+- **Controller-only entities** (not needed by agent-ssh): `oidc_provider`,
+  `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`,
+  `pending_account_link`, `pending_device_flow`, `api_rate_limit`, `api_token`, `auth_method`,
+  `session`, `user`, `user_role`, `user_oidc_link`, `role`, `role_permission`, `permission`,
+  `mqtt_client`, `mqtt_lease`, `scheduled_task`, `settings_version`, `controller_event`, and more.
+- **Shared entities**: `service`, `service_host`, `service_certificate`, `host`,
+  `software_item`, `host_software_item`, `provider_config`, `tenant`.
+- **Agent-ssh uses**: primarily the `crypto` module for `EncryptedString`, plus its own local
+  migrations.
+
+The SSH agent compiles all 34 entity models even though it only needs the crypto module and
+potentially a few shared entities for type compatibility.
+
+**Impact:** Increased compile time and binary size for agent-ssh. Conceptual coupling between the
+agent and controller-specific schema (OIDC, rate limiting, etc.).
+
+**Recommendation:** Split entities into feature-gated modules:
+
+```toml
+[features]
+default = ["crypto"]
+crypto = []
+controller-entities = []
+all-entities = ["controller-entities"]
+```
+
+The SSH agent would depend on `shared-db` with only the `crypto` feature. The controller and
+web-api would enable `all-entities`.
+
+### Extensibility positives
+
+- **Re-exports enums from shared-types** (`MqttClientConnectionStatus`, `MqttTransport`,
+  `OutputStreamType`, `SessionTokenType`) -- clean minimal public API.
+- **`EncryptedString` type** provides transparent at-rest AES-256-GCM encryption -- reusable by
+  any crate needing encrypted storage.
+- **`OnceLock`-based master key initialization** ensures the key is set exactly once.
+- Clean separation between `crypto` (reusable) and `entity` (schema-specific) modules.
+
+---
+
 ## Crypto Module Findings
 
 ### PASS: AES-256-GCM correctness
@@ -70,12 +118,12 @@ validation.
 
 Several pending flow entities store bearer tokens as plaintext primary keys:
 
-| Entity                         | Field               | Risk                                                           |
-| ------------------------------ | ------------------- | -------------------------------------------------------------- |
-| `pending_device_flow`          | `device_code`       | Attacker with DB access can poll to obtain tokens              |
-| `pending_account_link`         | `link_token`        | Attacker can complete account linking                          |
-| `pending_oidc_registration`    | `registration_code` | Attacker can complete OIDC registration                        |
-| `pending_oidc_token_exchange`  | `exchange_code`     | Attacker can complete token exchange                           |
+| Entity | Field | Risk |
+| --- | --- | --- |
+| `pending_device_flow` | `device_code` | Attacker with DB access can poll to obtain tokens |
+| `pending_account_link` | `link_token` | Attacker can complete account linking |
+| `pending_oidc_registration` | `registration_code` | Attacker can complete OIDC registration |
+| `pending_oidc_token_exchange` | `exchange_code` | Attacker can complete token exchange |
 
 These tokens are used as primary keys, so hashing would require a lookup-by-hash pattern, and encrypting with
 `EncryptedString` would break lookups (random nonces). This is a design constraint requiring careful thought -- consider
@@ -183,16 +231,17 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 
 ## Summary
 
-| Category             | Status       | Notes                                                        |
-| -------------------- | ------------ | ------------------------------------------------------------ |
-| AES-256-GCM          | PASS         | Correct algorithm, nonces, wire format                       |
-| Key management       | PASS         | `OnceLock`, HA verification, single init                     |
-| `EncryptedString`    | PASS         | Eager encryption, redaction, legacy fallback                 |
-| Entity consistency   | PASS         | 34 entities follow identical patterns                        |
-| Error handling       | PASS         | rootcause/thiserror throughout                               |
-| `unwrap`/`panic`     | PASS         | Zero in production code                                      |
-| PKCE verifier        | **HIGH**     | Must be encrypted                                            |
-| Bearer token storage | **MEDIUM**   | Plaintext PKs for pending flows                              |
-| Master key memory    | **MEDIUM**   | Not zeroized; defense-in-depth concern                       |
-| RoleMapping fallback | **MEDIUM**   | Silent data loss on serialization failure                    |
-| HA safety            | GOOD         | Verification works; minor race on first creation             |
+| Category | Status | Notes |
+| --- | --- | --- |
+| AES-256-GCM | PASS | Correct algorithm, nonces, wire format |
+| Key management | PASS | `OnceLock`, HA verification, single init |
+| `EncryptedString` | PASS | Eager encryption, redaction, legacy fallback |
+| Entity consistency | PASS | 34 entities follow identical patterns |
+| Error handling | PASS | rootcause/thiserror throughout |
+| `unwrap`/`panic` | PASS | Zero in production code |
+| PKCE verifier | **HIGH** | Must be encrypted |
+| Bearer token storage | **MEDIUM** | Plaintext PKs for pending flows |
+| Master key memory | **MEDIUM** | Not zeroized; defense-in-depth concern |
+| RoleMapping fallback | **MEDIUM** | Silent data loss on serialization failure |
+| HA safety | GOOD | Verification works; minor race on first creation |
+| Extensibility | FAIR | All 34 entities in one crate; needs feature gating |
