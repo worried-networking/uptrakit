@@ -217,7 +217,18 @@ mod tests {
 
     #[test]
     fn rate_limited_paths_list() {
+        #[cfg(feature = "oidc")]
         let mut expected = vec![
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/device",
+            "/api/v1/auth/device/poll",
+            "/api/v1/auth/device/approve",
+        ];
+
+        #[cfg(not(feature = "oidc"))]
+        let expected = vec![
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/auth/refresh",

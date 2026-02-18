@@ -225,7 +225,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 
     #[test]
     fn display_name_hyphenated() {
-        assert_eq!(slug_to_display_name("crafty-controller"), "Crafty Controller");
+        assert_eq!(
+            slug_to_display_name("crafty-controller"),
+            "Crafty Controller"
+        );
     }
 
     #[test]

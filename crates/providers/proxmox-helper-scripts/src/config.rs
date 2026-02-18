@@ -185,7 +185,10 @@ mod tests {
         let gh = deserialized.github.as_ref().expect("github present");
         assert_eq!(gh.owner, "owner");
         assert_eq!(gh.repo, "repo");
-        assert_eq!(gh.auth_token.as_ref().expect("token").expose_secret(), "ghp_test");
+        assert_eq!(
+            gh.auth_token.as_ref().expect("token").expose_secret(),
+            "ghp_test"
+        );
         assert!(gh.include_prereleases);
     }
 
@@ -290,7 +293,10 @@ mod tests {
         };
         let masked = config.with_secrets_masked();
         let gh = masked.github.as_ref().expect("github present");
-        assert_eq!(gh.auth_token.as_ref().expect("token").expose_secret(), SECRET_MASK);
+        assert_eq!(
+            gh.auth_token.as_ref().expect("token").expose_secret(),
+            SECRET_MASK
+        );
         assert_eq!(gh.owner, "owner");
     }
 
@@ -308,7 +314,10 @@ mod tests {
         };
         let masked = config.with_secrets_masked();
         let gh = masked.github.as_ref().expect("github present");
-        assert_eq!(gh.auth_token.as_ref().expect("token").expose_secret(), SECRET_MASK);
+        assert_eq!(
+            gh.auth_token.as_ref().expect("token").expose_secret(),
+            SECRET_MASK
+        );
     }
 
     #[test]
@@ -356,7 +365,10 @@ mod tests {
         };
         incoming.restore_secrets_from(&existing);
         let gh = incoming.github.as_ref().expect("github present");
-        assert_eq!(gh.auth_token.as_ref().expect("token").expose_secret(), "ghp_new");
+        assert_eq!(
+            gh.auth_token.as_ref().expect("token").expose_secret(),
+            "ghp_new"
+        );
     }
 
     #[test]

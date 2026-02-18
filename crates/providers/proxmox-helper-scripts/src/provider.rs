@@ -46,7 +46,10 @@ impl ProxmoxHelperScriptsProvider {
     /// When `config.github` is `Some`, an internal `GitHubProvider` is constructed
     /// for upstream version detection. Returns an error if the GitHub provider
     /// configuration is invalid.
-    pub fn new(config: ProxmoxHelperScriptsConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
+    pub fn new(
+        config: ProxmoxHelperScriptsConfig,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> Result<Self> {
         let github = match config.github {
             Some(ref gh) => {
                 let github_config = GitHubConfig {
@@ -59,8 +62,8 @@ impl ProxmoxHelperScriptsProvider {
                     asset_patterns: vec![],
                     install_command: None,
                 };
-                let provider = GitHubProvider::new(github_config, Arc::clone(&executor))
-                    .map_err(|e| {
+                let provider =
+                    GitHubProvider::new(github_config, Arc::clone(&executor)).map_err(|e| {
                         report!(ProviderError::Configuration(format!(
                             "failed to create GitHub provider for PHS: {e}"
                         )))
@@ -81,10 +84,7 @@ impl ProxmoxHelperScriptsProvider {
     async fn resolve_home(&self) -> Result<String> {
         let output = self
             .executor
-            .execute_quiet(&CommandSpec::exec(
-                "printenv",
-                ["HOME".to_string()],
-            ))
+            .execute_quiet(&CommandSpec::exec("printenv", ["HOME".to_string()]))
             .await
             .map_err(|e| {
                 report!(ProviderError::ProviderInternal(format!(
@@ -131,10 +131,7 @@ impl Provider for ProxmoxHelperScriptsProvider {
         }
     }
 
-    async fn fetch_releases(
-        &self,
-        package_identifier: &str,
-    ) -> Result<Vec<UpstreamRelease>> {
+    async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         match self.github {
             Some(ref gh) => gh.fetch_releases(package_identifier).await,
             None => Err(report!(ProviderError::Configuration(
