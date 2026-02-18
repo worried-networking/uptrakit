@@ -103,17 +103,6 @@ production code.
 
 All `unwrap()`, `expect()`, and `panic!()` calls are exclusively in `#[cfg(test)]` blocks.
 
-### HIGH: PKCE verifier stored in plaintext
-
-**File:** `src/entity/pending_oidc_flow.rs`, line 11
-
-The PKCE code verifier (`pkce_verifier`) is a security-critical secret stored as a plain `String`. If an attacker has
-database read access, they can intercept the OIDC authorization code and exchange it by supplying the stolen PKCE
-verifier. This should be `EncryptedString`.
-
-The `nonce` field (line 13) is also security-sensitive but less exploitable since it is only used for ID token
-validation.
-
 ### MEDIUM: Bearer tokens as plaintext primary keys
 
 Several pending flow entities store bearer tokens as plaintext primary keys:
@@ -213,8 +202,9 @@ enable database-level JSON validation and query capabilities. May be intentional
 
 ### INFORMATIONAL: Sensitive data in `Debug` derives
 
-Entities with sensitive `String` fields (`user.password_hash`, `pending_oidc_flow.pkce_verifier`) will expose those
-values through `Debug` output. `EncryptedString` properly redacts, but plain `String` fields do not get this protection.
+Entities with sensitive `String` fields (`user.password_hash`) will expose those values through `Debug` output.
+`EncryptedString` properly redacts, but plain `String` fields do not get this protection. Note:
+`pending_oidc_flow.pkce_verifier` is now `EncryptedString` and benefits from automatic redaction.
 Consider custom `Debug` implementations for entities containing security-sensitive fields.
 
 ---
@@ -229,7 +219,7 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | Entity consistency | PASS | 34 entities follow identical patterns |
 | Error handling | PASS | rootcause/thiserror throughout |
 | `unwrap`/`panic` | PASS | Zero in production code |
-| PKCE verifier | **HIGH** | Must be encrypted |
+| PKCE verifier | PASS | Now encrypted with `EncryptedString` |
 | Bearer token storage | **MEDIUM** | Plaintext PKs for pending flows |
 | Master key memory | **MEDIUM** | Not zeroized; defense-in-depth concern |
 | RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |

@@ -55,7 +55,10 @@ pub async fn execute(
     }
 
     if resp.status >= 400 {
-        std::process::exit(1);
+        bail!(CliError::Api {
+            status: resp.status,
+            message: format!("HTTP {} {}", resp.status, status_text(resp.status)),
+        });
     }
 
     Ok(())

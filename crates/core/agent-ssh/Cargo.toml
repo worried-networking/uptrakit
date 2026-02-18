@@ -15,6 +15,7 @@ rootcause = { workspace = true }
 rpassword = "7"
 russh = { version = "0.57", default-features = false, features = ["aws-lc-rs"] }
 ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "rand_core", "std"] }
+strum = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
 sha2 = { workspace = true }

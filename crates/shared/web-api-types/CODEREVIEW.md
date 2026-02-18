@@ -17,28 +17,6 @@ gated for `openapi` (utoipa schema generation).
 
 ---
 
-## Extensibility Findings
-
-### Significant: dependency on uptrakit-internal-wire leaks wire types to API clients
-
-**Location:** `Cargo.toml:18`
-
-This crate depends on `uptrakit-internal-wire`. The dependency exists because `update_hooks.rs`
-re-exports `HookShell` from the wire crate:
-
-```rust
-pub use uptrakit_internal_wire::HookShell;  // src/update_hooks.rs:96
-```
-
-Since `HookShell` originates in `shared-types` and is merely re-exported through the wire crate,
-this dependency is unnecessary. API client applications that depend on `web-api-types` transitively
-compile the wire protocol crate even though they never use wire protocol messages.
-
-**Recommendation:** Import `HookShell` directly from `uptrakit-shared-types` instead of from
-`uptrakit-internal-wire`. If no other wire types are used, remove the wire dependency entirely.
-
----
-
 ## Code Quality Findings
 
 ### HIGH: No field validation on request types
@@ -205,7 +183,7 @@ serialization. 16 thorough tests.
 | --- | --- | --- |
 | Input validation | **HIGH** | No validation on request types (except update hooks) |
 | Secret handling | **HIGH** | Plain `String` for passwords/tokens in request types |
-| Wire dependency | **Significant** | Unnecessary wire crate dependency leaks to API clients |
+| Wire dependency | PASS | `HookShell` now imported from `uptrakit-shared-types` directly |
 | OpenAPI correctness | FAIR | One wrong derive; missing derives on hooks types |
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |

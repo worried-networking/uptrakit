@@ -157,23 +157,6 @@ when a function takes more than 4 parameters.
 
 ---
 
-### A-4: `api::execute` calls `std::process::exit(1)` inside a `Result`-returning function [MEDIUM]
-
-**File:** `src/commands/api.rs:57-59`
-
-```rust
-if resp.status >= 400 {
-    std::process::exit(1);
-}
-```
-
-This bypasses Rust's normal cleanup (Drop implementations, buffered I/O flush) and is
-inconsistent with the rest of the crate which propagates errors via `Result<()>`.
-
-**Recommendation:** Return a `CliError` instead.
-
----
-
 ## 3. Code Quality
 
 ### Q-1: Human output formatting has inconsistent spacing after colons [MEDIUM]
@@ -265,16 +248,15 @@ Low priority since types are only used within the crate.
 | Priority | ID | Description |
 | --- | --- | --- |
 | 1 | A-1 | Fix or collapse `check installed`/`check available` |
-| 2 | A-4 | Remove `process::exit(1)` from api.rs |
-| 3 | Q-1 | Fix human output spacing inconsistencies |
-| 4 | Q-2 | Use `Uuid` for auth output ID fields |
-| 5 | Q-3 | Fix Debug format in update trigger output |
-| 6 | A-2 | Extract shared auth resolution logic |
-| 7 | S-2 | Add environment variable support for token/server |
-| 8 | S-3 | Validate URL before opening in browser |
-| 9 | A-3 | Standardize parameter passing (struct vs loose) |
-| 10 | C-1 | Call `ensure_dirs()` in config operations |
-| 11 | C-2 | Add tests for formatting and error paths |
-| 12 | S-4 | Warn on `--insecure` usage |
-| 13 | Q-4 | Expand status_text coverage |
-| 14 | Q-5 | Document or fix stderr/stdout mixing in api command |
+| 2 | Q-1 | Fix human output spacing inconsistencies |
+| 3 | Q-2 | Use `Uuid` for auth output ID fields |
+| 4 | Q-3 | Fix Debug format in update trigger output |
+| 5 | A-2 | Extract shared auth resolution logic |
+| 6 | S-2 | Add environment variable support for token/server |
+| 7 | S-3 | Validate URL before opening in browser |
+| 8 | A-3 | Standardize parameter passing (struct vs loose) |
+| 9 | C-1 | Call `ensure_dirs()` in config operations |
+| 10 | C-2 | Add tests for formatting and error paths |
+| 11 | S-4 | Warn on `--insecure` usage |
+| 12 | Q-4 | Expand status_text coverage |
+| 13 | Q-5 | Document or fix stderr/stdout mixing in api command |

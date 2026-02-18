@@ -20,7 +20,6 @@ rules are satisfied.
 
 | # | Severity | Category | Location | Description | Suggested fix |
 | --- | --- | --- | --- | --- | --- |
-| C-1 | Medium | Safety | `startup.rs:585` | `.expect("already validated")` on `pki_url.parse::<url::Url>()` in production code. The URL was validated earlier by the CLI parser, but it is re-parsed here from a `&str` that passed through DB reconciliation. A logic change in the reconciliation pipeline could invalidate the pre-condition. | Parse once during validation and carry the typed `url::Url` through `ReconciledSettings`, or replace `.expect()` with `?` and a proper `AppError`. |
 | C-2 | Low | Safety | `startup.rs:406` | `.expect("valid default HTTPS addr")` when parsing `DEFAULT_HTTPS_ADDR`, a compile-time constant string. The panic can never trigger at runtime. | Acceptable as-is. Could use a `const` assertion or a `#[cfg(test)]` unit test that parses the constant, to make the invariant machine-checked. |
 | C-3 | Info | Code Quality | `pki.rs:900,904` | `.unwrap_or([0; 4])` / `.unwrap_or([0; 16])` on `try_into()` after the `match ip_bytes.len()` already guarantees the slice length. The fallback is unreachable but reads as though `0.0.0.0` / `::` is a valid SAN. | Replace with `.expect("length already matched")` (acceptable in this context since it is truly unreachable), or restructure using `TryFrom` with an explicit error. |
 | C-4 | Info | HA | `tasks.rs:128` | Token denylist periodic purge is correctly invoked from `spawn_denylist_cleanup` on `AUTH_CLEANUP_INTERVAL`. No issue. | None needed. |
@@ -53,7 +52,7 @@ Provider-related operations are delegated to the web-api layer. This is a clean 
 
 ## Strengths
 
-- **Zero `unsafe`, zero `#[allow()]`, zero non-test `unwrap()`/`panic!()`.**
+- **Zero `unsafe`, zero `#[allow()]`, zero non-test `unwrap()`/`panic!()` / `.expect()`.**
   Production code paths never panic; all errors propagated with `rootcause`/`thiserror`.
 - **CA rotation with optimistic locking** (`pki.rs:391-484`).
   Compare-and-swap guard on the active CA fingerprint prevents concurrent rotations

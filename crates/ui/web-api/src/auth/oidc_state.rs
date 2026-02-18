@@ -3,6 +3,7 @@ use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use thiserror::Error;
 use time::OffsetDateTime;
+use uptrakit_shared_db::crypto::EncryptedString;
 use uptrakit_shared_db::entity::{
     pending_account_link, pending_oidc_flow, pending_oidc_registration,
     pending_oidc_token_exchange,
@@ -22,13 +23,17 @@ pub enum OidcStoreError {
 
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("encryption error: {0}")]
+    Crypto(#[from] uptrakit_shared_db::crypto::CryptoError),
 }
 
 pub type Result<T> = std::result::Result<T, rootcause::Report<OidcStoreError>>;
 
 impl_report_conversion! {
-    sea_orm::DbErr     => OidcStoreError::Database,
-    serde_json::Error  => OidcStoreError::Serialization,
+    sea_orm::DbErr                        => OidcStoreError::Database,
+    serde_json::Error                     => OidcStoreError::Serialization,
+    uptrakit_shared_db::crypto::CryptoError => OidcStoreError::Crypto,
 }
 
 /// Pending OIDC authorization flow data returned by `take()`.
@@ -62,7 +67,7 @@ impl OidcFlowStore {
         let model = pending_oidc_flow::ActiveModel {
             csrf_state: Set(state),
             provider_id: Set(provider_id),
-            pkce_verifier: Set(pkce_verifier.secret().clone()),
+            pkce_verifier: Set(EncryptedString::new(pkce_verifier.secret().clone()).context_to()?),
             nonce: Set(nonce.secret().clone()),
             created_at: Set(now),
             expires_at: Set(expires_at),
@@ -99,7 +104,7 @@ impl OidcFlowStore {
 
         Ok(Some(PendingOidcFlowData {
             provider_id: flow.provider_id,
-            pkce_verifier: PkceCodeVerifier::new(flow.pkce_verifier),
+            pkce_verifier: PkceCodeVerifier::new(flow.pkce_verifier.expose_secret().to_string()),
             nonce: Nonce::new(flow.nonce),
         }))
     }

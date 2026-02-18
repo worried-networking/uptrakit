@@ -11,10 +11,14 @@ use uptrakit_shared_db::crypto::EncryptedString;
 #[error("invalid SSH key type: expected ed25519, rsa, or ecdsa")]
 pub struct ParseSshKeyTypeError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter, sea_orm::DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Text")]
 pub enum SshKeyType {
+    #[sea_orm(string_value = "ed25519")]
     Ed25519,
+    #[sea_orm(string_value = "rsa")]
     Rsa,
+    #[sea_orm(string_value = "ecdsa")]
     Ecdsa,
 }
 
@@ -44,57 +48,6 @@ impl FromStr for SshKeyType {
             "ecdsa" => Ok(Self::Ecdsa),
             _ => Err(ParseSshKeyTypeError),
         }
-    }
-}
-
-// ── SeaORM value conversions for SshKeyType ─────────────────────────
-
-impl From<SshKeyType> for sea_orm::Value {
-    fn from(val: SshKeyType) -> Self {
-        sea_orm::Value::String(Some(val.as_str().to_string()))
-    }
-}
-
-impl sea_orm::sea_query::ValueType for SshKeyType {
-    fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
-        match v {
-            sea_orm::Value::String(Some(s)) => s
-                .parse::<SshKeyType>()
-                .map_err(|_| sea_orm::sea_query::ValueTypeErr),
-            _ => Err(sea_orm::sea_query::ValueTypeErr),
-        }
-    }
-
-    fn type_name() -> String {
-        "SshKeyType".to_string()
-    }
-
-    fn array_type() -> sea_orm::sea_query::ArrayType {
-        sea_orm::sea_query::ArrayType::String
-    }
-
-    fn column_type() -> sea_orm::sea_query::ColumnType {
-        sea_orm::sea_query::ColumnType::Text
-    }
-}
-
-impl sea_orm::sea_query::Nullable for SshKeyType {
-    fn null() -> sea_orm::Value {
-        sea_orm::Value::String(None)
-    }
-}
-
-impl sea_orm::TryGetable for SshKeyType {
-    fn try_get_by<I: sea_orm::ColIdx>(
-        res: &sea_orm::QueryResult,
-        index: I,
-    ) -> std::result::Result<Self, sea_orm::TryGetError> {
-        let s: String = res.try_get_by(index).map_err(sea_orm::TryGetError::DbErr)?;
-        s.parse::<SshKeyType>().map_err(|e| {
-            sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(format!(
-                "SshKeyType conversion failed: {e}"
-            )))
-        })
     }
 }
 

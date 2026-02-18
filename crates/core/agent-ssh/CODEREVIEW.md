@@ -57,45 +57,6 @@ compile time and conceptually couples the agent to the controller's schema.
    `uptrakit-agent-ssh-db`) that depends only on `sea-orm` and the `crypto`
    module from `shared-db`.
 
-#### H2: `SshKeyType` uses manual SeaORM conversions instead of `DeriveActiveEnum`
-
-**File:** `src/db/entity/ssh_host.rs:52-99`
-
-48 lines of manual `From<SshKeyType> for Value`, `ValueType`, `Nullable`,
-and `TryGetable` implementations. Per the coding standards
-(`docs/development/coding-standards.md`, "Database Enum Columns" section),
-all entity columns storing a fixed set of string values must use
-`DeriveActiveEnum`:
-
-```rust
-// Current: 48 lines of manual conversion code
-impl From<SshKeyType> for sea_orm::Value { ... }
-impl sea_orm::sea_query::ValueType for SshKeyType { ... }
-impl sea_orm::sea_query::Nullable for SshKeyType { ... }
-impl sea_orm::TryGetable for SshKeyType { ... }
-```
-
-**Recommendation:** Refactor to use the `DeriveActiveEnum` pattern from
-`uptrakit-shared-types`, following the existing `DeviceAuthStatus` template:
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "sea-orm", derive(strum::EnumIter, sea_orm::DeriveActiveEnum))]
-#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
-pub enum SshKeyType {
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "ed25519"))]
-    Ed25519,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "rsa"))]
-    Rsa,
-    #[cfg_attr(feature = "sea-orm", sea_orm(string_value = "ecdsa"))]
-    Ecdsa,
-}
-```
-
-Since `SshKeyType` is local to this crate (not in `uptrakit-shared-types`),
-the `cfg_attr` feature gates may not be needed, and the derives can be
-applied directly.
-
 ### Medium — Security
 
 #### MS1: Bootstrap grants `NOPASSWD: ALL` sudoers access

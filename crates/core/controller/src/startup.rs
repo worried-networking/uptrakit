@@ -582,7 +582,11 @@ pub(crate) fn validate_configuration(
         })?;
         match mode {
             crate::cli::PkiHttpMode::Listener => {
-                let parsed: url::Url = pki_url.parse().expect("already validated");
+                let parsed: url::Url = pki_url.parse().map_err(|e| {
+                    report!(AppError::Config(format!(
+                        "--pki-addr URL is not valid: {e}"
+                    )))
+                })?;
                 let port = parsed.port_or_known_default().ok_or_else(|| {
                     report!(AppError::Config(
                         "--pki-addr URL must have an explicit or default port".into()

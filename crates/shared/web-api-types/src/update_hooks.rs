@@ -92,8 +92,8 @@ fn validate_hook_path(value: &str, field: &'static str) -> Result<(), HookValida
     Ok(())
 }
 
-/// Re-export the canonical `HookShell` type from the wire crate.
-pub use uptrakit_internal_wire::HookShell;
+/// Re-export the canonical `HookShell` type from the shared types crate.
+pub use uptrakit_shared_types::HookShell;
 
 /// Systemd service action - explicit, maps directly to command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
