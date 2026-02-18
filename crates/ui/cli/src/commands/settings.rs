@@ -441,7 +441,7 @@ pub async fn mqtt_create(params: MqttCreateParams<'_>) -> Result<()> {
         .transport
         .map(|t| t.parse())
         .transpose()
-        .map_err(|e| report!(crate::error::CliError::Other(format!("{e}"))))?;
+        .context_to()?;
     let req = CreateMqttClientRequest {
         url: params.url,
         transport,
@@ -490,7 +490,7 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
         .transport
         .map(|t| t.parse())
         .transpose()
-        .map_err(|e| report!(crate::error::CliError::Other(format!("{e}"))))?;
+        .context_to()?;
     let username = params.username.map(serde_json::Value::String);
     let req = UpdateMqttClientRequest {
         url: params.url,
