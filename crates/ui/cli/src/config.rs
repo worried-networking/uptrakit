@@ -38,7 +38,7 @@ pub fn save_config(config: &Config) -> Result<()> {
 
 pub fn load_credentials() -> Result<Credentials> {
     let dirs = app_dirs()?;
-    let path = dirs.config_path("credentials.json");
+    let path = dirs.state_path("credentials.json");
     if !path.exists() {
         return Ok(Credentials::default());
     }
@@ -48,7 +48,8 @@ pub fn load_credentials() -> Result<Credentials> {
 
 pub fn save_credentials(creds: &Credentials) -> Result<()> {
     let dirs = app_dirs()?;
-    let path = dirs.config_path("credentials.json");
+    dirs.ensure_state_dir().context_to()?;
+    let path = dirs.state_path("credentials.json");
     let data = serde_json::to_string_pretty(creds).context_to()?;
     uptrakit_directories::write_secure_file_str(&path, &data).context_to()
 }

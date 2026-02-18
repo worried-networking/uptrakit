@@ -10,6 +10,7 @@ version.workspace = true
 base64 = "0.22"
 clap = { workspace = true }
 dirs = "6"
+futures-util = { workspace = true }
 rootcause = { workspace = true }
 rpassword = "7"
 russh = { version = "0.57", default-features = false, features = ["aws-lc-rs"] }

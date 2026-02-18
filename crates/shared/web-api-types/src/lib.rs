@@ -31,7 +31,6 @@ pub mod update_hooks;
 
 #[cfg(test)]
 mod tests {
-    use crate::agents::{AgentResponse, AgentStatus};
     use crate::auth::{AuthResponse, UserResponse};
     use crate::device_auth::DeviceAuthPollResponse;
     use crate::error::ErrorResponse;
@@ -122,69 +121,7 @@ mod tests {
         }
     }
 
-    // ── 2. AgentStatus enum round-trip ────────────────────────────────────
-
-    #[test]
-    fn agent_status_serde_round_trip() {
-        let variants = [
-            AgentStatus::Pending,
-            AgentStatus::Approved,
-            AgentStatus::Rejected,
-        ];
-        for status in &variants {
-            let json = serde_json::to_string(status).unwrap();
-            let deserialized: AgentStatus = serde_json::from_str(&json).unwrap();
-            assert_eq!(&deserialized, status);
-        }
-    }
-
-    #[test]
-    fn agent_status_as_str_values() {
-        assert_eq!(AgentStatus::Pending.as_str(), "pending");
-        assert_eq!(AgentStatus::Approved.as_str(), "approved");
-        assert_eq!(AgentStatus::Rejected.as_str(), "rejected");
-    }
-
-    #[test]
-    fn agent_status_from_str_valid() {
-        assert_eq!(
-            "pending".parse::<AgentStatus>().ok(),
-            Some(AgentStatus::Pending)
-        );
-        assert_eq!(
-            "approved".parse::<AgentStatus>().ok(),
-            Some(AgentStatus::Approved)
-        );
-        assert_eq!(
-            "rejected".parse::<AgentStatus>().ok(),
-            Some(AgentStatus::Rejected)
-        );
-    }
-
-    #[test]
-    fn agent_status_from_str_invalid_returns_none() {
-        assert!("unknown".parse::<AgentStatus>().is_err());
-        assert!("".parse::<AgentStatus>().is_err());
-        assert!("PENDING".parse::<AgentStatus>().is_err());
-    }
-
-    #[test]
-    fn agent_status_as_str_round_trips_through_from_str() {
-        let variants = [
-            AgentStatus::Pending,
-            AgentStatus::Approved,
-            AgentStatus::Rejected,
-        ];
-        for status in &variants {
-            let s = status.as_str();
-            let parsed: AgentStatus = s
-                .parse()
-                .expect("from_str should succeed for as_str output");
-            assert_eq!(&parsed, status);
-        }
-    }
-
-    // ── 3. RegistrationMode enum round-trip ───────────────────────────────
+    // ── 2. RegistrationMode enum round-trip ──────────────────────────────
 
     #[test]
     fn registration_mode_serde_round_trip() {
@@ -498,62 +435,7 @@ mod tests {
         assert_eq!(deserialized.user.permissions[1], Permission::ManageAgents);
     }
 
-    #[test]
-    fn agent_response_round_trip() {
-        let agent_id = Uuid::parse_str("10000000-0000-0000-0000-000000000001").expect("valid uuid");
-        let agent = AgentResponse {
-            id: agent_id,
-            hostname: "server-1.local".to_string(),
-            friendly_name: "Production Server 1".to_string(),
-            ip_address: Some("192.168.1.10".to_string()),
-            status: AgentStatus::Approved,
-            agent_version: "0.0.1".to_string(),
-            last_seen_at: Some("2025-01-15T10:30:00Z".to_string()),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-15T10:30:00Z".to_string(),
-        };
-        let json = serde_json::to_string(&agent).unwrap();
-        let deserialized: AgentResponse = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(deserialized.id, agent_id);
-        assert_eq!(deserialized.hostname, "server-1.local");
-        assert_eq!(deserialized.friendly_name, "Production Server 1");
-        assert_eq!(deserialized.ip_address.as_deref(), Some("192.168.1.10"));
-        assert_eq!(deserialized.status, AgentStatus::Approved);
-        assert_eq!(deserialized.agent_version, "0.0.1");
-        assert_eq!(
-            deserialized.last_seen_at.as_deref(),
-            Some("2025-01-15T10:30:00Z")
-        );
-        assert_eq!(deserialized.created_at, "2025-01-01T00:00:00Z");
-        assert_eq!(deserialized.updated_at, "2025-01-15T10:30:00Z");
-    }
-
-    #[test]
-    fn agent_response_round_trip_with_none_optionals() {
-        let agent_id = Uuid::parse_str("10000000-0000-0000-0000-000000000002").expect("valid uuid");
-        let agent = AgentResponse {
-            id: agent_id,
-            hostname: "server-2.local".to_string(),
-            friendly_name: "Staging Server".to_string(),
-            ip_address: None,
-            status: AgentStatus::Pending,
-            agent_version: "unknown".to_string(),
-            last_seen_at: None,
-            created_at: "2025-02-01T00:00:00Z".to_string(),
-            updated_at: "2025-02-01T00:00:00Z".to_string(),
-        };
-        let json = serde_json::to_string(&agent).unwrap();
-        let deserialized: AgentResponse = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(deserialized.id, agent_id);
-        assert!(deserialized.ip_address.is_none());
-        assert_eq!(deserialized.status, AgentStatus::Pending);
-        assert_eq!(deserialized.agent_version, "unknown");
-        assert!(deserialized.last_seen_at.is_none());
-    }
-
-    // ── 7. UpdateStatus enum round-trip ──────────────────────────────────
+    // ── 6. UpdateStatus enum round-trip ─────────────────────────────────
 
     #[test]
     fn update_status_serde_round_trip() {
@@ -829,8 +711,7 @@ mod tests {
         let _: AuthResponse;
         let _: UserResponse;
 
-        // Agents / Services
-        let _ = AgentStatus::Pending;
+        // Services
         let _ = ServiceStatus::Pending;
 
         // Hosts

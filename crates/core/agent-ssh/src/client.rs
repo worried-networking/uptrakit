@@ -98,6 +98,7 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
     // ── Report enrolled hosts to controller ──────────────────────────
     report_enrolled_hosts(&local_db, &mut conn).await;
 
+    #[cfg(unix)]
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
 
@@ -260,7 +261,16 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                 }
                 break LoopOutcome::Shutdown;
             }
-            _ = sigterm.recv() => {
+            _ = async {
+                #[cfg(unix)]
+                {
+                    sigterm.recv().await;
+                }
+                #[cfg(not(unix))]
+                {
+                    futures_util::future::pending::<()>().await;
+                }
+            } => {
                 tracing::info!("received SIGTERM, initiating graceful shutdown");
                 let disconnecting_msg =
                     ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Shutdown));

@@ -32,11 +32,20 @@ impl sea_orm::sea_query::ValueType for RoleMapping {
 
 impl From<RoleMapping> for sea_orm::Value {
     fn from(val: RoleMapping) -> Self {
+        // `HashMap<String, String>` serialization to JSON is infallible: both key
+        // and value types are JSON-native strings with no custom serializers, so
+        // `serde_json::to_value` cannot fail for this type. The fallback exists
+        // only as a defence-in-depth safeguard against future type changes; it
+        // writes a clearly invalid sentinel instead of a silent empty `{}` that
+        // could be confused with a legitimate empty mapping.
         let json = match serde_json::to_value(&val) {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!(error = %e, "RoleMapping serialization failed, using empty object");
-                serde_json::Value::Object(Default::default())
+                tracing::error!(
+                    error = %e,
+                    "RoleMapping serialization failed — writing sentinel error value"
+                );
+                serde_json::json!({"__serialization_error": true})
             }
         };
         sea_orm::Value::Json(Some(Box::new(json)))
@@ -113,3 +122,51 @@ impl Related<super::tenant::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn role_mapping_serialization_round_trip() {
+        let mut map = HashMap::new();
+        map.insert("admin_group".to_string(), "admin".to_string());
+        map.insert("viewer_group".to_string(), "viewer".to_string());
+        let role_mapping = RoleMapping(map.clone());
+
+        let value: sea_orm::Value = role_mapping.into();
+        match value {
+            sea_orm::Value::Json(Some(json)) => {
+                let deserialized: RoleMapping =
+                    serde_json::from_value(*json).expect("should deserialize");
+                assert_eq!(deserialized.0, map);
+            }
+            other => panic!("expected Json value, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn role_mapping_empty_serialization() {
+        let role_mapping = RoleMapping(HashMap::new());
+
+        let value: sea_orm::Value = role_mapping.into();
+        match value {
+            sea_orm::Value::Json(Some(json)) => {
+                assert_eq!(*json, serde_json::json!({}));
+            }
+            other => panic!("expected Json value, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn role_mapping_serde_json_round_trip() {
+        let mut map = HashMap::new();
+        map.insert("group_a".to_string(), "role_x".to_string());
+        let role_mapping = RoleMapping(map.clone());
+
+        let json = serde_json::to_value(&role_mapping).expect("serialization is infallible");
+        let deserialized: RoleMapping =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(deserialized.0, map);
+    }
+}

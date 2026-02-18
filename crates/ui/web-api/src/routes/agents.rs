@@ -17,7 +17,7 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_shared_macros::impl_report_conversion;
 
-pub use uptrakit_web_api_types::agents::AgentStatus;
+pub use uptrakit_web_api_types::services::ServiceStatus;
 
 // --- Agent route error type ---
 
@@ -47,7 +47,7 @@ impl_report_conversion!(sea_orm::DbErr => AgentRouteError::Database);
 pub(crate) struct EnrollResult {
     pub agent: agent::Model,
     pub enrollment_secret: String,
-    pub status: AgentStatus,
+    pub status: ServiceStatus,
 }
 
 /// Parameters for [`do_enroll`].
@@ -108,7 +108,7 @@ pub(crate) async fn do_enroll(
         };
 
         match password::verify_password(enrollment_token, &token_hash) {
-            Ok(true) => AgentStatus::Approved,
+            Ok(true) => ServiceStatus::Approved,
             Ok(false) => {
                 bail!(AgentRouteError::Forbidden(
                     "Invalid enrollment token".into()
@@ -120,7 +120,7 @@ pub(crate) async fn do_enroll(
             }
         }
     } else {
-        AgentStatus::Pending
+        ServiceStatus::Pending
     };
 
     let enrollment_secret = match token::generate_secure_token() {
@@ -137,9 +137,10 @@ pub(crate) async fn do_enroll(
 
     let now = OffsetDateTime::now_utc();
     let db_status = match status {
-        AgentStatus::Pending => agent::ServiceStatus::Pending,
-        AgentStatus::Approved => agent::ServiceStatus::Approved,
-        AgentStatus::Rejected => agent::ServiceStatus::Rejected,
+        ServiceStatus::Pending => agent::ServiceStatus::Pending,
+        ServiceStatus::Approved => agent::ServiceStatus::Approved,
+        ServiceStatus::Rejected => agent::ServiceStatus::Rejected,
+        ServiceStatus::Deactivated => agent::ServiceStatus::Deactivated,
     };
     let model = agent::ActiveModel {
         id: Set(agent_id),

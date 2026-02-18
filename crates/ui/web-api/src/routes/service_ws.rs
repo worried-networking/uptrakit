@@ -908,7 +908,7 @@ async fn enroll_agent(
     sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
-    use crate::routes::agents::{AgentStatus, EnrollParams, do_enroll};
+    use crate::routes::agents::{EnrollParams, ServiceStatus, do_enroll};
 
     let result = do_enroll(EnrollParams {
         db: &state.db,
@@ -925,7 +925,7 @@ async fn enroll_agent(
         Ok(enroll_result) => {
             let service_id = enroll_result.agent.id;
             let wire_status = match enroll_result.status {
-                AgentStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
+                ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
                 _ => uptrakit_internal_wire::EnrollmentStatus::Pending,
             };
             let enrolled_msg = ControllerMessage::Enrolled(EnrolledPayload {
@@ -946,7 +946,7 @@ async fn enroll_agent(
                 "agent enrolled via WS"
             );
 
-            let approved = enroll_result.status == AgentStatus::Approved;
+            let approved = enroll_result.status == ServiceStatus::Approved;
             if approved {
                 let approved_msg = ControllerMessage::Approved(ApprovedPayload { service_id });
                 let json = serialize_controller_msg(out_seq, approved_msg)?;

@@ -137,16 +137,6 @@ The raw key bytes `[u8; 32]` are stored in a `OnceLock`. If process memory is du
 exposed. Consider using `Zeroizing<[u8; 32]>` from the `zeroize` crate. Since `OnceLock` never drops, this is
 defense-in-depth, not critical.
 
-### MEDIUM: `RoleMapping` silent data loss
-
-**File:** `src/entity/oidc_provider.rs`, lines 34-43
-
-On serialization failure, the `From<RoleMapping> for sea_orm::Value` impl silently replaces data with an empty JSON
-object `{}` and writes it to the database. While `HashMap<String, String>` serialization should never fail in practice,
-if it ever fires, it would **overwrite the user's role mapping with nothing** -- a security-impacting data corruption.
-
-**Recommendation:** Make this a hard error rather than a silent fallback.
-
 ### MEDIUM: `EncryptedString::new()` dev-mode fallback lacks warning
 
 **File:** `src/crypto.rs`, lines 222-231
@@ -242,6 +232,6 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | PKCE verifier | **HIGH** | Must be encrypted |
 | Bearer token storage | **MEDIUM** | Plaintext PKs for pending flows |
 | Master key memory | **MEDIUM** | Not zeroized; defense-in-depth concern |
-| RoleMapping fallback | **MEDIUM** | Silent data loss on serialization failure |
+| RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
 | HA safety | GOOD | Verification works; minor race on first creation |
 | Extensibility | FAIR | All 34 entities in one crate; needs feature gating |

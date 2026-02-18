@@ -169,14 +169,12 @@ fn home_dir() -> Option<PathBuf> {
 
 /// Create a directory with secure permissions (700).
 ///
-/// On Unix, uses `DirBuilder` with mode `0o700` so the directory is created
-/// with the correct permissions atomically, avoiding a TOCTOU window.
+/// On Unix, uses `DirBuilder` with mode `0o700` so newly created directories
+/// get correct permissions atomically. After creation, verifies and corrects
+/// permissions on the final path component via `set_dir_permissions()` to
+/// ensure pre-existing directories are not left with overly permissive modes.
 /// Creates parent directories as needed.
 pub fn create_secure_dir(path: &Path) -> Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -190,6 +188,9 @@ pub fn create_secure_dir(path: &Path) -> Result<()> {
                     source: e,
                 })
             })?;
+        // Ensure the target directory has 0o700 even if it already existed
+        // with different permissions.
+        set_dir_permissions(path)?;
     }
 
     #[cfg(not(unix))]
@@ -426,6 +427,37 @@ mod tests {
         assert!(dir.is_dir());
         let metadata = fs::metadata(&dir).expect("metadata");
         let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn create_secure_dir_corrects_existing_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        let dir = temp.path().join("wrong_perms_dir");
+
+        // Create directory with overly permissive mode (0o755)
+        fs::create_dir(&dir).expect("create dir");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).expect("set perms");
+        let mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "precondition: dir should be 0o755");
+
+        // create_secure_dir should correct permissions to 0o700
+        create_secure_dir(&dir).expect("should succeed on existing dir");
+
+        let mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "permissions should be corrected to 0o700");
+    }
+
+    #[test]
+    fn create_secure_dir_idempotent() {
+        let temp = TempDir::new().expect("temp dir");
+        let dir = temp.path().join("idempotent_dir");
+
+        create_secure_dir(&dir).expect("first call");
+        create_secure_dir(&dir).expect("second call should succeed");
+
+        assert!(dir.is_dir());
+        let mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
     }
 

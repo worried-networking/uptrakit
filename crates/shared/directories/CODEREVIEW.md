@@ -19,28 +19,6 @@ The entire crate is a single `src/lib.rs` file providing:
 
 ## Findings
 
-### HIGH / SECURITY: TOCTOU race in `create_secure_dir`
-
-**File:** `src/lib.rs`, lines 175-178
-
-```rust
-pub fn create_secure_dir(path: &Path) -> Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    // ... then create directory
-```
-
-The doc comment claims "avoiding a TOCTOU window," but the early-return on `path.exists()` introduces one:
-
-1. A concurrent process could replace the directory with a symlink between the `exists()` check and the `create` call.
-2. If the directory **already exists with wrong permissions** (e.g., `0o755`), the function silently returns `Ok(())`
-   **without verifying or correcting permissions**. For directories holding private keys and certificates, this is a real
-   concern.
-
-**Recommendation:** Remove the `path.exists()` early return. `DirBuilder::new().recursive(true).create(path)` already
-handles existing directories. Then unconditionally verify/set permissions on the target path after creation.
-
 ### MEDIUM: Recursive `DirBuilder` applies mode only to leaf directory
 
 **File:** `src/lib.rs`, lines 183-186
@@ -163,7 +141,7 @@ sync writes.
 | Category                | Status     | Notes                                                      |
 | ----------------------- | ---------- | ---------------------------------------------------------- |
 | File permission setting | GOOD       | Atomic at creation time for files; TOCTOU gap for dirs     |
-| TOCTOU                  | **HIGH**   | `create_secure_dir` early-return on `exists()`             |
+| TOCTOU                  | PASS       | `create_secure_dir` verifies/sets permissions on existing dirs |
 | Path traversal          | **MEDIUM** | `config_path`/`state_path` accept unsanitized names        |
 | Error handling          | PASS       | rootcause/thiserror with contextual path information       |
 | `unwrap`/`panic`        | PASS       | Zero in production code                                    |

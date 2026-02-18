@@ -50,44 +50,6 @@ The CLI depends only on `uptrakit-openapi-client`, `uptrakit-build-info`, and
 
 ## 1. Security & Safety
 
-### S-1: Credentials stored in config directory instead of state directory [CRITICAL]
-
-**File:** `src/config.rs:41-54`
-
-Both `load_credentials()` and `save_credentials()` store `credentials.json` under
-`dirs.config_path()`. Per the `uptrakit-directories` documentation and the project's own
-directory management guidelines (AGENTS.md "Config vs state separation" table), secrets
-(tokens, private keys) belong in the **state** directory, not config.
-
-Config directories are conceptually "shareable" - they may be synced across machines, backed
-up to cloud storage, or included in dotfile repositories. Storing API tokens there increases
-the risk of accidental credential exposure.
-
-**Current:**
-
-```rust
-pub fn load_credentials() -> Result<Credentials> {
-    let dirs = app_dirs()?;
-    let path = dirs.config_path("credentials.json"); // WRONG: secret in config dir
-    // ...
-}
-```
-
-**Should be:**
-
-```rust
-pub fn load_credentials() -> Result<Credentials> {
-    let dirs = app_dirs()?;
-    let path = dirs.state_path("credentials.json"); // secrets belong in state dir
-    // ...
-}
-```
-
-Both `load_credentials` and `save_credentials` need this change. The config directory
-(`config.json` with server URL) is correctly placed.
-
----
-
 ### S-2: API token visible in process listing via `--token` flag [MEDIUM]
 
 **File:** `src/main.rs:26`
@@ -302,18 +264,17 @@ Low priority since types are only used within the crate.
 
 | Priority | ID | Description |
 | --- | --- | --- |
-| 1 | S-1 | Move credentials to state directory |
-| 2 | A-1 | Fix or collapse `check installed`/`check available` |
-| 3 | A-4 | Remove `process::exit(1)` from api.rs |
-| 4 | Q-1 | Fix human output spacing inconsistencies |
-| 5 | Q-2 | Use `Uuid` for auth output ID fields |
-| 6 | Q-3 | Fix Debug format in update trigger output |
-| 7 | A-2 | Extract shared auth resolution logic |
-| 8 | S-2 | Add environment variable support for token/server |
-| 9 | S-3 | Validate URL before opening in browser |
-| 10 | A-3 | Standardize parameter passing (struct vs loose) |
-| 11 | C-1 | Call `ensure_dirs()` in config operations |
-| 12 | C-2 | Add tests for formatting and error paths |
-| 13 | S-4 | Warn on `--insecure` usage |
-| 14 | Q-4 | Expand status_text coverage |
-| 15 | Q-5 | Document or fix stderr/stdout mixing in api command |
+| 1 | A-1 | Fix or collapse `check installed`/`check available` |
+| 2 | A-4 | Remove `process::exit(1)` from api.rs |
+| 3 | Q-1 | Fix human output spacing inconsistencies |
+| 4 | Q-2 | Use `Uuid` for auth output ID fields |
+| 5 | Q-3 | Fix Debug format in update trigger output |
+| 6 | A-2 | Extract shared auth resolution logic |
+| 7 | S-2 | Add environment variable support for token/server |
+| 8 | S-3 | Validate URL before opening in browser |
+| 9 | A-3 | Standardize parameter passing (struct vs loose) |
+| 10 | C-1 | Call `ensure_dirs()` in config operations |
+| 11 | C-2 | Add tests for formatting and error paths |
+| 12 | S-4 | Warn on `--insecure` usage |
+| 13 | Q-4 | Expand status_text coverage |
+| 14 | Q-5 | Document or fix stderr/stdout mixing in api command |

@@ -19,32 +19,6 @@ gated for `openapi` (utoipa schema generation).
 
 ## Extensibility Findings
 
-### Critical: AgentStatus duplicates ServiceStatus with a missing variant
-
-**Location:** `src/agents.rs:9-13`
-
-`AgentStatus` has 3 variants (`Pending`, `Approved`, `Rejected`), while the canonical
-`ServiceStatus` in `shared-types` has 4 variants (`Pending`, `Approved`, `Rejected`,
-`Deactivated`). The missing `Deactivated` variant means deactivated agents cannot be represented
-in API responses.
-
-**Impact:** API clients cannot distinguish between a non-existent agent and a deactivated one.
-The type system provides no compile-time guarantee that all agent states are handled.
-
-### Critical: MqttServiceStatus is an exact duplicate of ServiceStatus
-
-**Location:** `src/mqtt_services.rs:10-15`
-
-`MqttServiceStatus` (`Pending`, `Approved`, `Rejected`, `Deactivated`) has identical variants to
-`ServiceStatus` from `shared-types`. Each has its own `as_str()`, `FromStr`, serde derives, and
-parse error type. This is pure duplication with no semantic difference.
-
-**Impact:** Two parallel type hierarchies for the same concept create maintenance burden and
-confusion. Changes to service status semantics must be applied in multiple places.
-
-**Recommendation:** Remove both `AgentStatus` and `MqttServiceStatus`. Use the canonical
-`ServiceStatus` from `shared-types` directly in `AgentResponse` and `MqttServiceResponse`.
-
 ### Significant: dependency on uptrakit-internal-wire leaks wire types to API clients
 
 **Location:** `Cargo.toml:18`
@@ -231,7 +205,6 @@ serialization. 16 thorough tests.
 | --- | --- | --- |
 | Input validation | **HIGH** | No validation on request types (except update hooks) |
 | Secret handling | **HIGH** | Plain `String` for passwords/tokens in request types |
-| Type duplication | **Critical** | AgentStatus/MqttServiceStatus duplicate ServiceStatus |
 | Wire dependency | **Significant** | Unnecessary wire crate dependency leaks to API clients |
 | OpenAPI correctness | FAIR | One wrong derive; missing derives on hooks types |
 | Serialization | GOOD | Correct attributes; minor consistency issues |

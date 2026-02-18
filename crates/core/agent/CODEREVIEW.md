@@ -59,28 +59,6 @@ The agent would depend on the factory trait rather than the concrete
 registry. Alternatively, compile provider selection behind **feature flags**
 so deployments can opt into only the providers they need.
 
-#### H2: Unix-only signal handling without `#[cfg(unix)]` guard
-
-**File:** `src/client.rs:85-88`
-
-The SIGTERM and SIGHUP signal handlers use `tokio::signal::unix::signal()`
-without any `#[cfg(unix)]` guard. This will fail to compile on non-Unix
-platforms (e.g., Windows).
-
-```rust
-let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-    .context_to::<Error>()?;
-let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
-    .context_to::<Error>()?;
-```
-
-The MQTT crate (`crates/core/mqtt/src/main.rs:180-186, 287-312`) handles
-this correctly with `#[cfg(unix)]` and `#[cfg(not(unix))]`
-`futures_util::future::pending()` fallbacks.
-
-**Recommendation:** Add `#[cfg(unix)]` / `#[cfg(not(unix))]` guards matching
-the pattern used in the MQTT crate.
-
 ### Medium
 
 #### M1: Manual error conversion reconstructs `EnrollmentError` variants

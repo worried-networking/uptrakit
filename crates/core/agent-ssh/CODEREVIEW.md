@@ -96,17 +96,6 @@ Since `SshKeyType` is local to this crate (not in `uptrakit-shared-types`),
 the `cfg_attr` feature gates may not be needed, and the derives can be
 applied directly.
 
-#### H3: Unix-only signal handling without `#[cfg(unix)]` guard
-
-**File:** `src/client.rs:101`
-
-Like the agent crate, the SSH agent uses
-`tokio::signal::unix::signal(SignalKind::terminate())` without platform
-guards. The MQTT crate handles this correctly.
-
-**Recommendation:** Add `#[cfg(unix)]` / `#[cfg(not(unix))]` guards
-matching the pattern used in the MQTT crate.
-
 ### Medium — Security
 
 #### MS1: Bootstrap grants `NOPASSWD: ALL` sudoers access

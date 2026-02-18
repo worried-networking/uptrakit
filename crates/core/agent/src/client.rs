@@ -82,8 +82,10 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
         env!("CARGO_PKG_VERSION")
     );
 
+    #[cfg(unix)]
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context_to::<Error>()?;
+    #[cfg(unix)]
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
         .context_to::<Error>()?;
 
@@ -410,7 +412,16 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                     LoopOutcome::Shutdown,
                 ).await;
             }
-            _ = sigterm.recv() => {
+            _ = async {
+                #[cfg(unix)]
+                {
+                    sigterm.recv().await;
+                }
+                #[cfg(not(unix))]
+                {
+                    futures_util::future::pending::<()>().await;
+                }
+            } => {
                 tracing::info!("received SIGTERM, initiating graceful shutdown");
                 break handle_graceful_shutdown(
                     &mut conn,
@@ -420,7 +431,16 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
                     LoopOutcome::Shutdown,
                 ).await;
             }
-            _ = sighup.recv() => {
+            _ = async {
+                #[cfg(unix)]
+                {
+                    sighup.recv().await;
+                }
+                #[cfg(not(unix))]
+                {
+                    futures_util::future::pending::<()>().await;
+                }
+            } => {
                 tracing::info!("received SIGHUP, initiating graceful restart");
                 break handle_graceful_shutdown(
                     &mut conn,
