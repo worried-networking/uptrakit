@@ -1,3 +1,7 @@
+/// Re-export `SecretString` so consumers (web-api, CLI, openapi-client) can
+/// use it without a direct `uptrakit-shared-types` dependency.
+pub use uptrakit_shared_types::SecretString;
+
 pub mod agents;
 pub mod api_tokens;
 pub mod auth;
@@ -41,7 +45,7 @@ mod tests {
     use crate::software_items::CreateSoftwareItemRequest;
     use crate::update_history::UpdateStatus;
     use strum::IntoEnumIterator;
-    use uptrakit_shared_types::DeviceAuthStatus;
+    use uptrakit_shared_types::{DeviceAuthStatus, SecretString};
     use uuid::Uuid;
 
     // ── 1. Permission enum round-trip ─────────────────────────────────────
@@ -314,7 +318,7 @@ mod tests {
     fn device_auth_poll_response_includes_some_fields() {
         let resp = DeviceAuthPollResponse {
             status: DeviceAuthStatus::Authorized,
-            token: Some("secret-token-value".to_string()),
+            token: Some(SecretString::new("secret-token-value".to_string())),
             token_name: Some("my-device".to_string()),
         };
         let json = serde_json::to_value(&resp).unwrap();
@@ -343,13 +347,16 @@ mod tests {
     fn device_auth_poll_response_round_trip_with_some() {
         let resp = DeviceAuthPollResponse {
             status: DeviceAuthStatus::Authorized,
-            token: Some("tok".to_string()),
+            token: Some(SecretString::new("tok".to_string())),
             token_name: Some("dev".to_string()),
         };
         let json = serde_json::to_string(&resp).unwrap();
         let deserialized: DeviceAuthPollResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.status, DeviceAuthStatus::Authorized);
-        assert_eq!(deserialized.token.as_deref(), Some("tok"));
+        assert_eq!(
+            deserialized.token.as_ref().map(|t| t.expose_secret()),
+            Some("tok")
+        );
         assert_eq!(deserialized.token_name.as_deref(), Some("dev"));
     }
 
@@ -409,8 +416,8 @@ mod tests {
     fn auth_response_round_trip() {
         let user_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid uuid");
         let auth = AuthResponse {
-            access_token: "eyJhbGciOiJIUzI1NiJ9.test".to_string(),
-            refresh_token: "refresh-token-value".to_string(),
+            access_token: SecretString::new("eyJhbGciOiJIUzI1NiJ9.test".to_string()),
+            refresh_token: SecretString::new("refresh-token-value".to_string()),
             expires_in: 3600,
             token_type: "Bearer".to_string(),
             user: UserResponse {
@@ -424,8 +431,14 @@ mod tests {
         let json = serde_json::to_string(&auth).unwrap();
         let deserialized: AuthResponse = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.access_token, "eyJhbGciOiJIUzI1NiJ9.test");
-        assert_eq!(deserialized.refresh_token, "refresh-token-value");
+        assert_eq!(
+            deserialized.access_token.expose_secret(),
+            "eyJhbGciOiJIUzI1NiJ9.test"
+        );
+        assert_eq!(
+            deserialized.refresh_token.expose_secret(),
+            "refresh-token-value"
+        );
         assert_eq!(deserialized.expires_in, 3600);
         assert_eq!(deserialized.token_type, "Bearer");
         assert_eq!(deserialized.user.id, user_id);

@@ -164,7 +164,9 @@ These are non-negotiable design constraints. Do not violate them.
    `VersionCheckResult`. Keep this boundary clear.
 1. **No shell injection.** Any path that constructs or executes shell commands must validate inputs. Custom scripts are
    treated as untrusted input.
-1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials.
+1. **No secrets in logs.** Never log tokens, passwords, API keys, or other credentials. All secret fields in HTTP API
+   types (`uptrakit-web-api-types`) must use `SecretString` instead of `String`. See
+   [Secrets Handling](docs/security/secrets-and-encryption.md).
 1. **Logging goes to journald or stdout.** No internal log storage. Full command output is not captured internally --
    only high-level summaries are retained for display.
 1. **No overlapping update actions per host.** The scheduler must ensure that two update operations for the same host
@@ -289,6 +291,18 @@ All binaries support `--config-dir` and `--state-dir` CLI flags (and correspondi
 `UPTRAKIT_STATE_DIR` environment variables) to override the platform defaults. Both support `~` expansion for home
 directory paths.
 
+#### CLI authentication environment variables
+
+The `uptrakit` CLI binary also supports:
+
+| Variable | Description |
+| --- | --- |
+| `UPTRAKIT_SERVER` | Controller URL (equivalent to `--server`) |
+| `UPTRAKIT_TOKEN` | API token (equivalent to `--token`) |
+
+**Priority:** CLI flag > environment variable > stored credentials file. Using `UPTRAKIT_TOKEN` is preferred over
+`--token` in automation to avoid exposing tokens in process listings.
+
 #### Secure permissions
 
 All created files and directories use secure permissions:
@@ -305,6 +319,8 @@ Unix, eliminating TOCTOU windows):
 - `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
 - `AppDirs::config_path(name)` / `AppDirs::state_path(name)` -- returns `Result<PathBuf>` after validating `name`
   against path traversal (rejects path separators, `..`, `.`, empty strings, absolute paths)
+- `AppDirs::ensure_config_dir()` -- creates config directory with secure permissions
+- `AppDirs::ensure_state_dir()` -- creates state directory with secure permissions
 - `AppDirs::ensure_dirs()` -- creates both directories with secure permissions
 
 All crates writing sensitive files (private keys, certificates, CA bundles) **must** use these helpers instead of raw

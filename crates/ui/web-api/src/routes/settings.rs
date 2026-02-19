@@ -81,7 +81,7 @@ pub async fn update_registration_settings(
             &state.db,
             state.default_tenant_id,
             req.mode,
-            req.token,
+            req.token.map(|t| t.expose_secret().to_string()),
             req.require_token_for_oidc,
         )
         .await

@@ -13,6 +13,7 @@ use std::sync::Arc;
 pub use uptrakit_web_api_types::api_tokens::{
     ApiTokenListResponse, ApiTokenResponse, CreateApiTokenRequest, CreateApiTokenResponse,
 };
+use uptrakit_web_api_types::SecretString;
 
 /// Create a new API token
 #[utoipa::path(
@@ -38,7 +39,7 @@ pub async fn create_api_token(
             let format = time::format_description::well_known::Rfc3339;
             let response = CreateApiTokenResponse {
                 id: created.id,
-                token: created.plaintext_token,
+                token: SecretString::new(created.plaintext_token),
                 created_at: created.created_at.format(&format).unwrap_or_default(),
             };
             (StatusCode::CREATED, Json(response)).into_response()

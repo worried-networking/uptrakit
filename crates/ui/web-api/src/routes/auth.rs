@@ -19,6 +19,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_web_api_types::SecretString;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
 
@@ -49,7 +50,7 @@ pub async fn register(
     }
 
     // Validate password length
-    if let Some(message) = password::validate_password_length(&req.password) {
+    if let Some(message) = password::validate_password_length(req.password.expose_secret()) {
         return error_response(StatusCode::BAD_REQUEST, message);
     }
 
@@ -57,13 +58,13 @@ pub async fn register(
     if let Err(e) = state
         .settings
         .registration()
-        .validate(req.registration_token.as_deref())
+        .validate(req.registration_token.as_ref().map(|t| t.expose_secret()))
     {
         return e.into_response();
     }
 
     // Hash password
-    let password_hash = match password::hash_password(&req.password) {
+    let password_hash = match password::hash_password(req.password.expose_secret()) {
         Ok(hash) => hash,
         Err(e) => {
             tracing::error!("Password hashing failed: {:?}", e);
@@ -172,8 +173,8 @@ pub async fn register(
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: SecretString::new(access_token),
+        refresh_token: SecretString::new(refresh_token),
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: UserResponse {
@@ -212,7 +213,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     }
 
     // Validate password length early to avoid expensive hashing on absurd inputs
-    if let Some(message) = password::validate_password_length(&req.password) {
+    if let Some(message) = password::validate_password_length(req.password.expose_secret()) {
         return error_response(StatusCode::BAD_REQUEST, message);
     }
 
@@ -241,7 +242,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         }
     };
 
-    let valid = match password::verify_password(&req.password, hash) {
+    let valid = match password::verify_password(req.password.expose_secret(), hash) {
         Ok(valid) => valid,
         Err(e) => {
             tracing::error!("Password verification error: {:?}", e);
@@ -290,8 +291,8 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: SecretString::new(access_token),
+        refresh_token: SecretString::new(refresh_token),
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: UserResponse {
@@ -338,7 +339,11 @@ pub async fn logout(
         };
         serde_json::from_slice::<LogoutRequest>(&body_bytes)
             .ok()
-            .and_then(|r| r.refresh_token.filter(|t| !t.is_empty()))
+            .and_then(|r| {
+                r.refresh_token
+                    .filter(|t| !t.expose_secret().is_empty())
+                    .map(|t| t.expose_secret().to_string())
+            })
     };
 
     let refresh_token = cookie_token.or(body_token);
@@ -704,7 +709,11 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
         };
         serde_json::from_slice::<RefreshRequest>(&body_bytes)
             .ok()
-            .and_then(|r| r.refresh_token.filter(|t| !t.is_empty()))
+            .and_then(|r| {
+                r.refresh_token
+                    .filter(|t| !t.expose_secret().is_empty())
+                    .map(|t| t.expose_secret().to_string())
+            })
     };
 
     let refresh_token = match cookie_token.or(body_token) {
@@ -770,8 +779,8 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
 
     let cookie = set_refresh_token_cookie(&new_refresh_token);
     let response = RefreshResponse {
-        access_token,
-        refresh_token: new_refresh_token,
+        access_token: SecretString::new(access_token),
+        refresh_token: SecretString::new(new_refresh_token),
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
     };

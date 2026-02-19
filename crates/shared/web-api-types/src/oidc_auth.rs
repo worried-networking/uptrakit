@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -29,8 +30,8 @@ pub struct OidcAuthorizeResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcLinkRequest {
-    pub link_token: String,
-    pub password: Option<String>,
+    pub link_token: SecretString,
+    pub password: Option<SecretString>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -42,6 +43,6 @@ pub struct OidcExchangeRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OidcCompleteRegistrationRequest {
-    pub registration_code: String,
-    pub registration_token: String,
+    pub registration_code: SecretString,
+    pub registration_token: SecretString,
 }

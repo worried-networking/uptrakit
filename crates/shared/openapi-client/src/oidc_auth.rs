@@ -42,6 +42,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
+    use uptrakit_web_api_types::SecretString;
     use uptrakit_web_api_types::oidc_auth::{
         OidcCompleteRegistrationRequest, OidcExchangeRequest, OidcLinkRequest,
     };
@@ -58,8 +59,8 @@ mod tests {
     #[test]
     fn oidc_link_request_serialization() {
         let req = OidcLinkRequest {
-            link_token: "link-tok-abc".to_string(),
-            password: Some("SecurePass123".to_string()),
+            link_token: SecretString::new("link-tok-abc".to_string()),
+            password: Some(SecretString::new("SecurePass123".to_string())),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["link_token"], "link-tok-abc");
@@ -69,7 +70,7 @@ mod tests {
     #[test]
     fn oidc_link_request_without_password() {
         let req = OidcLinkRequest {
-            link_token: "link-tok-abc".to_string(),
+            link_token: SecretString::new("link-tok-abc".to_string()),
             password: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
@@ -80,8 +81,8 @@ mod tests {
     #[test]
     fn oidc_complete_registration_request_serialization() {
         let req = OidcCompleteRegistrationRequest {
-            registration_code: "reg-code-123".to_string(),
-            registration_token: "reg-tok-456".to_string(),
+            registration_code: SecretString::new("reg-code-123".to_string()),
+            registration_token: SecretString::new("reg-tok-456".to_string()),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["registration_code"], "reg-code-123");

@@ -18,11 +18,11 @@ struct Cli {
     version: bool,
 
     /// Server URL (overrides stored config)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "UPTRAKIT_SERVER")]
     server: Option<String>,
 
     /// API token (overrides stored credentials)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, env = "UPTRAKIT_TOKEN")]
     token: Option<String>,
 
     /// Skip TLS certificate verification (insecure, for development only)
@@ -610,6 +610,10 @@ async fn main() {
             std::process::exit(1);
         }
         return;
+    }
+
+    if cli.insecure {
+        eprintln!("WARNING: TLS certificate verification is disabled. Connection is insecure.");
     }
 
     let command = match cli.command {

@@ -10,6 +10,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// `Debug` and `Display` implementations redact the value. Serialization is
 /// transparent so the JSON wire format is unchanged.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(transparent)]
 pub struct SecretString(String);
 

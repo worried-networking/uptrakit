@@ -89,6 +89,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
+    use uptrakit_web_api_types::SecretString;
     use uptrakit_web_api_types::registration::RegistrationMode;
     use uptrakit_web_api_types::settings::UpdateRegistrationSettingsRequest;
     use uptrakit_web_api_types::settings_agent_certs::UpdateAgentCertificateSettingsRequest;
@@ -99,7 +100,7 @@ mod tests {
     fn update_registration_settings_serialization() {
         let req = UpdateRegistrationSettingsRequest {
             mode: RegistrationMode::Invite,
-            token: Some("my-invite-token".to_string()),
+            token: Some(SecretString::new("my-invite-token".to_string())),
             require_token_for_oidc: Some(true),
         };
         let json = serde_json::to_value(&req).expect("serialize");

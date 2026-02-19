@@ -1,5 +1,6 @@
 use crate::permissions::Permission;
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -18,9 +19,9 @@ pub struct RegisterRequest {
     #[cfg_attr(feature = "openapi", schema(example = "User"))]
     pub last_name: String,
     #[cfg_attr(feature = "openapi", schema(example = "SecurePass123", min_length = 8))]
-    pub password: String,
+    pub password: SecretString,
     /// Required when registration mode is `invite`.
-    pub registration_token: Option<String>,
+    pub registration_token: Option<SecretString>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -33,7 +34,7 @@ pub struct LoginRequest {
     #[cfg_attr(feature = "openapi", schema(example = "admin@example.com"))]
     pub email: String,
     #[cfg_attr(feature = "openapi", schema(example = "SecurePass123"))]
-    pub password: String,
+    pub password: SecretString,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -42,7 +43,7 @@ pub struct LogoutRequest {
     /// The refresh token to revoke. Optional when the token is provided
     /// via the `refresh_token` `HttpOnly` cookie.
     #[serde(default)]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<SecretString>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,14 +52,14 @@ pub struct RefreshRequest {
     /// The refresh token. Optional when the token is provided via the
     /// `refresh_token` `HttpOnly` cookie.
     #[serde(default)]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<SecretString>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AuthResponse {
-    pub access_token: String,
-    pub refresh_token: String,
+    pub access_token: SecretString,
+    pub refresh_token: SecretString,
     pub expires_in: i64,
     pub token_type: String,
     pub user: UserResponse,
@@ -67,9 +68,9 @@ pub struct AuthResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RefreshResponse {
-    pub access_token: String,
+    pub access_token: SecretString,
     /// Rotated refresh token. The previous refresh token is now invalid.
-    pub refresh_token: String,
+    pub refresh_token: SecretString,
     pub expires_in: i64,
     pub token_type: String,
 }

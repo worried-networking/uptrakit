@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -11,7 +12,7 @@ pub struct CreateApiTokenRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateApiTokenResponse {
     pub id: Uuid,
-    pub token: String,
+    pub token: SecretString,
     pub created_at: String,
 }
 

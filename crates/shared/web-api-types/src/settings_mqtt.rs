@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 use crate::mqtt_transport::MqttTransport;
@@ -54,7 +55,7 @@ pub struct CreateMqttClientRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_prefix: Option<String>,
 }
@@ -78,8 +79,9 @@ pub struct UpdateMqttClientRequest {
     /// Set to `null` to clear, omit to keep existing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<serde_json::Value>,
+    /// Set to `null` to clear, omit to keep existing.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
+    pub password: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_prefix: Option<String>,
 }

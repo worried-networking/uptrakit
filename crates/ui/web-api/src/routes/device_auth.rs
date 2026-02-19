@@ -4,6 +4,7 @@ use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
+use uptrakit_web_api_types::SecretString;
 use axum::http::HeaderMap;
 use axum::{
     Json,
@@ -154,7 +155,7 @@ pub async fn device_auth_poll(
                     StatusCode::OK,
                     Json(DeviceAuthPollResponse {
                         status: DeviceAuthStatus::Authorized,
-                        token: Some(created.plaintext_token),
+                        token: Some(SecretString::new(created.plaintext_token)),
                         token_name: Some(token_name),
                     }),
                 )

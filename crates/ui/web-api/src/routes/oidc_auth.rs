@@ -26,6 +26,7 @@ use sea_orm::{
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_web_api_types::SecretString;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
 
@@ -690,8 +691,8 @@ pub async fn oidc_exchange(
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: SecretString::new(access_token),
+        refresh_token: SecretString::new(refresh_token),
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
@@ -733,7 +734,7 @@ pub async fn oidc_complete_registration(
     // 1. Atomically consume the pending registration so the code is one-time use
     let pending = match state
         .oidc_registration_store
-        .take(&req.registration_code)
+        .take(req.registration_code.expose_secret())
         .await
     {
         Ok(Some(p)) => p,
@@ -751,7 +752,7 @@ pub async fn oidc_complete_registration(
 
     // 2. Validate the registration token after consuming the entry
     let reg_settings = state.settings.registration();
-    if let Err(e) = reg_settings.validate(Some(&req.registration_token)) {
+    if let Err(e) = reg_settings.validate(Some(req.registration_token.expose_secret())) {
         return e.into_response();
     }
 
@@ -937,8 +938,8 @@ pub async fn oidc_complete_registration(
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: SecretString::new(access_token),
+        refresh_token: SecretString::new(refresh_token),
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
@@ -986,7 +987,7 @@ pub async fn oidc_link(
     };
 
     // Retrieve pending link from database
-    let pending = match state.account_link_store.take(&link_req.link_token).await {
+    let pending = match state.account_link_store.take(link_req.link_token.expose_secret()).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             return error_response(StatusCode::BAD_REQUEST, "Link token not found or expired");
@@ -999,7 +1000,7 @@ pub async fn oidc_link(
 
     // Verify ownership
     let verified = if let Some(ref pwd) = link_req.password {
-        if let Some(message) = password::validate_password_length(pwd) {
+        if let Some(message) = password::validate_password_length(pwd.expose_secret()) {
             return error_response(StatusCode::BAD_REQUEST, message);
         }
         // Password verification
@@ -1011,7 +1012,7 @@ pub async fn oidc_link(
             Some(h) => h,
             None => return error_response(StatusCode::UNAUTHORIZED, "User has no password"),
         };
-        matches!(password::verify_password(pwd, hash), Ok(true))
+        matches!(password::verify_password(pwd.expose_secret(), hash), Ok(true))
     } else {
         // Bearer token verification (OIDC-to-OIDC linking) — now JWT-based
         let bearer = parts
@@ -1143,8 +1144,8 @@ pub async fn oidc_link(
 
     let cookie = set_refresh_token_cookie(&refresh_token);
     let response = AuthResponse {
-        access_token,
-        refresh_token,
+        access_token: SecretString::new(access_token),
+        refresh_token: SecretString::new(refresh_token),
         expires_in: state.jwt.expires_in(),
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {

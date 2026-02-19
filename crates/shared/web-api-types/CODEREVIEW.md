@@ -42,49 +42,31 @@ follow.
 **Recommendation:** Add `validate()` methods to all request types, starting with security-relevant inputs (email, URLs,
 passwords, CIDR ranges). Follow the pattern in `update_hooks.rs`.
 
-### HIGH: Secrets in plain `String` fields
+### ~~HIGH: Secrets in plain `String` fields~~ (FIXED)
 
-Several types contain secrets as plain `String`, meaning they can appear in Debug output, log messages, and error traces:
-
-- `RegisterRequest.password`, `LoginRequest.password`
-- `CreateOidcProviderRequest.client_secret`, `UpdateOidcProviderRequest.client_secret`
-- `CreateMqttClientRequest.password`, `UpdateMqttClientRequest.password`
-- `AuthResponse.access_token`, `AuthResponse.refresh_token`
-- `DeviceAuthPollResponse.token`, `EnrollmentTokenResponse.token`
-- `CreateApiTokenResponse.token`
-- `UpdateRegistrationSettingsRequest.token`
-
-The wire crate already uses `SecretString` from `secrecy`. Response types like `OidcProviderResponse` and
-`MqttClientResponse` correctly mask secrets with `has_*` boolean fields.
-
-**Recommendation:** Use `SecretString` for password/secret fields in request types, or at minimum ensure custom `Debug`
-implementations that redact secrets.
+**Resolution:** All secret fields now use `SecretString` from `uptrakit-shared-types`. This includes passwords,
+tokens, client secrets, access tokens, and refresh tokens across request and response types. `SecretString`
+provides transparent serde, redacted `Debug`/`Display`, and `ZeroizeOnDrop`.
 
 ### MEDIUM: Inconsistent `skip_serializing_if` for `Option` fields
 
 Most response structs serialize `null` for `None` values. `DeviceAuthPollResponse` and `ErrorResponse` skip `None`
 entirely. Both approaches are valid, but inconsistency within the same API confuses consumers.
 
-### MEDIUM: `UpdateMqttClientRequest` type mismatch between `username` and `password`
+### ~~MEDIUM: `UpdateMqttClientRequest` type mismatch between `username` and `password`~~ (FIXED)
 
-**File:** `src/settings_mqtt.rs`, lines 80-82
+**Resolution:** `password` now uses `Option<serde_json::Value>` (matching `username`) with three-state
+semantics: omit = keep, null = clear, string = set. The route handler parses both fields identically.
 
-`username` uses `Option<serde_json::Value>` (to distinguish "set to null to clear" vs "omit to keep"), while `password`
-uses `Option<String>` (cannot distinguish). These should use the same pattern.
+### ~~MEDIUM: `ListAgentsQuery` uses `ToSchema` instead of `IntoParams`~~ (NOT APPLICABLE)
 
-### MEDIUM: `ListAgentsQuery` uses `ToSchema` instead of `IntoParams`
+**Resolution:** `ListAgentsQuery` does not exist. Agents use `ListServicesQuery` which correctly uses
+`IntoParams`. This finding was a false positive.
 
-**File:** `src/agents.rs`, line 57
+### ~~MEDIUM: `uses_remaining` allows negative values~~ (FIXED)
 
-Query parameter structs should use `utoipa::IntoParams`, not `ToSchema`. Compare with `ListServicesQuery` and
-`ListMqttServicesQuery` which correctly use `IntoParams`.
-
-### MEDIUM: `uses_remaining` allows negative values
-
-**File:** `src/mqtt_services.rs`, line 99
-
-`Option<i32>` allows negative values. Should be `Option<u32>` since a negative remaining-uses count is semantically
-meaningless. Same issue in `MqttEnrollmentTokenResponse` and `MqttEnrollmentTokenListResponse`.
+**Resolution:** Changed `uses_remaining` from `Option<i32>` to `Option<u32>` in `MqttEnrollmentTokenResponse`,
+`MqttEnrollmentTokenListResponse`, and `CreateMqttEnrollmentTokenRequest`.
 
 ### MEDIUM: Missing test coverage for many modules
 
@@ -182,12 +164,12 @@ serialization. 16 thorough tests.
 | Category | Status | Notes |
 | --- | --- | --- |
 | Input validation | **HIGH** | No validation on request types (except update hooks) |
-| Secret handling | **HIGH** | Plain `String` for passwords/tokens in request types |
+| Secret handling | ~~**HIGH**~~ FIXED | All secret fields now use `SecretString` |
 | Wire dependency | PASS | `HookShell` now imported from `uptrakit-shared-types` directly |
-| OpenAPI correctness | FAIR | One wrong derive; missing derives on hooks types |
+| OpenAPI correctness | FAIR | Missing derives on hooks types |
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |
 | Permission model | FAIR | Very coarse (5 variants); many resources not covered |
 | Test coverage | FAIR | 114 tests, but many modules have zero coverage |
 | `unwrap`/`panic` | PASS | Zero in production code |
-| Type safety | FAIR | Several `String` fields where typed enums would be better |
+| Type safety | IMPROVED | `uses_remaining` now `u32`; `UpdateMqttClientRequest.password` uses three-state semantics |

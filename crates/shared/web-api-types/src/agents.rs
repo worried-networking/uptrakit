@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct EnrollmentTokenResponse {
-    pub token: String,
+    pub token: SecretString,
 }
 
 #[derive(Serialize, Deserialize)]

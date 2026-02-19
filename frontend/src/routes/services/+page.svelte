@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { user } from '$lib/auth';
 	import { getServices, approveService, rejectService, deleteService, mergeService } from '$lib/api';
 	import type { ServiceResponse, ServiceType } from '$lib/types';
@@ -25,10 +24,9 @@
 
 	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
 
-	onMount(() => loadServices(1));
-
 	$effect(() => {
-		loadServices(1); // Reload services when typeFilter changes, reset to first page
+		const _filter = typeFilter; // explicit dependency tracking
+		loadServices(1);
 	});
 
 	async function loadServices(page: number) {

@@ -10,9 +10,9 @@ Every command accepts these global flags:
 
 | Flag | Description |
 | --- | --- |
-| `--server <URL>` | Controller URL (overrides stored config) |
-| `--token <TOKEN>` | API token (overrides stored credentials) |
-| `--insecure` | Skip TLS certificate verification (development only) |
+| `--server <URL>` | Controller URL (overrides stored config and `UPTRAKIT_SERVER` env var) |
+| `--token <TOKEN>` | API token (overrides stored credentials and `UPTRAKIT_TOKEN` env var) |
+| `--insecure` | Skip TLS certificate verification (development only; prints a warning to stderr) |
 | `-o`, `--output <FORMAT>` | Output format: `human` (default), `json`, `yaml` |
 | `--version` | Show version and build metadata |
 
@@ -21,6 +21,18 @@ Every command accepts these global flags:
 All entity ID arguments (host IDs, service IDs, software item IDs, task IDs,
 etc.) must be valid UUIDs. The CLI validates UUID format at parse time and
 rejects invalid values immediately with a descriptive error message.
+
+## Environment Variables
+
+The CLI reads the following environment variables. CLI flags take precedence over environment
+variables, which take precedence over stored configuration.
+
+| Variable | Description |
+| --- | --- |
+| `UPTRAKIT_SERVER` | Controller URL (equivalent to `--server`) |
+| `UPTRAKIT_TOKEN` | API token (equivalent to `--token`; preferred over `--token` for automation to avoid exposing tokens in process listings) |
+
+**Priority order:** CLI flag > environment variable > stored credentials file.
 
 ## Authentication
 

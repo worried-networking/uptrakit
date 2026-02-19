@@ -74,7 +74,7 @@ pub async fn create_provider(
         || req.slug.is_empty()
         || req.issuer_url.is_empty()
         || req.client_id.is_empty()
-        || req.client_secret.is_empty()
+        || req.client_secret.expose_secret().is_empty()
     {
         return error_response(StatusCode::BAD_REQUEST, "Missing required fields");
     }
@@ -91,7 +91,8 @@ pub async fn create_provider(
         return error_response(StatusCode::CONFLICT, "Slug already exists");
     }
 
-    let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(req.client_secret)
+    let encrypted_secret =
+        match uptrakit_shared_db::crypto::EncryptedString::new(req.client_secret.expose_secret().to_string())
     {
         Ok(s) => s,
         Err(e) => {
@@ -277,8 +278,9 @@ pub async fn update_provider(
         model.client_id = Set(client_id);
     }
     if let Some(client_secret) = req.client_secret {
-        let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(client_secret)
-        {
+        let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(
+            client_secret.expose_secret().to_string(),
+        ) {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("encryption failed: {e}");

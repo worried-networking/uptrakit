@@ -742,7 +742,9 @@ pub async fn create_enrollment_token(
 
     (
         StatusCode::CREATED,
-        Json(EnrollmentTokenResponse { token: plaintext }),
+        Json(EnrollmentTokenResponse {
+            token: uptrakit_web_api_types::SecretString::new(plaintext),
+        }),
     )
         .into_response()
 }

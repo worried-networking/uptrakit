@@ -2,17 +2,33 @@
 
 ## SecretString
 
-`SecretString` (defined in `crates/shared/types/src/secret_string.rs`, re-exported by `uptrakit-internal-wire`) is a
-newtype wrapper that prevents accidental logging of sensitive values:
+`SecretString` (defined in `crates/shared/types/src/secret_string.rs`, re-exported by `uptrakit-internal-wire` and
+`uptrakit-web-api-types`) is a newtype wrapper that prevents accidental logging of sensitive values:
 
 - `Debug` output: `SecretString(***)`
 - `Display` output: `***REDACTED***`
 - Access the inner value via `.expose_secret()` (returns `&str`)
 - Transparent serde: JSON wire format is unchanged (plain string)
-- Used for: enrollment tokens, enrollment secrets, MQTT credentials in wire types
+- `ZeroizeOnDrop`: memory is zeroed when the value is dropped
+- Feature-gated `ToSchema` derive for OpenAPI schema generation (`openapi` feature)
+- Used for: enrollment tokens, enrollment secrets, MQTT credentials in wire types, **and all secret fields in HTTP
+  API request/response types** (passwords, tokens, client secrets, access/refresh tokens)
 
 Wire fields using `SecretString`: `EnrollPayload.enrollment_token`, `EnrolledPayload.enrollment_secret`,
 `MqttTenantConfig.username`, `MqttTenantConfig.password`.
+
+HTTP API fields using `SecretString` (in `uptrakit-web-api-types`): `RegisterRequest.password`,
+`LoginRequest.password`, `AuthResponse.access_token`, `AuthResponse.refresh_token`,
+`RefreshResponse.access_token`, `RefreshResponse.refresh_token`, `LogoutRequest.refresh_token`,
+`RefreshRequest.refresh_token`, `CreateOidcProviderRequest.client_secret`,
+`UpdateOidcProviderRequest.client_secret`, `OidcLinkRequest.link_token`, `OidcLinkRequest.password`,
+`OidcCompleteRegistrationRequest.registration_code`,
+`OidcCompleteRegistrationRequest.registration_token`, `RegisterRequest.registration_token`,
+`UpdateRegistrationSettingsRequest.token`, `CreateMqttClientRequest.password`,
+`CreateApiTokenResponse.token`, `EnrollmentTokenResponse.token`,
+`MqttEnrollmentTokenResponse.token`, `DeviceAuthPollResponse.token`.
+
+See also: [Coding Standards](../development/coding-standards.md).
 
 ## Encryption at Rest
 

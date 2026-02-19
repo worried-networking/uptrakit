@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 /// Query parameters for listing MQTT services.
@@ -14,9 +15,9 @@ pub struct ListMqttServicesQuery {
 pub struct MqttEnrollmentTokenResponse {
     pub id: Uuid,
     pub name: String,
-    pub token: String,
+    pub token: SecretString,
     pub expires_at: Option<String>,
-    pub uses_remaining: Option<i32>,
+    pub uses_remaining: Option<u32>,
     pub created_at: String,
 }
 
@@ -27,7 +28,7 @@ pub struct MqttEnrollmentTokenListResponse {
     pub id: Uuid,
     pub name: String,
     pub expires_at: Option<String>,
-    pub uses_remaining: Option<i32>,
+    pub uses_remaining: Option<u32>,
     pub created_at: String,
 }
 
@@ -41,5 +42,5 @@ pub struct CreateMqttEnrollmentTokenRequest {
     pub expires_at: Option<String>,
     /// Optional maximum number of uses.
     #[serde(default)]
-    pub uses_remaining: Option<i32>,
+    pub uses_remaining: Option<u32>,
 }

@@ -233,26 +233,10 @@ trusted.
 
 ### 3.2 Issues
 
-#### CQ-01: Double data load on services page
+#### ~~CQ-01: Double data load on services page~~ (FIXED)
 
-**Severity:** Medium (bug)
-**Location:** `services/+page.svelte:28-32`
-
-```typescript
-onMount(() => loadServices(1));
-
-$effect(() => {
-    loadServices(1); // Reload services when typeFilter changes
-});
-```
-
-Both `onMount` and `$effect` call `loadServices(1)` on initial render. The `$effect` runs on every render
-cycle when its tracked dependencies change (it tracks `typeFilter` through the closure in `loadServices`).
-On mount, this results in two API calls for the same data.
-
-**Recommendation:** Remove the `onMount` call. The `$effect` handles initial load because it runs when
-`typeFilter` is first read. If you need explicit initial-only loading, use the `$effect` with explicit
-dependency tracking.
+**Resolution:** Removed the duplicate `onMount(() => loadServices(1))` call. The `$effect` handles
+initial load. Also made the `typeFilter` dependency explicit (see CQ-04).
 
 #### CQ-02: Non-null assertion `$state(undefined!)` for component refs
 
@@ -289,27 +273,12 @@ The component has three nearly identical sets of:
 **Recommendation:** Extract a reusable `TokenSection` component or use a data-driven approach with an array
 of `{ type, label, description }` objects.
 
-#### CQ-04: Fragile `$effect` dependency tracking in services page
+#### ~~CQ-04: Fragile `$effect` dependency tracking in services page~~ (FIXED)
 
-**Severity:** Low
-**Location:** `services/+page.svelte:30-32`
-
+**Resolution:** Made the `typeFilter` dependency explicit in the `$effect` body:
 ```typescript
 $effect(() => {
-    loadServices(1); // Reload services when typeFilter changes
-});
-```
-
-The comment says "when typeFilter changes" but `typeFilter` is accessed inside `loadServices()` (line 39),
-not directly in the `$effect` body. Svelte 5's fine-grained reactivity tracks `typeFilter` through the
-closure, so this works. However, if `loadServices` is refactored to accept the filter as a parameter, the
-`$effect` would stop re-running on filter changes.
-
-**Recommendation:** Access `typeFilter` directly in the `$effect` body to make the dependency explicit:
-
-```typescript
-$effect(() => {
-    const _filter = typeFilter; // explicit dependency
+    const _filter = typeFilter; // explicit dependency tracking
     loadServices(1);
 });
 ```

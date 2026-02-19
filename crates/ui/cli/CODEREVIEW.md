@@ -50,22 +50,11 @@ The CLI depends only on `uptrakit-openapi-client`, `uptrakit-build-info`, and
 
 ## 1. Security & Safety
 
-### S-2: API token visible in process listing via `--token` flag [MEDIUM]
+### ~~S-2: API token visible in process listing via `--token` flag~~ [FIXED]
 
-**File:** `src/main.rs:26`
-
-The `--token` CLI flag passes the API token as a command-line argument. This exposes the
-token in:
-
-- Process listings (`ps aux`, `/proc/*/cmdline`)
-- Shell history files (`~/.bash_history`, `~/.zsh_history`)
-- System audit logs
-
-**Recommendation:** Add support for the `UPTRAKIT_TOKEN` environment variable as an
-alternative (higher-priority than stored credentials, lower than `--token`). Document that
-`--token` is for development/scripting only and environment variables are preferred.
-
-The `--server` flag has the same concern to a lesser degree (add `UPTRAKIT_SERVER`).
+**Resolution:** Added `env = "UPTRAKIT_TOKEN"` and `env = "UPTRAKIT_SERVER"` attributes
+to the `--token` and `--server` clap arguments. Priority: CLI arg > env var > stored
+credentials. Environment variables are the recommended approach for automation.
 
 ---
 
@@ -78,16 +67,11 @@ Tests added.
 
 ---
 
-### S-4: No warning when `--insecure` flag is used [LOW]
+### ~~S-4: No warning when `--insecure` flag is used~~ [FIXED]
 
-**File:** `src/main.rs:29`
-
-When `--insecure` is passed, TLS certificate verification is silently disabled. Other CLI
-tools (e.g., `curl -k`, `wget --no-check-certificate`) print warnings when operating
-insecurely.
-
-**Recommendation:** Print a warning to stderr when `--insecure` is active, e.g.:
-`WARNING: TLS certificate verification is disabled. Connection is insecure.`
+**Resolution:** Added a stderr warning (`WARNING: TLS certificate verification is
+disabled. Connection is insecure.`) when `--insecure` is active, printed before
+dispatching commands.
 
 ---
 
@@ -169,11 +153,11 @@ Acceptable for a CLI tool; user can retry manually.
 
 ## 5. Coding Standards Compliance
 
-### C-1: `ensure_dirs()` not called before config/credential file operations [MEDIUM]
+### ~~C-1: `ensure_dirs()` not called before config/credential file operations~~ [FIXED]
 
-**File:** `src/config.rs:22-54`
-
-Not a bug but inconsistent with other binaries that explicitly call `ensure_dirs()`.
+**Resolution:** Added `dirs.ensure_config_dir()` call in `save_config()` before writing,
+matching `save_credentials()` which already calls `dirs.ensure_state_dir()`. Also added
+`ensure_config_dir()` method to the directories crate.
 
 ### C-2: Missing test coverage for command execution logic [MEDIUM]
 
@@ -208,11 +192,11 @@ Low priority since types are only used within the crate.
 | ~~3~~ | ~~Q-2~~ | ~~Use `Uuid` for auth output ID fields~~ (FIXED) |
 | ~~4~~ | ~~Q-3~~ | ~~Fix Debug format in update trigger output~~ (FIXED) |
 | ~~5~~ | ~~A-2~~ | ~~Extract shared auth resolution logic~~ (FIXED) |
-| 6 | S-2 | Add environment variable support for token/server |
+| ~~6~~ | ~~S-2~~ | ~~Add environment variable support for token/server~~ (FIXED) |
 | ~~7~~ | ~~S-3~~ | ~~Validate URL before opening in browser~~ (FIXED) |
 | 8 | A-3 | Standardize parameter passing (struct vs loose) |
-| 9 | C-1 | Call `ensure_dirs()` in config operations |
+| ~~9~~ | ~~C-1~~ | ~~Call `ensure_dirs()` in config operations~~ (FIXED) |
 | 10 | C-2 | Add tests for formatting and error paths |
-| 11 | S-4 | Warn on `--insecure` usage |
+| ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |
 | 12 | Q-4 | Expand status_text coverage |
 | 13 | Q-5 | Document or fix stderr/stdout mixing in api command |

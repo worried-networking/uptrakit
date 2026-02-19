@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::SecretString;
 use uptrakit_openapi_client::types::oidc_providers::{
     CreateOidcProviderRequest, UpdateOidcProviderRequest,
 };
@@ -103,7 +104,7 @@ pub async fn registration_update(params: RegistrationUpdateParams<'_>) -> Result
     let client = authenticated_client(params.server, params.token, params.insecure)?;
     let req = UpdateRegistrationSettingsRequest {
         mode: params.mode,
-        token: params.reg_token,
+        token: params.reg_token.map(SecretString::new),
         require_token_for_oidc: params.require_token_for_oidc,
     };
     let resp = client
@@ -450,7 +451,7 @@ pub async fn mqtt_create(params: MqttCreateParams<'_>) -> Result<()> {
         enabled: params.enabled,
         client_id: params.client_id,
         username: params.username,
-        password: params.password,
+        password: params.password.map(SecretString::new),
         topic_prefix: params.topic_prefix,
     };
     let resp = client.create_mqtt_settings(&req).await.context_to()?;
@@ -492,6 +493,7 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
         .transpose()
         .context_to()?;
     let username = params.username.map(serde_json::Value::String);
+    let password = params.password.map(serde_json::Value::String);
     let req = UpdateMqttClientRequest {
         url: params.url,
         transport,
@@ -500,7 +502,7 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
         enabled: params.enabled,
         client_id: params.client_id,
         username,
-        password: params.password,
+        password,
         topic_prefix: params.topic_prefix,
     };
     let resp = client
@@ -670,7 +672,7 @@ pub async fn oidc_create(params: OidcCreateParams<'_>) -> Result<()> {
         logo_url: params.logo_url,
         issuer_url: params.issuer_url,
         client_id: params.client_id,
-        client_secret: params.client_secret,
+        client_secret: SecretString::new(params.client_secret),
         scopes: params
             .scopes
             .unwrap_or_else(|| "openid email profile groups".to_string()),
@@ -717,7 +719,7 @@ pub async fn oidc_update(params: OidcUpdateParams<'_>) -> Result<()> {
         logo_url: params.logo_url,
         issuer_url: params.issuer_url,
         client_id: params.client_id,
-        client_secret: params.client_secret,
+        client_secret: params.client_secret.map(SecretString::new),
         scopes: params.scopes,
         auto_create_users: params.auto_create_users,
         role_claim_path: params.role_claim_path,

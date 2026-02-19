@@ -718,23 +718,12 @@ impl Default for IncomingSeq {
 
 /// Error returned when a received sequence number does not match the expected
 /// value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("sequence error: expected {expected}, received {received}")]
 pub struct SeqError {
     pub expected: u64,
     pub received: u64,
 }
-
-impl fmt::Display for SeqError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "sequence error: expected {}, received {}",
-            self.expected, self.received
-        )
-    }
-}
-
-impl std::error::Error for SeqError {}
 
 #[cfg(test)]
 mod tests {

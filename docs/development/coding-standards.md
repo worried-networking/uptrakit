@@ -386,6 +386,7 @@ Do NOT use `.map_err()` to convert `PoisonError` into an application error — t
 1. **Derive `Debug` and `Error`** (via thiserror) on all error enums.
 1. **Use structured context** -- prefer typed variants (`NotFound(String)`) over generic string errors.
 1. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.
+1. **Use `SecretString` for all secret fields in API types.** Any field in `uptrakit-web-api-types` that carries a password, token, client secret, or other credential must use `SecretString` (from `uptrakit-shared-types`, re-exported by `uptrakit-web-api-types`). This prevents accidental exposure through `Debug` output and log messages. Consumers access the inner value via `.expose_secret()` and construct via `SecretString::new(...)`. See [Secrets Handling](../security/secrets-and-encryption.md) for details.
 1. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
 1. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may encounter.
 

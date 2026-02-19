@@ -49,16 +49,11 @@ when custom messages are supported.
 
 ### Medium
 
-#### M1: `SeqError` uses manual `Display`/`Error` despite `thiserror` dependency
+#### ~~M1: `SeqError` uses manual `Display`/`Error` despite `thiserror` dependency~~ (FIXED)
 
-**File:** `src/lib.rs:717-733`, `Cargo.toml:12`
-
-`thiserror` is listed as a dependency and used in `close_reason.rs` (line 86),
-but `SeqError` implements `Display` and `Error` manually. This is inconsistent
-within the crate.
-
-**Recommendation:** Use `#[derive(Debug, thiserror::Error)]` with
-`#[error("sequence error: expected {expected}, received {received}")]`.
+**Resolution:** Converted `SeqError` to use `#[derive(thiserror::Error)]` with
+`#[error("sequence error: expected {expected}, received {received}")]`, removing
+the manual `Display` and `Error` implementations.
 
 #### ~~M2: `ErrorCode` lacks `#[non_exhaustive]`~~ (FIXED)
 

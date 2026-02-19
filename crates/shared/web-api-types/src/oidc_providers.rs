@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
 pub fn default_scopes() -> String {
@@ -18,7 +19,7 @@ pub struct CreateOidcProviderRequest {
     pub logo_url: Option<String>,
     pub issuer_url: String,
     pub client_id: String,
-    pub client_secret: String,
+    pub client_secret: SecretString,
     #[serde(default = "default_scopes")]
     pub scopes: String,
     #[serde(default = "default_auto_create")]
@@ -36,7 +37,7 @@ pub struct UpdateOidcProviderRequest {
     pub logo_url: Option<String>,
     pub issuer_url: Option<String>,
     pub client_id: Option<String>,
-    pub client_secret: Option<String>,
+    pub client_secret: Option<SecretString>,
     pub scopes: Option<String>,
     pub auto_create_users: Option<bool>,
     pub role_claim_path: Option<String>,

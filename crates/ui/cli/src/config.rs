@@ -31,6 +31,7 @@ pub fn load_config() -> Result<Config> {
 
 pub fn save_config(config: &Config) -> Result<()> {
     let dirs = app_dirs()?;
+    dirs.ensure_config_dir().context_to()?;
     let path = dirs.config_path("config.json").context_to()?;
     let data = serde_json::to_string_pretty(config).context_to()?;
     uptrakit_directories::write_secure_file_str(&path, &data).context_to()

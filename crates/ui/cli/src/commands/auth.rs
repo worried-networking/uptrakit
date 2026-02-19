@@ -171,7 +171,7 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                     server: Some(server.clone()),
                 })?;
                 save_credentials(&Credentials {
-                    token: Some(api_token),
+                    token: Some(api_token.expose_secret().to_string()),
                 })?;
 
                 eprintln!();
@@ -241,7 +241,7 @@ pub async fn token_create(
         .context_to()?;
 
     let id = resp.id;
-    let new_token = resp.token;
+    let new_token = resp.token.expose_secret().to_string();
 
     let mut human = String::new();
     human.push_str("Token created:\n");

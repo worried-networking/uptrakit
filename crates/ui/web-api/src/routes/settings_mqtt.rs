@@ -212,7 +212,7 @@ pub async fn create_mqtt_settings(
         port,
         client_id,
         username: req.username.as_deref(),
-        password: req.password.as_deref(),
+        password: req.password.as_ref().map(|p| p.expose_secret()),
         topic_prefix,
     })
     .await
@@ -497,11 +497,22 @@ pub async fn update_mqtt_settings(
         None
     };
 
-    // Password: omitted = keep existing; empty string = clear; non-empty = set
-    let password: Option<Option<&str>> = req
-        .password
-        .as_ref()
-        .map(|p| if p.is_empty() { None } else { Some(p.as_str()) });
+    // Password: JSON value can be string or null
+    let password: Option<Option<&str>> = if let Some(ref password_val) = req.password {
+        if password_val.is_null() {
+            Some(None)
+        } else if let Some(s) = password_val.as_str() {
+            if s.is_empty() {
+                Some(None)
+            } else {
+                Some(Some(s))
+            }
+        } else {
+            return error_response(StatusCode::BAD_REQUEST, "password must be a string or null");
+        }
+    } else {
+        None
+    };
 
     if let Some(ref cid) = req.client_id
         && cid.is_empty()
