@@ -26,7 +26,7 @@ impl std::fmt::Display for HookShell {
 
 impl HookShell {
     /// Returns the string representation of the shell type.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Bash => "bash",
             Self::Sh => "sh",

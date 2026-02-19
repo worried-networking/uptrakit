@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uptrakit_internal_wire::MqttClientConnectionStatus;
 use uptrakit_internal_wire::MqttTransport;
+use uptrakit_internal_wire::SecretString;
 use uptrakit_shared_macros::impl_report_conversion;
 
 /// Configuration for connecting to an MQTT broker.
@@ -21,9 +22,9 @@ pub struct MqttConfig {
     /// MQTT client ID.
     pub client_id: String,
     /// Optional username for authentication.
-    pub username: Option<String>,
+    pub username: Option<SecretString>,
     /// Optional password for authentication.
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     /// Topic prefix (e.g. `"uptrakit"`).
     pub topic_prefix: String,
 }
@@ -187,7 +188,13 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
     opts.set_last_will(lwt);
 
     if let (Some(username), password) = (&config.username, &config.password) {
-        opts.set_credentials(username, password.as_deref().unwrap_or(""));
+        opts.set_credentials(
+            username.expose_secret(),
+            password
+                .as_ref()
+                .map(|p| p.expose_secret())
+                .unwrap_or(""),
+        );
     }
 
     match config.transport {
@@ -311,8 +318,8 @@ mod tests {
     #[test]
     fn mqtt_options_sets_credentials_when_provided() {
         let config = MqttConfig {
-            username: Some("user".into()),
-            password: Some("pass".into()),
+            username: Some(SecretString::new("user".into())),
+            password: Some(SecretString::new("pass".into())),
             ..tcp_config()
         };
 
@@ -338,8 +345,8 @@ mod tests {
     #[test]
     fn credentials_redacted_in_debug() {
         let config = MqttConfig {
-            password: Some("super-secret-password".into()),
-            username: Some("user".into()),
+            password: Some(SecretString::new("super-secret-password".into())),
+            username: Some(SecretString::new("user".into())),
             ..tcp_config()
         };
 

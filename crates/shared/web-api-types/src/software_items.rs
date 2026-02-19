@@ -116,7 +116,6 @@ impl std::fmt::Display for TriggerUpdateStatus {
 pub struct ReleaseAssetInfoRequest {
     pub name: String,
     pub download_url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
 }
 
@@ -137,7 +136,6 @@ pub struct TriggerUpdateRequest {
     /// Target version to update to.
     pub to_version: String,
     /// Optional release information (for providers that need it).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub release_info: Option<ReleaseInfoRequest>,
 }
 

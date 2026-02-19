@@ -18,7 +18,7 @@ pub enum ProviderType {
 
 impl ProviderType {
     /// Returns the snake_case string representation of this provider type.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::GithubReleases => "github_releases",
             Self::ProxmoxHelperScripts => "proxmox_helper_scripts",
@@ -30,8 +30,11 @@ impl ProviderType {
 
 /// Error returned when parsing an invalid [`ProviderType`] string.
 #[derive(Debug, Error)]
-#[error("unknown provider type: {0}")]
-pub struct ParseProviderTypeError(pub String);
+pub enum ParseProviderTypeError {
+    /// The input string does not match any known provider type.
+    #[error("invalid provider type value")]
+    Invalid,
+}
 
 impl FromStr for ProviderType {
     type Err = ParseProviderTypeError;
@@ -42,7 +45,7 @@ impl FromStr for ProviderType {
             "proxmox_helper_scripts" => Ok(Self::ProxmoxHelperScripts),
             "docker_registry" => Ok(Self::DockerRegistry),
             "homebrew" => Ok(Self::Homebrew),
-            _ => Err(ParseProviderTypeError(s.to_string())),
+            _ => Err(ParseProviderTypeError::Invalid),
         }
     }
 }
@@ -163,9 +166,9 @@ mod tests {
     }
 
     #[test]
-    fn provider_type_from_str_error_contains_input() {
+    fn provider_type_from_str_error_display() {
         let err = "bad_value".parse::<ProviderType>().unwrap_err();
-        assert!(err.to_string().contains("bad_value"));
+        assert_eq!(err.to_string(), "invalid provider type value");
     }
 
     #[test]

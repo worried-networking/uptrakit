@@ -84,6 +84,7 @@ pub(crate) async fn run_command_exec_impl(
     let stdout_handle = tokio::spawn(async move {
         let mut lines = stdout_reader.lines();
         let mut output = String::new();
+        let mut truncated = false;
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(ref tx) = stdout_tx {
                 let _ = tx
@@ -96,6 +97,10 @@ pub(crate) async fn run_command_exec_impl(
             if output.len() < MAX_OUTPUT_BYTES {
                 output.push_str(&line);
                 output.push('\n');
+            } else if !truncated {
+                truncated = true;
+                tracing::warn!("stdout output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation");
+                output.push_str("\n[output truncated at 10 MB]\n");
             }
         }
         output
@@ -105,6 +110,7 @@ pub(crate) async fn run_command_exec_impl(
     let stderr_handle = tokio::spawn(async move {
         let mut lines = stderr_reader.lines();
         let mut output = String::new();
+        let mut truncated = false;
         while let Ok(Some(line)) = lines.next_line().await {
             if let Some(ref tx) = stderr_tx {
                 let _ = tx
@@ -117,6 +123,10 @@ pub(crate) async fn run_command_exec_impl(
             if output.len() < MAX_OUTPUT_BYTES {
                 output.push_str(&line);
                 output.push('\n');
+            } else if !truncated {
+                truncated = true;
+                tracing::warn!("stderr output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation");
+                output.push_str("\n[output truncated at 10 MB]\n");
             }
         }
         output

@@ -23,7 +23,7 @@ pub enum MqttTransport {
 
 impl MqttTransport {
     /// DB / wire representation.
-    pub const fn as_str(self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Tcp => "tcp",
             Self::Tls => "tls",
@@ -31,7 +31,7 @@ impl MqttTransport {
     }
 
     /// Default port for this transport.
-    pub const fn default_port(self) -> u16 {
+    pub const fn default_port(&self) -> u16 {
         match self {
             Self::Tcp => 1883,
             Self::Tls => 8883,
@@ -39,7 +39,7 @@ impl MqttTransport {
     }
 
     /// URL scheme for this transport.
-    pub const fn url_scheme(self) -> &'static str {
+    pub const fn url_scheme(&self) -> &'static str {
         match self {
             Self::Tcp => "mqtt",
             Self::Tls => "mqtts",
@@ -56,7 +56,7 @@ impl MqttTransport {
     }
 
     /// Whether this transport uses TLS.
-    pub const fn requires_tls(self) -> bool {
+    pub const fn requires_tls(&self) -> bool {
         matches!(self, Self::Tls)
     }
 }

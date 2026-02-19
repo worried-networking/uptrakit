@@ -20,7 +20,7 @@ pub enum SessionTokenType {
 
 impl SessionTokenType {
     /// Returns the string representation.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RefreshToken => "refresh_token",
         }

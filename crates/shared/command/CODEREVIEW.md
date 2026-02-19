@@ -95,25 +95,15 @@ All `unwrap()` and `expect()` calls are exclusively in `#[cfg(test)]` blocks. Th
 
 All public items exported from `lib.rs` are used by downstream crates.
 
-### LOW: `UpdateOutputLine` missing derive traits
+### ~~LOW: `UpdateOutputLine` missing derive traits~~ (FIXED)
 
-**File:** `src/types.rs`, line 2
+**Resolution:** Added `#[derive(Clone, Debug)]` to `UpdateOutputLine`.
 
-The struct has no `#[derive(...)]` attributes. Compare with `UpdateOutputStream` which derives
-`Clone, Copy, Debug, PartialEq, Eq`. At minimum, `Debug` should be derived for logging support; `Clone` is also likely
-useful since the struct is sent through channels.
+### ~~LOW: Silent output truncation~~ (FIXED)
 
-**Recommendation:** Add `#[derive(Clone, Debug)]` to `UpdateOutputLine`.
-
-### LOW: Silent output truncation
-
-**File:** `src/command.rs`, lines 96-99 and 117-120
-
-When output exceeds `MAX_OUTPUT_BYTES`, data is silently discarded. No log message, no marker in the output, and no way
-for the caller to know truncation occurred.
-
-**Recommendation:** Add a `tracing::warn!` when the limit is first hit, and optionally append a
-`\n[output truncated at 10 MB]\n` marker.
+**Resolution:** Added a `tracing::warn!` when the 10 MB truncation threshold is first hit (once
+per stream, tracked with a bool flag). A `\n[output truncated at 10 MB]\n` marker is appended
+to the accumulated output so callers know truncation occurred.
 
 ### INFORMATIONAL: No command timeout mechanism
 

@@ -19,7 +19,7 @@ pub enum Error {
 
     // ── Database operations ─────────────────────────────────────────
     #[error("database error: {0}")]
-    Database(String),
+    Database(#[from] sea_orm::DbErr),
 
     // ── Host management ─────────────────────────────────────────────
     #[error("host not found: {0}")]
@@ -83,10 +83,8 @@ impl_report_conversion! {
     EnrollmentError => Error::Enrollment,
     std::io::Error => Error::Io,
     uptrakit_directories::DirectoryError => Error::Directory,
+    sea_orm::DbErr => Error::Database,
 }
-
-// sea_orm::DbErr uses a String-based variant, so we use a closure conversion.
-impl_report_conversion!(sea_orm::DbErr => Error, |e| Error::Database(e.to_string()));
 
 // russh::Error doesn't impl std::error::Error in a compatible way, so use String-based conversion.
 impl_report_conversion!(russh::Error => Error, |e| Error::SshConnection(e.to_string()));
@@ -111,7 +109,7 @@ mod tests {
 
     #[test]
     fn is_receive_closed_other_error() {
-        let err = Error::Database("test".to_string());
+        let err = Error::Database(sea_orm::DbErr::Custom("test".to_string()));
         assert!(!err.is_receive_closed());
     }
 
@@ -152,7 +150,7 @@ mod tests {
 
     #[test]
     fn is_cert_expired_database_error() {
-        let err = Error::Database("CertificateExpired".to_string());
+        let err = Error::Database(sea_orm::DbErr::Custom("CertificateExpired".to_string()));
         assert!(
             !err.is_cert_expired(),
             "should not match CertificateExpired in unrelated variant"

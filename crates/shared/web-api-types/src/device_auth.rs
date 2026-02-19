@@ -27,9 +27,7 @@ pub struct DeviceAuthPollRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DeviceAuthPollResponse {
     pub status: DeviceAuthStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<SecretString>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub token_name: Option<String>,
 }
 

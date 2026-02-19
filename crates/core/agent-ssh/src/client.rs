@@ -72,9 +72,9 @@ pub async fn run_authenticated_loop(params: AuthenticatedLoopParams<'_>) -> Resu
 
     // Open (or create) the local SSH host database.
     let local_db = crate::db::init_db(state_dir).await.map_err(|e| {
-        report!(Error::Database(format!(
+        report!(Error::Database(sea_orm::DbErr::Custom(format!(
             "failed to initialize local database: {e}"
-        )))
+        ))))
     })?;
     tracing::debug!("local SSH host database initialized");
 

@@ -23,17 +23,13 @@ pub enum ServiceType {
 
 impl fmt::Display for ServiceType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Agent => f.write_str("agent"),
-            Self::Mqtt => f.write_str("mqtt"),
-            Self::SshAgent => f.write_str("ssh_agent"),
-        }
+        f.write_str(self.as_str())
     }
 }
 
 impl ServiceType {
     /// Returns the string representation.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Agent => "agent",
             Self::Mqtt => "mqtt",

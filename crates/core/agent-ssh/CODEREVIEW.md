@@ -107,21 +107,15 @@ disabling TOFU. Document the TOFU behavior in security documentation.
 **Resolution:** Added `EnrollmentError::from_agent_error(cert_expired, receive_closed, msg)`
 in the service SDK. Both agent and agent-ssh now use this shared helper.
 
-#### M2: Several error variants use `String` for foreign errors
+#### ~~M2: `Database` error variant uses `String` instead of typed `DbErr`~~ (FIXED)
 
-**File:** `src/error.rs:21-57`
-
-Multiple error variants (`Database`, `SshConnection`, `SshAuth`,
-`SshCommand`, `KeyGeneration`, `BootstrapVerification`, `InvalidInput`)
-wrap `String` instead of the original error type. While some of these are
-necessary (e.g., `russh::Error` does not implement `std::error::Error`
-compatibly, per line 91-92), others like `Database` could wrap `sea_orm::DbErr`
-directly with `#[from]`.
-
-**Recommendation:** Where the foreign error type implements
-`std::error::Error`, use `#[from]` to preserve the error chain. The
-`sea_orm::DbErr` case (line 89) is documented as intentional, but
-`DbErr` does implement `Error`, so `#[from]` should work.
+**Resolution:** Changed `Error::Database(String)` to
+`Error::Database(#[from] sea_orm::DbErr)`. The `#[from]` generates the
+`From<sea_orm::DbErr>` conversion, preserving the full error chain. Added
+`sea_orm::DbErr` to the simple `impl_report_conversion!` list. Remaining
+`String`-based variants (`SshConnection`, `SshAuth`, `SshCommand`,
+`KeyGeneration`, `BootstrapVerification`, `InvalidInput`) are kept as-is
+because their source types do not implement `std::error::Error` compatibly.
 
 ### Low
 

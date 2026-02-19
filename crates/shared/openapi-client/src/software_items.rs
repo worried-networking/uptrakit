@@ -156,7 +156,7 @@ mod tests {
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["to_version"], "2.0.0");
-        assert!(json.get("release_info").is_none());
+        assert!(json["release_info"].is_null());
     }
 
     #[test]

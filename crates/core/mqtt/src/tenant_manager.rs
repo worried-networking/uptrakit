@@ -161,14 +161,8 @@ fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
         host: config.host.clone(),
         port,
         client_id: config.client_id.clone(),
-        username: config
-            .username
-            .as_ref()
-            .map(|s| s.expose_secret().to_string()),
-        password: config
-            .password
-            .as_ref()
-            .map(|s| s.expose_secret().to_string()),
+        username: config.username.clone(),
+        password: config.password.clone(),
         topic_prefix: config.topic_prefix.clone(),
     }
 }
@@ -216,9 +210,14 @@ mod tests {
         assert_eq!(mqtt_config.host, "broker.example.com");
         assert_eq!(mqtt_config.port, 8883);
         assert_eq!(mqtt_config.client_id, "my-client");
-        assert_eq!(mqtt_config.username.as_deref(), Some("user"));
-        assert_eq!(mqtt_config.password.as_deref(), Some("pass"));
-        // (These are plain String fields on MqttConfig, extracted from SecretString)
+        assert_eq!(
+            mqtt_config.username.as_ref().map(|s| s.expose_secret()),
+            Some("user")
+        );
+        assert_eq!(
+            mqtt_config.password.as_ref().map(|s| s.expose_secret()),
+            Some("pass")
+        );
         assert_eq!(mqtt_config.topic_prefix, "home/uptrakit");
     }
 

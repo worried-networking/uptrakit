@@ -24,7 +24,7 @@ pub enum MqttClientConnectionStatus {
 
 impl MqttClientConnectionStatus {
     /// Returns the string representation.
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Online => "online",
             Self::Offline => "offline",

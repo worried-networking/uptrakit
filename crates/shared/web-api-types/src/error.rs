@@ -11,6 +11,5 @@ pub struct ErrorResponse {
     /// Human-readable error message.
     pub error: String,
     /// Optional machine-readable error code for programmatic handling.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
 }

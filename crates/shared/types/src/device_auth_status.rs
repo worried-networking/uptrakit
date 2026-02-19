@@ -23,7 +23,7 @@ pub enum DeviceAuthStatus {
 
 impl DeviceAuthStatus {
     /// Returns the string representation.
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Authorized => "authorized",

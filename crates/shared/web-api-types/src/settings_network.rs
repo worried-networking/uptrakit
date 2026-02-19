@@ -13,7 +13,6 @@ pub struct NetworkSettingsResponse {
     pub forwarded_client_cert_pem_header: Option<String>,
     pub pki_addr: Option<String>,
     /// Warning message when pki_addr was changed, explaining that CA rotation is required.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pki_addr_warning: Option<String>,
 }
 

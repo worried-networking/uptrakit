@@ -292,10 +292,10 @@ mod tests {
         assert!(!req.enabled);
     }
 
-    // ── 5. skip_serializing_if ────────────────────────────────────────────
+    // ── 5. Option fields serialize as null ─────────────────────────────────
 
     #[test]
-    fn device_auth_poll_response_omits_none_fields() {
+    fn device_auth_poll_response_serializes_none_as_null() {
         let resp = DeviceAuthPollResponse {
             status: DeviceAuthStatus::Pending,
             token: None,
@@ -306,12 +306,12 @@ mod tests {
 
         assert!(obj.contains_key("status"));
         assert!(
-            !obj.contains_key("token"),
-            "token should be omitted when None"
+            obj.get("token").unwrap().is_null(),
+            "token should serialize as null when None"
         );
         assert!(
-            !obj.contains_key("token_name"),
-            "token_name should be omitted when None"
+            obj.get("token_name").unwrap().is_null(),
+            "token_name should serialize as null when None"
         );
     }
 
@@ -531,8 +531,8 @@ mod tests {
 
         assert_eq!(obj.get("error").unwrap(), "Something went wrong");
         assert!(
-            !obj.contains_key("code"),
-            "code should be omitted when None"
+            obj.get("code").unwrap().is_null(),
+            "code should serialize as null when None"
         );
     }
 

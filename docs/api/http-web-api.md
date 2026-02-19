@@ -231,9 +231,8 @@ All web API error responses use a consistent JSON format defined by `ErrorRespon
 }
 ```
 
-The `code` field is optional (`#[serde(skip_serializing_if = "Option::is_none")]`) and used only where a
-machine-readable code adds value (e.g. `"not_found"` for the 404 fallback, `"agent_version_too_old"` for version
-checks).
+The `code` field is optional and serializes as `null` when not set. It is used where a machine-readable code adds
+value (e.g. `"not_found"` for the 404 fallback, `"agent_version_too_old"` for version checks).
 
 ### Helper functions
 

@@ -85,22 +85,12 @@ now renews certificates independently of controller-pushed
 
 ### Low
 
-#### L1: Credentials stored as plain `String` in `MqttConfig`
+#### ~~L1: Credentials stored as plain `String` in `MqttConfig`~~ (FIXED)
 
-**File:** `src/mqtt_client.rs:24-26`, `src/tenant_manager.rs:164-171`
-
-`MqttConfig.username` and `MqttConfig.password` are `Option<String>`, while
-the wire protocol uses `SecretString`. The `build_config_from_wire` function
-(tenant_manager.rs:164-171) calls `.expose_secret().to_string()` to extract
-the plaintext.
-
-While the custom `Debug` impl (mqtt_client.rs:31-43) properly redacts these
-fields in log output, holding credentials as plain `String` means they may
-appear in heap dumps or core dumps.
-
-**Recommendation:** Consider keeping `SecretString` (or `Zeroizing<String>`)
-in `MqttConfig` and only exposing the secret when passing to
-`MqttOptions::set_credentials()`.
+**Resolution:** `MqttConfig.username` and `MqttConfig.password` are now
+`Option<SecretString>`. `build_config_from_wire()` clones the `SecretString`
+instead of extracting plaintext. Credentials are only exposed at the point
+of passing to `MqttOptions::set_credentials()`.
 
 #### L2: `compute_config_hash` uses `DefaultHasher` (non-deterministic)
 

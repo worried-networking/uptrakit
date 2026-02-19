@@ -114,39 +114,27 @@ serialization (e.g., logging a struct as JSON) will leak the secret.
 
 **Recommendation:** Add a prominent doc-comment warning that `Serialize` emits plaintext.
 
-### LOW: `ParseProviderTypeError` inconsistent with other parse errors
+### ~~LOW: `ParseProviderTypeError` inconsistent with other parse errors~~ (FIXED)
 
-**File:** `src/provider_types.rs`, lines 32-34
+**Resolution:** Changed `ParseProviderTypeError` from a `String`-wrapping struct to a thiserror-derived enum
+with a single `Invalid` variant. Now uses `#[derive(Debug, Error)]` with `#[error("invalid provider type value")]`,
+consistent with the crate's use of thiserror while keeping a structured error type.
 
-This is the only parse error that: (a) captures the invalid input as a `String`, (b) uses `thiserror::Error` derive,
-and (c) has a `pub` field. All others are zero-sized unit structs with manual impls.
+### ~~LOW: Inconsistent `as_str` receiver (`&self` vs `self`)~~ (FIXED)
 
-**Recommendation:** Either make all parse errors capture input (more helpful for diagnostics) or make this one a unit
-struct for consistency.
+**Resolution:** Standardized all `as_str` methods to `&self`. `MqttTransport` and
+`MqttClientConnectionStatus` were changed from `as_str(self)` to `as_str(&self)`.
 
-### LOW: Inconsistent `as_str` receiver (`&self` vs `self`)
+### ~~LOW: `ServiceType::Display` does not delegate to `as_str()`~~ (FIXED)
 
-| Type | Receiver |
-| --- | --- |
-| Most types | `as_str(&self)` |
-| `MqttClientConnectionStatus` | `as_str(self)` (by value) |
-| `MqttTransport` | `as_str(self)` (by value, `const fn`) |
+**Resolution:** Changed `ServiceType::Display` to delegate to `f.write_str(self.as_str())`,
+matching every other type in the crate.
 
-For `Copy` types this is functionally identical, but the API inconsistency is confusing.
+### ~~LOW: Inconsistent `const fn` usage~~ (FIXED)
 
-**Recommendation:** Standardize all `as_str` methods to `&self`.
-
-### LOW: `ServiceType::Display` does not delegate to `as_str()`
-
-**File:** `src/service_type.rs`, lines 24-32
-
-Every other type's `Display` delegates to `self.as_str()`. `ServiceType` duplicates the match, creating a maintenance
-risk if the two diverge. The test `display_matches_as_str` catches this today, but delegation is safer.
-
-### LOW: Inconsistent `const fn` usage
-
-Only `MqttTransport` marks `as_str` as `const fn`. No other type does. Either all `as_str` methods on `Copy` enums
-should be `const fn` or none should.
+**Resolution:** All `as_str` methods on Copy enums now use `const fn`: `ServiceType`, `ServiceStatus`,
+`DeviceAuthStatus`, `HookShell`, `MqttClientConnectionStatus`, `MqttTransport`, `OutputStreamType`,
+`SessionTokenType`, and `ProviderType`.
 
 ### ~~LOW: Hex `decode` could panic on non-ASCII multi-byte UTF-8~~ RESOLVED
 

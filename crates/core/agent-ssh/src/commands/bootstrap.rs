@@ -59,9 +59,9 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
 
     // Fail fast: check host name is not in DB.
     let db = crate::db::init_db(state_dir).await.map_err(|e| {
-        report!(Error::Database(format!(
+        report!(Error::Database(sea_orm::DbErr::Custom(format!(
             "failed to initialize local database: {e}"
-        )))
+        ))))
     })?;
     let existing = host_ops::find_host(&db, &params.name).await?;
     if existing.is_some() {

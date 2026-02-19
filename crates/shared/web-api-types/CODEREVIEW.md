@@ -36,10 +36,14 @@ on failure. 18 tests added.
 tokens, client secrets, access tokens, and refresh tokens across request and response types. `SecretString`
 provides transparent serde, redacted `Debug`/`Display`, and `ZeroizeOnDrop`.
 
-### MEDIUM: Inconsistent `skip_serializing_if` for `Option` fields
+### ~~MEDIUM: Inconsistent `skip_serializing_if` for `Option` fields~~ (FIXED)
 
-Most response structs serialize `null` for `None` values. `DeviceAuthPollResponse` and `ErrorResponse` skip `None`
-entirely. Both approaches are valid, but inconsistency within the same API confuses consumers.
+**Resolution:** Removed `#[serde(skip_serializing_if = "Option::is_none")]` from all response type `Option` fields
+(`DeviceAuthPollResponse`, `ErrorResponse`, `SystemAlert`, `NetworkSettingsResponse`, `ReleaseAssetInfoRequest`,
+`TriggerUpdateRequest`). All `Option` fields now consistently serialize as `null` when `None`. Kept
+`skip_serializing_if` on request types with PATCH semantics (`CreateMqttClientRequest`, `UpdateMqttClientRequest`)
+and configuration types (`UpdateHookConfig`, `HooksConfig`, `DockerComposeHook`) where absent-vs-null distinction
+is meaningful.
 
 ### ~~MEDIUM: `UpdateMqttClientRequest` type mismatch between `username` and `password`~~ (FIXED)
 
