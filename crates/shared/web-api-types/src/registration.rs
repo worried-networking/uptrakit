@@ -25,6 +25,12 @@ impl RegistrationMode {
     }
 }
 
+impl std::fmt::Display for RegistrationMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Error)]
 #[error("invalid registration mode value")]
 pub struct ParseRegistrationModeError;

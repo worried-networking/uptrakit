@@ -23,6 +23,12 @@ impl UpdateStatus {
     }
 }
 
+impl std::fmt::Display for UpdateStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Error)]
 #[error("invalid update status value")]
 pub struct ParseUpdateStatusError;

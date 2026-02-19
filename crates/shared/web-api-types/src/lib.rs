@@ -197,6 +197,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn registration_mode_display_matches_as_str() {
+        let variants = [
+            RegistrationMode::Open,
+            RegistrationMode::Invite,
+            RegistrationMode::Closed,
+        ];
+        for mode in &variants {
+            assert_eq!(format!("{mode}"), mode.as_str());
+        }
+    }
+
     // ── 4. Serde defaults ─────────────────────────────────────────────────
 
     #[test]
@@ -524,6 +536,19 @@ mod tests {
                 .parse()
                 .expect("from_str should succeed for as_str output");
             assert_eq!(&parsed, status);
+        }
+    }
+
+    #[test]
+    fn update_status_display_matches_as_str() {
+        let variants = [
+            UpdateStatus::Pending,
+            UpdateStatus::InProgress,
+            UpdateStatus::Completed,
+            UpdateStatus::Failed,
+        ];
+        for status in &variants {
+            assert_eq!(format!("{status}"), status.as_str());
         }
     }
 

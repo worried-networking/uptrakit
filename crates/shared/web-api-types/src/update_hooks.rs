@@ -111,6 +111,12 @@ impl SystemdAction {
     }
 }
 
+impl std::fmt::Display for SystemdAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Docker-compose action - explicit, maps directly to command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -131,6 +137,12 @@ impl DockerComposeAction {
             Self::Restart => "restart",
             Self::Pull => "pull",
         }
+    }
+}
+
+impl std::fmt::Display for DockerComposeAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -318,6 +330,18 @@ mod tests {
         assert_eq!(SystemdAction::Reload.as_str(), "reload");
     }
 
+    #[test]
+    fn systemd_action_display_matches_as_str() {
+        for action in [
+            SystemdAction::Start,
+            SystemdAction::Stop,
+            SystemdAction::Restart,
+            SystemdAction::Reload,
+        ] {
+            assert_eq!(format!("{action}"), action.as_str());
+        }
+    }
+
     // ── DockerComposeAction tests ────────────────────────────────────────────
 
     #[test]
@@ -340,6 +364,18 @@ mod tests {
         assert_eq!(DockerComposeAction::Down.as_str(), "down");
         assert_eq!(DockerComposeAction::Restart.as_str(), "restart");
         assert_eq!(DockerComposeAction::Pull.as_str(), "pull");
+    }
+
+    #[test]
+    fn docker_compose_action_display_matches_as_str() {
+        for action in [
+            DockerComposeAction::Up,
+            DockerComposeAction::Down,
+            DockerComposeAction::Restart,
+            DockerComposeAction::Pull,
+        ] {
+            assert_eq!(format!("{action}"), action.as_str());
+        }
     }
 
     // ── SystemdServiceHook tests ─────────────────────────────────────────────
