@@ -56,7 +56,7 @@ async fn nginx_crl_rejects_revoked_cert() {
         .send()
         .await
         .expect("healthz request");
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Valid cert should be accepted
     let resp = client_valid_cert
@@ -64,7 +64,7 @@ async fn nginx_crl_rejects_revoked_cert() {
         .send()
         .await
         .expect("valid cert request");
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Revoked cert should be rejected by Nginx at the TLS layer.
     // Nginx returns 400 "The SSL certificate error" when CRL check fails.
@@ -77,7 +77,8 @@ async fn nginx_crl_rejects_revoked_cert() {
         Ok(resp) => {
             // Nginx may return 400 instead of closing the connection
             assert!(
-                resp.status() == 400 || resp.status() == 403,
+                resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN,
                 "revoked cert should be rejected, got status {}",
                 resp.status()
             );

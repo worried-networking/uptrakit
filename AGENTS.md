@@ -202,6 +202,10 @@ These are non-negotiable design constraints. Do not violate them.
    helper patterns where applicable).
    **Approved exceptions**: `Mutex::lock().unwrap()`, `RwLock::read().unwrap()`, and `RwLock::write().unwrap()` are safe
    because `panic = "abort"` in the release profile makes lock poisoning impossible.
+1. **Use `StatusCode` for HTTP status codes.** Never compare against numeric literals (`== 404`, `>= 400`). Use
+   `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
+   (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
+   See [Coding Standards](docs/development/coding-standards.md).
 
 ### Error handling quick reference
 

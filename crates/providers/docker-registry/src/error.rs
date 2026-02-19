@@ -10,7 +10,10 @@ pub enum DockerRegistryError {
     Request(String),
 
     #[error("registry API error: {status} {message}")]
-    ApiError { status: u16, message: String },
+    ApiError {
+        status: reqwest::StatusCode,
+        message: String,
+    },
 
     #[error("authentication failed: {0}")]
     AuthFailed(String),
@@ -54,10 +57,10 @@ mod tests {
     #[test]
     fn display_api_error() {
         let err = DockerRegistryError::ApiError {
-            status: 404,
+            status: reqwest::StatusCode::NOT_FOUND,
             message: "not found".to_string(),
         };
-        assert_eq!(err.to_string(), "registry API error: 404 not found");
+        assert_eq!(err.to_string(), "registry API error: 404 Not Found not found");
     }
 
     #[test]

@@ -11,7 +11,10 @@ pub enum ClientError {
     Json(#[from] serde_json::Error),
 
     #[error("API error ({status}): {message}")]
-    Api { status: u16, message: String },
+    Api {
+        status: reqwest::StatusCode,
+        message: String,
+    },
 
     #[error("rate limited{}", match .retry_after_seconds {
         Some(secs) => format!(" (retry after {secs}s)"),

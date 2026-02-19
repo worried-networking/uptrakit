@@ -16,7 +16,7 @@ pub async fn request_log(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let response = next.run(req).await;
     let latency_ms = start.elapsed().as_millis();
-    let status = response.status().as_u16();
+    let status = response.status();
 
     let client_ip = response.extensions().get::<ClientIp>().map(|c| c.0);
     let proxy_ip = response.extensions().get::<ProxyIp>().map(|p| p.0);

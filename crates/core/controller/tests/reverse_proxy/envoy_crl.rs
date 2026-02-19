@@ -68,7 +68,7 @@ async fn envoy_crl_rejects_revoked_cert() {
         .send()
         .await
         .expect("healthz request");
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Valid cert should be accepted
     let resp = client_valid_cert
@@ -76,7 +76,7 @@ async fn envoy_crl_rejects_revoked_cert() {
         .send()
         .await
         .expect("valid cert request");
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Revoked cert should be rejected by Envoy at the TLS layer.
     let result = client_revoked_cert

@@ -206,10 +206,10 @@ impl Provider for GitHubProvider {
         self.check_rate_limit(response.headers());
 
         if !status.is_success() {
-            let status_code = status.as_u16();
-
             // Check for rate limiting
-            if status_code == 403 || status_code == 429 {
+            if status == reqwest::StatusCode::FORBIDDEN
+                || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            {
                 let remaining = response
                     .headers()
                     .get("x-ratelimit-remaining")
@@ -235,7 +235,7 @@ impl Provider for GitHubProvider {
                 .unwrap_or(body);
 
             bail!(ProviderError::Configuration(format!(
-                "GitHub API error: {status_code} {message}"
+                "GitHub API error: {status} {message}"
             )));
         }
 

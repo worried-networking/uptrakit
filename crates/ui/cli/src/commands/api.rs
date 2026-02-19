@@ -3,6 +3,7 @@ use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_value};
 use rootcause::prelude::*;
 use serde::Serialize;
+use uptrakit_openapi_client::StatusCode;
 
 /// Execute a raw API call and print the response in the requested format.
 pub async fn execute(
@@ -29,10 +30,11 @@ pub async fn execute(
     };
 
     let resp = client.raw_request(method, &path, body).await.context_to()?;
+    let reason = resp.status.canonical_reason().unwrap_or("");
 
     match format {
         OutputFormat::Human => {
-            eprintln!("HTTP {} {}", resp.status, status_text(resp.status));
+            eprintln!("HTTP {} {reason}", resp.status);
             if !resp.body.is_null() {
                 print_value(format, &resp.body)?;
             }
@@ -40,7 +42,7 @@ pub async fn execute(
         OutputFormat::Json | OutputFormat::Yaml => {
             let envelope = ApiResponse {
                 status: resp.status,
-                status_text: status_text(resp.status),
+                status_text: reason,
                 body: if resp.body.is_null() {
                     None
                 } else {
@@ -51,34 +53,28 @@ pub async fn execute(
         }
     }
 
-    if resp.status >= 400 {
+    if resp.status.is_client_error() || resp.status.is_server_error() {
         bail!(CliError::Api {
             status: resp.status,
-            message: format!("HTTP {} {}", resp.status, status_text(resp.status)),
+            message: format!("HTTP {} {reason}", resp.status),
         });
     }
 
     Ok(())
 }
 
-#[derive(Serialize)]
-struct ApiResponse {
-    status: u16,
-    status_text: &'static str,
-    body: Option<serde_json::Value>,
+/// Serialize a `StatusCode` as its numeric `u16` value for JSON wire compatibility.
+fn serialize_status_code<S: serde::Serializer>(
+    status: &StatusCode,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_u16(status.as_u16())
 }
 
-fn status_text(code: u16) -> &'static str {
-    match code {
-        200 => "OK",
-        201 => "Created",
-        204 => "No Content",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        403 => "Forbidden",
-        404 => "Not Found",
-        409 => "Conflict",
-        500 => "Internal Server Error",
-        _ => "",
-    }
+#[derive(Serialize)]
+struct ApiResponse {
+    #[serde(serialize_with = "serialize_status_code")]
+    status: StatusCode,
+    status_text: &'static str,
+    body: Option<serde_json::Value>,
 }

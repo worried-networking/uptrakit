@@ -200,7 +200,6 @@ impl RegistryClient {
         }
 
         if !status.is_success() {
-            let status_code = status.as_u16();
             let body = response.text().await.unwrap_or_default();
             let message = serde_json::from_str::<RegistryErrorResponse>(&body)
                 .ok()
@@ -209,7 +208,7 @@ impl RegistryClient {
                 .unwrap_or(body);
 
             bail!(DockerRegistryError::ApiError {
-                status: status_code,
+                status,
                 message,
             });
         }
@@ -230,10 +229,9 @@ impl RegistryClient {
         }
 
         if !status.is_success() {
-            let status_code = status.as_u16();
             bail!(DockerRegistryError::ApiError {
-                status: status_code,
-                message: format!("manifest HEAD returned {status_code}"),
+                status,
+                message: format!("manifest HEAD returned {status}"),
             });
         }
 

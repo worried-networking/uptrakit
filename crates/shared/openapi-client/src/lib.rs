@@ -37,14 +37,27 @@ pub use uuid::Uuid;
 /// do not need a direct dependency on `reqwest`.
 pub use reqwest::Error as ReqwestError;
 
+/// Re-export `reqwest::StatusCode` so that downstream crates (e.g. the CLI)
+/// do not need a direct dependency on `reqwest` for HTTP status handling.
+pub use reqwest::StatusCode;
+
 use rootcause::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+/// Serialize a `StatusCode` as its numeric `u16` value for JSON wire compatibility.
+fn serialize_status_code<S: serde::Serializer>(
+    status: &reqwest::StatusCode,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_u16(status.as_u16())
+}
+
 /// Response from a raw (untyped) API request.
 #[derive(Debug, Serialize)]
 pub struct RawResponse {
-    pub status: u16,
+    #[serde(serialize_with = "serialize_status_code")]
+    pub status: reqwest::StatusCode,
     pub body: serde_json::Value,
 }
 
@@ -110,7 +123,7 @@ impl UptrakitClient {
         }
 
         let resp = req.send().await.context_to()?;
-        let status = resp.status().as_u16();
+        let status = resp.status();
         let text = resp.text().await.context_to()?;
 
         let body = if text.is_empty() {
@@ -309,7 +322,7 @@ impl UptrakitClient {
         if status.is_client_error() || status.is_server_error() {
             let message = extract_error_message(&text);
             bail!(ClientError::Api {
-                status: status.as_u16(),
+                status,
                 message,
             });
         }
@@ -336,7 +349,7 @@ impl UptrakitClient {
             let text = resp.text().await.context_to()?;
             let message = extract_error_message(&text);
             bail!(ClientError::Api {
-                status: status.as_u16(),
+                status,
                 message,
             });
         }
@@ -362,7 +375,7 @@ impl UptrakitClient {
         if status.is_client_error() || status.is_server_error() {
             let message = extract_error_message(&text);
             bail!(ClientError::Api {
-                status: status.as_u16(),
+                status,
                 message,
             });
         }
@@ -474,7 +487,7 @@ mod tests {
     #[test]
     fn parse_retry_after_valid_seconds() {
         let resp = http::Response::builder()
-            .status(429)
+            .status(http::StatusCode::TOO_MANY_REQUESTS)
             .header("Retry-After", "60")
             .body("")
             .unwrap();
@@ -485,7 +498,7 @@ mod tests {
     #[test]
     fn parse_retry_after_missing_header() {
         let resp = http::Response::builder()
-            .status(429)
+            .status(http::StatusCode::TOO_MANY_REQUESTS)
             .body("")
             .unwrap();
         let reqwest_resp = reqwest::Response::from(resp);
@@ -495,7 +508,7 @@ mod tests {
     #[test]
     fn parse_retry_after_non_numeric() {
         let resp = http::Response::builder()
-            .status(429)
+            .status(http::StatusCode::TOO_MANY_REQUESTS)
             .header("Retry-After", "Wed, 21 Oct 2025 07:28:00 GMT")
             .body("")
             .unwrap();
@@ -506,7 +519,7 @@ mod tests {
     #[test]
     fn raw_response_serialization() {
         let resp = RawResponse {
-            status: 200,
+            status: reqwest::StatusCode::OK,
             body: serde_json::json!({"key": "value"}),
         };
         let json = serde_json::to_string(&resp).expect("serialize");

@@ -120,9 +120,9 @@ sites and tests.
 **Resolution:** Changed `{:?}` to `{}` in `update.rs` and added `Display` impl for
 `TriggerUpdateStatus` in `web-api-types`.
 
-### Q-4: `status_text()` in `api.rs` has limited coverage [LOW]
+### ~~Q-4: `status_text()` in `api.rs` has limited coverage~~ [LOW] (FIXED)
 
-The function only maps 9 HTTP status codes and returns `""` for anything else.
+Replaced hand-written `status_text()` function with `StatusCode::canonical_reason()`, which covers all standard HTTP status codes.
 
 ### Q-5: `api.rs` mixes stderr and stdout for Human format [LOW]
 
@@ -193,5 +193,5 @@ Low priority since types are only used within the crate.
 | ~~9~~ | ~~C-1~~ | ~~Call `ensure_dirs()` in config operations~~ (FIXED) |
 | 10 | C-2 | Add tests for formatting and error paths |
 | ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |
-| 12 | Q-4 | Expand status_text coverage |
+| ~~12~~ | ~~Q-4~~ | ~~Expand status_text coverage~~ (FIXED) |
 | 13 | Q-5 | Document or fix stderr/stdout mixing in api command |

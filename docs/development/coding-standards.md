@@ -447,6 +447,17 @@ if let Err(e) = req.validate() {
 See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook
 configuration types.
 
+## HTTP Status Codes
+
+Always use `reqwest::StatusCode` (re-exported as `uptrakit_openapi_client::StatusCode` for CLI code) instead of raw `u16` for HTTP status codes.
+
+- **Comparisons**: `status == StatusCode::NOT_FOUND`, not `status == 404`
+- **Range checks**: `status.is_client_error()`, `status.is_server_error()`, `status.is_success()` -- not `status >= 400`
+- **Reason phrases**: `status.canonical_reason()` -- not hand-written match tables
+- **Error types**: `status: StatusCode` -- not `status: u16`
+- **Serialization**: When a `StatusCode` must appear as a number in JSON, use `#[serde(serialize_with = "serialize_status_code")]`
+- **The only approved `.as_u16()` call** is inside serde serialization helpers for JSON wire compatibility
+
 ## Database Enum Columns (`DeriveActiveEnum`)
 
 All entity columns that store a fixed set of string values must use a typed Rust enum with SeaORM's `DeriveActiveEnum` instead of `String`. This

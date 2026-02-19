@@ -55,7 +55,7 @@ async fn nginx_ocsp_rejects_revoked_cert() {
         .send()
         .await
         .expect("healthz request");
-    assert_status(&container, resp.status(), 200, "no-cert healthz").await;
+    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"no-cert healthz").await;
 
     // Valid cert → should be accepted
     let resp = client_valid_cert
@@ -63,7 +63,7 @@ async fn nginx_ocsp_rejects_revoked_cert() {
         .send()
         .await
         .expect("valid cert request");
-    assert_status(&container, resp.status(), 200, "valid cert").await;
+    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"valid cert").await;
 
     // Revoked cert → should be rejected by Nginx OCSP check.
     // Nginx returns 400 "The SSL certificate error" when OCSP says revoked.
@@ -75,7 +75,8 @@ async fn nginx_ocsp_rejects_revoked_cert() {
     match result {
         Ok(resp) => {
             assert!(
-                resp.status() == 400 || resp.status() == 403,
+                resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN,
                 "revoked cert should be rejected, got status {}",
                 resp.status()
             );
@@ -160,7 +161,7 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
         .send()
         .await
         .expect("healthz request");
-    assert_status(&container, resp.status(), 200, "no-cert healthz").await;
+    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"no-cert healthz").await;
 
     // Valid cert → should be accepted
     let resp = client_valid_cert
@@ -168,7 +169,7 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
         .send()
         .await
         .expect("valid cert request");
-    assert_status(&container, resp.status(), 200, "valid cert").await;
+    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"valid cert").await;
 
     // Revoked cert → should be rejected (Nginx reads AIA, queries HTTP OCSP).
     let result = client_revoked_cert
@@ -179,7 +180,8 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
     match result {
         Ok(resp) => {
             assert!(
-                resp.status() == 400 || resp.status() == 403,
+                resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN,
                 "revoked cert should be rejected via AIA HTTP OCSP, got status {}",
                 resp.status()
             );
@@ -255,7 +257,7 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
         .expect("HTTPS OCSP healthz request");
     assert_eq!(
         healthz_resp.status(),
-        200,
+        reqwest::StatusCode::OK,
         "HTTPS OCSP responder should be reachable"
     );
 
@@ -280,7 +282,7 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
         .send()
         .await
         .expect("healthz request");
-    assert_status(&container, resp.status(), 200, "no-cert healthz").await;
+    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"no-cert healthz").await;
 
     // Valid cert → rejected because Nginx cannot use https:// AIA OCSP URLs.
     // Nginx reports "invalid URL prefix in OCSP responder" during SSL handshake.
@@ -290,7 +292,8 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
         .await
         .expect("valid cert request (should be rejected — Nginx rejects HTTPS AIA URL)");
     assert!(
-        resp.status() == 400 || resp.status() == 403,
+        resp.status() == reqwest::StatusCode::BAD_REQUEST
+            || resp.status() == reqwest::StatusCode::FORBIDDEN,
         "valid cert should be REJECTED because Nginx rejects https:// AIA OCSP URLs, got {}",
         resp.status()
     );
@@ -303,7 +306,8 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
     match result {
         Ok(resp) => {
             assert!(
-                resp.status() == 400 || resp.status() == 403,
+                resp.status() == reqwest::StatusCode::BAD_REQUEST
+                    || resp.status() == reqwest::StatusCode::FORBIDDEN,
                 "revoked cert should be REJECTED (HTTPS AIA URL), got {}",
                 resp.status()
             );
@@ -623,10 +627,10 @@ async fn get_nginx_port(container: &testcontainers::ContainerAsync<GenericImage>
 async fn assert_status(
     container: &testcontainers::ContainerAsync<GenericImage>,
     actual: reqwest::StatusCode,
-    expected: u16,
+    expected: reqwest::StatusCode,
     label: &str,
 ) {
-    if actual.as_u16() != expected {
+    if actual != expected {
         let logs = get_nginx_logs(container);
         panic!("{label}: expected HTTP {expected}, got {actual}.\nNginx logs:\n{logs}",);
     }

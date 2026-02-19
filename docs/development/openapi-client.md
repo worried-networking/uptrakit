@@ -29,9 +29,10 @@ generate code that doesn't follow the project's strict coding standards
 
 **Re-exports all types:** The crate re-exports `uptrakit-web-api-types` as
 `types`, `DeviceAuthStatus` and `ServiceType` from `uptrakit-shared-types`,
-`uuid::Uuid`, and `reqwest::Error` as `ReqwestError`. Downstream crates
-(e.g. the CLI) depend only on `uptrakit-openapi-client` and import types via
-`uptrakit_openapi_client::types::*`, `uptrakit_openapi_client::Uuid`, and
+`uuid::Uuid`, `reqwest::Error` as `ReqwestError`, and `reqwest::StatusCode`.
+Downstream crates (e.g. the CLI) depend only on `uptrakit-openapi-client`
+and import types via `uptrakit_openapi_client::types::*`,
+`uptrakit_openapi_client::Uuid`, `uptrakit_openapi_client::StatusCode`, and
 `uptrakit_openapi_client::ReqwestError`.
 
 **Full API coverage:** The client covers all JSON REST endpoints exposed by the
@@ -104,7 +105,7 @@ For the CLI `api` command that allows arbitrary API calls:
 
 ```rust
 let resp = client.raw_request("GET", "/api/v1/some/path", None).await?;
-// resp.status: u16, resp.body: serde_json::Value
+// resp.status: reqwest::StatusCode, resp.body: serde_json::Value
 ```
 
 ## UUID type safety
@@ -134,7 +135,7 @@ The `ClientError` enum covers all failure modes:
 | --- | --- |
 | `Http(reqwest::Error)` | Network/transport error |
 | `Json(serde_json::Error)` | JSON serialization/deserialization error |
-| `Api { status, message }` | Server returned an error response (4xx/5xx) |
+| `Api { status: StatusCode, message }` | Server returned an error response (4xx/5xx); `status` is `reqwest::StatusCode` |
 | `RateLimited { retry_after_seconds }` | Server returned HTTP 429; `retry_after_seconds: Option<u64>` parsed from the `Retry-After` header (seconds format) |
 | `NotFound(String)` | Server returned HTTP 404 |
 | `NotAuthenticated` | Server returned HTTP 401, or no bearer token available |
