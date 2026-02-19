@@ -2,7 +2,8 @@
 
 ## Error Handling - Overview
 
-- Wrap errors in `rootcause::Report` and define a `Result<T>` alias per boundary (e.g. `pub type Result<T> = std::result::Result<T, Report<MyError>>`).
+- Wrap errors in `rootcause::Report` and define a `Result<T>` alias per boundary (e.g.
+  `pub type Result<T> = std::result::Result<T, Report<MyError>>`).
 - Use `thiserror::Error` with `#[derive(Debug, Error)]` to describe failures.
 - Implement `ReportConversion` (via `impl_report_conversion!`) for all downstream errors and prefer `.context_to()?` to preserve the chain.
 - Use `report!()` for creating new reports and `bail!()` for early returns.
@@ -90,10 +91,10 @@ enum definition. Every module boundary must define its own error type following 
 
 ### Import convention
 
-Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()`,
-`.context_to()`, and `.context_transform()`), `IteratorExt` (for `collect_reports()`), `handlers` (report handler configuration), and
-`IntoRootcause` (for converting plain `Result<T, E>` into `Result<T, Report<E>>`). When implementing `ReportConversion`, use the
-`impl_report_conversion!` macro from `uptrakit-shared-macros` (it handles the `ReportConversion` import internally):
+Prefer importing the `rootcause::prelude` module. It provides `Report`, `markers`, `report!`, `bail!`, `ResultExt` (for `.context()`, `.context_to()`,
+and `.context_transform()`), `IteratorExt` (for `collect_reports()`), `handlers` (report handler configuration), and `IntoRootcause` (for converting
+plain `Result<T, E>` into `Result<T, Report<E>>`). When implementing `ReportConversion`, use the `impl_report_conversion!` macro from
+`uptrakit-shared-macros` (it handles the `ReportConversion` import internally):
 
 ```rust
 use rootcause::prelude::*;
@@ -232,12 +233,9 @@ fn validate(input: &str) -> Result<()> {
 
 ### Pattern 10: Decision guide — which context method to use
 
-| Scenario | Method | Effect |
-| --- | --- | --- |
-| Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl |
-| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node |
-| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` | Replace context, preserve children |
-| One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
+| Scenario | Method | Effect | | --- | --- | --- | | Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl | | Wrap
+low-level error with high-level meaning | `.context(Higher::Variant)` | New parent node | | Change error type in-place (1:1 mapping) |
+`.context_transform(\|e\| ...)` | Replace context, preserve children | | One-off, no conversion impl | `.map_err(\|e\| report!(...))` | Manual wrap |
 | Guard clause / early return | `bail!(...)` | Return immediately |
 
 ### Pattern 11: Custom error helper methods
@@ -302,8 +300,8 @@ errors.
 
 ### Pattern 16: Display fallbacks
 
-`unwrap_or_else` / `unwrap_or_default` used for non-critical display formatting (e.g. pretty-printing JSON with a `to_string()` fallback) are not error
-propagation and do not need typed errors:
+`unwrap_or_else` / `unwrap_or_default` used for non-critical display formatting (e.g. pretty-printing JSON with a `to_string()` fallback) are not
+error propagation and do not need typed errors:
 
 ```rust
 let pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
@@ -323,9 +321,9 @@ These are error handling patterns that MUST NOT be used:
 
 ### Pattern 17: Batch error collection with `IteratorExt`
 
-The `IteratorExt` trait (from `rootcause::prelude`) provides `collect_reports()` for collecting results from iterators where individual items may fail.
-Instead of short-circuiting on the first error, `collect_reports()` accumulates all successes and all failures, allowing batch validation scenarios to
-report every problem at once:
+The `IteratorExt` trait (from `rootcause::prelude`) provides `collect_reports()` for collecting results from iterators where individual items may
+fail. Instead of short-circuiting on the first error, `collect_reports()` accumulates all successes and all failures, allowing batch validation
+scenarios to report every problem at once:
 
 ```rust
 let (successes, errors): (Vec<_>, Vec<_>) = items
@@ -336,8 +334,8 @@ let (successes, errors): (Vec<_>, Vec<_>) = items
 
 ### Pattern 18: Orphan rule limitation for `IntoResponse`
 
-Due to Rust's orphan rule, downstream crates cannot implement `impl IntoResponse for Report<E>` because both `IntoResponse` (from `axum`) and
-`Report` (from `rootcause`) are foreign types. At HTTP handler call sites, handle errors inline instead:
+Due to Rust's orphan rule, downstream crates cannot implement `impl IntoResponse for Report<E>` because both `IntoResponse` (from `axum`) and `Report`
+(from `rootcause`) are foreign types. At HTTP handler call sites, handle errors inline instead:
 
 ```rust
 pub async fn my_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -386,14 +384,17 @@ Do NOT use `.map_err()` to convert `PoisonError` into an application error — t
 1. **Derive `Debug` and `Error`** (via thiserror) on all error enums.
 1. **Use structured context** -- prefer typed variants (`NotFound(String)`) over generic string errors.
 1. **No secrets in error messages.** Never include tokens, passwords, keys, or credentials.
-1. **Use `SecretString` for all secret fields in API types.** Any field in `uptrakit-web-api-types` that carries a password, token, client secret, or other credential must use `SecretString` (from `uptrakit-shared-types`, re-exported by `uptrakit-web-api-types`). This prevents accidental exposure through `Debug` output and log messages. Consumers access the inner value via `.expose_secret()` and construct via `SecretString::new(...)`. See [Secrets Handling](../security/secrets-and-encryption.md) for details.
+1. **Use `SecretString` for all secret fields in API types.** Any field in `uptrakit-web-api-types` that carries a password, token, client secret, or
+   other credential must use `SecretString` (from `uptrakit-shared-types`, re-exported by `uptrakit-web-api-types`). This prevents accidental exposure
+   through `Debug` output and log messages. Consumers access the inner value via `.expose_secret()` and construct via `SecretString::new(...)`. See
+   [Secrets Handling](../security/secrets-and-encryption.md) for details.
 1. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
 1. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may encounter.
 
 ## Request Type Validation
 
-All HTTP request types in `uptrakit-web-api-types` that accept user input must implement the `Validate` trait
-(defined in `validation.rs`). Route handlers call `req.validate()` at entry and return HTTP 400 on failure.
+All HTTP request types in `uptrakit-web-api-types` that accept user input must implement the `Validate` trait (defined in `validation.rs`). Route
+handlers call `req.validate()` at entry and return HTTP 400 on failure.
 
 ### Validate trait
 
@@ -405,8 +406,7 @@ pub trait Validate {
 }
 ```
 
-`ValidationError` carries a `field: &'static str` and `message: String`, providing structured field-level error
-reporting to API consumers.
+`ValidationError` carries a `field: &'static str` and `message: String`, providing structured field-level error reporting to API consumers.
 
 ### Implementation pattern
 
@@ -434,18 +434,13 @@ if let Err(e) = req.validate() {
 
 ### Currently validated request types
 
-| Type | Key validations |
-| --- | --- |
-| `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8-1024 chars |
-| `LoginRequest` | email format, password non-empty |
-| `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens, 1-64), issuer_url scheme, client_id non-empty |
-| `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields |
-| `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format |
-| `CreateSoftwareItemRequest` | name non-empty, exactly one of provider_config_id/provider_config |
-| `CreateProviderConfigRequest` | name non-empty |
+| Type | Key validations | | --- | --- | | `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8-1024
+chars | | `LoginRequest` | email format, password non-empty | | `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens,
+1-64), issuer_url scheme, client_id non-empty | | `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields | |
+`UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format | | `CreateSoftwareItemRequest` | name
+non-empty, exactly one of provider_config_id/provider_config | | `CreateProviderConfigRequest` | name non-empty |
 
-See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook
-configuration types.
+See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
 
 ## HTTP Status Codes
 
