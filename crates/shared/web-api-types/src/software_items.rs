@@ -4,10 +4,6 @@ use uuid::Uuid;
 use crate::provider_configs::CreateProviderConfigRequest;
 use crate::validation::{Validate, ValidationError};
 
-pub fn default_enabled() -> bool {
-    true
-}
-
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateSoftwareItemRequest {
@@ -22,7 +18,7 @@ pub struct CreateSoftwareItemRequest {
     /// Provider-specific overrides merged onto the base ProviderConfig at resolution time.
     pub config_override: Option<serde_json::Value>,
     /// Whether version checking is active. Defaults to true.
-    #[serde(default = "default_enabled")]
+    #[serde(default = "crate::default_enabled")]
     pub enabled: bool,
 }
 

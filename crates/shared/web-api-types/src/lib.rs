@@ -34,6 +34,15 @@ pub mod update_history;
 pub mod update_hooks;
 pub mod validation;
 
+/// Default value for `enabled` fields in create-request types.
+///
+/// Used as `#[serde(default = "crate::default_enabled")]` in
+/// [`provider_configs::CreateProviderConfigRequest`] and
+/// [`software_items::CreateSoftwareItemRequest`].
+pub fn default_enabled() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use crate::auth::{AuthResponse, UserResponse};

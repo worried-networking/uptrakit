@@ -8,7 +8,7 @@ pub struct EnrollmentTokenResponse {
     pub token: SecretString,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MessageResponse {
     pub message: String,

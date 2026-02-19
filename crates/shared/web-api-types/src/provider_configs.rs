@@ -4,10 +4,6 @@ use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
 
-pub fn default_enabled() -> bool {
-    true
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateProviderConfigRequest {
@@ -17,7 +13,7 @@ pub struct CreateProviderConfigRequest {
     /// Provider-specific configuration blob.
     pub config: serde_json::Value,
     /// Whether the config is enabled. Defaults to true.
-    #[serde(default = "default_enabled")]
+    #[serde(default = "crate::default_enabled")]
     pub enabled: bool,
 }
 
