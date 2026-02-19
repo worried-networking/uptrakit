@@ -85,6 +85,52 @@ pub async fn upsert_setting(
     Ok(())
 }
 
+/// Insert a setting only if it does not already exist (INSERT without ON CONFLICT UPDATE).
+///
+/// Returns `true` if the row was inserted, or `false` if a conflicting row
+/// already exists (duplicate tenant_id + key). This is used by HA startup
+/// to avoid silently overwriting a verification token written by another instance.
+pub async fn insert_setting_if_absent(
+    db: &impl ConnectionTrait,
+    tenant_id: Uuid,
+    key: SettingKey,
+    value: serde_json::Value,
+) -> Result<bool> {
+    let now = OffsetDateTime::now_utc();
+    let db_key = key.as_str();
+
+    let model = setting::ActiveModel {
+        tenant_id: Set(tenant_id),
+        key: Set(db_key.to_string()),
+        value: Set(value),
+        updated_at: Set(now),
+    };
+
+    let result = Setting::insert(model)
+        .on_conflict(
+            OnConflict::columns([setting::Column::TenantId, setting::Column::Key])
+                .do_nothing()
+                .to_owned(),
+        )
+        .try_insert()
+        .exec(db)
+        .await;
+
+    match result {
+        Ok(_) => {
+            // Row was inserted — bump version counter (non-fatal on failure)
+            if let Err(e) = bump_settings_version(db, tenant_id, key.is_global()).await {
+                tracing::warn!(error = ?e, key = db_key, "failed to bump settings version counter");
+            }
+            Ok(true)
+        }
+        Err(sea_orm::DbErr::RecordNotInserted) => Ok(false),
+        Err(e) => Err(report!(AuthError::Internal(format!(
+            "failed to insert setting {db_key}: {e}"
+        )))),
+    }
+}
+
 pub async fn load_setting(
     db: &impl ConnectionTrait,
     tenant_id: Uuid,

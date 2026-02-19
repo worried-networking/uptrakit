@@ -34,7 +34,7 @@ pub struct UpdateProviderConfigRequest {
 pub struct ProviderConfigResponse {
     pub id: Uuid,
     pub name: String,
-    pub provider_type: String,
+    pub provider_type: ProviderType,
     /// Provider-specific configuration with secrets masked.
     pub config: serde_json::Value,
     pub enabled: bool,

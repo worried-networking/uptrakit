@@ -89,29 +89,34 @@ Should be consolidated.
 Throughout the crate, timestamps use `String`. Using `time::OffsetDateTime` or similar would provide compile-time format
 guarantees.
 
-### LOW: Query filter parameters use raw `String` instead of typed enums
+### ~~LOW: Query filter parameters use raw `String` instead of typed enums~~ RESOLVED
 
-`ListMqttServicesQuery.status` is `Option<String>` rather than `Option<MqttServiceStatus>`. Similarly for
-`ListServicesQuery.status`, `ListServicesQuery.r#type`, and `UpdateHistoryQuery.status`. Compare with
-`ListAgentsQuery.status` which correctly uses `Option<AgentStatus>`.
+**Resolution:** `ListServicesQuery.r#type` is now `Option<ServiceType>`, `ListServicesQuery.status` is now
+`Option<ServiceStatus>`, and `UpdateHistoryQuery.status` is now `Option<UpdateStatus>`. Invalid filter values
+are rejected at deserialization time by axum/serde with a 400 error. Route handlers, CLI, and openapi-client
+tests updated accordingly. (`ListMqttServicesQuery.status` was a false positive -- it does not exist.)
 
-### LOW: `ProviderConfigResponse.provider_type` is `String` not `ProviderType`
+### ~~LOW: `ProviderConfigResponse.provider_type` is `String` not `ProviderType`~~ RESOLVED
 
-Loses type safety on responses. The request type correctly uses the typed enum.
+**Resolution:** Changed `provider_type` field from `String` to `ProviderType`. The response builder
+(`provider_config_response_from`) now returns `Option<ProviderConfigResponse>`, logging and skipping rows with
+invalid `provider_type` values. Callers use `filter_map` (list) or `match` (get/create/update).
 
 ### LOW: Missing `Display` implementations for some enums
 
 `AgentStatus`, `RegistrationMode`, `UpdateStatus`, and `MqttServiceStatus` have `as_str()` but no `Display`. In
 contrast, `Permission` and `AlertSeverity` do implement `Display`.
 
-### LOW: Missing OpenAPI schema derives on update hooks types
+### ~~LOW: Missing OpenAPI schema derives on update hooks types~~ RESOLVED
 
-None of the types in `update_hooks.rs` have `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]`. If exposed
-via API responses, they need schemas.
+**Resolution:** Added `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]` to all 7 public types in
+`update_hooks.rs`: `SystemdAction`, `DockerComposeAction`, `SystemdServiceHook`, `DockerComposeHook`,
+`PredefinedHook`, `UpdateHookConfig`, `HooksConfig`. Also added the derive to `HookShell` in `uptrakit-shared-types`.
 
-### LOW: `HookValidationError` does not use `thiserror`
+### ~~LOW: `HookValidationError` does not use `thiserror`~~ RESOLVED
 
-Uses manual `impl std::error::Error` and `impl Display`. Inconsistent with the rest of the crate.
+**Resolution:** Converted from manual `impl Display` + `impl Error` to `#[derive(thiserror::Error)]` with
+`#[error("{field}: {message}")]`.
 
 ### PASS: No production `unwrap`/`panic`
 
@@ -158,10 +163,10 @@ serialization. 16 thorough tests.
 | Input validation | ~~**HIGH**~~ FIXED | `Validate` trait + impls for 7 request types, wired into route handlers |
 | Secret handling | ~~**HIGH**~~ FIXED | All secret fields now use `SecretString` |
 | Wire dependency | PASS | `HookShell` now imported from `uptrakit-shared-types` directly |
-| OpenAPI correctness | FAIR | Missing derives on hooks types |
+| OpenAPI correctness | PASS | All hooks types now have OpenAPI schema derives |
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |
 | Permission model | FAIR | Very coarse (5 variants); many resources not covered |
 | Test coverage | FAIR | 114 tests, but many modules have zero coverage |
 | `unwrap`/`panic` | PASS | Zero in production code |
-| Type safety | IMPROVED | `uses_remaining` now `u32`; `UpdateMqttClientRequest.password` uses three-state semantics |
+| Type safety | GOOD | Typed enums for query filters; `ProviderConfigResponse.provider_type` typed; `uses_remaining` now `u32` |

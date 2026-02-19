@@ -112,8 +112,8 @@ pub fn verify_key_verification_token(stored: &str) -> Result<()> {
 /// Prefix for encrypted values stored in the database.
 const ENC_PREFIX: &str = "ENC:v1:";
 
-/// Check whether a stored string is already encrypted.
-fn is_encrypted(s: &str) -> bool {
+/// Check whether a stored string is already encrypted (has the `ENC:v1:` prefix).
+pub fn is_encrypted(s: &str) -> bool {
     s.starts_with(ENC_PREFIX)
 }
 

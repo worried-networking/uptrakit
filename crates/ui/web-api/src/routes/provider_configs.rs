@@ -44,12 +44,26 @@ pub(crate) fn validate_provider_config_request(
     Ok(())
 }
 
-fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigResponse {
-    ProviderConfigResponse {
+fn provider_config_response_from(
+    m: provider_config::Model,
+) -> Option<ProviderConfigResponse> {
+    let provider_type: uptrakit_provider_registry::ProviderType = match m.provider_type.parse() {
+        Ok(pt) => pt,
+        Err(_) => {
+            tracing::error!(
+                id = %m.id,
+                provider_type = %m.provider_type,
+                "provider config has invalid provider_type in database, skipping"
+            );
+            return None;
+        }
+    };
+    let config = ProviderRegistry::mask_config_secrets_str(provider_type.as_str(), &m.config);
+    Some(ProviderConfigResponse {
         id: m.id,
         name: m.name,
-        provider_type: m.provider_type.clone(),
-        config: ProviderRegistry::mask_config_secrets_str(&m.provider_type, &m.config),
+        provider_type,
+        config,
         enabled: m.enabled,
         created_at: m
             .created_at
@@ -59,7 +73,7 @@ fn provider_config_response_from(m: provider_config::Model) -> ProviderConfigRes
             .updated_at
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
-    }
+    })
 }
 
 /// Create a new provider configuration.
@@ -102,11 +116,12 @@ pub async fn create_provider_config(
     };
 
     match model.insert(&state.db).await {
-        Ok(inserted) => (
-            StatusCode::CREATED,
-            Json(provider_config_response_from(inserted)),
-        )
-            .into_response(),
+        Ok(inserted) => match provider_config_response_from(inserted) {
+            Some(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
+            None => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
         Err(e) => {
             tracing::error!("Failed to create provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -162,7 +177,7 @@ pub async fn list_provider_configs(
         Ok(configs) => {
             let items: Vec<ProviderConfigResponse> = configs
                 .into_iter()
-                .map(provider_config_response_from)
+                .filter_map(provider_config_response_from)
                 .collect();
             (
                 StatusCode::OK,
@@ -205,9 +220,12 @@ pub async fn get_provider_config(
     };
 
     match find_active_config(&state.db, tenant.tenant_id, config_id).await {
-        Some(config) => {
-            (StatusCode::OK, Json(provider_config_response_from(config))).into_response()
-        }
+        Some(config) => match provider_config_response_from(config) {
+            Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
+            None => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
         None => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     }
 }
@@ -287,9 +305,12 @@ pub async fn update_provider_config(
     model.updated_at = Set(now);
 
     match model.update(&state.db).await {
-        Ok(updated) => {
-            (StatusCode::OK, Json(provider_config_response_from(updated))).into_response()
-        }
+        Ok(updated) => match provider_config_response_from(updated) {
+            Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
+            None => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+            }
+        },
         Err(e) => {
             tracing::error!("Failed to update provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

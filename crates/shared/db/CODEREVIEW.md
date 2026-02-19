@@ -128,12 +128,12 @@ Resolved: Master key is now wrapped in `Zeroizing<[u8; 32]>` from the `zeroize` 
 Resolved: `tracing::warn!("master key not configured; storing value as plaintext (development mode)")` is now emitted
 when the plaintext fallback path is taken.
 
-### LOW: HA race condition on first token creation
+### ~~LOW: HA race condition on first token creation~~ RESOLVED
 
-If two instances start simultaneously and neither has a stored verification token, both will call
-`create_key_verification_token()` and attempt to store it. If they have different master keys, the last writer "wins" and
-the other may not detect the mismatch until restart. Consider using an INSERT-or-fail pattern (not upsert) for initial
-token creation.
+**Resolution:** `verify_master_key()` now uses `insert_setting_if_absent()` (INSERT with ON CONFLICT DO NOTHING) instead
+of `upsert_setting()`. If the insert fails because another instance raced and stored a token first, the current instance
+re-reads the stored token and verifies it against the current master key. This ensures key mismatches are always detected
+even during simultaneous startup.
 
 ### ~~LOW: Key verification error discards root cause~~ RESOLVED
 
@@ -215,5 +215,5 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | Bearer token storage | ~~**MEDIUM**~~ FIXED | UUID PKs + SHA-256 hash columns for lookup |
 | Master key memory | PASS       | Wrapped in `Zeroizing<[u8; 32]>` (defense-in-depth) |
 | RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
-| HA safety | GOOD | Verification works; minor race on first creation |
+| HA safety | PASS | Insert-then-verify pattern eliminates first-creation race |
 | Extensibility | FAIR | All 34 entities in one crate; needs feature gating |

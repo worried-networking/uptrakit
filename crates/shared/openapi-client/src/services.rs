@@ -98,15 +98,15 @@ impl UptrakitClient {
 #[cfg(test)]
 mod tests {
     use super::EnrollmentTokenQuery;
-    use uptrakit_shared_types::ServiceType;
+    use uptrakit_shared_types::{ServiceStatus, ServiceType};
     use uptrakit_web_api_types::services::{ListServicesQuery, MergeAgentRequest};
     use uuid::Uuid;
 
     #[test]
     fn list_services_query_serialization_with_all_fields() {
         let query = ListServicesQuery {
-            r#type: Some("agent".to_string()),
-            status: Some("approved".to_string()),
+            r#type: Some(ServiceType::Agent),
+            status: Some(ServiceStatus::Approved),
             page: Some(2),
             per_page: Some(50),
         };

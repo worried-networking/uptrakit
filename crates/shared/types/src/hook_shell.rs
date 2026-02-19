@@ -6,6 +6,7 @@ use std::str::FromStr;
 ///
 /// Determines which shell interpreter and fail-early settings are used.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum HookShell {
     /// Bash shell with `set -euo pipefail`

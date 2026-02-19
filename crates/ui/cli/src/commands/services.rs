@@ -1,9 +1,11 @@
 use crate::client::authenticated_client;
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::services::{ListServicesQuery, MergeAgentRequest};
+use uptrakit_openapi_client::types::services::{
+    ListServicesQuery, MergeAgentRequest, ParseServiceStatusError, ParseServiceTypeError,
+};
 
 /// Parameters for listing services.
 pub struct ListParams<'a> {
@@ -21,8 +23,16 @@ pub struct ListParams<'a> {
 pub async fn list(params: ListParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
     let query = ListServicesQuery {
-        r#type: params.service_type.map(|s| s.to_string()),
-        status: params.status.map(|s| s.to_string()),
+        r#type: params
+            .service_type
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
+        status: params
+            .status
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())))?,
         page: params.page,
         per_page: params.per_page,
     };

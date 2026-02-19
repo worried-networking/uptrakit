@@ -46,7 +46,7 @@ impl std::str::FromStr for UpdateStatus {
 pub struct UpdateHistoryQuery {
     pub host_id: Option<Uuid>,
     pub software_item_id: Option<Uuid>,
-    pub status: Option<String>,
+    pub status: Option<UpdateStatus>,
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
     /// Items per page. Defaults to 20, max 1000.

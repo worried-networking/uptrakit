@@ -22,7 +22,7 @@ impl UptrakitClient {
 
 #[cfg(test)]
 mod tests {
-    use uptrakit_web_api_types::update_history::UpdateHistoryQuery;
+    use uptrakit_web_api_types::update_history::{UpdateHistoryQuery, UpdateStatus};
     use uuid::Uuid;
 
     #[test]
@@ -31,7 +31,7 @@ mod tests {
         let query = UpdateHistoryQuery {
             host_id: Some(host_id),
             software_item_id: None,
-            status: Some("completed".to_string()),
+            status: Some(UpdateStatus::Completed),
             page: Some(2),
             per_page: Some(10),
         };

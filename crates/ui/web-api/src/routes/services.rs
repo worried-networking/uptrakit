@@ -56,27 +56,13 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
     }
 }
 
-/// Error returned when the `type` query parameter is invalid.
-#[derive(Debug, thiserror::Error)]
-#[error("invalid type parameter: '{0}', expected 'agent', 'mqtt', or 'ssh_agent'")]
-struct InvalidServiceTypeParam(String);
-
-impl IntoResponse for InvalidServiceTypeParam {
-    fn into_response(self) -> Response {
-        error_response(StatusCode::BAD_REQUEST, self.to_string())
-    }
-}
-
 /// Determine the correct `SettingKey` for the enrollment token hash based on
 /// the `type` query parameter.
-fn enrollment_setting_key(
-    type_param: Option<&str>,
-) -> std::result::Result<SettingKey, InvalidServiceTypeParam> {
+fn enrollment_setting_key(type_param: Option<&ServiceType>) -> SettingKey {
     match type_param {
-        Some("agent") | None => Ok(SettingKey::EnrollmentTokenHash),
-        Some("mqtt") => Ok(SettingKey::MqttEnrollmentTokenHash),
-        Some("ssh_agent") => Ok(SettingKey::SshAgentEnrollmentTokenHash),
-        Some(other) => Err(InvalidServiceTypeParam(other.to_string())),
+        Some(ServiceType::Mqtt) => SettingKey::MqttEnrollmentTokenHash,
+        Some(ServiceType::SshAgent) => SettingKey::SshAgentEnrollmentTokenHash,
+        Some(ServiceType::Agent) | None => SettingKey::EnrollmentTokenHash,
     }
 }
 
@@ -118,16 +104,12 @@ pub async fn list_services(
         .filter(service::Column::TenantId.eq(tenant.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null());
 
-    if let Some(ref type_filter) = query.r#type
-        && let Ok(db_type) = type_filter.parse::<ServiceType>()
-    {
-        q = q.filter(service::Column::ServiceType.eq(db_type));
+    if let Some(ref type_filter) = query.r#type {
+        q = q.filter(service::Column::ServiceType.eq(*type_filter));
     }
 
-    if let Some(ref status_filter) = query.status
-        && let Ok(db_status) = status_filter.parse::<ServiceStatus>()
-    {
-        q = q.filter(service::Column::Status.eq(db_status));
+    if let Some(ref status_filter) = query.status {
+        q = q.filter(service::Column::Status.eq(*status_filter));
     }
 
     let base_query = q.order_by_desc(service::Column::CreatedAt);
@@ -707,10 +689,7 @@ pub async fn create_enrollment_token(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let setting_key = match enrollment_setting_key(query.r#type.as_deref()) {
-        Ok(k) => k,
-        Err(e) => return e.into_response(),
-    };
+    let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     let plaintext = match token::generate_secure_token() {
         Ok(t) => t,
@@ -773,10 +752,7 @@ pub async fn revoke_enrollment_token(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let setting_key = match enrollment_setting_key(query.r#type.as_deref()) {
-        Ok(k) => k,
-        Err(e) => return e.into_response(),
-    };
+    let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     if let Err(e) = delete_setting(&state.db, state.default_tenant_id, setting_key).await {
         tracing::error!("Failed to delete enrollment token: {:?}", e);
@@ -1064,10 +1040,7 @@ pub async fn enrollment_token_status(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let setting_key = match enrollment_setting_key(query.r#type.as_deref()) {
-        Ok(k) => k,
-        Err(e) => return e.into_response(),
-    };
+    let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     let configured = matches!(
         load_setting(&state.db, state.default_tenant_id, setting_key).await,

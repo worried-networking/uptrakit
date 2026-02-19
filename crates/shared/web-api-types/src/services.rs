@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 // Canonical types from shared-types with feature-gated OpenAPI derives.
-pub use uptrakit_shared_types::{ParseServiceStatusError, ServiceStatus, ServiceType};
+pub use uptrakit_shared_types::{
+    ParseServiceStatusError, ParseServiceTypeError, ServiceStatus, ServiceType,
+};
 
 /// Unified response for any service (agent or MQTT).
 #[derive(Serialize, Deserialize)]
@@ -24,10 +26,10 @@ pub struct ServiceResponse {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListServicesQuery {
-    /// Filter by service type: `agent` or `mqtt`.
-    pub r#type: Option<String>,
+    /// Filter by service type: `agent`, `mqtt`, or `ssh_agent`.
+    pub r#type: Option<ServiceType>,
     /// Filter by status: `pending`, `approved`, `rejected`, `deactivated`.
-    pub status: Option<String>,
+    pub status: Option<ServiceStatus>,
     /// Page number (1-indexed). Defaults to 1.
     pub page: Option<u64>,
     /// Items per page. Defaults to 20, max 1000.

@@ -4,7 +4,7 @@
 //! platform conventions (XDG on Linux, Application Support on macOS, etc.).
 //!
 //! Each binary has its own project directories:
-//! - Controller: `uptrakit/controller` (qualifier: `io.uptrakit`)
+//! - Controller: `uptrakit/controller` (qualifier: `org.uptrakit`)
 //! - Agent: `uptrakit/agent`
 //! - MQTT: `uptrakit/mqtt`
 //!

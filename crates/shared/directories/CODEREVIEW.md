@@ -69,10 +69,10 @@ for flush.
 Returns `None` on Windows where `USERPROFILE` is used. The `directories` crate (already a dependency) provides
 cross-platform home directory resolution.
 
-### LOW: `ProjectDirs::from` qualifier mismatch with documentation
+### ~~LOW: `ProjectDirs::from` qualifier mismatch with documentation~~ RESOLVED
 
-`ProjectDirs::from("org", "uptrakit", app_name)` produces `org.uptrakit.*` on macOS, but documentation says
-`io.uptrakit`. Either change the qualifier to `"io"` or update the docs.
+**Resolution:** Updated the crate docstring and `AGENTS.md` to say `org.uptrakit.*` (matching the code). The code
+correctly uses `ProjectDirs::from("org", "uptrakit", app_name)`.
 
 ### LOW: Non-Unix platforms get no permission hardening
 

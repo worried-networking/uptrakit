@@ -160,7 +160,7 @@ pub(crate) async fn verify_master_key(
     match stored_token {
         Some(value) => {
             if let Some(token_str) = value.as_str()
-                && token_str.starts_with("ENC:v1:")
+                && uptrakit_shared_db::crypto::is_encrypted(token_str)
             {
                 uptrakit_shared_db::crypto::verify_key_verification_token(token_str).map_err(
                     |_| {
@@ -177,7 +177,7 @@ pub(crate) async fn verify_master_key(
         }
         None => {
             let token = uptrakit_shared_db::crypto::create_key_verification_token().context_to()?;
-            uptrakit_web_api::settings_store::upsert_setting(
+            let inserted = uptrakit_web_api::settings_store::insert_setting_if_absent(
                 db,
                 tenant_id,
                 SettingKey::MasterKeyVerification,
@@ -185,7 +185,36 @@ pub(crate) async fn verify_master_key(
             )
             .await
             .context(AppError::Settings)?;
-            tracing::info!("master key verification token stored");
+
+            if inserted {
+                tracing::info!("master key verification token stored");
+            } else {
+                // Another instance raced and stored a token first — verify against it.
+                let raced_value = uptrakit_web_api::settings_store::load_setting(
+                    db,
+                    tenant_id,
+                    SettingKey::MasterKeyVerification,
+                )
+                .await
+                .context(AppError::Settings)?;
+                if let Some(value) = raced_value
+                    && let Some(token_str) = value.as_str()
+                    && uptrakit_shared_db::crypto::is_encrypted(token_str)
+                {
+                    uptrakit_shared_db::crypto::verify_key_verification_token(token_str).map_err(
+                        |_| {
+                            report!(AppError::Config(
+                                "master key mismatch: another controller instance stored a \
+                                 verification token first, and the current UPTRAKIT_MASTER_KEY \
+                                 cannot decrypt it. Ensure all controller instances use the \
+                                 same master key."
+                                    .into()
+                            ))
+                        },
+                    )?;
+                    tracing::info!("master key verification succeeded (raced with another instance)");
+                }
+            }
         }
     }
     Ok(())

@@ -82,7 +82,9 @@ To prevent this, the controller performs **startup key verification**:
 
 1. On first startup (when no verification token exists), `create_key_verification_token()` encrypts a
    known sentinel value (`uptrakit-master-key-ok-v1`) and stores the ciphertext in the
-   `crypto.master_key_verification` settings entry.
+   `crypto.master_key_verification` settings entry using `insert_setting_if_absent()` (INSERT with
+   ON CONFLICT DO NOTHING). If another controller instance raced and stored a token first, the current
+   instance detects the conflict, re-reads the stored token, and verifies it against the current key.
 2. On subsequent startups, `verify_key_verification_token()` reads the stored ciphertext, decrypts it,
    and verifies it matches the expected sentinel. If decryption fails or the plaintext does not match,
    the controller aborts with a `MasterKeyMismatch` error and a clear diagnostic message.

@@ -6,22 +6,15 @@
 //! - Shell selection (bash, sh, powershell)
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use thiserror::Error;
 
 /// Error returned when hook parameter validation fails.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("{field}: {message}")]
 pub struct HookValidationError {
     pub field: &'static str,
     pub message: String,
 }
-
-impl fmt::Display for HookValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.field, self.message)
-    }
-}
-
-impl std::error::Error for HookValidationError {}
 
 /// Validate a systemd service/unit name.
 ///
@@ -97,6 +90,7 @@ pub use uptrakit_shared_types::HookShell;
 
 /// Systemd service action - explicit, maps directly to command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SystemdAction {
     Start,
@@ -119,6 +113,7 @@ impl SystemdAction {
 
 /// Docker-compose action - explicit, maps directly to command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum DockerComposeAction {
     Up,
@@ -141,6 +136,7 @@ impl DockerComposeAction {
 
 /// Predefined systemd service hook configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SystemdServiceHook {
     /// Name of the systemd service (e.g., "myapp", "nginx").
     pub service_name: String,
@@ -157,6 +153,7 @@ impl SystemdServiceHook {
 
 /// Predefined docker-compose hook configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DockerComposeHook {
     /// Action to perform.
     pub action: DockerComposeAction,
@@ -185,6 +182,7 @@ impl DockerComposeHook {
 ///
 /// Each variant directly maps to a specific command - no hidden magic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PredefinedHook {
     /// Systemd service management (e.g., stop/start a service).
@@ -208,6 +206,7 @@ impl PredefinedHook {
 /// Either `predefined` or `commands` should be set, not both.
 /// If both are set, `predefined` takes precedence.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateHookConfig {
     /// Use a predefined hook template with explicit action.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -224,6 +223,7 @@ pub struct UpdateHookConfig {
 ///
 /// Stored in provider_config or software item's config_override.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HooksConfig {
     /// Pre-update hook configuration.
     #[serde(skip_serializing_if = "Option::is_none")]

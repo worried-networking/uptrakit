@@ -262,7 +262,7 @@ resolution. The crate uses the `directories` crate (`ProjectDirs`) to follow pla
 | Platform | Config directory | State directory |
 | --- | --- | --- |
 | Linux | `~/.config/{app}/` (XDG) | `~/.local/state/{app}/` (XDG) |
-| macOS | `~/Library/Application Support/io.uptrakit.{app}/` | `~/Library/Application Support/io.uptrakit.{app}/` |
+| macOS | `~/Library/Application Support/org.uptrakit.{app}/` | `~/Library/Application Support/org.uptrakit.{app}/` |
 | Windows | `{FOLDERID_RoamingAppData}\uptrakit\{app}\` | `{FOLDERID_LocalAppData}\uptrakit\{app}\` |
 
 Where `{app}` is one of: `controller`, `agent`, `agent-ssh`, `mqtt`.

@@ -1,9 +1,9 @@
 use crate::client::authenticated_client;
-use crate::error::Result;
+use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::update_history::UpdateHistoryQuery;
+use uptrakit_openapi_client::types::update_history::{ParseUpdateStatusError, UpdateHistoryQuery};
 
 /// Parameters for listing update history.
 pub struct ListParams<'a> {
@@ -25,7 +25,11 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
     let query = UpdateHistoryQuery {
         host_id: params.host_id,
         software_item_id: params.software_item_id,
-        status: params.status.map(|s| s.to_string()),
+        status: params
+            .status
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: ParseUpdateStatusError| Report::new(CliError::Other(e.to_string())))?,
         page: params.page,
         per_page: params.per_page,
     };
