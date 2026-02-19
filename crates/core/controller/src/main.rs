@@ -97,7 +97,7 @@ async fn run(args: cli::Args) -> Result<()> {
             "failed to resolve directories: {e}"
         )))
     })?;
-    app_dirs.ensure_dirs().map_err(|e| {
+    app_dirs.ensure_dirs().await.map_err(|e| {
         report!(AppError::Config(format!(
             "failed to create directories: {e}"
         )))

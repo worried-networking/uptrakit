@@ -32,6 +32,7 @@ pub mod software_items;
 pub mod system_alerts;
 pub mod update_history;
 pub mod update_hooks;
+pub mod validation;
 
 #[cfg(test)]
 mod tests {
@@ -758,5 +759,259 @@ mod tests {
         let _: PaginationParams;
         let _ = Permission::ViewSettings;
         let _ = RegistrationMode::Open;
+    }
+
+    // ── 11. Request type validation ─────────────────────────────────────
+
+    #[test]
+    fn register_request_valid() {
+        use crate::auth::RegisterRequest;
+        use crate::validation::Validate;
+        let req = RegisterRequest {
+            email: "user@example.com".to_string(),
+            first_name: "John".to_string(),
+            last_name: "Doe".to_string(),
+            password: SecretString::new("password12345678".to_string()),
+            registration_token: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn register_request_email_missing_at() {
+        use crate::auth::RegisterRequest;
+        use crate::validation::Validate;
+        let req = RegisterRequest {
+            email: "invalid-email".to_string(),
+            first_name: "John".to_string(),
+            last_name: "Doe".to_string(),
+            password: SecretString::new("password12345678".to_string()),
+            registration_token: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "email");
+    }
+
+    #[test]
+    fn register_request_password_too_short() {
+        use crate::auth::RegisterRequest;
+        use crate::validation::Validate;
+        let req = RegisterRequest {
+            email: "user@example.com".to_string(),
+            first_name: "John".to_string(),
+            last_name: "Doe".to_string(),
+            password: SecretString::new("short".to_string()),
+            registration_token: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "password");
+    }
+
+    #[test]
+    fn register_request_empty_first_name() {
+        use crate::auth::RegisterRequest;
+        use crate::validation::Validate;
+        let req = RegisterRequest {
+            email: "user@example.com".to_string(),
+            first_name: "".to_string(),
+            last_name: "Doe".to_string(),
+            password: SecretString::new("password12345678".to_string()),
+            registration_token: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "first_name");
+    }
+
+    #[test]
+    fn login_request_valid() {
+        use crate::auth::LoginRequest;
+        use crate::validation::Validate;
+        let req = LoginRequest {
+            email: "user@example.com".to_string(),
+            password: SecretString::new("any-password".to_string()),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn login_request_empty_password() {
+        use crate::auth::LoginRequest;
+        use crate::validation::Validate;
+        let req = LoginRequest {
+            email: "user@example.com".to_string(),
+            password: SecretString::new("".to_string()),
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "password");
+    }
+
+    #[test]
+    fn create_oidc_provider_valid() {
+        use crate::validation::Validate;
+        let req = CreateOidcProviderRequest {
+            name: "Test Provider".to_string(),
+            slug: "test-provider".to_string(),
+            logo_url: None,
+            issuer_url: "https://issuer.example.com".to_string(),
+            client_id: "client-id".to_string(),
+            client_secret: SecretString::new("secret".to_string()),
+            scopes: "openid email".to_string(),
+            auto_create_users: true,
+            role_claim_path: None,
+            role_mapping: Default::default(),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn create_oidc_provider_invalid_slug() {
+        use crate::validation::Validate;
+        let req = CreateOidcProviderRequest {
+            name: "Test".to_string(),
+            slug: "INVALID_SLUG".to_string(),
+            logo_url: None,
+            issuer_url: "https://issuer.example.com".to_string(),
+            client_id: "client-id".to_string(),
+            client_secret: SecretString::new("secret".to_string()),
+            scopes: "openid".to_string(),
+            auto_create_users: true,
+            role_claim_path: None,
+            role_mapping: Default::default(),
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "slug");
+    }
+
+    #[test]
+    fn create_oidc_provider_invalid_issuer_url() {
+        use crate::validation::Validate;
+        let req = CreateOidcProviderRequest {
+            name: "Test".to_string(),
+            slug: "test".to_string(),
+            logo_url: None,
+            issuer_url: "ftp://issuer.example.com".to_string(),
+            client_id: "client-id".to_string(),
+            client_secret: SecretString::new("secret".to_string()),
+            scopes: "openid".to_string(),
+            auto_create_users: true,
+            role_claim_path: None,
+            role_mapping: Default::default(),
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "issuer_url");
+    }
+
+    #[test]
+    fn create_software_item_valid_with_config_id() {
+        use crate::validation::Validate;
+        let req = CreateSoftwareItemRequest {
+            name: "Node.js".to_string(),
+            provider_config_id: Some(Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").unwrap()),
+            provider_config: None,
+            package_identifier: None,
+            config_override: None,
+            enabled: true,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn create_software_item_neither_config_provided() {
+        use crate::validation::Validate;
+        let req = CreateSoftwareItemRequest {
+            name: "Node.js".to_string(),
+            provider_config_id: None,
+            provider_config: None,
+            package_identifier: None,
+            config_override: None,
+            enabled: true,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "provider_config");
+    }
+
+    #[test]
+    fn create_provider_config_valid() {
+        use crate::validation::Validate;
+        use uptrakit_shared_types::ProviderType;
+        let req = CreateProviderConfigRequest {
+            name: "GitHub Releases".to_string(),
+            provider_type: ProviderType::GithubReleases,
+            config: serde_json::json!({}),
+            enabled: true,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn create_provider_config_empty_name() {
+        use crate::validation::Validate;
+        use uptrakit_shared_types::ProviderType;
+        let req = CreateProviderConfigRequest {
+            name: "".to_string(),
+            provider_type: ProviderType::GithubReleases,
+            config: serde_json::json!({}),
+            enabled: true,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn update_scheduled_task_valid_cron() {
+        use crate::scheduler::UpdateScheduledTaskRequest;
+        use crate::validation::Validate;
+        let req = UpdateScheduledTaskRequest {
+            cron_expression: Some("0 * * * *".to_string()),
+            enabled: None,
+            task_config: None,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_scheduled_task_invalid_cron() {
+        use crate::scheduler::UpdateScheduledTaskRequest;
+        use crate::validation::Validate;
+        let req = UpdateScheduledTaskRequest {
+            cron_expression: Some("not a cron".to_string()),
+            enabled: None,
+            task_config: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "cron_expression");
+    }
+
+    #[test]
+    fn update_network_settings_valid() {
+        use crate::settings_network::UpdateNetworkSettingsRequest;
+        use crate::validation::Validate;
+        let req = UpdateNetworkSettingsRequest {
+            trusted_proxies: Some(vec!["10.0.0.0/8".to_string()]),
+            real_ip_header: Some("X-Real-IP".to_string()),
+            extra_sans: None,
+            https_addr: None,
+            forwarded_client_cert_info_header: None,
+            forwarded_client_cert_pem_header: None,
+            pki_addr: Some("https://pki.example.com".to_string()),
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn update_network_settings_empty_trusted_proxy() {
+        use crate::settings_network::UpdateNetworkSettingsRequest;
+        use crate::validation::Validate;
+        let req = UpdateNetworkSettingsRequest {
+            trusted_proxies: Some(vec!["".to_string()]),
+            real_ip_header: None,
+            extra_sans: None,
+            https_addr: None,
+            forwarded_client_cert_info_header: None,
+            forwarded_client_cert_pem_header: None,
+            pki_addr: None,
+        };
+        let err = req.validate().unwrap_err();
+        assert_eq!(err.field, "trusted_proxies");
     }
 }

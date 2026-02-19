@@ -1400,12 +1400,8 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingDeviceFlows::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(PendingDeviceFlows::DeviceCode)
-                            .text()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(PendingDeviceFlows::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(PendingDeviceFlows::DeviceCodeHash).text().not_null().unique_key())
                     .col(
                         ColumnDef::new(PendingDeviceFlows::UserCode)
                             .text()
@@ -1492,12 +1488,8 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingAccountLinks::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(PendingAccountLinks::LinkToken)
-                            .text()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(PendingAccountLinks::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(PendingAccountLinks::LinkTokenHash).text().not_null().unique_key())
                     .col(
                         ColumnDef::new(PendingAccountLinks::ProviderId)
                             .uuid()
@@ -1552,12 +1544,8 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingOidcTokenExchanges::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(PendingOidcTokenExchanges::ExchangeCode)
-                            .text()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(PendingOidcTokenExchanges::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(PendingOidcTokenExchanges::ExchangeCodeHash).text().not_null().unique_key())
                     .col(
                         ColumnDef::new(PendingOidcTokenExchanges::UserId)
                             .uuid()
@@ -1598,12 +1586,8 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingOidcRegistrations::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(PendingOidcRegistrations::RegistrationCode)
-                            .text()
-                            .not_null()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(PendingOidcRegistrations::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(PendingOidcRegistrations::RegistrationCodeHash).text().not_null().unique_key())
                     .col(
                         ColumnDef::new(PendingOidcRegistrations::ProviderId)
                             .uuid()
@@ -2270,7 +2254,8 @@ enum UpdateOutputLines {
 #[derive(DeriveIden)]
 enum PendingDeviceFlows {
     Table,
-    DeviceCode,
+    Id,
+    DeviceCodeHash,
     UserCode,
     Status,
     UserId,
@@ -2293,7 +2278,8 @@ enum PendingOidcFlows {
 #[derive(DeriveIden)]
 enum PendingAccountLinks {
     Table,
-    LinkToken,
+    Id,
+    LinkTokenHash,
     ProviderId,
     OidcSubject,
     Email,
@@ -2309,7 +2295,8 @@ enum PendingAccountLinks {
 #[derive(DeriveIden)]
 enum PendingOidcTokenExchanges {
     Table,
-    ExchangeCode,
+    Id,
+    ExchangeCodeHash,
     UserId,
     ProviderId,
     CreatedAt,
@@ -2319,7 +2306,8 @@ enum PendingOidcTokenExchanges {
 #[derive(DeriveIden)]
 enum PendingOidcRegistrations {
     Table,
-    RegistrationCode,
+    Id,
+    RegistrationCodeHash,
     ProviderId,
     OidcSubject,
     Email,

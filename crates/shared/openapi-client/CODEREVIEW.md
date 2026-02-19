@@ -18,25 +18,20 @@ improvement area is resiliency (timeouts and optional retry strategy).
 **Resolution:** Added `connect_timeout(10s)` and `timeout(30s)` to the
 `reqwest::Client` builder in `UptrakitClient::new()`.
 
-### O-2 (Medium): 429 handling lacks actionable retry metadata
+### ~~O-2 (Medium): 429 handling lacks actionable retry metadata~~ (FIXED)
 
-**Location:** response handlers in `crates/shared/openapi-client/src/lib.rs`
+**Resolution:** `ClientError::RateLimited` is now a struct variant with
+`retry_after_seconds: Option<u64>`. The `Retry-After` header is parsed from 429
+responses (seconds format). The CLI auth polling loop uses the parsed value when
+available, falling back to the configured interval. Tests added for
+`parse_retry_after` (valid seconds, missing header, non-numeric).
 
-`429 Too Many Requests` is mapped to `ClientError::RateLimited`, but retry
-information (e.g. `Retry-After`) is not surfaced.
+### ~~O-3 (Low): 401 is not represented as a dedicated error variant~~ (FIXED)
 
-**Suggested fix:** Parse and expose `Retry-After` (or related headers) in the
-error variant so callers can implement robust backoff.
-
-### O-3 (Low): 401 is not represented as a dedicated error variant
-
-**Location:** response handlers in `crates/shared/openapi-client/src/lib.rs`
-
-`401 Unauthorized` is currently returned as a generic API error variant, which
-makes auth-refresh flows less explicit for consumers.
-
-**Suggested fix:** Add a dedicated unauthorized error variant and map 401
-responses before generic API error mapping.
+**Resolution:** Added `ClientError::NotAuthenticated` variant. All three
+response handlers (`handle_response`, `handle_empty_response`,
+`handle_text_response`) now check for 401 before generic 4xx/5xx mapping. The
+CLI error formatter maps `NotAuthenticated` to a user-friendly message.
 
 ### O-4 (Low): One endpoint bypasses helper pattern
 

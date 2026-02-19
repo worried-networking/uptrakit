@@ -4,8 +4,10 @@ use time::OffsetDateTime;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "pending_account_links")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
-    pub link_token: String,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
+    #[sea_orm(unique, column_type = "Text")]
+    pub link_token_hash: String,
     pub provider_id: Uuid,
     #[sea_orm(column_type = "Text")]
     pub oidc_subject: String,

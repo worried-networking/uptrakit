@@ -5,18 +5,30 @@ use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginationParams;
 
+/// Parameters for listing hosts.
+pub struct ListParams<'a> {
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub format: OutputFormat,
+    pub insecure: bool,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+/// Parameters for showing a single host.
+pub struct ShowParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub format: OutputFormat,
+    pub insecure: bool,
+}
+
 /// List all hosts (paginated).
-pub async fn list(
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-    page: Option<u64>,
-    per_page: Option<u64>,
-) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
-    let params = PaginationParams { page, per_page };
-    let resp = client.list_hosts(&params).await.context_to()?;
+pub async fn list(params: ListParams<'_>) -> Result<()> {
+    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let pagination = PaginationParams { page: params.page, per_page: params.per_page };
+    let resp = client.list_hosts(&pagination).await.context_to()?;
 
     let mut human = String::new();
     if resp.items.is_empty() {
@@ -41,19 +53,13 @@ pub async fn list(
         ));
     }
 
-    print_output(format, &human, &resp)
+    print_output(params.format, &human, &resp)
 }
 
 /// Show details for a single host.
-pub async fn show(
-    id: &Uuid,
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
-    let resp = client.get_host(id).await.context_to()?;
+pub async fn show(params: ShowParams<'_>) -> Result<()> {
+    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let resp = client.get_host(params.id).await.context_to()?;
 
     let mut human = String::new();
     human.push_str(&format!("ID:           {}\n", resp.id));
@@ -86,5 +92,5 @@ pub async fn show(
         }
     }
 
-    print_output(format, &human, &resp)
+    print_output(params.format, &human, &resp)
 }

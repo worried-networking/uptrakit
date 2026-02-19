@@ -20,6 +20,7 @@ use sea_orm::{
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_web_api_types::SecretString;
+use uptrakit_web_api_types::validation::Validate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
 
@@ -47,6 +48,10 @@ pub async fn register(
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Validate password length
@@ -210,6 +215,10 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     // Check if password auth is enabled
     if !state.settings.authentication().password_auth_enabled {
         return error_response(StatusCode::FORBIDDEN, "Password authentication is disabled");
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Validate password length early to avoid expensive hashing on absurd inputs

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use uptrakit_shared_types::ProviderType;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 pub fn default_enabled() -> bool {
     true
 }
@@ -38,4 +40,17 @@ pub struct ProviderConfigResponse {
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl Validate for CreateProviderConfigRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be empty".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }

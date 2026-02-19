@@ -293,7 +293,13 @@ impl UptrakitClient {
     async fn handle_response<T: DeserializeOwned>(&self, resp: reqwest::Response) -> Result<T> {
         let status = resp.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            bail!(ClientError::RateLimited);
+            let retry_after = parse_retry_after(&resp);
+            bail!(ClientError::RateLimited {
+                retry_after_seconds: retry_after,
+            });
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            bail!(ClientError::NotAuthenticated);
         }
         let text = resp.text().await.context_to()?;
         if status == reqwest::StatusCode::NOT_FOUND {
@@ -313,7 +319,13 @@ impl UptrakitClient {
     async fn handle_empty_response(&self, resp: reqwest::Response) -> Result<()> {
         let status = resp.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            bail!(ClientError::RateLimited);
+            let retry_after = parse_retry_after(&resp);
+            bail!(ClientError::RateLimited {
+                retry_after_seconds: retry_after,
+            });
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            bail!(ClientError::NotAuthenticated);
         }
         if status == reqwest::StatusCode::NOT_FOUND {
             let text = resp.text().await.context_to()?;
@@ -334,7 +346,13 @@ impl UptrakitClient {
     async fn handle_text_response(&self, resp: reqwest::Response) -> Result<String> {
         let status = resp.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            bail!(ClientError::RateLimited);
+            let retry_after = parse_retry_after(&resp);
+            bail!(ClientError::RateLimited {
+                retry_after_seconds: retry_after,
+            });
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            bail!(ClientError::NotAuthenticated);
         }
         let text = resp.text().await.context_to()?;
         if status == reqwest::StatusCode::NOT_FOUND {
@@ -350,6 +368,19 @@ impl UptrakitClient {
         }
         Ok(text)
     }
+}
+
+/// Parse the `Retry-After` header from a response as seconds.
+///
+/// Only the seconds-delay format (e.g. `Retry-After: 60`) is supported.
+/// HTTP-date format and non-numeric values return `None`.
+fn parse_retry_after(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .parse::<u64>()
+        .ok()
 }
 
 /// Extract an error message from a JSON response body, falling back to
@@ -438,6 +469,38 @@ mod tests {
             matches!(err.current_context(), ClientError::NotAuthenticated),
             "expected NotAuthenticated, got: {err}"
         );
+    }
+
+    #[test]
+    fn parse_retry_after_valid_seconds() {
+        let resp = http::Response::builder()
+            .status(429)
+            .header("Retry-After", "60")
+            .body("")
+            .unwrap();
+        let reqwest_resp = reqwest::Response::from(resp);
+        assert_eq!(parse_retry_after(&reqwest_resp), Some(60));
+    }
+
+    #[test]
+    fn parse_retry_after_missing_header() {
+        let resp = http::Response::builder()
+            .status(429)
+            .body("")
+            .unwrap();
+        let reqwest_resp = reqwest::Response::from(resp);
+        assert_eq!(parse_retry_after(&reqwest_resp), None);
+    }
+
+    #[test]
+    fn parse_retry_after_non_numeric() {
+        let resp = http::Response::builder()
+            .status(429)
+            .header("Retry-After", "Wed, 21 Oct 2025 07:28:00 GMT")
+            .body("")
+            .unwrap();
+        let reqwest_resp = reqwest::Response::from(resp);
+        assert_eq!(parse_retry_after(&reqwest_resp), None);
     }
 
     #[test]

@@ -24,6 +24,7 @@ use uptrakit_shared_db::entity::{
 };
 
 use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::software_items::{
@@ -214,18 +215,6 @@ enum ConfigOverrideError {
     ProviderValidation(String),
 }
 
-fn validate_provider_config_selection(
-    has_provider_config_id: bool,
-    has_provider_config: bool,
-) -> Result<(), &'static str> {
-    match (has_provider_config_id, has_provider_config) {
-        (true, false) => Ok(()),
-        (false, true) => Ok(()),
-        (true, true) => Err("Provide either provider_config_id or provider_config, not both"),
-        (false, false) => Err("provider_config_id or provider_config is required"),
-    }
-}
-
 /// Validate `config_override` by merging it with the base provider config and running
 /// provider-specific validation.
 fn validate_config_override(
@@ -273,15 +262,8 @@ pub async fn create_software_item(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    if req.name.is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
-    }
-
-    if let Err(e) = validate_provider_config_selection(
-        req.provider_config_id.is_some(),
-        req.provider_config.is_some(),
-    ) {
-        return error_response(StatusCode::BAD_REQUEST, e);
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     let txn = match state.db.begin().await {
@@ -1696,18 +1678,6 @@ mod tests {
                 "expected valid: {case}"
             );
         }
-    }
-
-    #[test]
-    fn validate_provider_config_selection_requires_one() {
-        assert!(validate_provider_config_selection(false, false).is_err());
-        assert!(validate_provider_config_selection(true, true).is_err());
-    }
-
-    #[test]
-    fn validate_provider_config_selection_accepts_one() {
-        assert!(validate_provider_config_selection(true, false).is_ok());
-        assert!(validate_provider_config_selection(false, true).is_ok());
     }
 
     #[test]

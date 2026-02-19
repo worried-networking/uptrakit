@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 pub fn default_scopes() -> String {
     "openid email profile groups".to_string()
 }
@@ -61,4 +63,52 @@ pub struct OidcProviderResponse {
     pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl Validate for CreateOidcProviderRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.is_empty() {
+            return Err(ValidationError {
+                field: "name",
+                message: "must not be empty".to_string(),
+            });
+        }
+
+        if self.slug.len() > 64 {
+            return Err(ValidationError {
+                field: "slug",
+                message: "must be at most 64 characters".to_string(),
+            });
+        }
+
+        let first = self.slug.as_bytes().first().copied().unwrap_or(0);
+        let valid_slug = !self.slug.is_empty()
+            && (first.is_ascii_lowercase() || first.is_ascii_digit())
+            && self
+                .slug
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !valid_slug {
+            return Err(ValidationError {
+                field: "slug",
+                message: "must match ^[a-z0-9][a-z0-9-]*$".to_string(),
+            });
+        }
+
+        if !self.issuer_url.starts_with("http://") && !self.issuer_url.starts_with("https://") {
+            return Err(ValidationError {
+                field: "issuer_url",
+                message: "must start with http:// or https://".to_string(),
+            });
+        }
+
+        if self.client_id.is_empty() {
+            return Err(ValidationError {
+                field: "client_id",
+                message: "must not be empty".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }

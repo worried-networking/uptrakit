@@ -133,12 +133,12 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
         let poll_resp = match poll_result {
             Ok(resp) => resp,
             Err(e) => {
-                if matches!(
-                    e.current_context(),
-                    uptrakit_openapi_client::ClientError::RateLimited
-                ) {
-                    // Rate limited, wait extra interval
-                    tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+                if let uptrakit_openapi_client::ClientError::RateLimited {
+                    retry_after_seconds,
+                } = e.current_context()
+                {
+                    let delay = retry_after_seconds.unwrap_or(interval);
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     continue;
                 }
                 if matches!(
@@ -169,10 +169,10 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 // Store config and credentials
                 save_config(&Config {
                     server: Some(server.clone()),
-                })?;
+                }).await?;
                 save_credentials(&Credentials {
                     token: Some(api_token.expose_secret().to_string()),
-                })?;
+                }).await?;
 
                 eprintln!();
                 println!("Logged in to {} successfully.", server);

@@ -36,19 +36,17 @@ violation. Tests added.
 Resolved: `expand_tilde` rewritten using `std::path::Component`-based matching, avoiding lossy string conversion
 entirely. Non-UTF-8 path components are preserved on Unix.
 
-### MEDIUM: Sync `create_secure_dir` called from async context
+### ~~MEDIUM: Sync `create_secure_dir` called from async context~~ RESOLVED
 
-**File:** `src/lib.rs`, lines 233-237
-
-`write_secure_file_async` calls sync `create_secure_dir`. The comment acknowledges this. On network filesystems, `mkdir`
-can block for seconds, blocking the tokio runtime thread.
-
-**Recommendation:** Wrap in `tokio::task::spawn_blocking` or provide an async `create_secure_dir_async` variant.
+**Resolution:** The entire crate has been converted to native async. `create_secure_dir` is now an `async fn` using
+`tokio::fs::DirBuilder`, `tokio::fs::metadata`, and `tokio::fs::set_permissions`. All sync/async duplication has been
+eliminated: `write_with_mode`, `write_secure_file`, and `write_secure_file_str` are now the single async versions.
+`ensure_config_dir`, `ensure_state_dir`, and `ensure_dirs` are async. All callers updated.
 
 ### PASS: Atomic permission setting on file writes
 
-`write_with_mode` and `write_with_mode_async` both set the mode at `open()` time via `OpenOptionsExt`, eliminating the
-classic create-then-chmod TOCTOU window. Correctly documented.
+`write_with_mode` sets the mode at `open()` time via `OpenOptionsExt`, eliminating the classic create-then-chmod TOCTOU
+window. Correctly documented.
 
 ### PASS: No production `unwrap`/`panic`
 
@@ -59,10 +57,10 @@ Zero instances in non-test code. All fallible operations return `Result`.
 Write functions use `create(true).truncate(true)` which overwrites in-place. If the process crashes mid-write, the file
 is left partially written. For security-critical files (private keys, certificates), consider write-to-temp-then-rename.
 
-### LOW: Missing `file.sync_all()` in sync write path
+### ~~LOW: Missing `file.sync_all()` in sync write path~~ RESOLVED
 
-The async version calls `file.shutdown().await` for flush. The sync version does not explicitly call `file.sync_all()`.
-For private keys and certificates, this could mean data loss on power failure.
+**Resolution:** The sync write path was removed. The remaining async `write_with_mode` calls `file.shutdown().await`
+for flush.
 
 ### LOW: `home_dir()` only checks `$HOME` environment variable
 

@@ -113,7 +113,7 @@ pub async fn run_service_lifecycle(
             e.to_string()
         )))
     })?;
-    app_dirs.ensure_dirs().map_err(|e| {
+    app_dirs.ensure_dirs().await.map_err(|e| {
         report!(EnrollmentError::Protocol(ProtocolError::Init(format!(
             "failed to create directories: {e}"
         ))))

@@ -8,7 +8,7 @@ use uptrakit_shared_db::entity::prelude::PendingDeviceFlow;
 use uptrakit_shared_macros::impl_report_conversion;
 use uuid::Uuid;
 
-use super::token::generate_secure_token;
+use super::token::{generate_secure_token, generate_uuid, hash_token};
 
 /// TTL for device flow sessions (10 minutes).
 const DEVICE_CODE_TTL_SECONDS: i64 = 600;
@@ -55,8 +55,10 @@ impl DeviceFlowStore {
 
     /// Create a new device flow session. Returns `(device_code, user_code)`.
     pub async fn create(&self, client_name: Option<String>) -> Result<(String, String)> {
+        let id = generate_uuid();
         let device_code = generate_secure_token()
             .map_err(|e| report!(DeviceFlowError::TokenGeneration(e.to_string())))?;
+        let device_code_hash = hash_token(&device_code);
         let user_code = generate_user_code();
         let raw_user_code = user_code.replace('-', "");
 
@@ -64,7 +66,8 @@ impl DeviceFlowStore {
         let expires_at = now + time::Duration::seconds(DEVICE_CODE_TTL_SECONDS);
 
         let model = pending_device_flow::ActiveModel {
-            device_code: Set(device_code.clone()),
+            id: Set(id),
+            device_code_hash: Set(device_code_hash),
             user_code: Set(raw_user_code),
             status: Set(DeviceAuthStatus::Pending),
             user_id: Set(None),
@@ -80,7 +83,9 @@ impl DeviceFlowStore {
 
     /// Get the current status of a device flow by device code.
     pub async fn get_status(&self, device_code: &str) -> Result<DeviceFlowStatus> {
-        let flow = PendingDeviceFlow::find_by_id(device_code)
+        let hash = hash_token(device_code);
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::DeviceCodeHash.eq(&hash))
             .one(&self.db)
             .await
             .context_to()?
@@ -104,7 +109,9 @@ impl DeviceFlowStore {
 
     /// Look up the client name for a device code.
     pub async fn get_client_name(&self, device_code: &str) -> Result<Option<String>> {
-        let flow = PendingDeviceFlow::find_by_id(device_code)
+        let hash = hash_token(device_code);
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::DeviceCodeHash.eq(&hash))
             .one(&self.db)
             .await
             .context_to()?
@@ -146,7 +153,7 @@ impl DeviceFlowStore {
                 pending_device_flow::Column::UserId,
                 sea_orm::sea_query::Expr::value(user_id),
             )
-            .filter(pending_device_flow::Column::DeviceCode.eq(&flow.device_code))
+            .filter(pending_device_flow::Column::Id.eq(flow.id))
             .filter(pending_device_flow::Column::Status.eq(DeviceAuthStatus::Pending.as_str()))
             .filter(pending_device_flow::Column::ExpiresAt.gt(now))
             .exec(&self.db)
@@ -164,7 +171,9 @@ impl DeviceFlowStore {
     /// Consume a device flow (one-time use). Removes the flow from the database.
     pub async fn consume(&self, device_code: &str) -> Result<(Uuid, Option<String>)> {
         // Read the flow first
-        let flow = PendingDeviceFlow::find_by_id(device_code)
+        let hash = hash_token(device_code);
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::DeviceCodeHash.eq(&hash))
             .one(&self.db)
             .await
             .context_to()?
@@ -181,7 +190,7 @@ impl DeviceFlowStore {
 
         // Atomic delete: only delete if still authorized (HA-safe double-consume prevention)
         let result = PendingDeviceFlow::delete_many()
-            .filter(pending_device_flow::Column::DeviceCode.eq(device_code))
+            .filter(pending_device_flow::Column::Id.eq(flow.id))
             .filter(pending_device_flow::Column::Status.eq(DeviceAuthStatus::Authorized.as_str()))
             .exec(&self.db)
             .await
@@ -211,10 +220,17 @@ impl DeviceFlowStore {
     #[cfg(test)]
     async fn expire_flow(&self, device_code: &str) {
         use sea_orm::ActiveValue::Unchanged;
+        let hash = hash_token(device_code);
+        let flow = PendingDeviceFlow::find()
+            .filter(pending_device_flow::Column::DeviceCodeHash.eq(&hash))
+            .one(&self.db)
+            .await
+            .expect("expire_flow lookup")
+            .expect("expire_flow flow not found");
         let expired_at =
             OffsetDateTime::now_utc() - time::Duration::seconds(DEVICE_CODE_TTL_SECONDS + 1);
         let model = pending_device_flow::ActiveModel {
-            device_code: Unchanged(device_code.to_string()),
+            id: Unchanged(flow.id),
             expires_at: Set(expired_at),
             ..Default::default()
         };

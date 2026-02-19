@@ -94,6 +94,26 @@ setting under `SettingKey::MasterKeyVerification`.
 See also: [Cross-Controller Communication](../development/cross-controller-comm.md) for other HA
 considerations.
 
+## Bearer Token Hashing
+
+Short-lived bearer tokens used in pending authentication flows are stored as SHA-256 hashes rather than plaintext.
+This prevents an attacker with database access from using leaked tokens to complete authentication flows.
+
+| Table | Token field | Hash column | Notes |
+| --- | --- | --- | --- |
+| `pending_device_flows` | `device_code` | `device_code_hash` | `user_code` remains unhashed (short-lived, user-facing, consonant alphabet) |
+| `pending_account_links` | `link_token` | `link_token_hash` | |
+| `pending_oidc_token_exchanges` | `exchange_code` | `exchange_code_hash` | |
+| `pending_oidc_registrations` | `registration_code` | `registration_code_hash` | |
+
+All four tables use a UUID `id` as primary key and a `*_hash TEXT NOT NULL UNIQUE` column for hash-based lookups.
+The hashing uses the same `hash_token()` function (SHA-256, hex-encoded) used by `api_token` entities.
+
+Lookup pattern: callers hash the raw token with `hash_token()` and filter by the hash column. The raw token is
+never stored in the database.
+
+See also: [Auth Flows](../api/auth-flows.md) for the authentication flow descriptions.
+
 ## Tokens and Secrets
 
 - JWT signing keys live in the `auth.jwt_signing_key` settings entry (base64 encoded, global scope). File-based keys

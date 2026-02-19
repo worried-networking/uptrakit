@@ -29,12 +29,12 @@ pub fn load_config() -> Result<Config> {
     serde_json::from_str(&data).context_to()
 }
 
-pub fn save_config(config: &Config) -> Result<()> {
+pub async fn save_config(config: &Config) -> Result<()> {
     let dirs = app_dirs()?;
-    dirs.ensure_config_dir().context_to()?;
+    dirs.ensure_config_dir().await.context_to()?;
     let path = dirs.config_path("config.json").context_to()?;
     let data = serde_json::to_string_pretty(config).context_to()?;
-    uptrakit_directories::write_secure_file_str(&path, &data).context_to()
+    uptrakit_directories::write_secure_file_str(&path, &data).await.context_to()
 }
 
 pub fn load_credentials() -> Result<Credentials> {
@@ -47,10 +47,10 @@ pub fn load_credentials() -> Result<Credentials> {
     serde_json::from_str(&data).context_to()
 }
 
-pub fn save_credentials(creds: &Credentials) -> Result<()> {
+pub async fn save_credentials(creds: &Credentials) -> Result<()> {
     let dirs = app_dirs()?;
-    dirs.ensure_state_dir().context_to()?;
+    dirs.ensure_state_dir().await.context_to()?;
     let path = dirs.state_path("credentials.json").context_to()?;
     let data = serde_json::to_string_pretty(creds).context_to()?;
-    uptrakit_directories::write_secure_file_str(&path, &data).context_to()
+    uptrakit_directories::write_secure_file_str(&path, &data).await.context_to()
 }

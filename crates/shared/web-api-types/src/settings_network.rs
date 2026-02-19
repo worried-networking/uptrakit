@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::validation::{Validate, ValidationError};
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NetworkSettingsResponse {
@@ -32,4 +34,41 @@ pub struct UpdateNetworkSettingsRequest {
     /// Supports both http:// and https:// schemes.
     /// Empty string disables.
     pub pki_addr: Option<String>,
+}
+
+impl Validate for UpdateNetworkSettingsRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(ref proxies) = self.trusted_proxies {
+            for item in proxies {
+                if item.is_empty() {
+                    return Err(ValidationError {
+                        field: "trusted_proxies",
+                        message: "items must not be empty".to_string(),
+                    });
+                }
+            }
+        }
+
+        if let Some(ref header) = self.real_ip_header
+            && header.is_empty()
+        {
+            return Err(ValidationError {
+                field: "real_ip_header",
+                message: "must not be empty".to_string(),
+            });
+        }
+
+        if let Some(ref addr) = self.pki_addr
+            && !addr.is_empty()
+            && !addr.starts_with("http://")
+            && !addr.starts_with("https://")
+        {
+            return Err(ValidationError {
+                field: "pki_addr",
+                message: "must start with http:// or https://".to_string(),
+            });
+        }
+
+        Ok(())
+    }
 }

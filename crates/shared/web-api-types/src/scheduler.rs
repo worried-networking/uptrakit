@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::validation::{Validate, ValidationError};
+
 /// Response for a single scheduled task.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -40,4 +42,27 @@ pub struct TriggerScheduledTaskResponse {
     pub triggered: bool,
     /// Human-readable status message.
     pub message: String,
+}
+
+impl Validate for UpdateScheduledTaskRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if let Some(ref cron) = self.cron_expression {
+            if cron.is_empty() {
+                return Err(ValidationError {
+                    field: "cron_expression",
+                    message: "must not be empty".to_string(),
+                });
+            }
+
+            let fields: Vec<&str> = cron.split_whitespace().collect();
+            if fields.len() != 5 {
+                return Err(ValidationError {
+                    field: "cron_expression",
+                    message: "must have exactly 5 fields".to_string(),
+                });
+            }
+        }
+
+        Ok(())
+    }
 }

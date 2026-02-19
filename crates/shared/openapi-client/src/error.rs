@@ -13,8 +13,13 @@ pub enum ClientError {
     #[error("API error ({status}): {message}")]
     Api { status: u16, message: String },
 
-    #[error("rate limited")]
-    RateLimited,
+    #[error("rate limited{}", match .retry_after_seconds {
+        Some(secs) => format!(" (retry after {secs}s)"),
+        None => String::new(),
+    })]
+    RateLimited {
+        retry_after_seconds: Option<u64>,
+    },
 
     #[error("not found: {0}")]
     NotFound(String),

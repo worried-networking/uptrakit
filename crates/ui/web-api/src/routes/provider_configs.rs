@@ -18,6 +18,7 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_web_api_types::validation::Validate;
 use uptrakit_shared_db::entity::provider_config;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -83,8 +84,8 @@ pub async fn create_provider_config(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    if let Err(e) = validate_provider_config_request(&req) {
-        return error_response(StatusCode::BAD_REQUEST, e);
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     let now = OffsetDateTime::now_utc();

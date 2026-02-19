@@ -4,14 +4,35 @@ use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
 
+/// Parameters for listing scheduled tasks.
+pub struct ListParams<'a> {
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub format: OutputFormat,
+    pub insecure: bool,
+}
+
+/// Parameters for showing a single scheduled task.
+pub struct ShowParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub format: OutputFormat,
+    pub insecure: bool,
+}
+
+/// Parameters for triggering a scheduled task.
+pub struct TriggerParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub format: OutputFormat,
+    pub insecure: bool,
+}
+
 /// List all scheduled tasks.
-pub async fn list(
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+pub async fn list(params: ListParams<'_>) -> Result<()> {
+    let client = authenticated_client(params.server, params.token, params.insecure)?;
 
     let resp = client.list_scheduled_tasks().await.context_to()?;
 
@@ -31,19 +52,13 @@ pub async fn list(
         }
     }
 
-    print_output(format, &human, &resp)
+    print_output(params.format, &human, &resp)
 }
 
 /// Show details for a single scheduled task.
-pub async fn show(
-    id: &Uuid,
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
-    let resp = client.get_scheduled_task(id).await.context_to()?;
+pub async fn show(params: ShowParams<'_>) -> Result<()> {
+    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let resp = client.get_scheduled_task(params.id).await.context_to()?;
 
     let mut human = String::new();
     human.push_str(&format!("ID:         {}\n", resp.id));
@@ -63,19 +78,13 @@ pub async fn show(
     human.push_str(&format!("Created:    {}\n", resp.created_at));
     human.push_str(&format!("Updated:    {}\n", resp.updated_at));
 
-    print_output(format, &human, &resp)
+    print_output(params.format, &human, &resp)
 }
 
 /// Trigger immediate execution of a scheduled task.
-pub async fn trigger(
-    id: &Uuid,
-    server: Option<&str>,
-    token: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
-    let resp = client.trigger_scheduled_task(id).await.context_to()?;
+pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
+    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let resp = client.trigger_scheduled_task(params.id).await.context_to()?;
 
     let human = if resp.triggered {
         format!("Task triggered: {}\n", resp.message)
@@ -83,5 +92,5 @@ pub async fn trigger(
         format!("Could not trigger task: {}\n", resp.message)
     };
 
-    print_output(format, &human, &resp)
+    print_output(params.format, &human, &resp)
 }

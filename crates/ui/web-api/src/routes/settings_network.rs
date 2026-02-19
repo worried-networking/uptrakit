@@ -14,6 +14,7 @@ use ipnet::IpNet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use uptrakit_web_api_types::validation::Validate;
 pub use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
@@ -77,6 +78,10 @@ pub async fn update_network_settings(
 ) -> Response {
     if !user.has_permission(Permission::ManageGlobalSettings) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Validate and apply trusted proxies (runtime-changeable)

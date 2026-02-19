@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::provider_configs::CreateProviderConfigRequest;
+use crate::validation::{Validate, ValidationError};
 
 pub fn default_enabled() -> bool {
     true
@@ -156,4 +157,33 @@ pub struct TriggerVersionCheckResponse {
     pub agents_notified: u32,
     /// Human-readable status message.
     pub message: String,
+}
+
+impl Validate for CreateSoftwareItemRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(ValidationError {
+                field: "name",
+                message: "name must not be empty".to_string(),
+            });
+        }
+
+        match (&self.provider_config_id, &self.provider_config) {
+            (Some(_), Some(_)) => {
+                return Err(ValidationError {
+                    field: "provider_config",
+                    message: "exactly one of provider_config_id or provider_config must be provided, not both".to_string(),
+                });
+            }
+            (None, None) => {
+                return Err(ValidationError {
+                    field: "provider_config",
+                    message: "exactly one of provider_config_id or provider_config must be provided".to_string(),
+                });
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
 }

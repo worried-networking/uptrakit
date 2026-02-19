@@ -19,28 +19,16 @@ gated for `openapi` (utoipa schema generation).
 
 ## Code Quality Findings
 
-### HIGH: No field validation on request types
+### ~~HIGH: No field validation on request types~~ RESOLVED
 
-None of the request types perform input validation. This is the most significant finding.
-
-**Critical examples:**
-
-| Type | Field | Issue |
-| --- | --- | --- |
-| `RegisterRequest` | `email` | No format validation |
-| `RegisterRequest` | `password` | No minimum length (OpenAPI says min 8) |
-| `LoginRequest` | `email`, `password` | No validation |
-| `CreateOidcProviderRequest` | `issuer_url` | No URL format validation |
-| `CreateOidcProviderRequest` | `slug` | No slug format validation |
-| `UpdateScheduledTaskRequest` | `cron_expression` | No format validation |
-| `UpdateNetworkSettingsRequest` | `trusted_proxies` | No IP/CIDR format validation |
-| `CreateSoftwareItemRequest` | mutual exclusivity | `provider_config_id` / `provider_config` not enforced |
-
-**Exception:** `update_hooks.rs` provides proper `validate()` methods -- this is the gold standard the rest should
-follow.
-
-**Recommendation:** Add `validate()` methods to all request types, starting with security-relevant inputs (email, URLs,
-passwords, CIDR ranges). Follow the pattern in `update_hooks.rs`.
+**Resolution:** Added a `Validate` trait (in `validation.rs`) with `ValidationError { field, message }`. Implemented
+`Validate` for 7 request types: `RegisterRequest` (email format, first_name non-empty, password 8-1024 chars),
+`LoginRequest` (email format, password non-empty), `CreateOidcProviderRequest` (name non-empty, slug format,
+issuer_url scheme, client_id non-empty), `UpdateScheduledTaskRequest` (cron non-empty, 5 fields),
+`UpdateNetworkSettingsRequest` (trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format),
+`CreateSoftwareItemRequest` (name non-empty, exactly one of provider_config_id/provider_config),
+`CreateProviderConfigRequest` (name non-empty). All 7 route handlers wire `req.validate()` at entry, returning 400
+on failure. 18 tests added.
 
 ### ~~HIGH: Secrets in plain `String` fields~~ (FIXED)
 
@@ -163,7 +151,7 @@ serialization. 16 thorough tests.
 
 | Category | Status | Notes |
 | --- | --- | --- |
-| Input validation | **HIGH** | No validation on request types (except update hooks) |
+| Input validation | ~~**HIGH**~~ FIXED | `Validate` trait + impls for 7 request types, wired into route handlers |
 | Secret handling | ~~**HIGH**~~ FIXED | All secret fields now use `SecretString` |
 | Wire dependency | PASS | `HookShell` now imported from `uptrakit-shared-types` directly |
 | OpenAPI correctness | FAIR | Missing derives on hooks types |

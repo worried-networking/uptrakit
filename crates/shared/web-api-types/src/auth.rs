@@ -1,4 +1,5 @@
 use crate::permissions::Permission;
+use crate::validation::{Validate, ValidationError};
 use serde::{Deserialize, Serialize};
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
@@ -83,4 +84,65 @@ pub struct UserResponse {
     pub first_name: String,
     pub last_name: String,
     pub permissions: Vec<Permission>,
+}
+
+impl Validate for RegisterRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.email.len() > 254 {
+            return Err(ValidationError {
+                field: "email",
+                message: "email must not exceed 254 characters".to_string(),
+            });
+        }
+        if !self.email.contains('@') {
+            return Err(ValidationError {
+                field: "email",
+                message: "email must contain '@'".to_string(),
+            });
+        }
+        if self.first_name.is_empty() {
+            return Err(ValidationError {
+                field: "first_name",
+                message: "first_name must not be empty".to_string(),
+            });
+        }
+        let password_len = self.password.expose_secret().len();
+        if password_len < 8 {
+            return Err(ValidationError {
+                field: "password",
+                message: "password must be at least 8 characters".to_string(),
+            });
+        }
+        if password_len > 1024 {
+            return Err(ValidationError {
+                field: "password",
+                message: "password must not exceed 1024 characters".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Validate for LoginRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.email.len() > 254 {
+            return Err(ValidationError {
+                field: "email",
+                message: "email must not exceed 254 characters".to_string(),
+            });
+        }
+        if !self.email.contains('@') {
+            return Err(ValidationError {
+                field: "email",
+                message: "email must contain '@'".to_string(),
+            });
+        }
+        if self.password.expose_secret().is_empty() {
+            return Err(ValidationError {
+                field: "password",
+                message: "password must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
 }

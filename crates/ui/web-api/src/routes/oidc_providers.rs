@@ -16,6 +16,7 @@ use sea_orm::{
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
+use uptrakit_web_api_types::validation::Validate;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
 
 pub use uptrakit_web_api_types::oidc_providers::{
@@ -70,13 +71,8 @@ pub async fn create_provider(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    if req.name.is_empty()
-        || req.slug.is_empty()
-        || req.issuer_url.is_empty()
-        || req.client_id.is_empty()
-        || req.client_secret.expose_secret().is_empty()
-    {
-        return error_response(StatusCode::BAD_REQUEST, "Missing required fields");
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     // Check slug uniqueness among non-deleted providers within tenant

@@ -9,6 +9,7 @@ use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::scheduled_task;
+use uptrakit_web_api_types::validation::Validate;
 
 use crate::AppState;
 use crate::auth::permissions::Permission;
@@ -142,6 +143,10 @@ pub async fn update_scheduled_task(
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    if let Err(e) = req.validate() {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
     let task_id = match Uuid::parse_str(&id) {

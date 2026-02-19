@@ -19,4 +19,5 @@ uptrakit-web-api-types = { path = "../web-api-types" }
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+http = { workspace = true }
 serde_urlencoded = "0.7"

@@ -115,7 +115,7 @@ async fn main() {
             std::process::exit(1);
         }
 
-        let state_dir = match resolve_state_dir_from_common(&args.common) {
+        let state_dir = match resolve_state_dir_from_common(&args.common).await {
             Ok(dir) => dir,
             Err(e) => {
                 eprintln!("error: {e}");
@@ -153,7 +153,7 @@ async fn main() {
     }
 
     // Resolve state directory early so we can pass it to the handler.
-    let state_dir = match resolve_state_dir_from_common(&args.common) {
+    let state_dir = match resolve_state_dir_from_common(&args.common).await {
         Ok(dir) => dir,
         Err(e) => {
             tracing::error!("{e}");
@@ -173,7 +173,7 @@ async fn main() {
 }
 
 /// Resolve the state directory for this service.
-fn resolve_state_dir_from_common(
+async fn resolve_state_dir_from_common(
     common: &uptrakit_service_sdk::cli::CommonServiceArgs,
 ) -> InitResult<std::path::PathBuf> {
     let dirs = common.resolve_dirs("agent-ssh").map_err(|e| {
@@ -181,7 +181,7 @@ fn resolve_state_dir_from_common(
             "failed to resolve directories: {e}"
         )))
     })?;
-    dirs.ensure_state_dir().map_err(|e| {
+    dirs.ensure_state_dir().await.map_err(|e| {
         report!(InitError::Directory(format!(
             "failed to ensure state directory: {e}"
         )))

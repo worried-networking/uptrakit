@@ -5,8 +5,10 @@ pub use uptrakit_shared_types::DeviceAuthStatus;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "pending_device_flows")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
-    pub device_code: String,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
+    #[sea_orm(unique, column_type = "Text")]
+    pub device_code_hash: String,
     #[sea_orm(unique, column_type = "Text")]
     pub user_code: String,
     pub status: DeviceAuthStatus,

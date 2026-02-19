@@ -761,69 +761,69 @@ async fn main() {
         },
         Commands::Hosts { command } => match command {
             HostsCommands::List { page, per_page } => {
-                commands::hosts::list(
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::hosts::list(commands::hosts::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
                     page,
                     per_page,
-                )
+                })
                 .await
             }
             HostsCommands::Show { id } => {
-                commands::hosts::show(
-                    &id,
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::hosts::show(commands::hosts::ShowParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
         },
         Commands::SoftwareItems { command } => match command {
             SoftwareItemsCommands::List { page, per_page } => {
-                commands::software_items::list(
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::software_items::list(commands::software_items::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
                     page,
                     per_page,
-                )
+                })
                 .await
             }
             SoftwareItemsCommands::Show { id } => {
-                commands::software_items::show(
-                    &id,
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::software_items::show(commands::software_items::ShowParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
         },
         Commands::Check { command } => match command {
             CheckCommands::All => {
-                commands::check::all(
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::check::all(commands::check::AllParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
             CheckCommands::Item { item_id, host } => {
-                commands::check::item(
-                    &item_id,
-                    host.as_ref(),
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::check::item(commands::check::ItemParams {
+                    item_id: &item_id,
+                    host_id: host.as_ref(),
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
         },
@@ -883,32 +883,32 @@ async fn main() {
         },
         Commands::Scheduler { command } => match command {
             SchedulerCommands::List => {
-                commands::scheduler::list(
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::scheduler::list(commands::scheduler::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
             SchedulerCommands::Show { id } => {
-                commands::scheduler::show(
-                    &id,
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::scheduler::show(commands::scheduler::ShowParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
             SchedulerCommands::Trigger { id } => {
-                commands::scheduler::trigger(
-                    &id,
-                    cli.server.as_deref(),
-                    cli.token.as_deref(),
-                    cli.output,
+                commands::scheduler::trigger(commands::scheduler::TriggerParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    format: cli.output,
                     insecure,
-                )
+                })
                 .await
             }
         },

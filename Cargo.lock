@@ -5910,6 +5910,7 @@ dependencies = [
 name = "uptrakit-openapi-client"
 version = "0.0.1"
 dependencies = [
+ "http",
  "reqwest 0.13.2",
  "rootcause",
  "serde",

@@ -1,3 +1,4 @@
+use crate::auth::token::{generate_uuid, hash_token};
 use openidconnect::{Nonce, PkceCodeVerifier};
 use rootcause::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
@@ -164,10 +165,13 @@ impl AccountLinkStore {
         let now = OffsetDateTime::now_utc();
         let expires_at = now + time::Duration::seconds(TTL_SECONDS);
 
+        let id = generate_uuid();
+        let token_hash = hash_token(&params.token);
         let roles_json = serde_json::to_value(&params.mapped_roles).context_to()?;
 
         let model = pending_account_link::ActiveModel {
-            link_token: Set(params.token),
+            id: Set(id),
+            link_token_hash: Set(token_hash),
             provider_id: Set(params.provider_id),
             oidc_subject: Set(params.oidc_subject),
             email: Set(params.email),
@@ -187,8 +191,10 @@ impl AccountLinkStore {
 
     pub async fn take(&self, token: &str) -> Result<Option<PendingAccountLinkData>> {
         let now = OffsetDateTime::now_utc();
+        let hash = hash_token(token);
 
-        let link = match PendingAccountLink::find_by_id(token)
+        let link = match PendingAccountLink::find()
+            .filter(pending_account_link::Column::LinkTokenHash.eq(&hash))
             .one(&self.db)
             .await
             .context_to()?
@@ -199,7 +205,7 @@ impl AccountLinkStore {
 
         // Atomic delete: only delete if not expired (HA-safe)
         let result = PendingAccountLink::delete_many()
-            .filter(pending_account_link::Column::LinkToken.eq(token))
+            .filter(pending_account_link::Column::Id.eq(link.id))
             .filter(pending_account_link::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
@@ -265,8 +271,12 @@ impl OidcTokenExchangeStore {
         let now = OffsetDateTime::now_utc();
         let expires_at = now + time::Duration::seconds(EXCHANGE_TTL_SECONDS);
 
+        let id = generate_uuid();
+        let code_hash = hash_token(&code);
+
         let model = pending_oidc_token_exchange::ActiveModel {
-            exchange_code: Set(code),
+            id: Set(id),
+            exchange_code_hash: Set(code_hash),
             user_id: Set(user_id),
             provider_id: Set(provider_id),
             created_at: Set(now),
@@ -280,8 +290,10 @@ impl OidcTokenExchangeStore {
 
     pub async fn take(&self, code: &str) -> Result<Option<PendingOidcTokenExchangeData>> {
         let now = OffsetDateTime::now_utc();
+        let hash = hash_token(code);
 
-        let exchange = match PendingOidcTokenExchange::find_by_id(code)
+        let exchange = match PendingOidcTokenExchange::find()
+            .filter(pending_oidc_token_exchange::Column::ExchangeCodeHash.eq(&hash))
             .one(&self.db)
             .await
             .context_to()?
@@ -292,7 +304,7 @@ impl OidcTokenExchangeStore {
 
         // Atomic delete: only delete if not expired (HA-safe)
         let result = PendingOidcTokenExchange::delete_many()
-            .filter(pending_oidc_token_exchange::Column::ExchangeCode.eq(code))
+            .filter(pending_oidc_token_exchange::Column::Id.eq(exchange.id))
             .filter(pending_oidc_token_exchange::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
@@ -358,10 +370,13 @@ impl OidcRegistrationStore {
         let now = OffsetDateTime::now_utc();
         let expires_at = now + time::Duration::seconds(TTL_SECONDS);
 
+        let id = generate_uuid();
+        let code_hash = hash_token(&params.registration_code);
         let roles_json = serde_json::to_value(&params.mapped_roles).context_to()?;
 
         let model = pending_oidc_registration::ActiveModel {
-            registration_code: Set(params.registration_code),
+            id: Set(id),
+            registration_code_hash: Set(code_hash),
             provider_id: Set(params.provider_id),
             oidc_subject: Set(params.oidc_subject),
             email: Set(params.email),
@@ -382,8 +397,10 @@ impl OidcRegistrationStore {
     /// preconditions (e.g. registration token) before consuming with [`take()`].
     pub async fn get(&self, code: &str) -> Result<Option<PendingOidcRegistrationData>> {
         let now = OffsetDateTime::now_utc();
+        let hash = hash_token(code);
 
-        let reg = match PendingOidcRegistration::find_by_id(code)
+        let reg = match PendingOidcRegistration::find()
+            .filter(pending_oidc_registration::Column::RegistrationCodeHash.eq(&hash))
             .filter(pending_oidc_registration::Column::ExpiresAt.gt(now))
             .one(&self.db)
             .await
@@ -407,8 +424,10 @@ impl OidcRegistrationStore {
 
     pub async fn take(&self, code: &str) -> Result<Option<PendingOidcRegistrationData>> {
         let now = OffsetDateTime::now_utc();
+        let hash = hash_token(code);
 
-        let reg = match PendingOidcRegistration::find_by_id(code)
+        let reg = match PendingOidcRegistration::find()
+            .filter(pending_oidc_registration::Column::RegistrationCodeHash.eq(&hash))
             .one(&self.db)
             .await
             .context_to()?
@@ -419,7 +438,7 @@ impl OidcRegistrationStore {
 
         // Atomic delete: only delete if not expired (HA-safe)
         let result = PendingOidcRegistration::delete_many()
-            .filter(pending_oidc_registration::Column::RegistrationCode.eq(code))
+            .filter(pending_oidc_registration::Column::Id.eq(reg.id))
             .filter(pending_oidc_registration::Column::ExpiresAt.gt(now))
             .exec(&self.db)
             .await
@@ -641,7 +660,7 @@ mod tests {
 
         // Backdate the link
         db.execute_unprepared(
-            "UPDATE pending_account_links SET expires_at = datetime('now', '-1 hour') WHERE link_token = 'token-to-expire'"
+            "UPDATE pending_account_links SET expires_at = datetime('now', '-1 hour')"
         ).await.unwrap();
 
         store.cleanup_expired().await;
@@ -666,7 +685,7 @@ mod tests {
 
         // Backdate the exchange
         db.execute_unprepared(
-            "UPDATE pending_oidc_token_exchanges SET expires_at = datetime('now', '-1 hour') WHERE exchange_code = 'code-to-expire'"
+            "UPDATE pending_oidc_token_exchanges SET expires_at = datetime('now', '-1 hour')"
         ).await.unwrap();
 
         store.cleanup_expired().await;
@@ -788,7 +807,7 @@ mod tests {
 
         // Backdate to make it expired
         db.execute_unprepared(
-            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour') WHERE registration_code = 'reg-get-expired'"
+            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')"
         ).await.unwrap();
 
         let reg = store.get("reg-get-expired").await.unwrap();
@@ -858,7 +877,7 @@ mod tests {
 
         // Backdate the registration
         db.execute_unprepared(
-            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour') WHERE registration_code = 'reg-to-expire'"
+            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')"
         ).await.unwrap();
 
         store.cleanup_expired().await;

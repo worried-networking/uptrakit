@@ -688,6 +688,7 @@ pub(crate) async fn init_pki_runtime(
     } else {
         let mut cert =
             pki::load_or_generate_server_cert(&pki_path, &ca_state.active, &reconciled.extra_sans)
+                .await
                 .context(AppError::Pki)?;
 
         // Check if the existing cert needs SAN regeneration
@@ -701,6 +702,7 @@ pub(crate) async fn init_pki_runtime(
                     "server certificate SANs do not match configured values, regenerating"
                 );
                 cert = pki::renew_server_cert(&pki_path, &ca_state.active, &reconciled.extra_sans)
+                    .await
                     .context(AppError::Pki)?;
             } else {
                 bail!(AppError::Config(
@@ -719,6 +721,7 @@ pub(crate) async fn init_pki_runtime(
         if pki::should_renew_server_cert(&cert.cert_pem) {
             tracing::info!("server certificate is within renewal window, renewing now");
             cert = pki::renew_server_cert(&pki_path, &ca_state.active, &reconciled.extra_sans)
+                .await
                 .context(AppError::Pki)?;
         }
 

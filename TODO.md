@@ -622,7 +622,7 @@ Comprehensive security hardening.
 - [x] Implement rate limiting for all endpoints
 - [x] Add brute force protection
 - [ ] Implement security headers
-- [ ] Add input validation and sanitization
+- [x] Add input validation and sanitization
 - [x] Implement secrets management
   - [x] Secure credential storage (AES-256-GCM encryption at rest via `EncryptedString`, mandatory in production; dev-only `--allow-plaintext-secrets`
     available)

@@ -93,17 +93,12 @@ the shared function. The private `resolve_auth()` function was removed.
 
 ---
 
-### A-3: Inconsistent parameter passing patterns across commands [MEDIUM]
+### ~~A-3: Inconsistent parameter passing patterns across commands~~ [FIXED]
 
-Some commands use parameter structs while others use 5-7 loose parameters:
-
-| Pattern | Commands |
-| --- | --- |
-| **Parameter struct** | `services::list`, `history::list`, `update::trigger`, `settings::registration_update`, `settings::network_update`, `settings::mqtt_create`, `settings::mqtt_update`, `settings::oidc_create`, `settings::oidc_update` |
-| **Loose parameters** | `hosts::list` (6 params), `hosts::show` (5), `software_items::list` (6), `software_items::show` (5), `scheduler::show` (5), `scheduler::trigger` (5), `check::installed` (6), `check::available` (6), most settings show/simple commands |
-
-**Recommendation:** Adopt a consistent convention. The simplest rule: use a parameter struct
-when a function takes more than 4 parameters.
+**Resolution:** All 9 functions with loose parameters have been converted to parameter structs:
+`hosts::ListParams`, `hosts::ShowParams`, `software_items::ListParams`, `software_items::ShowParams`,
+`scheduler::ListParams`, `scheduler::ShowParams`, `scheduler::TriggerParams`, `check::AllParams`,
+`check::ItemParams`. All call sites in `main.rs` updated accordingly.
 
 ---
 
@@ -194,7 +189,7 @@ Low priority since types are only used within the crate.
 | ~~5~~ | ~~A-2~~ | ~~Extract shared auth resolution logic~~ (FIXED) |
 | ~~6~~ | ~~S-2~~ | ~~Add environment variable support for token/server~~ (FIXED) |
 | ~~7~~ | ~~S-3~~ | ~~Validate URL before opening in browser~~ (FIXED) |
-| 8 | A-3 | Standardize parameter passing (struct vs loose) |
+| ~~8~~ | ~~A-3~~ | ~~Standardize parameter passing (struct vs loose)~~ (FIXED) |
 | ~~9~~ | ~~C-1~~ | ~~Call `ensure_dirs()` in config operations~~ (FIXED) |
 | 10 | C-2 | Add tests for formatting and error paths |
 | ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |

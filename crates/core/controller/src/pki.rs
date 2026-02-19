@@ -707,7 +707,7 @@ pub fn load_external_cert(cert_path: &Path, key_path: &Path) -> Result<ServerCer
 }
 
 /// Load or generate a server certificate signed by the internal CA.
-pub fn load_or_generate_server_cert(
+pub async fn load_or_generate_server_cert(
     pki: &Path,
     ca: &CaBundle,
     extra_sans: &[String],
@@ -731,8 +731,10 @@ pub fn load_or_generate_server_cert(
 
     let bundle = generate_server_cert(ca, extra_sans)?;
     uptrakit_directories::write_secure_file_str(&cert_path, &bundle.cert_pem)
+        .await
         .context_to::<PkiError>()?;
     uptrakit_directories::write_secure_file_str(&key_path, &bundle.key_pem)
+        .await
         .context_to::<PkiError>()?;
     tracing::info!("generated new server certificate at {}", pki.display());
     Ok(bundle)
@@ -854,7 +856,7 @@ pub fn should_renew_server_cert(cert_pem: &str) -> bool {
 }
 
 /// Generate a new server cert signed by the given CA and save to the PKI directory.
-pub fn renew_server_cert(
+pub async fn renew_server_cert(
     pki: &Path,
     ca: &CaBundle,
     extra_sans: &[String],
@@ -863,8 +865,10 @@ pub fn renew_server_cert(
     let cert_path = pki.join("server.crt");
     let key_path = pki.join("server.key");
     uptrakit_directories::write_secure_file_str(&cert_path, &bundle.cert_pem)
+        .await
         .context_to::<PkiError>()?;
     uptrakit_directories::write_secure_file_str(&key_path, &bundle.key_pem)
+        .await
         .context_to::<PkiError>()?;
     tracing::info!("server certificate renewed at {}", pki.display());
     Ok(bundle)
@@ -1241,14 +1245,14 @@ mod tests {
         assert!(is_cert_expired("not a cert"));
     }
 
-    #[test]
-    fn server_cert_round_trip() {
+    #[tokio::test]
+    async fn server_cert_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let pki = dir.path();
 
         let ca = generate_ca(None).unwrap();
-        let b1 = load_or_generate_server_cert(pki, &ca, &[]).unwrap();
-        let b2 = load_or_generate_server_cert(pki, &ca, &[]).unwrap();
+        let b1 = load_or_generate_server_cert(pki, &ca, &[]).await.unwrap();
+        let b2 = load_or_generate_server_cert(pki, &ca, &[]).await.unwrap();
 
         assert_eq!(b1.cert_pem, b2.cert_pem);
     }

@@ -103,20 +103,20 @@ production code.
 
 All `unwrap()`, `expect()`, and `panic!()` calls are exclusively in `#[cfg(test)]` blocks.
 
-### MEDIUM: Bearer tokens as plaintext primary keys
+### ~~MEDIUM: Bearer tokens as plaintext primary keys~~ RESOLVED
 
-Several pending flow entities store bearer tokens as plaintext primary keys:
+**Resolution:** All 4 pending flow entities now use a UUID `id` as primary key with a SHA-256 hash column for lookups:
 
-| Entity | Field | Risk |
+| Entity | New PK | Hash column |
 | --- | --- | --- |
-| `pending_device_flow` | `device_code` | Attacker with DB access can poll to obtain tokens |
-| `pending_account_link` | `link_token` | Attacker can complete account linking |
-| `pending_oidc_registration` | `registration_code` | Attacker can complete OIDC registration |
-| `pending_oidc_token_exchange` | `exchange_code` | Attacker can complete token exchange |
+| `pending_device_flow` | `id: Uuid` | `device_code_hash: String` (unique) |
+| `pending_account_link` | `id: Uuid` | `link_token_hash: String` (unique) |
+| `pending_oidc_registration` | `id: Uuid` | `registration_code_hash: String` (unique) |
+| `pending_oidc_token_exchange` | `id: Uuid` | `exchange_code_hash: String` (unique) |
 
-These tokens are used as primary keys, so hashing would require a lookup-by-hash pattern, and encrypting with
-`EncryptedString` would break lookups (random nonces). This is a design constraint requiring careful thought -- consider
-storing a hash in a separate indexed column for lookup.
+Bearer tokens are hashed via `hash_token()` (SHA-256, same as API tokens) before storage and lookup.
+The migration, 4 entity files, and 2 query files (`device_flow.rs`, `oidc_state.rs`) were updated.
+`user_code` in device flows remains unhashed (short-lived user-facing code, not a bearer token).
 
 ### ~~MEDIUM: Master key not zeroized in memory~~ RESOLVED
 
@@ -212,7 +212,7 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | Error handling | PASS | rootcause/thiserror throughout |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | PKCE verifier | PASS | Now encrypted with `EncryptedString` |
-| Bearer token storage | **MEDIUM** | Plaintext PKs for pending flows |
+| Bearer token storage | ~~**MEDIUM**~~ FIXED | UUID PKs + SHA-256 hash columns for lookup |
 | Master key memory | PASS       | Wrapped in `Zeroizing<[u8; 32]>` (defense-in-depth) |
 | RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
 | HA safety | GOOD | Verification works; minor race on first creation |

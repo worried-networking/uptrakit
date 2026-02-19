@@ -313,15 +313,14 @@ All created files and directories use secure permissions:
 The `uptrakit-directories` crate provides helper functions (permissions are set **atomically at creation time** on
 Unix, eliminating TOCTOU windows):
 
-- `create_secure_dir(path)` -- creates directory with 0o700 permissions
-- `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- writes file with 0o600 permissions (sync)
-- `write_secure_file_async(path, data)` / `write_secure_file_str_async(path, str)` -- async variants via tokio
+- `create_secure_dir(path)` -- async; creates directory with 0o700 permissions using `tokio::fs`
+- `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- async; writes file with 0o600 permissions
 - `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
 - `AppDirs::config_path(name)` / `AppDirs::state_path(name)` -- returns `Result<PathBuf>` after validating `name`
   against path traversal (rejects path separators, `..`, `.`, empty strings, absolute paths)
-- `AppDirs::ensure_config_dir()` -- creates config directory with secure permissions
-- `AppDirs::ensure_state_dir()` -- creates state directory with secure permissions
-- `AppDirs::ensure_dirs()` -- creates both directories with secure permissions
+- `AppDirs::ensure_config_dir()` -- async; creates config directory with secure permissions
+- `AppDirs::ensure_state_dir()` -- async; creates state directory with secure permissions
+- `AppDirs::ensure_dirs()` -- async; creates both directories with secure permissions
 
 All crates writing sensitive files (private keys, certificates, CA bundles) **must** use these helpers instead of raw
 `fs::write` / `tokio::fs::write`.

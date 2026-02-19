@@ -390,6 +390,63 @@ Do NOT use `.map_err()` to convert `PoisonError` into an application error — t
 1. **Use `Report<MyError>` as the error type**, not bare `MyError`. The `Result<T>` alias enforces this.
 1. **Implement `ReportConversion`** (via `impl_report_conversion!` macro) for every foreign error type your boundary may encounter.
 
+## Request Type Validation
+
+All HTTP request types in `uptrakit-web-api-types` that accept user input must implement the `Validate` trait
+(defined in `validation.rs`). Route handlers call `req.validate()` at entry and return HTTP 400 on failure.
+
+### Validate trait
+
+```rust
+use uptrakit_web_api_types::validation::{Validate, ValidationError};
+
+pub trait Validate {
+    fn validate(&self) -> Result<(), ValidationError>;
+}
+```
+
+`ValidationError` carries a `field: &'static str` and `message: String`, providing structured field-level error
+reporting to API consumers.
+
+### Implementation pattern
+
+```rust
+impl Validate for CreateSoftwareItemRequest {
+    fn validate(&self) -> Result<(), ValidationError> {
+        if self.name.trim().is_empty() {
+            return Err(ValidationError {
+                field: "name",
+                message: "must not be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+```
+
+### Route handler wiring
+
+```rust
+if let Err(e) = req.validate() {
+    return error_response(StatusCode::BAD_REQUEST, &e.to_string());
+}
+```
+
+### Currently validated request types
+
+| Type | Key validations |
+| --- | --- |
+| `RegisterRequest` | email format (contains `@`, max 254 chars), `first_name` non-empty, password 8-1024 chars |
+| `LoginRequest` | email format, password non-empty |
+| `CreateOidcProviderRequest` | name non-empty, slug format (lowercase+digits+hyphens, 1-64), issuer_url scheme, client_id non-empty |
+| `UpdateScheduledTaskRequest` | cron_expression non-empty, 5 whitespace-separated fields |
+| `UpdateNetworkSettingsRequest` | trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format |
+| `CreateSoftwareItemRequest` | name non-empty, exactly one of provider_config_id/provider_config |
+| `CreateProviderConfigRequest` | name non-empty |
+
+See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook
+configuration types.
+
 ## Database Enum Columns (`DeriveActiveEnum`)
 
 All entity columns that store a fixed set of string values must use a typed Rust enum with SeaORM's `DeriveActiveEnum` instead of `String`. This

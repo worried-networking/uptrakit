@@ -135,9 +135,9 @@ The `ClientError` enum covers all failure modes:
 | `Http(reqwest::Error)` | Network/transport error |
 | `Json(serde_json::Error)` | JSON serialization/deserialization error |
 | `Api { status, message }` | Server returned an error response (4xx/5xx) |
-| `RateLimited` | Server returned HTTP 429 |
+| `RateLimited { retry_after_seconds }` | Server returned HTTP 429; `retry_after_seconds: Option<u64>` parsed from the `Retry-After` header (seconds format) |
 | `NotFound(String)` | Server returned HTTP 404 |
-| `NotAuthenticated` | No bearer token available |
+| `NotAuthenticated` | Server returned HTTP 401, or no bearer token available |
 | `InvalidMethod(String)` | Invalid HTTP method string (raw request only) |
 
 All methods return `Result<T>` which is `std::result::Result<T, rootcause::Report<ClientError>>`. The CLI maps these to `CliError` variants via `impl_report_conversion!`.
