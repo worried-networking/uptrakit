@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use sea_orm::entity::prelude::*;
 use thiserror::Error;
-use uptrakit_shared_db::crypto::EncryptedString;
+use uptrakit_crypto::EncryptedString;
 
 // ── SshKeyType ──────────────────────────────────────────────────────
 

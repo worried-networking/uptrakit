@@ -1,0 +1,19 @@
+[package]
+name = "uptrakit-crypto"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+aws-lc-rs = { workspace = true }
+rand = { workspace = true }
+rootcause = { workspace = true }
+sea-orm = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+uptrakit-shared-types = { workspace = true }
+zeroize = { workspace = true }

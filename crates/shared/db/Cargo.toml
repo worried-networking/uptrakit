@@ -8,8 +8,6 @@ version.workspace = true
 publish = false
 
 [dependencies]
-aws-lc-rs = { workspace = true }
-rand = { workspace = true }
 rootcause = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }
@@ -17,6 +15,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }
+uptrakit-crypto = { path = "../crypto" }
 uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true, features = ["sea-orm"] }
 uuid = { workspace = true, features = ["v7", "serde"] }

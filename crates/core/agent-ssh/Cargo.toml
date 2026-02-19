@@ -31,7 +31,7 @@ uptrakit-command = { path = "../../shared/command" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
-uptrakit-shared-db = { path = "../../shared/db" }
+uptrakit-crypto = { path = "../../shared/crypto" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-build-info = { path = "../../shared/build-info" }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }

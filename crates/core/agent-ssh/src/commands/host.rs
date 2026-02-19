@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use rootcause::prelude::*;
-use uptrakit_shared_db::crypto::EncryptedString;
+use uptrakit_crypto::EncryptedString;
 
 use crate::cli::HostCommands;
 use crate::commands::bootstrap::{self, BootstrapParams};

@@ -10,7 +10,7 @@ pub struct AddHostParams {
     pub hostname: String,
     pub port: i32,
     pub username: String,
-    pub encrypted_key: uptrakit_shared_db::crypto::EncryptedString,
+    pub encrypted_key: uptrakit_crypto::EncryptedString,
     pub key_type: SshKeyType,
     pub host_key_fingerprint: Option<String>,
 }
@@ -21,7 +21,7 @@ pub struct HostUpdates {
     pub hostname: Option<String>,
     pub port: Option<i32>,
     pub username: Option<String>,
-    pub private_key: Option<uptrakit_shared_db::crypto::EncryptedString>,
+    pub private_key: Option<uptrakit_crypto::EncryptedString>,
     pub key_type: Option<SshKeyType>,
     pub host_key_fingerprint: Option<Option<String>>,
 }
@@ -168,8 +168,8 @@ mod tests {
         (dir, db)
     }
 
-    fn test_encrypted_key() -> uptrakit_shared_db::crypto::EncryptedString {
-        uptrakit_shared_db::crypto::EncryptedString::new("test-key-content".to_string())
+    fn test_encrypted_key() -> uptrakit_crypto::EncryptedString {
+        uptrakit_crypto::EncryptedString::new("test-key-content".to_string())
             .expect("encrypt")
     }
 

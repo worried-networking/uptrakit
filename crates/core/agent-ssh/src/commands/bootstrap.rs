@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
-use uptrakit_shared_db::crypto::EncryptedString;
+use uptrakit_crypto::EncryptedString;
 
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
