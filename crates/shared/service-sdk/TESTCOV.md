@@ -27,11 +27,6 @@
 
 ## Uncovered Critical Paths
 
-### Tier 1 — Security-Critical
-
-- **Certificate handler gaps** (`cert_handler.rs`, 71.7% coverage): Uncovered lines include certificate renewal scheduling,
-  expiration edge cases, and renewal delay computation. Risk: failed renewals could leave services with expired certificates.
-
 ### Tier 2 — Business-Logic
 
 - **WebSocket communication** (`ws.rs`, 0% coverage, 273 lines): WebSocket connection establishment, message framing,
@@ -45,11 +40,9 @@
 
 ## Test Recommendations
 
-1. **Certificate renewal scheduling tests** — Test renewal timing calculation, expiration detection, and renewal retry backoff.
-   Covers uncovered paths in `cert_handler.rs` (Tier 1). Mockable with custom time sources.
-2. **WebSocket lifecycle tests** — Test connection establishment, message send/receive, reconnection after disconnect, and graceful
+1. **WebSocket lifecycle tests** — Test connection establishment, message send/receive, reconnection after disconnect, and graceful
    close. Covers `ws.rs` (Tier 2). Use `tokio-tungstenite` test server.
-3. **Service lifecycle integration tests** — Test enrollment, authenticated loop entry, and shutdown sequence. Covers
+2. **Service lifecycle integration tests** — Test enrollment, authenticated loop entry, and shutdown sequence. Covers
    `lifecycle.rs` (Tier 2). Requires mock controller endpoint.
-4. **Connection retry tests** — Test connection retry with exponential backoff, URL failover, and timeout handling. Covers
+3. **Connection retry tests** — Test connection retry with exponential backoff, URL failover, and timeout handling. Covers
    `connection.rs` (Tier 2). Unit-testable with mock HTTP client.

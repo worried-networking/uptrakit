@@ -215,4 +215,66 @@ mod tests {
         assert!(refresh.has_capability(ProviderCapability::RefreshPackageIndex));
         assert!(!refresh.has_capability(ProviderCapability::DiscoverLocalSoftware));
     }
+
+    /// Provider with multiple capabilities.
+    struct MultiCapabilityProvider;
+
+    #[async_trait]
+    impl Provider for MultiCapabilityProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::GithubReleases
+        }
+
+        fn capabilities(&self) -> &'static [ProviderCapability] {
+            &[
+                ProviderCapability::DiscoverLocalSoftware,
+                ProviderCapability::RefreshPackageIndex,
+            ]
+        }
+    }
+
+    #[test]
+    fn has_capability_with_multiple_capabilities() {
+        let provider = MultiCapabilityProvider;
+
+        // First in slice
+        assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
+        // Last in slice
+        assert!(provider.has_capability(ProviderCapability::RefreshPackageIndex));
+    }
+
+    #[test]
+    fn capabilities_returns_correct_count_for_multi() {
+        let provider = MultiCapabilityProvider;
+        assert_eq!(provider.capabilities().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn default_error_messages_contain_operation_name() {
+        let provider = StubProvider;
+
+        let err = provider.fetch_releases("pkg").await.unwrap_err();
+        assert!(
+            format!("{}", err.current_context()).contains("fetch_releases"),
+            "fetch_releases error should mention the operation"
+        );
+
+        let err = provider.detect_installed_version("pkg").await.unwrap_err();
+        assert!(
+            format!("{}", err.current_context()).contains("detect_installed_version"),
+            "detect_installed_version error should mention the operation"
+        );
+
+        let err = provider.discover_software().await.unwrap_err();
+        assert!(
+            format!("{}", err.current_context()).contains("discover_software"),
+            "discover_software error should mention the operation"
+        );
+
+        let err = provider.refresh_package_index().await.unwrap_err();
+        assert!(
+            format!("{}", err.current_context()).contains("refresh_package_index"),
+            "refresh_package_index error should mention the operation"
+        );
+    }
 }

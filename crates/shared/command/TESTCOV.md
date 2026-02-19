@@ -22,15 +22,13 @@
 
 ### Tier 2 — Business-Logic
 
-- **Command execution edge cases** (`command.rs`, 89.3% coverage, 364 lines): 39 uncovered lines include timeout handling for
-  long-running commands, signal propagation (SIGTERM/SIGKILL), and output truncation for excessively large command output.
-  Risk: untested timeout paths could leave zombie processes or cause resource leaks.
+- **Command execution edge cases** (`command.rs`): Remaining uncovered lines include the 10 MB output truncation path
+  (requires generating >10 MB output), signal propagation, and the task-join failure fallback messages. Working directory
+  errors and spawn failures are now tested.
 
 ## Test Recommendations
 
-1. **Command timeout tests** — Test command execution with timeout, verify process termination and output capture up to the
-   timeout point. Covers `command.rs` gaps (Tier 2). Use a `sleep` command as the test subject.
-2. **Large output handling tests** — Test command output exceeding buffer limits, verifying truncation behavior. Covers
-   `command.rs` gaps (Tier 2). Use a command that generates large output.
-3. **Signal propagation tests** — Test that child processes receive SIGTERM on cancellation. Covers `command.rs` gaps (Tier 2).
+1. **Large output truncation tests** — Test output exceeding the 10 MB buffer limit. Covers `command.rs` truncation paths
+   (Tier 2). Use `yes | head -c 11000000` or similar.
+2. **Signal propagation tests** — Test that child processes receive SIGTERM on cancellation. Covers `command.rs` gaps (Tier 2).
    Use a command that traps signals.

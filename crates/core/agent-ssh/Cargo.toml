@@ -43,6 +43,7 @@ zeroize = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
+rcgen = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }

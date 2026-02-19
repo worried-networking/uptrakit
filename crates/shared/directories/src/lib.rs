@@ -646,4 +646,73 @@ mod tests {
         let content = std::fs::read(&file).expect("read");
         assert_eq!(content, b"secret data");
     }
+
+    #[tokio::test]
+    async fn write_secure_file_str_creates_parent_dirs() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("x").join("y").join("file.txt");
+
+        write_secure_file_str(&file, "nested data")
+            .await
+            .expect("should write");
+
+        assert!(file.is_file());
+        let content = std::fs::read_to_string(&file).expect("read");
+        assert_eq!(content, "nested data");
+    }
+
+    #[tokio::test]
+    async fn write_secure_file_overwrites_existing() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("overwrite_file");
+
+        write_secure_file(&file, b"first").await.expect("write 1");
+        write_secure_file(&file, b"second").await.expect("write 2");
+
+        let content = std::fs::read(&file).expect("read");
+        assert_eq!(content, b"second");
+    }
+
+    #[tokio::test]
+    async fn write_secure_file_new_file_has_correct_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("new_secure_file");
+
+        // Writing a new file should create it with 0o600.
+        write_secure_file(&file, b"secure data").await.expect("write");
+
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+        let content = std::fs::read(&file).expect("read");
+        assert_eq!(content, b"secure data");
+    }
+
+    #[test]
+    fn expand_tilde_relative_path_unchanged() {
+        let path = Path::new("relative/path");
+        let expanded = expand_tilde(path).expect("should expand");
+        assert_eq!(expanded, path);
+    }
+
+    #[tokio::test]
+    async fn set_file_permissions_works() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("perm_test");
+        std::fs::write(&file, "data").expect("write");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644))
+            .expect("set perms");
+
+        set_file_permissions(&file).await.expect("set_file_permissions");
+
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }

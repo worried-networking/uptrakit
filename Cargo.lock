@@ -5732,6 +5732,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "rcgen",
  "rootcause",
  "rpassword",
  "russh",
@@ -5796,6 +5797,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "rootcause",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

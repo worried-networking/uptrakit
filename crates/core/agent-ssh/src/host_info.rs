@@ -271,4 +271,56 @@ mod tests {
     fn sw_vers_missing_fields() {
         assert_eq!(parse_sw_vers("ProductName:\tmacOS"), None);
     }
+
+    // ── Additional parse_pretty_name tests ────────────────────────────
+
+    #[test]
+    fn parses_pretty_name_alpine() {
+        let content = "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.19\nPRETTY_NAME=\"Alpine Linux v3.19\"\nHOME_URL=\"https://alpinelinux.org/\"";
+        assert_eq!(
+            parse_pretty_name(content),
+            Some("Alpine Linux v3.19".to_string())
+        );
+    }
+
+    #[test]
+    fn pretty_name_empty_content() {
+        assert_eq!(parse_pretty_name(""), None);
+    }
+
+    #[test]
+    fn pretty_name_no_quotes() {
+        // Some distributions use unquoted PRETTY_NAME.
+        let content = "PRETTY_NAME=Arch Linux";
+        assert_eq!(
+            parse_pretty_name(content),
+            Some("Arch Linux".to_string())
+        );
+    }
+
+    // ── Additional normalize_os_type tests ────────────────────────────
+
+    #[test]
+    fn normalizes_empty_string() {
+        assert_eq!(normalize_os_type(""), "");
+    }
+
+    // ── parse_sw_vers edge cases ──────────────────────────────────────
+
+    #[test]
+    fn sw_vers_empty_output() {
+        assert_eq!(parse_sw_vers(""), None);
+    }
+
+    #[test]
+    fn sw_vers_only_version() {
+        assert_eq!(parse_sw_vers("ProductVersion:\t15.2"), None);
+    }
+
+    // ── parse_ioplatform_uuid edge cases ──────────────────────────────
+
+    #[test]
+    fn ioreg_empty_output() {
+        assert_eq!(parse_ioplatform_uuid(""), None);
+    }
 }

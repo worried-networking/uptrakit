@@ -193,3 +193,52 @@ fn merge_config(base: &serde_json::Value, overrides: &serde_json::Value) -> serd
         _ => base.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_config_objects() {
+        let base = serde_json::json!({"key1": "val1", "key2": "val2"});
+        let overrides = serde_json::json!({"key2": "override2", "key3": "val3"});
+        let merged = merge_config(&base, &overrides);
+        assert_eq!(
+            merged,
+            serde_json::json!({"key1": "val1", "key2": "override2", "key3": "val3"})
+        );
+    }
+
+    #[test]
+    fn merge_config_non_object_override_returns_base() {
+        let base = serde_json::json!({"key": "val"});
+        let overrides = serde_json::json!("just a string");
+        let merged = merge_config(&base, &overrides);
+        assert_eq!(merged, base);
+    }
+
+    #[test]
+    fn merge_config_non_object_base_returns_base() {
+        let base = serde_json::json!(42);
+        let overrides = serde_json::json!({"key": "val"});
+        let merged = merge_config(&base, &overrides);
+        assert_eq!(merged, serde_json::json!(42));
+    }
+
+    #[test]
+    fn merge_config_empty_override() {
+        let base = serde_json::json!({"key": "val"});
+        let overrides = serde_json::json!({});
+        let merged = merge_config(&base, &overrides);
+        assert_eq!(merged, base);
+    }
+
+    #[test]
+    fn merge_config_nested_objects_replaced_not_deep_merged() {
+        let base = serde_json::json!({"nested": {"a": 1, "b": 2}});
+        let overrides = serde_json::json!({"nested": {"c": 3}});
+        let merged = merge_config(&base, &overrides);
+        // Shallow merge: the entire "nested" value is replaced.
+        assert_eq!(merged, serde_json::json!({"nested": {"c": 3}}));
+    }
+}

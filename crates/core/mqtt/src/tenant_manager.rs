@@ -275,6 +275,104 @@ mod tests {
     }
 
     #[test]
+    fn build_config_uses_default_port_for_tcp_when_zero() {
+        let config = MqttTenantConfig {
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000005").unwrap(),
+            tenant_id: Uuid::nil(),
+            enabled: true,
+            transport: MqttTransport::Tcp,
+            host: "broker.example.com".to_string(),
+            port: 0,
+            client_id: "client".to_string(),
+            username: None,
+            password: None,
+            topic_prefix: "uptrakit".to_string(),
+            updated_at: UtcDateTime::UNIX_EPOCH,
+        };
+
+        let mqtt_config = build_config_from_wire(&config);
+        assert_eq!(mqtt_config.port, 1883); // TCP default port
+    }
+
+    #[test]
+    fn build_config_no_credentials() {
+        let config = MqttTenantConfig {
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000006").unwrap(),
+            tenant_id: Uuid::nil(),
+            enabled: true,
+            transport: MqttTransport::Tcp,
+            host: "broker.local".to_string(),
+            port: 1883,
+            client_id: "anon-client".to_string(),
+            username: None,
+            password: None,
+            topic_prefix: "prefix".to_string(),
+            updated_at: UtcDateTime::UNIX_EPOCH,
+        };
+
+        let mqtt_config = build_config_from_wire(&config);
+        assert!(mqtt_config.username.is_none());
+        assert!(mqtt_config.password.is_none());
+    }
+
+    #[test]
+    fn tenant_manager_new_has_no_clients() {
+        let manager = TenantManager::new(None);
+        assert!(manager.active_mqtt_client_ids().is_empty());
+    }
+
+    #[test]
+    fn tenant_manager_default_has_no_clients() {
+        let manager = TenantManager::default();
+        assert!(manager.active_mqtt_client_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn stop_client_noop_for_nonexistent() {
+        let mut manager = TenantManager::new(None);
+        let fake_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000099").unwrap();
+        // Should not panic or error.
+        manager.stop_client(&fake_id).await;
+        assert!(manager.active_mqtt_client_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_all_on_empty_manager() {
+        let mut manager = TenantManager::new(None);
+        // Should not panic on empty manager.
+        manager.shutdown_all().await;
+        assert!(manager.active_mqtt_client_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn apply_assignments_disabled_configs_ignored() {
+        let mut manager = TenantManager::new(None);
+        let configs = vec![MqttTenantConfig {
+            mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000010").unwrap(),
+            tenant_id: Uuid::nil(),
+            enabled: false, // disabled
+            transport: MqttTransport::Tcp,
+            host: "broker.local".to_string(),
+            port: 1883,
+            client_id: "client".to_string(),
+            username: None,
+            password: None,
+            topic_prefix: "uptrakit".to_string(),
+            updated_at: UtcDateTime::UNIX_EPOCH,
+        }];
+        // Disabled configs should be a no-op (stop_client on non-existent is noop).
+        manager.apply_assignments(configs).await;
+        assert!(manager.active_mqtt_client_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn apply_assignments_empty_vec() {
+        let mut manager = TenantManager::new(None);
+        manager.apply_assignments(vec![]).await;
+        assert!(manager.active_mqtt_client_ids().is_empty());
+    }
+
+    #[test]
     fn config_hash_same_for_same_values() {
         let config1 = MqttTenantConfig {
             mqtt_client_id: Uuid::parse_str("019471a0-0000-7000-8000-000000000004").unwrap(),

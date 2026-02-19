@@ -43,16 +43,8 @@
 
 ## Uncovered Critical Paths
 
-### Tier 1 — Security-Critical
-
-- **Crypto module gaps** (`crypto.rs`, 90.6% coverage, 309 lines): 29 uncovered lines include master key initialization error
-  paths, key derivation edge cases, and the `EncryptedString` SeaORM integration (custom `Value` and `ValueType`
-  implementations). Risk: untested crypto edge cases could cause data loss or decryption failures after key rotation.
-
 ### Tier 2 — Business-Logic
 
-- **OIDC provider entity** (`entity/oidc_provider.rs`, 43.8% coverage): Role mapping serialization and OIDC-specific entity
-  methods are partially tested. Risk: serialization bugs could corrupt OIDC role assignments.
 - **Entity relation definitions** (0% coverage across 23 entity files): SeaORM `Relation` implementations, `Related<>` trait
   impls, and `ActiveModelBehavior` impls are generated code but remain untested. These are exercised indirectly by higher-level
   tests but have no direct coverage.
@@ -65,11 +57,7 @@
 
 ## Test Recommendations
 
-1. **Crypto error path tests** — Test master key initialization with invalid key material, decryption with wrong key, and
-   `EncryptedString` SeaORM value conversion edge cases. Covers `crypto.rs` gaps (Tier 1). Extend existing crypto test suite.
-2. **OIDC role mapping tests** — Test complex role mapping serialization with nested structures, empty mappings, and invalid
-   JSON. Covers `entity/oidc_provider.rs` (Tier 2). Extend existing `role_mapping_*` tests.
-3. **Entity relation smoke tests** — Test that SeaORM relation definitions compile and produce correct SQL joins for key entity
+1. **Entity relation smoke tests** — Test that SeaORM relation definitions compile and produce correct SQL joins for key entity
    pairs (user-role, host-software_item, service-host). Covers entity relation impls (Tier 2). Requires in-memory SQLite.
-4. **Scheduled task type conversion tests** — Test `ScheduledTaskType` enum serialization and `FromStr` implementation. Covers
+2. **Scheduled task type conversion tests** — Test `ScheduledTaskType` enum serialization and `FromStr` implementation. Covers
    `entity/scheduled_task.rs` (Tier 3). Simple unit tests.

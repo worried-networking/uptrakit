@@ -52,9 +52,9 @@
 
 ### Tier 2 — Business-Logic
 
-- **All scheduler executors** (0% coverage across 6 files, 137 lines total): Version checking, CA rotation checks, certificate
-  expiration checks, auth cleanup, event cleanup, and stale lease cleanup. Risk: untested executors could fail silently or
-  produce incorrect results.
+- **Remaining scheduler executors** (0% coverage for auth_cleanup, service_cert_check, stale_lease_cleanup): These executors
+  still lack tests. The `version_check` (`merge_config` function), `ca_rotation_check`, and `event_cleanup` executors are
+  now tested.
 - **Task management** (`tasks.rs`, 0% coverage, 272 lines): Async task spawning, cancellation, and lifecycle management for
   background operations. Risk: task leaks or failed cancellation could cause resource exhaustion.
 - **Startup orchestration** (`startup.rs`, 8.3% coverage, 739 lines): Database initialization, master key setup, CA bootstrap,
@@ -72,9 +72,8 @@
 
 ## Test Recommendations
 
-1. **Scheduler executor unit tests** — Test each executor in isolation: version_check (mock provider responses),
-   ca_rotation_check (mock CA state), service_cert_check (mock certificate store), auth_cleanup (mock expired sessions),
-   event_cleanup (mock old events), stale_lease_cleanup (mock expired leases). Covers all `scheduler/executors/*.rs` (Tier 2).
+1. **Remaining scheduler executor tests** — Test auth_cleanup, service_cert_check, and stale_lease_cleanup executors. Covers
+   remaining `scheduler/executors/*.rs` (Tier 2). Use `MockDatabase` from SeaORM.
 2. **Task lifecycle tests** — Test task spawning, completion callbacks, cancellation, and concurrent task limits. Covers `tasks.rs`
    (Tier 2). Unit-testable with mock async tasks.
 3. **Startup sequence integration test** — Test database initialization, master key verification, and CA bootstrap with in-memory

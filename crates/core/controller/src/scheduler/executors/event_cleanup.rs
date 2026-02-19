@@ -36,3 +36,57 @@ impl TaskExecutor for EventCleanupExecutor {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{DbBackend, MockDatabase, MockExecResult};
+    use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
+
+    fn dummy_task() -> scheduled_task::Model {
+        scheduled_task::Model {
+            id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::now_v7(),
+            task_type: ScheduledTaskType::EventCleanup,
+            cron_expression: "0 * * * *".to_string(),
+            enabled: true,
+            task_config: None,
+            last_run_at: None,
+            next_run_at: OffsetDateTime::now_utc(),
+            locked_by: None,
+            locked_at: None,
+            last_error: None,
+            run_count: 0,
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_deletes_old_events() {
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 5,
+            }])
+            .into_connection();
+
+        let executor = EventCleanupExecutor::new(db);
+        let result = executor.execute(&dummy_task()).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn execute_succeeds_with_no_rows_deleted() {
+        let db = MockDatabase::new(DbBackend::Sqlite)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .into_connection();
+
+        let executor = EventCleanupExecutor::new(db);
+        let result = executor.execute(&dummy_task()).await;
+        assert!(result.is_ok());
+    }
+}

@@ -380,6 +380,56 @@ mod tests {
         assert!(handler.pending_renewal_key.is_none());
     }
 
+    // ── create_renewal_sleep / update_renewal_schedule ──────────────────
+
+    #[tokio::test]
+    async fn create_renewal_sleep_initializes_to_far_future() {
+        tokio::time::pause();
+        let mut sleep = create_renewal_sleep();
+        // Advance time by 1 hour — should still be pending (FAR_FUTURE is 30 days).
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        let result = tokio::time::timeout(Duration::ZERO, &mut sleep).await;
+        assert!(result.is_err(), "sleep should not resolve after only 1 hour");
+    }
+
+    #[tokio::test]
+    async fn update_renewal_schedule_resets_to_zero_when_expired() {
+        tokio::time::pause();
+        let mut sleep = create_renewal_sleep();
+        // Certificate already expired: delay should be zero, so sleep resolves immediately.
+        let not_after = now_millis() - 1000;
+        update_renewal_schedule(&mut sleep, Some(not_after), 168);
+
+        let result = tokio::time::timeout(Duration::from_millis(100), &mut sleep).await;
+        assert!(result.is_ok(), "sleep should resolve immediately for expired cert");
+    }
+
+    #[tokio::test]
+    async fn update_renewal_schedule_far_future_when_no_cert() {
+        tokio::time::pause();
+        let mut sleep = create_renewal_sleep();
+        update_renewal_schedule(&mut sleep, None, 168);
+
+        // Advance time by 1 hour — should still be pending (FAR_FUTURE = 30 days).
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        let result = tokio::time::timeout(Duration::ZERO, &mut sleep).await;
+        assert!(result.is_err(), "sleep should not resolve when no cert");
+    }
+
+    // ── CertificateRenewalHandler ────────────────────────────────────────
+
+    #[test]
+    fn handler_new_has_no_pending_key() {
+        let handler = CertificateRenewalHandler::new();
+        assert!(handler.pending_renewal_key.is_none());
+    }
+
+    #[test]
+    fn handler_default_same_as_new() {
+        let handler = CertificateRenewalHandler::default();
+        assert!(handler.pending_renewal_key.is_none());
+    }
+
     #[tokio::test]
     async fn handle_ca_bundle_updated_saves() {
         let dir = TempDir::new().expect("tempdir");

@@ -403,4 +403,96 @@ oWQDYgAEkVQ4HWPH7wNHTLMMHK1FGY4GmUmqVE0gEN1vZJ3RLxdEJ/Rx/h3GX7y1
         let (pem2, _) = generate_ed25519_keypair().expect("keypair 2");
         assert_ne!(pem1, pem2, "each keypair should be unique");
     }
+
+    // ── PKCS#8 key detection tests ────────────────────────────────────
+
+    #[test]
+    fn detect_ed25519_pkcs8() {
+        // Generate a PKCS#8 Ed25519 key using rcgen.
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519).expect("keygen");
+        let pem = kp.serialize_pem();
+        assert!(pem.contains("BEGIN PRIVATE KEY"), "should be PKCS#8 format");
+        let key_type = detect_key_type(&pem).expect("should detect Ed25519");
+        assert_eq!(key_type, SshKeyType::Ed25519);
+    }
+
+    #[test]
+    fn detect_ecdsa_pkcs8() {
+        let kp =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let pem = kp.serialize_pem();
+        assert!(pem.contains("BEGIN PRIVATE KEY"), "should be PKCS#8 format");
+        let key_type = detect_key_type(&pem).expect("should detect ECDSA");
+        assert_eq!(key_type, SshKeyType::Ecdsa);
+    }
+
+    #[test]
+    fn detect_pkcs8_unrecognized_oid_fails() {
+        // Construct a minimal PKCS#8-like PEM with no known OID.
+        let fake_der = vec![0x30, 0x05, 0x02, 0x01, 0x00]; // minimal ASN.1
+        let b64 = STANDARD.encode(&fake_der);
+        let pem = format!("-----BEGIN PRIVATE KEY-----\n{b64}\n-----END PRIVATE KEY-----");
+        let result = detect_key_type(&pem);
+        assert!(result.is_err());
+    }
+
+    // ── OpenSSH edge case tests ───────────────────────────────────────
+
+    #[test]
+    fn detect_openssh_truncated_before_magic() {
+        let data = b"openssh-ke"; // too short
+        let pem = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----",
+            STANDARD.encode(data)
+        );
+        let result = detect_key_type(&pem);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn detect_openssh_truncated_after_magic() {
+        // Valid magic but no fields after it.
+        let pem = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----",
+            STANDARD.encode(b"openssh-key-v1\0")
+        );
+        let result = detect_key_type(&pem);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn detect_openssh_unknown_key_type() {
+        let key = build_test_openssh_key("ssh-unknown-algo");
+        let pem = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----",
+            STANDARD.encode(&key)
+        );
+        let result = detect_key_type(&pem);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_openssh_string_truncated_length() {
+        // Buffer too short to even read the u32 length prefix.
+        let data = [0u8; 2];
+        let result = read_openssh_string(&data, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn read_openssh_string_truncated_data() {
+        // Length says 100 bytes but only 5 bytes available.
+        let mut data = Vec::new();
+        data.extend_from_slice(&100u32.to_be_bytes());
+        data.extend_from_slice(b"short");
+        let result = read_openssh_string(&data, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn skip_openssh_string_truncated() {
+        let data = [0u8; 2];
+        let result = skip_openssh_string(&data, 0);
+        assert!(result.is_err());
+    }
 }

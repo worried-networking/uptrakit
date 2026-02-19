@@ -486,4 +486,86 @@ mod tests {
         let result = run_command_quiet("exit 3").await;
         assert!(result.is_err());
     }
+
+    // -- Working directory tests --
+
+    #[tokio::test]
+    async fn run_command_exec_with_working_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = run_command_exec(
+            "pwd",
+            &[],
+            Some(temp.path().to_str().unwrap()),
+            &tx,
+        )
+        .await;
+        assert!(result.is_ok());
+        let (output, _) = result.expect("should succeed");
+        // On macOS, /tmp is symlinked to /private/tmp.
+        let canonical = temp.path().canonicalize().expect("canonicalize");
+        assert!(
+            output.trim().contains(canonical.to_str().unwrap()),
+            "output should contain the working directory, got: {output}"
+        );
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn run_command_exec_invalid_working_dir() {
+        let result = run_command_exec_quiet(
+            "echo",
+            &["hello".to_string()],
+            Some("/nonexistent/path/that/does/not/exist"),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    // -- Spawn failure tests --
+
+    #[tokio::test]
+    async fn run_command_exec_nonexistent_program() {
+        let result = run_command_exec_quiet(
+            "/nonexistent/binary/xyz123",
+            &[],
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CommandError::CommandSpawn(_)
+        ));
+    }
+
+    // -- Stderr output tests --
+
+    #[tokio::test]
+    async fn run_command_captures_stderr() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = run_command("echo 'stderr msg' >&2", &tx).await;
+        // Command with set -euo pipefail: echo to stderr succeeds with exit 0.
+        assert!(result.is_ok());
+        let output = result.expect("should succeed");
+        assert!(
+            output.contains("stderr msg"),
+            "accumulated output should include stderr"
+        );
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    // -- Multi-line output test --
+
+    #[tokio::test]
+    async fn run_command_multiline_output() {
+        let result = run_command_quiet("printf 'line1\\nline2\\nline3'").await;
+        assert!(result.is_ok());
+        let output = result.expect("should succeed");
+        assert!(output.contains("line1"));
+        assert!(output.contains("line2"));
+        assert!(output.contains("line3"));
+    }
 }

@@ -553,4 +553,101 @@ mod tests {
             "expected MasterKeyMismatch"
         );
     }
+
+    #[test]
+    fn test_init_master_key_already_initialized() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        // Calling init_master_key again should return AlreadyInitialized.
+        let key = Zeroizing::new([0xABu8; 32]);
+        let result = init_master_key(key);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CryptoError::AlreadyInitialized
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_ciphertext_too_short() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        // Construct a value with valid prefix but ciphertext shorter than nonce + tag (28 bytes).
+        let short_bytes = [0u8; 10];
+        let short_hex = uptrakit_shared_types::hex::encode(short_bytes);
+        let stored = format!("{ENC_PREFIX}{short_hex}");
+        let result = decrypt_value(&stored);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CryptoError::CiphertextTooShort
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_missing_prefix() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        // Attempt to decrypt a string without the ENC:v1: prefix.
+        let result = decrypt_value("not-encrypted-data");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CryptoError::Decryption(_)
+        ));
+    }
+
+    #[test]
+    fn test_decrypt_invalid_hex() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let result = decrypt_value(&format!("{ENC_PREFIX}not-valid-hex!@#$"));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            CryptoError::HexDecode(_)
+        ));
+    }
+
+    #[test]
+    fn test_seaorm_value_type_non_string_fails() {
+        // Passing a non-String Value should return ValueTypeErr.
+        let value = sea_orm::Value::Int(Some(42));
+        let result = <EncryptedString as sea_orm::sea_query::ValueType>::try_from(value);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_seaorm_nullable_returns_none() {
+        let null = <EncryptedString as sea_orm::sea_query::Nullable>::null();
+        assert!(matches!(null, sea_orm::Value::String(None)));
+    }
+
+    #[test]
+    fn test_encrypted_string_clone_and_eq() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es1 = EncryptedString::new("test value".to_string()).expect("should encrypt");
+        let es2 = es1.clone();
+
+        // Clone should produce equal values (PartialEq compares plaintext only).
+        assert_eq!(es1, es2);
+        assert_eq!(es1.expose_secret(), es2.expose_secret());
+    }
+
+    #[test]
+    fn test_encrypted_string_inequality() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        ensure_test_key();
+
+        let es1 = EncryptedString::new("value_a".to_string()).expect("should encrypt");
+        let es2 = EncryptedString::new("value_b".to_string()).expect("should encrypt");
+
+        assert_ne!(es1, es2);
+    }
 }

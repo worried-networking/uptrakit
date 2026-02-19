@@ -168,4 +168,46 @@ mod tests {
         let deserialized: RoleMapping = serde_json::from_value(json).expect("should deserialize");
         assert_eq!(deserialized.0, map);
     }
+
+    #[test]
+    fn role_mapping_special_characters() {
+        let mut map = HashMap::new();
+        map.insert("key with spaces".to_string(), "value/with/slashes".to_string());
+        map.insert("unicode_\u{1f980}".to_string(), "crab!".to_string());
+        map.insert("quotes\"here".to_string(), "back\\slash".to_string());
+        let role_mapping = RoleMapping(map.clone());
+
+        let json = serde_json::to_value(&role_mapping).expect("serialization");
+        let deserialized: RoleMapping = serde_json::from_value(json).expect("deserialization");
+        assert_eq!(deserialized.0, map);
+    }
+
+    #[test]
+    fn role_mapping_default_is_empty() {
+        let role_mapping = RoleMapping::default();
+        assert!(role_mapping.0.is_empty());
+
+        let value: sea_orm::Value = role_mapping.into();
+        match value {
+            sea_orm::Value::Json(Some(json)) => {
+                assert_eq!(*json, serde_json::json!({}));
+            }
+            other => panic!("expected Json value, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn role_mapping_value_type_non_json_fails() {
+        let value = sea_orm::Value::String(Some("not json".to_string()));
+        let result = <RoleMapping as sea_orm::sea_query::ValueType>::try_from(value);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn role_mapping_value_type_invalid_json_shape_fails() {
+        // A JSON array instead of an object should fail deserialization.
+        let value = sea_orm::Value::Json(Some(Box::new(serde_json::json!(["a", "b"]))));
+        let result = <RoleMapping as sea_orm::sea_query::ValueType>::try_from(value);
+        assert!(result.is_err());
+    }
 }

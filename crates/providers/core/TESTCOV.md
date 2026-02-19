@@ -27,15 +27,13 @@
 
 - **Provider command execution** (`command.rs`, 0% coverage, 7 lines): Provider-specific command execution bridge. Small but
   completely untested.
-- **Provider trait default implementations** (`traits.rs`, 90.4% coverage): 9 uncovered lines include default `validate_config`
-  and `capabilities` method implementations. Risk: providers relying on defaults may have unvalidated configurations.
+- **Provider trait remaining gaps** (`traits.rs`): Multi-capability providers and default error messages are now tested.
+  Remaining uncovered lines are in the `execute_update` default implementation's channel setup.
 - **Secret masking** (`secrets.rs`, 75.0% coverage): 1 uncovered line in the `SecretMasking` trait default implementation.
 
 ## Test Recommendations
 
 1. **Provider command bridge test** — Test the command execution helper function with mock executor. Covers `command.rs` (Tier 2).
    Simple unit test.
-2. **Provider trait default method tests** — Test `validate_config` and `capabilities` default implementations with a mock
-   provider. Covers `traits.rs` gaps (Tier 2). Implement a minimal test provider struct.
-3. **Version comparison edge cases** — Test version comparison with pre-release identifiers and unusual version strings. Covers
+2. **Version comparison edge cases** — Test version comparison with pre-release identifiers and unusual version strings. Covers
    `version.rs` remaining 2 lines (Tier 3). Extend existing version tests.

@@ -68,6 +68,7 @@ x509-cert = { workspace = true }
 const-oid = { workspace = true }
 aws-lc-rs = { workspace = true }
 sha1 = "0.10"
+sea-orm = { workspace = true, features = ["mock"] }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }

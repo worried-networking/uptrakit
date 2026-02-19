@@ -40,15 +40,14 @@
 - **SSH transport** (`ssh_transport.rs`, 50.2% coverage, 412 lines): SSH connection establishment, session management,
   authentication negotiation, and host key verification. 205 uncovered lines include error recovery, timeout handling, and
   keyboard-interactive auth fallback. Risk: transport failures could cause silent connection drops.
-- **SSH key management** (`ssh_key.rs`, 67.5% coverage, 283 lines): SSH key type detection (RSA, ECDSA, Ed25519, PKCS#8),
-  key conversion, and key validation. 92 uncovered lines include edge cases for uncommon key formats. Risk: key detection
-  failures could reject valid SSH keys.
+- **SSH key management gaps** (`ssh_key.rs`): Remaining uncovered lines include the `read_private_key` stdin path and
+  encrypted key handling.
 - **Bootstrap command** (`commands/bootstrap.rs`, 38.8% coverage, 387 lines): Agent bootstrap flow including SSH host
   discovery, credential setup, and initial enrollment. Risk: bootstrap failures could leave the agent in an inconsistent state.
 - **Client lifecycle** (`client.rs`, 15.4% coverage, 208 lines): Controller communication, authenticated loop, and message
   handling. Risk: client failures could cause the SSH agent to disconnect silently.
-- **Host info collection** (`host_info.rs`, 46.6% coverage, 176 lines): Remote host information gathering via SSH (OS detection,
-  package manager detection). Risk: incomplete host info could cause provider selection failures.
+- **Host info collection gaps** (`host_info.rs`): Remaining uncovered lines are in the async SSH-dependent collection
+  functions (`collect_remote_host_info`, `read_remote_*`). The parsing helpers are now fully tested.
 
 ### Tier 3 — Supporting
 
@@ -62,11 +61,7 @@
    `commands/host.rs` (Tier 2). Use in-memory SQLite.
 2. **SSH transport connection tests** — Test SSH connection with mock server, auth negotiation, host key verification, and
    timeout handling. Covers `ssh_transport.rs` gaps (Tier 2). Use `russh` test server or mock.
-3. **SSH key format edge case tests** — Test detection of PKCS#8 keys, encrypted OpenSSH keys, and malformed key data. Covers
-   `ssh_key.rs` gaps (Tier 2). Provide sample key files as test fixtures.
-4. **Bootstrap flow integration tests** — Test the full bootstrap sequence with mock SSH server and controller. Covers
+3. **Bootstrap flow integration tests** — Test the full bootstrap sequence with mock SSH server and controller. Covers
    `commands/bootstrap.rs` (Tier 2). Requires mock SSH and HTTP endpoints.
-5. **Host info collection tests** — Test OS detection and package manager detection with various SSH command outputs. Covers
-   `host_info.rs` (Tier 2). Mock SSH command execution results.
-6. **Client authenticated loop tests** — Test message handling, reconnection, and graceful shutdown. Covers `client.rs` (Tier 2).
+4. **Client authenticated loop tests** — Test message handling, reconnection, and graceful shutdown. Covers `client.rs` (Tier 2).
    Use in-memory WebSocket pairs.
