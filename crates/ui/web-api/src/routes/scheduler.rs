@@ -29,12 +29,21 @@ fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
         enabled: m.enabled,
         task_config: m.task_config.clone(),
         last_run_at: m.last_run_at.and_then(|t| t.format(&Rfc3339).ok()),
-        next_run_at: m.next_run_at.format(&Rfc3339).unwrap_or_default(),
+        next_run_at: m
+            .next_run_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| m.next_run_at.to_string()),
         is_running: m.locked_by.is_some(),
         last_error: m.last_error.clone(),
         run_count: m.run_count,
-        created_at: m.created_at.format(&Rfc3339).unwrap_or_default(),
-        updated_at: m.updated_at.format(&Rfc3339).unwrap_or_default(),
+        created_at: m
+            .created_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| m.created_at.to_string()),
+        updated_at: m
+            .updated_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| m.updated_at.to_string()),
     }
 }
 

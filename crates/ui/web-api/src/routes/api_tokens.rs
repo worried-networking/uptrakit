@@ -40,7 +40,10 @@ pub async fn create_api_token(
             let response = CreateApiTokenResponse {
                 id: created.id,
                 token: SecretString::new(created.plaintext_token),
-                created_at: created.created_at.format(&format).unwrap_or_default(),
+                created_at: created
+                    .created_at
+                    .format(&format)
+                    .unwrap_or_else(|_| created.created_at.to_string()),
             };
             (StatusCode::CREATED, Json(response)).into_response()
         }
@@ -77,7 +80,10 @@ pub async fn list_api_tokens(
                     .map(|t| ApiTokenResponse {
                         id: t.id,
                         name: t.name,
-                        created_at: t.created_at.format(&format).unwrap_or_default(),
+                        created_at: t
+                            .created_at
+                            .format(&format)
+                            .unwrap_or_else(|_| t.created_at.to_string()),
                         last_used_at: t.last_used_at.and_then(|dt| dt.format(&format).ok()),
                         revoked_at: t.revoked_at.and_then(|dt| dt.format(&format).ok()),
                     })

@@ -68,11 +68,11 @@ fn provider_config_response_from(
         created_at: m
             .created_at
             .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default(),
+            .unwrap_or_else(|_| m.created_at.to_string()),
         updated_at: m
             .updated_at
             .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_default(),
+            .unwrap_or_else(|_| m.updated_at.to_string()),
     })
 }
 
