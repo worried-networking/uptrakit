@@ -585,4 +585,54 @@ mod tests {
         };
         assert_eq!(hash, expected);
     }
+
+    #[tokio::test]
+    async fn local_ca_hash_is_deterministic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca_path = dir.path().join("ca.pem");
+        tokio::fs::write(&ca_path, b"deterministic-content")
+            .await
+            .expect("write");
+        let hash1 = compute_local_ca_hash(dir.path()).await;
+        let hash2 = compute_local_ca_hash(dir.path()).await;
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64); // SHA-256 hex is 64 chars
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_different_content_different_hash() {
+        let dir1 = tempfile::tempdir().expect("tempdir1");
+        let dir2 = tempfile::tempdir().expect("tempdir2");
+        tokio::fs::write(dir1.path().join("ca.pem"), b"content-a")
+            .await
+            .expect("write1");
+        tokio::fs::write(dir2.path().join("ca.pem"), b"content-b")
+            .await
+            .expect("write2");
+        let hash1 = compute_local_ca_hash(dir1.path()).await;
+        let hash2 = compute_local_ca_hash(dir2.path()).await;
+        assert_ne!(hash1, hash2);
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_empty_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("ca.pem"), b"")
+            .await
+            .expect("write");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        // SHA-256 of empty input is a known constant
+        assert_eq!(hash.len(), 64);
+        assert!(!hash.is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_only_hex_chars() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("ca.pem"), b"some content")
+            .await
+            .expect("write");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }

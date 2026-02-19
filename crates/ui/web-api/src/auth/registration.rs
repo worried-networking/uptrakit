@@ -260,3 +260,211 @@ impl RegistrationSettings {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings_store::RawSettings;
+
+    fn make_raw(entries: &[(&str, serde_json::Value)]) -> RawSettings {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    // ── from_raw ─────────────────────────────────────────────────────
+
+    #[test]
+    fn from_raw_defaults_to_closed_when_empty() {
+        let raw = RawSettings::new();
+        let settings = RegistrationSettings::from_raw(&raw);
+        assert_eq!(settings.mode, RegistrationMode::Closed);
+        assert!(settings.token_hash.is_none());
+        assert!(!settings.require_token_for_oidc);
+    }
+
+    #[test]
+    fn from_raw_reads_open_mode() {
+        let raw = make_raw(&[("registration.mode", serde_json::json!("open"))]);
+        let settings = RegistrationSettings::from_raw(&raw);
+        assert_eq!(settings.mode, RegistrationMode::Open);
+    }
+
+    #[test]
+    fn from_raw_reads_invite_mode_with_token() {
+        let raw = make_raw(&[
+            ("registration.mode", serde_json::json!("invite")),
+            (
+                "registration.token_hash",
+                serde_json::json!("$argon2id$test_hash"),
+            ),
+        ]);
+        let settings = RegistrationSettings::from_raw(&raw);
+        assert_eq!(settings.mode, RegistrationMode::Invite);
+        assert_eq!(settings.token_hash.as_deref(), Some("$argon2id$test_hash"));
+    }
+
+    #[test]
+    fn from_raw_reads_require_token_for_oidc() {
+        let raw = make_raw(&[
+            ("registration.mode", serde_json::json!("invite")),
+            (
+                "registration.require_token_for_oidc",
+                serde_json::json!(true),
+            ),
+        ]);
+        let settings = RegistrationSettings::from_raw(&raw);
+        assert!(settings.require_token_for_oidc);
+    }
+
+    #[test]
+    fn from_raw_invalid_mode_defaults_to_closed() {
+        let raw = make_raw(&[("registration.mode", serde_json::json!("invalid_mode"))]);
+        let settings = RegistrationSettings::from_raw(&raw);
+        assert_eq!(settings.mode, RegistrationMode::Closed);
+    }
+
+    #[test]
+    fn from_raw_non_string_mode_defaults_to_closed() {
+        let raw = make_raw(&[("registration.mode", serde_json::json!(42))]);
+        let settings = RegistrationSettings::from_raw(&raw);
+        assert_eq!(settings.mode, RegistrationMode::Closed);
+    }
+
+    // ── validate ─────────────────────────────────────────────────────
+
+    #[test]
+    fn validate_open_mode_always_succeeds() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Open,
+            token_hash: None,
+            require_token_for_oidc: false,
+        };
+        assert!(settings.validate(None).is_ok());
+        assert!(settings.validate(Some("any_token")).is_ok());
+    }
+
+    #[test]
+    fn validate_closed_mode_always_fails() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Closed,
+            token_hash: None,
+            require_token_for_oidc: false,
+        };
+        let err = settings.validate(None).unwrap_err();
+        assert!(matches!(err, RegistrationValidationError::Closed));
+    }
+
+    #[test]
+    fn validate_invite_mode_requires_token() {
+        let hash = password::hash_password("valid_token").expect("hash");
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: Some(hash),
+            require_token_for_oidc: false,
+        };
+        let err = settings.validate(None).unwrap_err();
+        assert!(matches!(err, RegistrationValidationError::TokenRequired));
+    }
+
+    #[test]
+    fn validate_invite_mode_no_hash_configured() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: None,
+            require_token_for_oidc: false,
+        };
+        let err = settings.validate(Some("any_token")).unwrap_err();
+        assert!(matches!(
+            err,
+            RegistrationValidationError::NoTokenConfigured
+        ));
+    }
+
+    #[test]
+    fn validate_invite_mode_correct_token() {
+        let hash = password::hash_password("valid_token").expect("hash");
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: Some(hash),
+            require_token_for_oidc: false,
+        };
+        assert!(settings.validate(Some("valid_token")).is_ok());
+    }
+
+    #[test]
+    fn validate_invite_mode_wrong_token() {
+        let hash = password::hash_password("valid_token").expect("hash");
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: Some(hash),
+            require_token_for_oidc: false,
+        };
+        let err = settings.validate(Some("wrong_token")).unwrap_err();
+        assert!(matches!(err, RegistrationValidationError::InvalidToken));
+    }
+
+    // ── needs_token_for_oidc ─────────────────────────────────────────
+
+    #[test]
+    fn needs_token_for_oidc_false_when_not_invite() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Open,
+            token_hash: None,
+            require_token_for_oidc: true,
+        };
+        assert!(!settings.needs_token_for_oidc(true));
+        assert!(!settings.needs_token_for_oidc(false));
+    }
+
+    #[test]
+    fn needs_token_for_oidc_true_for_first_user_in_invite() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: None,
+            require_token_for_oidc: false,
+        };
+        assert!(settings.needs_token_for_oidc(true));
+    }
+
+    #[test]
+    fn needs_token_for_oidc_true_when_flag_enabled() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: None,
+            require_token_for_oidc: true,
+        };
+        assert!(settings.needs_token_for_oidc(false));
+    }
+
+    #[test]
+    fn needs_token_for_oidc_false_when_not_first_and_flag_off() {
+        let settings = RegistrationSettings {
+            mode: RegistrationMode::Invite,
+            token_hash: None,
+            require_token_for_oidc: false,
+        };
+        assert!(!settings.needs_token_for_oidc(false));
+    }
+
+    // ── IntoResponse for RegistrationValidationError ─────────────────
+
+    #[test]
+    fn error_closed_returns_forbidden() {
+        let resp = RegistrationValidationError::Closed.into_response();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn error_verification_failed_returns_internal() {
+        let resp = RegistrationValidationError::VerificationFailed.into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn error_token_required_returns_forbidden() {
+        let resp = RegistrationValidationError::TokenRequired.into_response();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+}

@@ -26,8 +26,9 @@
 
 ### Tier 2 — Business-Logic
 
-- **Client lifecycle** (`client.rs`, 9.1% coverage, 351 lines): Authenticated WebSocket loop, message dispatching (version check
-  requests, update execution commands, settings sync), reconnection logic, and graceful shutdown. Risk: client bugs could cause
+- **Client lifecycle** (`client.rs`, 351 lines): Authenticated WebSocket loop, message dispatching (version check requests,
+  update execution commands, settings sync), reconnection logic, and graceful shutdown. The `compute_local_ca_hash` helper is
+  now well-tested (6 tests), but the main WebSocket loop and message dispatch remain uncovered. Risk: client bugs could cause
   the agent to silently stop responding to controller commands.
 - **Update execution gaps** (`update.rs`, 77.2% coverage, 390 lines): 89 uncovered lines include update hook execution
   (pre/post hooks), provider-specific update dispatch, output streaming, and error status reporting. Risk: update failures could

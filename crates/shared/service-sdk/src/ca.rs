@@ -217,4 +217,89 @@ mod tests {
         let result = ca_pem_fingerprint(b"not a PEM");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn ca_pem_fingerprint_different_certs_have_different_fingerprints() {
+        let key_pair_a = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("key pair A generation should succeed");
+        let mut params_a = rcgen::CertificateParams::default();
+        params_a
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA A");
+        params_a.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert_a = params_a
+            .self_signed(&key_pair_a)
+            .expect("self-signed cert A should be created");
+
+        let key_pair_b = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("key pair B generation should succeed");
+        let mut params_b = rcgen::CertificateParams::default();
+        params_b
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA B");
+        params_b.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert_b = params_b
+            .self_signed(&key_pair_b)
+            .expect("self-signed cert B should be created");
+
+        let fp_a = ca_pem_fingerprint(cert_a.pem().as_bytes())
+            .expect("fingerprint for cert A should succeed");
+        let fp_b = ca_pem_fingerprint(cert_b.pem().as_bytes())
+            .expect("fingerprint for cert B should succeed");
+
+        assert_ne!(
+            fp_a, fp_b,
+            "two independently generated certificates must have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn ca_pem_fingerprint_only_hex_chars() {
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .expect("key pair generation should succeed");
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Hex Test CA");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params
+            .self_signed(&key_pair)
+            .expect("self-signed cert should be created");
+
+        let fp = ca_pem_fingerprint(cert.pem().as_bytes())
+            .expect("fingerprint computation should succeed");
+
+        assert!(
+            fp.chars().all(|c| c.is_ascii_hexdigit()),
+            "fingerprint must contain only hex characters, got: {fp}"
+        );
+        // Additionally verify lowercase encoding (no uppercase hex letters)
+        assert_eq!(
+            fp,
+            fp.to_lowercase(),
+            "fingerprint must be lowercase hex"
+        );
+    }
+
+    #[test]
+    fn ca_pem_fingerprint_empty_input_returns_error() {
+        let result = ca_pem_fingerprint(b"");
+        assert!(
+            result.is_err(),
+            "empty input should produce an error, but got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn ca_pem_fingerprint_truncated_pem_returns_error() {
+        // A PEM header without valid Base64 content or end marker
+        let truncated = b"-----BEGIN CERTIFICATE-----\nnotvalidbase64";
+        let result = ca_pem_fingerprint(truncated);
+        assert!(
+            result.is_err(),
+            "truncated PEM should produce an error, but got: {:?}",
+            result
+        );
+    }
 }

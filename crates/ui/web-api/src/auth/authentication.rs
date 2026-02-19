@@ -350,3 +350,234 @@ pub fn navigate_json_path<'a>(
     }
     Some(current)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    // ── AuthenticationSettings::default ──────────────────────────────
+
+    #[test]
+    fn default_has_password_auth_enabled() {
+        let settings = AuthenticationSettings::default();
+        assert!(
+            settings.password_auth_enabled,
+            "default should have password_auth_enabled = true"
+        );
+    }
+
+    // ── AuthenticationSettings::from_raw ─────────────────────────────
+
+    #[test]
+    fn from_raw_empty_map_defaults_to_true() {
+        let raw: RawSettings = HashMap::new();
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            settings.password_auth_enabled,
+            "empty settings map should default password_auth_enabled to true"
+        );
+    }
+
+    #[test]
+    fn from_raw_explicit_true() {
+        let mut raw: RawSettings = HashMap::new();
+        raw.insert(
+            SettingKey::PasswordAuthEnabled.as_str().to_string(),
+            serde_json::Value::Bool(true),
+        );
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            settings.password_auth_enabled,
+            "explicit true should set password_auth_enabled to true"
+        );
+    }
+
+    #[test]
+    fn from_raw_explicit_false() {
+        let mut raw: RawSettings = HashMap::new();
+        raw.insert(
+            SettingKey::PasswordAuthEnabled.as_str().to_string(),
+            serde_json::Value::Bool(false),
+        );
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            !settings.password_auth_enabled,
+            "explicit false should set password_auth_enabled to false"
+        );
+    }
+
+    #[test]
+    fn from_raw_non_bool_value_defaults_to_true() {
+        let mut raw: RawSettings = HashMap::new();
+        raw.insert(
+            SettingKey::PasswordAuthEnabled.as_str().to_string(),
+            serde_json::Value::String("not_a_bool".to_string()),
+        );
+        let settings = AuthenticationSettings::from_raw(&raw);
+        assert!(
+            settings.password_auth_enabled,
+            "non-bool value should default password_auth_enabled to true"
+        );
+    }
+
+    // ── navigate_json_path ───────────────────────────────────────────
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn navigate_json_path_single_level() {
+        let json = serde_json::json!({"role": "admin"});
+        let result = navigate_json_path(&json, "role");
+        assert_eq!(
+            result.expect("single-level path should resolve"),
+            &serde_json::json!("admin")
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn navigate_json_path_nested() {
+        let json = serde_json::json!({"a": {"b": {"c": 42}}});
+        let result = navigate_json_path(&json, "a.b.c");
+        assert_eq!(
+            result.expect("nested path a.b.c should resolve"),
+            &serde_json::json!(42)
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn navigate_json_path_missing_intermediate_returns_none() {
+        let json = serde_json::json!({"a": {"x": 1}});
+        let result = navigate_json_path(&json, "a.b.c");
+        assert!(
+            result.is_none(),
+            "missing intermediate key should return None"
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn navigate_json_path_empty_string_returns_none() {
+        let json = serde_json::json!({"a": 1});
+        // An empty string split by '.' yields one empty segment "",
+        // and json.get("") returns None for a non-empty-key object.
+        let result = navigate_json_path(&json, "");
+        assert!(
+            result.is_none(),
+            "empty path should return None because get(\"\") finds no key"
+        );
+    }
+
+    // ── extract_mapped_roles ─────────────────────────────────────────
+
+    #[cfg(feature = "oidc")]
+    fn build_test_provider(
+        role_claim_path: Option<String>,
+        role_mapping: HashMap<String, String>,
+    ) -> oidc_provider::Model {
+        use time::OffsetDateTime;
+        use uptrakit_shared_db::crypto::EncryptedString;
+
+        let client_secret = EncryptedString::new("test-secret".to_string())
+            .expect("EncryptedString::new should succeed without master key in test mode");
+
+        oidc_provider::Model {
+            id: uuid::Uuid::nil(),
+            tenant_id: uuid::Uuid::nil(),
+            name: "test-provider".to_string(),
+            slug: "test-provider".to_string(),
+            logo_url: None,
+            issuer_url: "https://issuer.example.com".to_string(),
+            client_id: "test-client-id".to_string(),
+            client_secret,
+            scopes: "openid profile email".to_string(),
+            auto_create_users: false,
+            role_claim_path,
+            role_mapping: oidc_provider::RoleMapping(role_mapping),
+            is_active: true,
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            updated_at: OffsetDateTime::UNIX_EPOCH,
+            deleted_at: None,
+        }
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn extract_mapped_roles_empty_role_claim_path_returns_empty() {
+        let provider = build_test_provider(None, HashMap::new());
+        let claims = serde_json::json!({"roles": ["admin"]});
+        let result = extract_mapped_roles(&provider, &claims);
+        assert!(
+            result.is_empty(),
+            "None role_claim_path should return empty vec"
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn extract_mapped_roles_empty_role_mapping_returns_empty() {
+        let provider = build_test_provider(Some("roles".to_string()), HashMap::new());
+        let claims = serde_json::json!({"roles": ["admin"]});
+        let result = extract_mapped_roles(&provider, &claims);
+        assert!(
+            result.is_empty(),
+            "empty role_mapping should return empty vec"
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn extract_mapped_roles_array_claim_values() {
+        let mut mapping = HashMap::new();
+        mapping.insert("oidc-admin".to_string(), "admin".to_string());
+        mapping.insert("oidc-viewer".to_string(), "viewer".to_string());
+        let provider = build_test_provider(Some("realm.roles".to_string()), mapping);
+
+        let claims = serde_json::json!({
+            "realm": {
+                "roles": ["oidc-admin", "oidc-viewer", "oidc-unknown"]
+            }
+        });
+        let mut result = extract_mapped_roles(&provider, &claims);
+        result.sort();
+
+        assert_eq!(
+            result,
+            vec!["admin", "viewer"],
+            "array claim values should be mapped to local role names"
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn extract_mapped_roles_string_claim_value() {
+        let mut mapping = HashMap::new();
+        mapping.insert("oidc-editor".to_string(), "editor".to_string());
+        let provider = build_test_provider(Some("role".to_string()), mapping);
+
+        let claims = serde_json::json!({"role": "oidc-editor"});
+        let result = extract_mapped_roles(&provider, &claims);
+
+        assert_eq!(
+            result,
+            vec!["editor"],
+            "string claim value should be mapped to a single local role"
+        );
+    }
+
+    #[cfg(feature = "oidc")]
+    #[test]
+    fn extract_mapped_roles_no_matching_claims_returns_empty() {
+        let mut mapping = HashMap::new();
+        mapping.insert("oidc-admin".to_string(), "admin".to_string());
+        let provider = build_test_provider(Some("roles".to_string()), mapping);
+
+        let claims = serde_json::json!({"roles": ["completely-different"]});
+        let result = extract_mapped_roles(&provider, &claims);
+        assert!(
+            result.is_empty(),
+            "no matching claim values should return empty vec"
+        );
+    }
+}

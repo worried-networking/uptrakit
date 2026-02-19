@@ -29,10 +29,6 @@
 
 ### Tier 1 — Security-Critical
 
-- **TLS configuration** (`tls.rs`, 0% coverage, 136 lines): TLS client configuration, certificate chain building, and mTLS setup
-  for service-to-controller communication. Risk: TLS misconfiguration could weaken transport security or cause connection failures.
-- **CA bootstrap** (`ca.rs`, 19.9% coverage, 146 lines): CA certificate discovery, download, and trust-on-first-use (TOFU)
-  validation. Risk: flawed TOFU logic could accept a rogue CA certificate.
 - **Certificate handler gaps** (`cert_handler.rs`, 71.7% coverage): Uncovered lines include certificate renewal scheduling,
   expiration edge cases, and renewal delay computation. Risk: failed renewals could leave services with expired certificates.
 
@@ -49,15 +45,11 @@
 
 ## Test Recommendations
 
-1. **TLS configuration unit tests** — Test TLS client builder with valid/invalid certificates, mTLS with client cert, and cipher
-   suite selection. Covers `tls.rs` (Tier 1). Use `rcgen` to generate test certificates.
-2. **CA TOFU bootstrap tests** — Test first-use CA acceptance, CA fingerprint pinning, CA rotation detection, and rejection of
-   untrusted CA. Covers `ca.rs` (Tier 1). Use temp directories and generated CA certs.
-3. **Certificate renewal scheduling tests** — Test renewal timing calculation, expiration detection, and renewal retry backoff.
+1. **Certificate renewal scheduling tests** — Test renewal timing calculation, expiration detection, and renewal retry backoff.
    Covers uncovered paths in `cert_handler.rs` (Tier 1). Mockable with custom time sources.
-4. **WebSocket lifecycle tests** — Test connection establishment, message send/receive, reconnection after disconnect, and graceful
+2. **WebSocket lifecycle tests** — Test connection establishment, message send/receive, reconnection after disconnect, and graceful
    close. Covers `ws.rs` (Tier 2). Use `tokio-tungstenite` test server.
-5. **Service lifecycle integration tests** — Test enrollment, authenticated loop entry, and shutdown sequence. Covers
+3. **Service lifecycle integration tests** — Test enrollment, authenticated loop entry, and shutdown sequence. Covers
    `lifecycle.rs` (Tier 2). Requires mock controller endpoint.
-6. **Connection retry tests** — Test connection retry with exponential backoff, URL failover, and timeout handling. Covers
+4. **Connection retry tests** — Test connection retry with exponential backoff, URL failover, and timeout handling. Covers
    `connection.rs` (Tier 2). Unit-testable with mock HTTP client.

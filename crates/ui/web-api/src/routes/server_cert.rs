@@ -209,3 +209,106 @@ fn build_server_tls_config(
         .with_single_cert(certs, key)
         .map_err(|e| report!(TlsConfigError::ServerConfig(e.to_string())))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Generate a self-signed CA certificate and its key pair for testing.
+    fn generate_test_ca() -> (String, rcgen::KeyPair) {
+        let key_pair =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params.self_signed(&key_pair).expect("self-sign");
+        (cert.pem(), key_pair)
+    }
+
+    /// Generate a server certificate signed by the given CA.
+    fn generate_test_server_cert(ca_pem: &str, ca_key: &rcgen::KeyPair) -> (String, String) {
+        let issuer = rcgen::Issuer::from_ca_cert_pem(ca_pem, ca_key).expect("issuer");
+        let server_key =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
+            .expect("params");
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test Server");
+        let cert = params.signed_by(&server_key, &issuer).expect("sign");
+        (cert.pem(), server_key.serialize_pem())
+    }
+
+    #[test]
+    fn build_server_tls_config_valid_certs() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_pem, ca_key) = generate_test_ca();
+        let (cert_pem, key_pem) = generate_test_server_cert(&ca_pem, &ca_key);
+
+        let _config = build_server_tls_config(&cert_pem, &key_pem, &ca_pem)
+            .expect("build_server_tls_config should succeed with valid certs");
+    }
+
+    #[test]
+    fn build_server_tls_config_invalid_cert_pem() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_pem, ca_key) = generate_test_ca();
+        let (_cert_pem, key_pem) = generate_test_server_cert(&ca_pem, &ca_key);
+
+        let result = build_server_tls_config("bad cert", &key_pem, &ca_pem);
+
+        assert!(
+            result.is_err(),
+            "should fail when cert PEM is invalid"
+        );
+    }
+
+    #[test]
+    fn build_server_tls_config_invalid_key_pem() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_pem, ca_key) = generate_test_ca();
+        let (cert_pem, _key_pem) = generate_test_server_cert(&ca_pem, &ca_key);
+
+        let result = build_server_tls_config(&cert_pem, "bad key", &ca_pem);
+
+        assert!(
+            result.is_err(),
+            "should fail when key PEM is invalid"
+        );
+    }
+
+    #[test]
+    fn build_server_tls_config_invalid_ca_pem() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_pem, ca_key) = generate_test_ca();
+        let (cert_pem, key_pem) = generate_test_server_cert(&ca_pem, &ca_key);
+
+        let result = build_server_tls_config(&cert_pem, &key_pem, "bad ca");
+
+        assert!(
+            result.is_err(),
+            "should fail when CA bundle PEM is invalid"
+        );
+    }
+
+    #[test]
+    fn build_server_tls_config_multiple_ca_certs() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (ca_pem_1, ca_key_1) = generate_test_ca();
+        let (ca_pem_2, _ca_key_2) = generate_test_ca();
+        let (cert_pem, key_pem) = generate_test_server_cert(&ca_pem_1, &ca_key_1);
+
+        // Concatenate two CA certificates into one bundle
+        let ca_bundle = format!("{ca_pem_1}{ca_pem_2}");
+
+        let _config = build_server_tls_config(&cert_pem, &key_pem, &ca_bundle)
+            .expect("build_server_tls_config should succeed with multiple CA certs in bundle");
+    }
+}

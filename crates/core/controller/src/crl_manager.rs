@@ -400,4 +400,102 @@ mod tests {
             rcgen::RevocationReason::CessationOfOperation as u8
         );
     }
+
+    /// Generate a self-signed CA certificate and key pair for testing.
+    fn generate_test_ca_issuer() -> (String, rcgen::KeyPair) {
+        let key_pair =
+            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let mut params = rcgen::CertificateParams::default();
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "Test CA");
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let cert = params.self_signed(&key_pair).expect("self-sign");
+        (cert.pem(), key_pair)
+    }
+
+    #[test]
+    fn sign_crl_empty_revoked_list() {
+        let (cert_pem, key_pair) = generate_test_ca_issuer();
+        let issuer =
+            Issuer::from_ca_cert_pem(&cert_pem, key_pair).expect("creating test CA issuer");
+
+        let (der, pem) =
+            sign_crl(&issuer, vec![], 1).expect("signing CRL with empty revoked list");
+
+        assert!(!der.is_empty(), "DER output should be non-empty");
+        assert!(
+            pem.starts_with("-----BEGIN X509 CRL-----"),
+            "PEM should start with X509 CRL header, got: {}",
+            &pem[..pem.len().min(40)]
+        );
+    }
+
+    #[test]
+    fn sign_crl_with_revoked_certs() {
+        let (cert_pem, key_pair) = generate_test_ca_issuer();
+        let issuer =
+            Issuer::from_ca_cert_pem(&cert_pem, key_pair).expect("creating test CA issuer");
+
+        let now = OffsetDateTime::now_utc();
+        let revoked = vec![
+            RevokedCertParams {
+                serial_number: SerialNumber::from_slice(&[0x00, 0xAB, 0xCD]),
+                revocation_time: now,
+                reason_code: Some(rcgen::RevocationReason::KeyCompromise),
+                invalidity_date: None,
+            },
+            RevokedCertParams {
+                serial_number: SerialNumber::from_slice(&[0x01, 0x02, 0x03]),
+                revocation_time: now,
+                reason_code: Some(rcgen::RevocationReason::Superseded),
+                invalidity_date: None,
+            },
+        ];
+
+        let (der, pem) =
+            sign_crl(&issuer, revoked, 42).expect("signing CRL with revoked certificates");
+
+        assert!(!der.is_empty(), "DER output should be non-empty");
+        assert!(
+            pem.starts_with("-----BEGIN X509 CRL-----"),
+            "PEM should start with X509 CRL header"
+        );
+    }
+
+    #[test]
+    fn sign_crl_increments_crl_number() {
+        let (cert_pem, key_pair) = generate_test_ca_issuer();
+        let issuer =
+            Issuer::from_ca_cert_pem(&cert_pem, key_pair).expect("creating test CA issuer");
+
+        let (der_1, pem_1) =
+            sign_crl(&issuer, vec![], 1).expect("signing first CRL");
+        let (der_2, pem_2) =
+            sign_crl(&issuer, vec![], 2).expect("signing second CRL");
+
+        assert!(!der_1.is_empty(), "first CRL DER should be non-empty");
+        assert!(!der_2.is_empty(), "second CRL DER should be non-empty");
+        assert!(
+            pem_1.starts_with("-----BEGIN X509 CRL-----"),
+            "first CRL PEM should have correct header"
+        );
+        assert!(
+            pem_2.starts_with("-----BEGIN X509 CRL-----"),
+            "second CRL PEM should have correct header"
+        );
+        // Different CRL numbers should produce different DER outputs.
+        assert_ne!(
+            der_1.as_ref(),
+            der_2.as_ref(),
+            "CRLs with different numbers should produce different DER"
+        );
+    }
+
+    #[test]
+    fn parse_serial_string_empty_string_returns_none() {
+        // An empty string splits into a single empty segment, which cannot be
+        // parsed as a hex byte, so the result should be `None`.
+        assert_eq!(parse_serial_string(""), None);
+    }
 }

@@ -44,8 +44,6 @@
 
 ### Tier 1 — Security-Critical
 
-- **CRL manager** (`crl_manager.rs`, 12.5% coverage, 272 lines): Certificate Revocation List generation, signing, and distribution.
-  Risk: untested CRL logic could fail to revoke compromised certificates, leaving them valid.
 - **mTLS acceptor** (`mtls_acceptor.rs`, 0% coverage, 39 lines): Mutual TLS connection acceptance and client certificate extraction.
   Risk: mTLS misconfiguration could bypass client authentication.
 - **PKI module gaps** (`pki.rs`, 83.7% coverage, 1,165 lines): While well-tested overall, 190 uncovered lines include CA key
@@ -54,8 +52,6 @@
 
 ### Tier 2 — Business-Logic
 
-- **Scheduler run loop** (`scheduler/mod.rs`, 0% coverage, 77 lines): Main scheduler polling loop, task dispatch, and error
-  recovery. Risk: scheduler failures could silently stop version checks.
 - **All scheduler executors** (0% coverage across 6 files, 137 lines total): Version checking, CA rotation checks, certificate
   expiration checks, auth cleanup, event cleanup, and stale lease cleanup. Risk: untested executors could fail silently or
   produce incorrect results.
@@ -76,18 +72,14 @@
 
 ## Test Recommendations
 
-1. **CRL generation and signing tests** — Test CRL creation with revoked certificates, empty CRL, and CRL signing with CA key.
-   Covers `crl_manager.rs` (Tier 1). Reuse PKI test infrastructure for CA key/cert setup.
-2. **Scheduler executor unit tests** — Test each executor in isolation: version_check (mock provider responses),
+1. **Scheduler executor unit tests** — Test each executor in isolation: version_check (mock provider responses),
    ca_rotation_check (mock CA state), service_cert_check (mock certificate store), auth_cleanup (mock expired sessions),
    event_cleanup (mock old events), stale_lease_cleanup (mock expired leases). Covers all `scheduler/executors/*.rs` (Tier 2).
-3. **Scheduler run loop test** — Test the polling loop with mock executors, verifying task dispatch, claim, and error recovery.
-   Covers `scheduler/mod.rs` (Tier 2). Use in-memory SQLite with seeded scheduled_task rows.
-4. **Task lifecycle tests** — Test task spawning, completion callbacks, cancellation, and concurrent task limits. Covers `tasks.rs`
+2. **Task lifecycle tests** — Test task spawning, completion callbacks, cancellation, and concurrent task limits. Covers `tasks.rs`
    (Tier 2). Unit-testable with mock async tasks.
-5. **Startup sequence integration test** — Test database initialization, master key verification, and CA bootstrap with in-memory
+3. **Startup sequence integration test** — Test database initialization, master key verification, and CA bootstrap with in-memory
    SQLite. Covers `startup.rs` (Tier 2). Requires careful mock setup for file system and database.
-6. **mTLS acceptor test** — Test client certificate extraction and validation from TLS connections. Covers `mtls_acceptor.rs`
+4. **mTLS acceptor test** — Test client certificate extraction and validation from TLS connections. Covers `mtls_acceptor.rs`
    (Tier 1). Requires test certificates (reuse PKI test helpers).
-7. **PKI edge case tests** — Test CA key rotation, certificate chain building with multiple CA generations, and AIA/CDP extension
+5. **PKI edge case tests** — Test CA key rotation, certificate chain building with multiple CA generations, and AIA/CDP extension
    validation. Covers uncovered lines in `pki.rs` (Tier 1). Extend existing PKI test suite.

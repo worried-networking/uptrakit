@@ -80,16 +80,10 @@
 
 ### Tier 1 — Security-Critical
 
-- **User registration flow** (`auth/registration.rs`, 0% coverage, 156 lines): Token-gated registration, open/closed mode enforcement,
-  and registration-token verification. Risk: unverified registration logic could allow unauthorized account creation.
-- **Authentication settings management** (`auth/authentication.rs`, 2.3% coverage): Password auth toggle, OIDC user provisioning
-  (auto-create, role mapping, account linking). Risk: misconfigured auth settings could lock out users or grant unintended access.
 - **OIDC authentication routes** (`routes/oidc_auth.rs`, 4.2% coverage, 855 lines): Authorization URL generation, callback handling,
   token exchange, account linking, and registration-via-OIDC. Risk: flawed OIDC flows could enable authentication bypass.
 - **OCSP responder route** (`routes/ocsp.rs`, 0% coverage, 63 lines): HTTP endpoint that serves OCSP responses for certificate
   validation. The core OCSP logic (`ocsp.rs`) has 48.6% coverage but the route handler is untested.
-- **Server certificate endpoints** (`routes/server_cert.rs`, 0% coverage, 118 lines): TLS certificate download and renewal endpoints
-  used by agents for TOFU bootstrap.
 - **Agent certificate settings** (`routes/settings_agent_certs.rs`, 0% coverage, 62 lines): Agent certificate lifetime and renewal
   policy configuration.
 
@@ -120,23 +114,19 @@
 
 ## Test Recommendations
 
-1. **Registration flow integration tests** — Test open/closed/token modes, invalid tokens, duplicate emails. Covers
-   `auth/registration.rs` (Tier 1). Mock `DatabaseConnection` and `RawSettings`.
-2. **OIDC callback and account linking tests** — Test authorization URL generation, token exchange, auto-create user, role mapping,
-   and account linking. Covers `routes/oidc_auth.rs` and `auth/authentication.rs` (Tier 1). Mock OIDC provider HTTP responses.
-3. **Agent WebSocket lifecycle tests** — Test enrollment handshake, certificate signing, version check dispatch, and update execution
+1. **OIDC callback and account linking tests** — Test authorization URL generation, token exchange, auto-create user, and account
+   linking. Covers `routes/oidc_auth.rs` (Tier 1). Mock OIDC provider HTTP responses.
+2. **Agent WebSocket lifecycle tests** — Test enrollment handshake, certificate signing, version check dispatch, and update execution
    message flow. Covers `routes/agent_ws.rs` (Tier 2). Use in-memory WebSocket pairs.
-4. **OCSP route handler test** — Test the HTTP POST endpoint with valid/invalid DER-encoded requests. Covers `routes/ocsp.rs`
+3. **OCSP route handler test** — Test the HTTP POST endpoint with valid/invalid DER-encoded requests. Covers `routes/ocsp.rs`
    (Tier 1). Reuse existing `ocsp.rs` test infrastructure.
-5. **Server certificate download test** — Test TOFU bootstrap certificate download and renewal endpoints. Covers
-   `routes/server_cert.rs` (Tier 1). Requires test CA setup.
-6. **Scheduler CRUD tests** — Test task creation, listing, update, deletion, and manual trigger. Covers `routes/scheduler.rs`
+4. **Scheduler CRUD tests** — Test task creation, listing, update, deletion, and manual trigger. Covers `routes/scheduler.rs`
    (Tier 2). Mock database with in-memory SQLite.
-7. **Settings management round-trip tests** — Test each settings category (network, auth, CA, MQTT, agent certs) update and
+5. **Settings management round-trip tests** — Test each settings category (network, auth, CA, MQTT, agent certs) update and
    retrieval. Covers `routes/settings*.rs` (Tier 2). Use `AppState` test helper.
-8. **Device auth flow route tests** — Test device code generation, polling, and approval endpoints. Covers `routes/device_auth.rs`
+6. **Device auth flow route tests** — Test device code generation, polling, and approval endpoints. Covers `routes/device_auth.rs`
    (Tier 2). Reuse `auth/device_flow.rs` test patterns.
-9. **MQTT client store tests** — Test client registration, deregistration, and connection tracking. Covers `mqtt_client_store.rs`
+7. **MQTT client store tests** — Test client registration, deregistration, and connection tracking. Covers `mqtt_client_store.rs`
    (Tier 2). Unit-testable with mock state.
-10. **Service connection load balancing tests** — Test connection registration, deregistration, and least-busy selection under
-    concurrent load. Covers `service_connections.rs` (Tier 3). Extend existing tests.
+8. **Service connection load balancing tests** — Test connection registration, deregistration, and least-busy selection under
+   concurrent load. Covers `service_connections.rs` (Tier 3). Extend existing tests.
