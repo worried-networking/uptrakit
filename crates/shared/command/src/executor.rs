@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::command::{get_shell_args, run_command_exec_impl, wrap_command_for_shell};
-use crate::types::{ShellType, UpdateOutputLine};
+use uptrakit_shared_types::HookShell;
+
+use crate::types::UpdateOutputLine;
 
 /// Specification for a command to execute.
 ///
@@ -36,7 +38,7 @@ pub enum CommandMode {
         /// The shell command string.
         command: String,
         /// Which shell to use.
-        shell: ShellType,
+        shell: HookShell,
     },
 }
 
@@ -66,14 +68,14 @@ impl CommandSpec {
         Self {
             mode: CommandMode::Shell {
                 command: command.into(),
-                shell: ShellType::Bash,
+                shell: HookShell::Bash,
             },
             working_dir: None,
         }
     }
 
     /// Create a spec for a shell command using the specified shell.
-    pub fn shell_with(command: impl Into<String>, shell: ShellType) -> Self {
+    pub fn shell_with(command: impl Into<String>, shell: HookShell) -> Self {
         Self {
             mode: CommandMode::Shell {
                 command: command.into(),
@@ -176,15 +178,15 @@ mod tests {
     fn shell_constructor_defaults_to_bash() {
         let spec = CommandSpec::shell("echo hello");
         assert!(matches!(&spec.mode, CommandMode::Shell { command, shell }
-            if command == "echo hello" && *shell == ShellType::Bash));
+            if command == "echo hello" && *shell == HookShell::Bash));
         assert!(spec.working_dir.is_none());
     }
 
     #[test]
     fn shell_with_specific_shell() {
-        let spec = CommandSpec::shell_with("echo hello", ShellType::Sh);
+        let spec = CommandSpec::shell_with("echo hello", HookShell::Sh);
         assert!(matches!(&spec.mode, CommandMode::Shell { command, shell }
-            if command == "echo hello" && *shell == ShellType::Sh));
+            if command == "echo hello" && *shell == HookShell::Sh));
     }
 
     #[test]
@@ -216,7 +218,7 @@ mod tests {
 
     #[test]
     fn resolve_shell_sh() {
-        let spec = CommandSpec::shell_with("echo hello", ShellType::Sh);
+        let spec = CommandSpec::shell_with("echo hello", HookShell::Sh);
         let (program, args) = spec.resolve();
         assert_eq!(program, "sh");
         assert_eq!(args[0], "-c");

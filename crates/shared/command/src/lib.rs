@@ -11,4 +11,4 @@ pub use error::{CommandError, Result};
 pub use executor::{
     CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
 };
-pub use types::{ShellType, UpdateOutputLine, UpdateOutputStream};
+pub use types::UpdateOutputLine;

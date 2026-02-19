@@ -17,7 +17,8 @@ use russh::keys::ssh_key::HashAlg;
 use russh::keys::{self};
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::{Mutex, mpsc};
-use uptrakit_command::{UpdateOutputLine, UpdateOutputStream};
+use uptrakit_command::UpdateOutputLine;
+use uptrakit_shared_types::OutputStreamType;
 
 use crate::error::{Error, Result};
 
@@ -95,14 +96,14 @@ pub(crate) struct LineBuffer {
     /// Total bytes accumulated (for enforcing the output limit).
     total_bytes: usize,
     /// Which output stream this buffer represents.
-    stream: UpdateOutputStream,
+    stream: OutputStreamType,
     /// Optional channel for streaming lines in real time.
     sender: Option<mpsc::Sender<UpdateOutputLine>>,
 }
 
 impl LineBuffer {
     /// Create a new `LineBuffer` for the given stream.
-    fn new(stream: UpdateOutputStream, sender: Option<mpsc::Sender<UpdateOutputLine>>) -> Self {
+    fn new(stream: OutputStreamType, sender: Option<mpsc::Sender<UpdateOutputLine>>) -> Self {
         Self {
             partial: String::new(),
             accumulated: String::new(),
@@ -198,8 +199,8 @@ impl SshSession {
             .await
             .map_err(|e| report!(Error::SshCommand(format!("failed to execute command: {e}"))))?;
 
-        let mut stdout_buf = LineBuffer::new(UpdateOutputStream::Stdout, output_tx.cloned());
-        let mut stderr_buf = LineBuffer::new(UpdateOutputStream::Stderr, output_tx.cloned());
+        let mut stdout_buf = LineBuffer::new(OutputStreamType::Stdout, output_tx.cloned());
+        let mut stderr_buf = LineBuffer::new(OutputStreamType::Stderr, output_tx.cloned());
         let mut exit_code: Option<u32> = None;
 
         while let Some(msg) = channel.wait().await {
@@ -512,13 +513,13 @@ mod tests {
     #[tokio::test]
     async fn line_buffer_emits_complete_lines() {
         let (tx, mut rx) = mpsc::channel(100);
-        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, Some(tx));
+        let mut buf = LineBuffer::new(OutputStreamType::Stdout, Some(tx));
 
         buf.push(b"hello\nworld\n").await;
 
         let line1 = rx.recv().await.expect("should receive first line");
         assert_eq!(line1.text, "hello");
-        assert_eq!(line1.stream, UpdateOutputStream::Stdout);
+        assert_eq!(line1.stream, OutputStreamType::Stdout);
 
         let line2 = rx.recv().await.expect("should receive second line");
         assert_eq!(line2.text, "world");
@@ -527,7 +528,7 @@ mod tests {
     #[tokio::test]
     async fn line_buffer_holds_partial_lines() {
         let (tx, mut rx) = mpsc::channel(100);
-        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, Some(tx));
+        let mut buf = LineBuffer::new(OutputStreamType::Stdout, Some(tx));
 
         buf.push(b"partial").await;
 
@@ -546,14 +547,14 @@ mod tests {
     #[tokio::test]
     async fn line_buffer_flush_emits_remaining() {
         let (tx, mut rx) = mpsc::channel(100);
-        let mut buf = LineBuffer::new(UpdateOutputStream::Stderr, Some(tx));
+        let mut buf = LineBuffer::new(OutputStreamType::Stderr, Some(tx));
 
         buf.push(b"trailing").await;
         buf.flush().await;
 
         let line = rx.recv().await.expect("flush should emit partial");
         assert_eq!(line.text, "trailing");
-        assert_eq!(line.stream, UpdateOutputStream::Stderr);
+        assert_eq!(line.stream, OutputStreamType::Stderr);
 
         let output = buf.into_output();
         assert_eq!(output, "trailing\n");
@@ -561,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn line_buffer_respects_output_limit() {
-        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, None);
+        let mut buf = LineBuffer::new(OutputStreamType::Stdout, None);
 
         // Push data exceeding MAX_OUTPUT_BYTES (10 MB).
         let big_line = "x".repeat(1_000_000);
@@ -581,7 +582,7 @@ mod tests {
 
     #[tokio::test]
     async fn line_buffer_works_without_sender() {
-        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, None);
+        let mut buf = LineBuffer::new(OutputStreamType::Stdout, None);
 
         buf.push(b"line1\nline2\n").await;
         buf.flush().await;
@@ -592,7 +593,7 @@ mod tests {
 
     #[tokio::test]
     async fn line_buffer_flush_noop_when_empty() {
-        let mut buf = LineBuffer::new(UpdateOutputStream::Stdout, None);
+        let mut buf = LineBuffer::new(OutputStreamType::Stdout, None);
         buf.flush().await;
         let output = buf.into_output();
         assert!(output.is_empty());

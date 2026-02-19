@@ -21,9 +21,7 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
-use uptrakit_command::{
-    CommandExecutor, LocalCommandExecutor, UpdateOutputLine, UpdateOutputStream,
-};
+use uptrakit_command::{CommandExecutor, LocalCommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
@@ -281,14 +279,10 @@ async fn execute_provider_update(
     let bridge_output_tx = output_tx.clone();
     let bridge_handle = tokio::spawn(async move {
         while let Some(line) = provider_rx.recv().await {
-            let stream = match line.stream {
-                UpdateOutputStream::Stdout => OutputStreamType::Stdout,
-                UpdateOutputStream::Stderr => OutputStreamType::Stderr,
-            };
             let _ = bridge_output_tx
                 .send(UpdateOutputMessage {
                     output: line.text,
-                    stream,
+                    stream: line.stream,
                 })
                 .await;
         }
@@ -324,8 +318,8 @@ async fn run_hook_command(
     let bridge_handle = tokio::spawn(async move {
         while let Some(line) = provider_rx.recv().await {
             let stream = match line.stream {
-                UpdateOutputStream::Stdout => bridge_stream_type,
-                UpdateOutputStream::Stderr => OutputStreamType::Stderr,
+                OutputStreamType::Stdout => bridge_stream_type,
+                _ => OutputStreamType::Stderr,
             };
             let _ = bridge_output_tx
                 .send(UpdateOutputMessage {

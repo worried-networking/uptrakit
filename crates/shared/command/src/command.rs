@@ -18,7 +18,9 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::error::CommandError;
-use crate::types::{ShellType, UpdateOutputLine, UpdateOutputStream};
+use uptrakit_shared_types::{HookShell, OutputStreamType};
+
+use crate::types::UpdateOutputLine;
 
 /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
@@ -35,7 +37,7 @@ pub fn shell_escape(s: &str) -> String {
 pub async fn send_output(
     output_tx: &mpsc::Sender<UpdateOutputLine>,
     text: &str,
-    stream: UpdateOutputStream,
+    stream: OutputStreamType,
 ) {
     let _ = output_tx
         .send(UpdateOutputLine {
@@ -90,7 +92,7 @@ pub(crate) async fn run_command_exec_impl(
                 let _ = tx
                     .send(UpdateOutputLine {
                         text: line.clone(),
-                        stream: UpdateOutputStream::Stdout,
+                        stream: OutputStreamType::Stdout,
                     })
                     .await;
             }
@@ -116,7 +118,7 @@ pub(crate) async fn run_command_exec_impl(
                 let _ = tx
                     .send(UpdateOutputLine {
                         text: line.clone(),
-                        stream: UpdateOutputStream::Stderr,
+                        stream: OutputStreamType::Stderr,
                     })
                     .await;
             }
@@ -192,20 +194,20 @@ pub async fn run_command_exec_quiet(
 /// - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
 /// - **Sh**: `set -eu` (exit on error, undefined vars)
 /// - **PowerShell**: `$ErrorActionPreference = 'Stop'`
-pub(crate) fn wrap_command_for_shell(cmd: &str, shell: ShellType) -> String {
+pub(crate) fn wrap_command_for_shell(cmd: &str, shell: HookShell) -> String {
     match shell {
-        ShellType::Bash => format!("set -euo pipefail\n{cmd}"),
-        ShellType::Sh => format!("set -eu\n{cmd}"),
-        ShellType::PowerShell => format!("$ErrorActionPreference = 'Stop'\n{cmd}"),
+        HookShell::Bash => format!("set -euo pipefail\n{cmd}"),
+        HookShell::Sh => format!("set -eu\n{cmd}"),
+        HookShell::PowerShell => format!("$ErrorActionPreference = 'Stop'\n{cmd}"),
     }
 }
 
 /// Get the shell executable and arguments for a given shell type.
-pub(crate) fn get_shell_args(shell: ShellType) -> (&'static str, &'static str) {
+pub(crate) fn get_shell_args(shell: HookShell) -> (&'static str, &'static str) {
     match shell {
-        ShellType::Bash => ("bash", "-c"),
-        ShellType::Sh => ("sh", "-c"),
-        ShellType::PowerShell => ("powershell", "-Command"),
+        HookShell::Bash => ("bash", "-c"),
+        HookShell::Sh => ("sh", "-c"),
+        HookShell::PowerShell => ("powershell", "-Command"),
     }
 }
 
@@ -214,7 +216,7 @@ pub(crate) fn get_shell_args(shell: ShellType) -> (&'static str, &'static str) {
 /// Returns the accumulated output and exit code on success.
 pub async fn run_command_with_shell(
     cmd: &str,
-    shell: ShellType,
+    shell: HookShell,
     output_tx: &mpsc::Sender<UpdateOutputLine>,
 ) -> crate::Result<(String, i32)> {
     let wrapped_cmd = wrap_command_for_shell(cmd, shell);
@@ -234,7 +236,7 @@ pub async fn run_command_with_shell(
 /// Equivalent to [`run_command_with_shell`] but does not require a channel.
 pub async fn run_command_with_shell_quiet(
     cmd: &str,
-    shell: ShellType,
+    shell: HookShell,
 ) -> crate::Result<(String, i32)> {
     let wrapped_cmd = wrap_command_for_shell(cmd, shell);
     let (shell_exec, shell_arg) = get_shell_args(shell);
@@ -249,7 +251,7 @@ pub async fn run_command(
     cmd: &str,
     output_tx: &mpsc::Sender<UpdateOutputLine>,
 ) -> crate::Result<String> {
-    let (output, _) = run_command_with_shell(cmd, ShellType::Bash, output_tx).await?;
+    let (output, _) = run_command_with_shell(cmd, HookShell::Bash, output_tx).await?;
     Ok(output)
 }
 
@@ -258,7 +260,7 @@ pub async fn run_command(
 /// Equivalent to [`run_command`] but does not require a channel.
 /// Returns the accumulated output on success.
 pub async fn run_command_quiet(cmd: &str) -> crate::Result<String> {
-    let (output, _) = run_command_with_shell_quiet(cmd, ShellType::Bash).await?;
+    let (output, _) = run_command_with_shell_quiet(cmd, HookShell::Bash).await?;
     Ok(output)
 }
 
@@ -316,35 +318,35 @@ mod tests {
 
     #[test]
     fn wrap_command_for_bash() {
-        let wrapped = wrap_command_for_shell("echo hello", ShellType::Bash);
+        let wrapped = wrap_command_for_shell("echo hello", HookShell::Bash);
         assert!(wrapped.starts_with("set -euo pipefail\n"));
         assert!(wrapped.ends_with("echo hello"));
     }
 
     #[test]
     fn wrap_command_for_sh() {
-        let wrapped = wrap_command_for_shell("echo hello", ShellType::Sh);
+        let wrapped = wrap_command_for_shell("echo hello", HookShell::Sh);
         assert!(wrapped.starts_with("set -eu\n"));
         assert!(wrapped.ends_with("echo hello"));
     }
 
     #[test]
     fn wrap_command_for_powershell() {
-        let wrapped = wrap_command_for_shell("echo hello", ShellType::PowerShell);
+        let wrapped = wrap_command_for_shell("echo hello", HookShell::PowerShell);
         assert!(wrapped.starts_with("$ErrorActionPreference = 'Stop'\n"));
         assert!(wrapped.ends_with("echo hello"));
     }
 
     #[test]
     fn get_shell_args_bash() {
-        let (exec, arg) = get_shell_args(ShellType::Bash);
+        let (exec, arg) = get_shell_args(HookShell::Bash);
         assert_eq!(exec, "bash");
         assert_eq!(arg, "-c");
     }
 
     #[test]
     fn get_shell_args_sh() {
-        let (exec, arg) = get_shell_args(ShellType::Sh);
+        let (exec, arg) = get_shell_args(HookShell::Sh);
         assert_eq!(exec, "sh");
         assert_eq!(arg, "-c");
     }
@@ -379,7 +381,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_command_with_shell_success() {
         let (tx, mut rx) = mpsc::channel(100);
-        let result = run_command_with_shell("echo 'test'", ShellType::Bash, &tx).await;
+        let result = run_command_with_shell("echo 'test'", HookShell::Bash, &tx).await;
         assert!(result.is_ok());
         let (output, exit_code) = result.expect("should succeed");
         assert!(output.contains("test"));
@@ -391,7 +393,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_command_with_shell_failure() {
         let (tx, mut rx) = mpsc::channel(100);
-        let result = run_command_with_shell("exit 42", ShellType::Bash, &tx).await;
+        let result = run_command_with_shell("exit 42", HookShell::Bash, &tx).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -449,7 +451,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_command_with_shell_quiet_success() {
-        let result = run_command_with_shell_quiet("echo 'quiet shell'", ShellType::Bash).await;
+        let result = run_command_with_shell_quiet("echo 'quiet shell'", HookShell::Bash).await;
         assert!(result.is_ok());
         let (output, exit_code) = result.expect("should succeed");
         assert!(output.contains("quiet shell"));
@@ -458,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_command_with_shell_quiet_failure() {
-        let result = run_command_with_shell_quiet("exit 7", ShellType::Bash).await;
+        let result = run_command_with_shell_quiet("exit 7", HookShell::Bash).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(

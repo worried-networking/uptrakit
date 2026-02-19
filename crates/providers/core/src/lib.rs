@@ -16,7 +16,10 @@ pub use types::{
 pub use version::Version;
 
 // Re-export command crate types (keeps existing imports working for provider crates)
-pub use uptrakit_command::{ShellType, UpdateOutputLine, UpdateOutputStream};
+pub use uptrakit_command::UpdateOutputLine;
+
+// Re-export shared-types enums used by providers
+pub use uptrakit_shared_types::{HookShell, OutputStreamType};
 
 // Re-export executor types for provider crate convenience
 pub use uptrakit_command::{

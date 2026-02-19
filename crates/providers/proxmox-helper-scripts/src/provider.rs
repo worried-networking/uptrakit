@@ -5,8 +5,8 @@ use rootcause::prelude::*;
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_provider_core::mpsc;
 use uptrakit_provider_core::{
-    DiscoveredSoftware, Provider, ProviderCapability, ProviderError, ProviderType, ReleaseInfo,
-    Result, UpdateOutputLine, UpdateOutputStream, UpstreamRelease, Version,
+    DiscoveredSoftware, OutputStreamType, Provider, ProviderCapability, ProviderError, ProviderType,
+    ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 
@@ -228,7 +228,7 @@ impl Provider for ProxmoxHelperScriptsProvider {
         send_output(
             output_tx,
             &format!("Running update script from {script_url}"),
-            UpdateOutputStream::Stdout,
+            OutputStreamType::Stdout,
         )
         .await;
         output.push_str(&format!("Running update script from {script_url}\n"));

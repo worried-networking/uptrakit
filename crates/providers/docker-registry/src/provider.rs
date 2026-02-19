@@ -7,7 +7,7 @@ use uptrakit_provider_core::mpsc;
 
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_provider_core::{
-    Provider, ProviderError, ProviderType, ReleaseInfo, UpdateOutputLine, UpdateOutputStream,
+    OutputStreamType, Provider, ProviderError, ProviderType, ReleaseInfo, UpdateOutputLine,
     UpstreamRelease, Version,
 };
 
@@ -170,7 +170,7 @@ impl Provider for DockerRegistryProvider {
         send_output(
             output_tx,
             &format!("Pulling Docker image {image}:{tag}"),
-            UpdateOutputStream::Stdout,
+            OutputStreamType::Stdout,
         )
         .await;
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
@@ -197,7 +197,7 @@ impl Provider for DockerRegistryProvider {
             send_output(
                 output_tx,
                 &format!("Running restart command: {cmd}"),
-                UpdateOutputStream::Stdout,
+                OutputStreamType::Stdout,
             )
             .await;
 

@@ -9,8 +9,8 @@ use uptrakit_provider_core::mpsc;
 
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output, shell_escape};
 use uptrakit_provider_core::{
-    Provider, ProviderError, ProviderType, ReleaseAsset, ReleaseInfo, UpdateOutputLine,
-    UpdateOutputStream, UpstreamRelease, Version,
+    OutputStreamType, Provider, ProviderError, ProviderType, ReleaseAsset, ReleaseInfo,
+    UpdateOutputLine, UpstreamRelease, Version,
 };
 
 use crate::api_types::{GitHubApiError, GitHubRelease};
@@ -284,7 +284,7 @@ impl Provider for GitHubProvider {
                 "Downloading release {} from {}",
                 release_info.tag, release_info.release_url
             ),
-            UpdateOutputStream::Stdout,
+            OutputStreamType::Stdout,
         )
         .await;
         output.push_str(&format!(
@@ -301,7 +301,7 @@ impl Provider for GitHubProvider {
             send_output(
                 output_tx,
                 &format!("Running install command: {cmd}"),
-                UpdateOutputStream::Stdout,
+                OutputStreamType::Stdout,
             )
             .await;
 
@@ -321,7 +321,7 @@ impl Provider for GitHubProvider {
             send_output(
                 output_tx,
                 "No install_command configured, skipping automated installation",
-                UpdateOutputStream::Stdout,
+                OutputStreamType::Stdout,
             )
             .await;
             output.push_str("No install_command configured, skipping automated installation\n");
