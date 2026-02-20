@@ -6,17 +6,21 @@ mod error;
 mod host_info;
 mod host_ops;
 mod ssh_config;
-mod ssh_executor;
 mod ssh_key;
 mod ssh_target;
 mod ssh_transport;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
-use uptrakit_build_info::BuildInfo;
+use uptrakit_internal_wire::{
+    ControllerMessage, DisconnectReason, DisconnectingPayload, ServiceMessage, ServiceType,
+};
 use uptrakit_service_sdk::{
-    AuthenticatedContext, LoopOutcome, ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
+    ControllerConnection, LoopError, LoopOutcome, ServiceHandler, ServiceIdentityState, Signal,
 };
 
 use cli::{Args, Commands};
@@ -41,57 +45,84 @@ type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
 
 struct SshAgentHandler {
     state_dir: std::path::PathBuf,
+    local_db: Option<sea_orm::DatabaseConnection>,
 }
 
 impl ServiceHandler for SshAgentHandler {
-    fn config(&self) -> ServiceConfig {
-        ServiceConfig {
-            dir_name: "agent-ssh",
-            service_label: "uptrakit-agent-ssh service",
-        }
-    }
+    const DIR_NAME: &'static str = "agent-ssh";
+    const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
+    const SERVICE_TYPE: ServiceType = ServiceType::SshAgent;
 
-    fn enrollment_info(&self) -> ServiceEnrollmentInfo {
-        ServiceEnrollmentInfo {
-            service_type: uptrakit_internal_wire::ServiceType::SshAgent,
-        }
-    }
+    type ServiceEvent = std::convert::Infallible;
 
-    fn run_authenticated_loop<'a>(
+    fn on_connected<'a>(
         &'a mut self,
-        ctx: AuthenticatedContext<'a>,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a,
-        >,
+        conn: &'a mut ControllerConnection,
+        _identity: &'a ServiceIdentityState,
+    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>> {
+        Box::pin(async move {
+            // Open (or create) the local SSH host database.
+            let local_db = crate::db::init_db(&self.state_dir).await.map_err(|e| {
+                LoopError {
+                    cert_expired: false,
+                    receive_closed: false,
+                    message: format!("failed to initialize local database: {e}"),
+                }
+            })?;
+            tracing::debug!("local SSH host database initialized");
+
+            // Report enrolled hosts to controller.
+            client::report_enrolled_hosts(&local_db, conn).await;
+
+            self.local_db = Some(local_db);
+            Ok(())
+        })
+    }
+
+    fn on_message<'a>(
+        &'a mut self,
+        _msg: ControllerMessage,
+        _conn: &'a mut ControllerConnection,
+    ) -> Pin<
+        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            let cert_not_after_ts = ctx.identity.cert_not_after_ms();
+            tracing::debug!("ignoring unrecognized message in authenticated loop");
+            Ok(None)
+        })
+    }
 
-            match client::run_authenticated_loop(client::AuthenticatedLoopParams {
-                host: ctx.host,
-                port: ctx.port,
-                base_url: ctx.base_url,
-                pki_addr: ctx.pki_addr,
-                ca_pem: ctx.ca_pem,
-                tls_connector: ctx.tls_connector,
-                cert_not_after_ts,
-                identity: ctx.identity,
-                state_dir: &self.state_dir,
-            })
-            .await
-            {
-                Ok(outcome) => Ok(outcome),
-                Err(e) => {
-                    let ctx = e.current_context();
-                    let sdk_err = uptrakit_service_sdk::EnrollmentError::from_agent_error(
-                        ctx.is_cert_expired(),
-                        ctx.is_receive_closed(),
-                        e.to_string(),
-                    );
-                    Err(report!(sdk_err))
-                }
+    fn poll_service_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
+        Box::pin(std::future::pending())
+    }
+
+    fn on_service_event<'a>(
+        &'a mut self,
+        event: Self::ServiceEvent,
+        _conn: &'a mut ControllerConnection,
+    ) -> Pin<
+        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
+    > {
+        match event {}
+    }
+
+    fn on_shutdown<'a>(
+        &'a mut self,
+        conn: &'a mut ControllerConnection,
+        _signal: Signal,
+        _shutdown_timeout_seconds: u32,
+    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
+        Box::pin(async move {
+            let disconnecting_msg =
+                ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Shutdown));
+            if let Err(e) = conn.send(disconnecting_msg).await {
+                tracing::debug!(error = %e, "failed to send Disconnecting message");
+            } else {
+                tracing::debug!("sent Disconnecting message to controller");
             }
+            LoopOutcome::Shutdown
         })
     }
 }
@@ -100,7 +131,11 @@ impl ServiceHandler for SshAgentHandler {
 async fn main() {
     let args = Args::parse();
     if args.common.version {
-        print_build_info();
+        uptrakit_service_sdk::print_build_info(
+            "uptrakit-agent-ssh",
+            env!("CARGO_PKG_VERSION"),
+            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+        );
         return;
     }
 
@@ -137,14 +172,8 @@ async fn main() {
         std::process::exit(1);
     }
 
-    let filter = match "uptrakit_agent_ssh=info".parse() {
-        Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
-        Err(_) => EnvFilter::from_default_env(),
-    };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
-
-    // Install the default crypto provider for rustls.
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    uptrakit_service_sdk::init_tracing("uptrakit_agent_ssh=info");
+    uptrakit_service_sdk::init_crypto();
 
     // Initialize master encryption key for local SSH credential storage.
     if let Err(e) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
@@ -161,15 +190,16 @@ async fn main() {
         }
     };
 
-    let mut handler = SshAgentHandler { state_dir };
-    if let Err(e) = uptrakit_service_sdk::run_service_lifecycle(&args.common, &mut handler).await {
-        if e.current_context().is_receive_closed() {
-            tracing::info!("disconnected by controller");
-        } else {
-            tracing::error!(error = %e, "agent-ssh failed");
-            std::process::exit(1);
-        }
-    }
+    let mut handler = SshAgentHandler {
+        state_dir,
+        local_db: None,
+    };
+    uptrakit_service_sdk::run_lifecycle_and_handle_errors(
+        "uptrakit-agent-ssh",
+        &args.common,
+        &mut handler,
+    )
+    .await;
 }
 
 /// Resolve the state directory for this service.
@@ -262,16 +292,6 @@ fn parse_master_key_hex(key_hex: &str) -> InitResult<[u8; 32]> {
         )))
     })?;
     Ok(key_bytes)
-}
-
-fn print_build_info() {
-    let build_info = BuildInfo::current(
-        "uptrakit-agent-ssh",
-        env!("CARGO_PKG_VERSION"),
-        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-    );
-    let output = build_info.render_human();
-    print!("{output}");
 }
 
 #[cfg(test)]

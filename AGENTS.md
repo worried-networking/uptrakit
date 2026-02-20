@@ -53,7 +53,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshCommandExecutor, SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
@@ -75,7 +75,7 @@ uptrakit/
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types; feature-gated: sea-orm, openapi
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types, reqwest::Error
-│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, enrollment, identity, TLS, CA bootstrap
+│   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface; uses openapi-client for all API calls (hosts, services, checks, updates, history, scheduler, settings)

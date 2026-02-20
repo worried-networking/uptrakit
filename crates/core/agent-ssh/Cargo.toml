@@ -18,7 +18,6 @@ ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "r
 strum = { workspace = true }
 uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
-sha2 = { workspace = true }
 ssh2-config = "0.7"
 thiserror = { workspace = true }
 time = { workspace = true }
@@ -33,7 +32,6 @@ uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
 uptrakit-crypto = { path = "../../shared/crypto" }
 uptrakit-internal-wire = { path = "../../shared/wire" }
-uptrakit-build-info = { path = "../../shared/build-info" }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
 sea-orm-migration = { version = "2.0.0-rc.32", default-features = false, features = ["runtime-tokio-rustls", "sqlx-sqlite"] }
 uuid = { workspace = true, features = ["v7", "serde"] }

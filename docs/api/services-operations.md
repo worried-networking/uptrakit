@@ -21,10 +21,10 @@
 
 ## Shared Service Startup Flow
 
-Both agents and MQTT services implement the `ServiceHandler` trait from `uptrakit-service-sdk` and delegate their
-startup to `run_service_lifecycle()`. Each service only provides service-specific configuration (`config()`),
-enrollment parameters (`enrollment_info()`), and the authenticated event loop (`run_authenticated_loop()`). The
-SDK handles all common plumbing:
+All service types (agents, SSH agents, MQTT) implement the `ServiceHandler` trait from `uptrakit-service-sdk` and delegate
+their startup to `run_service_lifecycle()`. Each service declares associated constants (`DIR_NAME`, `SERVICE_LABEL`,
+`SERVICE_TYPE`) and implements callbacks (`on_connected`, `on_message`, `on_shutdown`, etc.). The SDK owns the event loop
+and handles all common plumbing:
 
 1. Parse CLI arguments and resolve application directories.
 1. Load identity state; clear if `--force-enroll` is set.

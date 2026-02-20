@@ -1,6 +1,6 @@
 use rootcause::prelude::*;
 use thiserror::Error;
-use uptrakit_service_sdk::{EnrollmentError, is_rustls_cert_expired};
+use uptrakit_service_sdk::EnrollmentError;
 use uptrakit_shared_macros::impl_report_conversion;
 
 #[derive(Debug, Error)]
@@ -57,26 +57,6 @@ pub enum Error {
     InvalidInput(String),
 }
 
-impl Error {
-    /// `true` when the controller closed the connection.
-    pub fn is_receive_closed(&self) -> bool {
-        match self {
-            Error::Enrollment(e) => e.is_receive_closed(),
-            _ => false,
-        }
-    }
-
-    /// `true` when the TLS handshake failed because the server considers
-    /// our client certificate expired.
-    pub fn is_cert_expired(&self) -> bool {
-        match self {
-            Error::Enrollment(e) => e.is_cert_expired(),
-            Error::Io(io_err) => is_rustls_cert_expired(io_err),
-            _ => false,
-        }
-    }
-}
-
 pub type Result<T> = std::result::Result<T, Report<Error>>;
 
 impl_report_conversion! {
@@ -92,70 +72,12 @@ impl_report_conversion!(russh::Error => Error, |e| Error::SshConnection(e.to_str
 // russh agent auth errors use String-based conversion (AgentAuthError wraps SendError + keys::Error).
 impl_report_conversion!(russh::AgentAuthError => Error, |e| Error::SshAuth(e.to_string()));
 
-// CommandError from uptrakit-command (used by SshCommandExecutor boundary crossing).
+// CommandError from uptrakit-command (used by SSH remote command execution).
 impl_report_conversion!(uptrakit_command::CommandError => Error, |e| Error::SshCommand(e.to_string()));
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn is_receive_closed_enrollment_error() {
-        let err = Error::Enrollment(EnrollmentError::Protocol(
-            uptrakit_service_sdk::ProtocolError::ReceiveClosed,
-        ));
-        assert!(err.is_receive_closed());
-    }
-
-    #[test]
-    fn is_receive_closed_other_error() {
-        let err = Error::Database(sea_orm::DbErr::Custom("test".to_string()));
-        assert!(!err.is_receive_closed());
-    }
-
-    #[test]
-    fn is_receive_closed_io_error() {
-        let err = Error::Io(std::io::Error::new(
-            std::io::ErrorKind::ConnectionReset,
-            "reset",
-        ));
-        assert!(!err.is_receive_closed());
-    }
-
-    #[test]
-    fn is_cert_expired_enrollment_delegates() {
-        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
-        let io_err = std::io::Error::other(rustls_err);
-        let err = Error::Enrollment(EnrollmentError::Io(io_err));
-        assert!(err.is_cert_expired());
-    }
-
-    #[test]
-    fn is_cert_expired_enrollment_websocket_wrapping_rustls() {
-        let rustls_err = rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired);
-        let io_err = std::io::Error::other(rustls_err);
-        let ws_err = tokio_tungstenite::tungstenite::Error::Io(io_err);
-        let err = Error::Enrollment(EnrollmentError::WebSocket(ws_err));
-        assert!(err.is_cert_expired());
-    }
-
-    #[test]
-    fn is_cert_expired_unrelated_io_error() {
-        let err = Error::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
-        assert!(!err.is_cert_expired());
-    }
-
-    #[test]
-    fn is_cert_expired_database_error() {
-        let err = Error::Database(sea_orm::DbErr::Custom("CertificateExpired".to_string()));
-        assert!(
-            !err.is_cert_expired(),
-            "should not match CertificateExpired in unrelated variant"
-        );
-    }
 
     #[test]
     fn host_not_found_display() {

@@ -5,56 +5,153 @@ bootstrap-enrollment-reconnect flow shared by all Uptrakit services (agent, SSH 
 
 ## Overview
 
-Building a new Uptrakit service requires implementing three trait methods. The SDK handles all common plumbing: CLI argument parsing, directory
-resolution, identity management, CA bootstrap, enrollment with backoff, certificate expiry detection, and reconnection with exponential backoff.
+Building a new Uptrakit service requires implementing a set of callbacks on the `ServiceHandler` trait plus three associated constants. The SDK owns the
+entire event loop (`tokio::select!`) and handles all common plumbing: CLI argument parsing, directory resolution, identity management, CA bootstrap,
+enrollment with backoff, certificate renewal, ping/pong keepalive, signal handling, CA staleness checks, and reconnection with exponential backoff.
 
 ## The `ServiceHandler` trait
 
 ```rust
-pub trait ServiceHandler {
-    fn config(&self) -> ServiceConfig;
-    fn enrollment_info(&self) -> ServiceEnrollmentInfo;
-    fn run_authenticated_loop<'a>(
+pub trait ServiceHandler: Send {
+    const DIR_NAME: &'static str;
+    const SERVICE_LABEL: &'static str;
+    const SERVICE_TYPE: ServiceType;
+
+    type ServiceEvent: Send;
+
+    fn on_connected<'a>(
         &'a mut self,
-        ctx: AuthenticatedContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<LoopOutcome>> + Send + 'a>>;
+        conn: &'a mut ControllerConnection,
+        identity: &'a ServiceIdentityState,
+    ) -> Pin<Box<dyn Future<Output = Result<(), LoopError>> + Send + 'a>>;
+
+    fn on_message<'a>(
+        &'a mut self,
+        msg: ControllerMessage,
+        conn: &'a mut ControllerConnection,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>>;
+
+    fn on_settings<'a>(
+        &'a mut self,
+        _settings: &'a ServiceSettingsPayload,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {}) // default: no-op
+    }
+
+    fn poll_service_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>>;
+
+    fn on_service_event<'a>(
+        &'a mut self,
+        event: Self::ServiceEvent,
+        conn: &'a mut ControllerConnection,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>>;
+
+    fn on_shutdown<'a>(
+        &'a mut self,
+        conn: &'a mut ControllerConnection,
+        signal: Signal,
+        shutdown_timeout_seconds: u32,
+    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>>;
+
+    fn ping_interval(&self) -> Duration {
+        Duration::from_secs(300) // default 5 minutes
+    }
 }
 ```
 
-### `config()`
+### Associated constants
 
-Returns static configuration for the service:
+| Constant | Purpose |
+| --- | --- |
+| `DIR_NAME` | Directory name for platform-specific resolution (e.g. `"agent"`, `"mqtt"`). |
+| `SERVICE_LABEL` | Human-readable label for log messages (e.g. `"uptrakit-agent service"`). |
+| `SERVICE_TYPE` | `ServiceType::Agent`, `ServiceType::Mqtt`, or `ServiceType::SshAgent`. |
 
-- `dir_name` — directory name used for platform-specific directory resolution (e.g. `"agent"`, `"mqtt"`).
-- `service_label` — human-readable label for log messages (e.g. `"uptrakit-agent service"`).
+### `ServiceEvent` associated type
 
-### `enrollment_info()`
+Each service declares an associated type representing events from its custom `select!` arm. Use `std::convert::Infallible` for services with no custom
+events (the SDK will call `std::future::pending()` and the arm will never fire).
 
-Returns enrollment-time parameters:
+### Callbacks
 
-- `service_type` — `ServiceType::Agent`, `ServiceType::Mqtt`, or `ServiceType::SshAgent`. Host information is not part of enrollment — agents report
-  hosts via `ReportHosts` after authentication.
+#### `on_connected`
 
-### `run_authenticated_loop()`
+Called after the WebSocket connection is established. Use this to send initial messages (e.g. `ReportHosts`, `Register`).
 
-Runs the service-specific authenticated event loop. Receives an `AuthenticatedContext` containing:
+#### `on_message`
 
-- `host` / `port` — controller address.
-- `tls_connector` — pre-built mTLS connector (rebuilt on each reconnect iteration since certificates may have rotated).
-- `ca_pem` — raw CA PEM bytes if a pinned CA is in use.
-- `identity` — mutable reference to the loaded `ServiceIdentityState` (certified). Mutable access is required for services that handle
-  `CaBundleUpdated` or `Certificate` messages (calling `save_ca_cert()` or `save_certificate()`).
-- `base_url` — controller base URL (e.g. `https://host:8443`).
-- `pki_addr` — optional PKI address.
+Handle a `ControllerMessage` not handled by the SDK. The SDK handles: `Pong`, `Certificate`,
+`ServiceSettings`, `CaBundleUpdated`, `RequestCertRenewal`, and `ServerRestarting`. Everything else
+is delegated to this callback. Return `Ok(Some(outcome))` to break the loop, `Ok(None)` to continue.
 
-Returns a `LoopOutcome`:
+#### `on_settings`
 
-| Variant | Meaning | SDK behavior | |---|---|---| | `Shutdown` | SIGINT/SIGTERM received | Exit the lifecycle cleanly | | `Reconnect` | Certificate
-rotated | Reconnect immediately (reset backoff) | | `Disconnected` | Connection closed | Reconnect with exponential backoff | | `Restart` | Graceful
-restart via SIGHUP (agent and MQTT) | Exit the lifecycle |
+Called after the SDK processes the shared `ServiceSettings` fields (protocol version check, renewal
+schedule, shutdown timeout, CA staleness). Override for service-specific settings processing.
+Default is a no-op.
 
-The return type uses a boxed future (`Pin<Box<dyn Future + Send + 'a>>`) to avoid higher-ranked lifetime issues that arise with `impl Future` in trait
-methods when the implementation captures references with complex lifetime relationships (e.g. streaming iterators with `buffer_unordered`).
+#### `poll_service_event`
+
+Poll for service-specific events (additional `select!` arm). Return `std::future::pending()` if the
+service has no custom events. The returned future is dropped when another `select!` arm fires,
+releasing the `&mut self` borrow.
+
+#### `on_service_event`
+
+Handle a resolved service event from `poll_service_event`. Return `Ok(Some(outcome))` to break the loop, `Ok(None)` to continue.
+
+#### `on_shutdown`
+
+Graceful shutdown handler. Called when an OS signal is received. Send `Disconnecting` and drain in-flight work. The `signal` parameter distinguishes
+`Signal::Hangup` (restart) from `Signal::Interrupt`/`Signal::Terminate` (shutdown). `shutdown_timeout_seconds` comes from the latest `ServiceSettings`.
+
+#### `ping_interval`
+
+Override to change the keepalive ping interval. Default is 300 seconds. The MQTT service overrides this with its configurable value.
+
+### `LoopOutcome`
+
+| Variant | Meaning | SDK behavior |
+| --- | --- | --- |
+| `Shutdown` | SIGINT/SIGTERM received | Exit the lifecycle cleanly |
+| `Reconnect` | Certificate rotated | Reconnect immediately (reset backoff) |
+| `Disconnected` | Connection closed | Reconnect with exponential backoff |
+| `Restart` | Graceful restart via SIGHUP | Exit the lifecycle |
+
+### `LoopError`
+
+Callbacks return `Result<_, LoopError>`. `LoopError` carries semantic flags (`cert_expired`, `receive_closed`) so the lifecycle can decide whether to
+re-enroll, reconnect with backoff, or propagate the error. A `From<Report<EnrollmentError>>` impl enables using `?` on SDK connection operations.
+
+### Why `Pin<Box<dyn Future>>`
+
+All async trait methods use `Pin<Box<dyn Future>>` to avoid higher-ranked lifetime issues that arise with `impl Future` in trait methods when the
+implementation captures references with complex lifetime relationships (e.g. streaming iterators with `buffer_unordered`).
+
+## SDK-managed event loop
+
+The SDK owns the `tokio::select!` loop in `event_loop::run_event_loop()`. Services no longer write their own select loop. The event loop handles (in
+biased priority order):
+
+1. **Service events** (`handler.poll_service_event()`) — highest priority
+1. **Ping timer** — sends `Ping` messages at `handler.ping_interval()` intervals
+1. **Renewal timer** — proactive certificate renewal
+1. **Controller messages** (`conn.recv()`) — dispatched to SDK handlers or `handler.on_message()`
+1. **OS signals** (`signals.recv()`) — `handler.on_shutdown()`
+
+### `EventLoopContext`
+
+Passed to the event loop by the lifecycle. Contains connection metadata:
+
+```rust
+pub struct EventLoopContext<'a> {
+    pub base_url: &'a str,
+    pub pki_addr: Option<&'a str>,
+    pub ca_pem: Option<&'a [u8]>,
+}
+```
 
 ## `run_service_lifecycle()`
 
@@ -81,112 +178,114 @@ It executes the following sequence:
 
 The mTLS connector is rebuilt on each reconnect iteration inside the loop, because certificates may have been rotated since the last connection.
 
+## Main helpers
+
+The SDK provides shared initialization and error-handling functions to reduce boilerplate in `main()`:
+
+| Function | Purpose |
+| --- | --- |
+| `init_tracing(directive)` | Initialize `tracing_subscriber` with the given filter directive. |
+| `init_crypto()` | Install the `aws-lc-rs` rustls crypto provider. |
+| `print_build_info(name, version, features)` | Print build metadata for `--version`. |
+| `run_lifecycle_and_handle_errors(name, args, handler)` | Run the lifecycle and handle errors (log + exit code). |
+
 ## Example: minimal service
 
 ```rust
+use std::future::Future;
+use std::pin::Pin;
+
+use uptrakit_internal_wire::{ControllerMessage, ServiceType};
 use uptrakit_service_sdk::{
-    AuthenticatedContext, ControllerConnection, LoopOutcome,
-    ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
+    ControllerConnection, LoopError, LoopOutcome, ServiceHandler,
+    ServiceIdentityState, Signal,
 };
 
 struct MyHandler;
 
 impl ServiceHandler for MyHandler {
-    fn config(&self) -> ServiceConfig {
-        ServiceConfig {
-            dir_name: "my-service",
-            service_label: "uptrakit-my-service",
-        }
-    }
+    const DIR_NAME: &'static str = "my-service";
+    const SERVICE_LABEL: &'static str = "uptrakit-my-service";
+    const SERVICE_TYPE: ServiceType = ServiceType::Agent;
 
-    fn enrollment_info(&self) -> ServiceEnrollmentInfo {
-        ServiceEnrollmentInfo {
-            service_type: uptrakit_internal_wire::ServiceType::Agent,
-        }
-    }
+    type ServiceEvent = std::convert::Infallible;
 
-    fn run_authenticated_loop<'a>(
+    fn on_connected<'a>(
         &'a mut self,
-        ctx: AuthenticatedContext<'a>,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            let mut conn = ControllerConnection::connect(
-                ctx.host, ctx.port, &ctx.tls_connector, None,
-            ).await?;
+        _conn: &'a mut ControllerConnection,
+        _identity: &'a ServiceIdentityState,
+    ) -> Pin<Box<dyn Future<Output = Result<(), LoopError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
 
-            // Service-specific message loop here...
+    fn on_message<'a>(
+        &'a mut self,
+        _msg: ControllerMessage,
+        _conn: &'a mut ControllerConnection,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>> {
+        Box::pin(async { Ok(None) })
+    }
 
-            let _ = conn.close().await;
-            Ok(LoopOutcome::Shutdown)
-        })
+    fn poll_service_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
+        Box::pin(std::future::pending())
+    }
+
+    fn on_service_event<'a>(
+        &'a mut self,
+        event: Self::ServiceEvent,
+        _conn: &'a mut ControllerConnection,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>> {
+        match event {} // Infallible
+    }
+
+    fn on_shutdown<'a>(
+        &'a mut self,
+        _conn: &'a mut ControllerConnection,
+        _signal: Signal,
+        _shutdown_timeout_seconds: u32,
+    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
+        Box::pin(async { LoopOutcome::Shutdown })
     }
 }
 
 #[tokio::main]
 async fn main() {
-    // ... tracing, crypto provider setup, CLI parsing ...
+    let args = clap::Parser::parse();
+    uptrakit_service_sdk::init_tracing("uptrakit_my_service=info");
+    uptrakit_service_sdk::init_crypto();
+
     let mut handler = MyHandler;
-    if let Err(e) = uptrakit_service_sdk::run_service_lifecycle(&args.common, &mut handler).await {
-        tracing::error!(error = %e, "service failed");
-        std::process::exit(1);
-    }
+    uptrakit_service_sdk::run_lifecycle_and_handle_errors(
+        "uptrakit-my-service", &args.common, &mut handler,
+    ).await;
 }
 ```
+
+## Signal handling
+
+The SDK provides a cross-platform `SignalWatcher` that encapsulates `SIGINT`, `SIGTERM`, and `SIGHUP` handling:
+
+```rust
+pub enum Signal { Interrupt, Terminate, Hangup }
+
+pub struct SignalWatcher { /* platform-specific internals */ }
+
+impl SignalWatcher {
+    pub fn new() -> std::io::Result<Self>;
+    pub async fn recv(&mut self) -> Signal;
+}
+```
+
+On Unix, all three signals are monitored. On non-Unix platforms, only `Ctrl+C` (mapped to `Signal::Interrupt`) is available; the other arms use
+`std::future::pending()`.
 
 ## `CertificateRenewalHandler`
 
 The SDK provides a `CertificateRenewalHandler` struct (in `cert_handler` module) that encapsulates the three certificate-lifecycle controller messages
-shared by all services: `CaBundleUpdated`, `RequestCertRenewal`, and `Certificate`. Both the agent and MQTT service delegate to this handler instead
-of duplicating the same logic.
-
-### Why a separate handler
-
-Before the handler existed, each service independently implemented ~70 lines of keypair generation, certificate persistence, CA bundle saving, and
-`pending_renewal_key` tracking. Any future service would have needed a third copy. The handler makes the SDK the single place to understand
-certificate renewal behaviour.
-
-### API
-
-Create one `CertificateRenewalHandler` per connection, before the message loop:
-
-```rust
-let mut cert_handler = CertificateRenewalHandler::new();
-```
-
-Then delegate the three controller messages inside the `select!` loop:
-
-| Controller message | Handler method | Return | |---|---|---| | `CaBundleUpdated` | `handle_ca_bundle_updated(&self, identity, payload)` | `()`
-(fire-and-forget, logs errors) | | `RequestCertRenewal` | `handle_request_cert_renewal(&mut self, identity, conn, payload)` | `Option<LoopOutcome>` —
-`None` means continue, `Some` means break | | `Certificate` | `handle_certificate(&mut self, identity, payload)` | `Result<LoopOutcome>` — `Reconnect`
-on success, `Disconnected` if no pending key |
-
-For timer-based proactive renewal, use the SDK-provided helpers instead of implementing the timer manually:
-
-```rust
-use uptrakit_service_sdk::{create_renewal_sleep, update_renewal_schedule};
-
-// Before the message loop:
-let mut renewal_sleep = create_renewal_sleep();
-
-// In the ServiceSettings handler:
-update_renewal_schedule(&mut renewal_sleep, cert_not_after_ts, settings.renewal_window_hours);
-
-// In tokio::select!:
-_ = &mut renewal_sleep => {
-    if let Some(o) = cert_handler.handle_renewal_timer(identity, &mut conn, &mut renewal_sleep).await {
-        break o;
-    }
-}
-```
-
-The `handle_renewal_timer` method handles CSR generation, sending the `RenewCertificate` message, and resetting the
-timer to far-future. It returns `Some(LoopOutcome)` on failure (the caller should break) or `None` on success.
-
-`initiate_renewal` extracts the service ID from `identity`, generates a fresh ECDSA P-256 keypair and CSR, stores the private key internally, and
-returns the CSR PEM to send to the controller. It is called internally by `handle_renewal_timer` and
-`handle_request_cert_renewal`, and can also be called directly if custom renewal logic is needed.
+shared by all services: `CaBundleUpdated`, `RequestCertRenewal`, and `Certificate`. The SDK event loop delegates to this handler automatically — services
+do not need to handle these messages.
 
 ### Renewal timer helpers
 
@@ -210,22 +309,25 @@ it takes the pending key, persists both the certificate and the key via `identit
 
 ## Error handling at the trait boundary
 
-The lifecycle works with `Report<EnrollmentError>`. The handler's `run_authenticated_loop` returns `Result<LoopOutcome>` using the SDK's `Result`
-type. Each service converts its internal error type to `EnrollmentError` at the boundary. The lifecycle only needs two semantic checks:
+The lifecycle works with `Report<EnrollmentError>`. Service callbacks return `Result<_, LoopError>`. The `LoopError` type bridges the gap with semantic
+flags:
 
-- `is_cert_expired()` — triggers enrollment fallback.
-- `is_receive_closed()` — triggers reconnect with backoff.
+- `cert_expired` — triggers enrollment fallback.
+- `receive_closed` — triggers reconnect with backoff.
 
-All other errors propagate up and terminate the lifecycle.
+A `From<Report<EnrollmentError>>` impl on `LoopError` automatically extracts these flags from the SDK's error type, enabling services to use `?` on
+SDK connection operations (e.g. `conn.send(msg).await.map_err(LoopError::from)?`).
 
 ### `EnrollmentError` sub-enum structure
 
 `EnrollmentError` is organized into domain sub-enums for clearer error categorization:
 
-| Sub-enum | Domain | Example variants | |---|---|---| | `TlsError` | TLS/certificate errors | `Config`, `Rustls`, `NoCertificates`,
-`CertificateParse`, `Pem`, `InvalidDnsName` | | `IdentityError` | Identity/enrollment state | `KeypairGeneration`, `CsrGeneration`, `NotEnrolled`,
-`NotCertified` | | `ProtocolError` | Wire protocol/enrollment flow | `Init`, `ReceiveClosed`, `UnexpectedMessage`, `Enrollment`, `EnrollmentRejected`,
-timeouts | | `CaError` | CA certificate operations | `Fetch`, `CertFile` |
+| Sub-enum | Domain | Example variants |
+| --- | --- | --- |
+| `TlsError` | TLS/certificate errors | `Config`, `Rustls`, `NoCertificates`, `CertificateParse`, `Pem`, `InvalidDnsName` |
+| `IdentityError` | Identity/enrollment state | `KeypairGeneration`, `CsrGeneration`, `NotEnrolled`, `NotCertified` |
+| `ProtocolError` | Wire protocol/enrollment flow | `Init`, `ReceiveClosed`, `UnexpectedMessage`, `Enrollment`, `EnrollmentRejected`, timeouts |
+| `CaError` | CA certificate operations | `Fetch`, `CertFile` |
 
 Top-level variants (`Io`, `Json`, `WebSocket`, `HttpUri`, `Directory`) remain directly on `EnrollmentError`. Services can match on categories (e.g.,
 `EnrollmentError::Tls(_)`) instead of individual variants for coarse-grained error handling.

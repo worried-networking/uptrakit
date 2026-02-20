@@ -76,15 +76,20 @@ Key design decisions:
 The `uptrakit-service-sdk` crate (`crates/shared/service-sdk/`) provides shared infrastructure for building Uptrakit services:
 
 - **Lifecycle**: The `ServiceHandler` trait and `run_service_lifecycle()` function encapsulate the full bootstrap-enrollment-reconnect flow. New
-  services implement three methods (`config()`, `enrollment_info()`, `run_authenticated_loop()`) and get directory setup, identity management, CA
-  bootstrap, enrollment with backoff, and reconnection with backoff for free. See [Service Lifecycle](docs/development/service-lifecycle.md).
+  services declare three associated constants (`DIR_NAME`, `SERVICE_LABEL`, `SERVICE_TYPE`) and implement callbacks (`on_connected`, `on_message`,
+  `on_shutdown`, etc.) to get directory setup, identity management, CA bootstrap, enrollment with backoff, and reconnection with backoff for free.
+  See [Service Lifecycle](docs/development/service-lifecycle.md).
+- **Event Loop**: The SDK owns the unified `tokio::select!` loop that handles ping/pong, certificate renewal, CA staleness checks, signal handling,
+  and close-reason dispatch. Services inject custom behaviour through `ServiceHandler` callbacks (`poll_service_event`, `on_service_event`).
+- **Main Helpers**: `init_tracing()`, `init_crypto()`, `print_build_info()`, and `run_lifecycle_and_handle_errors()` reduce `main()` boilerplate.
+- **Signal Handling**: Cross-platform `SignalWatcher` for `SIGINT`, `SIGTERM`, and `SIGHUP`.
 - **Enrollment**: WebSocket-based enrollment with certificate issuance.
 - **Identity**: Service identity state management (service ID, enrollment secret, certificate, private key).
-- **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust).
+- **TLS/CA**: TLS connector builders (server-only and mTLS), CA bootstrap (cached, file, PKI endpoint, TOFU, system trust), CA staleness checks.
 - **ControllerConnection**: Shared authenticated WebSocket connection with envelope serialization, sequence validation, Ping/Pong handling, and
-  close-frame reason tracking. Used by both agent and MQTT service. Sequence validation is performed before full message deserialization to ensure
+  close-frame reason tracking. Used by all service types. Sequence validation is performed before full message deserialization to ensure
   unrecognized messages do not cause sequence mismatches.
-- **CertificateRenewalHandler**: Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`,
-  `compute_renewal_delay`) used by all three service types for proactive certificate renewal.
+- **CertificateRenewalHandler**: Handles certificate lifecycle messages (`CaBundleUpdated`, `RequestCertRenewal`, `Certificate`) automatically in the
+  event loop. Also provides shared renewal timer helpers (`create_renewal_sleep`, `update_renewal_schedule`, `compute_renewal_delay`).
 - **Backoff**: Exponential backoff with jitter for reconnection delays.
 - **CLI**: Common CLI arguments (`--url`, `--config-dir`, `--state-dir`, `--force-enroll`, etc.).

@@ -190,6 +190,63 @@ pub async fn bootstrap_ca(
     Ok(None)
 }
 
+/// Compute the SHA-256 hex hash of the local CA certificate file (`ca.pem`)
+/// in the given config directory.
+///
+/// Returns an empty string if the file does not exist or cannot be read.
+pub async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
+    let ca_path = config_dir.join("ca.pem");
+    match tokio::fs::read(&ca_path).await {
+        Ok(bytes) => {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&bytes);
+            uptrakit_shared_types::hex::encode(hasher.finalize())
+        }
+        Err(_) => String::new(),
+    }
+}
+
+/// Check if the local CA bundle is stale compared to the controller's hash,
+/// and fetch an updated bundle if necessary.
+///
+/// This encapsulates the CA staleness check that was previously duplicated
+/// in both the agent and agent-ssh event loops.
+pub async fn check_ca_staleness(
+    ca_bundle_hash: &str,
+    config_dir: &std::path::Path,
+    identity: &mut crate::identity::ServiceIdentityState,
+    pki_addr: Option<&str>,
+    base_url: &str,
+    ca_pem: Option<&[u8]>,
+) {
+    if ca_bundle_hash.is_empty() {
+        return;
+    }
+
+    let local_hash = compute_local_ca_hash(config_dir).await;
+    if local_hash == ca_bundle_hash {
+        return;
+    }
+
+    tracing::info!("CA bundle hash mismatch, fetching updated bundle");
+    let ca_fetch_url = pki_addr.unwrap_or(base_url);
+    let tls_mode = match ca_pem {
+        Some(pem) => CaTlsMode::PinnedCa(pem),
+        None => CaTlsMode::SystemTrust,
+    };
+    match fetch_ca_certificate(ca_fetch_url, tls_mode).await {
+        Ok(pem) => {
+            let pem_str = String::from_utf8_lossy(&pem);
+            if let Err(e) = identity.save_ca_cert(&pem_str).await {
+                tracing::warn!("failed to save updated CA: {e}");
+            } else {
+                tracing::info!("updated CA bundle saved to disk");
+            }
+        }
+        Err(e) => tracing::warn!("failed to fetch updated CA: {e}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +358,79 @@ mod tests {
             "truncated PEM should produce an error, but got: {:?}",
             result
         );
+    }
+
+    // ── compute_local_ca_hash ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn local_ca_hash_missing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        assert!(hash.is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_valid_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca_path = dir.path().join("ca.pem");
+        tokio::fs::write(&ca_path, b"test-ca-content")
+            .await
+            .expect("write");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        let expected = {
+            let mut h = sha2::Sha256::new();
+            h.update(b"test-ca-content");
+            uptrakit_shared_types::hex::encode(h.finalize())
+        };
+        assert_eq!(hash, expected);
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_is_deterministic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca_path = dir.path().join("ca.pem");
+        tokio::fs::write(&ca_path, b"deterministic-content")
+            .await
+            .expect("write");
+        let hash1 = compute_local_ca_hash(dir.path()).await;
+        let hash2 = compute_local_ca_hash(dir.path()).await;
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64); // SHA-256 hex is 64 chars
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_different_content_different_hash() {
+        let dir1 = tempfile::tempdir().expect("tempdir1");
+        let dir2 = tempfile::tempdir().expect("tempdir2");
+        tokio::fs::write(dir1.path().join("ca.pem"), b"content-a")
+            .await
+            .expect("write1");
+        tokio::fs::write(dir2.path().join("ca.pem"), b"content-b")
+            .await
+            .expect("write2");
+        let hash1 = compute_local_ca_hash(dir1.path()).await;
+        let hash2 = compute_local_ca_hash(dir2.path()).await;
+        assert_ne!(hash1, hash2);
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_empty_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("ca.pem"), b"")
+            .await
+            .expect("write");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        assert_eq!(hash.len(), 64);
+        assert!(!hash.is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_ca_hash_only_hex_chars() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("ca.pem"), b"some content")
+            .await
+            .expect("write");
+        let hash = compute_local_ca_hash(dir.path()).await;
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

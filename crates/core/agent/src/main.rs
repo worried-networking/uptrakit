@@ -5,68 +5,147 @@ mod host_info;
 mod update;
 mod version_check;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use clap::Parser;
-use rootcause::prelude::*;
-use tracing_subscriber::EnvFilter;
-use uptrakit_build_info::BuildInfo;
+use uptrakit_internal_wire::{
+    ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
+};
 use uptrakit_service_sdk::{
-    AuthenticatedContext, LoopOutcome, ServiceConfig, ServiceEnrollmentInfo, ServiceHandler,
+    ControllerConnection, LoopError, LoopOutcome, ServiceHandler, ServiceIdentityState, Signal,
 };
 
 use cli::Args;
 
-struct AgentHandler;
+struct AgentHandler {
+    in_flight_update: Option<client::InFlightUpdate>,
+}
 
 impl ServiceHandler for AgentHandler {
-    fn config(&self) -> ServiceConfig {
-        ServiceConfig {
-            dir_name: "agent",
-            service_label: "uptrakit-agent service",
-        }
-    }
+    const DIR_NAME: &'static str = "agent";
+    const SERVICE_LABEL: &'static str = "uptrakit-agent service";
+    const SERVICE_TYPE: ServiceType = ServiceType::Agent;
 
-    fn enrollment_info(&self) -> ServiceEnrollmentInfo {
-        ServiceEnrollmentInfo {
-            service_type: uptrakit_internal_wire::ServiceType::Agent,
-        }
-    }
+    type ServiceEvent = client::UpdateEvent;
 
-    fn run_authenticated_loop<'a>(
+    fn on_connected<'a>(
         &'a mut self,
-        ctx: AuthenticatedContext<'a>,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = uptrakit_service_sdk::Result<LoopOutcome>> + Send + 'a,
-        >,
+        conn: &'a mut ControllerConnection,
+        _identity: &'a ServiceIdentityState,
+    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>> {
+        Box::pin(async move {
+            let host_info = crate::host_info::collect_host_info();
+            conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
+                hosts: vec![host_info],
+                agent_version: env!("CARGO_PKG_VERSION").to_string(),
+                protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+            }))
+            .await
+            .map_err(LoopError::from)?;
+            tracing::debug!(
+                "sent ReportHosts with agent_version={}",
+                env!("CARGO_PKG_VERSION")
+            );
+            Ok(())
+        })
+    }
+
+    fn on_message<'a>(
+        &'a mut self,
+        msg: ControllerMessage,
+        conn: &'a mut ControllerConnection,
+    ) -> Pin<
+        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
     > {
         Box::pin(async move {
-            let cert_not_after_ts = ctx.identity.cert_not_after_ms();
-
-            match client::run_authenticated_loop(client::AuthenticatedLoopParams {
-                host: ctx.host,
-                port: ctx.port,
-                base_url: ctx.base_url,
-                pki_addr: ctx.pki_addr,
-                ca_pem: ctx.ca_pem,
-                tls_connector: ctx.tls_connector,
-                cert_not_after_ts,
-                identity: ctx.identity,
-            })
-            .await
-            {
-                Ok(outcome) => Ok(outcome),
-                Err(e) => {
-                    // Convert agent error to SDK error, preserving cert-expired
-                    // and receive-closed semantics for the lifecycle.
-                    let ctx = e.current_context();
-                    let sdk_err = uptrakit_service_sdk::EnrollmentError::from_agent_error(
-                        ctx.is_cert_expired(),
-                        ctx.is_receive_closed(),
-                        e.to_string(),
-                    );
-                    Err(report!(sdk_err))
+            match msg {
+                ControllerMessage::CheckVersions(payload) => {
+                    Ok(client::handle_check_versions(payload, conn).await)
+                }
+                ControllerMessage::ExecuteUpdate(payload) => {
+                    client::handle_execute_update(
+                        *payload,
+                        &mut self.in_flight_update,
+                        conn,
+                    )
+                    .await;
+                    Ok(None)
+                }
+                _ => {
+                    tracing::debug!("ignoring unrecognized message in authenticated loop");
+                    Ok(None)
                 }
             }
+        })
+    }
+
+    fn poll_service_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
+        Box::pin(async move {
+            if let Some(ref mut update) = self.in_flight_update {
+                tokio::select! {
+                    biased;
+                    Some(output_msg) = update.output_rx.recv() => {
+                        client::UpdateEvent::Output(output_msg)
+                    }
+                    result = &mut update.handle => {
+                        client::UpdateEvent::Completed(result)
+                    }
+                }
+            } else {
+                std::future::pending::<Self::ServiceEvent>().await
+            }
+        })
+    }
+
+    fn on_service_event<'a>(
+        &'a mut self,
+        event: Self::ServiceEvent,
+        conn: &'a mut ControllerConnection,
+    ) -> Pin<
+        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let Some(ref update) = self.in_flight_update else {
+                tracing::error!("received update event but no in-flight update exists");
+                return Ok(None);
+            };
+            let update_history_id = update.update_history_id;
+
+            match event {
+                client::UpdateEvent::Output(output_msg) => {
+                    client::send_update_output(conn, update_history_id, output_msg).await;
+                }
+                client::UpdateEvent::Completed(result) => {
+                    client::send_update_result(conn, update_history_id, result).await;
+                    self.in_flight_update = None;
+                }
+            }
+            Ok(None)
+        })
+    }
+
+    fn on_shutdown<'a>(
+        &'a mut self,
+        conn: &'a mut ControllerConnection,
+        signal: Signal,
+        shutdown_timeout_seconds: u32,
+    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
+        Box::pin(async move {
+            let (disconnect_reason, outcome) = match signal {
+                Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
+                _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+            };
+            client::handle_graceful_shutdown(
+                conn,
+                self.in_flight_update.take(),
+                shutdown_timeout_seconds,
+                disconnect_reason,
+                outcome,
+            )
+            .await
         })
     }
 }
@@ -75,36 +154,24 @@ impl ServiceHandler for AgentHandler {
 async fn main() {
     let args = Args::parse();
     if args.common.version {
-        print_build_info();
+        uptrakit_service_sdk::print_build_info(
+            "uptrakit-agent",
+            env!("CARGO_PKG_VERSION"),
+            option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
+        );
         return;
     }
 
-    let filter = match "uptrakit_agent=info".parse() {
-        Ok(directive) => EnvFilter::from_default_env().add_directive(directive),
-        Err(_) => EnvFilter::from_default_env(),
+    uptrakit_service_sdk::init_tracing("uptrakit_agent=info");
+    uptrakit_service_sdk::init_crypto();
+
+    let mut handler = AgentHandler {
+        in_flight_update: None,
     };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
-
-    // Install the default crypto provider for rustls
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
-    let mut handler = AgentHandler;
-    if let Err(e) = uptrakit_service_sdk::run_service_lifecycle(&args.common, &mut handler).await {
-        if e.current_context().is_receive_closed() {
-            tracing::info!("disconnected by controller");
-        } else {
-            tracing::error!(error = %e, "agent failed");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn print_build_info() {
-    let build_info = BuildInfo::current(
+    uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent",
-        env!("CARGO_PKG_VERSION"),
-        option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
-    );
-    let output = build_info.render_human();
-    print!("{output}");
+        &args.common,
+        &mut handler,
+    )
+    .await;
 }

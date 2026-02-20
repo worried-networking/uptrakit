@@ -1,25 +1,54 @@
 //! Service lifecycle management: bootstrap, enrollment, and reconnect loop.
 //!
 //! Extracts the duplicated bootstrap → enrollment → authenticated-loop flow
-//! shared by the agent and MQTT services into a single
-//! [`run_service_lifecycle`] function. Each service implements
-//! [`ServiceHandler`] to provide its service-specific parts (enrollment info
-//! and authenticated event loop), while the SDK owns the common plumbing.
+//! shared by all services into a single [`run_service_lifecycle`] function.
+//! Each service implements [`ServiceHandler`] to provide its service-specific
+//! parts (callbacks for connection, messages, shutdown), while the SDK owns
+//! the common plumbing including the unified event loop.
 
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::ServiceType;
+use uptrakit_internal_wire::{ControllerMessage, ServiceSettingsPayload, ServiceType};
 
 use crate::Backoff;
 use crate::cli::CommonServiceArgs;
+use crate::connection::ControllerConnection;
 use crate::error::{EnrollmentError, IdentityError, ProtocolError, Result};
 use crate::identity::ServiceIdentityState;
+use crate::signal::Signal;
 
-/// Outcome of the authenticated event loop, returned by
-/// [`ServiceHandler::run_authenticated_loop`].
+/// Error type returned by event loop callbacks in [`ServiceHandler`].
+///
+/// Carries semantic flags (`cert_expired`, `receive_closed`) so the
+/// lifecycle can decide whether to re-enroll, reconnect with backoff, or
+/// propagate the error — without requiring services to construct internal
+/// SDK error types.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct LoopError {
+    /// The TLS handshake was rejected because the server considers
+    /// our client certificate expired.
+    pub cert_expired: bool,
+    /// The WebSocket connection was cleanly closed by the controller.
+    pub receive_closed: bool,
+    /// Human-readable description of the error.
+    pub message: String,
+}
+
+impl From<Report<EnrollmentError>> for LoopError {
+    fn from(e: Report<EnrollmentError>) -> Self {
+        Self {
+            cert_expired: e.current_context().is_cert_expired(),
+            receive_closed: e.current_context().is_receive_closed(),
+            message: format!("{e}"),
+        }
+    }
+}
+
+/// Outcome of the authenticated event loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoopOutcome {
     /// SIGINT/SIGTERM received — exit the lifecycle cleanly.
@@ -32,60 +61,96 @@ pub enum LoopOutcome {
     Restart,
 }
 
-/// Static configuration for a service.
-pub struct ServiceConfig {
+/// Trait that each service implements to plug into the shared lifecycle
+/// and unified event loop.
+///
+/// All async methods use `Pin<Box<dyn Future>>` to avoid higher-ranked
+/// lifetime issues that arise with `impl Future` in trait methods when the
+/// implementation captures references with complex lifetime relationships.
+pub trait ServiceHandler: Send {
     /// Directory name used for platform-specific directory resolution
     /// (e.g. `"agent"` or `"mqtt"`).
-    pub dir_name: &'static str,
+    const DIR_NAME: &'static str;
+
     /// Human-readable label for log messages (e.g. `"uptrakit-agent service"`).
-    pub service_label: &'static str,
-}
+    const SERVICE_LABEL: &'static str;
 
-/// Enrollment parameters that vary between services.
-pub struct ServiceEnrollmentInfo {
-    /// Whether this is an Agent or Mqtt service.
-    pub service_type: ServiceType,
-}
+    /// Whether this is an Agent, SshAgent, or Mqtt service.
+    const SERVICE_TYPE: ServiceType;
 
-/// Context provided by the lifecycle to the authenticated loop.
-pub struct AuthenticatedContext<'a> {
-    /// Controller hostname.
-    pub host: &'a str,
-    /// Controller port.
-    pub port: u16,
-    /// Pre-built mTLS connector for this iteration.
-    pub tls_connector: tokio_rustls::TlsConnector,
-    /// Raw CA PEM bytes, if a pinned CA is in use.
-    pub ca_pem: Option<&'a [u8]>,
-    /// The loaded identity state (certified, mutable for cert renewal / CA update).
-    pub identity: &'a mut ServiceIdentityState,
-    /// Base URL for the controller (e.g. `https://host:8443`).
-    pub base_url: &'a str,
-    /// Optional PKI address.
-    pub pki_addr: Option<&'a str>,
-}
-
-/// Trait that each service implements to plug into the shared lifecycle.
-///
-/// Uses a boxed future for [`run_authenticated_loop`](ServiceHandler::run_authenticated_loop)
-/// to avoid higher-ranked lifetime issues that arise with `impl Future` in
-/// trait methods when the implementation captures references with complex
-/// lifetime relationships (e.g. `stream::iter` + `buffer_unordered` patterns).
-pub trait ServiceHandler {
-    /// Return static configuration for this service.
-    fn config(&self) -> ServiceConfig;
-
-    /// Return enrollment-time parameters (service type).
-    fn enrollment_info(&self) -> ServiceEnrollmentInfo;
-
-    /// Run the authenticated event loop until a [`LoopOutcome`] is reached.
+    /// Service-specific event type from [`poll_service_event`](Self::poll_service_event).
     ///
-    /// The lifecycle rebuilds the mTLS connector on each reconnect iteration
-    /// (certificates may have rotated), so `ctx.tls_connector` is always fresh.
-    fn run_authenticated_loop<'a>(
+    /// Use [`std::convert::Infallible`] for services with no custom select arms.
+    type ServiceEvent: Send;
+
+    /// Called after the WebSocket connection is established.
+    ///
+    /// Send initial messages (e.g. `ReportHosts`, `Register`) here.
+    fn on_connected<'a>(
         &'a mut self,
-        ctx: AuthenticatedContext<'a>,
-    ) -> Pin<Box<dyn Future<Output = Result<LoopOutcome>> + Send + 'a>>;
+        conn: &'a mut ControllerConnection,
+        identity: &'a ServiceIdentityState,
+    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>>;
+
+    /// Handle a [`ControllerMessage`] not handled by the SDK.
+    ///
+    /// The SDK handles: `Pong`, `Certificate`, `ServiceSettings`,
+    /// `CaBundleUpdated`, `RequestCertRenewal`, `ServerRestarting`.
+    /// Everything else is delegated to this callback.
+    ///
+    /// Return `Ok(Some(outcome))` to break the loop, `Ok(None)` to continue.
+    fn on_message<'a>(
+        &'a mut self,
+        msg: ControllerMessage,
+        conn: &'a mut ControllerConnection,
+    ) -> Pin<
+        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
+    >;
+
+    /// Called after the SDK processes shared `ServiceSettings` fields.
+    ///
+    /// The SDK already handles protocol version check, renewal schedule,
+    /// shutdown timeout, and CA staleness. Override this for additional
+    /// service-specific settings processing.
+    fn on_settings<'a>(
+        &'a mut self,
+        _settings: &'a ServiceSettingsPayload,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
+
+    /// Poll for service-specific events (additional `select!` arm).
+    ///
+    /// Return [`std::future::pending()`] if the service has no custom events.
+    /// The returned future is dropped when another `select!` arm fires,
+    /// releasing the `&mut self` borrow.
+    fn poll_service_event(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>>;
+
+    /// Handle a resolved service event.
+    ///
+    /// Return `Ok(Some(outcome))` to break the loop, `Ok(None)` to continue.
+    fn on_service_event<'a>(
+        &'a mut self,
+        event: Self::ServiceEvent,
+        conn: &'a mut ControllerConnection,
+    ) -> Pin<
+        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
+    >;
+
+    /// Graceful shutdown: send `Disconnecting` and drain in-flight work.
+    fn on_shutdown<'a>(
+        &'a mut self,
+        conn: &'a mut ControllerConnection,
+        signal: Signal,
+        shutdown_timeout_seconds: u32,
+    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>>;
+
+    /// Ping interval. Default 300s. Override for configurable values.
+    fn ping_interval(&self) -> Duration {
+        Duration::from_secs(300)
+    }
 }
 
 /// Run the full service lifecycle: directory setup → identity load →
@@ -93,12 +158,11 @@ pub trait ServiceHandler {
 ///
 /// This is the single entry point that replaces the per-service `run()`
 /// functions in agent and MQTT.
-pub async fn run_service_lifecycle(
+pub async fn run_service_lifecycle<H: ServiceHandler>(
     args: &CommonServiceArgs,
-    handler: &mut impl ServiceHandler,
+    handler: &mut H,
 ) -> Result<()> {
-    let config = handler.config();
-    tracing::info!("starting {}", config.service_label);
+    tracing::info!("starting {}", H::SERVICE_LABEL);
 
     // Parse URL early.
     let (host, port) = args
@@ -108,7 +172,7 @@ pub async fn run_service_lifecycle(
     let pki_addr = args.pki_addr();
 
     // Resolve application directories.
-    let app_dirs = args.resolve_dirs(config.dir_name).map_err(|e| {
+    let app_dirs = args.resolve_dirs(H::DIR_NAME).map_err(|e| {
         report!(EnrollmentError::Protocol(ProtocolError::Init(
             e.to_string()
         )))
@@ -218,13 +282,13 @@ pub async fn run_service_lifecycle(
 }
 
 /// Run enrollment using the shared enrollment module.
-async fn do_enrollment(
+async fn do_enrollment<H: ServiceHandler>(
     args: &CommonServiceArgs,
     host: &str,
     port: u16,
     identity: &mut ServiceIdentityState,
     tls_connector: &tokio_rustls::TlsConnector,
-    handler: &mut impl ServiceHandler,
+    _handler: &mut H,
 ) -> Result<()> {
     if identity.is_enrolled_only() {
         // Resume: reconnect with Bearer header (existing service.json).
@@ -234,7 +298,6 @@ async fn do_enrollment(
         // Fresh enrollment.
         let hostname = args.hostname();
         let friendly_name = args.friendly_name_or_hostname();
-        let enrollment_info = handler.enrollment_info();
 
         tracing::info!("enrolling via WebSocket");
         crate::ws::run_enrollment(crate::ws::EnrollmentParams {
@@ -245,7 +308,7 @@ async fn do_enrollment(
             hostname: &hostname,
             friendly_name: &friendly_name,
             enrollment_token: args.enrollment_token.as_deref(),
-            service_type: enrollment_info.service_type,
+            service_type: H::SERVICE_TYPE,
         })
         .await?;
     }
@@ -281,17 +344,28 @@ async fn run_authenticated_with_reconnect(
             }
         };
 
-        let ctx = AuthenticatedContext {
-            host,
-            port,
-            tls_connector: mtls_connector,
-            ca_pem,
-            identity,
+        let ctx = crate::event_loop::EventLoopContext {
             base_url,
             pki_addr,
+            ca_pem,
         };
 
-        match handler.run_authenticated_loop(ctx).await? {
+        match crate::event_loop::run_event_loop(
+            handler, host, port, &mtls_connector, identity, &ctx,
+        )
+        .await
+        .map_err(|e| {
+            let sdk_err = if e.cert_expired {
+                EnrollmentError::Tls(crate::error::TlsError::Rustls(
+                    rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
+                ))
+            } else if e.receive_closed {
+                EnrollmentError::Protocol(ProtocolError::ReceiveClosed)
+            } else {
+                EnrollmentError::Protocol(ProtocolError::Enrollment(e.message))
+            };
+            report!(sdk_err)
+        })? {
             LoopOutcome::Shutdown => return Ok(()),
             LoopOutcome::Reconnect => {
                 reconnect_backoff.reset();

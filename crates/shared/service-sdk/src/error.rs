@@ -130,24 +130,6 @@ impl EnrollmentError {
         }
     }
 
-    /// Build an `EnrollmentError` from an agent-level error that already has
-    /// semantic flags for cert-expired and receive-closed conditions.
-    ///
-    /// This avoids manually constructing fake `EnrollmentError` variants in
-    /// agent binaries. The lifecycle only inspects `is_cert_expired()` and
-    /// `is_receive_closed()` on the returned error, so this preserves the
-    /// correct semantics without fabricating internal error types.
-    pub fn from_agent_error(cert_expired: bool, receive_closed: bool, msg: String) -> Self {
-        if cert_expired {
-            Self::Tls(TlsError::Rustls(rustls::Error::AlertReceived(
-                rustls::AlertDescription::CertificateExpired,
-            )))
-        } else if receive_closed {
-            Self::Protocol(ProtocolError::ReceiveClosed)
-        } else {
-            Self::Protocol(ProtocolError::Enrollment(msg))
-        }
-    }
 }
 
 // ── ReportConversion impls ───────────────────────────────────────────
@@ -236,27 +218,4 @@ mod tests {
         assert!(!is_rustls_cert_expired(&io_err));
     }
 
-    #[test]
-    fn from_agent_error_cert_expired() {
-        let err = EnrollmentError::from_agent_error(true, false, "some message".to_string());
-        assert!(err.is_cert_expired());
-        assert!(!err.is_receive_closed());
-    }
-
-    #[test]
-    fn from_agent_error_receive_closed() {
-        let err = EnrollmentError::from_agent_error(false, true, "some message".to_string());
-        assert!(!err.is_cert_expired());
-        assert!(err.is_receive_closed());
-    }
-
-    #[test]
-    fn from_agent_error_generic() {
-        let err = EnrollmentError::from_agent_error(false, false, "connection failed".to_string());
-        assert!(!err.is_cert_expired());
-        assert!(!err.is_receive_closed());
-        assert!(
-            matches!(&err, EnrollmentError::Protocol(ProtocolError::Enrollment(msg)) if msg == "connection failed")
-        );
-    }
 }

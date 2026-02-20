@@ -21,7 +21,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "fs"] }
+tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "fs", "signal", "macros"] }
 tokio-rustls = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
@@ -30,6 +30,8 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 sha2 = { workspace = true }
 webpki-roots = { workspace = true }
 x509-parser = { workspace = true }
+tracing-subscriber = { workspace = true }
+uptrakit-build-info = { path = "../build-info" }
 uptrakit-directories = { path = "../directories" }
 uptrakit-internal-wire = { path = "../wire" }
 uptrakit-shared-types = { workspace = true }
