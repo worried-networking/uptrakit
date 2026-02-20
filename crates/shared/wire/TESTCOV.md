@@ -1,12 +1,12 @@
 # Test Coverage: uptrakit-internal-wire
 
-> Generated: 2026-02-19 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
+> Generated: 2026-02-20 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
 
 ## Summary
 
 | Metric | Value |
 | -------- | ------- |
-| Line coverage | 98.9% (1,301 / 1,316) |
+| Line coverage | 98.8% (1,301 / 1,316) |
 | Function coverage | 98.4% (124 / 126) |
 | Test count | 107 |
 

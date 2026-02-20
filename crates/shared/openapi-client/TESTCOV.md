@@ -1,13 +1,13 @@
 # Test Coverage: uptrakit-openapi-client
 
-> Generated: 2026-02-19 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
+> Generated: 2026-02-20 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
 
 ## Summary
 
 | Metric | Value |
 | -------- | ------- |
-| Line coverage | 44.9% (592 / 1,318) |
-| Function coverage | 27.2% (72 / 265) |
+| Line coverage | 42.7% (592 / 1,386) |
+| Function coverage | 26.3% (72 / 274) |
 | Test count | 59 |
 
 ## Coverage by Module
@@ -25,8 +25,8 @@
 | software_items.rs | 47.0% | 63/134 | 20.0% | 5/25 |
 | scheduler.rs | 45.2% | 19/42 | 20.0% | 2/10 |
 | settings.rs | 41.4% | 41/99 | 15.4% | 4/26 |
-| lib.rs | 33.2% | 131/395 | 41.7% | 25/60 |
 | api_tokens.rs | 30.4% | 7/23 | 14.3% | 1/7 |
+| lib.rs | 28.3% | 131/463 | 36.2% | 25/69 |
 | health.rs | 0.0% | 0/4 | 0.0% | 0/2 |
 | pki.rs | 0.0% | 0/8 | 0.0% | 0/4 |
 | system_alerts.rs | 0.0% | 0/4 | 0.0% | 0/2 |
@@ -35,8 +35,8 @@
 
 ### Tier 3 — Supporting
 
-- **Client core** (`lib.rs`, 33.2% coverage, 395 lines): HTTP client construction, token management, request building, and
-  response parsing. 264 uncovered lines include error handling for HTTP failures, token refresh logic, and TLS configuration.
+- **Client core** (`lib.rs`, 28.3% coverage, 463 lines): HTTP client construction, token management, request building, and
+  response parsing. 332 uncovered lines include error handling for HTTP failures, token refresh logic, and TLS configuration.
   Risk: client failures could prevent CLI and other consumers from communicating with the controller.
 - **PKI endpoints** (`pki.rs`, 0% coverage, 8 lines): CA certificate download client methods. Risk: untested PKI client could
   fail during TOFU bootstrap.

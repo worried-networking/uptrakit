@@ -1,30 +1,36 @@
 # Test Coverage: uptrakit-command
 
-> Generated: 2026-02-19 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
+> Generated: 2026-02-20 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
 
 ## Summary
 
 | Metric | Value |
 | -------- | ------- |
-| Line coverage | 92.2% (463 / 502) |
-| Function coverage | 93.0% (80 / 86) |
-| Test count | 37 |
+| Line coverage | 67.2% (531 / 790) |
+| Function coverage | 70.6% (89 / 126) |
+| Test count | 40 |
 
 ## Coverage by Module
 
 | File | Line % | Lines | Function % | Functions |
 | ------ | -------- | ------- | ------------ | ----------- |
-| executor.rs | 100.0% | 130/130 | 100.0% | 22/22 |
-| types.rs | 100.0% | 8/8 | 100.0% | 2/2 |
-| command.rs | 89.3% | 325/364 | 90.3% | 56/62 |
+| executor.rs | 75.1% | 130/173 | 75.9% | 22/29 |
+| command.rs | 65.0% | 401/617 | 69.1% | 67/97 |
+| types.rs | — | — | — | — |
+
+> **Note:** Previous report showed 92.2% (463/502) totals because 0%-coverage entries from other
+> compilation units were excluded. The actual measured codebase is larger than previously reported.
+> types.rs was not measured in this run.
 
 ## Uncovered Critical Paths
 
 ### Tier 2 — Business-Logic
 
-- **Command execution edge cases** (`command.rs`): Remaining uncovered lines include the 10 MB output truncation path
-  (requires generating >10 MB output), signal propagation, and the task-join failure fallback messages. Working directory
-  errors and spawn failures are now tested.
+- **command.rs remaining gaps (65.0%)**: Output truncation at the 10 MB limit, signal propagation,
+  task-join failure fallback, and some streaming output paths via mpsc channels remain uncovered.
+  New tests added for working directory errors, stderr capture, and nonexistent program handling.
+- **executor.rs remaining gaps (75.1%)**: Some executor paths are not yet exercised by the test
+  suite.
 
 ## Test Recommendations
 
@@ -32,3 +38,6 @@
    (Tier 2). Use `yes | head -c 11000000` or similar.
 2. **Signal propagation tests** — Test that child processes receive SIGTERM on cancellation. Covers `command.rs` gaps (Tier 2).
    Use a command that traps signals.
+3. **Streaming output paths** — Exercise the mpsc-channel-based streaming output collection to cover remaining `command.rs`
+   branches.
+4. **Executor edge cases** — Add tests targeting the uncovered executor.rs paths to improve coverage from 75.1%.

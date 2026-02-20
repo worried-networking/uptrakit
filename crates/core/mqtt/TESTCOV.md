@@ -1,22 +1,22 @@
 # Test Coverage: uptrakit-mqtt
 
-> Generated: 2026-02-19 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
+> Generated: 2026-02-20 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
 
 ## Summary
 
 | Metric | Value |
 | -------- | ------- |
-| Line coverage | 48.8% (394 / 808) |
-| Function coverage | 45.6% (36 / 79) |
-| Test count | 21 |
+| Line coverage | 56.9% (506 / 890) |
+| Function coverage | 62.6% (57 / 91) |
+| Test count | 29 |
 
 ## Coverage by Module
 
 | File | Line % | Lines | Function % | Functions |
 | ------ | -------- | ------- | ------------ | ----------- |
 | cli.rs | 100.0% | 99/99 | 100.0% | 8/8 |
-| mqtt_client.rs | 61.4% | 167/272 | 66.7% | 20/30 |
-| tenant_manager.rs | 60.1% | 128/213 | 34.8% | 8/23 |
+| tenant_manager.rs | 81.5% | 243/298 | 82.9% | 29/35 |
+| mqtt_client.rs | 61.0% | 164/269 | 66.7% | 20/30 |
 | main.rs | 0.0% | 0/224 | 0.0% | 0/18 |
 
 ## Uncovered Critical Paths
@@ -25,11 +25,11 @@
 
 - **Service main loop** (`main.rs`, 0% coverage, 224 lines): MQTT service startup, controller connection, tenant assignment
   receipt, MQTT broker connection, and graceful shutdown. Risk: main loop bugs could prevent the MQTT service from functioning.
-- **Tenant manager gaps** (`tenant_manager.rs`): Remaining uncovered lines are in `start_or_update_client` which requires
-  a real MQTT broker connection. Config hashing, assignment routing, and lifecycle management are now tested.
-- **MQTT client** (`mqtt_client.rs`, 61.4% coverage, 272 lines): 105 uncovered lines include MQTT message publishing,
-  subscription management, connection error recovery, and reconnection with credential refresh. Risk: client bugs could cause
-  stale or missing MQTT state.
+- **MQTT client remaining gaps** (`mqtt_client.rs`, 61% coverage, 269 lines): 105 uncovered lines include MQTT message
+  publishing, reconnection with credential refresh, and subscription management. Risk: client bugs could cause stale or missing
+  MQTT state.
+- **Tenant manager remaining gaps** (`tenant_manager.rs`, 81.5% coverage): `start_or_update_client` requires a real MQTT broker
+  connection. Config parsing, lifecycle management, and assignment routing are now tested.
 
 ## Test Recommendations
 

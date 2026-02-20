@@ -1,26 +1,26 @@
 # Test Coverage: uptrakit-provider-registry
 
-> Generated: 2026-02-19 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
+> Generated: 2026-02-20 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
 
 ## Summary
 
 | Metric | Value |
 | -------- | ------- |
-| Line coverage | 96.3% (335 / 348) |
-| Function coverage | 95.2% (40 / 42) |
-| Test count | 27 |
+| Line coverage | 91.7% (319 / 348) |
+| Function coverage | 90.5% (38 / 42) |
+| Test count | 28 |
 
 ## Coverage by Module
 
 | File | Line % | Lines | Function % | Functions |
 | ------ | -------- | ------- | ------------ | ----------- |
-| registry.rs | 96.3% | 335/348 | 95.2% | 40/42 |
+| registry.rs | 91.7% | 319/348 | 90.5% | 38/42 |
 
 ## Uncovered Critical Paths
 
 ### Tier 2 — Business-Logic
 
-- **Provider dispatch edge cases** (`registry.rs`, 96.3% coverage): 13 uncovered lines include error handling for unknown
+- **Provider dispatch edge cases** (`registry.rs`, 91.7% coverage): 29 uncovered lines include error handling for unknown
   provider types and concurrent provider creation. Risk: registry lookup failures for edge-case provider configurations.
 
 ## Test Recommendations

@@ -1,14 +1,14 @@
 # Test Coverage: uptrakit-agent
 
-> Generated: 2026-02-19 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
+> Generated: 2026-02-20 | Tool: cargo-llvm-cov 0.8.4 | Rust: 1.93.1
 
 ## Summary
 
 | Metric | Value |
 | -------- | ------- |
-| Line coverage | 57.4% (686 / 1,196) |
-| Function coverage | 78.0% (78 / 100) |
-| Test count | 38 |
+| Line coverage | 59.2% (736 / 1,243) |
+| Function coverage | 79.8% (87 / 109) |
+| Test count | 42 |
 
 ## Coverage by Module
 
@@ -17,20 +17,20 @@
 | cli.rs | 100.0% | 139/139 | 100.0% | 14/14 |
 | error.rs | 100.0% | 53/53 | 100.0% | 9/9 |
 | version_check.rs | 93.9% | 108/115 | 92.9% | 13/14 |
-| update.rs | 77.2% | 301/390 | 93.9% | 31/33 |
+| update.rs | 77.8% | 301/387 | 93.9% | 31/33 |
 | host_info.rs | 76.8% | 53/69 | 100.0% | 5/5 |
-| client.rs | 9.1% | 32/351 | 33.3% | 6/18 |
+| client.rs | 20.4% | 82/401 | 55.6% | 15/27 |
 | main.rs | 0.0% | 0/79 | 0.0% | 0/7 |
 
 ## Uncovered Critical Paths
 
 ### Tier 2 — Business-Logic
 
-- **Client lifecycle** (`client.rs`, 351 lines): Authenticated WebSocket loop, message dispatching (version check requests,
+- **Client lifecycle** (`client.rs`, 401 lines): Authenticated WebSocket loop, message dispatching (version check requests,
   update execution commands, settings sync), reconnection logic, and graceful shutdown. The `compute_local_ca_hash` helper is
   now well-tested (6 tests), but the main WebSocket loop and message dispatch remain uncovered. Risk: client bugs could cause
   the agent to silently stop responding to controller commands.
-- **Update execution gaps** (`update.rs`, 77.2% coverage, 390 lines): 89 uncovered lines include update hook execution
+- **Update execution gaps** (`update.rs`, 77.8% coverage, 387 lines): 86 uncovered lines include update hook execution
   (pre/post hooks), provider-specific update dispatch, output streaming, and error status reporting. Risk: update failures could
   leave software in an inconsistent state.
 - **Host info collection gaps** (`host_info.rs`, 76.8% coverage): 16 uncovered lines in OS-specific detection edge cases.
