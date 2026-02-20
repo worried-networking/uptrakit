@@ -17,7 +17,8 @@ use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, ServiceMessage, ServiceType,
 };
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, ServiceHandler, ServiceIdentityState, Signal,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
+    ServiceIdentityState, Signal,
 };
 
 use cli::{Args, Commands};
@@ -57,12 +58,12 @@ impl ServiceHandler for SshAgentHandler {
         &mut self,
         conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
-    ) -> std::result::Result<(), LoopError> {
+    ) -> LoopResult<()> {
         // Open (or create) the local SSH host database.
-        let local_db = crate::db::init_db(&self.state_dir).await.map_err(|e| LoopError {
-            cert_expired: false,
-            receive_closed: false,
-            message: format!("failed to initialize local database: {e}"),
+        let local_db = crate::db::init_db(&self.state_dir).await.map_err(|e| {
+            report!(LoopError::Other(format!(
+                "failed to initialize local database: {e}"
+            )))
         })?;
         tracing::debug!("local SSH host database initialized");
 
@@ -77,7 +78,7 @@ impl ServiceHandler for SshAgentHandler {
         &mut self,
         _msg: ControllerMessage,
         _conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         tracing::debug!("ignoring unrecognized message in authenticated loop");
         Ok(None)
     }
@@ -90,7 +91,7 @@ impl ServiceHandler for SshAgentHandler {
         &mut self,
         event: Self::ServiceEvent,
         _conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         match event {}
     }
 

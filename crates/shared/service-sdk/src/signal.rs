@@ -101,13 +101,9 @@ mod tests {
         assert_ne!(Signal::Interrupt, Signal::Terminate);
     }
 
-    #[test]
-    fn signal_watcher_new() {
-        // Needs a tokio runtime for signal registration
-        let rt = tokio::runtime::Runtime::new().expect("runtime");
-        rt.block_on(async {
-            let watcher = SignalWatcher::new();
-            assert!(watcher.is_ok());
-        });
+    #[tokio::test]
+    async fn signal_watcher_new() {
+        let watcher = SignalWatcher::new();
+        assert!(watcher.is_ok());
     }
 }

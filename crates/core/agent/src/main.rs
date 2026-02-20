@@ -9,8 +9,10 @@ use clap::Parser;
 use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
 };
+use rootcause::prelude::*;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, ServiceHandler, ServiceIdentityState, Signal,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
+    ServiceIdentityState, Signal,
 };
 
 use cli::Args;
@@ -31,7 +33,7 @@ impl ServiceHandler for AgentHandler {
         &mut self,
         conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
-    ) -> std::result::Result<(), LoopError> {
+    ) -> LoopResult<()> {
         let host_info = crate::host_info::collect_host_info();
         conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
             hosts: vec![host_info],
@@ -39,7 +41,7 @@ impl ServiceHandler for AgentHandler {
             protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
         }))
         .await
-        .map_err(LoopError::from)?;
+        .context_to::<LoopError>()?;
         tracing::debug!(
             "sent ReportHosts with agent_version={}",
             env!("CARGO_PKG_VERSION")
@@ -51,7 +53,7 @@ impl ServiceHandler for AgentHandler {
         &mut self,
         msg: ControllerMessage,
         conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         match msg {
             ControllerMessage::CheckVersions(payload) => {
                 Ok(client::handle_check_versions(payload, conn).await)
@@ -87,7 +89,7 @@ impl ServiceHandler for AgentHandler {
         &mut self,
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         let Some(ref update) = self.in_flight_update else {
             tracing::error!("received update event but no in-flight update exists");
             return Ok(None);

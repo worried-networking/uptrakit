@@ -24,13 +24,13 @@ pub trait ServiceHandler: Send {
         &mut self,
         conn: &mut ControllerConnection,
         identity: &ServiceIdentityState,
-    ) -> Result<(), LoopError>;
+    ) -> LoopResult<()>;
 
     async fn on_message(
         &mut self,
         msg: ControllerMessage,
         conn: &mut ControllerConnection,
-    ) -> Result<Option<LoopOutcome>, LoopError>;
+    ) -> LoopResult<Option<LoopOutcome>>;
 
     async fn on_settings(&mut self, _settings: &ServiceSettingsPayload) {}
 
@@ -40,7 +40,7 @@ pub trait ServiceHandler: Send {
         &mut self,
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
-    ) -> Result<Option<LoopOutcome>, LoopError>;
+    ) -> LoopResult<Option<LoopOutcome>>;
 
     async fn on_shutdown(
         &mut self,
@@ -116,8 +116,17 @@ Override to change the keepalive ping interval. Default is 300 seconds. The MQTT
 
 ### `LoopError`
 
-Callbacks return `Result<_, LoopError>`. `LoopError` carries semantic flags (`cert_expired`, `receive_closed`) so the lifecycle can decide whether to
-re-enroll, reconnect with backoff, or propagate the error. A `From<Report<EnrollmentError>>` impl enables using `?` on SDK connection operations.
+`LoopError` is a `thiserror`-backed enum with three variants:
+
+| Variant | Meaning | SDK behavior |
+| --- | --- | --- |
+| `CertExpired` | TLS handshake rejected (certificate expired) | Re-enroll |
+| `ReceiveClosed` | WebSocket cleanly closed by controller | Reconnect with backoff |
+| `Other(String)` | Any other event-loop error | Propagate |
+
+Callbacks return `LoopResult<T>` (alias for `Result<T, Report<LoopError>>`), following the project-wide
+`Report<T>` convention. An `impl_report_conversion!(EnrollmentError => LoopError, ...)` closure-based
+conversion enables `.context_to::<LoopError>()?` on SDK connection operations inside callbacks.
 
 ### Why `#[async_trait]`
 
@@ -190,7 +199,7 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 use async_trait::async_trait;
 use uptrakit_internal_wire::{ControllerMessage, ServiceType};
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, ServiceHandler,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
     ServiceIdentityState, Signal,
 };
 
@@ -208,7 +217,7 @@ impl ServiceHandler for MyHandler {
         &mut self,
         _conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
-    ) -> Result<(), LoopError> {
+    ) -> LoopResult<()> {
         Ok(())
     }
 
@@ -216,7 +225,7 @@ impl ServiceHandler for MyHandler {
         &mut self,
         _msg: ControllerMessage,
         _conn: &mut ControllerConnection,
-    ) -> Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         Ok(None)
     }
 
@@ -228,7 +237,7 @@ impl ServiceHandler for MyHandler {
         &mut self,
         event: Self::ServiceEvent,
         _conn: &mut ControllerConnection,
-    ) -> Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         match event {} // Infallible
     }
 
@@ -301,14 +310,15 @@ it takes the pending key, persists both the certificate and the key via `identit
 
 ## Error handling at the trait boundary
 
-The lifecycle works with `Report<EnrollmentError>`. Service callbacks return `Result<_, LoopError>`. The `LoopError` type bridges the gap with semantic
-flags:
+The lifecycle works with `Report<EnrollmentError>`. Service callbacks return `LoopResult<T>` (i.e.
+`Result<T, Report<LoopError>>`). `LoopError` is a `thiserror` enum with three variants (`CertExpired`,
+`ReceiveClosed`, `Other`), and a closure-based `impl_report_conversion!` maps `EnrollmentError` to the
+appropriate variant. This enables services to use `.context_to::<LoopError>()?` on SDK connection
+operations (e.g. `conn.send(msg).await.context_to::<LoopError>()?`).
 
-- `cert_expired` — triggers enrollment fallback.
-- `receive_closed` — triggers reconnect with backoff.
-
-A `From<Report<EnrollmentError>>` impl on `LoopError` automatically extracts these flags from the SDK's error type, enabling services to use `?` on
-SDK connection operations (e.g. `conn.send(msg).await.map_err(LoopError::from)?`).
+When the event loop returns to the lifecycle, the lifecycle uses `.context_transform()` to map
+`LoopError` variants back to `EnrollmentError` for semantic decision-making (re-enroll on
+`CertExpired`, reconnect with backoff on `ReceiveClosed`, propagate on `Other`).
 
 ### `EnrollmentError` sub-enum structure
 

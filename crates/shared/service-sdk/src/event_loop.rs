@@ -14,12 +14,14 @@ use uptrakit_internal_wire::{
     now_millis,
 };
 
+use rootcause::prelude::*;
+
 use crate::cert_handler::{
     CertificateRenewalHandler, create_renewal_sleep, update_renewal_schedule,
 };
 use crate::connection::ControllerConnection;
 use crate::identity::ServiceIdentityState;
-use crate::lifecycle::{LoopError, LoopOutcome, ServiceHandler};
+use crate::lifecycle::{LoopError, LoopOutcome, LoopResult, ServiceHandler};
 use crate::signal::SignalWatcher;
 
 /// Context for the event loop, providing connection metadata that callbacks
@@ -54,7 +56,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     tls_connector: &tokio_rustls::TlsConnector,
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
-) -> std::result::Result<LoopOutcome, LoopError> {
+) -> LoopResult<LoopOutcome> {
     const DEFAULT_SHUTDOWN_TIMEOUT: u32 = 120;
 
     let cert_not_after_ts = identity.cert_not_after_ms();
@@ -64,16 +66,16 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     tracing::info!("connecting to controller (authenticated)");
     let mut conn = ControllerConnection::connect(host, port, tls_connector, None)
         .await
-        .map_err(LoopError::from)?;
+        .context_to::<LoopError>()?;
 
     // Let the service handle post-connect initialization.
     handler.on_connected(&mut conn, identity).await?;
 
     // Signal handler.
-    let mut signals = SignalWatcher::new().map_err(|e| LoopError {
-        cert_expired: false,
-        receive_closed: false,
-        message: format!("failed to register signal handlers: {e}"),
+    let mut signals = SignalWatcher::new().map_err(|e| {
+        report!(LoopError::Other(format!(
+            "failed to register signal handlers: {e}"
+        )))
     })?;
 
     // Ping timer — first tick fires immediately (skipped), then at the
@@ -106,7 +108,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                 tracing::trace!(service_ts, "sending ping");
                 conn.send(ServiceMessage::Ping(PingPayload { service_ts }))
                     .await
-                    .map_err(LoopError::from)?;
+                    .context_to::<LoopError>()?;
             }
 
             // 3. Certificate renewal timer.
@@ -120,7 +122,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
 
             // 4. Controller messages.
             msg = conn.recv() => {
-                match msg.map_err(LoopError::from)? {
+                match msg.context_to::<LoopError>()? {
                     Some(ControllerMessage::Pong(pong)) => {
                         let rtt = now_millis() - pong.service_ts;
                         tracing::trace!(
@@ -134,7 +136,7 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                         break cert_handler
                             .handle_certificate(identity, &payload)
                             .await
-                            .map_err(LoopError::from)?;
+                            .context_to::<LoopError>()?;
                     }
                     Some(ControllerMessage::ServiceSettings(settings)) => {
                         handle_service_settings(

@@ -12,6 +12,7 @@ use async_trait::async_trait;
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{ControllerMessage, ServiceSettingsPayload, ServiceType};
+use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::Backoff;
 use crate::cli::CommonServiceArgs;
@@ -22,31 +23,34 @@ use crate::signal::Signal;
 
 /// Error type returned by event loop callbacks in [`ServiceHandler`].
 ///
-/// Carries semantic flags (`cert_expired`, `receive_closed`) so the
-/// lifecycle can decide whether to re-enroll, reconnect with backoff, or
-/// propagate the error — without requiring services to construct internal
-/// SDK error types.
+/// Each variant carries the semantic meaning needed by the lifecycle to
+/// decide whether to re-enroll, reconnect with backoff, or propagate —
+/// without requiring services to construct internal SDK error types.
 #[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct LoopError {
-    /// The TLS handshake was rejected because the server considers
-    /// our client certificate expired.
-    pub cert_expired: bool,
-    /// The WebSocket connection was cleanly closed by the controller.
-    pub receive_closed: bool,
-    /// Human-readable description of the error.
-    pub message: String,
+pub enum LoopError {
+    /// TLS handshake rejected: server considers our client certificate expired.
+    #[error("certificate expired")]
+    CertExpired,
+    /// WebSocket connection cleanly closed by the controller.
+    #[error("connection closed by controller")]
+    ReceiveClosed,
+    /// Other error during the event loop.
+    #[error("{0}")]
+    Other(String),
 }
 
-impl From<Report<EnrollmentError>> for LoopError {
-    fn from(e: Report<EnrollmentError>) -> Self {
-        Self {
-            cert_expired: e.current_context().is_cert_expired(),
-            receive_closed: e.current_context().is_receive_closed(),
-            message: format!("{e}"),
-        }
+/// Result alias for [`ServiceHandler`] callbacks and the event loop.
+pub type LoopResult<T> = std::result::Result<T, Report<LoopError>>;
+
+impl_report_conversion!(EnrollmentError => LoopError, |e| {
+    if e.is_cert_expired() {
+        LoopError::CertExpired
+    } else if e.is_receive_closed() {
+        LoopError::ReceiveClosed
+    } else {
+        LoopError::Other(e.to_string())
     }
-}
+});
 
 /// Outcome of the authenticated event loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +95,7 @@ pub trait ServiceHandler: Send {
         &mut self,
         conn: &mut ControllerConnection,
         identity: &ServiceIdentityState,
-    ) -> std::result::Result<(), LoopError>;
+    ) -> LoopResult<()>;
 
     /// Handle a [`ControllerMessage`] not handled by the SDK.
     ///
@@ -104,7 +108,7 @@ pub trait ServiceHandler: Send {
         &mut self,
         msg: ControllerMessage,
         conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError>;
+    ) -> LoopResult<Option<LoopOutcome>>;
 
     /// Called after the SDK processes shared `ServiceSettings` fields.
     ///
@@ -127,7 +131,7 @@ pub trait ServiceHandler: Send {
         &mut self,
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError>;
+    ) -> LoopResult<Option<LoopOutcome>>;
 
     /// Graceful shutdown: send `Disconnecting` and drain in-flight work.
     async fn on_shutdown(
@@ -344,17 +348,12 @@ async fn run_authenticated_with_reconnect(
             handler, host, port, &mtls_connector, identity, &ctx,
         )
         .await
-        .map_err(|e| {
-            let sdk_err = if e.cert_expired {
-                EnrollmentError::Tls(crate::error::TlsError::Rustls(
-                    rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
-                ))
-            } else if e.receive_closed {
-                EnrollmentError::Protocol(ProtocolError::ReceiveClosed)
-            } else {
-                EnrollmentError::Protocol(ProtocolError::Enrollment(e.message))
-            };
-            report!(sdk_err)
+        .context_transform(|e: LoopError| match e {
+            LoopError::CertExpired => EnrollmentError::Tls(crate::error::TlsError::Rustls(
+                rustls::Error::AlertReceived(rustls::AlertDescription::CertificateExpired),
+            )),
+            LoopError::ReceiveClosed => EnrollmentError::Protocol(ProtocolError::ReceiveClosed),
+            LoopError::Other(msg) => EnrollmentError::Protocol(ProtocolError::Enrollment(msg)),
         })? {
             LoopOutcome::Shutdown => return Ok(()),
             LoopOutcome::Reconnect => {

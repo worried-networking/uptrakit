@@ -175,6 +175,17 @@ impl_report_conversion! {
 
 // Closure-based for errors that don't map directly (e.g. Box wrapping):
 impl_report_conversion!(tungstenite::Error => MyError, |e| MyError::WebSocket(Box::new(e)));
+
+// Closure-based with conditional mapping (inspects source variant to choose target variant):
+impl_report_conversion!(EnrollmentError => LoopError, |e| {
+    if e.is_cert_expired() {
+        LoopError::CertExpired
+    } else if e.is_receive_closed() {
+        LoopError::ReceiveClosed
+    } else {
+        LoopError::Other(e.to_string())
+    }
+});
 ```
 
 Each macro invocation expands to a full `impl<T> ReportConversion<Source, markers::Mutable, T> for Target` block with

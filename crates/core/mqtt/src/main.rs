@@ -9,8 +9,10 @@ use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
     MqttRegisterPayload, ServiceMessage, ServiceType,
 };
+use rootcause::prelude::*;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, ServiceHandler, ServiceIdentityState, Signal,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
+    ServiceIdentityState, Signal,
 };
 
 use crate::tenant_manager::TenantManager;
@@ -35,7 +37,7 @@ impl ServiceHandler for MqttHandler {
         &mut self,
         conn: &mut ControllerConnection,
         _identity: &ServiceIdentityState,
-    ) -> std::result::Result<(), LoopError> {
+    ) -> LoopResult<()> {
         conn.send(ServiceMessage::Register(MqttRegisterPayload {
             instance_id: self.instance_id.clone(),
             max_tenants: self.max_tenants,
@@ -43,7 +45,7 @@ impl ServiceHandler for MqttHandler {
             protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
         }))
         .await
-        .map_err(LoopError::from)?;
+        .context_to::<LoopError>()?;
         Ok(())
     }
 
@@ -51,7 +53,7 @@ impl ServiceHandler for MqttHandler {
         &mut self,
         msg: ControllerMessage,
         _conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         match msg {
             ControllerMessage::Registered(payload) => {
                 tracing::info!(instance_id = %payload.instance_id, "registered with controller");
@@ -87,7 +89,7 @@ impl ServiceHandler for MqttHandler {
         &mut self,
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
-    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+    ) -> LoopResult<Option<LoopOutcome>> {
         match event {
             Some(status) => {
                 conn.send_best_effort(ServiceMessage::MqttClientStatus(
