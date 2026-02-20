@@ -1,7 +1,8 @@
 # Secure Development
 
-Developers must consult [docs/development/coding-standards.md](../development/coding-standards.md) for error handling, panic policies, and design
-boundaries. Security-sensitive changes should also reference:
+Developers must consult [Coding Standards](../development/coding-standards.md) for panic policies and design
+boundaries, and [Error Handling](../development/error-handling.md) for rootcause/thiserror patterns and the full
+decision guide. Security-sensitive changes should also reference:
 
 - [PKI and certificates](pki-certificates.md)
 - [Secrets and encryption](secrets-and-encryption.md)

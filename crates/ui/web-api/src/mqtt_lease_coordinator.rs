@@ -33,7 +33,7 @@ pub enum LeaseCoordinatorError {
     MqttClientNotFound(Uuid),
 }
 
-pub type Result<T> = std::result::Result<T, rootcause::Report<LeaseCoordinatorError>>;
+pub type Result<T> = std::result::Result<T, Report<LeaseCoordinatorError>>;
 
 /// Outcome when attempting to lease an MQTT client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

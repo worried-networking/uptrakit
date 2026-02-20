@@ -9,7 +9,8 @@ Uptrakit.
 | --- | --- |
 | [Setup](setup.md) | Local environment setup, prerequisites, and baseline build commands. |
 | [Testing](testing.md) | Required test suites, coverage expectations, and execution guidance. |
-| [Coding Standards](coding-standards.md) | Core coding rules, error handling conventions, and quality constraints. |
+| [Coding Standards](coding-standards.md) | Core coding rules and quality constraints. |
+| [Error Handling](error-handling.md) | rootcause/thiserror patterns, decision guide, anti-patterns, and approved exceptions. |
 | [PR Process](pr-process.md) | Pull request requirements, review expectations, and merge readiness checklist. |
 | [Dependency Policy](dependency-policy.md) | Dependency introduction/update rules and `cargo deny` policy. |
 | [Provider Guidelines](provider-guidelines.md) | Provider architecture expectations and implementation conventions. |

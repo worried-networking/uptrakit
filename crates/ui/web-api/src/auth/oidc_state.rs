@@ -29,7 +29,7 @@ pub enum OidcStoreError {
     Crypto(#[from] uptrakit_shared_db::crypto::CryptoError),
 }
 
-pub type Result<T> = std::result::Result<T, rootcause::Report<OidcStoreError>>;
+pub type Result<T> = std::result::Result<T, Report<OidcStoreError>>;
 
 impl_report_conversion! {
     sea_orm::DbErr                        => OidcStoreError::Database,

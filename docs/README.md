@@ -67,7 +67,8 @@ This directory holds audience-specific documentation split into five sections, p
 | --- | --- |
 | [Setup](development/setup.md) | Prerequisites, master key handling, and build/lint commands. See also: [Testing](development/testing.md), [Secrets and Encryption](security/secrets-and-encryption.md). |
 | [Testing](development/testing.md) | Required test suites and Docker reverse-proxy coverage. See also: [PR Process](development/pr-process.md). |
-| [Coding Standards](development/coding-standards.md) | Error handling, logging, and core design rules. See also: [Provider Guidelines](development/provider-guidelines.md). |
+| [Coding Standards](development/coding-standards.md) | Core design rules, logging, and quality constraints. See also: [Provider Guidelines](development/provider-guidelines.md). |
+| [Error Handling](development/error-handling.md) | rootcause/thiserror patterns, decision guide, anti-patterns, and approved exceptions. See also: [Coding Standards](development/coding-standards.md), [Secure Development](security/secure-development.md). |
 | [PR Process](development/pr-process.md) | PR checklist and Conventional Commits expectations. |
 | [Dependency Policy](development/dependency-policy.md) | Workspace dependency rules and `cargo deny` guidance. |
 | [Provider Guidelines](development/provider-guidelines.md) | Provider lifecycle rules and documentation expectations. See also: [Wire Protocol](api/wire-protocol.md). |

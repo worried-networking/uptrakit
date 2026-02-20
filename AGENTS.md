@@ -214,6 +214,8 @@ These are non-negotiable design constraints. Do not violate them.
 ### Error handling quick reference
 
 Every boundary (crate or module) must define its own typed error enum. Here is the minimal setup and decision guide.
+Full reference with 19 patterns, anti-patterns, error chain diagrams, and a complete real-world example:
+[docs/development/error-handling.md](docs/development/error-handling.md).
 
 **Required imports:**
 
@@ -229,21 +231,48 @@ use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversio
 1. Define `pub type Result<T> = std::result::Result<T, Report<MyError>>;`
 1. Add `impl_report_conversion!` for every foreign error type your boundary encounters.
 
+**Complete minimal example:**
+
+```rust
+use rootcause::prelude::*;
+use thiserror::Error;
+use uptrakit_shared_macros::impl_report_conversion;
+
+#[derive(Debug, Error)]
+pub enum WidgetError {
+    #[error("database error: {0}")]
+    Database(#[from] sea_orm::DbErr),
+    #[error("widget not found: {0}")]
+    NotFound(uuid::Uuid),
+}
+
+pub type Result<T> = std::result::Result<T, Report<WidgetError>>;
+
+impl_report_conversion!(sea_orm::DbErr => WidgetError::Database);
+
+pub async fn get_widget(db: &DatabaseConnection, id: uuid::Uuid) -> Result<Widget> {
+    Widget::find_by_id(id)
+        .one(db).await.context_to()?
+        .ok_or_else(|| report!(WidgetError::NotFound(id)))
+}
+```
+
 **`bail!()` vs `report!()`:**
 
 - `bail!(MyError::Variant(...))` — use for guard-clause early returns (replaces `return Err(report!(...))`).
 - `report!(MyError::Variant(...))` — use inside `.ok_or_else()`, `.map_err()`, or when building a `Report` without
   returning.
+- Do **not** use `Report::new()` directly; always use the `report!()` macro.
 
 **Decision table — which context method to use:**
 
-| Scenario | Method |
-| --- | --- |
-| Foreign error has `ReportConversion` impl | `.context_to()` |
-| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` |
-| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` |
-| One-off conversion, no impl needed | `.map_err(\|e\| report!(...))` |
-| Guard clause / early return | `bail!(...)` |
+| Scenario | Method | Effect |
+| --- | --- | --- |
+| Foreign error has `ReportConversion` impl | `.context_to()` | Delegates to impl |
+| Wrap low-level error with high-level meaning | `.context(Higher::Variant)` | Adds new parent node; original stays as child |
+| Change error type in-place (1:1 mapping) | `.context_transform(\|e\| ...)` | Replaces context type; children preserved |
+| One-off conversion, no impl needed | `.map_err(\|e\| report!(...))` | Manual wrap |
+| Guard clause / early return | `bail!(...)` | Return immediately |
 
 **Approved exceptions:**
 
@@ -255,8 +284,6 @@ use uptrakit_shared_macros::impl_report_conversion;  // cross-boundary conversio
 - HTTP input validation helpers — thin functions producing user-facing HTTP 400 error messages where the string goes
   directly into `error_response()` (Pattern 15).
 - Display fallbacks — `unwrap_or_else` / `unwrap_or_default` for non-critical display/formatting (Pattern 16).
-
-Full details: [docs/development/coding-standards.md](docs/development/coding-standards.md).
 
 ### Directory management
 
@@ -364,7 +391,8 @@ For more in-depth information on specific topics, refer to the following documen
 - [CLI Usage Guide](docs/end-user/cli-usage.md)
 - [Graceful Restart](docs/development/graceful-restart.md)
 - [Cross-Controller Communication](docs/development/cross-controller-comm.md)
-- [Coding Standards (Error Handling)](docs/development/coding-standards.md)
+- [Coding Standards](docs/development/coding-standards.md)
+- [Error Handling](docs/development/error-handling.md)
 - [Testing Expectations](docs/development/testing.md)
 - [Provider Guidelines](docs/development/provider-guidelines.md)
 - [Command Executor](docs/development/command-executor.md)
