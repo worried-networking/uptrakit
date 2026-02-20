@@ -32,13 +32,32 @@ pub struct TokenListOutput {
     pub tokens: Vec<TokenEntry>,
 }
 
+/// Status of an API token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenStatus {
+    Active,
+    Revoked,
+}
+
+impl std::fmt::Display for TokenStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => f.write_str("active"),
+            Self::Revoked => f.write_str("revoked"),
+        }
+    }
+}
+
 /// A single token entry in `auth token list`.
 #[derive(Debug, Serialize)]
 pub struct TokenEntry {
     pub id: Uuid,
     pub name: String,
+    /// ISO 8601 datetime string from the API (e.g. `"2025-01-01T00:00:00Z"`).
+    /// Kept as `String` because the CLI only displays it — no parsing needed.
     pub created_at: String,
-    pub status: String,
+    pub status: TokenStatus,
 }
 
 /// Serializable output for `auth token revoke`.
@@ -274,16 +293,16 @@ pub async fn token_list(
         .tokens
         .iter()
         .map(|t| {
-            let status_str = if t.revoked_at.is_some() {
-                "revoked"
+            let status = if t.revoked_at.is_some() {
+                TokenStatus::Revoked
             } else {
-                "active"
+                TokenStatus::Active
             };
             TokenEntry {
                 id: t.id,
                 name: t.name.clone(),
                 created_at: t.created_at.clone(),
-                status: status_str.to_string(),
+                status,
             }
         })
         .collect();
@@ -430,13 +449,13 @@ mod tests {
                     id: id1,
                     name: "my-token".to_string(),
                     created_at: "2025-01-01T00:00:00Z".to_string(),
-                    status: "active".to_string(),
+                    status: TokenStatus::Active,
                 },
                 TokenEntry {
                     id: id2,
                     name: "old-token".to_string(),
                     created_at: "2024-06-15T12:00:00Z".to_string(),
-                    status: "revoked".to_string(),
+                    status: TokenStatus::Revoked,
                 },
             ],
         };
@@ -445,6 +464,20 @@ mod tests {
         assert_eq!(parsed["tokens"].as_array().expect("array").len(), 2);
         assert_eq!(parsed["tokens"][0]["status"], "active");
         assert_eq!(parsed["tokens"][1]["status"], "revoked");
+    }
+
+    #[test]
+    fn token_status_display() {
+        assert_eq!(TokenStatus::Active.to_string(), "active");
+        assert_eq!(TokenStatus::Revoked.to_string(), "revoked");
+    }
+
+    #[test]
+    fn token_status_serialization() {
+        let json = serde_json::to_string(&TokenStatus::Active).expect("serialize");
+        assert_eq!(json, r#""active""#);
+        let json = serde_json::to_string(&TokenStatus::Revoked).expect("serialize");
+        assert_eq!(json, r#""revoked""#);
     }
 
     #[test]

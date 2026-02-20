@@ -5,7 +5,7 @@
 **Scope:** Architecture, security, code quality, coding standards
 **Overall quality: GOOD (82/100)**
 
-All 114 tests pass. 1 doc-test passes.
+All 189 tests pass. 1 doc-test passes.
 
 ---
 
@@ -60,11 +60,18 @@ semantics: omit = keep, null = clear, string = set. The route handler parses bot
 **Resolution:** Changed `uses_remaining` from `Option<i32>` to `Option<u32>` in `MqttEnrollmentTokenResponse`,
 `MqttEnrollmentTokenListResponse`, and `CreateMqttEnrollmentTokenRequest`.
 
-### MEDIUM: Missing test coverage for many modules
+### ~~MEDIUM: Missing test coverage for many modules~~ PARTIALLY RESOLVED
 
-The following have **zero tests**: `api_tokens`, `hosts`, `oidc_auth`, `provider_configs`, `scheduler`, `server_cert`,
+~~The following have **zero tests**: `api_tokens`, `hosts`, `oidc_auth`, `provider_configs`, `scheduler`, `server_cert`,
 `services`, `settings`, `settings_agent_certs`, `settings_auth`, `settings_ca`, `settings_combined`, `settings_network`,
-`software_items`, `registration`.
+`software_items`, `registration`.~~
+
+**Resolution:** Added 75 tests across 6 critical modules: `api_tokens` (10 tests: serde round-trips, `SecretString`
+serialization, optional field handling), `hosts` (11 tests: agent summary, response fields, update requests),
+`services` (9 tests: response types, query filters, pagination helpers), `software_items` (20 tests: CRUD types,
+validation, `Display` impls), `scheduler` (14 tests: task types, cron validation), `registration` (14 tests: serde,
+`Display`, `FromStr`, error types). Remaining untested: `oidc_auth`, `provider_configs`, `server_cert`, `settings`,
+`settings_agent_certs`, `settings_auth`, `settings_ca`, `settings_combined`, `settings_network`.
 
 Well-tested modules (good examples): `pagination`, `mqtt_url`, `update_hooks`, `system_alerts`, `settings_mqtt`.
 
@@ -173,6 +180,6 @@ serialization. 16 thorough tests.
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |
 | Permission model | ~~FAIR~~ GOOD | 9 variants after adding ViewSoftware, ManageSoftware, ViewHosts, ManageHosts |
-| Test coverage | FAIR | 114 tests, but many modules have zero coverage |
+| Test coverage | GOOD | 189 tests; 6 critical modules added (75 tests); 9 modules remain untested |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | Type safety | GOOD | Typed enums for query filters; `ProviderConfigResponse.provider_type` typed; `uses_remaining` now `u32` |

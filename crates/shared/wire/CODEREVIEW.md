@@ -54,29 +54,30 @@ the manual `Display` and `Error` implementations.
 
 ### Low
 
-#### L1: `ErrorCode` and `EnrollmentStatus` use manual `Display` impls
+#### ~~L1: `ErrorCode` and `EnrollmentStatus` use manual `Display` impls~~ (FIXED)
 
-**File:** `src/lib.rs:29-36` (EnrollmentStatus), `src/lib.rs:294-307` (ErrorCode)
+~~**File:** `src/lib.rs:29-36` (EnrollmentStatus), `src/lib.rs:294-307` (ErrorCode)~~
 
-Both enums have manual `Display` impls that produce `snake_case` output
+~~Both enums have manual `Display` impls that produce `snake_case` output
 matching their serde `rename_all`. These could be derived with `strum::Display`
 (`#[strum(serialize_all = "snake_case")]`) or `thiserror` to reduce boilerplate
-and ensure consistency with the serde representation.
+and ensure consistency with the serde representation.~~
 
-**Recommendation:** Consider deriving `Display` via `strum` or keeping the
-manual impl if the explicit mapping is preferred for wire-format stability.
-Document the choice.
+**Resolution:** Added `strum` dependency. Replaced manual `Display` impls for both
+`ErrorCode` and `EnrollmentStatus` with `#[derive(strum::Display)]` +
+`#[strum(serialize_all = "snake_case")]`. Added tests verifying `Display` output
+matches serde serialization for all variants.
 
-#### L2: `HookCommand::Display` does not round-trip with serde
+#### ~~L2: `HookCommand::Display` does not round-trip with serde~~ (FIXED)
 
-**File:** `src/lib.rs:61-81`
+~~**File:** `src/lib.rs:61-81`~~
 
-The `Display` impl for `HookCommand::Shell` only outputs the command string
+~~The `Display` impl for `HookCommand::Shell` only outputs the command string
 (line 64), losing the `shell` field. This is fine for logging but could be
-confusing if used for comparison or reconstruction.
+confusing if used for comparison or reconstruction.~~
 
-**Recommendation:** Document that `Display` is for human-readable logging only,
-not for round-trip serialization.
+**Resolution:** Added doc comment on the `HookCommand` `Display` impl clarifying it is
+for human-readable logging only, not for round-trip serialization.
 
 ### Info
 

@@ -100,6 +100,30 @@ Database columns using encryption:
 Ciphertext format: `ENC:v1:<hex(nonce || ciphertext || tag)>`. The `v1` marker enables future algorithm changes.
 Legacy plaintext detection allows old values to remain readable until rewritten.
 
+### Startup Re-encryption of Legacy Plaintext
+
+When the controller starts with a master key configured, a re-encryption routine runs
+automatically after master key verification (Phase 4b). It scans all encrypted columns
+listed above (except `ssh_hosts.private_key`, which lives in the agent-ssh local DB) for
+values that are still stored as plaintext (i.e. they lack the `ENC:v1:` prefix). Such
+values are re-encrypted in place using the current master key.
+
+The routine has these properties:
+
+- **Idempotent** -- already-encrypted values are skipped via `EncryptedString::is_db_value_encrypted()`.
+- **HA-safe** -- concurrent controllers may race on the same row; the last writer wins,
+  which is fine because the result is always a correctly encrypted value under the same
+  master key.
+- **Fault-tolerant** -- errors on individual rows are logged at `warn` level and skipped.
+  The controller still starts successfully.
+- **Observable** -- on completion, if any values were re-encrypted, an `info`-level log
+  line reports the total count and per-table breakdowns.
+
+Implementation: `crates/core/controller/src/reencrypt.rs`.
+
+See also: [Secure Development](secure-development.md) for coding standards related to
+encryption.
+
 ## Master Key Management
 
 - A 256-bit master key is required in production via `UPTRAKIT_MASTER_KEY` (64 hex characters) or `--master-key-file`.
@@ -178,3 +202,4 @@ See also: [Auth Flows](../api/auth-flows.md) for the authentication flow descrip
 | `crates/shared/types/src/secret_string.rs` | `SecretString` newtype with redacted Debug/Display |
 | `crates/ui/web-api/src/setting_key.rs` | `SettingKey::MasterKeyVerification` — stores the key verification token |
 | `crates/core/controller/src/startup.rs` | `verify_master_key()` — startup phase that validates the master key |
+| `crates/core/controller/src/reencrypt.rs` | Startup re-encryption of legacy plaintext values across encrypted columns |

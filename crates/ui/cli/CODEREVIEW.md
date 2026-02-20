@@ -128,9 +128,14 @@ Replaced hand-written `status_text()` function with `StatusCode::canonical_reaso
 
 Status line goes to stderr while body goes to stdout. Should be documented or made consistent.
 
-### Q-6: `TokenEntry::created_at` and `TokenEntry::status` use raw strings [LOW]
+### ~~Q-6: `TokenEntry::created_at` and `TokenEntry::status` use raw strings~~ [LOW] (PARTIALLY FIXED)
 
-Could use typed datetime and enum respectively.
+~~Could use typed datetime and enum respectively.~~
+
+**Resolution:** `TokenEntry::status` now uses a `TokenStatus` enum (`Active`/`Revoked`) with `Display` and
+`Serialize` impls. `TokenEntry::created_at` remains `String` (ISO 8601 from the API) with a doc comment —
+parsing to `time::OffsetDateTime` is unnecessary overhead for display-only data. Tests added for
+`TokenStatus` serialization and display.
 
 ---
 
@@ -194,4 +199,5 @@ Low priority since types are only used within the crate.
 | 10 | C-2 | Add tests for formatting and error paths |
 | ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |
 | ~~12~~ | ~~Q-4~~ | ~~Expand status_text coverage~~ (FIXED) |
+| ~~14~~ | ~~Q-6~~ | ~~Use typed enum for `TokenEntry::status`~~ (PARTIALLY FIXED) |
 | 13 | Q-5 | Document or fix stderr/stdout mixing in api command |

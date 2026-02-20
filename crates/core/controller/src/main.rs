@@ -9,6 +9,7 @@ mod migration;
 mod mtls_acceptor;
 mod pki;
 mod reconcile;
+mod reencrypt;
 mod scheduler;
 mod server;
 mod startup;
@@ -112,6 +113,9 @@ async fn run(args: cli::Args) -> Result<()> {
 
     // Phase 4: Master key verification (HA safety)
     startup::verify_master_key(&db_conn, default_tenant_id).await?;
+
+    // Phase 4b: Re-encrypt legacy plaintext secrets
+    reencrypt::reencrypt_legacy_plaintext(&db_conn).await;
 
     // Phase 5: Load settings
     let (settings, raw_settings, reg_token) = Settings::load(&db_conn, default_tenant_id)

@@ -106,18 +106,20 @@ because their source types do not implement `std::error::Error` compatibly.
 
 ### Low
 
-#### L1: `LineBuffer` output limit silently truncates
+#### ~~L1: `LineBuffer` output limit silently truncates~~ (FIXED)
 
-**File:** `src/ssh_transport.rs:90-167`
+~~**File:** `src/ssh_transport.rs:90-167`~~
 
-When accumulated output exceeds `MAX_OUTPUT_BYTES` (10 MB), new lines are
+~~When accumulated output exceeds `MAX_OUTPUT_BYTES` (10 MB), new lines are
 still sent to the optional channel (streaming) but not appended to
 `accumulated`. This means the streaming output and the final collected
-output may diverge.
+output may diverge.~~
 
-**Recommendation:** Consider adding a truncation marker to the accumulated
-output (e.g., `\n[output truncated at 10 MB]`) so callers know the output
-was truncated.
+**Resolution:** Added a `truncated: bool` flag to `LineBuffer`. When the limit is first hit,
+the flag is set, `tracing::warn!()` is emitted, and `\n[output truncated at 10 MB]\n` is
+appended to `accumulated`. All lines continue streaming via the channel. The same pattern
+is applied in both `push()` and `flush()` methods. Tests added to verify the truncation
+marker and continued streaming behavior.
 
 #### L2: `SshTarget::from_str` does not validate hostname
 

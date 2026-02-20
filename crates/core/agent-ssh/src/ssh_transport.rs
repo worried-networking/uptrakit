@@ -96,6 +96,8 @@ pub(crate) struct LineBuffer {
     accumulated: String,
     /// Total bytes accumulated (for enforcing the output limit).
     total_bytes: usize,
+    /// Whether accumulated output has been truncated due to exceeding the limit.
+    truncated: bool,
     /// Which output stream this buffer represents.
     stream: OutputStreamType,
     /// Optional channel for streaming lines in real time.
@@ -109,6 +111,7 @@ impl LineBuffer {
             partial: String::new(),
             accumulated: String::new(),
             total_bytes: 0,
+            truncated: false,
             stream,
             sender,
         }
@@ -133,6 +136,13 @@ impl LineBuffer {
                     self.accumulated.push_str(&self.partial);
                     self.accumulated.push('\n');
                     self.total_bytes += self.partial.len() + 1;
+                } else if !self.truncated {
+                    self.truncated = true;
+                    tracing::warn!(
+                        stream = ?self.stream,
+                        "output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation"
+                    );
+                    self.accumulated.push_str("\n[output truncated at 10 MB]\n");
                 }
                 self.partial.clear();
             } else {
@@ -157,6 +167,13 @@ impl LineBuffer {
                 self.accumulated.push_str(&self.partial);
                 self.accumulated.push('\n');
                 self.total_bytes += self.partial.len() + 1;
+            } else if !self.truncated {
+                self.truncated = true;
+                tracing::warn!(
+                    stream = ?self.stream,
+                    "output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation"
+                );
+                self.accumulated.push_str("\n[output truncated at 10 MB]\n");
             }
             self.partial.clear();
         }
@@ -573,11 +590,35 @@ mod tests {
             buf.push(data.as_bytes()).await;
         }
 
+        assert!(buf.truncated, "buffer should be marked as truncated");
         let output = buf.into_output();
         assert!(
-            output.len() <= MAX_OUTPUT_BYTES + 1_000_001,
-            "output should respect the 10 MB limit (got {} bytes)",
-            output.len()
+            output.contains("[output truncated at 10 MB]"),
+            "output should contain truncation marker"
+        );
+    }
+
+    #[tokio::test]
+    async fn line_buffer_streams_all_lines_even_after_truncation() {
+        let (tx, mut rx) = mpsc::channel(100);
+        let mut buf = LineBuffer::new(OutputStreamType::Stdout, Some(tx));
+
+        // Push data exceeding MAX_OUTPUT_BYTES (10 MB).
+        let big_line = "x".repeat(1_000_000);
+        for _ in 0..12 {
+            let mut data = big_line.clone();
+            data.push('\n');
+            buf.push(data.as_bytes()).await;
+        }
+
+        // All 12 lines should be streamed even though accumulation is truncated.
+        let mut streamed_count = 0;
+        while rx.try_recv().is_ok() {
+            streamed_count += 1;
+        }
+        assert_eq!(
+            streamed_count, 12,
+            "all lines should be streamed regardless of truncation"
         );
     }
 

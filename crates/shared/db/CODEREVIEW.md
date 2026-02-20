@@ -120,10 +120,18 @@ key. This should be documented as a comment in the crypto module.~~
 **Resolution:** Added documentation to `encrypt_value()` in `uptrakit-crypto` covering nonce collision probability
 (birthday bound ~2^48), safety margins for the application's use case, and NIST SP 800-38D reference.
 
-### LOW: No background re-encryption mechanism
+### ~~LOW: No background re-encryption mechanism~~ RESOLVED
 
-Legacy plaintext values persist indefinitely in the database. A migration script or background task should be
-implemented to progressively encrypt them.
+~~Legacy plaintext values persist indefinitely in the database. A migration script or background task should be
+implemented to progressively encrypt them.~~
+
+**Resolution:** Added a startup re-encryption routine (`reencrypt.rs`) in the controller. After master key
+verification (Phase 4b), it scans all 5 encrypted columns across 4 tables (`ca_certificates.key_pem`,
+`oidc_providers.client_secret`, `mqtt_clients.password`, `mqtt_clients.ca_cert_pem`,
+`pending_oidc_flows.pkce_verifier`) for values lacking the `ENC:v1:` prefix. Plaintext values are re-encrypted
+in place. The routine is idempotent, HA-safe (last writer wins with identical result), and fault-tolerant
+(per-row errors are logged and skipped). `EncryptedString::is_db_value_encrypted()` was added to support the
+prefix check without exposing raw DB values.
 
 ### ~~LOW: `DeviceAuthStatus` re-export location inconsistency~~ RESOLVED
 

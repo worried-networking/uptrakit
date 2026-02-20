@@ -130,7 +130,7 @@ pub fn is_encrypted(s: &str) -> bool {
 /// use case (database field encryption with infrequent writes). Key rotation
 /// via the `ENC:v1:` version prefix provides a migration path if usage
 /// patterns ever approach this bound.
-fn encrypt_value(plaintext: &str) -> Result<String> {
+pub fn encrypt_value(plaintext: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -166,7 +166,7 @@ fn encrypt_value(plaintext: &str) -> Result<String> {
 ///
 /// Strips the `"ENC:v1:"` prefix, hex-decodes, extracts the nonce,
 /// and decrypts the ciphertext.
-fn decrypt_value(stored: &str) -> Result<String> {
+pub fn decrypt_value(stored: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
         .ok_or_else(|| report!(CryptoError::NotInitialized))?;
@@ -269,6 +269,14 @@ impl EncryptedString {
     /// Expose the plaintext secret.
     pub fn expose_secret(&self) -> &str {
         self.plaintext.expose_secret()
+    }
+
+    /// Returns `true` if the stored DB representation is already encrypted.
+    ///
+    /// Used by the re-encryption routine to identify legacy plaintext values
+    /// that need to be re-encrypted with the current master key.
+    pub fn is_db_value_encrypted(&self) -> bool {
+        is_encrypted(&self.db_value)
     }
 }
 

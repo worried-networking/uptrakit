@@ -19,21 +19,13 @@ pub use uptrakit_shared_types::{
 pub use uptrakit_shared_types::SecretString;
 
 /// Enrollment status returned in the `Enrolled` message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum EnrollmentStatus {
     Pending,
     Approved,
-}
-
-impl std::fmt::Display for EnrollmentStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Pending => f.write_str("pending"),
-            Self::Approved => f.write_str("approved"),
-        }
-    }
 }
 
 /// A single hook command to execute on the agent.
@@ -59,6 +51,8 @@ pub enum HookCommand {
     },
 }
 
+/// Human-readable formatting for logging only. Not intended for round-trip
+/// serialization — use serde for machine-readable encoding.
 impl fmt::Display for HookCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -271,9 +265,10 @@ mod utc_datetime_millis {
 }
 
 /// Machine-readable error code sent in `ErrorPayload`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ErrorCode {
     /// Malformed or unexpected message from the service.
     BadRequest,
@@ -291,21 +286,6 @@ pub enum ErrorCode {
     AgentVersionTooOld,
     /// Message sequence number mismatch (replay protection).
     SequenceError,
-}
-
-impl std::fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadRequest => f.write_str("bad_request"),
-            Self::EnrollmentFailed => f.write_str("enrollment_failed"),
-            Self::NotApproved => f.write_str("not_approved"),
-            Self::Forbidden => f.write_str("forbidden"),
-            Self::CertificateError => f.write_str("certificate_error"),
-            Self::InternalError => f.write_str("internal_error"),
-            Self::AgentVersionTooOld => f.write_str("agent_version_too_old"),
-            Self::SequenceError => f.write_str("sequence_error"),
-        }
-    }
 }
 
 /// Payload for error responses.
@@ -1754,6 +1734,39 @@ mod tests {
     #[test]
     fn hook_shell_default_is_bash() {
         assert_eq!(HookShell::default(), HookShell::Bash);
+    }
+
+    #[test]
+    fn enrollment_status_display_matches_serde() {
+        for status in [EnrollmentStatus::Pending, EnrollmentStatus::Approved] {
+            let serde_str = serde_json::to_value(status).unwrap();
+            assert_eq!(
+                status.to_string(),
+                serde_str.as_str().unwrap(),
+                "Display must match serde for {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn error_code_display_matches_serde() {
+        for code in [
+            ErrorCode::BadRequest,
+            ErrorCode::EnrollmentFailed,
+            ErrorCode::NotApproved,
+            ErrorCode::Forbidden,
+            ErrorCode::CertificateError,
+            ErrorCode::InternalError,
+            ErrorCode::AgentVersionTooOld,
+            ErrorCode::SequenceError,
+        ] {
+            let serde_str = serde_json::to_value(code).unwrap();
+            assert_eq!(
+                code.to_string(),
+                serde_str.as_str().unwrap(),
+                "Display must match serde for {code:?}"
+            );
+        }
     }
 
     #[test]
