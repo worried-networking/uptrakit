@@ -103,17 +103,18 @@ impl RegistrationSettings {
             )
             .await?;
             // Upsert token hash
+            let hash_str = hash.expose_secret().to_string();
             upsert_setting(
                 db,
                 tenant_id,
                 SettingKey::RegistrationTokenHash,
-                serde_json::Value::String(hash.clone()),
+                serde_json::Value::String(hash_str.clone()),
             )
             .await?;
 
             let settings = RegistrationSettings {
                 mode: RegistrationMode::Invite,
-                token_hash: Some(hash),
+                token_hash: Some(hash_str),
                 require_token_for_oidc: false,
             };
             Ok((settings, Some(plaintext)))
@@ -211,14 +212,15 @@ impl RegistrationSettings {
         let token_hash = if mode == RegistrationMode::Invite {
             if let Some(ref plaintext) = token {
                 let hash = password::hash_password(plaintext)?;
+                let hash_str = hash.expose_secret().to_string();
                 upsert_setting(
                     db,
                     tenant_id,
                     SettingKey::RegistrationTokenHash,
-                    serde_json::Value::String(hash.clone()),
+                    serde_json::Value::String(hash_str.clone()),
                 )
                 .await?;
-                Some(hash)
+                Some(hash_str)
             } else {
                 // Keep existing hash if no new token provided (shouldn't happen per API contract,
                 // but handled defensively)
@@ -361,7 +363,7 @@ mod tests {
         let hash = password::hash_password("valid_token").expect("hash");
         let settings = RegistrationSettings {
             mode: RegistrationMode::Invite,
-            token_hash: Some(hash),
+            token_hash: Some(hash.expose_secret().to_string()),
             require_token_for_oidc: false,
         };
         let err = settings.validate(None).unwrap_err();
@@ -387,7 +389,7 @@ mod tests {
         let hash = password::hash_password("valid_token").expect("hash");
         let settings = RegistrationSettings {
             mode: RegistrationMode::Invite,
-            token_hash: Some(hash),
+            token_hash: Some(hash.expose_secret().to_string()),
             require_token_for_oidc: false,
         };
         assert!(settings.validate(Some("valid_token")).is_ok());
@@ -398,7 +400,7 @@ mod tests {
         let hash = password::hash_password("valid_token").expect("hash");
         let settings = RegistrationSettings {
             mode: RegistrationMode::Invite,
-            token_hash: Some(hash),
+            token_hash: Some(hash.expose_secret().to_string()),
             require_token_for_oidc: false,
         };
         let err = settings.validate(Some("wrong_token")).unwrap_err();

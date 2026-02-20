@@ -4,6 +4,7 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use rootcause::prelude::*;
+use uptrakit_shared_db::SecretString;
 
 pub const MIN_PASSWORD_LENGTH: usize = 8;
 pub const MAX_PASSWORD_LENGTH: usize = 1024;
@@ -26,7 +27,7 @@ pub fn validate_password_length(password: &str) -> Option<&'static str> {
 /// - Iterations: 2
 /// - Parallelism: 1
 /// - Random salt per password
-pub fn hash_password(password: &str) -> Result<String> {
+pub fn hash_password(password: &str) -> Result<SecretString> {
     // OWASP recommended parameters for Argon2id
     let params = Params::new(
         19456, // 19 MiB memory cost
@@ -44,7 +45,7 @@ pub fn hash_password(password: &str) -> Result<String> {
         .hash_password(password.as_bytes(), &salt)
         .context_to()?;
 
-    Ok(password_hash.to_string())
+    Ok(SecretString::new(password_hash.to_string()))
 }
 
 /// Verify a password against an Argon2id hash using constant-time comparison
@@ -66,15 +67,19 @@ mod tests {
     fn test_hash_password_produces_valid_argon2id() {
         let password = "TestPassword123!";
         let hash = hash_password(password).unwrap();
+        let exposed = hash.expose_secret();
 
         // Check that hash starts with $argon2id$
         assert!(
-            hash.starts_with("$argon2id$"),
+            exposed.starts_with("$argon2id$"),
             "Hash should use Argon2id algorithm"
         );
 
         // Check that hash can be parsed
-        assert!(PasswordHash::new(&hash).is_ok(), "Hash should be valid");
+        assert!(
+            PasswordHash::new(exposed).is_ok(),
+            "Hash should be valid"
+        );
     }
 
     #[test]
@@ -83,7 +88,7 @@ mod tests {
         let hash = hash_password(password).unwrap();
 
         assert!(
-            verify_password(password, &hash).unwrap(),
+            verify_password(password, hash.expose_secret()).unwrap(),
             "Verification should succeed with correct password"
         );
     }
@@ -95,7 +100,7 @@ mod tests {
         let hash = hash_password(password).unwrap();
 
         assert!(
-            !verify_password(wrong_password, &hash).unwrap(),
+            !verify_password(wrong_password, hash.expose_secret()).unwrap(),
             "Verification should fail with wrong password"
         );
     }
@@ -112,8 +117,8 @@ mod tests {
         );
 
         // Both should still verify correctly
-        assert!(verify_password(password, &hash1).unwrap());
-        assert!(verify_password(password, &hash2).unwrap());
+        assert!(verify_password(password, hash1.expose_secret()).unwrap());
+        assert!(verify_password(password, hash2.expose_secret()).unwrap());
     }
 
     #[test]

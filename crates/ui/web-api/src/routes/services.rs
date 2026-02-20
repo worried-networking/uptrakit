@@ -711,7 +711,7 @@ pub async fn create_enrollment_token(
         &state.db,
         state.default_tenant_id,
         setting_key,
-        serde_json::Value::String(hash),
+        serde_json::Value::String(hash.expose_secret().to_string()),
     )
     .await
     {

@@ -175,11 +175,20 @@ The bootstrap command supports three authentication methods for step 4:
   each key via `authenticate_publickey_with`.
 
 The bootstrap command uses `russh` (pure Rust async SSH client) for SSH
-transport. Host key verification supports strict fingerprint pinning and
-trust-on-first-use (TOFU). Remote commands are constructed using
-`uptrakit_command::shell_escape()` to prevent shell injection. SSH config
-parsing uses the `ssh2-config` crate with `ALLOW_UNKNOWN_FIELDS` to gracefully
-handle non-standard directives.
+transport. Host key verification supports two modes:
+
+- **Strict mode** (`--strict-host-key-checking`): requires a pre-verified host
+  key fingerprint via `--host-key-fingerprint`. TOFU is disabled; the connection
+  is rejected if the fingerprint does not match.
+- **TOFU mode** (default): accepts and records the remote host's key on first
+  connection. A `tracing::info!` log is emitted when a key is accepted via TOFU.
+
+For detailed security guidance on choosing between these modes, see
+[SSH Agent Secrets -- Host key verification](../security/ssh-agent-secrets.md#host-key-verification).
+
+Remote commands are constructed using `uptrakit_command::shell_escape()` to
+prevent shell injection. SSH config parsing uses the `ssh2-config` crate with
+`ALLOW_UNKNOWN_FIELDS` to gracefully handle non-standard directives.
 
 For detailed usage and troubleshooting, see
 [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md).

@@ -28,6 +28,7 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
+use uptrakit_shared_db::MaskedEmail;
 use uptrakit_web_api_types::SecretString;
 
 pub use super::auth::AuthResponse;
@@ -697,7 +698,7 @@ pub async fn oidc_exchange(
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
             id: user.id,
-            email: user.email,
+            email: user.email.expose_email().to_string(),
             first_name: user.first_name,
             last_name: user.last_name,
             permissions,
@@ -786,7 +787,7 @@ pub async fn oidc_complete_registration(
     let now = OffsetDateTime::now_utc();
     let user_model = uptrakit_shared_db::entity::user::ActiveModel {
         id: Set(user_id),
-        email: Set(pending.email.clone()),
+        email: Set(MaskedEmail::new(pending.email.clone())),
         first_name: Set(pending.first_name.unwrap_or_default()),
         last_name: Set(pending.last_name.unwrap_or_default()),
         password_hash: Set(None),
@@ -944,7 +945,7 @@ pub async fn oidc_complete_registration(
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
             id: user.id,
-            email: user.email,
+            email: user.email.expose_email().to_string(),
             first_name: user.first_name,
             last_name: user.last_name,
             permissions,
@@ -1017,7 +1018,7 @@ pub async fn oidc_link(
             None => return error_response(StatusCode::UNAUTHORIZED, "User has no password"),
         };
         matches!(
-            password::verify_password(pwd.expose_secret(), hash),
+            password::verify_password(pwd.expose_secret(), hash.expose_secret()),
             Ok(true)
         )
     } else {
@@ -1157,7 +1158,7 @@ pub async fn oidc_link(
         token_type: "Bearer".to_string(),
         user: super::auth::UserResponse {
             id: user.id,
-            email: user.email,
+            email: user.email.expose_email().to_string(),
             first_name: user.first_name,
             last_name: user.last_name,
             permissions,

@@ -496,3 +496,90 @@ pub struct Model {
 `uptrakit-shared-db` re-exports all entity-relevant enums from `uptrakit-shared-types` for downstream convenience. Crates that depend on
 `uptrakit-shared-db` (like `uptrakit-web-api`) should import from `uptrakit_shared_db` rather than adding a direct dependency on
 `uptrakit-shared-types`.
+
+## SeaORM Integration for Custom Types
+
+When creating new wrapper types (newtypes) for use in SeaORM entity models, implement the following four traits behind the `sea-orm` feature flag
+in `uptrakit-shared-types`. Both `SecretString` and `MaskedEmail` follow this pattern.
+
+### Required trait implementations
+
+| Trait | Purpose |
+| --- | --- |
+| `From<T> for sea_orm::Value` | Converts the wrapper into a `Value` for query binding |
+| `sea_orm::TryGetable` | Extracts the wrapper from a `QueryResult` row |
+| `sea_orm::sea_query::ValueType` | Declares the column type and provides `try_from(Value)` |
+| `sea_orm::sea_query::Nullable` | Provides the null `Value` representation for `Option<T>` columns |
+
+### Implementation template
+
+```rust
+#[cfg(feature = "sea-orm")]
+mod sea_orm_impl {
+    use super::MyWrapper;
+    use sea_orm::entity::prelude::*;
+    use sea_orm::sea_query::ValueType;
+    use sea_orm::{TryGetError, TryGetable};
+
+    impl From<MyWrapper> for Value {
+        fn from(w: MyWrapper) -> Self {
+            Value::String(Some(w.into_inner()))
+        }
+    }
+
+    impl TryGetable for MyWrapper {
+        fn try_get_by<I: sea_orm::ColIdx>(
+            res: &QueryResult,
+            index: I,
+        ) -> std::result::Result<Self, TryGetError> {
+            let val: String = res.try_get_by(index)?;
+            Ok(MyWrapper::new(val))
+        }
+    }
+
+    impl ValueType for MyWrapper {
+        fn try_from(v: Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
+            match v {
+                Value::String(Some(s)) => Ok(MyWrapper::new(s)),
+                _ => Err(sea_orm::sea_query::ValueTypeErr),
+            }
+        }
+
+        fn type_name() -> String {
+            "MyWrapper".to_string()
+        }
+
+        fn array_type() -> sea_orm::sea_query::ArrayType {
+            sea_orm::sea_query::ArrayType::String
+        }
+
+        fn column_type() -> sea_orm::ColumnType {
+            sea_orm::ColumnType::String(sea_orm::sea_query::StringLen::None)
+        }
+    }
+
+    impl sea_orm::sea_query::Nullable for MyWrapper {
+        fn null() -> Value {
+            Value::String(None)
+        }
+    }
+}
+```
+
+### Important notes
+
+- **Import `ValueType` from `sea_orm::sea_query`**, not from the prelude. In sea-orm 2.0, `ValueType` is not re-exported from the prelude.
+- Place all four trait implementations inside a `#[cfg(feature = "sea-orm")] mod sea_orm_impl { ... }` block in the type's source file.
+- Add corresponding `#[cfg(feature = "sea-orm")]` test functions to verify the roundtrip (see `SecretString` and `MaskedEmail` tests for examples).
+- For types that perform fallible conversion (like `EncryptedString` which decrypts on read), convert typed errors via `.map_err()` to the required
+  SeaORM error type (see Pattern 13 above).
+
+### Existing custom types with SeaORM integration
+
+| Type | Crate | Entity usage |
+| --- | --- | --- |
+| `SecretString` | `uptrakit-shared-types` | `user.password_hash` |
+| `MaskedEmail` | `uptrakit-shared-types` | `user.email` |
+| `EncryptedString` | `uptrakit-shared-db` | `mqtt_client.password`, `oidc_provider.client_secret`, `ca_certificate.key_pem`, `ssh_host.private_key` |
+
+See also: [Secrets Handling and Encryption](../security/secrets-and-encryption.md) for security properties of `SecretString` and `MaskedEmail`.

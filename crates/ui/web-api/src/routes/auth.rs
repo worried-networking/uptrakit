@@ -21,6 +21,7 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
+use uptrakit_shared_db::MaskedEmail;
 use uptrakit_web_api_types::SecretString;
 use uptrakit_web_api_types::validation::Validate;
 
@@ -103,7 +104,7 @@ pub async fn register(
 
     let new_user = user::ActiveModel {
         id: Set(user_id),
-        email: Set(req.email.clone()),
+        email: Set(MaskedEmail::new(req.email.clone())),
         first_name: Set(req.first_name.clone()),
         last_name: Set(req.last_name.clone()),
         password_hash: Set(Some(password_hash)),
@@ -251,7 +252,8 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         }
     };
 
-    let valid = match password::verify_password(req.password.expose_secret(), hash) {
+    let valid = match password::verify_password(req.password.expose_secret(), hash.expose_secret())
+    {
         Ok(valid) => valid,
         Err(e) => {
             tracing::error!("Password verification error: {:?}", e);
@@ -306,7 +308,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
         token_type: "Bearer".to_string(),
         user: UserResponse {
             id: user.id,
-            email: user.email,
+            email: user.email.expose_email().to_string(),
             first_name: user.first_name,
             last_name: user.last_name,
             permissions,
@@ -439,7 +441,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set("test@example.com".to_string()),
+            email: Set(MaskedEmail::new("test@example.com".to_string())),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -610,7 +612,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let other_user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set("other@example.com".to_string()),
+            email: Set(MaskedEmail::new("other@example.com".to_string())),
             first_name: Set("Other".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),
@@ -688,7 +690,7 @@ pub async fn me(
 
     let response = UserResponse {
         id: user.id,
-        email: user.email,
+        email: user.email.expose_email().to_string(),
         first_name: user.first_name,
         last_name: user.last_name,
         permissions,

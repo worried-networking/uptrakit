@@ -164,12 +164,14 @@ and enables `HashSet`/`HashMap` usage. Entities containing `EncryptedString` (`c
 The field stores JSON but uses `column_type = "Text"`. Using `serde_json::Value` with `column_type = "Json"` would
 enable database-level JSON validation and query capabilities. May be intentional for SQLite compatibility.
 
-### INFORMATIONAL: Sensitive data in `Debug` derives
+### ~~INFORMATIONAL: Sensitive data in `Debug` derives~~ (FIXED)
 
-Entities with sensitive `String` fields (`user.password_hash`) will expose those values through `Debug` output.
+~~Entities with sensitive `String` fields (`user.password_hash`) will expose those values through `Debug` output.
 `EncryptedString` properly redacts, but plain `String` fields do not get this protection. Note:
 `pending_oidc_flow.pkce_verifier` is now `EncryptedString` and benefits from automatic redaction.
-Consider custom `Debug` implementations for entities containing security-sensitive fields.
+Consider custom `Debug` implementations for entities containing security-sensitive fields.~~
+
+**Resolution:** Changed `password_hash` from `Option<String>` to `Option<SecretString>` (redacted Debug/Display, zeroize-on-drop). Changed `email` from `String` to `MaskedEmail` (masked Debug/Display, full value preserved for serialization).
 
 ---
 

@@ -901,12 +901,14 @@ pub fn extract_sans_from_cert(cert_pem: &str) -> Result<SanCollection> {
                 GeneralName::IPAddress(ip_bytes) => {
                     match ip_bytes.len() {
                         4 => {
-                            let octets: [u8; 4] = (*ip_bytes).try_into().unwrap_or([0; 4]);
-                            ip_addrs.push(IpAddr::V4(std::net::Ipv4Addr::from(octets)));
+                            if let Ok(octets) = <[u8; 4]>::try_from(*ip_bytes) {
+                                ip_addrs.push(IpAddr::V4(std::net::Ipv4Addr::from(octets)));
+                            }
                         }
                         16 => {
-                            let octets: [u8; 16] = (*ip_bytes).try_into().unwrap_or([0; 16]);
-                            ip_addrs.push(IpAddr::V6(std::net::Ipv6Addr::from(octets)));
+                            if let Ok(octets) = <[u8; 16]>::try_from(*ip_bytes) {
+                                ip_addrs.push(IpAddr::V6(std::net::Ipv6Addr::from(octets)));
+                            }
                         }
                         _ => {} // skip malformed IP entries
                     }

@@ -76,6 +76,7 @@ impl client::Handler for BootstrapHandler {
             Ok(matches)
         } else {
             // TOFU: accept and record.
+            tracing::info!(fingerprint = %fingerprint, "accepting host key via trust-on-first-use (TOFU)");
             let mut fp = self.observed_fingerprint.lock().await;
             *fp = Some(fingerprint);
             Ok(true)

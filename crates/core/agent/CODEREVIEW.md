@@ -25,26 +25,26 @@ boundary, and missing platform portability guards.
 
 ### High
 
-#### H1: Agent depends on `provider-registry` (extensibility)
+#### ~~H1: Agent depends on `provider-registry` (extensibility)~~ (ACCEPTED)
 
-**Location:** `Cargo.toml:28`
+~~**Location:** `Cargo.toml:28`~~
 
-The agent binary depends on `uptrakit-provider-registry`, which transitively
+~~The agent binary depends on `uptrakit-provider-registry`, which transitively
 pulls in every concrete provider crate (GitHub, Docker Registry, Proxmox
 Helper Scripts, Homebrew). The agent needs the registry to instantiate
 providers from JSON config for local version detection and update execution.
 This is **architecturally justified** -- the agent must be able to run any
 provider locally -- but it creates a large transitive dependency footprint
 that couples the agent binary to all provider implementations at compile
-time.
+time.~~
 
-**Impact:** Adding a new provider crate increases the agent's compile time
-and binary size, even if a given agent deployment never uses that provider.
+~~**Impact:** Adding a new provider crate increases the agent's compile time
+and binary size, even if a given agent deployment never uses that provider.~~
 
-**Recommendation:** Introduce a `ProviderFactory` trait (in `provider-core`
-or a new `provider-factory` crate) that the registry implements:
+~~**Recommendation:** Introduce a `ProviderFactory` trait (in `provider-core`
+or a new `provider-factory` crate) that the registry implements:~~
 
-```rust
+~~```rust
 pub trait ProviderFactory: Send + Sync {
     fn create_provider(
         &self,
@@ -53,11 +53,13 @@ pub trait ProviderFactory: Send + Sync {
         executor: Arc<dyn CommandExecutor>,
     ) -> Result<Box<dyn Provider>>;
 }
-```
+```~~
 
-The agent would depend on the factory trait rather than the concrete
+~~The agent would depend on the factory trait rather than the concrete
 registry. Alternatively, compile provider selection behind **feature flags**
-so deployments can opt into only the providers they need.
+so deployments can opt into only the providers they need.~~
+
+**Resolution:** Accepted tradeoff: all agents compiled with all possible providers; adding a new provider only through the registry is acceptable.
 
 ### Medium
 

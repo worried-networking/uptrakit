@@ -35,6 +35,8 @@ pub struct BootstrapParams {
     pub target_username: String,
     pub target_private_key_pem: Option<String>,
     pub host_key_fingerprint: Option<String>,
+    /// When `true`, `host_key_fingerprint` must be `Some` and TOFU is disabled.
+    pub strict_host_key_checking: bool,
 }
 
 // ── Main orchestrator ────────────────────────────────────────────────
@@ -42,6 +44,12 @@ pub struct BootstrapParams {
 /// Run the full bootstrap workflow.
 pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<()> {
     // 1. VALIDATE INPUTS
+    if params.strict_host_key_checking && params.host_key_fingerprint.is_none() {
+        bail!(Error::InvalidInput(
+            "--strict-host-key-checking requires --host-key-fingerprint to be provided".to_string()
+        ));
+    }
+
     validate_posix_username(&params.auth_username)?;
     validate_posix_username(&params.target_username)?;
 

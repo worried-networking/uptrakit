@@ -1,6 +1,7 @@
 mod device_auth_status;
 pub mod hex;
 mod hook_shell;
+mod masked_email;
 mod mqtt_connection_status;
 mod mqtt_transport;
 mod output_stream_type;
@@ -12,6 +13,7 @@ mod session_token_type;
 
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
 pub use hook_shell::{HookShell, ParseHookShellError};
+pub use masked_email::{MaskedEmail, ParseMaskedEmailError};
 pub use mqtt_connection_status::{
     MqttClientConnectionStatus, ParseMqttClientConnectionStatusError,
 };

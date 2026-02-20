@@ -12,6 +12,8 @@ use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
 };
+#[cfg(feature = "oidc")]
+use uptrakit_shared_db::MaskedEmail;
 
 /// Global authentication settings (password auth toggle).
 /// OIDC config lives in the `oidc_providers` table.
@@ -190,7 +192,7 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
 
     let new_user = user::ActiveModel {
         id: Set(user_id),
-        email: Set(email.to_string()),
+        email: Set(MaskedEmail::new(email.to_string())),
         first_name: Set(first_name.unwrap_or("").to_string()),
         last_name: Set(last_name.unwrap_or("").to_string()),
         password_hash: Set(None),

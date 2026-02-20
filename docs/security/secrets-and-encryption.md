@@ -14,6 +14,20 @@
 - Used for: enrollment tokens, enrollment secrets, MQTT credentials in wire types, **and all secret fields in HTTP
   API request/response types** (passwords, tokens, client secrets, access/refresh tokens)
 
+### Security caveats
+
+When using `SecretString`, be aware of the following implementation trade-offs:
+
+- **`Clone`** creates a new heap allocation containing the secret. Each clone must be properly dropped (not
+  leaked or stored in a non-zeroizing container) to maintain the zeroize guarantee.
+- **`Serialize`** is transparent (`#[serde(transparent)]`) -- it emits the plaintext value. Never serialize
+  structs containing `SecretString` to logs or debug output. Use `Debug` formatting instead, which renders
+  `SecretString(***)`.
+- **`PartialEq`** uses standard `String` comparison, which short-circuits on the first mismatched byte. Do
+  **not** use `PartialEq` for authentication comparisons where timing side channels are a concern; use a
+  constant-time comparison function instead (e.g., `subtle::ConstantTimeEq` or
+  `argon2::password_hash::PasswordVerifier`).
+
 Wire fields using `SecretString`: `EnrollPayload.enrollment_token`, `EnrolledPayload.enrollment_secret`,
 `MqttTenantConfig.username`, `MqttTenantConfig.password`.
 
@@ -28,7 +42,37 @@ HTTP API fields using `SecretString` (in `uptrakit-web-api-types`): `RegisterReq
 `CreateApiTokenResponse.token`, `EnrollmentTokenResponse.token`,
 `MqttEnrollmentTokenResponse.token`, `DeviceAuthPollResponse.token`.
 
+### Entity field usage
+
+The `User` entity model (`crates/shared/db/src/entity/user.rs`) uses `SecretString` and `MaskedEmail`
+for sensitive fields:
+
+- **`password_hash: Option<SecretString>`** -- the user's password hash is wrapped in `SecretString`,
+  ensuring it is redacted in `Debug`/`Display` output and zeroed from memory on drop. Access the raw
+  hash via `.expose_secret()`.
+- **`email: MaskedEmail`** -- the user's email address is wrapped in `MaskedEmail`, which masks the
+  local part in `Debug`/`Display` output (e.g., `an***@example.com`) while preserving the full value
+  for serialization, API responses, and database storage. Access the full email via `.expose_email()`.
+
 See also: [Coding Standards](../development/coding-standards.md).
+
+## MaskedEmail
+
+`MaskedEmail` (defined in `crates/shared/types/src/masked_email.rs`, re-exported by `uptrakit-shared-types`)
+is a newtype wrapper for email addresses that masks the local part in `Debug` and `Display` output while
+preserving the full value for serialization and database storage.
+
+- `Debug` output: `MaskedEmail(an***@example.com)`
+- `Display` output: `an***@example.com`
+- Access the full, unmasked email via `.expose_email()` (returns `&str`)
+- Transparent serde: JSON wire format is unchanged (plain string)
+- Implements `FromStr` with basic email validation (requires exactly one `@` with non-empty local and domain)
+- Feature-gated SeaORM integration (`sea-orm` feature) -- see
+  [Coding Standards](../development/coding-standards.md#seaorm-integration-for-custom-types)
+
+The masking algorithm splits the local part (before `@`) by delimiters (`.`, `_`, `+`, `-`), shows
+`ceil(len/3)` leading characters per segment (minimum 1) followed by `***`, and always shows the
+domain in full. Original delimiters are preserved.
 
 ## Encryption at Rest
 

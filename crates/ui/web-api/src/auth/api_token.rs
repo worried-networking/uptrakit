@@ -133,6 +133,7 @@ impl ApiTokenService {
 mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, ConnectionTrait, Database};
+    use uptrakit_shared_db::MaskedEmail;
     use uptrakit_shared_db::entity::user;
 
     async fn setup_test_db() -> DatabaseConnection {
@@ -173,7 +174,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let test_user = user::ActiveModel {
             id: Set(generate_uuid()),
-            email: Set("test@example.com".to_string()),
+            email: Set(MaskedEmail::new("test@example.com".to_string())),
             first_name: Set("Test".to_string()),
             last_name: Set("User".to_string()),
             password_hash: Set(None),

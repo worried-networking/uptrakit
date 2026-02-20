@@ -78,20 +78,24 @@ input, leading zeros, uppercase, invalid chars, and round-trips.
 
 76 tests covering round-trips, edge cases, Display/as_str consistency, default values, and error paths.
 
-### LOW: `Clone` on `SecretString` defeats zeroize guarantees
+### ~~LOW: `Clone` on `SecretString` defeats zeroize guarantees~~ (FIXED)
 
-Every `.clone()` creates a new heap copy that the caller must drop properly. If stored in a non-zeroizing container, the
-secret persists in memory. The `zeroize` crate's own guidance warns about this.
+~~Every `.clone()` creates a new heap copy that the caller must drop properly. If stored in a non-zeroizing container, the
+secret persists in memory. The `zeroize` crate's own guidance warns about this.~~
 
-**Recommendation:** Add a doc-comment on `Clone` explaining the security implication, or consider removing `Clone` if
-not strictly required.
+~~**Recommendation:** Add a doc-comment on `Clone` explaining the security implication, or consider removing `Clone` if
+not strictly required.~~
 
-### LOW: `SecretString` serialization is transparent (potential secret leak)
+**Resolution:** Added comprehensive doc comments documenting security caveats for Clone (heap allocation must be properly dropped), Serialize (emits plaintext), and PartialEq (not constant-time). Added SeaORM integration behind `sea-orm` feature.
 
-`#[serde(transparent)]` means `serde_json::to_string(&secret)` produces the actual secret value. Any accidental
-serialization (e.g., logging a struct as JSON) will leak the secret.
+### ~~LOW: `SecretString` serialization is transparent (potential secret leak)~~ (FIXED)
 
-**Recommendation:** Add a prominent doc-comment warning that `Serialize` emits plaintext.
+~~`#[serde(transparent)]` means `serde_json::to_string(&secret)` produces the actual secret value. Any accidental
+serialization (e.g., logging a struct as JSON) will leak the secret.~~
+
+~~**Recommendation:** Add a prominent doc-comment warning that `Serialize` emits plaintext.~~
+
+**Resolution:** Added comprehensive doc comments documenting security caveats for Clone (heap allocation must be properly dropped), Serialize (emits plaintext), and PartialEq (not constant-time). Added SeaORM integration behind `sea-orm` feature.
 
 ### ~~LOW: `ParseProviderTypeError` inconsistent with other parse errors~~ (FIXED)
 
@@ -120,11 +124,13 @@ matching every other type in the crate.
 **Resolution:** Added an early `if !s.is_ascii()` guard before byte-offset slicing in `decode()`. Multi-byte UTF-8
 input now returns `Err(DecodeError::InvalidChar)` instead of panicking. Test added.
 
-### INFORMATIONAL: `PartialEq` on `SecretString` is timing-sensitive
+### ~~INFORMATIONAL: `PartialEq` on `SecretString` is timing-sensitive~~ (FIXED)
 
-The derived `PartialEq` for `String` short-circuits on first mismatch (non-constant-time). If used for authentication
+~~The derived `PartialEq` for `String` short-circuits on first mismatch (non-constant-time). If used for authentication
 comparisons, this could leak information through timing side channels. If only used for configuration/caching, this is
-fine.
+fine.~~
+
+**Resolution:** Added comprehensive doc comments documenting security caveats for Clone (heap allocation must be properly dropped), Serialize (emits plaintext), and PartialEq (not constant-time). Added SeaORM integration behind `sea-orm` feature.
 
 ### INFORMATIONAL: `ProviderType` and `HookShell` missing `sea-orm` feature gate
 

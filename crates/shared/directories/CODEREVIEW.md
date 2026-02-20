@@ -52,10 +52,12 @@ window. Correctly documented.
 
 Zero instances in non-test code. All fallible operations return `Result`.
 
-### LOW: No atomic file replacement
+### ~~LOW: No atomic file replacement~~ (FIXED)
 
-Write functions use `create(true).truncate(true)` which overwrites in-place. If the process crashes mid-write, the file
-is left partially written. For security-critical files (private keys, certificates), consider write-to-temp-then-rename.
+~~Write functions use `create(true).truncate(true)` which overwrites in-place. If the process crashes mid-write, the file
+is left partially written. For security-critical files (private keys, certificates), consider write-to-temp-then-rename.~~
+
+**Resolution:** Implemented atomic write-to-temp-then-rename in `write_with_mode`. Writes to `.{filename}.tmp` temp file, then atomically renames to target.
 
 ### ~~LOW: Missing `file.sync_all()` in sync write path~~ RESOLVED
 

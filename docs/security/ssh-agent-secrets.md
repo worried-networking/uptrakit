@@ -116,20 +116,39 @@ The `host bootstrap` command introduces additional security considerations.
 
 ### Host key verification
 
-The bootstrap command supports two modes:
+The `host add` and `host bootstrap` commands support two host key verification
+modes, controlled by the `--strict-host-key-checking` flag:
 
-| Mode | Flag | Security Level |
+| Mode | Flags | Security Level |
 | --- | --- | --- |
-| **Strict pinning** | `--host-key-fingerprint SHA256:...` | Strong — rejects mismatched keys |
-| **TOFU** (trust-on-first-use) | (omitted) | Weaker — accepts any key on first connection |
+| **Strict** | `--strict-host-key-checking --host-key-fingerprint SHA256:...` | Strong — rejects mismatched keys; TOFU disabled |
+| **TOFU** (trust-on-first-use) | (neither flag, or `--host-key-fingerprint` alone) | Weaker — accepts any key on first connection |
 
-When TOFU is used, the observed fingerprint is displayed to the operator and
-stored in the database for subsequent connections. The verification step (step 7)
-always uses strict pinning with the fingerprint from step 3.
+When `--strict-host-key-checking` is set, `--host-key-fingerprint` becomes
+**required**. The command exits with an error if the fingerprint is not provided:
 
-**Recommendation**: Use `--host-key-fingerprint` in production to prevent
-man-in-the-middle attacks during the initial connection. TOFU is acceptable for
-development and trusted networks.
+```text
+error: --strict-host-key-checking requires --host-key-fingerprint to be provided
+```
+
+Without `--strict-host-key-checking`, TOFU mode is used by default. In TOFU
+mode, the SSH agent accepts and records the remote host's key on first
+connection. A `tracing::info!` log message is emitted when a key is accepted
+via TOFU:
+
+```text
+INFO accepting host key via trust-on-first-use (TOFU), fingerprint: SHA256:...
+```
+
+The observed fingerprint is displayed to the operator and stored in the database
+for subsequent connections. The verification step (step 7 in the bootstrap
+workflow) always uses strict pinning with the fingerprint from step 3.
+
+**Recommendation**: Use `--strict-host-key-checking` with
+`--host-key-fingerprint` in production and high-security deployments where host
+keys should be pre-verified out-of-band. This prevents man-in-the-middle attacks
+during the initial connection. TOFU is acceptable for development and trusted
+networks.
 
 ### Shell injection prevention
 

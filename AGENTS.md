@@ -322,7 +322,8 @@ The `uptrakit-directories` crate provides helper functions (permissions are set 
 Unix, eliminating TOCTOU windows):
 
 - `create_secure_dir(path)` -- async; creates directory with 0o700 permissions using `tokio::fs`
-- `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- async; writes file with 0o600 permissions
+- `write_secure_file(path, data)` / `write_secure_file_str(path, str)` -- async; atomically writes file with 0o600
+  permissions (write-to-temp-then-rename on same filesystem)
 - `AppDirs::resolve(app_kind, config_override, state_override)` -- resolves directories for an application
 - `AppDirs::config_path(name)` / `AppDirs::state_path(name)` -- returns `Result<PathBuf>` after validating `name`
   against path traversal (rejects path separators, `..`, `.`, empty strings, absolute paths)

@@ -289,8 +289,10 @@ pub async fn create_secure_dir(path: &Path) -> Result<()> {
 
 /// Write data to a file atomically with secure permissions (600).
 ///
-/// On Unix, opens the file with `mode(0o600)` via `OpenOptionsExt` so it is
-/// never world-readable, eliminating the TOCTOU window of write-then-chmod.
+/// Uses write-to-temp-then-rename for atomic replacement, preventing
+/// partial writes from corrupting security-critical files (private keys,
+/// certificates). On Unix, the temp file is created with `mode(0o600)`
+/// via `OpenOptionsExt` so it is never world-readable.
 /// Creates parent directories as needed with 700 permissions.
 pub async fn write_secure_file(path: &Path, data: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -306,44 +308,82 @@ pub async fn write_secure_file_str(path: &Path, data: &str) -> Result<()> {
     write_secure_file(path, data.as_bytes()).await
 }
 
-/// Async helper: open + write with `mode(0o600)` on Unix via tokio.
+/// Async helper: write to a temporary file in the same directory, then
+/// atomically rename to the target path. On Unix the temp file is created
+/// with `mode(0o600)` so it is never world-readable.
+///
+/// The rename is atomic on the same filesystem, preventing partial writes
+/// from leaving private keys or certificates in a corrupted state.
 async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
     use tokio::io::AsyncWriteExt;
 
-    #[cfg(unix)]
-    let file = {
-        tokio::fs::OpenOptions::new()
+    // Build a temp file path in the same directory to ensure same-filesystem rename.
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    let temp_name = format!(".{file_name}.tmp");
+    let temp_path = path.with_file_name(&temp_name);
+
+    // Write to temp file.
+    let write_result = async {
+        #[cfg(unix)]
+        let file = {
+            tokio::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&temp_path)
+                .await
+        };
+
+        #[cfg(not(unix))]
+        let file = tokio::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .mode(0o600)
-            .open(path)
-            .await
-    };
+            .open(&temp_path)
+            .await;
 
-    #[cfg(not(unix))]
-    let file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-        .await;
+        let mut file = file.map_err(|e| {
+            report!(DirectoryError::WriteFile {
+                path: temp_path.clone(),
+                source: e,
+            })
+        })?;
 
-    let mut file = file.map_err(|e| {
-        report!(DirectoryError::WriteFile {
-            path: path.to_path_buf(),
-            source: e,
-        })
-    })?;
+        file.write_all(data).await.map_err(|e| {
+            report!(DirectoryError::WriteFile {
+                path: temp_path.clone(),
+                source: e,
+            })
+        })?;
 
-    file.write_all(data).await.map_err(|e| {
-        report!(DirectoryError::WriteFile {
-            path: path.to_path_buf(),
-            source: e,
-        })
-    })?;
+        file.shutdown().await.map_err(|e| {
+            report!(DirectoryError::WriteFile {
+                path: temp_path.clone(),
+                source: e,
+            })
+        })?;
 
-    file.shutdown().await.map_err(|e| {
+        Ok::<(), Report<DirectoryError>>(())
+    }
+    .await;
+
+    // On write failure, attempt to clean up the temp file.
+    if let Err(e) = write_result {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(e);
+    }
+
+    // Atomically rename temp file to target path.
+    tokio::fs::rename(&temp_path, path).await.map_err(|e| {
+        // Best-effort cleanup on rename failure.
+        let temp = temp_path.clone();
+        tokio::spawn(async move {
+            let _ = tokio::fs::remove_file(&temp).await;
+        });
         report!(DirectoryError::WriteFile {
             path: path.to_path_buf(),
             source: e,
@@ -714,5 +754,20 @@ mod tests {
             .mode()
             & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[tokio::test]
+    async fn write_secure_file_atomic_no_temp_leftover() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("atomic_test");
+
+        write_secure_file(&file, b"data").await.expect("write");
+
+        // Verify no temp file remains
+        let temp_path = temp.path().join(".atomic_test.tmp");
+        assert!(!temp_path.exists(), "temp file should be cleaned up after atomic rename");
+
+        let content = std::fs::read(&file).expect("read");
+        assert_eq!(content, b"data");
     }
 }

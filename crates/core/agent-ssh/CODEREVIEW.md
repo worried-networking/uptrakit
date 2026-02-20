@@ -42,46 +42,50 @@ the compile-time and binary-size cost of 34 entity definitions.
 
 ### Medium — Security
 
-#### MS1: Bootstrap grants `NOPASSWD: ALL` sudoers access
+#### ~~MS1: Bootstrap grants `NOPASSWD: ALL` sudoers access~~ (ACCEPTED)
 
-**File:** `src/commands/bootstrap.rs`
+~~**File:** `src/commands/bootstrap.rs`~~
 
-The bootstrap workflow creates a sudoers entry granting the target user
+~~The bootstrap workflow creates a sudoers entry granting the target user
 unlimited passwordless sudo (`NOPASSWD: ALL`). While this is warned about
 in the CLI output and documented, it represents a significant security
-surface:
+surface:~~
 
-- Any compromise of the SSH key grants full root access to the target host.
-- There is no option to restrict sudo to specific commands.
+~~- Any compromise of the SSH key grants full root access to the target host.~~
+~~- There is no option to restrict sudo to specific commands.~~
 
-**Recommendation:** Consider adding an option to generate a restricted
+~~**Recommendation:** Consider adding an option to generate a restricted
 sudoers entry (e.g., `NOPASSWD: /usr/bin/apt-get, /usr/bin/systemctl`)
 or at minimum document the security implications in the security
-documentation with a hardening guide for production deployments.
+documentation with a hardening guide for production deployments.~~
 
-#### MS2: TOFU for SSH host keys accepts any key on first use
+**Resolution:** Accepted risk. The `NOPASSWD: ALL` configuration is required for the agent's operational scope and is clearly warned about in CLI output.
 
-**File:** `src/ssh_transport.rs:76-81`
+#### ~~MS2: TOFU for SSH host keys accepts any key on first use~~ (FIXED)
 
-`BootstrapHandler::check_server_key` accepts any host key when no
+~~**File:** `src/ssh_transport.rs:76-81`~~
+
+~~`BootstrapHandler::check_server_key` accepts any host key when no
 `expected_fingerprint` is provided (TOFU mode). This is standard SSH TOFU
-behavior and the observed fingerprint is stored for future verification.
+behavior and the observed fingerprint is stored for future verification.~~
 
-```rust
+~~```rust
 } else {
     // TOFU: accept and record.
     let mut fp = self.observed_fingerprint.lock().await;
     *fp = Some(fingerprint);
     Ok(true)
 }
-```
+```~~
 
-The host key fingerprint is persisted in the database
-(`ssh_hosts.host_key_fingerprint`) and used for subsequent connections.
+~~The host key fingerprint is persisted in the database
+(`ssh_hosts.host_key_fingerprint`) and used for subsequent connections.~~
 
-**Recommendation:** Consider adding a `--strict-host-key-checking` flag
+~~**Recommendation:** Consider adding a `--strict-host-key-checking` flag
 that requires `--host-key-fingerprint` for the initial connection,
-disabling TOFU. Document the TOFU behavior in security documentation.
+disabling TOFU. Document the TOFU behavior in security documentation.~~
+
+**Resolution:** Added `--strict-host-key-checking` flag to bootstrap and host-add commands. When set, `--host-key-fingerprint` is required. TOFU key acceptance is now logged via `tracing::info!`.
 
 ### Medium — Code Quality
 

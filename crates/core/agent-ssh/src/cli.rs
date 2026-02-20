@@ -65,6 +65,11 @@ pub enum HostCommands {
         /// Expected host key fingerprint (e.g., `SHA256:...`).
         #[arg(long)]
         host_key_fingerprint: Option<String>,
+
+        /// Enable strict host key checking mode.
+        /// When set, --host-key-fingerprint is required and TOFU is disabled.
+        #[arg(long)]
+        strict_host_key_checking: bool,
     },
 
     /// List all SSH hosts.
@@ -158,6 +163,11 @@ pub enum HostCommands {
         /// If omitted, trust-on-first-use is applied.
         #[arg(long)]
         host_key_fingerprint: Option<String>,
+
+        /// Enable strict host key checking mode.
+        /// When set, --host-key-fingerprint is required and TOFU is disabled.
+        #[arg(long)]
+        strict_host_key_checking: bool,
     },
 }
 
@@ -228,6 +238,7 @@ mod tests {
                         username,
                         private_key_file,
                         host_key_fingerprint,
+                        strict_host_key_checking,
                     },
             }) => {
                 assert_eq!(name, "myhost");
@@ -236,6 +247,7 @@ mod tests {
                 assert_eq!(username, "root");
                 assert_eq!(private_key_file.to_str().expect("path"), "/path/to/key");
                 assert!(host_key_fingerprint.is_none());
+                assert!(!strict_host_key_checking);
             }
             other => panic!("expected Host Add, got: {other:?}"),
         }
@@ -260,6 +272,7 @@ mod tests {
             "-",
             "--host-key-fingerprint",
             "SHA256:abc123",
+            "--strict-host-key-checking",
         ])
         .expect("should parse");
 
@@ -270,12 +283,14 @@ mod tests {
                         port,
                         private_key_file,
                         host_key_fingerprint,
+                        strict_host_key_checking,
                         ..
                     },
             }) => {
                 assert_eq!(*port, 2222);
                 assert_eq!(private_key_file.to_str().expect("path"), "-");
                 assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+                assert!(strict_host_key_checking);
             }
             other => panic!("expected Host Add, got: {other:?}"),
         }
@@ -557,6 +572,7 @@ mod tests {
                         target_username,
                         target_private_key_file,
                         host_key_fingerprint,
+                        strict_host_key_checking,
                     },
             }) => {
                 assert_eq!(target.hostname, "10.0.0.5");
@@ -572,6 +588,7 @@ mod tests {
                 assert!(target_username.is_none());
                 assert!(target_private_key_file.is_none());
                 assert!(host_key_fingerprint.is_none());
+                assert!(!strict_host_key_checking);
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
         }
@@ -652,6 +669,7 @@ mod tests {
             "-",
             "--host-key-fingerprint",
             "SHA256:abc123",
+            "--strict-host-key-checking",
         ])
         .expect("should parse bootstrap with all options");
 
@@ -666,6 +684,7 @@ mod tests {
                         target_username,
                         target_private_key_file,
                         host_key_fingerprint,
+                        strict_host_key_checking,
                     },
             }) => {
                 assert_eq!(target.hostname, "192.168.1.50");
@@ -687,6 +706,7 @@ mod tests {
                     Some("-")
                 );
                 assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+                assert!(strict_host_key_checking);
             }
             other => panic!("expected Host Bootstrap, got: {other:?}"),
         }
@@ -793,5 +813,139 @@ mod tests {
             result.is_err(),
             "--auth-password and --auth-private-key-file should conflict"
         );
+    }
+
+    #[test]
+    fn host_add_strict_host_key_checking_without_fingerprint_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "add",
+            "--name",
+            "myhost",
+            "--hostname",
+            "192.168.1.1",
+            "--username",
+            "root",
+            "--private-key-file",
+            "/path/to/key",
+            "--strict-host-key-checking",
+        ])
+        .expect("--strict-host-key-checking without --host-key-fingerprint should parse (validation is in command handlers)");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Add {
+                        strict_host_key_checking,
+                        host_key_fingerprint,
+                        ..
+                    },
+            }) => {
+                assert!(strict_host_key_checking);
+                assert!(host_key_fingerprint.is_none());
+            }
+            other => panic!("expected Host Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_add_strict_host_key_checking_with_fingerprint_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "add",
+            "--name",
+            "myhost",
+            "--hostname",
+            "192.168.1.1",
+            "--username",
+            "root",
+            "--private-key-file",
+            "/path/to/key",
+            "--strict-host-key-checking",
+            "--host-key-fingerprint",
+            "SHA256:abc123",
+        ])
+        .expect("--strict-host-key-checking with --host-key-fingerprint should parse");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Add {
+                        strict_host_key_checking,
+                        host_key_fingerprint,
+                        ..
+                    },
+            }) => {
+                assert!(strict_host_key_checking);
+                assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+            }
+            other => panic!("expected Host Add, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_strict_host_key_checking_without_fingerprint_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "root@10.0.0.1",
+            "--auth-password",
+            "pass",
+            "--strict-host-key-checking",
+        ])
+        .expect("--strict-host-key-checking without --host-key-fingerprint should parse (validation is in command handlers)");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Bootstrap {
+                        strict_host_key_checking,
+                        host_key_fingerprint,
+                        ..
+                    },
+            }) => {
+                assert!(strict_host_key_checking);
+                assert!(host_key_fingerprint.is_none());
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn host_bootstrap_strict_host_key_checking_with_fingerprint_parses() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "root@10.0.0.1",
+            "--auth-password",
+            "pass",
+            "--strict-host-key-checking",
+            "--host-key-fingerprint",
+            "SHA256:abc123",
+        ])
+        .expect("--strict-host-key-checking with --host-key-fingerprint should parse");
+
+        match &args.command {
+            Some(Commands::Host {
+                command:
+                    HostCommands::Bootstrap {
+                        strict_host_key_checking,
+                        host_key_fingerprint,
+                        ..
+                    },
+            }) => {
+                assert!(strict_host_key_checking);
+                assert_eq!(host_key_fingerprint.as_deref(), Some("SHA256:abc123"));
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
     }
 }
