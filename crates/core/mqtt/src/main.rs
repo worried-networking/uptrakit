@@ -2,8 +2,6 @@ mod cli;
 mod mqtt_client;
 mod tenant_manager;
 
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 use clap::Parser;
@@ -25,6 +23,7 @@ struct MqttHandler {
     status_rx: tokio::sync::mpsc::UnboundedReceiver<mqtt_client::MqttClientStatusEvent>,
 }
 
+#[async_trait::async_trait]
 impl ServiceHandler for MqttHandler {
     const DIR_NAME: &'static str = "mqtt";
     const SERVICE_LABEL: &'static str = "uptrakit-mqtt service";
@@ -32,119 +31,105 @@ impl ServiceHandler for MqttHandler {
 
     type ServiceEvent = Option<mqtt_client::MqttClientStatusEvent>;
 
-    fn on_connected<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
-        _identity: &'a ServiceIdentityState,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>> {
-        Box::pin(async move {
-            conn.send(ServiceMessage::Register(MqttRegisterPayload {
-                instance_id: self.instance_id.clone(),
-                max_tenants: self.max_tenants,
-                active_mqtt_clients: self.tenant_mgr.active_mqtt_client_ids(),
-                protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
-            }))
-            .await
-            .map_err(LoopError::from)?;
-            Ok(())
-        })
-    }
-
-    fn on_message<'a>(
-        &'a mut self,
-        msg: ControllerMessage,
-        _conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            match msg {
-                ControllerMessage::Registered(payload) => {
-                    tracing::info!(instance_id = %payload.instance_id, "registered with controller");
-                    Ok(None)
-                }
-                ControllerMessage::TenantAssignments(payload) => {
-                    tracing::info!(count = payload.tenants.len(), "received tenant assignments");
-                    self.tenant_mgr.apply_assignments(payload.tenants).await;
-                    Ok(None)
-                }
-                ControllerMessage::TenantConfigUpdated(payload) => {
-                    tracing::info!(mqtt_client_id = %payload.tenant.mqtt_client_id, "mqtt client config updated");
-                    self.tenant_mgr.reload_client(payload.tenant).await;
-                    Ok(None)
-                }
-                ControllerMessage::TenantRevoked(payload) => {
-                    tracing::info!(mqtt_client_id = %payload.mqtt_client_id, reason = %payload.reason, "mqtt client revoked");
-                    self.tenant_mgr.stop_client(&payload.mqtt_client_id).await;
-                    Ok(None)
-                }
-                _ => {
-                    tracing::debug!("ignoring unrecognized message in authenticated loop");
-                    Ok(None)
-                }
-            }
-        })
-    }
-
-    fn poll_service_event(
+    async fn on_connected(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
-        Box::pin(async move { self.status_rx.recv().await })
+        conn: &mut ControllerConnection,
+        _identity: &ServiceIdentityState,
+    ) -> std::result::Result<(), LoopError> {
+        conn.send(ServiceMessage::Register(MqttRegisterPayload {
+            instance_id: self.instance_id.clone(),
+            max_tenants: self.max_tenants,
+            active_mqtt_clients: self.tenant_mgr.active_mqtt_client_ids(),
+            protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+        }))
+        .await
+        .map_err(LoopError::from)?;
+        Ok(())
     }
 
-    fn on_service_event<'a>(
-        &'a mut self,
-        event: Self::ServiceEvent,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            match event {
-                Some(status) => {
-                    conn.send_best_effort(ServiceMessage::MqttClientStatus(
-                        MqttClientStatusPayload {
-                            mqtt_client_id: status.mqtt_client_id,
-                            status: status.status,
-                        },
-                    ))
-                    .await;
-                    Ok(None)
-                }
-                None => {
-                    tracing::warn!("status channel closed");
-                    Ok(Some(LoopOutcome::Disconnected))
-                }
+    async fn on_message(
+        &mut self,
+        msg: ControllerMessage,
+        _conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+        match msg {
+            ControllerMessage::Registered(payload) => {
+                tracing::info!(instance_id = %payload.instance_id, "registered with controller");
+                Ok(None)
             }
-        })
+            ControllerMessage::TenantAssignments(payload) => {
+                tracing::info!(count = payload.tenants.len(), "received tenant assignments");
+                self.tenant_mgr.apply_assignments(payload.tenants).await;
+                Ok(None)
+            }
+            ControllerMessage::TenantConfigUpdated(payload) => {
+                tracing::info!(mqtt_client_id = %payload.tenant.mqtt_client_id, "mqtt client config updated");
+                self.tenant_mgr.reload_client(payload.tenant).await;
+                Ok(None)
+            }
+            ControllerMessage::TenantRevoked(payload) => {
+                tracing::info!(mqtt_client_id = %payload.mqtt_client_id, reason = %payload.reason, "mqtt client revoked");
+                self.tenant_mgr.stop_client(&payload.mqtt_client_id).await;
+                Ok(None)
+            }
+            _ => {
+                tracing::debug!("ignoring unrecognized message in authenticated loop");
+                Ok(None)
+            }
+        }
     }
 
-    fn on_shutdown<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
+    async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+        self.status_rx.recv().await
+    }
+
+    async fn on_service_event(
+        &mut self,
+        event: Self::ServiceEvent,
+        conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+        match event {
+            Some(status) => {
+                conn.send_best_effort(ServiceMessage::MqttClientStatus(
+                    MqttClientStatusPayload {
+                        mqtt_client_id: status.mqtt_client_id,
+                        status: status.status,
+                    },
+                ))
+                .await;
+                Ok(None)
+            }
+            None => {
+                tracing::warn!("status channel closed");
+                Ok(Some(LoopOutcome::Disconnected))
+            }
+        }
+    }
+
+    async fn on_shutdown(
+        &mut self,
+        conn: &mut ControllerConnection,
         signal: Signal,
         _shutdown_timeout_seconds: u32,
-    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
-        Box::pin(async move {
-            let (reason, outcome) = match signal {
-                Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
-                _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
-            };
+    ) -> LoopOutcome {
+        let (reason, outcome) = match signal {
+            Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
+            _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+        };
 
-            // Notify controller with active MQTT client list.
-            let active = self.tenant_mgr.active_mqtt_client_ids();
-            conn.send_best_effort(ServiceMessage::Disconnecting(DisconnectingPayload {
-                reason,
-                active_mqtt_clients: active,
-            }))
-            .await;
+        // Notify controller with active MQTT client list.
+        let active = self.tenant_mgr.active_mqtt_client_ids();
+        conn.send_best_effort(ServiceMessage::Disconnecting(DisconnectingPayload {
+            reason,
+            active_mqtt_clients: active,
+        }))
+        .await;
 
-            tracing::info!("shutting down MQTT clients");
-            self.tenant_mgr.shutdown_all().await;
-            tracing::info!("shutdown complete");
+        tracing::info!("shutting down MQTT clients");
+        self.tenant_mgr.shutdown_all().await;
+        tracing::info!("shutdown complete");
 
-            outcome
-        })
+        outcome
     }
 
     fn ping_interval(&self) -> Duration {

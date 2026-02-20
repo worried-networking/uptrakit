@@ -5,9 +5,6 @@ mod host_info;
 mod update;
 mod version_check;
 
-use std::future::Future;
-use std::pin::Pin;
-
 use clap::Parser;
 use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
@@ -22,6 +19,7 @@ struct AgentHandler {
     in_flight_update: Option<client::InFlightUpdate>,
 }
 
+#[async_trait::async_trait]
 impl ServiceHandler for AgentHandler {
     const DIR_NAME: &'static str = "agent";
     const SERVICE_LABEL: &'static str = "uptrakit-agent service";
@@ -29,124 +27,103 @@ impl ServiceHandler for AgentHandler {
 
     type ServiceEvent = client::UpdateEvent;
 
-    fn on_connected<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
-        _identity: &'a ServiceIdentityState,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>> {
-        Box::pin(async move {
-            let host_info = crate::host_info::collect_host_info();
-            conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
-                hosts: vec![host_info],
-                agent_version: env!("CARGO_PKG_VERSION").to_string(),
-                protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
-            }))
-            .await
-            .map_err(LoopError::from)?;
-            tracing::debug!(
-                "sent ReportHosts with agent_version={}",
-                env!("CARGO_PKG_VERSION")
-            );
-            Ok(())
-        })
-    }
-
-    fn on_message<'a>(
-        &'a mut self,
-        msg: ControllerMessage,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            match msg {
-                ControllerMessage::CheckVersions(payload) => {
-                    Ok(client::handle_check_versions(payload, conn).await)
-                }
-                ControllerMessage::ExecuteUpdate(payload) => {
-                    client::handle_execute_update(
-                        *payload,
-                        &mut self.in_flight_update,
-                        conn,
-                    )
-                    .await;
-                    Ok(None)
-                }
-                _ => {
-                    tracing::debug!("ignoring unrecognized message in authenticated loop");
-                    Ok(None)
-                }
-            }
-        })
-    }
-
-    fn poll_service_event(
+    async fn on_connected(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
-        Box::pin(async move {
-            if let Some(ref mut update) = self.in_flight_update {
-                tokio::select! {
-                    biased;
-                    Some(output_msg) = update.output_rx.recv() => {
-                        client::UpdateEvent::Output(output_msg)
-                    }
-                    result = &mut update.handle => {
-                        client::UpdateEvent::Completed(result)
-                    }
-                }
-            } else {
-                std::future::pending::<Self::ServiceEvent>().await
-            }
-        })
+        conn: &mut ControllerConnection,
+        _identity: &ServiceIdentityState,
+    ) -> std::result::Result<(), LoopError> {
+        let host_info = crate::host_info::collect_host_info();
+        conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
+            hosts: vec![host_info],
+            agent_version: env!("CARGO_PKG_VERSION").to_string(),
+            protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+        }))
+        .await
+        .map_err(LoopError::from)?;
+        tracing::debug!(
+            "sent ReportHosts with agent_version={}",
+            env!("CARGO_PKG_VERSION")
+        );
+        Ok(())
     }
 
-    fn on_service_event<'a>(
-        &'a mut self,
+    async fn on_message(
+        &mut self,
+        msg: ControllerMessage,
+        conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+        match msg {
+            ControllerMessage::CheckVersions(payload) => {
+                Ok(client::handle_check_versions(payload, conn).await)
+            }
+            ControllerMessage::ExecuteUpdate(payload) => {
+                client::handle_execute_update(*payload, &mut self.in_flight_update, conn).await;
+                Ok(None)
+            }
+            _ => {
+                tracing::debug!("ignoring unrecognized message in authenticated loop");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+        if let Some(ref mut update) = self.in_flight_update {
+            tokio::select! {
+                biased;
+                Some(output_msg) = update.output_rx.recv() => {
+                    client::UpdateEvent::Output(output_msg)
+                }
+                result = &mut update.handle => {
+                    client::UpdateEvent::Completed(result)
+                }
+            }
+        } else {
+            std::future::pending::<Self::ServiceEvent>().await
+        }
+    }
+
+    async fn on_service_event(
+        &mut self,
         event: Self::ServiceEvent,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            let Some(ref update) = self.in_flight_update else {
-                tracing::error!("received update event but no in-flight update exists");
-                return Ok(None);
-            };
-            let update_history_id = update.update_history_id;
+        conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+        let Some(ref update) = self.in_flight_update else {
+            tracing::error!("received update event but no in-flight update exists");
+            return Ok(None);
+        };
+        let update_history_id = update.update_history_id;
 
-            match event {
-                client::UpdateEvent::Output(output_msg) => {
-                    client::send_update_output(conn, update_history_id, output_msg).await;
-                }
-                client::UpdateEvent::Completed(result) => {
-                    client::send_update_result(conn, update_history_id, result).await;
-                    self.in_flight_update = None;
-                }
+        match event {
+            client::UpdateEvent::Output(output_msg) => {
+                client::send_update_output(conn, update_history_id, output_msg).await;
             }
-            Ok(None)
-        })
+            client::UpdateEvent::Completed(result) => {
+                client::send_update_result(conn, update_history_id, result).await;
+                self.in_flight_update = None;
+            }
+        }
+        Ok(None)
     }
 
-    fn on_shutdown<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
+    async fn on_shutdown(
+        &mut self,
+        conn: &mut ControllerConnection,
         signal: Signal,
         shutdown_timeout_seconds: u32,
-    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
-        Box::pin(async move {
-            let (disconnect_reason, outcome) = match signal {
-                Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
-                _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
-            };
-            client::handle_graceful_shutdown(
-                conn,
-                self.in_flight_update.take(),
-                shutdown_timeout_seconds,
-                disconnect_reason,
-                outcome,
-            )
-            .await
-        })
+    ) -> LoopOutcome {
+        let (disconnect_reason, outcome) = match signal {
+            Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
+            _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+        };
+        client::handle_graceful_shutdown(
+            conn,
+            self.in_flight_update.take(),
+            shutdown_timeout_seconds,
+            disconnect_reason,
+            outcome,
+        )
+        .await
     }
 }
 

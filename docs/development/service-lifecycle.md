@@ -12,6 +12,7 @@ enrollment with backoff, certificate renewal, ping/pong keepalive, signal handli
 ## The `ServiceHandler` trait
 
 ```rust
+#[async_trait]
 pub trait ServiceHandler: Send {
     const DIR_NAME: &'static str;
     const SERVICE_LABEL: &'static str;
@@ -19,41 +20,34 @@ pub trait ServiceHandler: Send {
 
     type ServiceEvent: Send;
 
-    fn on_connected<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
-        identity: &'a ServiceIdentityState,
-    ) -> Pin<Box<dyn Future<Output = Result<(), LoopError>> + Send + 'a>>;
-
-    fn on_message<'a>(
-        &'a mut self,
-        msg: ControllerMessage,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>>;
-
-    fn on_settings<'a>(
-        &'a mut self,
-        _settings: &'a ServiceSettingsPayload,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {}) // default: no-op
-    }
-
-    fn poll_service_event(
+    async fn on_connected(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>>;
+        conn: &mut ControllerConnection,
+        identity: &ServiceIdentityState,
+    ) -> Result<(), LoopError>;
 
-    fn on_service_event<'a>(
-        &'a mut self,
+    async fn on_message(
+        &mut self,
+        msg: ControllerMessage,
+        conn: &mut ControllerConnection,
+    ) -> Result<Option<LoopOutcome>, LoopError>;
+
+    async fn on_settings(&mut self, _settings: &ServiceSettingsPayload) {}
+
+    async fn poll_service_event(&mut self) -> Self::ServiceEvent;
+
+    async fn on_service_event(
+        &mut self,
         event: Self::ServiceEvent,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>>;
+        conn: &mut ControllerConnection,
+    ) -> Result<Option<LoopOutcome>, LoopError>;
 
-    fn on_shutdown<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
+    async fn on_shutdown(
+        &mut self,
+        conn: &mut ControllerConnection,
         signal: Signal,
         shutdown_timeout_seconds: u32,
-    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>>;
+    ) -> LoopOutcome;
 
     fn ping_interval(&self) -> Duration {
         Duration::from_secs(300) // default 5 minutes
@@ -125,10 +119,11 @@ Override to change the keepalive ping interval. Default is 300 seconds. The MQTT
 Callbacks return `Result<_, LoopError>`. `LoopError` carries semantic flags (`cert_expired`, `receive_closed`) so the lifecycle can decide whether to
 re-enroll, reconnect with backoff, or propagate the error. A `From<Report<EnrollmentError>>` impl enables using `?` on SDK connection operations.
 
-### Why `Pin<Box<dyn Future>>`
+### Why `#[async_trait]`
 
-All async trait methods use `Pin<Box<dyn Future>>` to avoid higher-ranked lifetime issues that arise with `impl Future` in trait methods when the
-implementation captures references with complex lifetime relationships (e.g. streaming iterators with `buffer_unordered`).
+All async trait methods use the `#[async_trait]` macro, which desugars `async fn` into `Pin<Box<dyn Future + Send + '_>>` return types. This matches the
+established pattern used across the codebase (Provider, CommandExecutor, TaskExecutor, CertSigner, etc.) and eliminates the manual `Pin<Box<...>>` /
+`Box::pin(async move { ... })` boilerplate that was previously required in the trait definition and all implementations.
 
 ## SDK-managed event loop
 
@@ -192,9 +187,7 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 ## Example: minimal service
 
 ```rust
-use std::future::Future;
-use std::pin::Pin;
-
+use async_trait::async_trait;
 use uptrakit_internal_wire::{ControllerMessage, ServiceType};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, ServiceHandler,
@@ -203,6 +196,7 @@ use uptrakit_service_sdk::{
 
 struct MyHandler;
 
+#[async_trait]
 impl ServiceHandler for MyHandler {
     const DIR_NAME: &'static str = "my-service";
     const SERVICE_LABEL: &'static str = "uptrakit-my-service";
@@ -210,43 +204,41 @@ impl ServiceHandler for MyHandler {
 
     type ServiceEvent = std::convert::Infallible;
 
-    fn on_connected<'a>(
-        &'a mut self,
-        _conn: &'a mut ControllerConnection,
-        _identity: &'a ServiceIdentityState,
-    ) -> Pin<Box<dyn Future<Output = Result<(), LoopError>> + Send + 'a>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn on_message<'a>(
-        &'a mut self,
-        _msg: ControllerMessage,
-        _conn: &'a mut ControllerConnection,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn poll_service_event(
+    async fn on_connected(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
-        Box::pin(std::future::pending())
+        _conn: &mut ControllerConnection,
+        _identity: &ServiceIdentityState,
+    ) -> Result<(), LoopError> {
+        Ok(())
     }
 
-    fn on_service_event<'a>(
-        &'a mut self,
+    async fn on_message(
+        &mut self,
+        _msg: ControllerMessage,
+        _conn: &mut ControllerConnection,
+    ) -> Result<Option<LoopOutcome>, LoopError> {
+        Ok(None)
+    }
+
+    async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+        std::future::pending().await
+    }
+
+    async fn on_service_event(
+        &mut self,
         event: Self::ServiceEvent,
-        _conn: &'a mut ControllerConnection,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<LoopOutcome>, LoopError>> + Send + 'a>> {
+        _conn: &mut ControllerConnection,
+    ) -> Result<Option<LoopOutcome>, LoopError> {
         match event {} // Infallible
     }
 
-    fn on_shutdown<'a>(
-        &'a mut self,
-        _conn: &'a mut ControllerConnection,
+    async fn on_shutdown(
+        &mut self,
+        _conn: &mut ControllerConnection,
         _signal: Signal,
         _shutdown_timeout_seconds: u32,
-    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
-        Box::pin(async { LoopOutcome::Shutdown })
+    ) -> LoopOutcome {
+        LoopOutcome::Shutdown
     }
 }
 

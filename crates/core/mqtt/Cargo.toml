@@ -15,6 +15,7 @@ path = "src/main.rs"
 default = []
 
 [dependencies]
+async-trait = { workspace = true }
 clap = { workspace = true }
 futures-util = { workspace = true }
 hostname = { workspace = true }

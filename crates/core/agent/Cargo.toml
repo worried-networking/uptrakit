@@ -7,6 +7,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 clap = { workspace = true }
 futures-util = { workspace = true }
 rootcause = { workspace = true }

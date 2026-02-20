@@ -6,9 +6,9 @@
 //! parts (callbacks for connection, messages, shutdown), while the SDK owns
 //! the common plumbing including the unified event loop.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
+
+use async_trait::async_trait;
 
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{ControllerMessage, ServiceSettingsPayload, ServiceType};
@@ -64,9 +64,10 @@ pub enum LoopOutcome {
 /// Trait that each service implements to plug into the shared lifecycle
 /// and unified event loop.
 ///
-/// All async methods use `Pin<Box<dyn Future>>` to avoid higher-ranked
-/// lifetime issues that arise with `impl Future` in trait methods when the
-/// implementation captures references with complex lifetime relationships.
+/// All async methods are desugared by [`async_trait`] into
+/// `Pin<Box<dyn Future + Send + '_>>`, matching the established pattern
+/// used across the codebase (Provider, CommandExecutor, TaskExecutor, etc.).
+#[async_trait]
 pub trait ServiceHandler: Send {
     /// Directory name used for platform-specific directory resolution
     /// (e.g. `"agent"` or `"mqtt"`).
@@ -86,11 +87,11 @@ pub trait ServiceHandler: Send {
     /// Called after the WebSocket connection is established.
     ///
     /// Send initial messages (e.g. `ReportHosts`, `Register`) here.
-    fn on_connected<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
-        identity: &'a ServiceIdentityState,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>>;
+    async fn on_connected(
+        &mut self,
+        conn: &mut ControllerConnection,
+        identity: &ServiceIdentityState,
+    ) -> std::result::Result<(), LoopError>;
 
     /// Handle a [`ControllerMessage`] not handled by the SDK.
     ///
@@ -99,53 +100,42 @@ pub trait ServiceHandler: Send {
     /// Everything else is delegated to this callback.
     ///
     /// Return `Ok(Some(outcome))` to break the loop, `Ok(None)` to continue.
-    fn on_message<'a>(
-        &'a mut self,
+    async fn on_message(
+        &mut self,
         msg: ControllerMessage,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    >;
+        conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError>;
 
     /// Called after the SDK processes shared `ServiceSettings` fields.
     ///
     /// The SDK already handles protocol version check, renewal schedule,
     /// shutdown timeout, and CA staleness. Override this for additional
     /// service-specific settings processing.
-    fn on_settings<'a>(
-        &'a mut self,
-        _settings: &'a ServiceSettingsPayload,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    async fn on_settings(&mut self, _settings: &ServiceSettingsPayload) {}
 
     /// Poll for service-specific events (additional `select!` arm).
     ///
     /// Return [`std::future::pending()`] if the service has no custom events.
     /// The returned future is dropped when another `select!` arm fires,
     /// releasing the `&mut self` borrow.
-    fn poll_service_event(
-        &mut self,
-    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>>;
+    async fn poll_service_event(&mut self) -> Self::ServiceEvent;
 
     /// Handle a resolved service event.
     ///
     /// Return `Ok(Some(outcome))` to break the loop, `Ok(None)` to continue.
-    fn on_service_event<'a>(
-        &'a mut self,
+    async fn on_service_event(
+        &mut self,
         event: Self::ServiceEvent,
-        conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    >;
+        conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError>;
 
     /// Graceful shutdown: send `Disconnecting` and drain in-flight work.
-    fn on_shutdown<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
+    async fn on_shutdown(
+        &mut self,
+        conn: &mut ControllerConnection,
         signal: Signal,
         shutdown_timeout_seconds: u32,
-    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>>;
+    ) -> LoopOutcome;
 
     /// Ping interval. Default 300s. Override for configurable values.
     fn ping_interval(&self) -> Duration {

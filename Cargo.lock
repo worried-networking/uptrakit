@@ -5699,6 +5699,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 name = "uptrakit-agent"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "clap",
  "futures-util",
  "rootcause",
@@ -5898,6 +5899,7 @@ dependencies = [
 name = "uptrakit-mqtt"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "clap",
  "futures-util",
  "hostname",
@@ -6043,6 +6045,7 @@ dependencies = [
 name = "uptrakit-service-sdk"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "clap",
  "futures-util",
  "hostname",

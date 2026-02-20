@@ -10,9 +10,6 @@ mod ssh_key;
 mod ssh_target;
 mod ssh_transport;
 
-use std::future::Future;
-use std::pin::Pin;
-
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
@@ -48,6 +45,7 @@ struct SshAgentHandler {
     local_db: Option<sea_orm::DatabaseConnection>,
 }
 
+#[async_trait::async_trait]
 impl ServiceHandler for SshAgentHandler {
     const DIR_NAME: &'static str = "agent-ssh";
     const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
@@ -55,75 +53,61 @@ impl ServiceHandler for SshAgentHandler {
 
     type ServiceEvent = std::convert::Infallible;
 
-    fn on_connected<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
-        _identity: &'a ServiceIdentityState,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), LoopError>> + Send + 'a>> {
-        Box::pin(async move {
-            // Open (or create) the local SSH host database.
-            let local_db = crate::db::init_db(&self.state_dir).await.map_err(|e| {
-                LoopError {
-                    cert_expired: false,
-                    receive_closed: false,
-                    message: format!("failed to initialize local database: {e}"),
-                }
-            })?;
-            tracing::debug!("local SSH host database initialized");
-
-            // Report enrolled hosts to controller.
-            client::report_enrolled_hosts(&local_db, conn).await;
-
-            self.local_db = Some(local_db);
-            Ok(())
-        })
-    }
-
-    fn on_message<'a>(
-        &'a mut self,
-        _msg: ControllerMessage,
-        _conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    > {
-        Box::pin(async move {
-            tracing::debug!("ignoring unrecognized message in authenticated loop");
-            Ok(None)
-        })
-    }
-
-    fn poll_service_event(
+    async fn on_connected(
         &mut self,
-    ) -> Pin<Box<dyn Future<Output = Self::ServiceEvent> + Send + '_>> {
-        Box::pin(std::future::pending())
+        conn: &mut ControllerConnection,
+        _identity: &ServiceIdentityState,
+    ) -> std::result::Result<(), LoopError> {
+        // Open (or create) the local SSH host database.
+        let local_db = crate::db::init_db(&self.state_dir).await.map_err(|e| LoopError {
+            cert_expired: false,
+            receive_closed: false,
+            message: format!("failed to initialize local database: {e}"),
+        })?;
+        tracing::debug!("local SSH host database initialized");
+
+        // Report enrolled hosts to controller.
+        client::report_enrolled_hosts(&local_db, conn).await;
+
+        self.local_db = Some(local_db);
+        Ok(())
     }
 
-    fn on_service_event<'a>(
-        &'a mut self,
+    async fn on_message(
+        &mut self,
+        _msg: ControllerMessage,
+        _conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
+        tracing::debug!("ignoring unrecognized message in authenticated loop");
+        Ok(None)
+    }
+
+    async fn poll_service_event(&mut self) -> Self::ServiceEvent {
+        std::future::pending().await
+    }
+
+    async fn on_service_event(
+        &mut self,
         event: Self::ServiceEvent,
-        _conn: &'a mut ControllerConnection,
-    ) -> Pin<
-        Box<dyn Future<Output = std::result::Result<Option<LoopOutcome>, LoopError>> + Send + 'a>,
-    > {
+        _conn: &mut ControllerConnection,
+    ) -> std::result::Result<Option<LoopOutcome>, LoopError> {
         match event {}
     }
 
-    fn on_shutdown<'a>(
-        &'a mut self,
-        conn: &'a mut ControllerConnection,
+    async fn on_shutdown(
+        &mut self,
+        conn: &mut ControllerConnection,
         _signal: Signal,
         _shutdown_timeout_seconds: u32,
-    ) -> Pin<Box<dyn Future<Output = LoopOutcome> + Send + 'a>> {
-        Box::pin(async move {
-            let disconnecting_msg =
-                ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Shutdown));
-            if let Err(e) = conn.send(disconnecting_msg).await {
-                tracing::debug!(error = %e, "failed to send Disconnecting message");
-            } else {
-                tracing::debug!("sent Disconnecting message to controller");
-            }
-            LoopOutcome::Shutdown
-        })
+    ) -> LoopOutcome {
+        let disconnecting_msg =
+            ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Shutdown));
+        if let Err(e) = conn.send(disconnecting_msg).await {
+            tracing::debug!(error = %e, "failed to send Disconnecting message");
+        } else {
+            tracing::debug!("sent Disconnecting message to controller");
+        }
+        LoopOutcome::Shutdown
     }
 }
 
