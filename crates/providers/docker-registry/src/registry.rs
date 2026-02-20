@@ -207,10 +207,7 @@ impl RegistryClient {
                 .map(|e| format!("{}: {}", e.code, e.message))
                 .unwrap_or(body);
 
-            bail!(DockerRegistryError::ApiError {
-                status,
-                message,
-            });
+            bail!(DockerRegistryError::ApiError { status, message });
         }
 
         response.text().await.map_err(|e| {

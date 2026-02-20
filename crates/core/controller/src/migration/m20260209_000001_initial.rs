@@ -1400,8 +1400,18 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingDeviceFlows::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(PendingDeviceFlows::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(PendingDeviceFlows::DeviceCodeHash).text().not_null().unique_key())
+                    .col(
+                        ColumnDef::new(PendingDeviceFlows::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(PendingDeviceFlows::DeviceCodeHash)
+                            .text()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(
                         ColumnDef::new(PendingDeviceFlows::UserCode)
                             .text()
@@ -1488,8 +1498,18 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingAccountLinks::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(PendingAccountLinks::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(PendingAccountLinks::LinkTokenHash).text().not_null().unique_key())
+                    .col(
+                        ColumnDef::new(PendingAccountLinks::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(PendingAccountLinks::LinkTokenHash)
+                            .text()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(
                         ColumnDef::new(PendingAccountLinks::ProviderId)
                             .uuid()
@@ -1544,8 +1564,18 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingOidcTokenExchanges::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(PendingOidcTokenExchanges::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(PendingOidcTokenExchanges::ExchangeCodeHash).text().not_null().unique_key())
+                    .col(
+                        ColumnDef::new(PendingOidcTokenExchanges::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(PendingOidcTokenExchanges::ExchangeCodeHash)
+                            .text()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(
                         ColumnDef::new(PendingOidcTokenExchanges::UserId)
                             .uuid()
@@ -1586,8 +1616,18 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(PendingOidcRegistrations::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(PendingOidcRegistrations::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(PendingOidcRegistrations::RegistrationCodeHash).text().not_null().unique_key())
+                    .col(
+                        ColumnDef::new(PendingOidcRegistrations::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(PendingOidcRegistrations::RegistrationCodeHash)
+                            .text()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(
                         ColumnDef::new(PendingOidcRegistrations::ProviderId)
                             .uuid()

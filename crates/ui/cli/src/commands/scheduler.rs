@@ -84,7 +84,10 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
 /// Trigger immediate execution of a scheduled task.
 pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
-    let resp = client.trigger_scheduled_task(params.id).await.context_to()?;
+    let resp = client
+        .trigger_scheduled_task(params.id)
+        .await
+        .context_to()?;
 
     let human = if resp.triggered {
         format!("Task triggered: {}\n", resp.message)

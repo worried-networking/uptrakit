@@ -18,8 +18,8 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_web_api_types::validation::Validate;
 use uptrakit_shared_db::entity::provider_config;
+use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::provider_configs::{
@@ -44,9 +44,7 @@ pub(crate) fn validate_provider_config_request(
     Ok(())
 }
 
-fn provider_config_response_from(
-    m: provider_config::Model,
-) -> Option<ProviderConfigResponse> {
+fn provider_config_response_from(m: provider_config::Model) -> Option<ProviderConfigResponse> {
     let provider_type: uptrakit_provider_registry::ProviderType = match m.provider_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
@@ -118,9 +116,7 @@ pub async fn create_provider_config(
     match model.insert(&state.db).await {
         Ok(inserted) => match provider_config_response_from(inserted) {
             Some(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-            None => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
+            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
         },
         Err(e) => {
             tracing::error!("Failed to create provider config: {e}");
@@ -222,9 +218,7 @@ pub async fn get_provider_config(
     match find_active_config(&state.db, tenant.tenant_id, config_id).await {
         Some(config) => match provider_config_response_from(config) {
             Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
-            None => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
+            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
         },
         None => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     }
@@ -307,9 +301,7 @@ pub async fn update_provider_config(
     match model.update(&state.db).await {
         Ok(updated) => match provider_config_response_from(updated) {
             Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
-            None => {
-                error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-            }
+            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
         },
         Err(e) => {
             tracing::error!("Failed to update provider config: {e}");

@@ -16,8 +16,8 @@ use sea_orm::{
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_web_api_types::validation::Validate;
 use uptrakit_shared_db::entity::{oidc_provider, oidc_provider::RoleMapping};
+use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::oidc_providers::{
     CreateOidcProviderRequest, OidcProviderResponse, UpdateOidcProviderRequest,
@@ -87,9 +87,9 @@ pub async fn create_provider(
         return error_response(StatusCode::CONFLICT, "Slug already exists");
     }
 
-    let encrypted_secret =
-        match uptrakit_shared_db::crypto::EncryptedString::new(req.client_secret.expose_secret().to_string())
-    {
+    let encrypted_secret = match uptrakit_shared_db::crypto::EncryptedString::new(
+        req.client_secret.expose_secret().to_string(),
+    ) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("encryption failed: {e}");

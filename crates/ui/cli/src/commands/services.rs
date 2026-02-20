@@ -22,20 +22,19 @@ pub struct ListParams<'a> {
 /// List services with optional filters and pagination.
 pub async fn list(params: ListParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
-    let query = ListServicesQuery {
-        r#type: params
-            .service_type
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
-        status: params
-            .status
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())))?,
-        page: params.page,
-        per_page: params.per_page,
-    };
+    let query =
+        ListServicesQuery {
+            r#type: params
+                .service_type
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
+            status: params.status.map(|s| s.parse()).transpose().map_err(
+                |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
+            )?,
+            page: params.page,
+            per_page: params.per_page,
+        };
     let resp = client.list_services(&query).await.context_to()?;
 
     let mut human = String::new();

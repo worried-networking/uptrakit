@@ -940,7 +940,9 @@ mod tests {
         use crate::validation::Validate;
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
-            provider_config_id: Some(Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").unwrap()),
+            provider_config_id: Some(
+                Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").unwrap(),
+            ),
             provider_config: None,
             package_identifier: None,
             config_override: None,

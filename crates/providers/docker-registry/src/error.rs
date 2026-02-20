@@ -60,7 +60,10 @@ mod tests {
             status: reqwest::StatusCode::NOT_FOUND,
             message: "not found".to_string(),
         };
-        assert_eq!(err.to_string(), "registry API error: 404 Not Found not found");
+        assert_eq!(
+            err.to_string(),
+            "registry API error: 404 Not Found not found"
+        );
     }
 
     #[test]

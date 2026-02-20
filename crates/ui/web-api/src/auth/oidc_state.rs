@@ -660,8 +660,10 @@ mod tests {
 
         // Backdate the link
         db.execute_unprepared(
-            "UPDATE pending_account_links SET expires_at = datetime('now', '-1 hour')"
-        ).await.unwrap();
+            "UPDATE pending_account_links SET expires_at = datetime('now', '-1 hour')",
+        )
+        .await
+        .unwrap();
 
         store.cleanup_expired().await;
 
@@ -685,8 +687,10 @@ mod tests {
 
         // Backdate the exchange
         db.execute_unprepared(
-            "UPDATE pending_oidc_token_exchanges SET expires_at = datetime('now', '-1 hour')"
-        ).await.unwrap();
+            "UPDATE pending_oidc_token_exchanges SET expires_at = datetime('now', '-1 hour')",
+        )
+        .await
+        .unwrap();
 
         store.cleanup_expired().await;
 
@@ -807,8 +811,10 @@ mod tests {
 
         // Backdate to make it expired
         db.execute_unprepared(
-            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')"
-        ).await.unwrap();
+            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')",
+        )
+        .await
+        .unwrap();
 
         let reg = store.get("reg-get-expired").await.unwrap();
         assert!(reg.is_none());
@@ -877,8 +883,10 @@ mod tests {
 
         // Backdate the registration
         db.execute_unprepared(
-            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')"
-        ).await.unwrap();
+            "UPDATE pending_oidc_registrations SET expires_at = datetime('now', '-1 hour')",
+        )
+        .await
+        .unwrap();
 
         store.cleanup_expired().await;
 

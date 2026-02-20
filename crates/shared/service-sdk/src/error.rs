@@ -238,24 +238,21 @@ mod tests {
 
     #[test]
     fn from_agent_error_cert_expired() {
-        let err =
-            EnrollmentError::from_agent_error(true, false, "some message".to_string());
+        let err = EnrollmentError::from_agent_error(true, false, "some message".to_string());
         assert!(err.is_cert_expired());
         assert!(!err.is_receive_closed());
     }
 
     #[test]
     fn from_agent_error_receive_closed() {
-        let err =
-            EnrollmentError::from_agent_error(false, true, "some message".to_string());
+        let err = EnrollmentError::from_agent_error(false, true, "some message".to_string());
         assert!(!err.is_cert_expired());
         assert!(err.is_receive_closed());
     }
 
     #[test]
     fn from_agent_error_generic() {
-        let err =
-            EnrollmentError::from_agent_error(false, false, "connection failed".to_string());
+        let err = EnrollmentError::from_agent_error(false, false, "connection failed".to_string());
         assert!(!err.is_cert_expired());
         assert!(!err.is_receive_closed());
         assert!(

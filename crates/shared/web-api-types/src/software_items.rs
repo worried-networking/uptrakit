@@ -172,7 +172,9 @@ impl Validate for CreateSoftwareItemRequest {
             (None, None) => {
                 return Err(ValidationError {
                     field: "provider_config",
-                    message: "exactly one of provider_config_id or provider_config must be provided".to_string(),
+                    message:
+                        "exactly one of provider_config_id or provider_config must be provided"
+                            .to_string(),
                 });
             }
             _ => {}

@@ -19,10 +19,10 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_web_api_types::SecretString;
-use uptrakit_web_api_types::validation::Validate;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{permission, role, role_permission, user, user_role};
+use uptrakit_web_api_types::SecretString;
+use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::auth::{
     AuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RefreshResponse, RegisterRequest,

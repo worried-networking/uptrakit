@@ -27,7 +27,10 @@ pub struct ShowParams<'a> {
 /// List all hosts (paginated).
 pub async fn list(params: ListParams<'_>) -> Result<()> {
     let client = authenticated_client(params.server, params.token, params.insecure)?;
-    let pagination = PaginationParams { page: params.page, per_page: params.per_page };
+    let pagination = PaginationParams {
+        page: params.page,
+        per_page: params.per_page,
+    };
     let resp = client.list_hosts(&pagination).await.context_to()?;
 
     let mut human = String::new();

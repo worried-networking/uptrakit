@@ -5,8 +5,8 @@ use rootcause::prelude::*;
 use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output};
 use uptrakit_provider_core::mpsc;
 use uptrakit_provider_core::{
-    DiscoveredSoftware, OutputStreamType, Provider, ProviderCapability, ProviderError, ProviderType,
-    ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
+    DiscoveredSoftware, OutputStreamType, Provider, ProviderCapability, ProviderError,
+    ProviderType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
 };
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 

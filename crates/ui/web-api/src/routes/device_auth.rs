@@ -4,7 +4,6 @@ use crate::auth::device_flow::{DeviceFlowError, DeviceFlowStatus};
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use uptrakit_web_api_types::SecretString;
 use axum::http::HeaderMap;
 use axum::{
     Json,
@@ -14,6 +13,7 @@ use axum::{
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::pending_device_flow::DeviceAuthStatus;
+use uptrakit_web_api_types::SecretString;
 
 pub use uptrakit_web_api_types::device_auth::{
     DeviceAuthApproveRequest, DeviceAuthApproveResponse, DeviceAuthPollRequest,

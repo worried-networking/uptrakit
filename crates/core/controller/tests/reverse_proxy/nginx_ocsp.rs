@@ -55,7 +55,13 @@ async fn nginx_ocsp_rejects_revoked_cert() {
         .send()
         .await
         .expect("healthz request");
-    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"no-cert healthz").await;
+    assert_status(
+        &container,
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "no-cert healthz",
+    )
+    .await;
 
     // Valid cert → should be accepted
     let resp = client_valid_cert
@@ -63,7 +69,13 @@ async fn nginx_ocsp_rejects_revoked_cert() {
         .send()
         .await
         .expect("valid cert request");
-    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"valid cert").await;
+    assert_status(
+        &container,
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "valid cert",
+    )
+    .await;
 
     // Revoked cert → should be rejected by Nginx OCSP check.
     // Nginx returns 400 "The SSL certificate error" when OCSP says revoked.
@@ -161,7 +173,13 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
         .send()
         .await
         .expect("healthz request");
-    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"no-cert healthz").await;
+    assert_status(
+        &container,
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "no-cert healthz",
+    )
+    .await;
 
     // Valid cert → should be accepted
     let resp = client_valid_cert
@@ -169,7 +187,13 @@ async fn nginx_ocsp_aia_http_rejects_revoked_cert() {
         .send()
         .await
         .expect("valid cert request");
-    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"valid cert").await;
+    assert_status(
+        &container,
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "valid cert",
+    )
+    .await;
 
     // Revoked cert → should be rejected (Nginx reads AIA, queries HTTP OCSP).
     let result = client_revoked_cert
@@ -282,7 +306,13 @@ async fn nginx_ocsp_aia_https_cannot_verify() {
         .send()
         .await
         .expect("healthz request");
-    assert_status(&container, resp.status(), reqwest::StatusCode::OK,"no-cert healthz").await;
+    assert_status(
+        &container,
+        resp.status(),
+        reqwest::StatusCode::OK,
+        "no-cert healthz",
+    )
+    .await;
 
     // Valid cert → rejected because Nginx cannot use https:// AIA OCSP URLs.
     // Nginx reports "invalid URL prefix in OCSP responder" during SSL handshake.

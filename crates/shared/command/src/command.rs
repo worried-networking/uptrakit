@@ -101,7 +101,9 @@ pub(crate) async fn run_command_exec_impl(
                 output.push('\n');
             } else if !truncated {
                 truncated = true;
-                tracing::warn!("stdout output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation");
+                tracing::warn!(
+                    "stdout output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation"
+                );
                 output.push_str("\n[output truncated at 10 MB]\n");
             }
         }
@@ -127,7 +129,9 @@ pub(crate) async fn run_command_exec_impl(
                 output.push('\n');
             } else if !truncated {
                 truncated = true;
-                tracing::warn!("stderr output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation");
+                tracing::warn!(
+                    "stderr output exceeded {MAX_OUTPUT_BYTES} bytes, truncating accumulation"
+                );
                 output.push_str("\n[output truncated at 10 MB]\n");
             }
         }

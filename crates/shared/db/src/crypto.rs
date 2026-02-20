@@ -19,8 +19,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_nullable_encrypted_string_decodes_to_none() {
-        let _lock = TEST_LOCK.lock().unwrap();
-        ensure_test_key();
+        {
+            let _lock = TEST_LOCK.lock().unwrap();
+            ensure_test_key();
+        }
 
         use crate::entity::mqtt_client;
         use crate::entity::prelude::MqttClient;

@@ -26,9 +26,9 @@ use sea_orm::{
 use serde::Deserialize;
 use std::sync::Arc;
 use time::OffsetDateTime;
-use uptrakit_web_api_types::SecretString;
 use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::{oidc_provider, user_oidc_link, user_role};
+use uptrakit_web_api_types::SecretString;
 
 pub use super::auth::AuthResponse;
 use crate::auth::registration::RegistrationMode;
@@ -987,7 +987,11 @@ pub async fn oidc_link(
     };
 
     // Retrieve pending link from database
-    let pending = match state.account_link_store.take(link_req.link_token.expose_secret()).await {
+    let pending = match state
+        .account_link_store
+        .take(link_req.link_token.expose_secret())
+        .await
+    {
         Ok(Some(p)) => p,
         Ok(None) => {
             return error_response(StatusCode::BAD_REQUEST, "Link token not found or expired");
@@ -1012,7 +1016,10 @@ pub async fn oidc_link(
             Some(h) => h,
             None => return error_response(StatusCode::UNAUTHORIZED, "User has no password"),
         };
-        matches!(password::verify_password(pwd.expose_secret(), hash), Ok(true))
+        matches!(
+            password::verify_password(pwd.expose_secret(), hash),
+            Ok(true)
+        )
     } else {
         // Bearer token verification (OIDC-to-OIDC linking) — now JWT-based
         let bearer = parts

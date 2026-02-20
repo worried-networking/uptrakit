@@ -14,10 +14,10 @@ use ipnet::IpNet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use uptrakit_web_api_types::validation::Validate;
 pub use uptrakit_web_api_types::settings_network::{
     NetworkSettingsResponse, UpdateNetworkSettingsRequest,
 };
+use uptrakit_web_api_types::validation::Validate;
 
 /// Get network settings
 #[utoipa::path(

@@ -212,7 +212,9 @@ pub(crate) async fn verify_master_key(
                             ))
                         },
                     )?;
-                    tracing::info!("master key verification succeeded (raced with another instance)");
+                    tracing::info!(
+                        "master key verification succeeded (raced with another instance)"
+                    );
                 }
             }
         }

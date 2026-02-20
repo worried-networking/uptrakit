@@ -190,10 +190,7 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
     if let (Some(username), password) = (&config.username, &config.password) {
         opts.set_credentials(
             username.expose_secret(),
-            password
-                .as_ref()
-                .map(|p| p.expose_secret())
-                .unwrap_or(""),
+            password.as_ref().map(|p| p.expose_secret()).unwrap_or(""),
         );
     }
 

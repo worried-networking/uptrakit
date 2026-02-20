@@ -169,8 +169,7 @@ mod tests {
     }
 
     fn test_encrypted_key() -> uptrakit_crypto::EncryptedString {
-        uptrakit_crypto::EncryptedString::new("test-key-content".to_string())
-            .expect("encrypt")
+        uptrakit_crypto::EncryptedString::new("test-key-content".to_string()).expect("encrypt")
     }
 
     fn add_params(

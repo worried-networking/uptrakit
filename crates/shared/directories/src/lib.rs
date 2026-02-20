@@ -462,8 +462,7 @@ mod tests {
 
         // Create directory with overly permissive mode (0o755)
         std::fs::create_dir(&dir).expect("create dir");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
-            .expect("set perms");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("set perms");
         let mode = std::fs::metadata(&dir)
             .expect("metadata")
             .permissions()
@@ -472,7 +471,9 @@ mod tests {
         assert_eq!(mode, 0o755, "precondition: dir should be 0o755");
 
         // create_secure_dir should correct permissions to 0o700
-        create_secure_dir(&dir).await.expect("should succeed on existing dir");
+        create_secure_dir(&dir)
+            .await
+            .expect("should succeed on existing dir");
 
         let mode = std::fs::metadata(&dir)
             .expect("metadata")
@@ -509,7 +510,9 @@ mod tests {
         let dir = temp.path().join("idempotent_dir");
 
         create_secure_dir(&dir).await.expect("first call");
-        create_secure_dir(&dir).await.expect("second call should succeed");
+        create_secure_dir(&dir)
+            .await
+            .expect("second call should succeed");
 
         assert!(dir.is_dir());
         let mode = std::fs::metadata(&dir)
@@ -540,7 +543,9 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let file = temp.path().join("a/b/c/file");
 
-        write_secure_file(&file, b"data").await.expect("should write");
+        write_secure_file(&file, b"data")
+            .await
+            .expect("should write");
 
         assert!(file.is_file());
     }

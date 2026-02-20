@@ -10,10 +10,10 @@ use axum::{
 };
 use std::sync::Arc;
 
+use uptrakit_web_api_types::SecretString;
 pub use uptrakit_web_api_types::api_tokens::{
     ApiTokenListResponse, ApiTokenResponse, CreateApiTokenRequest, CreateApiTokenResponse,
 };
-use uptrakit_web_api_types::SecretString;
 
 /// Create a new API token
 #[utoipa::path(

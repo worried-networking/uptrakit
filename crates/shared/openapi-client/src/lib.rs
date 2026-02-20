@@ -321,10 +321,7 @@ impl UptrakitClient {
         }
         if status.is_client_error() || status.is_server_error() {
             let message = extract_error_message(&text);
-            bail!(ClientError::Api {
-                status,
-                message,
-            });
+            bail!(ClientError::Api { status, message });
         }
         serde_json::from_str(&text).context_to()
     }
@@ -348,10 +345,7 @@ impl UptrakitClient {
         if status.is_client_error() || status.is_server_error() {
             let text = resp.text().await.context_to()?;
             let message = extract_error_message(&text);
-            bail!(ClientError::Api {
-                status,
-                message,
-            });
+            bail!(ClientError::Api { status, message });
         }
         Ok(())
     }
@@ -374,10 +368,7 @@ impl UptrakitClient {
         }
         if status.is_client_error() || status.is_server_error() {
             let message = extract_error_message(&text);
-            bail!(ClientError::Api {
-                status,
-                message,
-            });
+            bail!(ClientError::Api { status, message });
         }
         Ok(text)
     }

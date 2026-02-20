@@ -20,9 +20,7 @@ pub enum ClientError {
         Some(secs) => format!(" (retry after {secs}s)"),
         None => String::new(),
     })]
-    RateLimited {
-        retry_after_seconds: Option<u64>,
-    },
+    RateLimited { retry_after_seconds: Option<u64> },
 
     #[error("not found: {0}")]
     NotFound(String),

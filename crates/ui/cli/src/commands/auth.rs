@@ -1,7 +1,5 @@
 use crate::client::{UptrakitClient, resolve_server_and_token};
-use crate::config::{
-    Config, Credentials, load_config, save_config, save_credentials,
-};
+use crate::config::{Config, Credentials, load_config, save_config, save_credentials};
 use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
@@ -169,10 +167,12 @@ pub async fn login(server_override: Option<&str>, insecure: bool) -> Result<()> 
                 // Store config and credentials
                 save_config(&Config {
                     server: Some(server.clone()),
-                }).await?;
+                })
+                .await?;
                 save_credentials(&Credentials {
                     token: Some(api_token.expose_secret().to_string()),
-                }).await?;
+                })
+                .await?;
 
                 eprintln!();
                 println!("Logged in to {} successfully.", server);
@@ -494,10 +494,7 @@ mod tests {
     #[test]
     fn token_revoke_output_serialization() {
         let id = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").expect("uuid");
-        let output = TokenRevokeOutput {
-            id,
-            revoked: true,
-        };
+        let output = TokenRevokeOutput { id, revoked: true };
         let json = serde_json::to_string(&output).expect("serialize");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
         assert_eq!(parsed["id"], id.to_string());
