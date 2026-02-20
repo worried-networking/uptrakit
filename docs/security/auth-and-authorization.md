@@ -6,12 +6,28 @@
 | OIDC | User login | External identity providers with auto-create or account linking. Requires the `oidc` Cargo feature (enabled by default). |
 | Device authorization | CLI login | RFC 8628-style flow: device code, browser approval, API token issuance. Status tracked via `DeviceAuthStatus` enum (`pending`, `authorized`, `expired`). |
 | JWT access tokens | API requests | Short-lived tokens that carry resolved permissions (never stored). |
-| Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. |
+| Refresh tokens | API requests | SHA-256 hashed, 7-day expiry, rotated on each use within a DB transaction, revoking the predecessor. Session integrity validated on every use (see below). |
 | API tokens | Programmatic access | Long-lived, revocable bearer tokens stored in the database. |
 | mTLS client certs | Agent/MQTT connections | Issued after CSR approval and validated per connection. |
 | Forwarded cert headers | Reverse proxy | Trusted proxies forward cert info/PEM; issuer CN verified. |
 | Enrollment tokens | Agent onboarding | One-time tokens with optional expiry/use limit. |
 | MQTT enrollment tokens | MQTT service enrollment | Stored separately (`mqtt_enrollment.token_hash`). |
+
+## Session Integrity Validation
+
+Refresh token verification and rotation validate session data integrity before proceeding:
+
+- **OIDC sessions** must have a valid `oidc_provider_id`. If the provider ID is missing or corrupt
+  (e.g., `auth_method = 'oidc'` but `oidc_provider_id IS NULL`), the session is rejected with
+  `AuthError::InvalidSession` and a warning is logged. The session is **never** silently downgraded
+  to password authentication.
+- **JWT access tokens** with `auth_method = "oidc"` are similarly rejected if `oidc_provider_id`
+  is missing or unparseable, returning HTTP 401 instead of falling back to a different auth method.
+- **Database constraint**: The sessions table enforces
+  `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)` to prevent invalid state at the
+  storage layer.
+
+See also: [Secrets Handling and Encryption](secrets-and-encryption.md) for encryption-at-rest details.
 
 ## Permissions Model - Detailed
 

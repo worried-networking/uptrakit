@@ -1,6 +1,5 @@
 use crate::Result;
 use crate::UptrakitClient;
-use rootcause::prelude::*;
 use uptrakit_web_api_types::auth::{
     AuthResponse, LoginRequest, LogoutRequest, RefreshRequest, RefreshResponse, RegisterRequest,
     UserResponse,
@@ -64,9 +63,8 @@ impl UptrakitClient {
         &self,
         req: &DeviceAuthPollRequest,
     ) -> Result<DeviceAuthPollResponse> {
-        let url = format!("{}/api/v1/auth/device/poll", self.base_url);
-        let resp = self.http.post(&url).json(req).send().await.context_to()?;
-        self.handle_response(resp).await
+        self.post_json_unauth("/api/v1/auth/device/poll", req)
+            .await
     }
 
     /// Approve a pending device authorization request.

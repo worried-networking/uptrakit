@@ -33,15 +33,16 @@ response handlers (`handle_response`, `handle_empty_response`,
 `handle_text_response`) now check for 401 before generic 4xx/5xx mapping. The
 CLI error formatter maps `NotAuthenticated` to a user-friendly message.
 
-### O-4 (Low): One endpoint bypasses helper pattern
+### ~~O-4 (Low): One endpoint bypasses helper pattern~~ (FIXED)
 
-**Location:** `crates/shared/openapi-client/src/auth.rs`
+~~**Location:** `crates/shared/openapi-client/src/auth.rs`~~
 
-`device_auth_poll` manually constructs and sends the request while most methods
-use shared helper functions.
+~~`device_auth_poll` manually constructs and sends the request while most methods
+use shared helper functions.~~
 
-**Suggested fix:** Route through the same helper used by comparable unauth
-POST endpoints for consistency.
+**Resolution:** Replaced manual URL construction and request sending with
+`self.post_json_unauth("/api/v1/auth/device/poll", req)`. Removed unused
+`rootcause` import from `auth.rs`.
 
 ### O-5 (Info): Raw response fallback is intentional and acceptable
 

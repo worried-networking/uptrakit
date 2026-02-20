@@ -94,6 +94,9 @@ pub enum AuthError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("invalid session: auth method data is corrupted or inconsistent")]
+    InvalidSession,
+
     #[error("internal error: {0}")]
     Internal(String),
 }

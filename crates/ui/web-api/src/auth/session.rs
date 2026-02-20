@@ -87,7 +87,14 @@ impl SessionService {
 
         let user_id = session.user_id;
         let auth_method = AuthMethod::from_session(&session.auth_method, session.oidc_provider_id)
-            .unwrap_or(AuthMethod::Password);
+            .ok_or_else(|| {
+                tracing::warn!(
+                    user_id = %user_id,
+                    auth_method = %session.auth_method,
+                    "session has corrupted auth method data; rejecting"
+                );
+                report!(AuthError::InvalidSession)
+            })?;
 
         Ok(VerifiedSession {
             user_id,
@@ -137,8 +144,17 @@ impl SessionService {
         old_active.update(&txn).await.context_to()?;
 
         // Create new session with a fresh refresh token
-        let auth_method = AuthMethod::from_session(&old_auth_method_str, old_oidc_provider_id)
-            .unwrap_or(AuthMethod::Password);
+        let auth_method =
+            AuthMethod::from_session(&old_auth_method_str, old_oidc_provider_id).ok_or_else(
+                || {
+                    tracing::warn!(
+                        user_id = %old_user_id,
+                        auth_method = %old_auth_method_str,
+                        "session has corrupted auth method data; rejecting rotation"
+                    );
+                    report!(AuthError::InvalidSession)
+                },
+            )?;
 
         let new_token = generate_secure_token()?;
         let new_hash = hash_token(&new_token);
@@ -483,5 +499,78 @@ mod tests {
         // Second rotation of the same token must fail (replay detection)
         let result = service.rotate_refresh_token(&token).await;
         assert!(result.is_err(), "rotating already-rotated token must fail");
+    }
+
+    #[tokio::test]
+    async fn test_corrupted_oidc_session_rejected() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        // Manually insert a session with auth_method = "oidc" but
+        // oidc_provider_id = NULL (corrupted data).
+        let token = generate_secure_token().unwrap();
+        let token_hash = hash_token(&token);
+        let now = OffsetDateTime::now_utc();
+        let expires_at = now + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS);
+
+        let corrupted_session = session::ActiveModel {
+            id: Set(generate_uuid()),
+            user_id: Set(user.id),
+            refresh_token_hash: Set(token_hash),
+            auth_method: Set("oidc".to_string()),
+            oidc_provider_id: Set(None), // corrupted: OIDC session without provider
+            token_type: Set(SessionTokenType::RefreshToken),
+            created_at: Set(now),
+            expires_at: Set(expires_at),
+            revoked_at: Set(None),
+            user_agent: Set(None),
+            ip_address: Set(None),
+        };
+        corrupted_session.insert(&db).await.unwrap();
+
+        // Verification must fail with InvalidSession, not silently downgrade
+        let result = service.verify_refresh_token(&token).await;
+        assert!(
+            result.is_err(),
+            "corrupted OIDC session must be rejected, not silently downgraded to password"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_corrupted_oidc_session_rotation_rejected() {
+        let db = setup_test_db().await;
+        let service = SessionService::new(db.clone());
+
+        let user = User::find().one(&db).await.unwrap().unwrap();
+
+        // Manually insert a corrupted OIDC session
+        let token = generate_secure_token().unwrap();
+        let token_hash = hash_token(&token);
+        let now = OffsetDateTime::now_utc();
+        let expires_at = now + Duration::days(REFRESH_TOKEN_EXPIRY_DAYS);
+
+        let corrupted_session = session::ActiveModel {
+            id: Set(generate_uuid()),
+            user_id: Set(user.id),
+            refresh_token_hash: Set(token_hash),
+            auth_method: Set("oidc".to_string()),
+            oidc_provider_id: Set(None),
+            token_type: Set(SessionTokenType::RefreshToken),
+            created_at: Set(now),
+            expires_at: Set(expires_at),
+            revoked_at: Set(None),
+            user_agent: Set(None),
+            ip_address: Set(None),
+        };
+        corrupted_session.insert(&db).await.unwrap();
+
+        // Rotation must also fail for corrupted sessions
+        let result = service.rotate_refresh_token(&token).await;
+        assert!(
+            result.is_err(),
+            "corrupted OIDC session must be rejected during rotation"
+        );
     }
 }

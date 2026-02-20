@@ -86,10 +86,13 @@ On `#[cfg(not(unix))]`, files and directories are created with default permissio
 
 The function only handles `~` and `~/...`, not `~otheruser/...`. Should be documented explicitly.
 
-### LOW: Tests are Unix-only without cfg guards
+### ~~LOW: Tests are Unix-only without cfg guards~~ RESOLVED
 
-`use std::os::unix::fs::PermissionsExt;` inside `#[cfg(test)]` but not behind `#[cfg(unix)]`. Tests will fail to
-compile on Windows.
+~~`use std::os::unix::fs::PermissionsExt;` inside `#[cfg(test)]` but not behind `#[cfg(unix)]`. Tests will fail to
+compile on Windows.~~
+
+**Resolution:** Added `#[cfg(unix)]` guard before `#[cfg(test)]` on the test module. The entire test suite uses
+Unix-specific permission checks (`PermissionsExt`), so gating the whole module is appropriate.
 
 ### LOW: Missing test coverage
 

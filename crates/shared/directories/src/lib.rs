@@ -435,6 +435,7 @@ pub async fn set_file_permissions(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 #[cfg(test)]
 mod tests {
     use super::*;

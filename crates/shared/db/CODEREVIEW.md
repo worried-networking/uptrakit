@@ -112,26 +112,40 @@ even during simultaneous startup.
 Resolved: The `Err` branch in `verify_key_verification_token` now logs the underlying decryption error at `debug` level
 via `tracing::debug!(error = %e, "key verification decryption failed")` before returning `MasterKeyMismatch`.
 
-### LOW: No nonce collision documentation
+### ~~LOW: No nonce collision documentation~~ RESOLVED
 
-With random 96-bit nonces and AES-256-GCM, the birthday bound for nonce collision is ~2^48 encryptions under the same
-key. This should be documented as a comment in the crypto module.
+~~With random 96-bit nonces and AES-256-GCM, the birthday bound for nonce collision is ~2^48 encryptions under the same
+key. This should be documented as a comment in the crypto module.~~
+
+**Resolution:** Added documentation to `encrypt_value()` in `uptrakit-crypto` covering nonce collision probability
+(birthday bound ~2^48), safety margins for the application's use case, and NIST SP 800-38D reference.
 
 ### LOW: No background re-encryption mechanism
 
 Legacy plaintext values persist indefinitely in the database. A migration script or background task should be
 implemented to progressively encrypt them.
 
-### LOW: `DeviceAuthStatus` re-export location inconsistency
+### ~~LOW: `DeviceAuthStatus` re-export location inconsistency~~ RESOLVED
 
-`pending_device_flow.rs` re-exports `DeviceAuthStatus` from within an entity module, while other shared type re-exports
-happen in `lib.rs`. Consider moving for consistency.
+~~`pending_device_flow.rs` re-exports `DeviceAuthStatus` from within an entity module, while other shared type re-exports
+happen in `lib.rs`. Consider moving for consistency.~~
 
-### LOW: `AuthMethod::from_session` data integrity assumption
+**Resolution:** Moved `DeviceAuthStatus` re-export from `pending_device_flow.rs` to `lib.rs` alongside
+`MaskedEmail`, `MqttClientConnectionStatus`, `MqttTransport`, `OutputStreamType`, `SecretString`, and
+`SessionTokenType`. Downstream imports updated.
 
-When `kind == "oidc"` but `oidc_provider_id` is `None`, returns `None`. This is a data integrity invariant that depends
+### ~~LOW: `AuthMethod::from_session` data integrity assumption~~ RESOLVED
+
+~~When `kind == "oidc"` but `oidc_provider_id` is `None`, returns `None`. This is a data integrity invariant that depends
 on the DB schema enforcing `oidc_provider_id IS NOT NULL WHEN auth_method = 'oidc'`. If no CHECK constraint exists, this
-is a latent bug.
+is a latent bug.~~
+
+**Resolution:** Three-pronged fix: (1) Added `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)` to the
+sessions table in the initial migration. (2) Replaced `unwrap_or(AuthMethod::Password)` in `session.rs` (both
+`verify_refresh_token` and `rotate_refresh_token`) with `ok_or_else(|| report!(AuthError::InvalidSession))` that logs
+a warning and rejects the session. (3) Fixed `require_auth.rs` JWT path to return
+`AuthFailure::Unauthorized("Invalid OIDC session: missing provider")` instead of falling back to Password. Added
+`AuthError::InvalidSession` variant and two tests for corrupted OIDC sessions.
 
 ---
 

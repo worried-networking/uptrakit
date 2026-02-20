@@ -471,6 +471,11 @@ impl MigrationTrait for Migration {
                             .to(OidcProviders::Table, OidcProviders::Id)
                             .on_delete(ForeignKeyAction::SetNull),
                     )
+                    .check(
+                        Expr::col(Sessions::AuthMethod)
+                            .ne("oidc")
+                            .or(Expr::col(Sessions::OidcProviderId).is_not_null()),
+                    )
                     .to_owned(),
             )
             .await?;

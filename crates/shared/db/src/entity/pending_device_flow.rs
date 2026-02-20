@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
-pub use uptrakit_shared_types::DeviceAuthStatus;
+use uptrakit_shared_types::DeviceAuthStatus;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "pending_device_flows")]

@@ -12,7 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
-use uptrakit_shared_db::entity::pending_device_flow::DeviceAuthStatus;
+use uptrakit_shared_db::DeviceAuthStatus;
 use uptrakit_web_api_types::SecretString;
 
 pub use uptrakit_web_api_types::device_auth::{

@@ -148,11 +148,15 @@ async fn authenticate_jwt(
         let provider_id = claims
             .oidc_provider_id
             .as_deref()
-            .and_then(|id| uuid::Uuid::parse_str(id).ok());
-        match provider_id {
-            Some(pid) => AuthMethod::Oidc { provider_id: pid },
-            None => AuthMethod::Password,
-        }
+            .and_then(|id| uuid::Uuid::parse_str(id).ok())
+            .ok_or_else(|| {
+                tracing::warn!(
+                    user_id = %claims.sub,
+                    "OIDC token missing valid provider ID; rejecting"
+                );
+                AuthFailure::Unauthorized("Invalid OIDC session: missing provider")
+            })?;
+        AuthMethod::Oidc { provider_id }
     } else {
         AuthMethod::Password
     };

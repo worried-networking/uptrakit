@@ -120,6 +120,16 @@ pub fn is_encrypted(s: &str) -> bool {
 /// Encrypt a plaintext string.
 ///
 /// Returns `"ENC:v1:<hex(nonce || ciphertext || tag)>"`.
+///
+/// # Nonce collision safety
+///
+/// AES-256-GCM uses a random 96-bit nonce generated via `rand::rng()`. The
+/// birthday-bound probability of a nonce collision under a single key is
+/// approximately 2^-32 after 2^48 encryptions (per NIST SP 800-38D,
+/// Section 8.3). This is well within safety margins for the application's
+/// use case (database field encryption with infrequent writes). Key rotation
+/// via the `ENC:v1:` version prefix provides a migration path if usage
+/// patterns ever approach this bound.
 fn encrypt_value(plaintext: &str) -> Result<String> {
     let key_bytes = MASTER_KEY
         .get()
