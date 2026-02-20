@@ -67,7 +67,9 @@ All Markdown files (`.md`) are linted with `markdownlint`. Ensure that `markdown
 `.markdownlintignore` or `.markdownlint.json` unless explicitly approved.
 
 ```sh
-markdownlint --config .markdownlint.json docs/
+markdownlint --config .markdownlint.json '**/*.md'
 ```
+
+The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
 
 CI runs these same checks. A PR that fails any of them will not merge.

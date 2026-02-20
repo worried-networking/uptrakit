@@ -34,28 +34,11 @@ bootstrap sudoers configuration.
 
 ### High
 
-#### H1: Agent-ssh depends on `uptrakit-shared-db` (extensibility)
+#### ~~H1: Agent-ssh depends on `uptrakit-shared-db` (extensibility)~~ RESOLVED
 
-**Location:** `Cargo.toml:32`
-
-The SSH agent depends on `uptrakit-shared-db`, which contains all 34 entity
-definitions for the entire system (controller entities, OIDC entities, MQTT
-entities, etc.). The SSH agent only uses its own local SQLite tables for
-encrypted SSH credential storage. It does not need controller-side entities
-like `oidc_provider`, `mqtt_lease`, `scheduled_task`, or `api_rate_limit`.
-
-**Impact:** The SSH agent compiles and links all 34 entity models plus the
-`crypto` module even though it only uses a small subset. This increases
-compile time and conceptually couples the agent to the controller's schema.
-
-**Recommendation:** Two approaches to reduce this coupling:
-
-1. **Feature-gate entity groups** in `shared-db` -- e.g.,
-   `controller-entities`, `agent-entities`, `crypto`. The SSH agent would
-   enable only `crypto` and `agent-entities`.
-2. **Extract agent-ssh's local DB schema** into its own minimal crate (e.g.,
-   `uptrakit-agent-ssh-db`) that depends only on `sea-orm` and the `crypto`
-   module from `shared-db`.
+**Resolution:** The crypto module was extracted into a standalone `uptrakit-crypto` crate.
+Agent-ssh now depends on `uptrakit-crypto` instead of `uptrakit-shared-db`, eliminating
+the compile-time and binary-size cost of 34 entity definitions.
 
 ### Medium — Security
 

@@ -4,7 +4,7 @@ This document describes how the SSH-backed agent (`uptrakit-agent-ssh`) stores a
 
 ## Encryption Model
 
-The SSH agent uses the same encryption infrastructure as the controller (`uptrakit-shared-db::crypto`), but with an **independent master key**.
+The SSH agent uses the same encryption infrastructure as the controller (`uptrakit-crypto`), but with an **independent master key**.
 
 ### Key Hierarchy
 

@@ -39,14 +39,11 @@ full workspace rebuild.
 The `ServiceType` enum (`Agent`, `Mqtt`, `SshAgent`) has the same extensibility limitation. A
 developer creating a new service type (e.g., a Kubernetes operator service) must modify this file.
 
-### Minor: OutputStreamType has 5 variants but command crate defines its own 2-variant subset
+### ~~Minor: OutputStreamType has 5 variants but command crate defines its own 2-variant subset~~ RESOLVED
 
-**Location:** `src/output_stream_type.rs`
-
-`OutputStreamType` has 5 variants: `Stdout`, `Stderr`, `PreHook`, `PostHook`, `System`. The
-`uptrakit-command` crate defines a separate `UpdateOutputStream` enum with only `Stdout` and
-`Stderr`. The comment in the command crate says "PreHook, PostHook, System remain in the agent
-crate." This splits one logical concept across two crates and two types.
+**Resolution:** `UpdateOutputStream` was removed from the command crate. All code now uses
+`OutputStreamType` from `uptrakit-shared-types` directly, consolidating the output stream
+concept into a single canonical type.
 
 ### Extensibility recommendation
 

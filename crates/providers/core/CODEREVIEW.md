@@ -50,7 +50,7 @@ pub trait ProviderCapabilities {
 **Location:** `src/lib.rs:18-24`
 
 Re-exporting `CommandExecutor`, `CommandSpec`, `CommandMode`, `CommandOutput`,
-`LocalCommandExecutor`, `ShellType`, `UpdateOutputLine`, and `UpdateOutputStream` is good for
+`LocalCommandExecutor`, `HookShell`, `OutputStreamType`, and `UpdateOutputLine` is good for
 provider developer convenience -- they only need to depend on `provider-core`.
 
 ## Positive Observations

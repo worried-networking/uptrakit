@@ -40,7 +40,7 @@ Convenience constructors:
 ```rust
 pub enum CommandMode {
     Exec { program: String, args: Vec<String> },
-    Shell { command: String, shell: ShellType },
+    Shell { command: String, shell: HookShell },
 }
 ```
 

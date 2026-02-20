@@ -74,15 +74,16 @@ Only 5 permission variants (`ViewSettings`, `ManageSettings`, `ViewAgents`, `Man
 Notable gaps: no `ViewHosts`/`ManageHosts`, no `ManageSoftwareItems`, no `ManageOidcProviders`, no `ManageApiTokens`,
 no `ManageScheduledTasks`, no `ViewUpdateHistory`.
 
-### LOW: Duplicate `default_enabled()` functions
+### ~~LOW: Duplicate `default_enabled()` functions~~ RESOLVED
 
-`provider_configs.rs` and `software_items.rs` both define identical `pub fn default_enabled() -> bool { true }`.
-Should be consolidated.
+**Resolution:** Moved `default_enabled()` to `lib.rs` as a single crate-level function. Both
+`provider_configs.rs` and `software_items.rs` now reference `crate::default_enabled`.
 
-### LOW: Duplicate message response types
+### ~~LOW: Duplicate message response types~~ RESOLVED
 
-`MessageResponse` in `agents.rs`, `HostMessageResponse` in `hosts.rs`, and similar single-`message` structs in
-`server_cert.rs` and `settings_ca.rs`. Consider a single generic `MessageResponse`.
+**Resolution:** `HostMessageResponse`, `RenewServerCertResponse`, and `RotateCaResponse` are now
+re-exports of the canonical `MessageResponse` from `agents.rs` via `pub use ... as`. Duplicate
+OpenAPI schema entries removed.
 
 ### LOW: Timestamps as `String` instead of typed datetime
 
@@ -102,10 +103,11 @@ tests updated accordingly. (`ListMqttServicesQuery.status` was a false positive 
 (`provider_config_response_from`) now returns `Option<ProviderConfigResponse>`, logging and skipping rows with
 invalid `provider_type` values. Callers use `filter_map` (list) or `match` (get/create/update).
 
-### LOW: Missing `Display` implementations for some enums
+### ~~LOW: Missing `Display` implementations for some enums~~ RESOLVED
 
-`AgentStatus`, `RegistrationMode`, `UpdateStatus`, and `MqttServiceStatus` have `as_str()` but no `Display`. In
-contrast, `Permission` and `AlertSeverity` do implement `Display`.
+**Resolution:** Added `Display` impls (delegating to `as_str()`) for `UpdateStatus`,
+`RegistrationMode`, `SystemdAction`, and `DockerComposeAction`. Tests verify
+`display_matches_as_str` for all four.
 
 ### ~~LOW: Missing OpenAPI schema derives on update hooks types~~ RESOLVED
 

@@ -46,7 +46,7 @@ The SSH agent manages its own encryption key independently from the controller:
 | Controller | Controller's master key (`UPTRAKIT_MASTER_KEY`) | CA keys, OIDC secrets, MQTT passwords |
 | SSH Agent | SSH agent's master key (`UPTRAKIT_MASTER_KEY`) | SSH private keys in local SQLite |
 
-Both use the same `init_master_key()` function from `uptrakit-shared-db::crypto` and the same `EncryptedString` type (AES-256-GCM), but with
+Both use the same `init_master_key()` function from `uptrakit-crypto` and the same `EncryptedString` type (AES-256-GCM), but with
 independent keys. The controller has no knowledge of the SSH agent's master key.
 
 ### Master Key Options

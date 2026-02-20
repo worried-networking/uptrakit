@@ -68,7 +68,8 @@ uptrakit/
 │   ├── shared/
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
-│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities, migrations & crypto
+│   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
+│   │   ├── db/                         # uptrakit-shared-db                     (lib)  — SeaORM entities & migrations; re-exports uptrakit-crypto
 │   │   ├── directories/                # uptrakit-directories                   (lib)  — cross-platform directory management
 │   │   ├── macros/                     # uptrakit-shared-macros                 (lib)  — shared macros (impl_report_conversion!)
 │   │   ├── types/                      # uptrakit-shared-types                  (lib)  — shared value types; feature-gated: sea-orm, openapi
@@ -132,10 +133,13 @@ All changes must pass defined quality gates. See [docs/development/quality-gates
 #### AI execution guidance
 
 - Always run quality gates relevant to modified areas before finalizing.
+- **Always lint Markdown** with `markdownlint --config .markdownlint.json '**/*.md'` for all changes (not just docs).
+  The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
+  Do not add exceptions to `.markdownlintignore` or `.markdownlint.json` without explicit approval.
 - Scope-based execution is allowed for local iteration:
-  - frontend-only changes: run frontend checks (`npm run check`, `npm run build`) and docs checks.
-  - Rust/backend-only changes: run Rust checks/tests/linters and docs checks.
-  - mixed changes: run both Rust and frontend gates.
+  - frontend-only changes: run frontend checks (`npm run check`, `npm run build`) and markdownlint.
+  - Rust/backend-only changes: run Rust checks/tests/linters and markdownlint.
+  - mixed changes: run both Rust and frontend gates plus markdownlint.
 - If anything related to reverse proxy behavior changes, run ignored reverse proxy integration tests:
   - `cargo test -p uptrakit-controller reverse_proxy -- --ignored`
 - Treat the reverse proxy trigger list broadly, including (non-exhaustive):

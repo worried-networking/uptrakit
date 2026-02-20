@@ -27,34 +27,18 @@ object-safe, enabling `Arc<dyn CommandExecutor>` usage.
 
 ## Extensibility Findings
 
-### Minor: ShellType is an unnecessary alias
+### ~~Minor: ShellType is an unnecessary alias~~ RESOLVED
 
-**Location:** `src/types.rs:20`
+**Resolution:** Removed the `ShellType` alias. The command crate now uses `HookShell` from
+`uptrakit-shared-types` directly. `uptrakit-provider-core` re-exports `HookShell` from
+`uptrakit-shared-types`.
 
-```rust
-pub type ShellType = uptrakit_shared_types::HookShell;
-```
+### ~~Minor: UpdateOutputStream duplicates a subset of OutputStreamType~~ RESOLVED
 
-This creates two names for the same type (`ShellType` and `HookShell`), adding cognitive overhead.
-Downstream crates must decide which name to use, and documentation references become inconsistent.
-
-**Recommendation:** Remove the `ShellType` alias and use `HookShell` directly. Re-export it from
-the command crate for convenience if needed, but preserve the canonical name.
-
-### Minor: UpdateOutputStream duplicates a subset of OutputStreamType
-
-**Location:** `src/types.rs:13-17`
-
-`UpdateOutputStream` (2 variants: `Stdout`, `Stderr`) duplicates a subset of `OutputStreamType`
-(5 variants: `Stdout`, `Stderr`, `PreHook`, `PostHook`, `System`) from `shared-types`. The
-comment explains that agent-level streams remain in the agent crate, but this design splits one
-logical concept across two types in two crates.
-
-**Impact:** Code that converts between these types needs manual mapping. If a new stream type is
-added, both enums may need updating.
-
-**Recommendation:** Consolidate into a single `OutputStreamType` used everywhere. The command
-crate can use the shared-types variant directly; agent-level code simply uses additional variants.
+**Resolution:** Removed `UpdateOutputStream`. `UpdateOutputLine.stream` now uses `OutputStreamType`
+from `uptrakit-shared-types` directly. All downstream crates (providers, agent, agent-ssh) import
+`OutputStreamType` from their respective dependency paths. Bridge conversions in the agent were
+simplified to use the canonical type directly.
 
 ---
 

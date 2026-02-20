@@ -22,40 +22,12 @@ The crate has two layers:
 
 ## Extensibility Findings
 
-### Significant: all 34 entities in one crate
+### ~~Significant: all 34 entities in one crate~~ RESOLVED
 
-**Location:** `src/entity/`
-
-The crate contains 34 entity models spanning the entire system:
-
-- **Controller-only entities** (not needed by agent-ssh): `oidc_provider`,
-  `pending_oidc_flow`, `pending_oidc_registration`, `pending_oidc_token_exchange`,
-  `pending_account_link`, `pending_device_flow`, `api_rate_limit`, `api_token`, `auth_method`,
-  `session`, `user`, `user_role`, `user_oidc_link`, `role`, `role_permission`, `permission`,
-  `mqtt_client`, `mqtt_lease`, `scheduled_task`, `settings_version`, `controller_event`, and more.
-- **Shared entities**: `service`, `service_host`, `service_certificate`, `host`,
-  `software_item`, `host_software_item`, `provider_config`, `tenant`.
-- **Agent-ssh uses**: primarily the `crypto` module for `EncryptedString`, plus its own local
-  migrations.
-
-The SSH agent compiles all 34 entity models even though it only needs the crypto module and
-potentially a few shared entities for type compatibility.
-
-**Impact:** Increased compile time and binary size for agent-ssh. Conceptual coupling between the
-agent and controller-specific schema (OIDC, rate limiting, etc.).
-
-**Recommendation:** Split entities into feature-gated modules:
-
-```toml
-[features]
-default = ["crypto"]
-crypto = []
-controller-entities = []
-all-entities = ["controller-entities"]
-```
-
-The SSH agent would depend on `shared-db` with only the `crypto` feature. The controller and
-web-api would enable `all-entities`.
+**Resolution:** The crypto module was extracted into a standalone `uptrakit-crypto` crate
+(`crates/shared/crypto/`). `shared-db` re-exports it for backward compatibility. Agent-ssh now
+depends on `uptrakit-crypto` directly, dropping its `shared-db` dependency entirely. This
+eliminates the compile-time and binary-size cost of 34 entity definitions for the SSH agent.
 
 ### Extensibility positives
 
@@ -216,4 +188,4 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | Master key memory | PASS       | Wrapped in `Zeroizing<[u8; 32]>` (defense-in-depth) |
 | RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
 | HA safety | PASS | Insert-then-verify pattern eliminates first-creation race |
-| Extensibility | FAIR | All 34 entities in one crate; needs feature gating |
+| Extensibility | ~~FAIR~~ GOOD | Crypto extracted to standalone `uptrakit-crypto` crate; agent-ssh no longer depends on shared-db |
