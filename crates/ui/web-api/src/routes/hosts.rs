@@ -52,7 +52,7 @@ pub async fn list_hosts(
     Extension(user): Extension<AuthenticatedUser>,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewAgents) {
+    if !user.has_permission(Permission::ViewHosts) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -119,7 +119,7 @@ pub async fn get_host(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewAgents) {
+    if !user.has_permission(Permission::ViewHosts) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -170,7 +170,7 @@ pub async fn update_host(
     Path(id): Path<String>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
+    if !user.has_permission(Permission::ManageHosts) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -233,7 +233,7 @@ pub async fn deactivate_host(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
+    if !user.has_permission(Permission::ManageHosts) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

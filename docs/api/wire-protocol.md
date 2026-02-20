@@ -164,6 +164,31 @@ consumers:
 
 Consumers matching on these enums must include a wildcard (`_`) arm to handle unknown variants gracefully.
 
+## `MqttTenantConfig` Fields
+
+The `MqttTenantConfig` struct is used in `tenant_assignments` and `tenant_config_updated` messages. Key fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `mqtt_client_id` | UUID | Primary identifier from the `mqtt_clients` table |
+| `tenant_id` | UUID | Tenant UUID |
+| `enabled` | bool | Whether this MQTT client is enabled |
+| `transport` | `tcp` / `tls` | Transport protocol |
+| `host` | String | MQTT broker hostname |
+| `port` | u16 | MQTT broker port |
+| `client_id` | String | MQTT client ID for broker connection |
+| `username` | Option&lt;SecretString&gt; | Broker authentication username |
+| `password` | Option&lt;SecretString&gt; | Broker authentication password |
+| `ca_pem` | Option&lt;SecretString&gt; | Custom CA certificate in PEM format for private brokers |
+| `topic_prefix` | String | MQTT topic prefix |
+| `updated_at` | i64 | Last update timestamp in milliseconds |
+
+The `ca_pem` field is optional and uses `#[serde(default, skip_serializing_if = "Option::is_none")]` for
+backward compatibility. When present, the MQTT service uses the PEM bytes as the trusted CA for TLS
+connections instead of the system trust store. Credentials (`username`, `password`, `ca_pem`) use
+`SecretString` for zeroize-on-drop and redacted debug output. The `ca_pem` field is included in the
+config hash computation for change detection.
+
 ## AsyncAPI Specification
 
 The full message schema and payload definitions are published in `crates/shared/wire/asyncapi.yaml`. Use this document

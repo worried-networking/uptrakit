@@ -163,6 +163,7 @@ fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
         client_id: config.client_id.clone(),
         username: config.username.clone(),
         password: config.password.clone(),
+        ca_pem: config.ca_pem.clone(),
         topic_prefix: config.topic_prefix.clone(),
     }
 }
@@ -177,6 +178,7 @@ fn compute_config_hash(config: &MqttTenantConfig) -> u64 {
     config.client_id.hash(&mut hasher);
     config.username.hash(&mut hasher);
     config.password.hash(&mut hasher);
+    config.ca_pem.hash(&mut hasher);
     config.topic_prefix.hash(&mut hasher);
     hasher.finish()
 }
@@ -200,6 +202,7 @@ mod tests {
             client_id: "my-client".to_string(),
             username: Some(SecretString::new("user".into())),
             password: Some(SecretString::new("pass".into())),
+            ca_pem: None,
             topic_prefix: "home/uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -233,6 +236,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -253,6 +257,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -267,6 +272,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -286,6 +292,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -306,6 +313,7 @@ mod tests {
             client_id: "anon-client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "prefix".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -357,6 +365,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         }];
@@ -384,6 +393,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
@@ -398,6 +408,7 @@ mod tests {
             client_id: "client".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::from_unix_timestamp(12345).unwrap(), // Different updated_at doesn't matter
         };

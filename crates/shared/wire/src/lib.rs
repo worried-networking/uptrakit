@@ -589,6 +589,9 @@ pub struct MqttTenantConfig {
     /// Password (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<SecretString>,
+    /// Custom CA certificate in PEM format (optional, for private brokers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_pem: Option<SecretString>,
     /// Topic prefix.
     pub topic_prefix: String,
     /// Last update timestamp (for change detection).
@@ -1577,6 +1580,7 @@ mod tests {
                 client_id: "uptrakit".to_string(),
                 username: Some(SecretString::new("user".into())),
                 password: Some(SecretString::new("pass".into())),
+                ca_pem: None,
                 topic_prefix: "home/uptrakit".to_string(),
                 updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
             }],
@@ -1601,6 +1605,7 @@ mod tests {
                 client_id: "uptrakit".to_string(),
                 username: None,
                 password: None,
+                ca_pem: None,
                 topic_prefix: "uptrakit".to_string(),
                 updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
             },
@@ -1950,12 +1955,14 @@ mod tests {
             client_id: "uptrakit".to_string(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
             updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("username"));
         assert!(!json.contains("password"));
+        assert!(!json.contains("ca_pem"));
         let deserialized: MqttTenantConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, config);
     }

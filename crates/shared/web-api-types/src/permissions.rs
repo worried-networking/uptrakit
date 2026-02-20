@@ -12,6 +12,10 @@ pub enum Permission {
     ViewAgents,
     ManageAgents,
     ManageGlobalSettings,
+    ViewSoftware,
+    ManageSoftware,
+    ViewHosts,
+    ManageHosts,
 }
 
 impl Permission {
@@ -22,6 +26,10 @@ impl Permission {
             Permission::ViewAgents => "view_agents",
             Permission::ManageAgents => "manage_agents",
             Permission::ManageGlobalSettings => "manage_global_settings",
+            Permission::ViewSoftware => "view_software",
+            Permission::ManageSoftware => "manage_software",
+            Permission::ViewHosts => "view_hosts",
+            Permission::ManageHosts => "manage_hosts",
         }
     }
 }
@@ -41,6 +49,10 @@ impl FromStr for Permission {
             "view_agents" => Ok(Self::ViewAgents),
             "manage_agents" => Ok(Self::ManageAgents),
             "manage_global_settings" => Ok(Self::ManageGlobalSettings),
+            "view_software" => Ok(Self::ViewSoftware),
+            "manage_software" => Ok(Self::ManageSoftware),
+            "view_hosts" => Ok(Self::ViewHosts),
+            "manage_hosts" => Ok(Self::ManageHosts),
             _ => Err(ParsePermissionError),
         }
     }

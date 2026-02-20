@@ -104,7 +104,7 @@
 		}
 	}
 
-	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
+	const canManage = $derived($user?.permissions.includes(Permission.ManageHosts) ?? false);
 </script>
 
 <svelte:window onclick={handleWindowClick} onkeydown={(e) => {

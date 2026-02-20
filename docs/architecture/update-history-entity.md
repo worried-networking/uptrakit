@@ -50,8 +50,8 @@ the requesting tenant.
 
 | Method | Path | Permission | Description |
 | :----- | :---------------------------- | :----------- | :------------------------------------------------------------- |
-| GET | `/api/v1/update-history` | ViewSettings | List records (filterable by host_id, software_item_id, status) |
-| GET | `/api/v1/update-history/{id}` | ViewSettings | Get single record |
+| GET | `/api/v1/update-history` | ViewSoftware | List records (filterable by host_id, software_item_id, status) |
+| GET | `/api/v1/update-history/{id}` | ViewSoftware | Get single record |
 
 Responses include denormalized `host_name` and `software_item_name` fields.
 

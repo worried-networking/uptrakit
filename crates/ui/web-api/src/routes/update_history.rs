@@ -146,7 +146,7 @@ pub async fn list_update_history(
     Extension(user): Extension<AuthenticatedUser>,
     Query(query): Query<UpdateHistoryQuery>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ViewSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -249,7 +249,7 @@ pub async fn get_update_history(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ViewSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

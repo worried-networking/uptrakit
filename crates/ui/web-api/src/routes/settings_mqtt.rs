@@ -42,6 +42,7 @@ fn model_to_response(
         client_id: model.client_id.clone(),
         username: model.username.clone(),
         has_password: model.password.is_some(),
+        has_ca_cert: model.ca_cert_pem.is_some(),
         topic_prefix: model.topic_prefix.clone(),
         connection_status,
     }
@@ -213,6 +214,7 @@ pub async fn create_mqtt_settings(
         client_id,
         username: req.username.as_deref(),
         password: req.password.as_ref().map(|p| p.expose_secret()),
+        ca_cert_pem: req.ca_pem.as_ref().map(|c| c.expose_secret()),
         topic_prefix,
     })
     .await
@@ -514,6 +516,23 @@ pub async fn update_mqtt_settings(
         None
     };
 
+    // CA PEM: JSON value can be string or null
+    let ca_cert_pem: Option<Option<&str>> = if let Some(ref ca_val) = req.ca_pem {
+        if ca_val.is_null() {
+            Some(None)
+        } else if let Some(s) = ca_val.as_str() {
+            if s.is_empty() {
+                Some(None)
+            } else {
+                Some(Some(s))
+            }
+        } else {
+            return error_response(StatusCode::BAD_REQUEST, "ca_pem must be a string or null");
+        }
+    } else {
+        None
+    };
+
     if let Some(ref cid) = req.client_id
         && cid.is_empty()
     {
@@ -535,6 +554,7 @@ pub async fn update_mqtt_settings(
         client_id: req.client_id.as_deref(),
         username,
         password,
+        ca_cert_pem,
         topic_prefix: req.topic_prefix.as_deref(),
     })
     .await

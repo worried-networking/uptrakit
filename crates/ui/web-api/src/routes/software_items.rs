@@ -258,7 +258,7 @@ pub async fn create_software_item(
     Extension(user): Extension<AuthenticatedUser>,
     Json(req): Json<CreateSoftwareItemRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -429,7 +429,7 @@ pub async fn list_software_items(
     Extension(user): Extension<AuthenticatedUser>,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ViewSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -506,7 +506,7 @@ pub async fn get_software_item(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ViewSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -562,7 +562,7 @@ pub async fn update_software_item(
     Path(id): Path<String>,
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -697,7 +697,7 @@ pub async fn delete_software_item(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -747,7 +747,7 @@ pub async fn assign_hosts(
     Path(id): Path<String>,
     Json(req): Json<AssignHostsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -865,7 +865,7 @@ pub async fn unassign_host(
     Extension(user): Extension<AuthenticatedUser>,
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -939,7 +939,7 @@ pub async fn trigger_update(
     Path((id, host_id_str)): Path<(String, String)>,
     Json(req): Json<TriggerUpdateRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -1201,7 +1201,7 @@ pub async fn check_versions(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -1350,7 +1350,7 @@ pub async fn check_versions_host(
     Extension(user): Extension<AuthenticatedUser>,
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

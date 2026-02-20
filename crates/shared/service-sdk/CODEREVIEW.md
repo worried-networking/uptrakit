@@ -23,21 +23,13 @@ new service types would use this crate as their primary dependency.
 
 ### High — Extensibility
 
-#### E1: `ServiceType` enum constrains new service types
+#### ~~E1: `ServiceType` enum constrains new service types~~ (ACCEPTED)
 
-The service enrollment flow requires a `ServiceType` value (from
-`shared-types`), which is a closed enum with 3 variants (`Agent`, `Mqtt`,
-`SshAgent`). An external developer creating a new service type (e.g., a
-Kubernetes operator) must modify the `ServiceType` enum in `shared-types`
-before they can enroll their service.
-
-**Impact:** The SDK itself is well-designed for extensibility, but the type
-system blocks external service creation at the enrollment boundary.
-
-**Recommendation:** Consider accepting a string-based service type
-identifier at enrollment time, with the `ServiceType` enum used only for
-well-known built-in types. The controller could accept unknown service
-types and store them as strings.
+**Resolution:** Accepted as a deliberate design tradeoff. All service types
+are first-party and compiled together. The centralized `ServiceType` enum
+provides exhaustive matching and compile-time safety across the enrollment
+boundary. Adding a new service type requires modifying the `ServiceType`
+enum in `shared-types`, which is acceptable given the current architecture.
 
 ### Medium
 

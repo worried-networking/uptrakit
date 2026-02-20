@@ -2028,6 +2028,16 @@ components:
         password:
           type: string
           description: Password for broker authentication (optional)
+        ca_pem:
+          type: string
+          description: |
+            Custom CA certificate in PEM format for private MQTT brokers
+            using internal certificate authorities. When present, the MQTT
+            service uses these bytes as the trusted CA for TLS connections
+            instead of relying on the system trust store. Optional — omitted
+            when not configured.
+          examples:
+            - "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----\n"
         topic_prefix:
           type: string
           description: MQTT topic prefix

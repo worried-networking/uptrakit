@@ -92,7 +92,7 @@ pub async fn create_provider_config(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateProviderConfigRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -145,7 +145,7 @@ pub async fn list_provider_configs(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ViewSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -206,7 +206,7 @@ pub async fn get_provider_config(
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
+    if !user.has_permission(Permission::ViewSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -244,7 +244,7 @@ pub async fn update_provider_config(
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<UpdateProviderConfigRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -328,7 +328,7 @@ pub async fn delete_provider_config(
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

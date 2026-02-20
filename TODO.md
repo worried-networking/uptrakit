@@ -64,7 +64,8 @@ Essential infrastructure needed before feature development.
   - [x] Roles and permissions tables with seeded admin role
   - [x] User-role and role-permission junction tables
   - [x] First registered user automatically gets admin role
-  - [x] Permission enum (`ViewSettings`, `ManageSettings`, `ViewAgents`, `ManageAgents`)
+  - [x] Permission enum (9 variants: `ViewSettings`, `ManageSettings`, `ViewAgents`, `ManageAgents`,
+    `ManageGlobalSettings`, `ViewSoftware`, `ManageSoftware`, `ViewHosts`, `ManageHosts`)
   - [x] `admin` role (all permissions) and `user` role (`view_agents` only)
   - [x] JWT and API responses expose resolved permissions instead of raw role names
   - [x] Permission-based authorization checks on all protected routes

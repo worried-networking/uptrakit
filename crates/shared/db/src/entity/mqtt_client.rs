@@ -15,6 +15,7 @@ pub struct Model {
     pub client_id: String,
     pub username: Option<String>,
     pub password: Option<crate::crypto::EncryptedString>,
+    pub ca_cert_pem: Option<crate::crypto::EncryptedString>,
     pub topic_prefix: String,
     pub connection_status: MqttClientConnectionStatus,
     pub status_updated_at: OffsetDateTime,

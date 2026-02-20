@@ -34,13 +34,13 @@ detection timestamp).
 
 | Method | Path | Permission | Status | Description |
 | :----- | :-------------------------------------------- | :------------- | :----- | :--------------------------------------------------------- |
-| POST | `/api/v1/software-items` | ManageSettings | 201 | Create a new software item |
-| GET | `/api/v1/software-items` | ViewSettings | 200 | List all active software items (with host count) |
-| GET | `/api/v1/software-items/{id}` | ViewSettings | 200 | Get software item with assigned hosts + installed versions |
-| PUT | `/api/v1/software-items/{id}` | ManageSettings | 200 | Update name, enabled, package_identifier, config_override |
-| DELETE | `/api/v1/software-items/{id}` | ManageSettings | 204 | Soft-delete |
-| POST | `/api/v1/software-items/{id}/hosts` | ManageSettings | 200 | Assign to additional host(s) |
-| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSettings | 204 | Unassign from a host |
+| POST | `/api/v1/software-items` | ManageSoftware | 201 | Create a new software item |
+| GET | `/api/v1/software-items` | ViewSoftware | 200 | List all active software items (with host count) |
+| GET | `/api/v1/software-items/{id}` | ViewSoftware | 200 | Get software item with assigned hosts + installed versions |
+| PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name, enabled, package_identifier, config_override |
+| DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete |
+| POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s) |
+| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host |
 
 ## Validation rules
 

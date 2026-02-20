@@ -25,6 +25,8 @@ pub struct MqttConfig {
     pub username: Option<SecretString>,
     /// Optional password for authentication.
     pub password: Option<SecretString>,
+    /// Optional custom CA certificate in PEM format (for private brokers).
+    pub ca_pem: Option<SecretString>,
     /// Topic prefix (e.g. `"uptrakit"`).
     pub topic_prefix: String,
 }
@@ -38,6 +40,7 @@ impl fmt::Debug for MqttConfig {
             .field("client_id", &self.client_id)
             .field("username", &"[REDACTED]")
             .field("password", &"[REDACTED]")
+            .field("ca_pem", &self.ca_pem.as_ref().map(|_| "[REDACTED]"))
             .field("topic_prefix", &self.topic_prefix)
             .finish()
     }
@@ -197,8 +200,13 @@ fn build_mqtt_options(config: &MqttConfig) -> MqttOptions {
     match config.transport {
         MqttTransport::Tcp => {}
         MqttTransport::Tls => {
+            let ca = config
+                .ca_pem
+                .as_ref()
+                .map(|pem| pem.expose_secret().as_bytes().to_vec())
+                .unwrap_or_default();
             let tls_config = rumqttc::TlsConfiguration::Simple {
-                ca: Vec::new(),
+                ca,
                 alpn: None,
                 client_auth: None,
             };
@@ -298,6 +306,7 @@ mod tests {
             client_id: "test".into(),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: "myprefix".into(),
         }
     }
@@ -417,6 +426,17 @@ mod tests {
             ..tcp_config()
         };
         // Just verify it doesn't panic
+        let _opts = build_mqtt_options(&config);
+    }
+
+    #[test]
+    fn tls_with_custom_ca_pem_does_not_panic() {
+        let config = MqttConfig {
+            transport: MqttTransport::Tls,
+            port: 8883,
+            ca_pem: Some(SecretString::new("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into())),
+            ..tcp_config()
+        };
         let _opts = build_mqtt_options(&config);
     }
 

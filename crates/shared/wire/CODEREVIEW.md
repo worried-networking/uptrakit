@@ -19,33 +19,13 @@ payload structs, sequence management, and close reasons. It sits between
 
 ### High — Extensibility
 
-#### E1: `ServiceMessage` and `ControllerMessage` enums are closed
+#### ~~E1: `ServiceMessage` and `ControllerMessage` enums are closed~~ (ACCEPTED)
 
-**Location:** `src/lib.rs`
-
-`ServiceMessage` (13 variants) and `ControllerMessage` (17 variants) are
-exhaustive enums. Adding a new message type (e.g., for a new service type's
-custom RPC) requires modifying this crate, which triggers recompilation of
-every crate that depends on it.
-
-**Impact:** External service developers cannot introduce custom message
-types without modifying the wire crate. This is the most significant
-barrier to creating new service types.
-
-**Recommendation:** Consider an extension mechanism for future protocol
-evolution:
-
-```rust
-// Add a catch-all variant for forward compatibility
-Custom {
-    message_type: String,
-    payload: serde_json::Value,
-}
-```
-
-This would allow experimental or external message types without modifying
-the wire crate. The `PROTOCOL_VERSION` constant (currently `1`) could gate
-when custom messages are supported.
+**Resolution:** Accepted as a deliberate design tradeoff. The wire protocol
+is versioned (`PROTOCOL_VERSION = 1`) and all services are compiled together.
+Closed enums provide exhaustive match checking and compile-time safety. Adding
+a new message type requires modifying the wire crate, which is acceptable
+given the current architecture where all service types are first-party.
 
 ### Medium
 

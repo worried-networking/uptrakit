@@ -16,33 +16,13 @@ provider implementations.
 Adding a new provider now requires a single entry in the macro invocation. All provider
 `new()` constructors now consistently return `Result<Self>` and validate their config.
 
-### Significant: no dynamic provider registration mechanism
+### ~~Significant: no dynamic provider registration mechanism~~ (ACCEPTED)
 
-All providers are statically linked. There is no way for an external crate to register a provider
-without modifying this crate's source code and `Cargo.toml`.
-
-### Recommendation: implement a registration pattern
-
-Several approaches, in order of increasing complexity:
-
-1. **Macro-based registration** -- a declarative macro that generates all match arms from a list
-   of `(ProviderType, ConfigType, ProviderType)` tuples, reducing the 4 match blocks to a single
-   declaration.
-
-2. **`ProviderFactory` trait with a registry map** -- each provider crate exports a factory, and
-   the registry collects them into a `HashMap<ProviderType, Box<dyn ProviderFactory>>` at startup:
-
-   ```rust
-   pub trait ProviderFactory: Send + Sync {
-       fn create(&self, config: &Value, executor: Arc<dyn CommandExecutor>) -> Result<Box<dyn Provider>>;
-       fn validate(&self, config: &Value) -> Result<()>;
-       fn mask_secrets(&self, config: &Value) -> Value;
-       fn restore_secrets(&self, incoming: &mut Value, existing: &Value);
-   }
-   ```
-
-3. **Inventory crate pattern** -- use the `inventory` crate (or `linkme`) for compile-time
-   self-registration so provider crates register themselves without modifying the registry.
+**Resolution:** Accepted as a deliberate design tradeoff. All providers are
+first-party and compiled together via the `register_providers!` macro. The
+macro-based registration (completed earlier) reduces adding a new provider
+to a single entry in the macro invocation. Dynamic registration is not needed
+given the current architecture.
 
 ## Positive Observations
 

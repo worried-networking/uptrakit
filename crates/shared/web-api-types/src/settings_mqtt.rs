@@ -31,6 +31,7 @@ pub struct MqttClientResponse {
     pub client_id: String,
     pub username: Option<String>,
     pub has_password: bool,
+    pub has_ca_cert: bool,
     pub topic_prefix: String,
     pub connection_status: MqttClientConnectionStatus,
 }
@@ -56,6 +57,9 @@ pub struct CreateMqttClientRequest {
     pub username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<SecretString>,
+    /// Custom CA certificate in PEM format for TLS connections to private brokers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_pem: Option<SecretString>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_prefix: Option<String>,
 }
@@ -82,6 +86,9 @@ pub struct UpdateMqttClientRequest {
     /// Set to `null` to clear, omit to keep existing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<serde_json::Value>,
+    /// Set to `null` to clear, omit to keep existing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_pem: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_prefix: Option<String>,
 }

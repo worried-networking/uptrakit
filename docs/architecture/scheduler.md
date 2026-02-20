@@ -148,7 +148,7 @@ See [HTTP Web API](../api/http-web-api.md#scheduler-endpoints) for endpoint deta
 `/api/v1/scheduler/tasks/{id}` | Get task details | | PUT | `/api/v1/scheduler/tasks/{id}` | Update cron/enabled/config | | POST |
 `/api/v1/scheduler/tasks/{id}/trigger` | Trigger immediate execution |
 
-All endpoints require the `ManageSettings` permission.
+All endpoints require the `ManageSoftware` permission.
 
 ## Security Considerations
 
@@ -156,7 +156,7 @@ All endpoints require the `ManageSettings` permission.
   explicit user action.
 - Optimistic locking prevents concurrent execution of the same task across controllers.
 - Task claims have a 10-minute stale timeout to prevent permanent locking if a controller crashes.
-- REST API endpoints are protected by JWT authentication and the `ManageSettings` permission.
+- REST API endpoints are protected by JWT authentication and the `ManageSoftware` permission.
 - Cron expressions are validated before persistence.
 
 ## Related Documentation

@@ -223,7 +223,7 @@ commands and additionally sets `ip_address` to the SSH target address from the l
 
 | Method | Path | Permission | Action |
 | :----- | :--------------------- | :----------- | :-------------------------------------------- |
-| GET | `/api/v1/hosts` | ViewAgents | List non-deactivated hosts with linked agents |
-| GET | `/api/v1/hosts/{id}` | ViewAgents | Get single host with linked agents |
-| PUT | `/api/v1/hosts/{id}` | ManageAgents | Update friendly_name |
-| DELETE | `/api/v1/hosts/{id}` | ManageAgents | Soft-delete (set deactivated_at) |
+| GET | `/api/v1/hosts` | ViewHosts | List non-deactivated hosts with linked agents |
+| GET | `/api/v1/hosts/{id}` | ViewHosts | Get single host with linked agents |
+| PUT | `/api/v1/hosts/{id}` | ManageHosts | Update friendly_name |
+| DELETE | `/api/v1/hosts/{id}` | ManageHosts | Soft-delete (set deactivated_at) |

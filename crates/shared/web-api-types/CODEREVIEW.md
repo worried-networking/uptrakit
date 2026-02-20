@@ -68,11 +68,15 @@ The following have **zero tests**: `api_tokens`, `hosts`, `oidc_auth`, `provider
 
 Well-tested modules (good examples): `pagination`, `mqtt_url`, `update_hooks`, `system_alerts`, `settings_mqtt`.
 
-### MEDIUM: Coarse permission model
+### ~~MEDIUM: Coarse permission model~~ (FIXED)
 
-Only 5 permission variants (`ViewSettings`, `ManageSettings`, `ViewAgents`, `ManageAgents`, `ManageGlobalSettings`).
-Notable gaps: no `ViewHosts`/`ManageHosts`, no `ManageSoftwareItems`, no `ManageOidcProviders`, no `ManageApiTokens`,
-no `ManageScheduledTasks`, no `ViewUpdateHistory`.
+**Resolution:** Added 4 new permission variants: `ViewSoftware`, `ManageSoftware`,
+`ViewHosts`, `ManageHosts`. Total is now 9 permissions. Route guards updated:
+hosts use `ViewHosts`/`ManageHosts`, software items and provider configs use
+`ViewSoftware`/`ManageSoftware`, update history uses `ViewSoftware`, scheduler
+uses `ManageSoftware`. A backward-compatible migration grants new permissions to
+existing roles that have the corresponding old (broader) permission. Frontend
+permission checks updated accordingly.
 
 ### ~~LOW: Duplicate `default_enabled()` functions~~ RESOLVED
 
@@ -168,7 +172,7 @@ serialization. 16 thorough tests.
 | OpenAPI correctness | PASS | All hooks types now have OpenAPI schema derives |
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |
-| Permission model | FAIR | Very coarse (5 variants); many resources not covered |
+| Permission model | ~~FAIR~~ GOOD | 9 variants after adding ViewSoftware, ManageSoftware, ViewHosts, ManageHosts |
 | Test coverage | FAIR | 114 tests, but many modules have zero coverage |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | Type safety | GOOD | Typed enums for query filters; `ProviderConfigResponse.provider_type` typed; `uses_remaining` now `u32` |

@@ -432,6 +432,7 @@ pub struct MqttCreateParams<'a> {
     pub client_id: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub ca_pem: Option<String>,
     pub topic_prefix: Option<String>,
 }
 
@@ -452,6 +453,7 @@ pub async fn mqtt_create(params: MqttCreateParams<'_>) -> Result<()> {
         client_id: params.client_id,
         username: params.username,
         password: params.password.map(SecretString::new),
+        ca_pem: params.ca_pem.map(SecretString::new),
         topic_prefix: params.topic_prefix,
     };
     let resp = client.create_mqtt_settings(&req).await.context_to()?;
@@ -481,6 +483,7 @@ pub struct MqttUpdateParams<'a> {
     pub client_id: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub ca_pem: Option<String>,
     pub topic_prefix: Option<String>,
 }
 
@@ -494,6 +497,7 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
         .context_to()?;
     let username = params.username.map(serde_json::Value::String);
     let password = params.password.map(serde_json::Value::String);
+    let ca_pem = params.ca_pem.map(serde_json::Value::String);
     let req = UpdateMqttClientRequest {
         url: params.url,
         transport,
@@ -503,6 +507,7 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
         client_id: params.client_id,
         username,
         password,
+        ca_pem,
         topic_prefix: params.topic_prefix,
     };
     let resp = client

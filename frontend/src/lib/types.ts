@@ -8,7 +8,11 @@ export enum Permission {
 	ManageSettings = 'manage_settings',
 	ViewAgents = 'view_agents',
 	ManageAgents = 'manage_agents',
-	ManageGlobalSettings = 'manage_global_settings'
+	ManageGlobalSettings = 'manage_global_settings',
+	ViewSoftware = 'view_software',
+	ManageSoftware = 'manage_software',
+	ViewHosts = 'view_hosts',
+	ManageHosts = 'manage_hosts'
 }
 
 export interface User {
@@ -210,6 +214,7 @@ export interface MqttClientResponse {
 	client_id: string;
 	username: string | null;
 	has_password: boolean;
+	has_ca_cert: boolean;
 	topic_prefix: string;
 	connection_status: MqttConnectionStatus;
 }
@@ -223,6 +228,7 @@ export interface CreateMqttClient {
 	client_id?: string;
 	username?: string;
 	password?: string;
+	ca_pem?: string;
 	topic_prefix?: string;
 }
 
@@ -235,6 +241,7 @@ export interface UpdateMqttClient {
 	client_id?: string;
 	username?: string | null;
 	password?: string;
+	ca_pem?: string | null;
 	topic_prefix?: string;
 }
 

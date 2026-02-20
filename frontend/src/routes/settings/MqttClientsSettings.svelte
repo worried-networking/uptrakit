@@ -30,6 +30,7 @@
 		client_id: 'uptrakit-controller',
 		username: '',
 		password: '',
+		ca_pem: '',
 		topic_prefix: 'uptrakit'
 	});
 	let mqttDeleteConfirm: { id: string; url: string } | null = $state(null);
@@ -46,6 +47,7 @@
 			client_id: 'uptrakit-controller',
 			username: '',
 			password: '',
+			ca_pem: '',
 			topic_prefix: 'uptrakit'
 		};
 		showMqttModal = true;
@@ -59,6 +61,7 @@
 			client_id: client.client_id,
 			username: client.username ?? '',
 			password: '',
+			ca_pem: '',
 			topic_prefix: client.topic_prefix
 		};
 		showMqttModal = true;
@@ -78,7 +81,8 @@
 					client_id: mqttForm.client_id,
 					username: mqttForm.username || null,
 					topic_prefix: mqttForm.topic_prefix,
-					...(mqttForm.password ? { password: mqttForm.password } : {})
+					...(mqttForm.password ? { password: mqttForm.password } : {}),
+					...(mqttForm.ca_pem ? { ca_pem: mqttForm.ca_pem } : {})
 				};
 				const res = await updateMqttClient(editingMqttClient.id, data);
 				mqttClients = mqttClients.map((c) => (c.id === res.id ? res : c));
@@ -94,6 +98,7 @@
 					client_id: mqttForm.client_id || undefined,
 					username: mqttForm.username || undefined,
 					password: mqttForm.password || undefined,
+					ca_pem: mqttForm.ca_pem || undefined,
 					topic_prefix: mqttForm.topic_prefix || undefined
 				};
 				const res = await createMqttClient(data);
@@ -288,6 +293,21 @@
 					/>
 				</label>
 			</div>
+
+			<label class="label">
+				<span>
+					CA Certificate (PEM)
+					{#if editingMqttClient?.has_ca_cert}
+						<span class="badge preset-filled-success-500 ml-2 text-xs">CA cert set</span>
+					{/if}
+				</span>
+				<textarea
+					class="textarea font-mono text-sm"
+					rows="4"
+					placeholder={editingMqttClient ? 'Leave blank to keep current' : '(optional) Paste PEM-encoded CA certificate for private brokers'}
+					bind:value={mqttForm.ca_pem}
+				></textarea>
+			</label>
 
 			<div class="flex justify-end gap-2">
 				<button class="btn preset-tonal-surface" onclick={closeMqttModal}>Cancel</button>

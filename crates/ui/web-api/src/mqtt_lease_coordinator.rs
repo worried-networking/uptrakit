@@ -701,6 +701,10 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
             .password
             .as_ref()
             .map(|p| SecretString::new(p.expose_secret().to_string())),
+        ca_pem: client
+            .ca_cert_pem
+            .as_ref()
+            .map(|c| SecretString::new(c.expose_secret().to_string())),
         topic_prefix: client.topic_prefix.clone(),
         updated_at: UtcDateTime::from_unix_timestamp(client.updated_at.unix_timestamp())
             .unwrap_or(UtcDateTime::UNIX_EPOCH),
@@ -765,6 +769,7 @@ mod tests {
             client_id: ActiveValue::Set("uptrakit-controller".to_string()),
             username: ActiveValue::Set(None),
             password: ActiveValue::Set(None),
+            ca_cert_pem: ActiveValue::Set(None),
             topic_prefix: ActiveValue::Set("uptrakit".to_string()),
             connection_status: ActiveValue::Set(MqttClientConnectionStatus::Offline),
             status_updated_at: ActiveValue::Set(now),

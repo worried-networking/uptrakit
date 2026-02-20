@@ -29,8 +29,8 @@
 	let enabled: boolean = $state(true);
 	let configOverrideText: string = $state('');
 
-	const canView = $derived($user?.permissions.includes(Permission.ViewSettings) ?? false);
-	const canManage = $derived($user?.permissions.includes(Permission.ManageSettings) ?? false);
+	const canView = $derived($user?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canManage = $derived($user?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	const homebrewConfigs = $derived(
 		providerConfigs.filter((config) => config.provider_type === 'homebrew')

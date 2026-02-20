@@ -27,53 +27,23 @@ same pattern, it would have a similarly clean dependency chain.
 
 ### Medium
 
-#### M1: TLS configuration uses empty CA — no pinned CA support
+#### ~~M1: TLS configuration uses empty CA — no pinned CA support~~ (FIXED)
 
-**File:** `src/mqtt_client.rs:196-201`
+**Resolution:** Added optional `ca_pem: Option<SecretString>` field
+end-to-end: DB entity (`ca_cert_pem` as `EncryptedString`), wire protocol
+(`MqttTenantConfig.ca_pem`), `MqttConfig`, web API types
+(create/update/response), store, routes, CLI, and frontend. When present,
+the PEM bytes are passed to `TlsConfiguration::Simple { ca }`. The CA
+certificate is encrypted at rest and redacted in API responses
+(`has_ca_cert: bool`).
 
-When TLS transport is configured, the MQTT client uses
-`TlsConfiguration::Simple { ca: Vec::new() }`, which relies on the system
-trust store. This does not support pinned CA certificates for private MQTT
-brokers using internal CAs.
+#### ~~M2: `MqttClientCreated` message not handled~~ (RESOLVED)
 
-```rust
-MqttTransport::Tls => {
-    let tls_config = rumqttc::TlsConfiguration::Simple {
-        ca: Vec::new(),
-        alpn: None,
-        client_auth: None,
-    };
-    opts.set_transport(Transport::Tls(tls_config));
-}
-```
-
-**Recommendation:** Consider extending `MqttTenantConfig` (in wire) and
-`MqttConfig` with an optional CA PEM field for brokers using private CAs.
-Alternatively, use `rumqttc::TlsConfiguration::Rustls` with a custom
-`ClientConfig` built via the service-sdk's TLS utilities.
-
-#### M2: `MqttClientCreated` message not handled
-
-**File:** `src/main.rs:241-243`
-
-The `ControllerMessage::MqttClientCreated` variant exists in the wire
-protocol (wire `src/lib.rs:139`) but is not explicitly handled in the
-MQTT authenticated loop. It falls through to the wildcard `Some(_)` arm.
-
-```rust
-Some(_) => {
-    tracing::debug!("ignoring unrecognized message in authenticated loop");
-}
-```
-
-If the controller sends `MqttClientCreated` to notify the MQTT service of
-a new client to lease, this message is silently ignored.
-
-**Recommendation:** Either handle `MqttClientCreated` by fetching the
-client configuration (e.g., via a follow-up request or by expecting a
-subsequent `TenantAssignments`), or document that this message is handled
-server-side only and the MQTT service receives assignments via
-`TenantAssignments`.
+**Resolution:** `MqttClientCreated` is a controller-to-controller outbox
+event handled by the event poller (`event_poller.rs`), not a message sent
+to the MQTT service. The MQTT service correctly ignores it via the wildcard
+arm and receives client assignments exclusively via `TenantAssignments`.
+No code change needed.
 
 #### ~~M3: No proactive certificate renewal timer~~ (FIXED)
 

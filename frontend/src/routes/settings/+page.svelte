@@ -76,10 +76,11 @@
 			} catch {
 				// Suppress polling errors to avoid notification spam.
 				mqttPollAttempt++;
-				const delay = Math.min(
-					initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1), // Exponential backoff
+				const baseDelay = Math.min(
+					initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1),
 					maxMqttPollDelay
 				);
+				const delay = baseDelay * (0.5 + Math.random() * 0.5); // Jitter to prevent thundering herd
 				scheduleNextPoll(delay);
 			}
 		};

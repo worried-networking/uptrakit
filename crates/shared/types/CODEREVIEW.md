@@ -19,42 +19,24 @@ dependencies -- it is a leaf crate.
 
 ## Extensibility Findings
 
-### Significant: ProviderType enum is centralized
+### ~~Significant: ProviderType enum is centralized~~ (ACCEPTED)
 
-**Location:** `src/provider_types.rs`
+**Resolution:** Accepted as a deliberate design tradeoff. All providers are
+first-party and compiled together. The centralized enum enables exhaustive
+matching, compile-time safety, and database/OpenAPI schema generation via
+feature-gated derives. Adding a new provider requires modifying this file,
+which is acceptable given the current architecture.
 
-The `ProviderType` enum is defined here with 4 variants (`GithubReleases`,
-`ProxmoxHelperScripts`, `DockerRegistry`, `Homebrew`). It is `#[non_exhaustive]`, which is good
-for forward compatibility, but `FromStr` is hardcoded with an exhaustive match. External
-developers cannot add a new provider type without modifying this file and recompiling the entire
-workspace.
+### ~~Significant: ServiceType enum is centralized~~ (ACCEPTED)
 
-**Impact:** Every new provider requires a change to this foundational crate, which triggers a
-full workspace rebuild.
-
-### Significant: ServiceType enum is centralized
-
-**Location:** `src/service_type.rs`
-
-The `ServiceType` enum (`Agent`, `Mqtt`, `SshAgent`) has the same extensibility limitation. A
-developer creating a new service type (e.g., a Kubernetes operator service) must modify this file.
+**Resolution:** Accepted as a deliberate design tradeoff for the same reasons
+as `ProviderType`. All service types are first-party and compiled together.
 
 ### ~~Minor: OutputStreamType has 5 variants but command crate defines its own 2-variant subset~~ RESOLVED
 
 **Resolution:** `UpdateOutputStream` was removed from the command crate. All code now uses
 `OutputStreamType` from `uptrakit-shared-types` directly, consolidating the output stream
 concept into a single canonical type.
-
-### Extensibility recommendation
-
-For `ProviderType` and `ServiceType`, consider:
-
-1. **String-based identifiers** with a validation registry -- external developers register their
-   types at startup without modifying shared-types.
-2. **A trait-based approach** where each provider/service self-identifies via a string, and the
-   enum is only used for known built-in types with a fallback `Custom(String)` variant.
-3. **Consolidate output stream types** -- either move all 5 variants to the command crate or use
-   `OutputStreamType` everywhere and remove `UpdateOutputStream`.
 
 ---
 

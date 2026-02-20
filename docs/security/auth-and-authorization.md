@@ -22,17 +22,26 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | --- | --- | --- |
 | `ViewSettings` | `view_settings` | Read settings, OIDC providers, auth config |
 | `ManageSettings` | `manage_settings` | Modify settings, OIDC providers, auth config |
-| `ViewAgents` | `view_agents` | List agents |
+| `ViewAgents` | `view_agents` | List agents/services |
 | `ManageAgents` | `manage_agents` | Approve, reject, delete, merge agents; manage enrollment tokens |
 | `ManageGlobalSettings` | `manage_global_settings` | View and modify global settings (network, CA, TLS, system alerts) |
+| `ViewSoftware` | `view_software` | View software items, provider configs, and update history |
+| `ManageSoftware` | `manage_software` | Manage software items, provider configs, version checks, updates, and scheduler |
+| `ViewHosts` | `view_hosts` | View hosts |
+| `ManageHosts` | `manage_hosts` | Manage hosts (update, deactivate) |
 
 ### Roles
 
 | Role | Permissions |
 | --- | --- |
-| `owner` | All five (`view_settings`, `manage_settings`, `view_agents`, `manage_agents`, `manage_global_settings`) |
-| `admin` | `view_settings`, `manage_settings`, `view_agents`, `manage_agents` |
+| `owner` | All nine permissions |
+| `admin` | `view_settings`, `manage_settings`, `view_agents`, `manage_agents`, `view_software`, `manage_software`, `view_hosts`, `manage_hosts` |
 | `user` | `view_agents` only |
+
+The `admin` and `owner` roles automatically receive the 4 new permissions via a backward-compatible
+migration that grants `view_software` to roles with `view_settings`, `manage_software` to roles with
+`manage_settings`, `view_hosts` to roles with `view_agents`, and `manage_hosts` to roles with
+`manage_agents`.
 
 The first registered user gets the `owner` role — whether registered via password or OIDC. Subsequent users (password or
 OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.

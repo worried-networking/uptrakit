@@ -5,6 +5,7 @@ use sea_orm_migration::prelude::*;
 
 mod m20260209_000001_initial;
 mod m20260215_000001_scheduled_tasks;
+mod m20260220_000001_mqtt_ca_cert_and_permissions;
 
 pub struct Migrator;
 
@@ -14,6 +15,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260209_000001_initial::Migration),
             Box::new(m20260215_000001_scheduled_tasks::Migration),
+            Box::new(m20260220_000001_mqtt_ca_cert_and_permissions::Migration),
         ]
     }
 }

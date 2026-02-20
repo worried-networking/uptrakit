@@ -256,6 +256,12 @@ uptrakit settings mqtt show <ID>
 uptrakit settings mqtt create --url "mqtt://broker:1883" --enabled true
 uptrakit settings mqtt create --host broker --port 8883 --transport tls --client-id uptrakit-1
 
+# Create with a custom CA certificate for private brokers (inline PEM)
+uptrakit settings mqtt create --host broker --port 8883 --transport tls --ca-pem "$(cat ca.pem)"
+
+# Create with a custom CA certificate from a file
+uptrakit settings mqtt create --host broker --port 8883 --transport tls --ca-pem-file /path/to/ca.pem
+
 # Update an existing configuration
 uptrakit settings mqtt update <ID> --enabled false
 uptrakit settings mqtt update <ID> --host new-broker --port 8883

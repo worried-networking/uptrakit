@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn permission_iter_covers_all_variants() {
-        assert_eq!(Permission::iter().count(), 5);
+        assert_eq!(Permission::iter().count(), 9);
     }
 
     #[test]

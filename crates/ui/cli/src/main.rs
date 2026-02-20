@@ -439,6 +439,12 @@ enum MqttCommands {
         /// MQTT password
         #[arg(long)]
         password: Option<String>,
+        /// Custom CA certificate in PEM format (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem_file")]
+        ca_pem: Option<String>,
+        /// Path to a PEM file containing a custom CA certificate (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem")]
+        ca_pem_file: Option<std::path::PathBuf>,
         /// Topic prefix (e.g. homeassistant)
         #[arg(long)]
         topic_prefix: Option<String>,
@@ -471,6 +477,12 @@ enum MqttCommands {
         /// MQTT password
         #[arg(long)]
         password: Option<String>,
+        /// Custom CA certificate in PEM format (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem_file")]
+        ca_pem: Option<String>,
+        /// Path to a PEM file containing a custom CA certificate (for private brokers)
+        #[arg(long, conflicts_with = "ca_pem")]
+        ca_pem_file: Option<std::path::PathBuf>,
         /// Topic prefix
         #[arg(long)]
         topic_prefix: Option<String>,
@@ -593,6 +605,23 @@ fn parse_registration_mode(
 ) -> std::result::Result<uptrakit_openapi_client::types::registration::RegistrationMode, String> {
     s.parse()
         .map_err(|_| format!("invalid registration mode: {s} (expected open, invite, or closed)"))
+}
+
+/// Resolve `--ca-pem` (inline string) or `--ca-pem-file` (file path) into a single
+/// `Option<String>`. Clap's `conflicts_with` ensures at most one is provided.
+fn resolve_ca_pem(
+    ca_pem: Option<String>,
+    ca_pem_file: Option<std::path::PathBuf>,
+) -> error::Result<Option<String>> {
+    use rootcause::prelude::*;
+    match (ca_pem, ca_pem_file) {
+        (Some(pem), None) => Ok(Some(pem)),
+        (None, Some(path)) => {
+            let contents = std::fs::read_to_string(&path).context_to()?;
+            Ok(Some(contents))
+        }
+        _ => Ok(None),
+    }
 }
 
 #[tokio::main]
@@ -1083,25 +1112,31 @@ async fn main() {
                     client_id,
                     username,
                     password,
+                    ca_pem,
+                    ca_pem_file,
                     topic_prefix,
-                } => {
-                    commands::settings::mqtt_create(commands::settings::MqttCreateParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        format: cli.output,
-                        insecure,
-                        url,
-                        transport,
-                        host,
-                        port,
-                        enabled,
-                        client_id,
-                        username,
-                        password,
-                        topic_prefix,
-                    })
-                    .await
-                }
+                } => match resolve_ca_pem(ca_pem, ca_pem_file) {
+                    Err(e) => Err(e),
+                    Ok(ca_pem) => {
+                        commands::settings::mqtt_create(commands::settings::MqttCreateParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            format: cli.output,
+                            insecure,
+                            url,
+                            transport,
+                            host,
+                            port,
+                            enabled,
+                            client_id,
+                            username,
+                            password,
+                            ca_pem,
+                            topic_prefix,
+                        })
+                        .await
+                    }
+                },
                 MqttCommands::Update {
                     id,
                     url,
@@ -1112,26 +1147,32 @@ async fn main() {
                     client_id,
                     username,
                     password,
+                    ca_pem,
+                    ca_pem_file,
                     topic_prefix,
-                } => {
-                    commands::settings::mqtt_update(commands::settings::MqttUpdateParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        format: cli.output,
-                        insecure,
-                        id,
-                        url,
-                        transport,
-                        host,
-                        port,
-                        enabled,
-                        client_id,
-                        username,
-                        password,
-                        topic_prefix,
-                    })
-                    .await
-                }
+                } => match resolve_ca_pem(ca_pem, ca_pem_file) {
+                    Err(e) => Err(e),
+                    Ok(ca_pem) => {
+                        commands::settings::mqtt_update(commands::settings::MqttUpdateParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            format: cli.output,
+                            insecure,
+                            id,
+                            url,
+                            transport,
+                            host,
+                            port,
+                            enabled,
+                            client_id,
+                            username,
+                            password,
+                            ca_pem,
+                            topic_prefix,
+                        })
+                        .await
+                    }
+                },
                 MqttCommands::Delete { id } => {
                     commands::settings::mqtt_delete(
                         &id,

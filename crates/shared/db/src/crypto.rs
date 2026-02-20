@@ -41,6 +41,7 @@ mod tests {
             client_id: "uptrakit-controller".to_string(),
             username: None,
             password: None,
+            ca_cert_pem: None,
             topic_prefix: "uptrakit".to_string(),
             connection_status: MqttClientConnectionStatus::Offline,
             status_updated_at: OffsetDateTime::now_utc(),

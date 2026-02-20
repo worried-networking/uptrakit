@@ -73,6 +73,7 @@ mod tests {
             client_id: Some("uptrakit-1".to_string()),
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: Some("homeassistant".to_string()),
         };
         let json = serde_json::to_value(&req).expect("serialize");
@@ -93,6 +94,7 @@ mod tests {
             client_id: None,
             username: None,
             password: None,
+            ca_pem: None,
             topic_prefix: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");

@@ -62,7 +62,7 @@ pub async fn list_scheduled_tasks(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -102,7 +102,7 @@ pub async fn get_scheduled_task(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -150,7 +150,7 @@ pub async fn update_scheduled_task(
     Path(id): Path<String>,
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -238,7 +238,7 @@ pub async fn trigger_scheduled_task(
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
+    if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

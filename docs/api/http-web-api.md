@@ -63,15 +63,15 @@ Software items link to `provider_config`s and host associations via `host_softwa
 
 ## Service Operations
 
-- `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageAgents`).
-- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires `ManageAgents`).
+- `/api/v1/agents/{id}/version-check`: trigger a version check (requires `ManageSoftware`).
+- `/api/v1/agents/{id}/execute-update`: send `execute_update` (requires `ManageSoftware`).
 - `/api/v1/mqtt/tenants`: manage MQTT tenant assignments (requires `ManageSettings`).
 
 Update history records each attempt (`status`: `pending`, `in_progress`, `completed`, `failed`) and stores the full command output for auditing.
 
 ## Software Item Version Check Endpoints
 
-These endpoints trigger granular per-item version checks. Both require the `ManageSettings` permission.
+These endpoints trigger granular per-item version checks. Both require the `ManageSoftware` permission.
 
 ### `POST /api/v1/software-items/{id}/check-versions`
 
@@ -134,7 +134,7 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 
 ## Scheduler Endpoints
 
-All scheduler endpoints require the `ManageSettings` permission.
+All scheduler endpoints require the `ManageSoftware` permission.
 
 ### `GET /api/v1/scheduler/tasks`
 

@@ -290,6 +290,7 @@ mod tests {
                     client_id: "test".into(),
                     username: Some(uptrakit_internal_wire::SecretString::new("user".into())),
                     password: Some(uptrakit_internal_wire::SecretString::new("secret".into())),
+                    ca_pem: None,
                     topic_prefix: "test/".into(),
                     updated_at: time::UtcDateTime::UNIX_EPOCH,
                 },

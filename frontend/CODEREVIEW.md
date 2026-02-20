@@ -131,24 +131,13 @@ than the API (e.g., split deployment with a CDN), this would require a code chan
 
 ### 2.2 Issues
 
-#### SEC-01: CSP allows `'unsafe-inline'` for scripts
+#### ~~SEC-01: CSP allows `'unsafe-inline'` for scripts~~ (FIXED)
 
-**Severity:** Medium
-**Location:** `app.html:9`
-
-```html
-<meta http-equiv="Content-Security-Policy"
-  content="... script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; ..." />
-```
-
-The `'unsafe-inline'` for `script-src` is needed for the theme FOUC-prevention inline script (`app.html:12-18`),
-but it significantly weakens XSS protection. Any XSS vulnerability can execute arbitrary inline scripts.
-
-The `'unsafe-inline'` for `style-src` is likely needed by Skeleton UI / Tailwind but should be verified.
-
-**Recommendation:** Replace the inline theme script with a CSP nonce (SvelteKit supports `%sveltekit.nonce%`)
-or use a `'sha256-...'` hash for the specific inline script. Investigate whether `style-src` can drop
-`'unsafe-inline'`.
+**Resolution:** Replaced `'unsafe-inline'` in the `script-src` directive with
+`'sha256-RgCSpXdTZerbsu0EQDyVU1kcsU52WvTr2LdzVILxPec='`, the SHA-256 hash
+of the inline theme FOUC-prevention script. Only the exact inline script
+is allowed; arbitrary inline scripts are now blocked by CSP. `style-src`
+retains `'unsafe-inline'` (required by Skeleton UI / Tailwind).
 
 #### SEC-02: No URL path parameter validation
 
@@ -361,30 +350,12 @@ use different naming conventions due to the underlying backend types.
 
 ### 4.2 Issues
 
-#### HA-01: No jitter in MQTT polling backoff
+#### ~~HA-01: No jitter in MQTT polling backoff~~ (FIXED)
 
-**Severity:** Medium
-**Location:** `settings/+page.svelte:79-83`
-
-```typescript
-const delay = Math.min(
-    initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1),
-    maxMqttPollDelay
-);
-```
-
-All clients use deterministic exponential backoff. If multiple browser tabs or users are open, they will
-all retry at the same time after the same backoff period, creating a thundering herd on the backend.
-
-**Recommendation:** Add random jitter:
-
-```typescript
-const baseDelay = Math.min(
-    initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1),
-    maxMqttPollDelay
-);
-const delay = baseDelay * (0.5 + Math.random() * 0.5); // 50-100% of base delay
-```
+**Resolution:** Added random jitter (50-100% of base delay) to the MQTT
+polling backoff calculation. The delay is now
+`baseDelay * (0.5 + Math.random() * 0.5)`, preventing thundering herd when
+multiple browser tabs or users retry simultaneously.
 
 #### HA-02: No stale data detection
 
@@ -509,15 +480,13 @@ use proper mocking of the `api` module.
 
 ### 6.2 Issues
 
-#### A11Y-01: Toast notifications lack `aria-live` region
+#### ~~A11Y-01: Toast notifications lack `aria-live` region~~ (FIXED)
 
-**Severity:** Medium
-**Location:** `components/ToastNotifications.svelte`
-
-Screen readers will not announce toast notifications because the container is not marked as a live region.
-
-**Recommendation:** Add `role="status"` or `aria-live="polite"` to the toast container for success messages,
-and `role="alert"` or `aria-live="assertive"` for error messages.
+**Resolution:** Added ARIA live region attributes to `ToastNotifications.svelte`:
+container gets `aria-label="Notifications"`, success messages get
+`role="status" aria-live="polite" aria-atomic="true"`, error messages get
+`role="alert" aria-live="assertive" aria-atomic="true"`, and system alerts
+get `role="status" aria-live="polite" aria-atomic="true"`.
 
 #### A11Y-02: No keyboard navigation in context menus
 
@@ -542,8 +511,9 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 
 | Severity | Count | IDs |
 |----------|-------|-----|
-| Medium | 6 | SEC-01, ARC-02, CQ-01, CQ-02, HA-01, HA-02 |
-| Low | 14 | ARC-01, ARC-03, ARC-04, SEC-02, SEC-03, SEC-04, SEC-05, CQ-03, CQ-04, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, A11Y-01, A11Y-02, A11Y-03 |
+| Medium | 3 | ARC-02, CQ-02, HA-02 |
+| Medium (Fixed) | 3 | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~ |
+| Low | 14 | ARC-01, ARC-03, ARC-04, SEC-02, SEC-03, SEC-04, SEC-05, CQ-03, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, A11Y-02, A11Y-03 |
 
 ### Issues by Category
 
@@ -559,7 +529,7 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 
 | File | Issues | Notes |
 |------|--------|-------|
-| `app.html` | SEC-01, SEC-05 | CSP could be tightened |
+| `app.html` | ~~SEC-01~~, SEC-05 | CSP script-src tightened with SHA-256 hash |
 | `lib/api.ts` | SEC-02, SEC-03 | Core API client is well-structured |
 | `lib/auth.ts` | ARC-01 | Mixed store pattern |
 | `lib/theme.ts` | ARC-01, CQ-06 | Listener cleanup |
@@ -576,7 +546,7 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 | `services/+page.svelte` | CQ-01, CQ-04, HA-04 | Double load bug |
 | `hosts/+page.svelte` | HA-04 | No retry button |
 | `software/+page.svelte` | — | Clean implementation |
-| `settings/+page.svelte` | CQ-02, HA-01, HA-02 | Component ref pattern |
+| `settings/+page.svelte` | CQ-02, ~~HA-01~~, HA-02 | Component ref pattern; jitter added to backoff |
 | `settings/EnrollmentTokenSettings.svelte` | CQ-03 | Code duplication |
 | `settings/RegistrationSettings.svelte` | — | Clean |
 | `settings/AuthenticationSettings.svelte` | — | Clean |
@@ -584,7 +554,7 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 | `settings/MqttClientsSettings.svelte` | CQ-08 | Minor naming inconsistency |
 | `settings/OidcProvidersSettings.svelte` | — | Clean |
 | `settings/global/+page.svelte` | — | Clean |
-| `components/ToastNotifications.svelte` | A11Y-01 | Missing aria-live |
+| `components/ToastNotifications.svelte` | ~~A11Y-01~~ | ARIA live regions added |
 | `components/ContextMenu.svelte` | A11Y-02 | No keyboard nav |
 | `components/ConfirmDialog.svelte` | — | Clean |
 | `components/ModalBackdrop.svelte` | — | Excellent focus management |
