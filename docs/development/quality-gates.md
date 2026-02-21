@@ -56,6 +56,8 @@ This includes (non-exhaustive):
 
 ```sh
 cd frontend && npm install                                   # Install dependencies
+cd frontend && npm run lint                                  # ESLint
+cd frontend && npm run format:check                          # Prettier format check
 cd frontend && npm run check                                 # Svelte/TypeScript type check
 cd frontend && npm run build                                 # Production build
 ```

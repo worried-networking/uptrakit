@@ -86,13 +86,13 @@ uptrakit/
 │   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware), Pagination
 │   │   └── routes/                     # SvelteKit file-based routes
 │   │       └── settings/               # Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment)
-│   ├── package.json                    # npm scripts: build, check
+│   ├── package.json                    # npm scripts: build, check, lint, format, format:check
 │   ├── svelte.config.js                # SvelteKit config (static adapter)
 │   ├── tsconfig.json
 │   ├── vite.config.ts
 │   └── vitest.config.ts
 ├── .github/
-│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend check + build
+│   ├── workflows/ci.yml                # CI: fmt check, clippy, tests, reverse-proxy Docker tests, frontend lint + format + check + build
 │   └── dependabot.yml                  # Weekly Cargo + npm dependency updates
 ├── CONTRIBUTING.md
 ├── README.md
@@ -137,7 +137,7 @@ All changes must pass defined quality gates. See [docs/development/quality-gates
   The `.markdownlintignore` file excludes `node_modules/`, `target/`, `.claude/`, and `CODEREVIEW.md`.
   Do not add exceptions to `.markdownlintignore` or `.markdownlint.json` without explicit approval.
 - Scope-based execution is allowed for local iteration:
-  - frontend-only changes: run frontend checks (`npm run check`, `npm run build`) and markdownlint.
+  - frontend-only changes: run frontend checks (`npm run lint`, `npm run format:check`, `npm run check`, `npm run build`) and markdownlint.
   - Rust/backend-only changes: run Rust checks/tests/linters and markdownlint.
   - mixed changes: run both Rust and frontend gates plus markdownlint.
 - If anything related to reverse proxy behavior changes, run ignored reverse proxy integration tests:
