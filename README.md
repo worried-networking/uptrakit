@@ -1,5 +1,8 @@
 # Uptrakit
 
+> **Note:** Uptrakit is in early development. APIs may change, documentation may be incomplete,
+> and some features are still being built. Contributions and feedback are welcome!
+
 Uptrakit is a self-hosted **update tracking toolkit** for Linux homelabs and small fleets.
 
 It’s intentionally **not** an auto-updater: the controller can *check* for updates on a schedule, but **all update actions require explicit user
