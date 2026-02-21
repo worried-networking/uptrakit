@@ -23,6 +23,18 @@ export function formatDate(date: string | null | undefined): string {
 }
 
 /**
+ * Validates a redirect path: allows paths that start with "/" but not "//".
+ * Rejects null, absolute URLs, and protocol-relative URLs to prevent open
+ * redirect vulnerabilities. Returns "/" as the safe fallback.
+ */
+export function safeRedirect(redirect: string | null): string {
+	if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
+		return redirect;
+	}
+	return '/';
+}
+
+/**
  * Copies text to the clipboard. Returns true on success, false on failure.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {

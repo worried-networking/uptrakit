@@ -12,7 +12,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import type { AuthMethodsResponse } from '$lib/types';
-	import { isValidLogoUrl } from '$lib/utils';
+	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
 
 	let email = $state('');
 	let password = $state('');
@@ -94,11 +94,7 @@
 	});
 
 	function safeRedirect(): string {
-		const redirect = $page.url.searchParams.get('redirect');
-		if (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) {
-			return redirect;
-		}
-		return '/';
+		return safeRedirectFn($page.url.searchParams.get('redirect'));
 	}
 
 	async function onSubmit(e: SubmitEvent) {

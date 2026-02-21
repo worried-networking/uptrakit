@@ -128,6 +128,29 @@ All operations are single-item. No bulk update, bulk delete, or batch check endp
 - **Device flow support** for CLI/headless authentication.
 - **Insecure mode** for development (TLS verification bypass).
 
+## Mock Testing Feature
+
+A `mock` feature flag was added to support integration testing of crates that use
+`uptrakit-openapi-client`:
+
+```toml
+[dev-dependencies]
+uptrakit-openapi-client = { path = "...", features = ["mock"] }
+```
+
+The `mock` module (`src/mock.rs`) provides:
+
+- `MockApiServer`: starts an `httpmock::MockServer` on a random port, with endpoint-aware
+  convenience methods (`on_list_hosts`, `on_get_host`, `on_approve_service`, etc.) so test
+  code never needs to know API URL paths.
+- `MockEndpoint<'a>`: a response builder with pre-defined methods (`ok`, `no_content`,
+  `unauthorized`, `not_found`, `rate_limited`, `internal_error`) using `reqwest::StatusCode`
+  for type safety, plus `respond` and `respond_raw` for custom responses.
+- All response builder methods use `StatusCode` enum values (not raw `u16` literals).
+
+The CLI crate (`uptrakit-cli`) uses this feature in 14 integration tests covering command
+execution, error mapping, and output formatting.
+
 ## AGENTS.md Compliance Check
 
 - No `unsafe`: pass

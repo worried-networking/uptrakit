@@ -65,25 +65,24 @@ trivial MITM attacks. The comment at line 131-132 documents the intent.
 **Recommendation:** No change needed. Consider adding a log warning when
 TOFU mode is active (if not already present in `ca.rs`).
 
-#### L2: `Reconnect` outcome has a hardcoded 2-second delay
+#### ~~L2: `Reconnect` outcome has a hardcoded 2-second delay~~ (FIXED)
 
-**File:** `src/lifecycle.rs:297-300`
+**File:** `src/lifecycle.rs`
 
 After a `LoopOutcome::Reconnect` (certificate rotation), the lifecycle
-sleeps for a hardcoded 2 seconds before reconnecting. This is not
-configurable and not documented.
+sleeps for a hardcoded 2 seconds before reconnecting.
+
+**Resolution:** Extracted the delay into a named constant with a doc comment:
 
 ```rust
-LoopOutcome::Reconnect => {
-    reconnect_backoff.reset();
-    tracing::info!("reconnecting with new certificate");
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    continue;
-}
+/// Delay before reconnecting after certificate rotation. Allows the
+/// controller to finalize rotation before the service reconnects with
+/// its new certificate.
+const CERT_RECONNECT_DELAY: Duration = Duration::from_secs(2);
 ```
 
-**Recommendation:** Document the 2-second delay as intentional (to allow the
-controller time to finalize certificate rotation) or make it configurable.
+The constant is now self-documenting and easy to locate if the delay needs
+adjustment in future.
 
 ### Info
 

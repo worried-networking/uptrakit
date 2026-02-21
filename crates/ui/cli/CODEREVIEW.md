@@ -161,15 +161,19 @@ Acceptable for a CLI tool; user can retry manually.
 matching `save_credentials()` which already calls `dirs.ensure_state_dir()`. Also added
 `ensure_config_dir()` method to the directories crate.
 
-### C-2: Missing test coverage for command execution logic [MEDIUM] (PARTIALLY RESOLVED)
+### ~~C-2: Missing test coverage for command execution logic~~ [MEDIUM] (FIXED)
 
 ~~60+ tests for CLI argument parsing, but no tests for error paths, config loading, or
 formatting logic.~~
 
 **Resolution:** Added 5 output formatting tests to `output.rs`: Unicode handling, empty
 strings, nested value pretty-print, YAML special characters, and Human format passthrough.
-Total: 75 tests. Integration tests requiring HTTP mocks for command execution remain out
-of scope.
+Added 14 integration tests in `tests/command_execution.rs` using a feature-gated
+`MockApiServer` from `uptrakit-openapi-client`. Tests cover `hosts::list` (success, empty,
+JSON format), `hosts::show` (success, not found, with agents), `services::list`, `services::approve`
+(success, not found), `services::remove`, `software_items::list`, and HTTP error handling for
+401/429/500 responses. Total: 89+ tests. The CLI crate now has a `[lib]` target alongside the
+`[[bin]]` to allow integration test imports.
 
 ### C-3: No `#[non_exhaustive]` on public output structs [LOW]
 
@@ -203,7 +207,7 @@ Low priority since types are only used within the crate.
 | ~~7~~ | ~~S-3~~ | ~~Validate URL before opening in browser~~ (FIXED) |
 | ~~8~~ | ~~A-3~~ | ~~Standardize parameter passing (struct vs loose)~~ (FIXED) |
 | ~~9~~ | ~~C-1~~ | ~~Call `ensure_dirs()` in config operations~~ (FIXED) |
-| 10 | C-2 | Add tests for formatting and error paths |
+| ~~10~~ | ~~C-2~~ | ~~Add tests for formatting and error paths~~ (FIXED) |
 | ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |
 | ~~12~~ | ~~Q-4~~ | ~~Expand status_text coverage~~ (FIXED) |
 | ~~14~~ | ~~Q-6~~ | ~~Use typed enum for `TokenEntry::status`~~ (PARTIALLY FIXED) |

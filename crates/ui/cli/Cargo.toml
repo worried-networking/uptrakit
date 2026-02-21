@@ -6,6 +6,10 @@ authors.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[lib]
+name = "uptrakit_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "uptrakit"
 path = "src/main.rs"
@@ -25,6 +29,11 @@ uuid = { workspace = true }
 serde_yaml_ng = "0.10"
 uptrakit-build-info = { path = "../../shared/build-info" }
 uptrakit-directories = { path = "../../shared/directories" }
+
+[dev-dependencies]
+uptrakit-openapi-client = { path = "../../shared/openapi-client", features = ["mock"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
 
 [build-dependencies]
 uptrakit-build-info = { path = "../../shared/build-info" }

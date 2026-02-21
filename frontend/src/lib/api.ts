@@ -43,7 +43,7 @@ const BASE = '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
 
-async function extractErrorMessage(res: Response): Promise<string> {
+export async function extractErrorMessage(res: Response): Promise<string> {
 	const text = await res.text();
 	if (!text) return res.statusText;
 	try {

@@ -1,11 +1,7 @@
-mod client;
-mod commands;
-mod config;
-mod error;
-mod output;
+use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
-use output::OutputFormat;
+use uptrakit_cli::output::OutputFormat;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_openapi_client::Uuid;
 

@@ -390,34 +390,41 @@ service status changes and MQTT connection status.
 
 ### 5.1 Current State
 
-| Metric         | Value                  |
-| -------------- | ---------------------- |
-| Test files     | 1 (`lib/auth.test.ts`) |
-| Test cases     | 3                      |
-| Test framework | Vitest 4.0.18 + jsdom  |
-| Code coverage  | Not configured         |
+| Metric         | Value                                                          |
+| -------------- | -------------------------------------------------------------- |
+| Test files     | 3 (`lib/auth.test.ts`, `lib/utils.test.ts`, `lib/api.test.ts`) |
+| Test cases     | 29                                                             |
+| Test framework | Vitest 4.0.18 + jsdom                                          |
+| Code coverage  | Not configured                                                 |
 
-The existing tests cover `initialize()`: success path, refresh failure, and existing token reuse. They
-use proper mocking of the `api` module.
+The existing tests cover `initialize()` (auth, 3 tests), `isValidLogoUrl`, `formatDate`,
+`safeRedirect`, `copyToClipboard` (utils, 21 tests), and `extractErrorMessage` (api, 5 tests).
+
+**Added:** `lib/utils.test.ts` (21 tests) and `lib/api.test.ts` (5 tests) covering the
+most security-critical utility functions. `safeRedirect` was extracted from
+`login/+page.svelte` into `lib/utils.ts` and is now exported and tested.
 
 ### 5.2 Coverage Gaps
 
-| Area                                                                                    | Risk   | Priority |
-| --------------------------------------------------------------------------------------- | ------ | -------- |
-| API client (`lib/api.ts`) — token refresh, error extraction, retry logic                | High   | High     |
-| Auth functions — `handleLogin`, `handleLogout`, `handleOidcLogin`, `handleOidcCallback` | High   | High     |
-| Utility functions — `isValidLogoUrl`, `formatDate`, `copyToClipboard`                   | Medium | Medium   |
-| Route components — services, hosts, software, settings                                  | Medium | Medium   |
-| Shared components — ModalBackdrop focus trapping, ContextMenu positioning               | Low    | Low      |
-| `safeRedirect()` — open redirect prevention                                             | High   | High     |
-| Integration / E2E tests                                                                 | High   | Medium   |
+| Area                                                                                    | Risk   | Priority | Status     |
+| --------------------------------------------------------------------------------------- | ------ | -------- | ---------- |
+| ~~`safeRedirect()` — open redirect prevention~~                                         | High   | High     | **FIXED**  |
+| ~~`isValidLogoUrl()` — XSS vector validation~~                                          | High   | High     | **FIXED**  |
+| ~~`extractErrorMessage` — error parsing logic~~                                         | High   | High     | **FIXED**  |
+| ~~`formatDate` — date formatting~~                                                      | Medium | Medium   | **FIXED**  |
+| ~~`copyToClipboard` — clipboard API~~                                                   | Medium | Medium   | **FIXED**  |
+| API client (`lib/api.ts`) — token refresh, retry logic                                  | High   | High     | Open       |
+| Auth functions — `handleLogin`, `handleLogout`, `handleOidcLogin`, `handleOidcCallback` | High   | High     | Open       |
+| Route components — services, hosts, software, settings                                  | Medium | Medium   | Open       |
+| Shared components — ModalBackdrop focus trapping, ContextMenu positioning               | Low    | Low      | Open       |
+| Integration / E2E tests                                                                 | High   | Medium   | Open       |
 
 ### 5.3 Recommendations
 
-1. Add tests for `safeRedirect()` — this is a security-critical function.
-2. Add tests for `isValidLogoUrl()` — validates against XSS vectors.
+1. ~~Add tests for `safeRedirect()` — this is a security-critical function.~~ (DONE)
+2. ~~Add tests for `isValidLogoUrl()` — validates against XSS vectors.~~ (DONE)
 3. Add tests for `authenticatedFetch` — the token refresh retry logic is complex.
-4. Add tests for `extractErrorMessage` — the error parsing logic.
+4. ~~Add tests for `extractErrorMessage` — the error parsing logic.~~ (DONE)
 5. Configure code coverage in Vitest and set a minimum threshold.
 6. Consider Playwright for E2E tests covering auth flows and settings management.
 
@@ -531,8 +538,8 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
    initial load.
 2. **Add jitter to MQTT polling backoff** (HA-01): Prevents thundering herd in multi-client scenarios.
 3. ~~**Add linter configuration** (ARC-02): ESLint + Prettier + CI step.~~ (DONE)
-4. **Add tests for security-critical functions** (Testing): `safeRedirect()`, `isValidLogoUrl()`,
-   `authenticatedFetch` retry logic.
+4. ~~**Add tests for security-critical functions** (Testing): `safeRedirect()`, `isValidLogoUrl()`,
+   `authenticatedFetch` retry logic.~~ (PARTIALLY DONE — `safeRedirect`, `isValidLogoUrl`, `extractErrorMessage`, `formatDate`, `copyToClipboard` now have tests; `authenticatedFetch` remains open.)
 5. **Add `aria-live` to toast notifications** (A11Y-01): Required for screen reader users.
 
 ### Priority 2 (Should consider)

@@ -1,3 +1,6 @@
+#[cfg(feature = "mock")]
+pub mod mock;
+
 pub mod api_tokens;
 pub mod auth;
 pub mod error;

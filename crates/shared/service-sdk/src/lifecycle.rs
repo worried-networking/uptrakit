@@ -306,6 +306,11 @@ async fn do_enrollment<H: ServiceHandler>(
     Ok(())
 }
 
+/// Delay before reconnecting after certificate rotation. Allows the
+/// controller to finalize rotation before the service reconnects with
+/// its new certificate.
+const CERT_RECONNECT_DELAY: Duration = Duration::from_secs(2);
+
 /// Enter the mTLS authenticated loop with automatic reconnection.
 async fn run_authenticated_with_reconnect(
     host: &str,
@@ -359,7 +364,7 @@ async fn run_authenticated_with_reconnect(
             LoopOutcome::Reconnect => {
                 reconnect_backoff.reset();
                 tracing::info!("reconnecting with new certificate");
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(CERT_RECONNECT_DELAY).await;
                 continue;
             }
             LoopOutcome::Disconnected => {

@@ -169,6 +169,12 @@ fn build_config_from_wire(config: &MqttTenantConfig) -> MqttConfig {
 }
 
 /// Compute a hash of the config for change detection.
+///
+/// Uses `DefaultHasher` (SipHash with a per-process random seed), so
+/// hashes are only valid within the same process lifetime. This is
+/// correct for the intended use: detecting config changes between
+/// consecutive `TenantAssignments` messages during a single service
+/// run. Hashes are not persisted or compared across process restarts.
 fn compute_config_hash(config: &MqttTenantConfig) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

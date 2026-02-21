@@ -7,6 +7,11 @@ repository.workspace = true
 version.workspace = true
 description = "Typed HTTP client for the Uptrakit web API"
 
+[features]
+## Enables `MockApiServer` and `MockEndpoint` for use in tests of downstream crates.
+## Activate with `features = ["mock"]` in `[dev-dependencies]`.
+mock = ["dep:httpmock"]
+
 [dependencies]
 reqwest = { workspace = true, features = ["query"] }
 serde = { workspace = true }
@@ -17,6 +22,7 @@ uptrakit-shared-macros = { workspace = true }
 uptrakit-shared-types = { workspace = true }
 uptrakit-web-api-types = { path = "../web-api-types" }
 uuid = { workspace = true, features = ["serde"] }
+httpmock = { version = "0.8", optional = true }
 
 [dev-dependencies]
 http = { workspace = true }

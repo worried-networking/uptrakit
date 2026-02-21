@@ -62,17 +62,22 @@ now renews certificates independently of controller-pushed
 instead of extracting plaintext. Credentials are only exposed at the point
 of passing to `MqttOptions::set_credentials()`.
 
-#### L2: `compute_config_hash` uses `DefaultHasher` (non-deterministic)
+#### ~~L2: `compute_config_hash` uses `DefaultHasher` (non-deterministic)~~ (FIXED)
 
-**File:** `src/tenant_manager.rs:177-188`
+**File:** `src/tenant_manager.rs`
 
 `DefaultHasher` uses `SipHash` which is randomized per process (different
 seed each run). This is fine for within-process change detection (the
 intended use), but worth noting that hashes are not comparable across
 process restarts.
 
-**Recommendation:** No change needed — the hash is only used for
-same-process config dedup. Add a brief comment noting this.
+**Resolution:** Added an expanded doc comment to `compute_config_hash` explaining
+the `DefaultHasher` choice and its lifetime constraints:
+
+> Uses `DefaultHasher` (SipHash with a per-process random seed), so hashes are only
+> valid within the same process lifetime. This is correct for the intended use:
+> detecting config changes between consecutive `TenantAssignments` messages during a
+> single service run. Hashes are not persisted or compared across process restarts.
 
 ### Info
 

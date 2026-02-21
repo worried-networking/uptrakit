@@ -48,6 +48,7 @@ crates/shared/openapi-client/
 └── src/
     ├── lib.rs              # UptrakitClient struct, builder, re-exports, internal helpers
     ├── error.rs            # ClientError enum, Result type
+    ├── mock.rs             # (feature = "mock") MockApiServer + MockEndpoint for testing
     ├── auth.rs             # Auth (register, login, refresh, logout, device auth, auth methods)
     ├── api_tokens.rs       # API token CRUD
     ├── health.rs           # Health check endpoint
@@ -320,6 +321,104 @@ The openapi-client must mirror the web API:
 - **Changed request/response types** -> update the client method signature.
 - **Removed endpoint** -> remove the client method.
 
+## Mock testing feature
+
+The `mock` feature provides a first-class HTTP mocking layer for integration tests in crates
+that depend on `uptrakit-openapi-client`. It uses [`httpmock`](https://crates.io/crates/httpmock)
+under the hood.
+
+### Enabling the feature
+
+Add to `[dev-dependencies]` in your crate's `Cargo.toml`:
+
+```toml
+[dev-dependencies]
+uptrakit-openapi-client = { path = "...", features = ["mock"] }
+```
+
+### Using `MockApiServer`
+
+`MockApiServer` starts a real HTTP server on a random port and provides endpoint-aware
+convenience methods. Test code never needs to know API URL paths.
+
+```rust
+use uptrakit_openapi_client::mock::MockApiServer;
+use uptrakit_openapi_client::types::pagination::PaginatedResponse;
+use uptrakit_openapi_client::types::hosts::HostResponse;
+
+#[tokio::test]
+async fn list_hosts_returns_empty() {
+    let server = MockApiServer::start();
+
+    // Register a mock for GET /api/v1/hosts
+    let _m = server.on_list_hosts().ok(&PaginatedResponse::<HostResponse>::default());
+
+    // Get a pre-authenticated client pointing at the mock server
+    let client = server.client();
+    let result = client.list_hosts(&Default::default()).await.unwrap();
+    assert_eq!(result.items.len(), 0);
+    // _m goes out of scope here; httpmock checks for unexpected requests on drop
+}
+```
+
+### `MockEndpoint` response methods
+
+All response methods use `reqwest::StatusCode` for type safety:
+
+| Method | Status | Notes |
+| --- | --- | --- |
+| `ok(body)` | 200 OK | Serializes `body` as JSON |
+| `no_content()` | 204 No Content | No response body |
+| `unauthorized()` | 401 Unauthorized | JSON `{"error":"Unauthorized"}` |
+| `not_found(msg)` | 404 Not Found | JSON `{"error":"<msg>"}` |
+| `rate_limited(secs)` | 429 Too Many Requests | Optional `Retry-After` header |
+| `internal_error(msg)` | 500 Internal Server Error | JSON `{"error":"<msg>"}` |
+| `respond(status, body)` | custom | Serializes `body` as JSON |
+| `respond_raw(status, json)` | custom | Raw JSON string |
+
+All methods return `httpmock::Mock<'_>` which can be used for call-count assertions:
+
+```rust
+let m = server.on_list_hosts().ok(&response);
+// ... exercise code under test ...
+m.assert();       // exactly 1 call
+m.assert_hits(2); // exactly N calls
+```
+
+### Pre-defined endpoint helpers
+
+`MockApiServer` provides helpers for all major API endpoints so tests never hard-code paths:
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list_hosts()` | GET | `/api/v1/hosts` |
+| `on_get_host(id)` | GET | `/api/v1/hosts/{id}` |
+| `on_list_services()` | GET | `/api/v1/services` |
+| `on_get_service(id)` | GET | `/api/v1/services/{id}` |
+| `on_approve_service(id)` | POST | `/api/v1/services/{id}/approve` |
+| `on_reject_service(id)` | POST | `/api/v1/services/{id}/reject` |
+| `on_remove_service(id)` | DELETE | `/api/v1/services/{id}` |
+| `on_list_software_items()` | GET | `/api/v1/software-items` |
+| `on_get_software_item(id)` | GET | `/api/v1/software-items/{id}` |
+| `on_list_scheduled_tasks()` | GET | `/api/v1/scheduler/tasks` |
+| `on_trigger_scheduled_task(id)` | POST | `/api/v1/scheduler/tasks/{id}/trigger` |
+| `on_healthz()` | GET | `/healthz` |
+| `on_system_alerts()` | GET | `/api/v1/system/alerts` |
+| `on(method, path)` | any | Generic fallback for unlisted endpoints |
+
+### Client helpers
+
+```rust
+// Authenticated client (bearer token = "test-token", TLS verification disabled)
+let client = server.client();
+
+// Unauthenticated client
+let client = server.client_unauth();
+
+// Raw httpmock server for advanced scenarios
+let raw = server.server();
+```
+
 ## Testing
 
 Unit tests cover:
@@ -334,7 +433,11 @@ Unit tests cover:
 Run tests:
 
 ```bash
+# Unit tests only
 cargo test -p uptrakit-openapi-client
+
+# With mock feature (no additional tests in openapi-client itself, but enables mock for consumers)
+cargo test -p uptrakit-openapi-client --all-features
 ```
 
 ## Related documentation
