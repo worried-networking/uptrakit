@@ -771,4 +771,139 @@ mod tests {
         let content = std::fs::read(&file).expect("read");
         assert_eq!(content, b"data");
     }
+
+    #[test]
+    fn expand_tilde_user_syntax_unchanged() {
+        // `~otheruser/foo` is not the current user's tilde — it should pass through unchanged.
+        let path = Path::new("~otheruser/foo");
+        let expanded = expand_tilde(path).expect("should expand");
+        assert_eq!(expanded, path);
+    }
+
+    #[test]
+    fn expand_tilde_no_home_returns_error() {
+        // Temporarily unset HOME to simulate missing home directory.
+        let original = std::env::var_os("HOME");
+        unsafe { std::env::remove_var("HOME") };
+
+        let result = expand_tilde(Path::new("~"));
+        assert!(result.is_err(), "should error when HOME is unset");
+
+        // Restore HOME.
+        if let Some(val) = original {
+            unsafe { std::env::set_var("HOME", val) };
+        }
+    }
+
+    #[tokio::test]
+    async fn ensure_state_dir_creates_with_correct_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        let state = temp.path().join("state_test");
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(&state))
+            .expect("should resolve");
+
+        dirs.ensure_state_dir().await.expect("ensure_state_dir");
+
+        assert!(state.is_dir());
+        let mode = std::fs::metadata(&state)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[tokio::test]
+    async fn ensure_config_dir_creates_with_correct_permissions() {
+        let temp = TempDir::new().expect("temp dir");
+        let config = temp.path().join("config_test");
+        let dirs = AppDirs::resolve("controller", Some(&config), Some(temp.path()))
+            .expect("should resolve");
+
+        dirs.ensure_config_dir().await.expect("ensure_config_dir");
+
+        assert!(config.is_dir());
+        let mode = std::fs::metadata(&config)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn config_path_rejects_absolute() {
+        let temp = TempDir::new().expect("temp dir");
+        let dirs = AppDirs::resolve("controller", Some(temp.path()), Some(temp.path()))
+            .expect("should resolve");
+
+        assert!(
+            dirs.config_path("/etc/passwd").is_err(),
+            "absolute path should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_secure_file_empty_data() {
+        let temp = TempDir::new().expect("temp dir");
+        let file = temp.path().join("empty_file");
+
+        write_secure_file(&file, b"").await.expect("should write empty file");
+
+        assert!(file.is_file());
+        let content = std::fs::read(&file).expect("read");
+        assert!(content.is_empty());
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "empty file should still have 0o600 permissions");
+    }
+
+    #[tokio::test]
+    async fn set_dir_permissions_corrects_755() {
+        let temp = TempDir::new().expect("temp dir");
+        let dir = temp.path().join("dir_755");
+
+        std::fs::create_dir(&dir).expect("create dir");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+            .expect("set perms");
+
+        let mode_before = std::fs::metadata(&dir)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode_before, 0o755, "precondition: dir should be 0o755");
+
+        set_dir_permissions(&dir)
+            .await
+            .expect("set_dir_permissions");
+
+        let mode_after = std::fs::metadata(&dir)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode_after, 0o700, "permissions should be corrected to 0o700");
+    }
+
+    #[tokio::test]
+    async fn create_secure_dir_permission_denied() {
+        // Attempt to create a directory inside a read-only parent.
+        let temp = TempDir::new().expect("temp dir");
+        let readonly_parent = temp.path().join("readonly");
+        std::fs::create_dir(&readonly_parent).expect("create parent");
+        std::fs::set_permissions(&readonly_parent, std::fs::Permissions::from_mode(0o500))
+            .expect("set readonly");
+
+        let child = readonly_parent.join("child");
+        let result = create_secure_dir(&child).await;
+        assert!(result.is_err(), "should fail on read-only parent");
+
+        // Restore permissions so TempDir cleanup works.
+        std::fs::set_permissions(&readonly_parent, std::fs::Permissions::from_mode(0o700))
+            .expect("restore perms");
+    }
 }

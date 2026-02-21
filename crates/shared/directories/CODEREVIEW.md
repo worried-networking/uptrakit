@@ -94,12 +94,17 @@ compile on Windows.~~
 **Resolution:** Added `#[cfg(unix)]` guard before `#[cfg(test)]` on the test module. The entire test suite uses
 Unix-specific permission checks (`PermissionsExt`), so gating the whole module is appropriate.
 
-### LOW: Missing test coverage
+### ~~LOW: Missing test coverage~~ RESOLVED
 
-Missing tests for: `expand_tilde` with relative paths, `~user` syntax, unset `$HOME`, `create_secure_dir` idempotency,
+~~Missing tests for: `expand_tilde` with relative paths, `~user` syntax, unset `$HOME`, `create_secure_dir` idempotency,
 existing directory with wrong permissions, `write_secure_file` overwrite behavior, `write_secure_file_str`,
 `set_dir_permissions`, `set_file_permissions`, `AppDirs::ensure_state_dir`, error paths, and content verification for
-sync writes.
+sync writes.~~
+
+**Resolution:** Added 8 edge-case tests covering: `~otheruser/foo` pass-through, unset `$HOME` error,
+`ensure_state_dir` permissions, `ensure_config_dir` permissions, absolute path rejection in `config_path`,
+empty file write with correct permissions, `set_dir_permissions` correcting 0o755 to 0o700, and
+`create_secure_dir` failure on read-only parent. Total: 32 tests (up from 24).
 
 ---
 
@@ -113,4 +118,4 @@ sync writes.
 | Error handling          | PASS       | rootcause/thiserror with contextual path information       |
 | `unwrap`/`panic`        | PASS       | Zero in production code                                    |
 | Cross-platform          | FAIR       | Permission hardening is Unix-only; docs say "cross-platform" |
-| Test coverage           | FAIR       | Core paths covered; many edge cases and error paths missing  |
+| Test coverage           | GOOD       | 32 tests covering core paths, edge cases, and error paths    |
