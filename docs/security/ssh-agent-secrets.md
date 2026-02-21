@@ -157,6 +157,21 @@ which wraps arguments in single quotes with proper escaping. Username validation
 enforces POSIX rules (`[a-z_][a-z0-9_-]*`, max 32 characters), further reducing
 injection risk.
 
+### Hostname validation
+
+The `SshTarget` parser validates hostnames at parse time (not just at connection
+time). Validation rejects:
+
+- Whitespace and control characters
+- Hostnames exceeding 253 characters (DNS limit)
+- DNS labels exceeding 63 characters
+- Labels starting or ending with hyphens
+- Invalid characters in DNS labels (only alphanumeric, hyphens, and underscores
+  are allowed)
+
+IPv4 and IPv6 addresses pass through without DNS label validation. This prevents
+malformed or malicious hostname strings from reaching the SSH transport layer.
+
 ### Authorized keys hardening
 
 The public key deployed to `~target/.ssh/authorized_keys` is prefixed with SSH

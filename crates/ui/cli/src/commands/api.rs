@@ -34,7 +34,7 @@ pub async fn execute(
 
     match format {
         OutputFormat::Human => {
-            eprintln!("HTTP {} {reason}", resp.status);
+            println!("HTTP {} {reason}", resp.status);
             if !resp.body.is_null() {
                 print_value(format, &resp.body)?;
             }

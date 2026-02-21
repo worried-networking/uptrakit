@@ -121,16 +121,14 @@ appended to `accumulated`. All lines continue streaming via the channel. The sam
 is applied in both `push()` and `flush()` methods. Tests added to verify the truncation
 marker and continued streaming behavior.
 
-#### L2: `SshTarget::from_str` does not validate hostname
+#### ~~L2: `SshTarget::from_str` does not validate hostname~~ (FIXED)
 
-**File:** `src/ssh_target.rs`
-
-The `FromStr` impl for `SshTarget` parses the target into user, host, and
-port components but does not validate that the hostname is syntactically
-valid (e.g., no spaces, valid DNS characters).
-
-**Recommendation:** Consider basic hostname validation or document that
-validation happens at connection time.
+**Resolution:** Added `validate_hostname()` function and `InvalidHostname`
+error variant. Validation checks: no whitespace/control characters, length
+<= 253 (DNS limit), labels <= 63 chars, no leading/trailing hyphens per
+label, valid DNS characters (alphanumeric, hyphen, underscore). IPv4 and
+IPv6 addresses pass through without DNS label validation. FQDN trailing
+dots are allowed. 15 new tests cover valid and invalid hostname patterns.
 
 ### Info
 

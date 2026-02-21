@@ -14,6 +14,8 @@ The CLI supports three output formats via the global `--output` / `-o` flag:
 - `print_output<T: Serialize>(format, human_text, value)` — for typed commands (`auth status`, `auth token *`,
   `hosts`, `services`, `software-items`, `check`, `update`, `history`, `scheduler`).
 - `print_value(format, &serde_json::Value)` — for the `api` command which works with raw JSON values.
+  In Human format, the HTTP status line is printed to stdout before the body.
+  In JSON/YAML format, the status is wrapped in the response envelope.
 - Each structured command uses server response types from `uptrakit-web-api-types` (e.g. `HostResponse`,
   `SoftwareItemResponse`, `UpdateHistoryResponse`, `ScheduledTaskResponse`) for JSON/YAML output while building
   human-readable table/detail text for the human format.

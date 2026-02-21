@@ -83,7 +83,7 @@ uptrakit/
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
 │   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications
-│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware), Pagination
+│   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination
 │   │   └── routes/                     # SvelteKit file-based routes
 │   │       └── settings/               # Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment)
 │   ├── package.json                    # npm scripts: build, check, lint, format, format:check

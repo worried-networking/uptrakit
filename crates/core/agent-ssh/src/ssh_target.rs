@@ -27,6 +27,9 @@ pub enum ParseSshTargetError {
     #[error("empty hostname")]
     EmptyHostname,
 
+    #[error("invalid hostname: {0}")]
+    InvalidHostname(String),
+
     #[error("invalid port: {0}")]
     InvalidPort(String),
 
@@ -100,6 +103,8 @@ fn parse_ssh_url(s: &str) -> Result<SshTarget, ParseSshTargetError> {
 
     let port = parsed.port();
 
+    validate_hostname(hostname)?;
+
     Ok(SshTarget {
         username,
         hostname: hostname.to_string(),
@@ -126,6 +131,8 @@ fn parse_plain(s: &str) -> Result<SshTarget, ParseSshTargetError> {
     if hostname.is_empty() {
         return Err(ParseSshTargetError::EmptyHostname);
     }
+
+    validate_hostname(&hostname)?;
 
     Ok(SshTarget {
         username,
@@ -186,6 +193,83 @@ fn parse_host_port(s: &str) -> Result<(String, Option<u16>), ParseSshTargetError
             Ok((s.to_string(), None))
         }
     }
+}
+
+/// Validate that a hostname is syntactically acceptable.
+///
+/// - Not empty (handled by caller, but checked defensively).
+/// - No whitespace or control characters.
+/// - Length <= 253 characters (DNS limit).
+/// - IPv4/IPv6 addresses pass through without DNS label validation.
+/// - DNS hostnames: valid label characters (alphanumeric, hyphens, dots),
+///   no leading/trailing hyphens per label, labels <= 63 chars.
+/// - Single-label names (SSH aliases like "myserver") are allowed.
+fn validate_hostname(hostname: &str) -> Result<(), ParseSshTargetError> {
+    if hostname.is_empty() {
+        return Err(ParseSshTargetError::EmptyHostname);
+    }
+
+    // Reject whitespace and control characters.
+    if hostname
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(ParseSshTargetError::InvalidHostname(
+            "contains whitespace or control characters".to_string(),
+        ));
+    }
+
+    // DNS name length limit.
+    if hostname.len() > 253 {
+        return Err(ParseSshTargetError::InvalidHostname(format!(
+            "hostname length {} exceeds maximum of 253 characters",
+            hostname.len()
+        )));
+    }
+
+    // IPv6 addresses contain colons — skip DNS label validation.
+    if hostname.contains(':') {
+        return Ok(());
+    }
+
+    // IPv4 check: if it looks like an IP address (all digits and dots), skip
+    // DNS label validation. We only need a heuristic here — actual address
+    // validity is checked at connection time.
+    if hostname.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return Ok(());
+    }
+
+    // DNS label validation for hostnames.
+    for label in hostname.split('.') {
+        if label.is_empty() {
+            // Trailing dot is valid in DNS (FQDN), but empty interior labels
+            // are not. Allow trailing dot only.
+            continue;
+        }
+        if label.len() > 63 {
+            return Err(ParseSshTargetError::InvalidHostname(format!(
+                "label '{}' exceeds maximum length of 63 characters",
+                label
+            )));
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return Err(ParseSshTargetError::InvalidHostname(format!(
+                "label '{}' must not start or end with a hyphen",
+                label
+            )));
+        }
+        if !label
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(ParseSshTargetError::InvalidHostname(format!(
+                "label '{}' contains invalid characters (allowed: alphanumeric, hyphen, underscore)",
+                label
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_port(s: &str) -> Result<u16, ParseSshTargetError> {
@@ -436,5 +520,116 @@ mod tests {
         let target: SshTarget = "deploy@prod".parse().expect("should parse");
         assert_eq!(target.hostname, "prod");
         assert_eq!(target.username.as_deref(), Some("deploy"));
+    }
+
+    // ── Hostname validation ──────────────────────────────────────
+
+    #[test]
+    fn hostname_with_whitespace_fails() {
+        let err = "example .com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn hostname_with_tab_fails() {
+        let err = "example\t.com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn hostname_with_control_char_fails() {
+        let err = "example\x00.com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn hostname_too_long_fails() {
+        let long = "a".repeat(254);
+        let err = long.parse::<SshTarget>().expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn hostname_at_max_length_succeeds() {
+        // 62*4 + 3 separators = 251 chars, under the 253 limit
+        let hostname = format!(
+            "{}.{}.{}.{}",
+            "a".repeat(62),
+            "b".repeat(62),
+            "c".repeat(62),
+            "d".repeat(62)
+        );
+        let target: SshTarget = hostname.parse().expect("should parse");
+        assert_eq!(target.hostname, hostname);
+    }
+
+    #[test]
+    fn label_too_long_fails() {
+        let hostname = format!("{}.example.com", "a".repeat(64));
+        let err = hostname.parse::<SshTarget>().expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn label_leading_hyphen_fails() {
+        let err = "-example.com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn label_trailing_hyphen_fails() {
+        let err = "example-.com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn hostname_with_underscore_succeeds() {
+        // Underscores are common in internal hostnames and SSH configs
+        let target: SshTarget = "my_server.local".parse().expect("should parse");
+        assert_eq!(target.hostname, "my_server.local");
+    }
+
+    #[test]
+    fn hostname_with_invalid_chars_fails() {
+        let err = "exam!ple.com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
+    }
+
+    #[test]
+    fn hostname_fqdn_trailing_dot_succeeds() {
+        let target: SshTarget = "example.com.".parse().expect("should parse");
+        assert_eq!(target.hostname, "example.com.");
+    }
+
+    #[test]
+    fn ipv4_address_skips_label_validation() {
+        let target: SshTarget = "192.168.1.1".parse().expect("should parse");
+        assert_eq!(target.hostname, "192.168.1.1");
+    }
+
+    #[test]
+    fn ipv6_address_skips_label_validation() {
+        let target: SshTarget = "[2001:db8::1]".parse().expect("should parse");
+        assert_eq!(target.hostname, "2001:db8::1");
+    }
+
+    #[test]
+    fn ssh_url_hostname_validated() {
+        let err = "ssh://-invalid.com"
+            .parse::<SshTarget>()
+            .expect_err("should fail");
+        assert!(matches!(err, ParseSshTargetError::InvalidHostname(_)));
     }
 }

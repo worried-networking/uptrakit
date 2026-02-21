@@ -3,9 +3,29 @@
 	import type { EnrollmentTokenStatus } from '$lib/types';
 	import { copyToClipboard } from '$lib/utils';
 
-	let agentCopied: boolean = $state(false);
-	let mqttCopied: boolean = $state(false);
-	let sshAgentCopied: boolean = $state(false);
+	type TokenType = 'agent' | 'mqtt' | 'ssh_agent';
+
+	interface TokenSection {
+		type: TokenType;
+		label: string;
+		description?: string;
+	}
+
+	const tokenSections: TokenSection[] = [
+		{ type: 'agent', label: 'Agent Enrollment Token' },
+		{
+			type: 'mqtt',
+			label: 'MQTT Enrollment Token',
+			description:
+				'This token is used by MQTT services to register with the controller. It is separate from the agent enrollment token.'
+		},
+		{
+			type: 'ssh_agent',
+			label: 'SSH Agent Enrollment Token',
+			description:
+				'This token is used by SSH agents to register with the controller. It is separate from the agent and MQTT enrollment tokens.'
+		}
+	];
 
 	let {
 		onSuccess,
@@ -15,227 +35,113 @@
 		onError: (msg: string) => void;
 	} = $props();
 
-	let enrollmentConfigured: boolean = $state(false);
-	let generatedToken: string | null = $state(null);
-	let mqttEnrollmentConfigured: boolean = $state(false);
-	let mqttGeneratedToken: string | null = $state(null);
-	let sshAgentEnrollmentConfigured: boolean = $state(false);
-	let sshAgentGeneratedToken: string | null = $state(null);
+	let configured: Record<TokenType, boolean> = $state({
+		agent: false,
+		mqtt: false,
+		ssh_agent: false
+	});
+
+	let generatedTokens: Record<TokenType, string | null> = $state({
+		agent: null,
+		mqtt: null,
+		ssh_agent: null
+	});
+
+	let copied: Record<TokenType, boolean> = $state({
+		agent: false,
+		mqtt: false,
+		ssh_agent: false
+	});
 
 	export function loadAgent(status: EnrollmentTokenStatus) {
-		enrollmentConfigured = status.configured;
+		configured.agent = status.configured;
 	}
 
 	export function loadMqtt(status: EnrollmentTokenStatus) {
-		mqttEnrollmentConfigured = status.configured;
+		configured.mqtt = status.configured;
 	}
 
 	export function loadSshAgent(status: EnrollmentTokenStatus) {
-		sshAgentEnrollmentConfigured = status.configured;
+		configured.ssh_agent = status.configured;
 	}
 
-	async function handleGenerateToken() {
+	async function handleGenerate(section: TokenSection) {
 		try {
-			const res = await createEnrollmentToken('agent');
-			generatedToken = res.token;
-			enrollmentConfigured = true;
-			onSuccess('Agent enrollment token generated.');
+			const res = await createEnrollmentToken(section.type);
+			generatedTokens[section.type] = res.token;
+			configured[section.type] = true;
+			onSuccess(`${section.label.replace(' Enrollment Token', '')} enrollment token generated.`);
 		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to generate agent enrollment token');
+			onError(
+				e instanceof Error
+					? e.message
+					: `Failed to generate ${section.label.replace(' Enrollment Token', '').toLowerCase()} enrollment token`
+			);
 		}
 	}
 
-	async function handleRevokeToken() {
+	async function handleRevoke(section: TokenSection) {
 		try {
-			await revokeEnrollmentToken('agent');
-			enrollmentConfigured = false;
-			generatedToken = null;
-			onSuccess('Agent enrollment token revoked.');
+			await revokeEnrollmentToken(section.type);
+			configured[section.type] = false;
+			generatedTokens[section.type] = null;
+			onSuccess(`${section.label.replace(' Enrollment Token', '')} enrollment token revoked.`);
 		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to revoke agent enrollment token');
+			onError(
+				e instanceof Error
+					? e.message
+					: `Failed to revoke ${section.label.replace(' Enrollment Token', '').toLowerCase()} enrollment token`
+			);
 		}
 	}
 
-	async function handleGenerateMqttToken() {
-		try {
-			const res = await createEnrollmentToken('mqtt');
-			mqttGeneratedToken = res.token;
-			mqttEnrollmentConfigured = true;
-			onSuccess('MQTT enrollment token generated.');
-		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to generate MQTT enrollment token');
-		}
-	}
-
-	async function handleRevokeMqttToken() {
-		try {
-			await revokeEnrollmentToken('mqtt');
-			mqttEnrollmentConfigured = false;
-			mqttGeneratedToken = null;
-			onSuccess('MQTT enrollment token revoked.');
-		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to revoke MQTT enrollment token');
-		}
-	}
-
-	async function handleGenerateSshAgentToken() {
-		try {
-			const res = await createEnrollmentToken('ssh_agent');
-			sshAgentGeneratedToken = res.token;
-			sshAgentEnrollmentConfigured = true;
-			onSuccess('SSH Agent enrollment token generated.');
-		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to generate SSH Agent enrollment token');
-		}
-	}
-
-	async function handleRevokeSshAgentToken() {
-		try {
-			await revokeEnrollmentToken('ssh_agent');
-			sshAgentEnrollmentConfigured = false;
-			sshAgentGeneratedToken = null;
-			onSuccess('SSH Agent enrollment token revoked.');
-		} catch (e) {
-			onError(e instanceof Error ? e.message : 'Failed to revoke SSH Agent enrollment token');
+	async function handleCopy(type: TokenType) {
+		const token = generatedTokens[type];
+		if (token && (await copyToClipboard(token))) {
+			copied[type] = true;
+			setTimeout(() => {
+				copied[type] = false;
+			}, 2000);
 		}
 	}
 </script>
 
-<!-- Agent Enrollment Token -->
-<div class="card mb-6 p-6">
-	<h2 class="h3 mb-4">Agent Enrollment Token</h2>
-	<div class="mb-4 flex items-center gap-3">
-		<span>Status:</span>
-		{#if enrollmentConfigured}
-			<span class="badge preset-filled-success-500">Configured</span>
-		{:else}
-			<span class="badge preset-tonal">Not configured</span>
+{#each tokenSections as section (section.type)}
+	<div class="card mb-6 p-6">
+		<h2 class="h3 mb-4">{section.label}</h2>
+		{#if section.description}
+			<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+				{section.description}
+			</p>
 		{/if}
-	</div>
+		<div class="mb-4 flex items-center gap-3">
+			<span>Status:</span>
+			{#if configured[section.type]}
+				<span class="badge preset-filled-success-500">Configured</span>
+			{:else}
+				<span class="badge preset-tonal">Not configured</span>
+			{/if}
+		</div>
 
-	{#if generatedToken}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-			<p class="font-bold">Copy it now — it will not be shown again</p>
-			<div class="mt-2 flex items-start gap-2">
-				<code class="flex-1 break-all">{generatedToken}</code>
-				<button
-					class="btn btn-sm preset-tonal flex-shrink-0"
-					onclick={async () => {
-						if (generatedToken && (await copyToClipboard(generatedToken))) {
-							agentCopied = true;
-							setTimeout(() => {
-								agentCopied = false;
-							}, 2000);
-						}
-					}}
-				>
-					{agentCopied ? 'Copied!' : 'Copy'}
-				</button>
-			</div>
-		</aside>
-	{/if}
-
-	<div class="flex gap-2">
-		<button class="btn preset-filled-primary-500" onclick={handleGenerateToken}>
-			{enrollmentConfigured ? 'Regenerate' : 'Generate'}
-		</button>
-		{#if enrollmentConfigured}
-			<button class="btn preset-filled-error-500" onclick={handleRevokeToken}> Revoke </button>
+		{#if generatedTokens[section.type]}
+			<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+				<p class="font-bold">Copy it now — it will not be shown again</p>
+				<div class="mt-2 flex items-start gap-2">
+					<code class="flex-1 break-all">{generatedTokens[section.type]}</code>
+					<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={() => handleCopy(section.type)}>
+						{copied[section.type] ? 'Copied!' : 'Copy'}
+					</button>
+				</div>
+			</aside>
 		{/if}
+
+		<div class="flex gap-2">
+			<button class="btn preset-filled-primary-500" onclick={() => handleGenerate(section)}>
+				{configured[section.type] ? 'Regenerate' : 'Generate'}
+			</button>
+			{#if configured[section.type]}
+				<button class="btn preset-filled-error-500" onclick={() => handleRevoke(section)}> Revoke </button>
+			{/if}
+		</div>
 	</div>
-</div>
-
-<!-- MQTT Enrollment Token -->
-<div class="card mb-6 p-6">
-	<h2 class="h3 mb-4">MQTT Enrollment Token</h2>
-	<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
-		This token is used by MQTT services to register with the controller. It is separate from the agent enrollment token.
-	</p>
-	<div class="mb-4 flex items-center gap-3">
-		<span>Status:</span>
-		{#if mqttEnrollmentConfigured}
-			<span class="badge preset-filled-success-500">Configured</span>
-		{:else}
-			<span class="badge preset-tonal">Not configured</span>
-		{/if}
-	</div>
-
-	{#if mqttGeneratedToken}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-			<p class="font-bold">Copy it now — it will not be shown again</p>
-			<div class="mt-2 flex items-start gap-2">
-				<code class="flex-1 break-all">{mqttGeneratedToken}</code>
-				<button
-					class="btn btn-sm preset-tonal flex-shrink-0"
-					onclick={async () => {
-						if (mqttGeneratedToken && (await copyToClipboard(mqttGeneratedToken))) {
-							mqttCopied = true;
-							setTimeout(() => {
-								mqttCopied = false;
-							}, 2000);
-						}
-					}}
-				>
-					{mqttCopied ? 'Copied!' : 'Copy'}
-				</button>
-			</div>
-		</aside>
-	{/if}
-
-	<div class="flex gap-2">
-		<button class="btn preset-filled-primary-500" onclick={handleGenerateMqttToken}>
-			{mqttEnrollmentConfigured ? 'Regenerate' : 'Generate'}
-		</button>
-		{#if mqttEnrollmentConfigured}
-			<button class="btn preset-filled-error-500" onclick={handleRevokeMqttToken}> Revoke </button>
-		{/if}
-	</div>
-</div>
-
-<!-- SSH Agent Enrollment Token -->
-<div class="card mb-6 p-6">
-	<h2 class="h3 mb-4">SSH Agent Enrollment Token</h2>
-	<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
-		This token is used by SSH agents to register with the controller. It is separate from the agent and MQTT enrollment
-		tokens.
-	</p>
-	<div class="mb-4 flex items-center gap-3">
-		<span>Status:</span>
-		{#if sshAgentEnrollmentConfigured}
-			<span class="badge preset-filled-success-500">Configured</span>
-		{:else}
-			<span class="badge preset-tonal">Not configured</span>
-		{/if}
-	</div>
-
-	{#if sshAgentGeneratedToken}
-		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-			<p class="font-bold">Copy it now — it will not be shown again</p>
-			<div class="mt-2 flex items-start gap-2">
-				<code class="flex-1 break-all">{sshAgentGeneratedToken}</code>
-				<button
-					class="btn btn-sm preset-tonal flex-shrink-0"
-					onclick={async () => {
-						if (sshAgentGeneratedToken && (await copyToClipboard(sshAgentGeneratedToken))) {
-							sshAgentCopied = true;
-							setTimeout(() => {
-								sshAgentCopied = false;
-							}, 2000);
-						}
-					}}
-				>
-					{sshAgentCopied ? 'Copied!' : 'Copy'}
-				</button>
-			</div>
-		</aside>
-	{/if}
-
-	<div class="flex gap-2">
-		<button class="btn preset-filled-primary-500" onclick={handleGenerateSshAgentToken}>
-			{sshAgentEnrollmentConfigured ? 'Regenerate' : 'Generate'}
-		</button>
-		{#if sshAgentEnrollmentConfigured}
-			<button class="btn preset-filled-error-500" onclick={handleRevokeSshAgentToken}> Revoke </button>
-		{/if}
-	</div>
-</div>
+{/each}

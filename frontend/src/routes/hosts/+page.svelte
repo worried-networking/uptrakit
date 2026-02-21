@@ -188,11 +188,12 @@
 	{#if openMenuId}
 		{@const host = hosts.find((h) => h.id === openMenuId)}
 		{#if host}
-			<ContextMenu top={menuPos.top} left={menuPos.left}>
+			<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				<li>
 					<button
 						class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 						role="menuitem"
+						tabindex="-1"
 						onclick={() => openEditDialog(host)}
 					>
 						Edit Name
@@ -202,6 +203,7 @@
 					<button
 						class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 						role="menuitem"
+						tabindex="-1"
 						onclick={() => requestConfirm(host.id, 'deactivate', host.friendly_name)}
 					>
 						Deactivate

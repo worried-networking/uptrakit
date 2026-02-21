@@ -267,12 +267,13 @@
 	{#if openMenuId}
 		{@const service = services.find((s) => s.id === openMenuId)}
 		{#if service}
-			<ContextMenu top={menuPos.top} left={menuPos.left}>
+			<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
 				{#if service.status === 'pending'}
 					<li>
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
+							tabindex="-1"
 							onclick={() => openMergeDialog(service)}
 						>
 							Merge Into&hellip;
@@ -282,6 +283,7 @@
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-success-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
+							tabindex="-1"
 							onclick={() => requestConfirm(service.id, 'approve', service.friendly_name)}
 						>
 							Approve
@@ -291,6 +293,7 @@
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
+							tabindex="-1"
 							onclick={() => requestConfirm(service.id, 'reject', service.friendly_name)}
 						>
 							Reject
@@ -301,6 +304,7 @@
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
+							tabindex="-1"
 							onclick={() => requestConfirm(service.id, 'delete', service.friendly_name)}
 						>
 							Delete

@@ -237,7 +237,7 @@ export function getAuthMethods(): Promise<AuthMethodsResponse> {
 }
 
 export function getOidcAuthorizeUrl(providerId: string): Promise<{ authorize_url: string }> {
-	return request(`/auth/oidc/${providerId}/authorize`);
+	return request(`/auth/oidc/${encodeURIComponent(providerId)}/authorize`);
 }
 
 export function oidcLink(data: OidcLinkRequest): Promise<AuthResponse> {
@@ -294,19 +294,19 @@ export function getServices(options?: {
 }
 
 export function approveService(id: string): Promise<ServiceResponse> {
-	return request(`/services/${id}/approve`, { method: 'POST' });
+	return request(`/services/${encodeURIComponent(id)}/approve`, { method: 'POST' });
 }
 
 export function rejectService(id: string): Promise<ServiceResponse> {
-	return request(`/services/${id}/reject`, { method: 'POST' });
+	return request(`/services/${encodeURIComponent(id)}/reject`, { method: 'POST' });
 }
 
 export function deleteService(id: string): Promise<MessageResponse> {
-	return request(`/services/${id}`, { method: 'DELETE' });
+	return request(`/services/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function mergeService(targetId: string, sourceId: string): Promise<ServiceResponse> {
-	return request(`/services/${targetId}/merge`, {
+	return request(`/services/${encodeURIComponent(targetId)}/merge`, {
 		method: 'POST',
 		body: JSON.stringify({ source_id: sourceId })
 	});
@@ -323,15 +323,15 @@ export function getHosts(page?: number, perPage?: number): Promise<PaginatedResp
 }
 
 export function getHost(id: string): Promise<HostResponse> {
-	return request(`/hosts/${id}`);
+	return request(`/hosts/${encodeURIComponent(id)}`);
 }
 
 export function updateHost(id: string, data: UpdateHostRequest): Promise<HostResponse> {
-	return request(`/hosts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+	return request(`/hosts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 export function deactivateHost(id: string): Promise<MessageResponse> {
-	return request(`/hosts/${id}`, { method: 'DELETE' });
+	return request(`/hosts/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // --- Settings APIs ---
@@ -403,11 +403,11 @@ export function createMqttClient(data: CreateMqttClient): Promise<MqttClientResp
 }
 
 export function updateMqttClient(id: string, data: UpdateMqttClient): Promise<MqttClientResponse> {
-	return request(`/settings/mqtt/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+	return request(`/settings/mqtt/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 export function deleteMqttClient(id: string): Promise<void> {
-	return requestVoid(`/settings/mqtt/${id}`, { method: 'DELETE' });
+	return requestVoid(`/settings/mqtt/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function getMqttLimit(): Promise<MqttLimitResponse> {
@@ -429,22 +429,22 @@ export function createOidcProvider(data: CreateOidcProviderRequest): Promise<Oid
 }
 
 export function updateOidcProvider(id: string, data: UpdateOidcProviderRequest): Promise<OidcProviderResponse> {
-	return request(`/settings/oidc-providers/${id}`, {
+	return request(`/settings/oidc-providers/${encodeURIComponent(id)}`, {
 		method: 'PUT',
 		body: JSON.stringify(data)
 	});
 }
 
 export function deleteOidcProvider(id: string): Promise<void> {
-	return requestVoid(`/settings/oidc-providers/${id}`, { method: 'DELETE' });
+	return requestVoid(`/settings/oidc-providers/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export function activateOidcProvider(id: string): Promise<OidcProviderResponse> {
-	return request(`/settings/oidc-providers/${id}/activate`, { method: 'POST' });
+	return request(`/settings/oidc-providers/${encodeURIComponent(id)}/activate`, { method: 'POST' });
 }
 
 export function deactivateOidcProvider(id: string): Promise<OidcProviderResponse> {
-	return request(`/settings/oidc-providers/${id}/deactivate`, { method: 'POST' });
+	return request(`/settings/oidc-providers/${encodeURIComponent(id)}/deactivate`, { method: 'POST' });
 }
 
 // --- Device Authorization ---

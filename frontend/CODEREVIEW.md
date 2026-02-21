@@ -138,23 +138,13 @@ of the inline theme FOUC-prevention script. Only the exact inline script
 is allowed; arbitrary inline scripts are now blocked by CSP. `style-src`
 retains `'unsafe-inline'` (required by Skeleton UI / Tailwind).
 
-#### SEC-02: No URL path parameter validation
+#### ~~SEC-02: No URL path parameter validation~~ (FIXED)
 
-**Severity:** Low
-**Location:** `lib/api.ts` (multiple functions)
-
-API functions directly interpolate string parameters into URL paths:
-
-```typescript
-export function approveService(id: string) { return request(`/services/${id}/approve`, ...); }
-export function getOidcAuthorizeUrl(providerId: string) { return request(`/auth/oidc/${providerId}/authorize`); }
-```
-
-All `id` values originate from server responses (UUIDs), so exploitation requires a compromised server response.
-However, there is no frontend validation that these are valid UUIDs.
-
-**Recommendation:** Add a UUID format check before interpolating IDs into URLs, or use
-`encodeURIComponent()` on all path parameters as defense-in-depth.
+**Resolution:** Added `encodeURIComponent()` to all 14 path parameter interpolations in
+`lib/api.ts` as defense-in-depth. Covers `approveService`, `rejectService`, `deleteService`,
+`mergeService`, `getHost`, `updateHost`, `deactivateHost`, `updateMqttClient`, `deleteMqttClient`,
+`updateOidcProvider`, `deleteOidcProvider`, `activateOidcProvider`, `deactivateOidcProvider`,
+and `getOidcAuthorizeUrl`.
 
 #### SEC-03: Error messages may expose backend internals
 
@@ -234,21 +224,14 @@ sites in `loadAllSettings()` and `startMqttPolling()`. TypeScript null safety is
 the `refsReady` flag continues to prevent premature calls. The full props-based refactor
 (ARC-03) remains a future enhancement.
 
-#### CQ-03: Significant code duplication in EnrollmentTokenSettings
+#### ~~CQ-03: Significant code duplication in EnrollmentTokenSettings~~ (FIXED)
 
-**Severity:** Low
-**Location:** `settings/EnrollmentTokenSettings.svelte`
-
-The component has three nearly identical sets of:
-
-- State variables: `enrollmentConfigured`/`generatedToken`, `mqttEnrollmentConfigured`/`mqttGeneratedToken`,
-  `sshAgentEnrollmentConfigured`/`sshAgentGeneratedToken`
-- Functions: `handleGenerateToken`/`handleRevokeToken` (repeated 3 times with only the `type` parameter
-  differing)
-- Template blocks (repeated 3 times, lines 107-245)
-
-**Recommendation:** Extract a reusable `TokenSection` component or use a data-driven approach with an array
-of `{ type, label, description }` objects.
+**Resolution:** Refactored `EnrollmentTokenSettings.svelte` from three duplicated
+state/handler/template sets to a data-driven approach. A `tokenSections` array of
+`{ type, label, description }` objects drives a single `{#each}` loop with
+shared `handleGenerate`/`handleRevoke`/`handleCopy` functions parameterized by
+section type. Per-section state uses typed `Record<TokenType, T>` objects. The
+public API (`loadAgent`, `loadMqtt`, `loadSshAgent`) is preserved for the parent.
 
 #### ~~CQ-04: Fragile `$effect` dependency tracking in services page~~ (FIXED)
 
@@ -477,13 +460,14 @@ container gets `aria-label="Notifications"`, success messages get
 `role="alert" aria-live="assertive" aria-atomic="true"`, and system alerts
 get `role="status" aria-live="polite" aria-atomic="true"`.
 
-#### A11Y-02: No keyboard navigation in context menus
+#### ~~A11Y-02: No keyboard navigation in context menus~~ (FIXED)
 
-**Severity:** Low
-**Location:** `components/ContextMenu.svelte`
-
-Context menus support mouse clicks but not arrow key navigation. The WAI-ARIA menu pattern requires
-`ArrowUp`/`ArrowDown` for item focus movement and `Enter`/`Space` for activation.
+**Resolution:** Added full WAI-ARIA keyboard navigation to `ContextMenu.svelte`:
+`ArrowDown`/`ArrowUp` cycle through `[role="menuitem"]` children, `Enter`/`Space`
+activate the focused item, `Escape` closes the menu via an `onclose` callback,
+`Home`/`End` jump to first/last item. First item is auto-focused on mount.
+Menu items in both `services/+page.svelte` and `hosts/+page.svelte` updated
+with `tabindex="-1"` for programmatic focus and `onclose={closeMenu}` prop.
 
 #### A11Y-03: No skip-to-content link
 
@@ -498,11 +482,11 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 
 ### Issues by Severity
 
-| Severity       | Count | IDs                                                                                                                              |
-| -------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Medium         | 1     | HA-02                                                                                                                            |
-| Medium (Fixed) | 5     | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~, ~~CQ-02~~, ~~ARC-02~~                                                                        |
-| Low            | 14    | ARC-01, ARC-03, ARC-04, SEC-02, SEC-03, SEC-04, SEC-05, CQ-03, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, A11Y-02, A11Y-03 |
+| Severity       | Count | IDs                                                                                                                                          |
+| -------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Medium         | 1     | HA-02                                                                                                                                        |
+| Medium (Fixed) | 5     | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~, ~~CQ-02~~, ~~ARC-02~~                                                                                    |
+| Low            | 14    | ARC-01, ARC-03, ARC-04, ~~SEC-02~~, SEC-03, SEC-04, SEC-05, ~~CQ-03~~, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, ~~A11Y-02~~, A11Y-03 |
 
 ### Issues by Category
 
@@ -516,38 +500,38 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 
 ### File-Level Summary
 
-| File                                       | Issues                      | Notes                                                      |
-| ------------------------------------------ | --------------------------- | ---------------------------------------------------------- |
-| `app.html`                                 | ~~SEC-01~~, SEC-05          | CSP script-src tightened with SHA-256 hash                 |
-| `lib/api.ts`                               | SEC-02, SEC-03              | Core API client is well-structured                         |
-| `lib/auth.ts`                              | ARC-01                      | Mixed store pattern                                        |
-| `lib/theme.ts`                             | ARC-01, CQ-06               | Listener cleanup                                           |
-| `lib/stores/network.ts`                    | ARC-01, CQ-05               | Listener cleanup                                           |
-| `lib/notifications.svelte.ts`              | —                           | Clean implementation                                       |
-| `lib/utils.ts`                             | —                           | Clean implementation                                       |
-| `lib/types.ts`                             | —                           | Comprehensive type coverage                                |
-| `lib/auth.test.ts`                         | —                           | Good tests, need more coverage                             |
-| `+layout.svelte`                           | A11Y-03, HA-03              | Good auth guard pattern                                    |
-| `+layout.ts`                               | —                           | Clean                                                      |
-| `login/+page.svelte`                       | SEC-04, CQ-07               | Complex but well-handled                                   |
-| `register/+page.svelte`                    | CQ-07                       | Minor                                                      |
-| `device/+page.svelte`                      | —                           | Good device code validation                                |
-| `services/+page.svelte`                    | ~~CQ-01~~, ~~CQ-04~~, HA-04 | Double load + fragile effect fixed                         |
-| `hosts/+page.svelte`                       | HA-04                       | No retry button                                            |
-| `software/+page.svelte`                    | —                           | Clean implementation                                       |
-| `settings/+page.svelte`                    | ~~CQ-02~~, ~~HA-01~~, HA-02 | Component refs now properly typed; jitter added to backoff |
-| `settings/EnrollmentTokenSettings.svelte`  | CQ-03                       | Code duplication                                           |
-| `settings/RegistrationSettings.svelte`     | —                           | Clean                                                      |
-| `settings/AuthenticationSettings.svelte`   | —                           | Clean                                                      |
-| `settings/AgentCertificateSettings.svelte` | —                           | Clean                                                      |
-| `settings/MqttClientsSettings.svelte`      | CQ-08                       | Minor naming inconsistency                                 |
-| `settings/OidcProvidersSettings.svelte`    | —                           | Clean                                                      |
-| `settings/global/+page.svelte`             | —                           | Clean                                                      |
-| `components/ToastNotifications.svelte`     | ~~A11Y-01~~                 | ARIA live regions added                                    |
-| `components/ContextMenu.svelte`            | A11Y-02                     | No keyboard nav                                            |
-| `components/ConfirmDialog.svelte`          | —                           | Clean                                                      |
-| `components/ModalBackdrop.svelte`          | —                           | Excellent focus management                                 |
-| `components/Pagination.svelte`             | —                           | Clean and minimal                                          |
+| File                                       | Issues                      | Notes                                                       |
+| ------------------------------------------ | --------------------------- | ----------------------------------------------------------- |
+| `app.html`                                 | ~~SEC-01~~, SEC-05          | CSP script-src tightened with SHA-256 hash                  |
+| `lib/api.ts`                               | ~~SEC-02~~, SEC-03          | Core API client is well-structured; path params now encoded |
+| `lib/auth.ts`                              | ARC-01                      | Mixed store pattern                                         |
+| `lib/theme.ts`                             | ARC-01, CQ-06               | Listener cleanup                                            |
+| `lib/stores/network.ts`                    | ARC-01, CQ-05               | Listener cleanup                                            |
+| `lib/notifications.svelte.ts`              | —                           | Clean implementation                                        |
+| `lib/utils.ts`                             | —                           | Clean implementation                                        |
+| `lib/types.ts`                             | —                           | Comprehensive type coverage                                 |
+| `lib/auth.test.ts`                         | —                           | Good tests, need more coverage                              |
+| `+layout.svelte`                           | A11Y-03, HA-03              | Good auth guard pattern                                     |
+| `+layout.ts`                               | —                           | Clean                                                       |
+| `login/+page.svelte`                       | SEC-04, CQ-07               | Complex but well-handled                                    |
+| `register/+page.svelte`                    | CQ-07                       | Minor                                                       |
+| `device/+page.svelte`                      | —                           | Good device code validation                                 |
+| `services/+page.svelte`                    | ~~CQ-01~~, ~~CQ-04~~, HA-04 | Double load + fragile effect fixed                          |
+| `hosts/+page.svelte`                       | HA-04                       | No retry button                                             |
+| `software/+page.svelte`                    | —                           | Clean implementation                                        |
+| `settings/+page.svelte`                    | ~~CQ-02~~, ~~HA-01~~, HA-02 | Component refs now properly typed; jitter added to backoff  |
+| `settings/EnrollmentTokenSettings.svelte`  | ~~CQ-03~~                   | Refactored to data-driven approach                          |
+| `settings/RegistrationSettings.svelte`     | —                           | Clean                                                       |
+| `settings/AuthenticationSettings.svelte`   | —                           | Clean                                                       |
+| `settings/AgentCertificateSettings.svelte` | —                           | Clean                                                       |
+| `settings/MqttClientsSettings.svelte`      | CQ-08                       | Minor naming inconsistency                                  |
+| `settings/OidcProvidersSettings.svelte`    | —                           | Clean                                                       |
+| `settings/global/+page.svelte`             | —                           | Clean                                                       |
+| `components/ToastNotifications.svelte`     | ~~A11Y-01~~                 | ARIA live regions added                                     |
+| `components/ContextMenu.svelte`            | ~~A11Y-02~~                 | Keyboard navigation added                                   |
+| `components/ConfirmDialog.svelte`          | —                           | Clean                                                       |
+| `components/ModalBackdrop.svelte`          | —                           | Excellent focus management                                  |
+| `components/Pagination.svelte`             | —                           | Clean and minimal                                           |
 
 ---
 
@@ -568,15 +552,15 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 6. **Tighten CSP** (SEC-01): Replace `'unsafe-inline'` with nonce or hash for the theme script.
 7. **Refactor settings to use props instead of imperative refs** (ARC-03, CQ-02): Eliminates
    `$state(undefined!)` and simplifies data flow.
-8. **Extract reusable enrollment token component** (CQ-03): Reduces duplication from ~140 lines to ~50.
+8. ~~**Extract reusable enrollment token component** (CQ-03): Reduces duplication from ~140 lines to ~50.~~ (DONE)
 9. **Add retry buttons to services and hosts pages** (HA-04).
-10. **Add `encodeURIComponent` to API path parameters** (SEC-02): Defense-in-depth.
+10. ~~**Add `encodeURIComponent` to API path parameters** (SEC-02): Defense-in-depth.~~ (DONE)
 
 ### Priority 3 (Nice to have)
 
 11. **Standardize state management** (ARC-01): Migrate remaining Svelte 4 stores to runes.
 12. **Add stale data detection** (HA-02): ETag-based or periodic refresh.
 13. **Add skip-to-content link** (A11Y-03).
-14. **Add keyboard navigation to context menus** (A11Y-02).
+14. ~~**Add keyboard navigation to context menus** (A11Y-02).~~ (DONE)
 15. **Disable submit buttons when offline** (HA-03).
 16. **Show session-expired modal instead of hard redirect** (HA-05).

@@ -124,9 +124,11 @@ sites and tests.
 
 Replaced hand-written `status_text()` function with `StatusCode::canonical_reason()`, which covers all standard HTTP status codes.
 
-### Q-5: `api.rs` mixes stderr and stdout for Human format [LOW]
+### ~~Q-5: `api.rs` mixes stderr and stdout for Human format~~ [LOW] (FIXED)
 
-Status line goes to stderr while body goes to stdout. Should be documented or made consistent.
+**Resolution:** Changed `eprintln!` to `println!` for the HTTP status line in Human
+format output. All output (status line and body) now goes to stdout consistently.
+Stderr is reserved for actual errors/warnings (e.g., `--insecure` warning).
 
 ### ~~Q-6: `TokenEntry::created_at` and `TokenEntry::status` use raw strings~~ [LOW] (PARTIALLY FIXED)
 
@@ -205,4 +207,4 @@ Low priority since types are only used within the crate.
 | ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |
 | ~~12~~ | ~~Q-4~~ | ~~Expand status_text coverage~~ (FIXED) |
 | ~~14~~ | ~~Q-6~~ | ~~Use typed enum for `TokenEntry::status`~~ (PARTIALLY FIXED) |
-| 13 | Q-5 | Document or fix stderr/stdout mixing in api command |
+| ~~13~~ | ~~Q-5~~ | ~~Document or fix stderr/stdout mixing in api command~~ (FIXED) |
