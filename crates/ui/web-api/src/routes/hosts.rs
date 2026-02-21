@@ -377,7 +377,8 @@ mod tests {
                 last_seen_at INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER
+                deactivated_at INTEGER,
+                ping_interval_seconds INTEGER
             )",
         )
         .await
@@ -419,6 +420,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
         };
         let service_a = service_a.insert(&db).await.unwrap();
 
@@ -436,6 +438,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
         };
         let service_b = service_b.insert(&db).await.unwrap();
 

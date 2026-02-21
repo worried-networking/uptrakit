@@ -232,6 +232,7 @@ pub struct AppState {
         routes::settings_auth::update_authentication_settings,
         routes::services::list_services,
         routes::services::get_service,
+        routes::services::update_service,
         routes::services::approve_service,
         routes::services::reject_service,
         routes::services::deactivate_service,
@@ -305,6 +306,7 @@ pub struct AppState {
             routes::services::ServiceType,
             routes::services::ServiceStatus,
             routes::services::ServiceResponse,
+            routes::services::UpdateServiceRequest,
             routes::services::EnrollmentTokenResponse,
             routes::services::MessageResponse,
             routes::services::MergeAgentRequest,
@@ -482,6 +484,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::services::reject_service))
         .routes(routes!(
             routes::services::get_service,
+            routes::services::update_service,
             routes::services::deactivate_service
         ))
         .routes(routes!(routes::services::merge_service))

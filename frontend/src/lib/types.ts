@@ -66,6 +66,11 @@ export interface ServiceResponse {
 	last_seen_at: string | null;
 	created_at: string;
 	updated_at: string;
+	ping_interval_seconds?: number | null;
+}
+
+export interface UpdateServiceRequest {
+	ping_interval_seconds?: number;
 }
 
 export interface MessageResponse {

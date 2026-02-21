@@ -77,11 +77,8 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
         )))
     })?;
 
-    // Ping timer — first tick fires immediately (skipped), then at the
-    // configured interval.
-    let ping_interval_duration = handler.ping_interval();
-    let mut ping_timer = tokio::time::interval(ping_interval_duration);
-    ping_timer.tick().await;
+    // Ping timer — not started until ServiceSettings arrives with ping_interval.
+    let mut ping_timer: Option<tokio::time::Interval> = None;
 
     // Renewal timer — initially far-future, reset when ServiceSettings arrives.
     let mut renewal_sleep = create_renewal_sleep();
@@ -101,8 +98,8 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                 }
             }
 
-            // 2. Ping keepalive.
-            _ = ping_timer.tick() => {
+            // 2. Ping keepalive (only active after ServiceSettings arrives).
+            _ = async { ping_timer.as_mut().expect("ping timer should be set").tick().await }, if ping_timer.is_some() => {
                 let service_ts = now_millis();
                 tracing::trace!(service_ts, "sending ping");
                 conn.send(ServiceMessage::Ping(PingPayload { service_ts }))
@@ -138,12 +135,16 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             .context_to::<LoopError>()?;
                     }
                     Some(ControllerMessage::ServiceSettings(settings)) => {
+                        let mut loop_state = LoopState {
+                            shutdown_timeout_seconds: &mut shutdown_timeout_seconds,
+                            renewal_sleep: &mut renewal_sleep,
+                            ping_timer: &mut ping_timer,
+                            cert_not_after_ts,
+                            config_dir: &config_dir,
+                        };
                         handle_service_settings(
                             &settings,
-                            &mut shutdown_timeout_seconds,
-                            &mut renewal_sleep,
-                            cert_not_after_ts,
-                            &config_dir,
+                            &mut loop_state,
                             identity,
                             ctx,
                         ).await;
@@ -191,14 +192,21 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
     Ok(outcome)
 }
 
+/// Mutable state shared across the event loop that `handle_service_settings`
+/// needs to update.
+struct LoopState<'a> {
+    shutdown_timeout_seconds: &'a mut u32,
+    renewal_sleep: &'a mut Pin<Box<tokio::time::Sleep>>,
+    ping_timer: &'a mut Option<tokio::time::Interval>,
+    cert_not_after_ts: Option<i64>,
+    config_dir: &'a Path,
+}
+
 /// Process shared `ServiceSettings` fields: protocol version check,
-/// shutdown timeout, renewal schedule, and CA staleness.
+/// shutdown timeout, renewal schedule, ping interval, and CA staleness.
 async fn handle_service_settings(
     settings: &ServiceSettingsPayload,
-    shutdown_timeout_seconds: &mut u32,
-    renewal_sleep: &mut Pin<Box<tokio::time::Sleep>>,
-    cert_not_after_ts: Option<i64>,
-    config_dir: &Path,
+    state: &mut LoopState<'_>,
     identity: &mut ServiceIdentityState,
     ctx: &EventLoopContext<'_>,
 ) {
@@ -216,16 +224,23 @@ async fn handle_service_settings(
         );
     }
 
-    *shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(120);
+    *state.shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(120);
     update_renewal_schedule(
-        renewal_sleep,
-        cert_not_after_ts,
+        state.renewal_sleep,
+        state.cert_not_after_ts,
         settings.renewal_window_hours,
     );
 
+    // Create or update the ping timer with the controller-provided interval.
+    let interval_duration = settings.ping_interval;
+    tracing::debug!(ping_interval_secs = ?interval_duration.as_secs(), "setting ping interval from controller");
+    let mut new_timer = tokio::time::interval(interval_duration);
+    new_timer.tick().await; // Skip the first immediate tick
+    *state.ping_timer = Some(new_timer);
+
     crate::ca::check_ca_staleness(
         &settings.ca_bundle_hash,
-        config_dir,
+        state.config_dir,
         identity,
         ctx.pki_addr,
         ctx.base_url,

@@ -64,12 +64,11 @@ is left partially written. For security-critical files (private keys, certificat
 **Resolution:** The sync write path was removed. The remaining async `write_with_mode` calls `file.shutdown().await`
 for flush.
 
-### LOW: `home_dir()` only checks `$HOME` environment variable
+### ~~LOW: `home_dir()` only checks `$HOME` environment variable~~ FIXED
 
-**File:** `src/lib.rs`, lines 166-168
-
-Returns `None` on Windows where `USERPROFILE` is used. The `directories` crate (already a dependency) provides
-cross-platform home directory resolution.
+**Resolution:** Replaced with `directories::BaseDirs::new().map(|bd| bd.home_dir().to_path_buf())`,
+which handles Linux (`$HOME`), macOS (`$HOME`), and Windows (`USERPROFILE`) automatically.
+Added a test verifying the function returns `Some` on the current platform.
 
 ### ~~LOW: `ProjectDirs::from` qualifier mismatch with documentation~~ RESOLVED
 

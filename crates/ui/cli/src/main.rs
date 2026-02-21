@@ -262,6 +262,14 @@ enum ServicesCommands {
         /// Service UUID
         id: Uuid,
     },
+    /// Update a service's settings
+    Update {
+        /// Service UUID
+        id: Uuid,
+        /// Custom ping interval in seconds (0 to clear override)
+        #[arg(long)]
+        ping_interval: Option<u32>,
+    },
     /// Merge a source service into a target service
     Merge {
         /// Target service UUID (approved)
@@ -766,6 +774,20 @@ async fn main() {
             ServicesCommands::Remove { id } => {
                 commands::services::remove(
                     &id,
+                    cli.server.as_deref(),
+                    cli.token.as_deref(),
+                    cli.output,
+                    insecure,
+                )
+                .await
+            }
+            ServicesCommands::Update {
+                id,
+                ping_interval,
+            } => {
+                commands::services::update(
+                    &id,
+                    ping_interval,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
                     cli.output,

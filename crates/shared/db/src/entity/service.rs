@@ -22,6 +22,7 @@ pub struct Model {
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub deactivated_at: Option<OffsetDateTime>,
+    pub ping_interval_seconds: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

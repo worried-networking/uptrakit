@@ -80,6 +80,12 @@ uptrakit services reject <SERVICE_ID>
 # Remove (deactivate) a service
 uptrakit services remove <SERVICE_ID>
 
+# Update a service's settings (e.g. ping interval)
+uptrakit services update <SERVICE_ID> --ping-interval 60
+
+# Clear ping interval override (revert to service-type default)
+uptrakit services update <SERVICE_ID> --ping-interval 0
+
 # Merge a pending source service into an approved target service
 uptrakit services merge <TARGET_ID> <SOURCE_ID>
 ```

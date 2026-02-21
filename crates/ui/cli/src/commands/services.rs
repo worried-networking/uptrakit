@@ -5,6 +5,7 @@ use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::services::{
     ListServicesQuery, MergeAgentRequest, ParseServiceStatusError, ParseServiceTypeError,
+    UpdateServiceRequest,
 };
 
 /// Parameters for listing services.
@@ -91,8 +92,39 @@ pub async fn show(
     if let Some(ref seen) = resp.last_seen_at {
         human.push_str(&format!("Last Seen:     {}\n", seen));
     }
+    if let Some(ping) = resp.ping_interval_seconds {
+        human.push_str(&format!("Ping Interval: {}s\n", ping));
+    }
     human.push_str(&format!("Created:       {}\n", resp.created_at));
     human.push_str(&format!("Updated:       {}\n", resp.updated_at));
+
+    print_output(format, &human, &resp)
+}
+
+/// Update a service's configurable settings.
+pub async fn update(
+    id: &Uuid,
+    ping_interval: Option<u32>,
+    server: Option<&str>,
+    token: Option<&str>,
+    format: OutputFormat,
+    insecure: bool,
+) -> Result<()> {
+    let client = authenticated_client(server, token, insecure)?;
+    let req = UpdateServiceRequest {
+        ping_interval_seconds: ping_interval,
+    };
+    let resp = client.update_service(id, &req).await.context_to()?;
+
+    let mut human = String::new();
+    human.push_str(&format!("Service {} updated.\n", resp.id));
+    human.push_str(&format!("Type:     {}\n", resp.service_type));
+    human.push_str(&format!("Hostname: {}\n", resp.hostname));
+    if let Some(ping) = resp.ping_interval_seconds {
+        human.push_str(&format!("Ping Interval: {}s\n", ping));
+    } else {
+        human.push_str("Ping Interval: default\n");
+    }
 
     print_output(format, &human, &resp)
 }

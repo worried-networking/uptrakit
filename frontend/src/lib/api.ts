@@ -35,6 +35,7 @@ import type {
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
 	UpdateRegistrationSettings,
+	UpdateServiceRequest,
 	User
 } from './types';
 
@@ -303,6 +304,10 @@ export function rejectService(id: string): Promise<ServiceResponse> {
 
 export function deleteService(id: string): Promise<MessageResponse> {
 	return request(`/services/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function updateService(id: string, data: UpdateServiceRequest): Promise<ServiceResponse> {
+	return request(`/services/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 export function mergeService(targetId: string, sourceId: string): Promise<ServiceResponse> {

@@ -5,7 +5,7 @@ use uptrakit_shared_types::ServiceType;
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::services::{
     EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
-    MessageResponse, ServiceResponse,
+    MessageResponse, ServiceResponse, UpdateServiceRequest,
 };
 use uuid::Uuid;
 
@@ -49,6 +49,16 @@ impl UptrakitClient {
     pub async fn reject_service(&self, id: &Uuid) -> Result<ServiceResponse> {
         let path = format!("/api/v1/services/{id}/reject");
         self.post_empty(&path).await
+    }
+
+    /// Update a service's configurable settings (e.g. ping interval).
+    pub async fn update_service(
+        &self,
+        id: &Uuid,
+        req: &UpdateServiceRequest,
+    ) -> Result<ServiceResponse> {
+        let path = format!("/api/v1/services/{id}");
+        self.put_json(&path, req).await
     }
 
     /// Deactivate (remove) a service.

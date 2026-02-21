@@ -156,6 +156,7 @@ pub(crate) async fn do_enroll(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        ping_interval_seconds: Set(None),
     };
 
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;

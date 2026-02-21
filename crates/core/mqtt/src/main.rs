@@ -2,8 +2,6 @@ mod cli;
 mod mqtt_client;
 mod tenant_manager;
 
-use std::time::Duration;
-
 use clap::Parser;
 use rootcause::prelude::*;
 use uptrakit_internal_wire::{
@@ -19,7 +17,6 @@ use crate::tenant_manager::TenantManager;
 
 struct MqttHandler {
     max_tenants: u32,
-    ping_interval: u64,
     instance_id: String,
     tenant_mgr: TenantManager,
     status_rx: tokio::sync::mpsc::UnboundedReceiver<mqtt_client::MqttClientStatusEvent>,
@@ -131,10 +128,6 @@ impl ServiceHandler for MqttHandler {
 
         outcome
     }
-
-    fn ping_interval(&self) -> Duration {
-        Duration::from_secs(self.ping_interval)
-    }
 }
 
 #[tokio::main]
@@ -160,7 +153,6 @@ async fn main() {
 
     let mut handler = MqttHandler {
         max_tenants: args.max_tenants,
-        ping_interval: args.ping_interval,
         instance_id,
         tenant_mgr,
         status_rx,

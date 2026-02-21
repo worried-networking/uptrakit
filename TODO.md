@@ -329,7 +329,7 @@ Ways users interact with the system.
   - [x] `uptrakit check` - trigger version checks (all, item)
   - [x] `uptrakit update` - trigger update
   - [x] `uptrakit history` - view update history (list with filters, show)
-  - [x] `uptrakit services` - list, show, approve, reject, remove, merge services
+  - [x] `uptrakit services` - list, show, approve, reject, remove, merge, update services
   - [x] `uptrakit scheduler` - list, show, and trigger scheduled tasks
   - [x] `uptrakit settings` - settings management
   - [ ] `uptrakit status` - system status

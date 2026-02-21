@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { user } from '$lib/auth';
-	import { getServices, approveService, rejectService, deleteService, mergeService } from '$lib/api';
+	import { getServices, approveService, rejectService, deleteService, mergeService, updateService } from '$lib/api';
 	import type { ServiceResponse, ServiceType } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate } from '$lib/utils';
@@ -16,6 +17,7 @@
 	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null = $state(null);
 	let mergeSource: { id: string; name: string; type: ServiceType } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
+	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
@@ -23,9 +25,23 @@
 
 	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
 
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
 	$effect(() => {
 		const _filter = typeFilter; // explicit dependency tracking
 		loadServices(1);
+
+		refreshInterval = setInterval(() => {
+			if (document.visibilityState === 'visible') loadServices(currentPage);
+		}, 60_000);
+
+		return () => {
+			if (refreshInterval) clearInterval(refreshInterval);
+		};
+	});
+
+	onDestroy(() => {
+		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
 	async function loadServices(page: number) {
@@ -125,6 +141,42 @@
 		}
 	}
 
+	function openPingDialog(service: ServiceResponse) {
+		closeMenu();
+		editPingService = {
+			id: service.id,
+			name: service.friendly_name,
+			pingInterval: service.ping_interval_seconds != null ? String(service.ping_interval_seconds) : ''
+		};
+	}
+
+	function cancelPingEdit() {
+		editPingService = null;
+	}
+
+	async function executePingEdit() {
+		if (!editPingService || submitting) return;
+		const val = editPingService.pingInterval.trim();
+		const seconds = val === '' ? 0 : parseInt(val, 10);
+		if (val !== '' && (isNaN(seconds) || seconds < 0)) {
+			error = 'Ping interval must be a positive number or empty to clear.';
+			return;
+		}
+		submitting = true;
+		try {
+			error = null;
+			const updated = await updateService(editPingService.id, {
+				ping_interval_seconds: val === '' ? 0 : seconds
+			});
+			services = services.map((s) => (s.id === updated.id ? updated : s));
+			editPingService = null;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to update ping interval';
+		} finally {
+			submitting = false;
+		}
+	}
+
 	function handleWindowClick(event: MouseEvent) {
 		if (openMenuId && !(event.target as HTMLElement).closest('.actions-menu')) {
 			closeMenu();
@@ -155,6 +207,7 @@
 		if (e.key === 'Escape') {
 			if (confirmAction) cancelConfirm();
 			else if (mergeSource) cancelMerge();
+			else if (editPingService) cancelPingEdit();
 		}
 	}}
 />
@@ -192,6 +245,7 @@
 	{#if error}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 			<p>{error}</p>
+			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadServices(currentPage)}>Retry</button>
 		</aside>
 	{/if}
 
@@ -302,6 +356,16 @@
 				{:else}
 					<li>
 						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+							role="menuitem"
+							tabindex="-1"
+							onclick={() => openPingDialog(service)}
+						>
+							Edit Ping Interval
+						</button>
+					</li>
+					<li>
+						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 							role="menuitem"
 							tabindex="-1"
@@ -354,6 +418,32 @@
 					<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
 					<button class="btn preset-filled-primary-500" disabled={!mergeTargetId || submitting} onclick={executeMerge}>
 						{submitting ? 'Merging...' : 'Merge'}
+					</button>
+				</div>
+			</div>
+		</ModalBackdrop>
+	{/if}
+
+	{#if editPingService}
+		<ModalBackdrop onclose={cancelPingEdit}>
+			<div
+				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
+				role="dialog"
+				aria-modal="true"
+			>
+				<h3 class="h3">Edit Ping Interval</h3>
+				<p>
+					Set a custom ping interval for <strong>{editPingService.name}</strong>. Leave empty to use the service-type
+					default.
+				</p>
+				<label class="label">
+					<span>Ping interval (seconds)</span>
+					<input class="input" type="number" min="0" placeholder="Default" bind:value={editPingService.pingInterval} />
+				</label>
+				<div class="flex justify-end gap-2">
+					<button class="btn preset-tonal-surface" onclick={cancelPingEdit}>Cancel</button>
+					<button class="btn preset-filled-primary-500" disabled={submitting} onclick={executePingEdit}>
+						{submitting ? 'Saving...' : 'Save'}
 					</button>
 				</div>
 			</div>

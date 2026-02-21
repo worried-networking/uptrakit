@@ -76,7 +76,7 @@ uptrakit/
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types, reqwest::Error
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; includes `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin)  — CLI interface; uses openapi-client for all API calls (hosts, services, checks, updates, history, scheduler, settings)
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
@@ -210,6 +210,26 @@ These are non-negotiable design constraints. Do not violate them.
    `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
    (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
    See [Coding Standards](docs/development/coding-standards.md).
+
+### Service ping interval
+
+The ping interval is controller-managed and per-service configurable. The `services` DB table has a nullable
+`ping_interval_seconds INTEGER` column. The controller reads this value per-service and falls back to service-type
+defaults (300s for agent/SSH agent, 15s for MQTT) when the column is `NULL`.
+
+Key integration points:
+
+- **Wire protocol**: `ServiceSettingsPayload.ping_interval` is a required `Duration` field serialized as `u32` seconds
+  via `#[serde(with = "duration_seconds")]`. The `duration_seconds` module in `uptrakit-internal-wire` converts between
+  `std::time::Duration` and `u32` seconds on the wire.
+- **SDK event loop**: The ping timer starts as `None` and is created when the first `ServiceSettings` message arrives
+  with the controller-provided `ping_interval`. The `ServiceHandler::ping_interval()` trait method has been removed.
+- **REST API**: `PUT /api/v1/services/{id}` accepts `UpdateServiceRequest { ping_interval_seconds: Option<u32> }`.
+  Set to `0` to clear the override, positive value to override, omit to keep current.
+- **CLI**: `uptrakit services update <id> --ping-interval <seconds>`.
+- **OpenAPI client**: `update_service(&self, id: &Uuid, req: &UpdateServiceRequest) -> Result<ServiceResponse>`.
+- **Frontend**: Service page context menu includes "Edit Ping Interval" dialog.
+- **`ServiceResponse`**: Includes `ping_interval_seconds: Option<u32>` (`None` means service-type default is used).
 
 ### Error handling quick reference
 

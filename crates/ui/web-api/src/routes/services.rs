@@ -29,7 +29,7 @@ use uptrakit_shared_db::entity::{service, service_certificate, service_host};
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
     EnrollmentTokenResponse, EnrollmentTokenStatusResponse, ListServicesQuery, MergeAgentRequest,
-    MessageResponse, ServiceResponse, ServiceStatus, ServiceType,
+    MessageResponse, ServiceResponse, ServiceStatus, ServiceType, UpdateServiceRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,6 @@ fn format_rfc3339(dt: OffsetDateTime) -> String {
 }
 
 fn model_to_response(m: service::Model) -> ServiceResponse {
-    // DB and API types are now the same canonical type from shared-types.
     ServiceResponse {
         id: m.id,
         service_type: m.service_type,
@@ -53,6 +52,7 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
         last_seen_at: m.last_seen_at.map(format_rfc3339),
         created_at: format_rfc3339(m.created_at),
         updated_at: format_rfc3339(m.updated_at),
+        ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
     }
 }
 
@@ -189,6 +189,78 @@ pub async fn get_service(
     };
 
     (StatusCode::OK, Json(model_to_response(svc))).into_response()
+}
+
+/// Update a service's configurable settings (e.g. ping interval)
+#[utoipa::path(
+    put,
+    path = "/api/v1/services/{id}",
+    params(
+        ("id" = String, Path, description = "Service UUID")
+    ),
+    request_body = UpdateServiceRequest,
+    responses(
+        (status = 200, description = "Service updated", body = ServiceResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized"),
+        (status = 404, description = "Service not found")
+    ),
+    tag = "Services",
+    security(("bearer_token" = []))
+)]
+pub async fn update_service(
+    State(state): State<Arc<AppState>>,
+    tenant: TenantContext,
+    Extension(user): Extension<AuthenticatedUser>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateServiceRequest>,
+) -> Response {
+    if !user.has_permission(Permission::ManageAgents) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let service_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
+    };
+
+    let svc = match Service::find_by_id(service_id)
+        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
+        Err(e) => {
+            tracing::error!("DB error: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let mut active: service::ActiveModel = svc.into();
+
+    if let Some(ping) = body.ping_interval_seconds {
+        if ping == 0 {
+            // Clear override — revert to service-type default
+            active.ping_interval_seconds = Set(None);
+        } else {
+            active.ping_interval_seconds = Set(Some(ping as i32));
+        }
+    }
+
+    active.updated_at = Set(OffsetDateTime::now_utc());
+
+    let updated = match active.update(&state.db).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to update service: {}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    (StatusCode::OK, Json(model_to_response(updated))).into_response()
 }
 
 /// Approve a pending service
@@ -802,7 +874,8 @@ mod tests {
                 last_seen_at INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER
+                deactivated_at INTEGER,
+                ping_interval_seconds INTEGER
             )",
         )
         .await
@@ -967,6 +1040,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
         };
         let target = target.insert(&db).await.unwrap();
 
@@ -984,6 +1058,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
         };
         let source = source.insert(&db).await.unwrap();
 

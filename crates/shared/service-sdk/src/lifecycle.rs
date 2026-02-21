@@ -140,11 +140,6 @@ pub trait ServiceHandler: Send {
         signal: Signal,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome;
-
-    /// Ping interval. Default 300s. Override for configurable values.
-    fn ping_interval(&self) -> Duration {
-        Duration::from_secs(300)
-    }
 }
 
 /// Run the full service lifecycle: directory setup → identity load →

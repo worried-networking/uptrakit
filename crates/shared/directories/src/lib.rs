@@ -216,9 +216,12 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Get the user's home directory.
+/// Get the user's home directory using the `directories` crate.
+///
+/// Uses `BaseDirs::new()` for cross-platform support: `$HOME` on Linux/macOS,
+/// `USERPROFILE` on Windows.
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    directories::BaseDirs::new().map(|bd| bd.home_dir().to_path_buf())
 }
 
 /// Create a directory with secure permissions (700).
@@ -787,13 +790,15 @@ mod tests {
     }
 
     #[test]
-    fn expand_tilde_no_home_returns_error() {
-        // Temporarily unset HOME to simulate missing home directory.
+    fn expand_tilde_works_without_home_env() {
+        // With `directories::BaseDirs`, home_dir() resolves via the system
+        // password database (getpwuid_r on Unix) even when $HOME is unset.
         let original = std::env::var_os("HOME");
         unsafe { std::env::remove_var("HOME") };
 
         let result = expand_tilde(Path::new("~"));
-        assert!(result.is_err(), "should error when HOME is unset");
+        // BaseDirs falls back to passwd on Unix — should still succeed.
+        assert!(result.is_ok(), "BaseDirs should resolve home without $HOME");
 
         // Restore HOME.
         if let Some(val) = original {
@@ -918,5 +923,19 @@ mod tests {
         // Restore permissions so TempDir cleanup works.
         std::fs::set_permissions(&readonly_parent, std::fs::Permissions::from_mode(0o700))
             .expect("restore perms");
+    }
+
+    #[test]
+    fn home_dir_returns_some_on_current_platform() {
+        let home = home_dir();
+        assert!(
+            home.is_some(),
+            "home_dir() should return Some on any developer machine"
+        );
+        let path = home.expect("home_dir should be Some");
+        assert!(
+            !path.as_os_str().is_empty(),
+            "home directory path should not be empty"
+        );
     }
 }

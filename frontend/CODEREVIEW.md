@@ -329,18 +329,12 @@ polling backoff calculation. The delay is now
 `baseDelay * (0.5 + Math.random() * 0.5)`, preventing thundering herd when
 multiple browser tabs or users retry simultaneously.
 
-#### HA-02: No stale data detection
+#### ~~HA-02: No stale data detection~~ FIXED
 
-**Severity:** Medium
-**Location:** All data-loading pages
-
-Pages load data once on mount and only refresh on explicit user action (save, page navigation). If another
-admin changes settings, or if the backend state changes (e.g., a service becomes approved), the current
-client won't know until it navigates away and back.
-
-**Recommendation:** For settings, add a periodic refresh or use `ETag`/`If-Modified-Since` headers.
-For entity lists (services, hosts, software), consider a `Last-Modified` header on GET responses and
-periodic re-fetching with conflict detection.
+**Resolution:** Added 60-second auto-refresh with visibility-based polling to the
+services, hosts, and software list pages. Each page sets up a `setInterval` that
+re-fetches the current page when `document.visibilityState === 'visible'`, preventing
+stale data in multi-admin scenarios. The interval is cleaned up on component destroy.
 
 #### HA-03: Offline state doesn't prevent form submissions
 
@@ -352,17 +346,11 @@ offline results in a network error after the fetch timeout.
 
 **Recommendation:** Disable submit buttons or show an inline warning when `$isOnline` is false.
 
-#### HA-04: No retry mechanism on non-settings pages
+#### ~~HA-04: No retry mechanism on non-settings pages~~ FIXED
 
-**Severity:** Low
-**Location:** `services/+page.svelte`, `hosts/+page.svelte`
-
-If the initial data load fails (e.g., transient 503 during controller restart), an error message is shown
-but there's no retry button. The user must reload the page.
-
-The settings page (`settings/+page.svelte`) has "Retry All" buttons, but services and hosts pages do not.
-
-**Recommendation:** Add a retry button to the error states on all data pages.
+**Resolution:** Added a "Retry" button to the error `<aside>` on the services, hosts,
+and software pages. Each button calls the respective load function with the current page
+number, matching the pattern already established on the settings page.
 
 #### HA-05: Auth redirect on refresh failure loses context
 

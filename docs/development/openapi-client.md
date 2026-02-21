@@ -226,6 +226,7 @@ directly. `Option::None` fields are automatically skipped by
 
 - `list_services(&self, query) -> Result<PaginatedResponse<ServiceResponse>>`
 - `get_service(&self, id: &Uuid) -> Result<ServiceResponse>`
+- `update_service(&self, id: &Uuid, req) -> Result<ServiceResponse>` -- update configurable settings (e.g. ping interval)
 - `approve_service(&self, id: &Uuid) -> Result<ServiceResponse>`
 - `reject_service(&self, id: &Uuid) -> Result<ServiceResponse>`
 - `remove_service(&self, id: &Uuid) -> Result<MessageResponse>`

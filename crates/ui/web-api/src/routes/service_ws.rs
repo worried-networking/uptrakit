@@ -568,11 +568,20 @@ async fn handle_authenticated(
         service_entity::ServiceType::Mqtt => None,
         service_entity::ServiceType::SshAgent => Some(120),
     };
+    let ping_secs = service.ping_interval_seconds.map_or_else(
+        || match service.service_type {
+            service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => 300u32,
+            service_entity::ServiceType::Mqtt => 15u32,
+        },
+        |v| v as u32,
+    );
+    let ping_interval = std::time::Duration::from_secs(u64::from(ping_secs));
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
         ca_bundle_hash,
         protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
         shutdown_timeout_seconds: shutdown_timeout,
+        ping_interval,
     });
     let Some(json) = serialize_controller_msg(out_seq, settings_msg) else {
         return;
@@ -1156,7 +1165,8 @@ mod tests {
                 last_seen_at INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER
+                deactivated_at INTEGER,
+                ping_interval_seconds INTEGER
             )",
         )
         .await
@@ -1181,6 +1191,7 @@ mod tests {
             created_at: Set(now),
             updated_at: Set(now),
             deactivated_at: Set(None),
+            ping_interval_seconds: Set(None),
         }
         .insert(db)
         .await

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { user } from '$lib/auth';
 	import { getHosts, updateHost, deactivateHost } from '$lib/api';
 	import type { HostResponse } from '$lib/types';
@@ -20,7 +20,18 @@
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
 
-	onMount(() => loadHosts(1));
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+	onMount(() => {
+		loadHosts(1);
+		refreshInterval = setInterval(() => {
+			if (document.visibilityState === 'visible') loadHosts(currentPage);
+		}, 60_000);
+	});
+
+	onDestroy(() => {
+		if (refreshInterval) clearInterval(refreshInterval);
+	});
 
 	async function loadHosts(page: number) {
 		try {
@@ -123,6 +134,7 @@
 	{#if error}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 			<p>{error}</p>
+			<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadHosts(currentPage)}>Retry</button>
 		</aside>
 	{/if}
 

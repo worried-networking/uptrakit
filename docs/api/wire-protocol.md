@@ -131,6 +131,29 @@ Services should match on enum variants (not raw strings) to determine reconnecti
 - `CloseReason::CertificateRevoked` → stop; re-enrollment needed.
 - Other variants → reconnect with backoff or terminate depending on severity.
 
+## `ServiceSettingsPayload` Fields
+
+The `ServiceSettingsPayload` struct is sent by the controller as a `service_settings` message after an
+authenticated connection is established. It carries runtime configuration for the connected service.
+
+| Field | Type | Serde | Description |
+| --- | --- | --- | --- |
+| `renewal_window_hours` | `u16` | required | Hours before certificate expiry to initiate renewal |
+| `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
+| `protocol_version` | `u16` | `#[serde(default = "protocol_version_default")]` | Wire protocol version used by the controller |
+| `shutdown_timeout_seconds` | `Option<u32>` | `#[serde(default, skip_serializing_if)]` | Max seconds to wait during shutdown; present for agents, absent for MQTT |
+| `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-type default (300s agent/SSH agent, 15s MQTT) |
+
+The `ping_interval` field is serialized as a `u32` number of seconds on the wire (e.g. `"ping_interval": 300`)
+using the `duration_seconds` serde module. The controller reads `ping_interval_seconds` from the `services` table
+for each service and falls back to service-type defaults when no override is set.
+
+### `duration_seconds` serde module
+
+The `duration_seconds` module (`uptrakit_internal_wire::duration_seconds`) provides `serialize` and `deserialize`
+functions for converting `std::time::Duration` to/from a `u32` number of seconds in JSON. Use it with
+`#[serde(with = "duration_seconds")]` on `Duration` fields that should appear as plain integer seconds on the wire.
+
 ## `HostInfo` Fields
 
 The `HostInfo` struct (used inside `ReportHostsPayload.hosts`) contains:

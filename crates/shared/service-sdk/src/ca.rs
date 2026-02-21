@@ -194,6 +194,10 @@ pub async fn bootstrap_ca(
 /// in the given config directory.
 ///
 /// Returns an empty string if the file does not exist or cannot be read.
+/// An empty return value acts as a sentinel: when compared against the
+/// controller-provided `ca_bundle_hash`, the mismatch triggers a fresh
+/// CA bundle fetch — making this self-healing when the local file is
+/// missing, corrupted, or the service is starting for the first time.
 pub async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
     let ca_path = config_dir.join("ca.pem");
     match tokio::fs::read(&ca_path).await {
@@ -202,7 +206,14 @@ pub async fn compute_local_ca_hash(config_dir: &std::path::Path) -> String {
             hasher.update(&bytes);
             uptrakit_shared_types::hex::encode(hasher.finalize())
         }
-        Err(_) => String::new(),
+        Err(e) => {
+            tracing::debug!(
+                path = %ca_path.display(),
+                error = %e,
+                "CA file unreadable — returning empty hash to trigger re-fetch from controller"
+            );
+            String::new()
+        }
     }
 }
 

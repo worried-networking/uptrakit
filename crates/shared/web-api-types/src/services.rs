@@ -20,6 +20,10 @@ pub struct ServiceResponse {
     pub last_seen_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Custom ping interval override in seconds. `None` means the service-type
+    /// default is used (300s for agents, 15s for MQTT).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ping_interval_seconds: Option<u32>,
 }
 
 /// Query parameters for listing services.
@@ -43,6 +47,18 @@ impl ListServicesQuery {
             per_page: self.per_page,
         }
     }
+}
+
+/// Request to update a service's configurable settings.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateServiceRequest {
+    /// Custom ping interval in seconds.
+    /// Omit to keep current value. Set to `0` to clear the override and
+    /// revert to the service-type default. Set to a positive value to
+    /// override the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ping_interval_seconds: Option<u32>,
 }
 
 // Re-export generic types that are shared across service operations.
@@ -74,6 +90,7 @@ mod tests {
             last_seen_at: Some("2025-06-01T12:00:00Z".to_string()),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-06-01T12:00:00Z".to_string(),
+            ping_interval_seconds: Some(60),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -89,6 +106,7 @@ mod tests {
             deserialized.last_seen_at.as_deref(),
             Some("2025-06-01T12:00:00Z")
         );
+        assert_eq!(deserialized.ping_interval_seconds, Some(60));
     }
 
     #[test]
@@ -104,6 +122,7 @@ mod tests {
             last_seen_at: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
+            ping_interval_seconds: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ServiceResponse =
@@ -112,6 +131,7 @@ mod tests {
         assert!(deserialized.client_version.is_none());
         assert!(deserialized.last_seen_at.is_none());
         assert_eq!(deserialized.status, ServiceStatus::Pending);
+        assert!(deserialized.ping_interval_seconds.is_none());
     }
 
     #[test]
@@ -127,6 +147,7 @@ mod tests {
             last_seen_at: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
+            ping_interval_seconds: None,
         };
         let json_value =
             serde_json::to_value(&resp).expect("serialization to Value should succeed");
@@ -215,5 +236,36 @@ mod tests {
         let resolved = query.pagination().resolve();
         assert_eq!(resolved.page, 1);
         assert_eq!(resolved.per_page, crate::pagination::DEFAULT_PER_PAGE);
+    }
+
+    // ── UpdateServiceRequest ─────────────────────────────────────────
+
+    #[test]
+    fn update_service_request_with_ping_interval() {
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: Some(60),
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        assert!(json.contains(r#""ping_interval_seconds":60"#));
+        let parsed: UpdateServiceRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(parsed.ping_interval_seconds, Some(60));
+    }
+
+    #[test]
+    fn update_service_request_without_ping_interval() {
+        let req = UpdateServiceRequest {
+            ping_interval_seconds: None,
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        assert!(!json.contains("ping_interval_seconds"));
+    }
+
+    #[test]
+    fn update_service_request_clear_with_zero() {
+        let json = r#"{"ping_interval_seconds":0}"#;
+        let parsed: UpdateServiceRequest =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert_eq!(parsed.ping_interval_seconds, Some(0));
     }
 }

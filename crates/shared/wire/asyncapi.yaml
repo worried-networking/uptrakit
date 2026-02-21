@@ -321,8 +321,11 @@ operations:
     summary: Service receives settings from the controller
     description: |
       The controller sends service-specific settings after authentication.
-      Currently includes the renewal window and shutdown timeout that the
-      service should use.
+      Includes the renewal window, shutdown timeout, and ping interval.
+      The ping interval is controller-managed: derived from per-service
+      DB override or service-type default (300s for agents/SSH agents,
+      15s for MQTT). The service must not start its ping timer until
+      this message arrives.
 
   receiveCaBundleUpdated:
     action: receive
@@ -1216,6 +1219,7 @@ components:
         - type
         - renewal_window_hours
         - protocol_version
+        - ping_interval
       properties:
         seq:
           type: integer
@@ -1248,6 +1252,18 @@ components:
           format: int32
           description: Wire protocol version used by the controller
           default: 1
+        ping_interval:
+          type: integer
+          format: int32
+          minimum: 1
+          description: |
+            How often the service should send ping messages, in seconds.
+            Controller-managed: derived from per-service DB override or
+            service-type default (300s for agents/SSH agents, 15s for MQTT).
+            Serialized as whole seconds on the wire (`u32`).
+          examples:
+            - 300
+            - 15
         shutdown_timeout_seconds:
           type: integer
           format: int32

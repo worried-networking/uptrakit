@@ -702,6 +702,7 @@ pub(crate) async fn do_mqtt_service_enroll(
         created_at: Set(now),
         updated_at: Set(now),
         deactivated_at: Set(None),
+        ping_interval_seconds: Set(None),
     };
 
     let service = service.insert(db).await.context_to::<MqttWsError>()?;
@@ -828,7 +829,8 @@ mod tests {
                 last_seen_at INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                deactivated_at INTEGER
+                deactivated_at INTEGER,
+                ping_interval_seconds INTEGER
             )",
         )
         .await

@@ -77,27 +77,22 @@ the actual panic message for debugging.
 
 ### Low
 
-#### L1: `DEFAULT_SHUTDOWN_TIMEOUT` and `PING_INTERVAL` are not configurable
+#### ~~L1: `DEFAULT_SHUTDOWN_TIMEOUT` and `PING_INTERVAL` are not configurable~~ FIXED
 
-**File:** `src/client.rs:63-64`
+**Resolution:** Ping interval is now controller-managed and per-service configurable.
+The `ServiceHandler::ping_interval()` trait method was removed. The SDK event loop
+starts with no ping timer; when `ServiceSettings` arrives from the controller with
+a `ping_interval` field, the timer is created/updated. The controller reads per-service
+`ping_interval_seconds` from the DB (falling back to service-type defaults: 300s for
+agents/SSH agents, 15s for MQTT). A new `PUT /api/v1/services/:id` endpoint and
+`uptrakit service update --ping-interval` CLI command allow per-service overrides.
 
-Both constants are hardcoded. `shutdown_timeout_seconds` is later updated
-from `ServiceSettings` (line 212), but `PING_INTERVAL` (300s) has no
-override mechanism.
+#### ~~L2: `compute_local_ca_hash` returns empty string on error~~ FIXED
 
-**Recommendation:** Consider making `PING_INTERVAL` configurable via CLI
-args if different deployment scenarios require different ping frequencies.
-
-#### L2: `compute_local_ca_hash` returns empty string on error
-
-**File:** `src/client.rs:557-567`
-
-When the CA file cannot be read, `compute_local_ca_hash` returns an empty
-string. This means a missing CA file will always trigger a CA bundle fetch
-on every `ServiceSettings` message with a non-empty hash.
-
-**Recommendation:** This behavior is acceptable (self-healing), but worth
-documenting with a brief comment explaining the intent.
+**Resolution:** Added a `tracing::debug!` log on the error path explaining that the
+file is unreadable and an empty hash will trigger re-fetch from the controller
+(self-healing behavior). Also added a doc comment on `compute_local_ca_hash`
+explaining the empty-string-as-trigger design contract.
 
 ### Info
 

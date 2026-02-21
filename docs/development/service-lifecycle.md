@@ -48,10 +48,6 @@ pub trait ServiceHandler: Send {
         signal: Signal,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome;
-
-    fn ping_interval(&self) -> Duration {
-        Duration::from_secs(300) // default 5 minutes
-    }
 }
 ```
 
@@ -101,10 +97,6 @@ Handle a resolved service event from `poll_service_event`. Return `Ok(Some(outco
 Graceful shutdown handler. Called when an OS signal is received. Send `Disconnecting` and drain in-flight work. The `signal` parameter distinguishes
 `Signal::Hangup` (restart) from `Signal::Interrupt`/`Signal::Terminate` (shutdown). `shutdown_timeout_seconds` comes from the latest `ServiceSettings`.
 
-#### `ping_interval`
-
-Override to change the keepalive ping interval. Default is 300 seconds. The MQTT service overrides this with its configurable value.
-
 ### `LoopOutcome`
 
 | Variant | Meaning | SDK behavior |
@@ -140,10 +132,23 @@ The SDK owns the `tokio::select!` loop in `event_loop::run_event_loop()`. Servic
 biased priority order):
 
 1. **Service events** (`handler.poll_service_event()`) — highest priority
-1. **Ping timer** — sends `Ping` messages at `handler.ping_interval()` intervals
+1. **Ping timer** — sends `Ping` messages at the controller-provided `ping_interval` (conditional; see below)
 1. **Renewal timer** — proactive certificate renewal
 1. **Controller messages** (`conn.recv()`) — dispatched to SDK handlers or `handler.on_message()`
 1. **OS signals** (`signals.recv()`) — `handler.on_shutdown()`
+
+### Conditional ping timer
+
+The ping timer starts as `None` (no pings are sent). When a `ServiceSettings` message arrives, the SDK
+reads the `ping_interval` field (a `Duration` set by the controller per-service) and creates a
+`tokio::time::Interval` with that duration. The first immediate tick is consumed during setup so the
+first actual ping fires after one full interval. If a subsequent `ServiceSettings` message arrives with a
+different interval, the timer is replaced.
+
+This design means the ping interval is fully controller-managed. The `ServiceHandler` trait no longer
+exposes a `ping_interval()` method. The controller derives the interval from a per-service database
+override (`services.ping_interval_seconds`) or falls back to service-type defaults (300s for agent/SSH
+agent, 15s for MQTT).
 
 ### `EventLoopContext`
 

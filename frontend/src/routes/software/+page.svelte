@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { user } from '$lib/auth';
 	import { getSoftwareItems, getProviderConfigs, createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess, clearError } from '$lib/notifications.svelte';
@@ -49,10 +49,19 @@
 		homebrew: { package_type: 'formula' }
 	};
 
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
 	onMount(() => {
 		if (canView) {
 			loadAll(1);
+			refreshInterval = setInterval(() => {
+				if (document.visibilityState === 'visible') loadAll(currentPage);
+			}, 60_000);
 		}
+	});
+
+	onDestroy(() => {
+		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
 	async function loadAll(page: number) {
@@ -350,6 +359,7 @@
 		{#if error}
 			<aside class="mb-4 rounded-lg p-4 preset-filled-error-500">
 				<p>{error}</p>
+				<button class="btn preset-filled-primary-500 mt-2" onclick={() => loadAll(currentPage)}>Retry</button>
 			</aside>
 		{/if}
 

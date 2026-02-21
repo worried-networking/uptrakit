@@ -45,6 +45,7 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 
 - `GET /api/v1/services`: list services with optional type/status filters.
 - `GET /api/v1/services/{id}`: get a single service by UUID.
+- `PUT /api/v1/services/{id}`: update a service's configurable settings. See details below.
 - `POST /api/v1/services/{id}/approve`: approve a pending service.
 - `POST /api/v1/services/{id}/reject`: reject a pending service.
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
@@ -54,6 +55,65 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
 
 Software items link to `provider_config`s and host associations via `host_software_item`.
+
+`ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
+ping interval override. When `null`, the service uses its type default (300s for agents/SSH agents, 15s for MQTT).
+
+### `PUT /api/v1/services/{id}`
+
+Update a service's configurable settings. Requires the `ManageAgents` permission.
+
+**Path parameters**: `id` -- service UUID.
+
+**Request body** (`UpdateServiceRequest`):
+
+```json
+{
+  "ping_interval_seconds": 60
+}
+```
+
+- `ping_interval_seconds`: optional `u32`. Omit the field (or set to `null`) to keep the current value. Set to `0`
+  to clear the override and revert to the service-type default. Set to a positive value to override the default ping
+  interval in seconds.
+
+**Response** (`200`): `ServiceResponse`
+
+```json
+{
+  "id": "019...",
+  "service_type": "agent",
+  "hostname": "host-1.local",
+  "friendly_name": "My Agent",
+  "ip_address": "10.0.0.1",
+  "status": "approved",
+  "client_version": "1.2.3",
+  "last_seen_at": "2026-02-15T12:00:00Z",
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-02-15T12:00:00Z",
+  "ping_interval_seconds": 60
+}
+```
+
+**Error responses**:
+
+- `404` -- service not found.
+
+### Response types
+
+Types are defined in `crates/shared/web-api-types/src/services.rs`:
+
+| Type | Fields |
+| --- | --- |
+| `UpdateServiceRequest` | `ping_interval_seconds` (`Option<u32>`) |
+| `ServiceResponse` | `id`, `service_type`, `hostname`, `friendly_name`, `ip_address`, `status`, `client_version`, `last_seen_at`, `created_at`, `updated_at`, `ping_interval_seconds` |
+
+### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/ui/web-api/src/routes/services.rs` | Route handler (`update_service`) |
+| `crates/shared/web-api-types/src/services.rs` | Request/response types |
 
 ## Multi-Tenancy
 

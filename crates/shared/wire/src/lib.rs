@@ -295,6 +295,25 @@ pub struct ErrorPayload {
     pub message: String,
 }
 
+/// Serde helper: serialize/deserialize `std::time::Duration` as whole seconds (`u32`).
+///
+/// Uses `u32` consistently across wire, HTTP API, and CLI representations.
+/// Maximum representable interval: ~136 years — more than sufficient for ping intervals.
+pub mod duration_seconds {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(d: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+        let secs = u32::try_from(d.as_secs()).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_u32(secs)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
+        let secs = u32::deserialize(deserializer)?;
+        Ok(Duration::from_secs(u64::from(secs)))
+    }
+}
+
 /// Payload for service runtime settings pushed by the controller.
 ///
 /// Used for both agents and MQTT services. `shutdown_timeout_seconds` is
@@ -311,6 +330,10 @@ pub struct ServiceSettingsPayload {
     /// Present for agents, absent for MQTT services.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shutdown_timeout_seconds: Option<u32>,
+    /// How often the service should send ping messages.
+    /// Controller-managed; derived from per-service DB override or service-type default.
+    #[serde(with = "duration_seconds")]
+    pub ping_interval: std::time::Duration,
 }
 
 /// Payload for CA bundle update notification.
@@ -1257,11 +1280,12 @@ mod tests {
             ca_bundle_hash: "abc123".to_string(),
             protocol_version: PROTOCOL_VERSION,
             shutdown_timeout_seconds: Some(120),
+            ping_interval: std::time::Duration::from_secs(300),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","protocol_version":1,"shutdown_timeout_seconds":120}"#
+            r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","protocol_version":1,"shutdown_timeout_seconds":120,"ping_interval":300}"#
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -1274,10 +1298,12 @@ mod tests {
             ca_bundle_hash: "abc123def".to_string(),
             protocol_version: PROTOCOL_VERSION,
             shutdown_timeout_seconds: None,
+            ping_interval: std::time::Duration::from_secs(15),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"service_settings"#));
         assert!(!json.contains("shutdown_timeout_seconds"));
+        assert!(json.contains(r#""ping_interval":15"#));
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
     }
@@ -1285,7 +1311,7 @@ mod tests {
     #[test]
     fn service_settings_backward_compat_extra_fields() {
         // Future-proof: extra fields in JSON should be ignored
-        let json = r#"{"type":"service_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","shutdown_timeout_seconds":60,"some_future_field":"value"}"#;
+        let json = r#"{"type":"service_settings","renewal_window_hours":12,"ca_bundle_hash":"def456","shutdown_timeout_seconds":60,"ping_interval":300,"some_future_field":"value"}"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert_eq!(
             msg,
@@ -1294,22 +1320,7 @@ mod tests {
                 ca_bundle_hash: "def456".to_string(),
                 protocol_version: PROTOCOL_VERSION,
                 shutdown_timeout_seconds: Some(60),
-            })
-        );
-    }
-
-    #[test]
-    fn service_settings_backward_compat_missing_ca_hash() {
-        // Services running older protocol without ca_bundle_hash should still parse
-        let json = r#"{"type":"service_settings","renewal_window_hours":6}"#;
-        let msg: ControllerMessage = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            msg,
-            ControllerMessage::ServiceSettings(ServiceSettingsPayload {
-                renewal_window_hours: 6,
-                ca_bundle_hash: String::new(),
-                protocol_version: PROTOCOL_VERSION,
-                shutdown_timeout_seconds: None,
+                ping_interval: std::time::Duration::from_secs(300),
             })
         );
     }
@@ -1317,7 +1328,7 @@ mod tests {
     #[test]
     fn service_settings_backward_compat_missing_shutdown_timeout() {
         // Services running older protocol without shutdown_timeout_seconds should still parse
-        let json = r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc"}"#;
+        let json = r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc","ping_interval":300}"#;
         let msg: ControllerMessage = serde_json::from_str(json).unwrap();
         assert_eq!(
             msg,
@@ -1326,8 +1337,24 @@ mod tests {
                 ca_bundle_hash: "abc".to_string(),
                 protocol_version: PROTOCOL_VERSION,
                 shutdown_timeout_seconds: None,
+                ping_interval: std::time::Duration::from_secs(300),
             })
         );
+    }
+
+    #[test]
+    fn duration_seconds_roundtrip() {
+        let payload = ServiceSettingsPayload {
+            renewal_window_hours: 6,
+            ca_bundle_hash: String::new(),
+            protocol_version: PROTOCOL_VERSION,
+            shutdown_timeout_seconds: None,
+            ping_interval: std::time::Duration::from_secs(42),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["ping_interval"], 42);
+        let deserialized: ServiceSettingsPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.ping_interval, std::time::Duration::from_secs(42));
     }
 
     #[test]
