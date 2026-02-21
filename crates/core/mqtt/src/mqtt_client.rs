@@ -434,7 +434,9 @@ mod tests {
         let config = MqttConfig {
             transport: MqttTransport::Tls,
             port: 8883,
-            ca_pem: Some(SecretString::new("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into())),
+            ca_pem: Some(SecretString::new(
+                "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into(),
+            )),
             ..tcp_config()
         };
         let _opts = build_mqtt_options(&config);

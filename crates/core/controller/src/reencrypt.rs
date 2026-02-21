@@ -86,7 +86,12 @@ async fn reencrypt_ca_certificate_keys(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "ca_certificates", column = "key_pem", count, "re-encrypted");
+        tracing::info!(
+            table = "ca_certificates",
+            column = "key_pem",
+            count,
+            "re-encrypted"
+        );
     }
     count
 }
@@ -134,7 +139,12 @@ async fn reencrypt_oidc_client_secrets(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "oidc_providers", column = "client_secret", count, "re-encrypted");
+        tracing::info!(
+            table = "oidc_providers",
+            column = "client_secret",
+            count,
+            "re-encrypted"
+        );
     }
     count
 }
@@ -185,7 +195,12 @@ async fn reencrypt_mqtt_passwords(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "mqtt_clients", column = "password", count, "re-encrypted");
+        tracing::info!(
+            table = "mqtt_clients",
+            column = "password",
+            count,
+            "re-encrypted"
+        );
     }
     count
 }
@@ -236,7 +251,12 @@ async fn reencrypt_mqtt_ca_certs(db: &DatabaseConnection) -> u64 {
         }
     }
     if count > 0 {
-        tracing::info!(table = "mqtt_clients", column = "ca_cert_pem", count, "re-encrypted");
+        tracing::info!(
+            table = "mqtt_clients",
+            column = "ca_cert_pem",
+            count,
+            "re-encrypted"
+        );
     }
     count
 }

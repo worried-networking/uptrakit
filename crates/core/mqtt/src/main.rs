@@ -5,14 +5,14 @@ mod tenant_manager;
 use std::time::Duration;
 
 use clap::Parser;
+use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
     MqttRegisterPayload, ServiceMessage, ServiceType,
 };
-use rootcause::prelude::*;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
-    ServiceIdentityState, Signal,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
+    Signal,
 };
 
 use crate::tenant_manager::TenantManager;
@@ -92,12 +92,10 @@ impl ServiceHandler for MqttHandler {
     ) -> LoopResult<Option<LoopOutcome>> {
         match event {
             Some(status) => {
-                conn.send_best_effort(ServiceMessage::MqttClientStatus(
-                    MqttClientStatusPayload {
-                        mqtt_client_id: status.mqtt_client_id,
-                        status: status.status,
-                    },
-                ))
+                conn.send_best_effort(ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
+                    mqtt_client_id: status.mqtt_client_id,
+                    status: status.status,
+                }))
                 .await;
                 Ok(None)
             }

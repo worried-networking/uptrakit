@@ -170,7 +170,13 @@ mod tests {
         let obj = json_value
             .as_object()
             .expect("top-level value should be an object");
-        for field in ["os_type", "os_version", "architecture", "ip_address", "last_seen_at"] {
+        for field in [
+            "os_type",
+            "os_version",
+            "architecture",
+            "ip_address",
+            "last_seen_at",
+        ] {
             assert!(
                 obj.get(field).expect("field should be present").is_null(),
                 "{field} should serialize as null when None"

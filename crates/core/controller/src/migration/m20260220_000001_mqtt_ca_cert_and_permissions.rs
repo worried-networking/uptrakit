@@ -26,8 +26,14 @@ impl MigrationTrait for Migration {
         // 2. Add 4 new granular permissions
         // ============================================================
         let new_permissions = [
-            ("view_software", "View software items, provider configs, and update history"),
-            ("manage_software", "Manage software items, provider configs, version checks, updates, and scheduler"),
+            (
+                "view_software",
+                "View software items, provider configs, and update history",
+            ),
+            (
+                "manage_software",
+                "Manage software items, provider configs, version checks, updates, and scheduler",
+            ),
             ("view_hosts", "View hosts"),
             ("manage_hosts", "Manage hosts (update, deactivate)"),
         ];
@@ -47,7 +53,12 @@ impl MigrationTrait for Migration {
                             Permissions::Description,
                             Permissions::CreatedAt,
                         ])
-                        .values_panic([id.into(), (*name).into(), (*description).into(), now.into()])
+                        .values_panic([
+                            id.into(),
+                            (*name).into(),
+                            (*description).into(),
+                            now.into(),
+                        ])
                         .to_owned(),
                 )
                 .await?;

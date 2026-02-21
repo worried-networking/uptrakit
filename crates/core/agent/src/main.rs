@@ -6,13 +6,13 @@ mod update;
 mod version_check;
 
 use clap::Parser;
+use rootcause::prelude::*;
 use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
 };
-use rootcause::prelude::*;
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
-    ServiceIdentityState, Signal,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
+    Signal,
 };
 
 use cli::Args;

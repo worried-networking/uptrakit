@@ -176,10 +176,7 @@ mod tests {
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let deserialized: UpdateScheduledTaskRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(
-            deserialized.cron_expression.as_deref(),
-            Some("0 */2 * * *")
-        );
+        assert_eq!(deserialized.cron_expression.as_deref(), Some("0 */2 * * *"));
         assert_eq!(deserialized.enabled, Some(false));
         assert!(deserialized.task_config.is_some());
     }

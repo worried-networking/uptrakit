@@ -94,7 +94,9 @@ mod tests {
             config: serde_json::json!({}),
             enabled: true,
         };
-        let err = req.validate().expect_err("should reject whitespace-only name");
+        let err = req
+            .validate()
+            .expect_err("should reject whitespace-only name");
         assert_eq!(err.field, "name");
     }
 

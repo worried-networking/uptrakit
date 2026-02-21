@@ -331,11 +331,7 @@ mod tests {
             "fingerprint must contain only hex characters, got: {fp}"
         );
         // Additionally verify lowercase encoding (no uppercase hex letters)
-        assert_eq!(
-            fp,
-            fp.to_lowercase(),
-            "fingerprint must be lowercase hex"
-        );
+        assert_eq!(fp, fp.to_lowercase(), "fingerprint must be lowercase hex");
     }
 
     #[test]

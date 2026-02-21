@@ -38,7 +38,8 @@ pub fn init_crypto() {
 ///
 /// Intended for use with the `--version` flag.
 pub fn print_build_info(binary_name: &str, version: &str, enabled_features: Option<&str>) {
-    let build_info = uptrakit_build_info::BuildInfo::current(binary_name, version, enabled_features);
+    let build_info =
+        uptrakit_build_info::BuildInfo::current(binary_name, version, enabled_features);
     print!("{}", build_info.render_human());
 }
 

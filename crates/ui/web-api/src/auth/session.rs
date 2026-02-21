@@ -144,17 +144,15 @@ impl SessionService {
         old_active.update(&txn).await.context_to()?;
 
         // Create new session with a fresh refresh token
-        let auth_method =
-            AuthMethod::from_session(&old_auth_method_str, old_oidc_provider_id).ok_or_else(
-                || {
-                    tracing::warn!(
-                        user_id = %old_user_id,
-                        auth_method = %old_auth_method_str,
-                        "session has corrupted auth method data; rejecting rotation"
-                    );
-                    report!(AuthError::InvalidSession)
-                },
-            )?;
+        let auth_method = AuthMethod::from_session(&old_auth_method_str, old_oidc_provider_id)
+            .ok_or_else(|| {
+                tracing::warn!(
+                    user_id = %old_user_id,
+                    auth_method = %old_auth_method_str,
+                    "session has corrupted auth method data; rejecting rotation"
+                );
+                report!(AuthError::InvalidSession)
+            })?;
 
         let new_token = generate_secure_token()?;
         let new_hash = hash_token(&new_token);

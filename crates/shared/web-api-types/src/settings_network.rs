@@ -169,7 +169,9 @@ mod tests {
             forwarded_client_cert_pem_header: None,
             pki_addr: None,
         };
-        let err = req.validate().expect_err("should reject empty real_ip_header");
+        let err = req
+            .validate()
+            .expect_err("should reject empty real_ip_header");
         assert_eq!(err.field, "real_ip_header");
     }
 
@@ -227,7 +229,10 @@ mod tests {
             forwarded_client_cert_pem_header: None,
             pki_addr: Some(String::new()),
         };
-        assert!(req.validate().is_ok(), "empty string should pass through (disables pki_addr)");
+        assert!(
+            req.validate().is_ok(),
+            "empty string should pass through (disables pki_addr)"
+        );
     }
 
     #[test]

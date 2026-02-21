@@ -188,7 +188,9 @@ mod tests {
     fn validate_rejects_invalid_slug_chars() {
         let mut req = valid_create_request();
         req.slug = "My Provider!".to_string();
-        let err = req.validate().expect_err("should reject invalid slug chars");
+        let err = req
+            .validate()
+            .expect_err("should reject invalid slug chars");
         assert_eq!(err.field, "slug");
     }
 

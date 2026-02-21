@@ -9,11 +9,11 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 #[cfg(feature = "oidc")]
 use time::OffsetDateTime;
 #[cfg(feature = "oidc")]
+use uptrakit_shared_db::MaskedEmail;
+#[cfg(feature = "oidc")]
 use uptrakit_shared_db::entity::{
     oidc_provider, prelude::*, role, user, user_oidc_link, user_role,
 };
-#[cfg(feature = "oidc")]
-use uptrakit_shared_db::MaskedEmail;
 
 /// Global authentication settings (password auth toggle).
 /// OIDC config lives in the `oidc_providers` table.

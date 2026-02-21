@@ -73,18 +73,15 @@ mod tests {
     #[test]
     fn serde_serializes_as_snake_case_strings() {
         assert_eq!(
-            serde_json::to_string(&RegistrationMode::Open)
-                .expect("serialization should succeed"),
+            serde_json::to_string(&RegistrationMode::Open).expect("serialization should succeed"),
             r#""open""#
         );
         assert_eq!(
-            serde_json::to_string(&RegistrationMode::Invite)
-                .expect("serialization should succeed"),
+            serde_json::to_string(&RegistrationMode::Invite).expect("serialization should succeed"),
             r#""invite""#
         );
         assert_eq!(
-            serde_json::to_string(&RegistrationMode::Closed)
-                .expect("serialization should succeed"),
+            serde_json::to_string(&RegistrationMode::Closed).expect("serialization should succeed"),
             r#""closed""#
         );
     }
@@ -149,8 +146,9 @@ mod tests {
     fn from_str_round_trips_through_as_str() {
         for mode in &ALL_VARIANTS {
             let s = mode.as_str();
-            let parsed: RegistrationMode =
-                s.parse().expect("from_str should succeed for as_str output");
+            let parsed: RegistrationMode = s
+                .parse()
+                .expect("from_str should succeed for as_str output");
             assert_eq!(&parsed, mode);
         }
     }

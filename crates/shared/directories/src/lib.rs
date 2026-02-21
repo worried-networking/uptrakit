@@ -720,7 +720,9 @@ mod tests {
         let file = temp.path().join("new_secure_file");
 
         // Writing a new file should create it with 0o600.
-        write_secure_file(&file, b"secure data").await.expect("write");
+        write_secure_file(&file, b"secure data")
+            .await
+            .expect("write");
 
         let mode = std::fs::metadata(&file)
             .expect("metadata")
@@ -744,10 +746,11 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let file = temp.path().join("perm_test");
         std::fs::write(&file, "data").expect("write");
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644))
-            .expect("set perms");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("set perms");
 
-        set_file_permissions(&file).await.expect("set_file_permissions");
+        set_file_permissions(&file)
+            .await
+            .expect("set_file_permissions");
 
         let mode = std::fs::metadata(&file)
             .expect("metadata")
@@ -766,7 +769,10 @@ mod tests {
 
         // Verify no temp file remains
         let temp_path = temp.path().join(".atomic_test.tmp");
-        assert!(!temp_path.exists(), "temp file should be cleaned up after atomic rename");
+        assert!(
+            !temp_path.exists(),
+            "temp file should be cleaned up after atomic rename"
+        );
 
         let content = std::fs::read(&file).expect("read");
         assert_eq!(content, b"data");
@@ -848,7 +854,9 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let file = temp.path().join("empty_file");
 
-        write_secure_file(&file, b"").await.expect("should write empty file");
+        write_secure_file(&file, b"")
+            .await
+            .expect("should write empty file");
 
         assert!(file.is_file());
         let content = std::fs::read(&file).expect("read");
@@ -858,7 +866,10 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(mode, 0o600, "empty file should still have 0o600 permissions");
+        assert_eq!(
+            mode, 0o600,
+            "empty file should still have 0o600 permissions"
+        );
     }
 
     #[tokio::test]
@@ -867,8 +878,7 @@ mod tests {
         let dir = temp.path().join("dir_755");
 
         std::fs::create_dir(&dir).expect("create dir");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
-            .expect("set perms");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("set perms");
 
         let mode_before = std::fs::metadata(&dir)
             .expect("metadata")
@@ -886,7 +896,10 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        assert_eq!(mode_after, 0o700, "permissions should be corrected to 0o700");
+        assert_eq!(
+            mode_after, 0o700,
+            "permissions should be corrected to 0o700"
+        );
     }
 
     #[tokio::test]

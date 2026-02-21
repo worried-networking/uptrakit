@@ -118,7 +118,6 @@ mod sea_orm_impl {
             Value::String(None)
         }
     }
-
 }
 
 #[cfg(test)]
@@ -208,8 +207,7 @@ mod tests {
         use sea_orm::sea_query::ValueType;
         let s = SecretString::new("db-secret".into());
         let value: Value = s.into();
-        let recovered =
-            <SecretString as ValueType>::try_from(value).expect("should recover");
+        let recovered = <SecretString as ValueType>::try_from(value).expect("should recover");
         assert_eq!(recovered.expose_secret(), "db-secret");
     }
 

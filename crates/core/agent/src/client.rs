@@ -133,7 +133,10 @@ pub(crate) async fn handle_check_versions(
     payload: uptrakit_internal_wire::CheckVersionsPayload,
     conn: &mut ControllerConnection,
 ) -> Option<LoopOutcome> {
-    tracing::info!(count = payload.assignments.len(), "received CheckVersions request");
+    tracing::info!(
+        count = payload.assignments.len(),
+        "received CheckVersions request"
+    );
 
     let executor: std::sync::Arc<dyn uptrakit_command::CommandExecutor> =
         std::sync::Arc::new(uptrakit_command::LocalCommandExecutor);
@@ -150,9 +153,9 @@ pub(crate) async fn handle_check_versions(
                 assignment.provider_type.clone(),
                 &assignment.config,
                 std::sync::Arc::clone(&executor),
-            ) && provider.has_capability(
-                uptrakit_provider_registry::ProviderCapability::RefreshPackageIndex,
-            ) {
+            ) && provider
+                .has_capability(uptrakit_provider_registry::ProviderCapability::RefreshPackageIndex)
+            {
                 tracing::info!(provider_type = %assignment.provider_type, "refreshing package index");
                 if let Err(e) = provider.refresh_package_index().await {
                     tracing::warn!(provider_type = %assignment.provider_type, error = %e, "failed to refresh package index");
@@ -239,9 +242,8 @@ pub(crate) async fn handle_execute_update(
     let update_history_id = payload.update_history_id;
 
     // Spawn update execution task
-    let handle = tokio::spawn(async move {
-        crate::update::execute_update(payload, output_tx).await
-    });
+    let handle =
+        tokio::spawn(async move { crate::update::execute_update(payload, output_tx).await });
 
     // Send UpdateStarted
     if let Err(e) = conn

@@ -493,13 +493,7 @@ mod tests {
     async fn run_command_exec_with_working_dir() {
         let temp = tempfile::tempdir().expect("tempdir");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = run_command_exec(
-            "pwd",
-            &[],
-            Some(temp.path().to_str().unwrap()),
-            &tx,
-        )
-        .await;
+        let result = run_command_exec("pwd", &[], Some(temp.path().to_str().unwrap()), &tx).await;
         assert!(result.is_ok());
         let (output, _) = result.expect("should succeed");
         // On macOS, /tmp is symlinked to /private/tmp.
@@ -527,12 +521,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_command_exec_nonexistent_program() {
-        let result = run_command_exec_quiet(
-            "/nonexistent/binary/xyz123",
-            &[],
-            None,
-        )
-        .await;
+        let result = run_command_exec_quiet("/nonexistent/binary/xyz123", &[], None).await;
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err().current_context(),

@@ -129,7 +129,6 @@ impl EnrollmentError {
             _ => false,
         }
     }
-
 }
 
 // ── ReportConversion impls ───────────────────────────────────────────
@@ -217,5 +216,4 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
         assert!(!is_rustls_cert_expired(&io_err));
     }
-
 }

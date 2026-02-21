@@ -76,10 +76,7 @@ mod tests {
         );
 
         // Check that hash can be parsed
-        assert!(
-            PasswordHash::new(exposed).is_ok(),
-            "Hash should be valid"
-        );
+        assert!(PasswordHash::new(exposed).is_ok(), "Hash should be valid");
     }
 
     #[test]

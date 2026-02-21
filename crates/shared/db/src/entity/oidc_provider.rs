@@ -172,7 +172,10 @@ mod tests {
     #[test]
     fn role_mapping_special_characters() {
         let mut map = HashMap::new();
-        map.insert("key with spaces".to_string(), "value/with/slashes".to_string());
+        map.insert(
+            "key with spaces".to_string(),
+            "value/with/slashes".to_string(),
+        );
         map.insert("unicode_\u{1f980}".to_string(), "crab!".to_string());
         map.insert("quotes\"here".to_string(), "back\\slash".to_string());
         let role_mapping = RoleMapping(map.clone());

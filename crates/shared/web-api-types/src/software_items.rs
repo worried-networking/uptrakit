@@ -281,7 +281,9 @@ mod tests {
     fn validate_empty_name_fails() {
         let mut req = valid_request_with_config_id();
         req.name = "".to_string();
-        let err = req.validate().expect_err("empty name should fail validation");
+        let err = req
+            .validate()
+            .expect_err("empty name should fail validation");
         assert_eq!(err.field, "name");
     }
 
@@ -463,10 +465,7 @@ mod tests {
         let deserialized: TriggerVersionCheckResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.agents_notified, 3);
-        assert_eq!(
-            deserialized.message,
-            "Version check triggered for 3 agents"
-        );
+        assert_eq!(deserialized.message, "Version check triggered for 3 agents");
     }
 
     #[test]

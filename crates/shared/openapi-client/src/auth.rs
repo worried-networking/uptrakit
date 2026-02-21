@@ -63,8 +63,7 @@ impl UptrakitClient {
         &self,
         req: &DeviceAuthPollRequest,
     ) -> Result<DeviceAuthPollResponse> {
-        self.post_json_unauth("/api/v1/auth/device/poll", req)
-            .await
+        self.post_json_unauth("/api/v1/auth/device/poll", req).await
     }
 
     /// Approve a pending device authorization request.

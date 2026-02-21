@@ -268,7 +268,10 @@ mod tests {
 
         // Must complete within a reasonable timeout after cancellation
         let result = tokio::time::timeout(Duration::from_secs(5), scheduler.run(token)).await;
-        assert!(result.is_ok(), "scheduler.run should exit promptly after cancellation");
+        assert!(
+            result.is_ok(),
+            "scheduler.run should exit promptly after cancellation"
+        );
 
         // After shutdown, no tasks should be locked by this controller
         let all_tasks = scheduled_task::Entity::find()
@@ -323,8 +326,14 @@ mod tests {
             .await
             .expect("query")
             .expect("task exists");
-        assert!(task.locked_by.is_none(), "future task should not be claimed");
-        assert_eq!(task.run_count, 0, "future task should not have been executed");
+        assert!(
+            task.locked_by.is_none(),
+            "future task should not be claimed"
+        );
+        assert_eq!(
+            task.run_count, 0,
+            "future task should not have been executed"
+        );
     }
 
     #[tokio::test]
@@ -366,8 +375,14 @@ mod tests {
             .await
             .expect("query")
             .expect("task exists");
-        assert!(task.locked_by.is_none(), "task with no executor should not be claimed");
-        assert_eq!(task.run_count, 0, "task with no executor should not be executed");
+        assert!(
+            task.locked_by.is_none(),
+            "task with no executor should not be claimed"
+        );
+        assert_eq!(
+            task.run_count, 0,
+            "task with no executor should not be executed"
+        );
     }
 
     #[tokio::test]
@@ -402,10 +417,7 @@ mod tests {
         struct TrackingExecutor(std::sync::Arc<std::sync::atomic::AtomicBool>);
         #[async_trait::async_trait]
         impl TaskExecutor for TrackingExecutor {
-            async fn execute(
-                &self,
-                _task: &scheduled_task::Model,
-            ) -> error::Result<()> {
+            async fn execute(&self, _task: &scheduled_task::Model) -> error::Result<()> {
                 self.0.store(true, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             }

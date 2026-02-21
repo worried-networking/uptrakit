@@ -17,8 +17,8 @@ use uptrakit_internal_wire::{
     ControllerMessage, DisconnectReason, DisconnectingPayload, ServiceMessage, ServiceType,
 };
 use uptrakit_service_sdk::{
-    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler,
-    ServiceIdentityState, Signal,
+    ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
+    Signal,
 };
 
 use cli::{Args, Commands};

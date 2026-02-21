@@ -389,7 +389,10 @@ mod tests {
         // Advance time by 1 hour — should still be pending (FAR_FUTURE is 30 days).
         tokio::time::advance(Duration::from_secs(3600)).await;
         let result = tokio::time::timeout(Duration::ZERO, &mut sleep).await;
-        assert!(result.is_err(), "sleep should not resolve after only 1 hour");
+        assert!(
+            result.is_err(),
+            "sleep should not resolve after only 1 hour"
+        );
     }
 
     #[tokio::test]
@@ -401,7 +404,10 @@ mod tests {
         update_renewal_schedule(&mut sleep, Some(not_after), 168);
 
         let result = tokio::time::timeout(Duration::from_millis(100), &mut sleep).await;
-        assert!(result.is_ok(), "sleep should resolve immediately for expired cert");
+        assert!(
+            result.is_ok(),
+            "sleep should resolve immediately for expired cert"
+        );
     }
 
     #[tokio::test]

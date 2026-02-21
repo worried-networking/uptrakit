@@ -420,8 +420,7 @@ mod tests {
         let issuer =
             Issuer::from_ca_cert_pem(&cert_pem, key_pair).expect("creating test CA issuer");
 
-        let (der, pem) =
-            sign_crl(&issuer, vec![], 1).expect("signing CRL with empty revoked list");
+        let (der, pem) = sign_crl(&issuer, vec![], 1).expect("signing CRL with empty revoked list");
 
         assert!(!der.is_empty(), "DER output should be non-empty");
         assert!(
@@ -469,10 +468,8 @@ mod tests {
         let issuer =
             Issuer::from_ca_cert_pem(&cert_pem, key_pair).expect("creating test CA issuer");
 
-        let (der_1, pem_1) =
-            sign_crl(&issuer, vec![], 1).expect("signing first CRL");
-        let (der_2, pem_2) =
-            sign_crl(&issuer, vec![], 2).expect("signing second CRL");
+        let (der_1, pem_1) = sign_crl(&issuer, vec![], 1).expect("signing first CRL");
+        let (der_2, pem_2) = sign_crl(&issuer, vec![], 2).expect("signing second CRL");
 
         assert!(!der_1.is_empty(), "first CRL DER should be non-empty");
         assert!(!der_2.is_empty(), "second CRL DER should be non-empty");

@@ -292,10 +292,7 @@ mod tests {
     fn pretty_name_no_quotes() {
         // Some distributions use unquoted PRETTY_NAME.
         let content = "PRETTY_NAME=Arch Linux";
-        assert_eq!(
-            parse_pretty_name(content),
-            Some("Arch Linux".to_string())
-        );
+        assert_eq!(parse_pretty_name(content), Some("Arch Linux".to_string()));
     }
 
     // ── Additional normalize_os_type tests ────────────────────────────

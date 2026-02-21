@@ -296,8 +296,7 @@ mod tests {
         use sea_orm::sea_query::ValueType;
         let e = MaskedEmail::new("db@test.com".into());
         let value: Value = e.into();
-        let recovered =
-            <MaskedEmail as ValueType>::try_from(value).expect("should recover");
+        let recovered = <MaskedEmail as ValueType>::try_from(value).expect("should recover");
         assert_eq!(recovered.expose_email(), "db@test.com");
     }
 

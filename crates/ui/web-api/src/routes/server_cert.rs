@@ -232,8 +232,8 @@ mod tests {
         let issuer = rcgen::Issuer::from_ca_cert_pem(ca_pem, ca_key).expect("issuer");
         let server_key =
             rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
-        let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
-            .expect("params");
+        let mut params =
+            rcgen::CertificateParams::new(vec!["localhost".to_string()]).expect("params");
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test Server");
@@ -261,10 +261,7 @@ mod tests {
 
         let result = build_server_tls_config("bad cert", &key_pem, &ca_pem);
 
-        assert!(
-            result.is_err(),
-            "should fail when cert PEM is invalid"
-        );
+        assert!(result.is_err(), "should fail when cert PEM is invalid");
     }
 
     #[test]
@@ -276,10 +273,7 @@ mod tests {
 
         let result = build_server_tls_config(&cert_pem, "bad key", &ca_pem);
 
-        assert!(
-            result.is_err(),
-            "should fail when key PEM is invalid"
-        );
+        assert!(result.is_err(), "should fail when key PEM is invalid");
     }
 
     #[test]
@@ -291,10 +285,7 @@ mod tests {
 
         let result = build_server_tls_config(&cert_pem, &key_pem, "bad ca");
 
-        assert!(
-            result.is_err(),
-            "should fail when CA bundle PEM is invalid"
-        );
+        assert!(result.is_err(), "should fail when CA bundle PEM is invalid");
     }
 
     #[test]

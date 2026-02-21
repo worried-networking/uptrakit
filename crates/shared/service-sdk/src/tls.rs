@@ -237,15 +237,12 @@ mod tests {
     }
 
     /// Generate a client certificate signed by the given CA.
-    fn generate_test_client_cert(
-        ca_pem: &str,
-        ca_key: &rcgen::KeyPair,
-    ) -> (String, String) {
+    fn generate_test_client_cert(ca_pem: &str, ca_key: &rcgen::KeyPair) -> (String, String) {
         let issuer = rcgen::Issuer::from_ca_cert_pem(ca_pem, ca_key).expect("issuer");
         let client_key =
             rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
-        let mut params = rcgen::CertificateParams::new(vec!["client.test".to_string()])
-            .expect("params");
+        let mut params =
+            rcgen::CertificateParams::new(vec!["client.test".to_string()]).expect("params");
         params
             .distinguished_name
             .push(rcgen::DnType::CommonName, "Test Client");
@@ -351,12 +348,9 @@ mod tests {
         install_crypto_provider();
         let (ca_pem, ca_key) = generate_test_ca();
         let (cert_pem, key_pem) = generate_test_client_cert(&ca_pem, &ca_key);
-        let connector = build_tls_connector_with_client_cert(
-            ca_pem.as_bytes(),
-            &cert_pem,
-            &key_pem,
-        )
-        .expect("connector");
+        let connector =
+            build_tls_connector_with_client_cert(ca_pem.as_bytes(), &cert_pem, &key_pem)
+                .expect("connector");
         let _ = connector;
     }
 
@@ -376,9 +370,8 @@ mod tests {
         install_crypto_provider();
         let (ca_pem, ca_key) = generate_test_ca();
         let (cert_pem, key_pem) = generate_test_client_cert(&ca_pem, &ca_key);
-        let connector =
-            build_system_trust_tls_connector_with_client_cert(&cert_pem, &key_pem)
-                .expect("connector");
+        let connector = build_system_trust_tls_connector_with_client_cert(&cert_pem, &key_pem)
+            .expect("connector");
         let _ = connector;
     }
 

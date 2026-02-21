@@ -345,7 +345,12 @@ async fn run_authenticated_with_reconnect(
         };
 
         match crate::event_loop::run_event_loop(
-            handler, host, port, &mtls_connector, identity, &ctx,
+            handler,
+            host,
+            port,
+            &mtls_connector,
+            identity,
+            &ctx,
         )
         .await
         .context_transform(|e: LoopError| match e {

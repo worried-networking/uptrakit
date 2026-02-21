@@ -418,8 +418,7 @@ oWQDYgAEkVQ4HWPH7wNHTLMMHK1FGY4GmUmqVE0gEN1vZJ3RLxdEJ/Rx/h3GX7y1
 
     #[test]
     fn detect_ecdsa_pkcs8() {
-        let kp =
-            rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
+        let kp = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("keygen");
         let pem = kp.serialize_pem();
         assert!(pem.contains("BEGIN PRIVATE KEY"), "should be PKCS#8 format");
         let key_type = detect_key_type(&pem).expect("should detect ECDSA");

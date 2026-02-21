@@ -10,8 +10,7 @@ use std::path::Path;
 use std::pin::Pin;
 
 use uptrakit_internal_wire::{
-    CloseReason, ControllerMessage, PingPayload, ServiceMessage, ServiceSettingsPayload,
-    now_millis,
+    CloseReason, ControllerMessage, PingPayload, ServiceMessage, ServiceSettingsPayload, now_millis,
 };
 
 use rootcause::prelude::*;
@@ -218,7 +217,11 @@ async fn handle_service_settings(
     }
 
     *shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(120);
-    update_renewal_schedule(renewal_sleep, cert_not_after_ts, settings.renewal_window_hours);
+    update_renewal_schedule(
+        renewal_sleep,
+        cert_not_after_ts,
+        settings.renewal_window_hours,
+    );
 
     crate::ca::check_ca_staleness(
         &settings.ca_bundle_hash,
@@ -260,10 +263,7 @@ mod tests {
     #[test]
     fn dispatch_close_reason_cert_rotated() {
         let reason = CloseReason::CertificateRotated;
-        assert_eq!(
-            dispatch_close_reason(Some(&reason)),
-            LoopOutcome::Reconnect
-        );
+        assert_eq!(dispatch_close_reason(Some(&reason)), LoopOutcome::Reconnect);
     }
 
     #[test]
