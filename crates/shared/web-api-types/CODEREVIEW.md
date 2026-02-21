@@ -60,18 +60,22 @@ semantics: omit = keep, null = clear, string = set. The route handler parses bot
 **Resolution:** Changed `uses_remaining` from `Option<i32>` to `Option<u32>` in `MqttEnrollmentTokenResponse`,
 `MqttEnrollmentTokenListResponse`, and `CreateMqttEnrollmentTokenRequest`.
 
-### ~~MEDIUM: Missing test coverage for many modules~~ PARTIALLY RESOLVED
+### ~~MEDIUM: Missing test coverage for many modules~~ RESOLVED
 
 ~~The following have **zero tests**: `api_tokens`, `hosts`, `oidc_auth`, `provider_configs`, `scheduler`, `server_cert`,
 `services`, `settings`, `settings_agent_certs`, `settings_auth`, `settings_ca`, `settings_combined`, `settings_network`,
 `software_items`, `registration`.~~
 
-**Resolution:** Added 75 tests across 6 critical modules: `api_tokens` (10 tests: serde round-trips, `SecretString`
-serialization, optional field handling), `hosts` (11 tests: agent summary, response fields, update requests),
-`services` (9 tests: response types, query filters, pagination helpers), `software_items` (20 tests: CRUD types,
-validation, `Display` impls), `scheduler` (14 tests: task types, cron validation), `registration` (14 tests: serde,
-`Display`, `FromStr`, error types). Remaining untested: `oidc_auth`, `provider_configs`, `server_cert`, `settings`,
-`settings_agent_certs`, `settings_auth`, `settings_ca`, `settings_combined`, `settings_network`.
+**Resolution:** Added 75 tests across 6 critical modules in earlier iteration: `api_tokens` (10), `hosts` (11),
+`services` (9), `software_items` (20), `scheduler` (14), `registration` (14). Then added 54 more tests across
+7 modules: `provider_configs` (7 tests: serde round-trips, Validate rejection/acceptance, defaults),
+`settings_network` (8 tests: serde round-trips, Validate for empty proxies/header/pki_addr, scheme acceptance),
+`oidc_auth` (5 tests: serde round-trips for all 6 structs including SecretString fields),
+`oidc_providers` (9 tests: serde round-trips, Validate for empty name, slug too long, invalid slug, invalid issuer_url,
+empty client_id, valid request, defaults), `settings` (2 tests: serde round-trips),
+`settings_auth` (2 tests: serde round-trips), `settings_agent_certs` (2 tests: serde round-trips),
+`settings_combined` (2 tests: serde round-trips). Total: 243 tests. Only `server_cert` and `settings_ca` remain
+untested (1-line re-exports with no logic to test).
 
 Well-tested modules (good examples): `pagination`, `mqtt_url`, `update_hooks`, `system_alerts`, `settings_mqtt`.
 
@@ -180,6 +184,6 @@ serialization. 16 thorough tests.
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |
 | Permission model | ~~FAIR~~ GOOD | 9 variants after adding ViewSoftware, ManageSoftware, ViewHosts, ManageHosts |
-| Test coverage | GOOD | 189 tests; 6 critical modules added (75 tests); 9 modules remain untested |
+| Test coverage | EXCELLENT | 243 tests; only `server_cert` and `settings_ca` (1-line re-exports) remain untested |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | Type safety | GOOD | Typed enums for query filters; `ProviderConfigResponse.provider_type` typed; `uses_remaining` now `u32` |

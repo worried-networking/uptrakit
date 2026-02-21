@@ -50,3 +50,115 @@ impl Validate for CreateProviderConfigRequest {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_uuid() -> Uuid {
+        Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
+            .expect("hard-coded UUID should be valid")
+    }
+
+    // ── CreateProviderConfigRequest ──────────────────────────────────
+
+    #[test]
+    fn create_request_round_trip() {
+        let req = CreateProviderConfigRequest {
+            name: "my-github".to_string(),
+            provider_type: ProviderType::GithubReleases,
+            config: serde_json::json!({"owner": "org", "repo": "app"}),
+            enabled: true,
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        let de: CreateProviderConfigRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(de.name, "my-github");
+        assert_eq!(de.provider_type, ProviderType::GithubReleases);
+        assert!(de.enabled);
+    }
+
+    #[test]
+    fn create_request_enabled_defaults_to_true() {
+        let json = r#"{"name":"test","provider_type":"github_releases","config":{}}"#;
+        let de: CreateProviderConfigRequest =
+            serde_json::from_str(json).expect("deserialization should succeed");
+        assert!(de.enabled, "enabled should default to true");
+    }
+
+    #[test]
+    fn create_request_validate_rejects_empty_name() {
+        let req = CreateProviderConfigRequest {
+            name: "   ".to_string(),
+            provider_type: ProviderType::GithubReleases,
+            config: serde_json::json!({}),
+            enabled: true,
+        };
+        let err = req.validate().expect_err("should reject whitespace-only name");
+        assert_eq!(err.field, "name");
+    }
+
+    #[test]
+    fn create_request_validate_accepts_valid() {
+        let req = CreateProviderConfigRequest {
+            name: "my-provider".to_string(),
+            provider_type: ProviderType::GithubReleases,
+            config: serde_json::json!({}),
+            enabled: true,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    // ── UpdateProviderConfigRequest ──────────────────────────────────
+
+    #[test]
+    fn update_request_round_trip_all_fields() {
+        let req = UpdateProviderConfigRequest {
+            name: Some("renamed".to_string()),
+            config: Some(serde_json::json!({"key": "val"})),
+            enabled: Some(false),
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        let de: UpdateProviderConfigRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(de.name.as_deref(), Some("renamed"));
+        assert_eq!(de.enabled, Some(false));
+    }
+
+    #[test]
+    fn update_request_round_trip_none_fields() {
+        let req = UpdateProviderConfigRequest {
+            name: None,
+            config: None,
+            enabled: None,
+        };
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        let de: UpdateProviderConfigRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert!(de.name.is_none());
+        assert!(de.config.is_none());
+        assert!(de.enabled.is_none());
+    }
+
+    // ── ProviderConfigResponse ───────────────────────────────────────
+
+    #[test]
+    fn response_round_trip() {
+        let resp = ProviderConfigResponse {
+            id: sample_uuid(),
+            name: "docker-hub".to_string(),
+            provider_type: ProviderType::DockerRegistry,
+            config: serde_json::json!({"registry": "docker.io"}),
+            enabled: true,
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-06-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&resp).expect("serialization should succeed");
+        let de: ProviderConfigResponse =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(de.id, sample_uuid());
+        assert_eq!(de.name, "docker-hub");
+        assert_eq!(de.provider_type, ProviderType::DockerRegistry);
+        assert!(de.enabled);
+    }
+}
