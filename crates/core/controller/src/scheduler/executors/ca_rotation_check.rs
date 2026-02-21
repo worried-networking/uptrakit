@@ -102,6 +102,8 @@ mod tests {
 
     #[tokio::test]
     async fn does_not_trigger_for_long_lived_ca() {
+        tokio::time::pause();
+
         // CA valid for 5 years — well outside the 183-day rotation window.
         let cert_pem = generate_test_ca_cert(1825);
         let snapshot = make_snapshot(cert_pem);
@@ -120,6 +122,8 @@ mod tests {
 
     #[tokio::test]
     async fn triggers_for_soon_expiring_ca() {
+        tokio::time::pause();
+
         // CA valid for only 30 days — within the 183-day rotation window.
         let cert_pem = generate_test_ca_cert(30);
         let snapshot = make_snapshot(cert_pem);
@@ -138,6 +142,8 @@ mod tests {
 
     #[tokio::test]
     async fn triggers_for_invalid_cert_pem() {
+        tokio::time::pause();
+
         // Invalid PEM — should_rotate_ca returns true (fail-safe).
         let snapshot = make_snapshot("not a real cert".to_string());
         let (tx, rx) = tokio::sync::watch::channel(snapshot);

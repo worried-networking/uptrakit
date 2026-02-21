@@ -103,22 +103,6 @@ mod tests {
     }
 
     #[test]
-    fn test_same_password_produces_different_hashes() {
-        let password = "SamePassword123!";
-        let hash1 = hash_password(password).unwrap();
-        let hash2 = hash_password(password).unwrap();
-
-        assert_ne!(
-            hash1, hash2,
-            "Same password should produce different hashes due to different salts"
-        );
-
-        // Both should still verify correctly
-        assert!(verify_password(password, hash1.expose_secret()).unwrap());
-        assert!(verify_password(password, hash2.expose_secret()).unwrap());
-    }
-
-    #[test]
     fn test_verify_invalid_hash_format() {
         let result = verify_password("password", "not-a-valid-hash");
         assert!(result.is_err(), "Should error on invalid hash format");

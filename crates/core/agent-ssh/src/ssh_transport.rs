@@ -454,12 +454,6 @@ mod tests {
     use super::*;
     use russh::client::Handler;
 
-    #[test]
-    fn compute_fingerprint_format() {
-        let fp = "SHA256:abcdef";
-        assert!(fp.starts_with("SHA256:"));
-    }
-
     #[tokio::test]
     async fn handler_tofu_accepts() {
         let observed = Arc::new(Mutex::new(None));

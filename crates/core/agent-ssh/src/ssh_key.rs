@@ -322,21 +322,6 @@ oWQDYgAEkVQ4HWPH7wNHTLMMHK1FGY4GmUmqVE0gEN1vZJ3RLxdEJ/Rx/h3GX7y1
         assert!(detect_key_type(pem).is_err());
     }
 
-    #[test]
-    fn read_private_key_from_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let key_path = dir.path().join("test.key");
-        std::fs::write(&key_path, "test-key-content").expect("write");
-        let content = read_private_key(&key_path).expect("read");
-        assert_eq!(content, "test-key-content");
-    }
-
-    #[test]
-    fn read_private_key_missing_file() {
-        let path = std::path::Path::new("/nonexistent/path/key.pem");
-        assert!(read_private_key(path).is_err());
-    }
-
     /// Build a minimal synthetic OpenSSH key binary with the given key type string.
     fn build_test_openssh_key(key_type: &str) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -389,19 +374,6 @@ oWQDYgAEkVQ4HWPH7wNHTLMMHK1FGY4GmUmqVE0gEN1vZJ3RLxdEJ/Rx/h3GX7y1
 
         let extracted = extract_public_key_openssh(&private_pem).expect("should extract pubkey");
         assert_eq!(extracted, public_openssh);
-    }
-
-    #[test]
-    fn extract_public_key_invalid_pem() {
-        let result = extract_public_key_openssh("not a valid PEM key");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn generate_keypair_unique() {
-        let (pem1, _) = generate_ed25519_keypair().expect("keypair 1");
-        let (pem2, _) = generate_ed25519_keypair().expect("keypair 2");
-        assert_ne!(pem1, pem2, "each keypair should be unique");
     }
 
     // ── PKCS#8 key detection tests ────────────────────────────────────

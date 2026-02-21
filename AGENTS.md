@@ -210,6 +210,12 @@ These are non-negotiable design constraints. Do not violate them.
    `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
    (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
    See [Coding Standards](docs/development/coding-standards.md).
+1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
+   like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
+   table in [Testing Expectations](docs/development/testing.md).
+1. **Tests must use `tokio::time::pause()` -- never real sleeps.** All time-dependent tests must use virtual time via
+   `tokio::time::pause()` and `tokio::time::advance()` for deterministic, fast execution. The only exception is
+   Docker-based integration tests (`#[ignore]`) that wait for real external processes.
 
 ### Service ping interval
 

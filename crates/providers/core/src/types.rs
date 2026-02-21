@@ -148,34 +148,4 @@ mod tests {
         assert_ne!(a, c);
     }
 
-    #[test]
-    fn provider_capability_serialization_roundtrip() {
-        let cap = ProviderCapability::DiscoverLocalSoftware;
-        let json = serde_json::to_string(&cap).expect("serialize");
-        assert_eq!(json, r#""discover_local_software""#);
-
-        let deserialized: ProviderCapability = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(deserialized, cap);
-    }
-
-    #[test]
-    fn provider_capability_refresh_package_index_serialization_roundtrip() {
-        let cap = ProviderCapability::RefreshPackageIndex;
-        let json = serde_json::to_string(&cap).expect("serialize");
-        assert_eq!(json, r#""refresh_package_index""#);
-
-        let deserialized: ProviderCapability = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(deserialized, cap);
-    }
-
-    #[test]
-    fn provider_capability_is_copy() {
-        let cap = ProviderCapability::DiscoverLocalSoftware;
-        let cap2 = cap; // Copy, not move
-        assert_eq!(cap, cap2);
-
-        let cap3 = ProviderCapability::RefreshPackageIndex;
-        let cap4 = cap3; // Copy, not move
-        assert_eq!(cap3, cap4);
-    }
 }

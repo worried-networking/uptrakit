@@ -56,6 +56,7 @@ uptrakit-build-info = { path = "../../shared/build-info" }
 rust-embed = { version = "8", optional = true, features = ["mime-guess"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
 testcontainers = "0.27"
 reqwest = { workspace = true }

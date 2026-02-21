@@ -106,14 +106,4 @@ mod tests {
         assert!("Ed25519".parse::<SshKeyType>().is_err());
         assert!("".parse::<SshKeyType>().is_err());
     }
-
-    #[test]
-    fn ssh_key_type_roundtrip_via_value() {
-        for kt in [SshKeyType::Ed25519, SshKeyType::Rsa, SshKeyType::Ecdsa] {
-            let val: sea_orm::Value = kt.into();
-            let restored =
-                <SshKeyType as sea_orm::sea_query::ValueType>::try_from(val).expect("roundtrip");
-            assert_eq!(restored, kt);
-        }
-    }
 }

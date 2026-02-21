@@ -315,6 +315,8 @@ mod tests {
     async fn delivers_backlog_for_authenticated_service() -> Result<(), Box<dyn std::error::Error>>
     {
         let db = test_db().await?;
+        tokio::time::pause();
+
         let registry = ServiceConnectionRegistry::new();
         let controller_id = Uuid::now_v7();
         let svc = NotificationService::new(db.clone(), registry.clone(), controller_id);
@@ -397,6 +399,8 @@ mod tests {
     #[tokio::test]
     async fn skips_non_matching_service_type_backlog() -> Result<(), Box<dyn std::error::Error>> {
         let db = test_db().await?;
+        tokio::time::pause();
+
         let registry = ServiceConnectionRegistry::new();
         let controller_id = Uuid::now_v7();
         let svc = NotificationService::new(db.clone(), registry.clone(), controller_id);

@@ -68,7 +68,7 @@ tokio-util = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 tower = { workspace = true }
 http-body-util = "0.1"
 strum = { workspace = true }

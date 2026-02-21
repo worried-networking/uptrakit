@@ -1,6 +1,66 @@
 # Testing Expectations
 
-## Testing Expectations - Overview
+## Testing Philosophy
+
+### Do not test upstream crate behavior
+
+Upstream/external crates are treated as a black box. Their correctness is
+the maintainer's responsibility. Tests should focus exclusively on verifying
+**our own** logic, configuration, and contracts.
+
+A test is **upstream crate testing** if it would pass even when the function
+body is a direct, unmodified call to the upstream crate. It tests the
+dependency, not our code.
+
+A test is **internal logic testing** if it verifies behavior that could
+break when our code changes (custom parsing, validation, serde annotations
+that define a wire contract, backward compatibility guarantees, custom error
+handling paths, etc.).
+
+| Category | Example | Verdict |
+| --- | --- | --- |
+| `thiserror` `#[error("...")]` Display output | `assert_eq!(err.to_string(), "...")` | Upstream -- remove |
+| `serde_json::to_string` / `from_str` roundtrip on a plain `#[derive(Serialize, Deserialize)]` struct with no custom logic | `assert_eq!(deserialized, original)` | Upstream -- remove |
+| `argon2` salt uniqueness | Two hashes of the same password differ | Upstream -- remove |
+| Custom `#[serde(with = "...")]` module roundtrip | Custom date format serialization | Internal -- keep |
+| `skip_serializing_if` annotation | Optional field absent in JSON when `None` | Internal -- keep |
+| Backward compatibility (old JSON shape still deserializes) | Missing field defaults correctly | Internal -- keep |
+| Wire protocol spec conformance | Serialized JSON matches asyncapi.yaml schema | Internal -- keep |
+
+### Wire protocol tests: asyncapi.yaml is the source of truth
+
+Spec-conformance tests validate that Rust serialization matches the
+[asyncapi.yaml](../../crates/shared/wire/asyncapi.yaml) schema. Each test
+constructs a sample message, wraps it in an envelope, serializes it, and
+validates required fields, type discriminators, and enum values against the
+schema.
+
+Behavioral tests (backward compatibility, field omission, custom serde
+modules, exact JSON assertions, envelope/sequence logic) complement spec
+tests and are kept as-is.
+
+### Tests must never sleep on real wall-clock time
+
+Use `tokio::time::pause()` with `tokio::time::advance()` for deterministic,
+fast time-dependent tests. Paused time makes `tokio::time::sleep` and
+`tokio::time::timeout` resolve via virtual time advancement instead of
+wall-clock waiting.
+
+**Exceptions:**
+
+- Docker integration tests (`#[ignore]`) that wait for real external
+  processes (e.g., reverse proxy containers) use real delays out of
+  necessity.
+- Tests that use SQLx database connections (via SeaORM) must call
+  `tokio::time::pause()` **after** establishing the pool. SQLx's
+  connection pool uses internal tokio timers for acquire and idle
+  timeouts; pausing time before `Database::connect()` causes
+  `PoolTimedOut` because auto-advance expires the timers instantly.
+  If the test loop itself performs DB queries (e.g., a scheduler poll
+  loop), `tokio::time::pause()` cannot be used at all — keep real-time
+  delays minimal (under 200 ms) instead.
+
+## Testing Expectations -- Overview
 
 Changes should be covered by tests, especially if they touch behavior, parsing, or provider logic. If an integration test is infeasible (e.g., OS
 integration) include at least one of:

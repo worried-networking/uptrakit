@@ -1358,17 +1358,6 @@ mod tests {
     }
 
     #[test]
-    fn ca_bundle_updated_serialization_roundtrip() {
-        let msg = ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
-            ca_bundle_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
-                .to_string(),
-        });
-        let json = serde_json::to_string(&msg).unwrap();
-        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, msg);
-    }
-
-    #[test]
     fn request_cert_renewal_serialization_roundtrip() {
         let msg = ControllerMessage::RequestCertRenewal(RequestCertRenewalPayload {
             reason: "CA rotation after backend URL change".to_string(),
@@ -1659,21 +1648,6 @@ mod tests {
     }
 
     #[test]
-    fn host_info_serialization_roundtrip() {
-        let info = HostInfo {
-            machine_id: "abc-123-def".to_string(),
-            os_type: Some("linux".to_string()),
-            os_version: Some("Debian GNU/Linux 12 (bookworm)".to_string()),
-            architecture: Some("aarch64".to_string()),
-            hostname: None,
-            ip_address: None,
-        };
-        let json = serde_json::to_string(&info).unwrap();
-        let deserialized: HostInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, info);
-    }
-
-    #[test]
     fn host_info_minimal_serialization_roundtrip() {
         let info = HostInfo {
             machine_id: "unknown".to_string(),
@@ -1946,31 +1920,6 @@ mod tests {
     }
 
     #[test]
-    fn release_info_serialization_roundtrip() {
-        let info = ReleaseInfo {
-            tag: "v1.0.0".to_string(),
-            release_url: "https://example.com/release".to_string(),
-            assets: vec![
-                ReleaseAsset {
-                    name: "app.tar.gz".to_string(),
-                    download_url: "https://example.com/app.tar.gz".to_string(),
-                    size: Some(1024),
-                    content_type: None,
-                },
-                ReleaseAsset {
-                    name: "app.deb".to_string(),
-                    download_url: "https://example.com/app.deb".to_string(),
-                    size: None,
-                    content_type: None,
-                },
-            ],
-        };
-        let json = serde_json::to_string(&info).unwrap();
-        let deserialized: ReleaseInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, info);
-    }
-
-    #[test]
     fn release_info_empty_assets_omitted() {
         let info = ReleaseInfo {
             tag: "v1.0.0".to_string(),
@@ -2223,5 +2172,504 @@ mod tests {
         let json = serde_json::to_string(&payload).unwrap();
         let deserialized: CertificatePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.not_after, dt);
+    }
+
+    // =========================================================================
+    // AsyncAPI spec-conformance tests
+    //
+    // Validate that serialized messages conform to the asyncapi.yaml schema.
+    // The spec is the source of truth for the wire protocol; these tests
+    // ensure Rust serde annotations stay in sync with it.
+    // =========================================================================
+
+    /// Minimal AsyncAPI schema validator for wire protocol tests.
+    struct AsyncApiSpec {
+        schemas: serde_json::Map<String, serde_json::Value>,
+    }
+
+    impl AsyncApiSpec {
+        fn load() -> Self {
+            let yaml_str = include_str!("../asyncapi.yaml");
+            let doc: serde_json::Value =
+                serde_yaml_ng::from_str(yaml_str).expect("asyncapi.yaml should parse");
+            let schemas = doc["components"]["schemas"]
+                .as_object()
+                .expect("components.schemas should be an object")
+                .clone();
+            Self { schemas }
+        }
+
+        /// Validate that a serialized JSON value conforms to the named schema.
+        ///
+        /// Checks:
+        /// 1. Type discriminator (`const` field) matches
+        /// 2. All required fields are present
+        /// 3. Enum fields serialize to values in the spec's `enum` array
+        fn validate(&self, schema_name: &str, json: &serde_json::Value) {
+            let schema = self
+                .schemas
+                .get(schema_name)
+                .unwrap_or_else(|| panic!("schema '{schema_name}' not found in asyncapi.yaml"));
+
+            let obj = json
+                .as_object()
+                .unwrap_or_else(|| panic!("expected JSON object for schema '{schema_name}'"));
+
+            // Check required fields
+            if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
+                for field in required {
+                    let field_name = field.as_str().unwrap();
+                    assert!(
+                        obj.contains_key(field_name),
+                        "schema '{schema_name}': required field '{field_name}' missing from \
+                         serialized JSON.\nJSON: {json}"
+                    );
+                }
+            }
+
+            // Check const and enum constraints on properties
+            if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+                for (prop_name, prop_schema) in properties {
+                    if let Some(json_val) = obj.get(prop_name) {
+                        // Check const
+                        if let Some(const_val) = prop_schema.get("const") {
+                            assert_eq!(
+                                json_val, const_val,
+                                "schema '{schema_name}': field '{prop_name}' should be \
+                                 const {const_val}, got {json_val}"
+                            );
+                        }
+
+                        // Check enum
+                        if let Some(enum_vals) = prop_schema.get("enum").and_then(|e| e.as_array())
+                        {
+                            assert!(
+                                enum_vals.contains(json_val),
+                                "schema '{schema_name}': field '{prop_name}' value {json_val} \
+                                 not in enum {enum_vals:?}"
+                            );
+                        }
+
+                        // Check $ref to enum schemas
+                        if let Some(ref_val) = prop_schema.get("$ref").and_then(|r| r.as_str()) {
+                            let ref_schema_name =
+                                ref_val.strip_prefix("#/components/schemas/").unwrap_or(ref_val);
+                            if let Some(ref_schema) = self.schemas.get(ref_schema_name)
+                                && let Some(enum_vals) =
+                                    ref_schema.get("enum").and_then(|e| e.as_array())
+                            {
+                                assert!(
+                                    enum_vals.contains(json_val),
+                                    "schema '{schema_name}': field '{prop_name}' value \
+                                     {json_val} not in enum {ref_schema_name} {enum_vals:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Wrap a service message in an envelope and serialize to JSON value.
+    fn service_envelope_json(msg: ServiceMessage) -> serde_json::Value {
+        let envelope = ServiceEnvelope { seq: 1, message: msg };
+        serde_json::to_value(envelope).unwrap()
+    }
+
+    /// Wrap a controller message in an envelope and serialize to JSON value.
+    fn controller_envelope_json(msg: ControllerMessage) -> serde_json::Value {
+        let envelope = ControllerEnvelope { seq: 1, message: msg };
+        serde_json::to_value(envelope).unwrap()
+    }
+
+    // ── ServiceMessage spec conformance ─────────────────────────────
+
+    #[test]
+    fn spec_conformance_ping() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::Ping(PingPayload {
+            service_ts: 1706400000000,
+        }));
+        spec.validate("pingPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_enroll() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::Enroll(EnrollPayload {
+            hostname: "node-1".to_string(),
+            friendly_name: "Node One".to_string(),
+            enrollment_token: Some(SecretString::new("tok-123".into())),
+            service_type: ServiceType::Agent,
+        }));
+        spec.validate("enrollPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_request_certificate() {
+        let spec = AsyncApiSpec::load();
+        let json =
+            service_envelope_json(ServiceMessage::RequestCertificate(
+                RequestCertificatePayload {
+                    csr_pem: "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n".to_string(),
+                },
+            ));
+        spec.validate("requestCertificatePayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_renew_certificate() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::RenewCertificate(
+            RenewCertificatePayload {
+                csr_pem: "-----BEGIN CERTIFICATE REQUEST-----\nrenew\n-----END CERTIFICATE REQUEST-----\n".to_string(),
+            },
+        ));
+        spec.validate("renewCertificatePayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_report_hosts() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::ReportHosts(ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "machine-42".to_string(),
+                os_type: Some("linux".to_string()),
+                os_version: Some("Ubuntu 24.04 LTS".to_string()),
+                architecture: Some("x86_64".to_string()),
+                hostname: Some("web-01.example.com".to_string()),
+                ip_address: Some("10.0.0.5".to_string()),
+            }],
+            agent_version: "0.0.1".to_string(),
+            protocol_version: PROTOCOL_VERSION,
+        }));
+        spec.validate("reportHostsPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_version_check_results() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::VersionCheckResults(
+            VersionCheckResultsPayload {
+                results: vec![VersionCheckResult {
+                    software_item_id: TEST_UUID_1,
+                    installed_version: Some("1.2.3".to_string()),
+                    latest_version: Some("1.3.0".to_string()),
+                    error: None,
+                }],
+            },
+        ));
+        spec.validate("versionCheckResultsPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_update_started() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::UpdateStarted(UpdateStartedPayload {
+            update_history_id: TEST_UUID_1,
+            from_version: Some("1.0.0".to_string()),
+        }));
+        spec.validate("updateStartedPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_update_output() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::UpdateOutput(UpdateOutputPayload {
+            update_history_id: TEST_UUID_1,
+            output: "Downloading package...".to_string(),
+            stream: OutputStreamType::Stdout,
+        }));
+        spec.validate("updateOutputPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_update_result() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::UpdateResult(UpdateResultPayload {
+            update_history_id: TEST_UUID_1,
+            status: UpdateFinalStatus::Completed,
+            from_version: Some("1.0.0".to_string()),
+            to_version: Some("2.0.0".to_string()),
+            output: "Update completed successfully".to_string(),
+            error: None,
+        }));
+        spec.validate("updateResultPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_disconnecting() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::Disconnecting(DisconnectingPayload {
+            reason: DisconnectReason::Shutdown,
+            active_mqtt_clients: vec![TEST_UUID_1],
+        }));
+        spec.validate("disconnectingPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_register() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::Register(MqttRegisterPayload {
+            instance_id: "mqtt-node1-01936a1e".to_string(),
+            max_tenants: 10,
+            active_mqtt_clients: vec![TEST_UUID_1],
+            protocol_version: PROTOCOL_VERSION,
+        }));
+        spec.validate("mqttRegisterPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_release_tenants() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::ReleaseTenants(
+            MqttReleaseTenantsPayload {
+                mqtt_client_ids: vec![TEST_UUID_1],
+            },
+        ));
+        spec.validate("mqttReleaseTenantsPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_mqtt_client_status() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::MqttClientStatus(
+            MqttClientStatusPayload {
+                mqtt_client_id: TEST_UUID_1,
+                status: MqttClientConnectionStatus::Online,
+            },
+        ));
+        spec.validate("mqttClientStatusPayload", &json);
+    }
+
+    // ── ControllerMessage spec conformance ──────────────────────────
+
+    #[test]
+    fn spec_conformance_pong() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Pong(PongPayload {
+            service_ts: 1706400000000,
+            controller_ts: 1706400000050,
+        }));
+        spec.validate("pongPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_enrolled() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Enrolled(EnrolledPayload {
+            service_id: TEST_UUID_1,
+            enrollment_secret: SecretString::new("secret-abc".into()),
+            status: EnrollmentStatus::Pending,
+        }));
+        spec.validate("enrolledPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_approved() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Approved(ApprovedPayload {
+            service_id: TEST_UUID_1,
+        }));
+        spec.validate("approvedPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_rejected() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Rejected(RejectedPayload {
+            service_id: TEST_UUID_1,
+        }));
+        spec.validate("rejectedPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_certificate() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Certificate(CertificatePayload {
+            cert_pem: "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"
+                .to_string(),
+            not_after: UtcDateTime::from_unix_timestamp(1_706_400_000).unwrap(),
+        }));
+        spec.validate("certificatePayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_error() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Error(ErrorPayload {
+            code: ErrorCode::EnrollmentFailed,
+            message: "The enrollment token is invalid".to_string(),
+        }));
+        spec.validate("errorPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_service_settings() {
+        let spec = AsyncApiSpec::load();
+        let json =
+            controller_envelope_json(ControllerMessage::ServiceSettings(ServiceSettingsPayload {
+                renewal_window_hours: 6,
+                ca_bundle_hash: "abc123".to_string(),
+                protocol_version: PROTOCOL_VERSION,
+                shutdown_timeout_seconds: Some(120),
+                ping_interval: std::time::Duration::from_secs(300),
+            }));
+        spec.validate("serviceSettingsPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_ca_bundle_updated() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::CaBundleUpdated(
+            CaBundleUpdatedPayload {
+                ca_bundle_pem:
+                    "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".to_string(),
+            },
+        ));
+        spec.validate("caBundleUpdatedPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_request_cert_renewal() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::RequestCertRenewal(
+            RequestCertRenewalPayload {
+                reason: "CA rotation after backend URL change".to_string(),
+            },
+        ));
+        spec.validate("requestCertRenewalPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_server_restarting() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::ServerRestarting(
+            ServerRestartingPayload {
+                reason: "controller restarting for upgrade".to_string(),
+            },
+        ));
+        spec.validate("serverRestartingPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_check_versions() {
+        let spec = AsyncApiSpec::load();
+        let json =
+            controller_envelope_json(ControllerMessage::CheckVersions(CheckVersionsPayload {
+                assignments: vec![VersionCheckAssignment {
+                    software_item_id: TEST_UUID_1,
+                    name: "Test Software".to_string(),
+                    provider_type: ProviderType::GithubReleases,
+                    package_identifier: "owner/repo".to_string(),
+                    config: serde_json::json!({"owner": "octocat", "repo": "hello-world"}),
+                }],
+            }));
+        spec.validate("checkVersionsPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_execute_update() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::ExecuteUpdate(Box::new(
+            ExecuteUpdatePayload {
+                update_history_id: TEST_UUID_1,
+                software_item_id: TEST_UUID_2,
+                software_item_name: "Node.js".to_string(),
+                package_identifier: "nodejs".to_string(),
+                to_version: "20.10.0".to_string(),
+                provider_type: ProviderType::GithubReleases,
+                provider_config: serde_json::json!({"owner": "nodejs", "repo": "node"}),
+                pre_update_hooks: vec![],
+                post_update_hooks: vec![],
+                release_info: None,
+                timeout_seconds: 300,
+            },
+        )));
+        spec.validate("executeUpdatePayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_registered() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::Registered(
+            MqttRegisteredPayload {
+                instance_id: "mqtt-node1-01936a1e".to_string(),
+            },
+        ));
+        spec.validate("mqttRegisteredPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_tenant_assignments() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::TenantAssignments(
+            MqttTenantAssignmentsPayload {
+                tenants: vec![MqttTenantConfig {
+                    mqtt_client_id: TEST_UUID_3,
+                    tenant_id: TEST_UUID_1,
+                    enabled: true,
+                    transport: MqttTransport::Tls,
+                    host: "broker.example.com".to_string(),
+                    port: 8883,
+                    client_id: "uptrakit".to_string(),
+                    username: Some(SecretString::new("user".into())),
+                    password: Some(SecretString::new("pass".into())),
+                    ca_pem: None,
+                    topic_prefix: "home/uptrakit".to_string(),
+                    updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
+                }],
+            },
+        ));
+        spec.validate("mqttTenantAssignmentsPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_tenant_config_updated() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::TenantConfigUpdated(
+            MqttTenantConfigUpdatedPayload {
+                tenant: MqttTenantConfig {
+                    mqtt_client_id: TEST_UUID_1,
+                    tenant_id: TEST_UUID_2,
+                    enabled: true,
+                    transport: MqttTransport::Tcp,
+                    host: "broker.local".to_string(),
+                    port: 1883,
+                    client_id: "uptrakit".to_string(),
+                    username: None,
+                    password: None,
+                    ca_pem: None,
+                    topic_prefix: "uptrakit".to_string(),
+                    updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
+                },
+            },
+        ));
+        spec.validate("mqttTenantConfigUpdatedPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_tenant_revoked() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::TenantRevoked(
+            MqttTenantRevokedPayload {
+                mqtt_client_id: TEST_UUID_1,
+                reason: "mqtt client disabled".to_string(),
+            },
+        ));
+        spec.validate("mqttTenantRevokedPayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_mqtt_client_created() {
+        let spec = AsyncApiSpec::load();
+        // mqtt_client_created uses a different schema (no seq in required).
+        // Serialize just the inner message to match the schema.
+        let msg = ControllerMessage::MqttClientCreated(MqttClientCreatedPayload {
+            mqtt_client_id: TEST_UUID_2,
+        });
+        let json = serde_json::to_value(&msg).unwrap();
+        spec.validate("mqttClientCreatedPayload", &json);
     }
 }

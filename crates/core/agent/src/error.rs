@@ -32,26 +32,3 @@ impl_report_conversion! {
     std::io::Error => Error::Io,
     uptrakit_directories::DirectoryError => Error::Directory,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn update_execution_display() {
-        let err = Error::UpdateExecution("timeout".to_string());
-        assert_eq!(err.to_string(), "update execution failed: timeout");
-    }
-
-    #[test]
-    fn pre_update_hook_failed_display() {
-        let err = Error::PreUpdateHookFailed("exit code 1".to_string());
-        assert_eq!(err.to_string(), "Pre-update hook failed: exit code 1");
-    }
-
-    #[test]
-    fn post_update_hook_failed_display() {
-        let err = Error::PostUpdateHookFailed("exit code 2".to_string());
-        assert_eq!(err.to_string(), "Post-update hook failed: exit code 2");
-    }
-}

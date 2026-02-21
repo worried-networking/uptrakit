@@ -74,13 +74,6 @@ pub fn print_value(format: OutputFormat, value: &serde_json::Value) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Deserialize;
-
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
-    struct Sample {
-        name: String,
-        count: u32,
-    }
 
     #[test]
     fn default_format_is_human() {
@@ -95,106 +88,9 @@ mod tests {
     }
 
     #[test]
-    fn json_output_is_compact() {
-        let sample = Sample {
-            name: "test".to_string(),
-            count: 42,
-        };
-        let json = serde_json::to_string(&sample).expect("json serialization");
-        assert!(
-            !json.contains('\n'),
-            "compact JSON should not contain newlines"
-        );
-        assert_eq!(json, r#"{"name":"test","count":42}"#);
-    }
-
-    #[test]
-    fn yaml_output_is_valid() {
-        let sample = Sample {
-            name: "test".to_string(),
-            count: 42,
-        };
-        let yaml = serde_yaml_ng::to_string(&sample).expect("yaml serialization");
-        let parsed: Sample = serde_yaml_ng::from_str(&yaml).expect("yaml deserialization");
-        assert_eq!(parsed, sample);
-    }
-
-    #[test]
-    fn json_value_compact() {
-        let value = serde_json::json!({"key": "value", "num": 1});
-        let json = serde_json::to_string(&value).expect("json serialization");
-        assert!(!json.contains('\n'));
-    }
-
-    #[test]
-    fn yaml_value_valid() {
-        let value = serde_json::json!({"key": "value", "num": 1});
-        let yaml = serde_yaml_ng::to_string(&value).expect("yaml serialization");
-        let parsed: serde_json::Value =
-            serde_yaml_ng::from_str(&yaml).expect("yaml deserialization");
-        assert_eq!(parsed["key"], "value");
-        assert_eq!(parsed["num"], 1);
-    }
-
-    #[test]
-    fn json_handles_unicode() {
-        let sample = Sample {
-            name: "日本語テスト".to_string(),
-            count: 1,
-        };
-        let json = serde_json::to_string(&sample).expect("json serialization");
-        let parsed: Sample = serde_json::from_str(&json).expect("json deserialization");
-        assert_eq!(parsed.name, "日本語テスト");
-    }
-
-    #[test]
-    fn json_handles_empty_string() {
-        let sample = Sample {
-            name: String::new(),
-            count: 0,
-        };
-        let json = serde_json::to_string(&sample).expect("json serialization");
-        assert_eq!(json, r#"{"name":"","count":0}"#);
-    }
-
-    #[test]
-    fn nested_value_pretty_print_contains_newlines() {
-        let value = serde_json::json!({
-            "parent": {
-                "child": {
-                    "value": 42
-                }
-            }
-        });
-        let pretty = serde_json::to_string_pretty(&value).expect("pretty print");
-        assert!(
-            pretty.contains('\n'),
-            "pretty-printed JSON should contain newlines"
-        );
-        assert!(
-            pretty.contains("\"value\": 42"),
-            "should contain formatted nested value"
-        );
-    }
-
-    #[test]
-    fn yaml_handles_special_characters() {
-        let sample = Sample {
-            name: "test: value with \"quotes\" and 'apostrophes'".to_string(),
-            count: 99,
-        };
-        let yaml = serde_yaml_ng::to_string(&sample).expect("yaml serialization");
-        let parsed: Sample = serde_yaml_ng::from_str(&yaml).expect("yaml deserialization");
-        assert_eq!(parsed.name, sample.name);
-    }
-
-    #[test]
     fn print_output_human_uses_human_text() {
         // Verify Human format doesn't serialize through serde
-        let sample = Sample {
-            name: "test".to_string(),
-            count: 42,
-        };
+        let sample = serde_json::json!({"name": "test", "count": 42});
         let human_text = "Custom human output\n";
         // We can't capture stdout easily, but we verify the function
         // doesn't error for Human format
