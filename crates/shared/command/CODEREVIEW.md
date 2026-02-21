@@ -27,18 +27,8 @@ object-safe, enabling `Arc<dyn CommandExecutor>` usage.
 
 ## Extensibility Findings
 
-### ~~Minor: ShellType is an unnecessary alias~~ RESOLVED
-
-**Resolution:** Removed the `ShellType` alias. The command crate now uses `HookShell` from
-`uptrakit-shared-types` directly. `uptrakit-provider-core` re-exports `HookShell` from
-`uptrakit-shared-types`.
-
-### ~~Minor: UpdateOutputStream duplicates a subset of OutputStreamType~~ RESOLVED
-
-**Resolution:** Removed `UpdateOutputStream`. `UpdateOutputLine.stream` now uses `OutputStreamType`
-from `uptrakit-shared-types` directly. All downstream crates (providers, agent, agent-ssh) import
-`OutputStreamType` from their respective dependency paths. Bridge conversions in the agent were
-simplified to use the canonical type directly.
+All type duplication issues have been resolved: `ShellType` alias removed, `UpdateOutputStream` removed in favour of
+the canonical `OutputStreamType` from `uptrakit-shared-types`.
 
 ---
 
@@ -79,16 +69,6 @@ All `unwrap()` and `expect()` calls are exclusively in `#[cfg(test)]` blocks. Th
 
 All public items exported from `lib.rs` are used by downstream crates.
 
-### ~~LOW: `UpdateOutputLine` missing derive traits~~ (FIXED)
-
-**Resolution:** Added `#[derive(Clone, Debug)]` to `UpdateOutputLine`.
-
-### ~~LOW: Silent output truncation~~ (FIXED)
-
-**Resolution:** Added a `tracing::warn!` when the 10 MB truncation threshold is first hit (once
-per stream, tracked with a bool flag). A `\n[output truncated at 10 MB]\n` marker is appended
-to the accumulated output so callers know truncation occurred.
-
 ### INFORMATIONAL: No command timeout mechanism
 
 The crate has no built-in timeout for command execution. A hung process will block indefinitely. The caller is
@@ -123,4 +103,4 @@ documenting explicitly.
 | Dependencies        | PASS   | Minimal dependency set; all workspace-managed                    |
 | Test coverage       | PASS   | 37 tests covering success/failure paths, injection, all variants |
 | `unwrap`/`panic`    | PASS   | Zero in production code                                          |
-| Extensibility       | GOOD   | Well-designed trait; minor type duplication issues               |
+| Extensibility       | GOOD   | Well-designed trait; type duplication resolved                   |

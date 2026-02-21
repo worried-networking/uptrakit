@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { user, handleRegister } from '$lib/auth';
 	import { goto } from '$app/navigation';
+	import { isOnline } from '$lib/stores/network';
 
 	let email = $state('');
 	let firstName = $state('');
@@ -9,9 +10,11 @@
 	let showToken = $state(false);
 	let registrationToken = $state('');
 	let error = $state('');
+	let hasRedirected = false;
 
 	$effect(() => {
-		if ($user) {
+		if ($user && !hasRedirected) {
+			hasRedirected = true;
 			goto('/');
 		}
 	});
@@ -76,7 +79,10 @@
 			</label>
 		{/if}
 
-		<button type="submit" class="btn preset-filled-primary-500 w-full">Register</button>
+		<div class="flex items-center gap-2">
+			<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}>Register</button>
+			{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+		</div>
 	</form>
 
 	<p class="mt-4 text-center">

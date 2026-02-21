@@ -13,6 +13,7 @@
 	import { page } from '$app/stores';
 	import type { AuthMethodsResponse } from '$lib/types';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
+	import { isOnline } from '$lib/stores/network';
 
 	let email = $state('');
 	let password = $state('');
@@ -27,9 +28,11 @@
 	let registrationTokenRequired = $state(false);
 	let registrationCode = $state('');
 	let registrationTokenInput = $state('');
+	let hasRedirected = false;
 
 	$effect(() => {
-		if ($user) {
+		if ($user && !hasRedirected) {
+			hasRedirected = true;
 			goto('/');
 		}
 	});
@@ -178,7 +181,12 @@
 					placeholder="Paste the registration token here"
 				/>
 			</label>
-			<button type="submit" class="btn preset-filled-primary-500 w-full">Complete Registration</button>
+			<div class="flex items-center gap-2">
+				<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}
+					>Complete Registration</button
+				>
+				{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+			</div>
 		</form>
 	{:else if linkRequired}
 		<h2 class="h2 mb-6 text-center">Link Your Account</h2>
@@ -243,7 +251,10 @@
 					placeholder="Enter your password to verify"
 				/>
 			</label>
-			<button type="submit" class="btn preset-filled-primary-500 w-full">Link Account</button>
+			<div class="flex items-center gap-2">
+				<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}>Link Account</button>
+				{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+			</div>
 		</form>
 	{:else if !registrationTokenRequired}
 		<!-- Normal Login UI -->
@@ -285,7 +296,10 @@
 						<input class="input" type="password" bind:value={password} required autocomplete="current-password" />
 					</label>
 
-					<button type="submit" class="btn preset-filled-primary-500 w-full">Login</button>
+					<div class="flex items-center gap-2">
+						<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}>Login</button>
+						{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+					</div>
 				</form>
 
 				<p class="mt-4 text-center">

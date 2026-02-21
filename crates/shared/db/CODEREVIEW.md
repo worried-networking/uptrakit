@@ -22,13 +22,6 @@ The crate has two layers:
 
 ## Extensibility Findings
 
-### ~~Significant: all 34 entities in one crate~~ RESOLVED
-
-**Resolution:** The crypto module was extracted into a standalone `uptrakit-crypto` crate
-(`crates/shared/crypto/`). `shared-db` re-exports it for backward compatibility. Agent-ssh now
-depends on `uptrakit-crypto` directly, dropping its `shared-db` dependency entirely. This
-eliminates the compile-time and binary-size cost of 34 entity definitions for the SSH agent.
-
 ### Extensibility positives
 
 - **Re-exports enums from shared-types** (`MqttClientConnectionStatus`, `MqttTransport`,
@@ -75,86 +68,6 @@ production code.
 
 All `unwrap()`, `expect()`, and `panic!()` calls are exclusively in `#[cfg(test)]` blocks.
 
-### ~~MEDIUM: Bearer tokens as plaintext primary keys~~ RESOLVED
-
-**Resolution:** All 4 pending flow entities now use a UUID `id` as primary key with a SHA-256 hash column for lookups:
-
-| Entity | New PK | Hash column |
-| --- | --- | --- |
-| `pending_device_flow` | `id: Uuid` | `device_code_hash: String` (unique) |
-| `pending_account_link` | `id: Uuid` | `link_token_hash: String` (unique) |
-| `pending_oidc_registration` | `id: Uuid` | `registration_code_hash: String` (unique) |
-| `pending_oidc_token_exchange` | `id: Uuid` | `exchange_code_hash: String` (unique) |
-
-Bearer tokens are hashed via `hash_token()` (SHA-256, same as API tokens) before storage and lookup.
-The migration, 4 entity files, and 2 query files (`device_flow.rs`, `oidc_state.rs`) were updated.
-`user_code` in device flows remains unhashed (short-lived user-facing code, not a bearer token).
-
-### ~~MEDIUM: Master key not zeroized in memory~~ RESOLVED
-
-Resolved: Master key is now wrapped in `Zeroizing<[u8; 32]>` from the `zeroize` crate. `init_master_key()` accepts
-`Zeroizing<[u8; 32]>`. Defense-in-depth since `OnceLock` has `'static` lifetime.
-
-### ~~MEDIUM: `EncryptedString::new()` dev-mode fallback lacks warning~~ RESOLVED
-
-Resolved: `tracing::warn!("master key not configured; storing value as plaintext (development mode)")` is now emitted
-when the plaintext fallback path is taken.
-
-### ~~LOW: HA race condition on first token creation~~ RESOLVED
-
-**Resolution:** `verify_master_key()` now uses `insert_setting_if_absent()` (INSERT with ON CONFLICT DO NOTHING) instead
-of `upsert_setting()`. If the insert fails because another instance raced and stored a token first, the current instance
-re-reads the stored token and verifies it against the current master key. This ensures key mismatches are always detected
-even during simultaneous startup.
-
-### ~~LOW: Key verification error discards root cause~~ RESOLVED
-
-Resolved: The `Err` branch in `verify_key_verification_token` now logs the underlying decryption error at `debug` level
-via `tracing::debug!(error = %e, "key verification decryption failed")` before returning `MasterKeyMismatch`.
-
-### ~~LOW: No nonce collision documentation~~ RESOLVED
-
-~~With random 96-bit nonces and AES-256-GCM, the birthday bound for nonce collision is ~2^48 encryptions under the same
-key. This should be documented as a comment in the crypto module.~~
-
-**Resolution:** Added documentation to `encrypt_value()` in `uptrakit-crypto` covering nonce collision probability
-(birthday bound ~2^48), safety margins for the application's use case, and NIST SP 800-38D reference.
-
-### ~~LOW: No background re-encryption mechanism~~ RESOLVED
-
-~~Legacy plaintext values persist indefinitely in the database. A migration script or background task should be
-implemented to progressively encrypt them.~~
-
-**Resolution:** Added a startup re-encryption routine (`reencrypt.rs`) in the controller. After master key
-verification (Phase 4b), it scans all 5 encrypted columns across 4 tables (`ca_certificates.key_pem`,
-`oidc_providers.client_secret`, `mqtt_clients.password`, `mqtt_clients.ca_cert_pem`,
-`pending_oidc_flows.pkce_verifier`) for values lacking the `ENC:v1:` prefix. Plaintext values are re-encrypted
-in place. The routine is idempotent, HA-safe (last writer wins with identical result), and fault-tolerant
-(per-row errors are logged and skipped). `EncryptedString::is_db_value_encrypted()` was added to support the
-prefix check without exposing raw DB values.
-
-### ~~LOW: `DeviceAuthStatus` re-export location inconsistency~~ RESOLVED
-
-~~`pending_device_flow.rs` re-exports `DeviceAuthStatus` from within an entity module, while other shared type re-exports
-happen in `lib.rs`. Consider moving for consistency.~~
-
-**Resolution:** Moved `DeviceAuthStatus` re-export from `pending_device_flow.rs` to `lib.rs` alongside
-`MaskedEmail`, `MqttClientConnectionStatus`, `MqttTransport`, `OutputStreamType`, `SecretString`, and
-`SessionTokenType`. Downstream imports updated.
-
-### ~~LOW: `AuthMethod::from_session` data integrity assumption~~ RESOLVED
-
-~~When `kind == "oidc"` but `oidc_provider_id` is `None`, returns `None`. This is a data integrity invariant that depends
-on the DB schema enforcing `oidc_provider_id IS NOT NULL WHEN auth_method = 'oidc'`. If no CHECK constraint exists, this
-is a latent bug.~~
-
-**Resolution:** Three-pronged fix: (1) Added `CHECK(auth_method != 'oidc' OR oidc_provider_id IS NOT NULL)` to the
-sessions table in the initial migration. (2) Replaced `unwrap_or(AuthMethod::Password)` in `session.rs` (both
-`verify_refresh_token` and `rotate_refresh_token`) with `ok_or_else(|| report!(AuthError::InvalidSession))` that logs
-a warning and rejects the session. (3) Fixed `require_auth.rs` JWT path to return
-`AuthFailure::Unauthorized("Invalid OIDC session: missing provider")` instead of falling back to Password. Added
-`AuthError::InvalidSession` variant and two tests for corrupted OIDC sessions.
-
 ---
 
 ## Entity Layer Findings
@@ -186,15 +99,6 @@ and enables `HashSet`/`HashMap` usage. Entities containing `EncryptedString` (`c
 The field stores JSON but uses `column_type = "Text"`. Using `serde_json::Value` with `column_type = "Json"` would
 enable database-level JSON validation and query capabilities. May be intentional for SQLite compatibility.
 
-### ~~INFORMATIONAL: Sensitive data in `Debug` derives~~ (FIXED)
-
-~~Entities with sensitive `String` fields (`user.password_hash`) will expose those values through `Debug` output.
-`EncryptedString` properly redacts, but plain `String` fields do not get this protection. Note:
-`pending_oidc_flow.pkce_verifier` is now `EncryptedString` and benefits from automatic redaction.
-Consider custom `Debug` implementations for entities containing security-sensitive fields.~~
-
-**Resolution:** Changed `password_hash` from `Option<String>` to `Option<SecretString>` (redacted Debug/Display, zeroize-on-drop). Changed `email` from `String` to `MaskedEmail` (masked Debug/Display, full value preserved for serialization).
-
 ---
 
 ## Summary
@@ -208,8 +112,8 @@ Consider custom `Debug` implementations for entities containing security-sensiti
 | Error handling | PASS | rootcause/thiserror throughout |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | PKCE verifier | PASS | Now encrypted with `EncryptedString` |
-| Bearer token storage | ~~**MEDIUM**~~ FIXED | UUID PKs + SHA-256 hash columns for lookup |
-| Master key memory | PASS       | Wrapped in `Zeroizing<[u8; 32]>` (defense-in-depth) |
-| RoleMapping fallback | PASS       | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
+| Bearer token storage | PASS | UUID PKs + SHA-256 hash columns for lookup |
+| Master key memory | PASS | Wrapped in `Zeroizing<[u8; 32]>` (defense-in-depth) |
+| RoleMapping fallback | PASS | Sentinel error value on serialization failure (infallible for `HashMap<String, String>`) |
 | HA safety | PASS | Insert-then-verify pattern eliminates first-creation race |
-| Extensibility | ~~FAIR~~ GOOD | Crypto extracted to standalone `uptrakit-crypto` crate; agent-ssh no longer depends on shared-db |
+| Extensibility | GOOD | Crypto extracted to standalone `uptrakit-crypto` crate; agent-ssh no longer depends on shared-db |

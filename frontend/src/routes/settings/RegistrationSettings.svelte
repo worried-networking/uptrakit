@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { updateRegistrationSettings } from '$lib/api';
 	import type { RegistrationSettings } from '$lib/types';
+	import { isOnline } from '$lib/stores/network';
 
 	let {
 		onSuccess,
@@ -70,5 +71,8 @@
 		>
 	{/if}
 
-	<button class="btn preset-filled-primary-500" onclick={saveRegistration}> Save </button>
+	<div class="flex items-center gap-2">
+		<button class="btn preset-filled-primary-500" onclick={saveRegistration} disabled={!$isOnline}> Save </button>
+		{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+	</div>
 </div>

@@ -7,9 +7,7 @@ Reviewed: `src/main.rs` (343 lines), `src/mqtt_client.rs` (439 lines),
 
 The MQTT crate is clean and well-structured with proper credential redaction,
 hash-based config change detection, and graceful shutdown. It serves as a
-good example of a service built with the SDK. Key issues are limited TLS
-configuration for MQTT broker connections, a missing handler for
-`MqttClientCreated`, and no proactive certificate renewal timer.
+good example of a service built with the SDK.
 
 ## Role in the Architecture
 
@@ -24,60 +22,6 @@ Validates the service SDK's extensibility: if a new service type follows the
 same pattern, it would have a similarly clean dependency chain.
 
 ## Findings
-
-### Medium
-
-#### ~~M1: TLS configuration uses empty CA — no pinned CA support~~ (FIXED)
-
-**Resolution:** Added optional `ca_pem: Option<SecretString>` field
-end-to-end: DB entity (`ca_cert_pem` as `EncryptedString`), wire protocol
-(`MqttTenantConfig.ca_pem`), `MqttConfig`, web API types
-(create/update/response), store, routes, CLI, and frontend. When present,
-the PEM bytes are passed to `TlsConfiguration::Simple { ca }`. The CA
-certificate is encrypted at rest and redacted in API responses
-(`has_ca_cert: bool`).
-
-#### ~~M2: `MqttClientCreated` message not handled~~ (RESOLVED)
-
-**Resolution:** `MqttClientCreated` is a controller-to-controller outbox
-event handled by the event poller (`event_poller.rs`), not a message sent
-to the MQTT service. The MQTT service correctly ignores it via the wildcard
-arm and receives client assignments exclusively via `TenantAssignments`.
-No code change needed.
-
-#### ~~M3: No proactive certificate renewal timer~~ (FIXED)
-
-**Resolution:** Added proactive certificate renewal timer using the shared
-`create_renewal_sleep()`, `update_renewal_schedule()`, and
-`handle_renewal_timer()` helpers from the service-sdk. The MQTT service
-now renews certificates independently of controller-pushed
-`RequestCertRenewal` messages, matching the agent's behavior.
-
-### Low
-
-#### ~~L1: Credentials stored as plain `String` in `MqttConfig`~~ (FIXED)
-
-**Resolution:** `MqttConfig.username` and `MqttConfig.password` are now
-`Option<SecretString>`. `build_config_from_wire()` clones the `SecretString`
-instead of extracting plaintext. Credentials are only exposed at the point
-of passing to `MqttOptions::set_credentials()`.
-
-#### ~~L2: `compute_config_hash` uses `DefaultHasher` (non-deterministic)~~ (FIXED)
-
-**File:** `src/tenant_manager.rs`
-
-`DefaultHasher` uses `SipHash` which is randomized per process (different
-seed each run). This is fine for within-process change detection (the
-intended use), but worth noting that hashes are not comparable across
-process restarts.
-
-**Resolution:** Added an expanded doc comment to `compute_config_hash` explaining
-the `DefaultHasher` choice and its lifetime constraints:
-
-> Uses `DefaultHasher` (SipHash with a per-process random seed), so hashes are only
-> valid within the same process lifetime. This is correct for the intended use:
-> detecting config changes between consecutive `TenantAssignments` messages during a
-> single service run. Hashes are not persisted or compared across process restarts.
 
 ### Info
 

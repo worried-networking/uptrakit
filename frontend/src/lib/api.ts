@@ -42,6 +42,11 @@ import type {
 const BASE = '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
+const MAX_ERROR_LENGTH = 500;
+
+function truncateError(msg: string): string {
+	return msg.length > MAX_ERROR_LENGTH ? msg.slice(0, MAX_ERROR_LENGTH) + '\u2026' : msg;
+}
 
 export async function extractErrorMessage(res: Response): Promise<string> {
 	const text = await res.text();
@@ -49,12 +54,12 @@ export async function extractErrorMessage(res: Response): Promise<string> {
 	try {
 		const parsed = JSON.parse(text);
 		if (typeof parsed === 'object' && parsed !== null && typeof parsed.error === 'string') {
-			return parsed.error;
+			return truncateError(parsed.error);
 		}
 	} catch {
 		/* Not JSON */
 	}
-	return text;
+	return truncateError(text);
 }
 
 function authHeaders(): Record<string, string> {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { updateAuthenticationSettings } from '$lib/api';
 	import type { AuthenticationSettings } from '$lib/types';
+	import { isOnline } from '$lib/stores/network';
 
 	let {
 		onSuccess,
@@ -35,5 +36,8 @@
 		<input class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
 		<span>Enable password authentication</span>
 	</label>
-	<button class="btn preset-filled-primary-500" onclick={saveAuthentication}> Save </button>
+	<div class="flex items-center gap-2">
+		<button class="btn preset-filled-primary-500" onclick={saveAuthentication} disabled={!$isOnline}> Save </button>
+		{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+	</div>
 </div>

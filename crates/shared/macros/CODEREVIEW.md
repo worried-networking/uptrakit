@@ -40,17 +40,6 @@ implementations.
 The `$source:ty` fragment specifier correctly handles paths like `tokio_tungstenite::tungstenite::Error`. Confirmed by
 widespread usage.
 
-### ~~HIGH: Zero dedicated tests~~ RESOLVED
-
-**Resolution:** Created `tests/report_conversion.rs` with comprehensive tests exercising all three macro arms (simple
-variant mapping, closure-based transform, multi-conversion syntax) with runtime assertions. Added `thiserror` as a
-dev-dependency.
-
-### ~~MEDIUM: Multi-arm syntax does not support closure-based transforms (undocumented)~~ RESOLVED
-
-**Resolution:** Added a note to the doc comment documenting that closure-based transforms must be written as separate
-single invocations and cannot be mixed in the multi-conversion syntax.
-
 ### LOW: `$target:ident` prevents multi-segment target paths
 
 The fragment specifier only accepts a single identifier (e.g., `MyError`), not paths like `module::MyError`. Acceptable

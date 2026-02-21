@@ -20,12 +20,6 @@ non-standard lock-poisoning pattern. No critical issues.
 
 | # | Severity | Category | Location | Description | Suggested fix |
 | --- | --- | --- | --- | --- | --- |
-| W-1 | ~~Medium~~ | ~~Safety~~ | ~~`routes/ocsp.rs:42`~~ | ~~RESOLVED: `unwrap_or_default()` replaced with explicit `match` that logs via `tracing::debug!` and returns a malformed-request OCSP response directly on UTF-8 decode failure.~~ | ~~Done~~ |
-| W-2 | ~~Medium~~ | ~~Safety~~ | ~~`ocsp.rs:218`~~ | ~~RESOLVED: `unwrap_or_default()` replaced with `match` that logs at `error` level on DER encoding failure and returns a hardcoded DER-encoded InternalError response.~~ | ~~Done~~ |
-| W-3 | ~~Medium~~ | ~~Standards~~ | ~~`middleware/rate_limit.rs:121-123`~~ | ~~RESOLVED: `.unwrap_or_else(\|poisoned\| poisoned.into_inner())` replaced with `.unwrap()` per approved exception pattern.~~ | ~~Done~~ |
-| W-4 | ~~Low~~ | ~~Code Quality~~ | ~~`middleware/require_auth.rs`~~ | ~~RESOLVED: Trailing `\n` removed from all six `AuthFailure` string literals.~~ | ~~Done~~ |
-| W-5 | ~~Low~~ | ~~Code Quality~~ | ~~`routes/api_tokens.rs:42,79`~~ | ~~RESOLVED: `unwrap_or_default()` replaced with `.unwrap_or_else(\|_\| dt.to_string())` for informative fallback, consistent with `format_rfc3339()` helper used in hosts, services, and software_items routes.~~ | ~~Done~~ |
-| W-6 | ~~Low~~ | ~~Code Quality~~ | ~~`routes/scheduler.rs:31,35,36`~~ | ~~RESOLVED: Same fix as W-5; `unwrap_or_default()` replaced with `.unwrap_or_else(\|_\| dt.to_string())`. Also fixed in `routes/provider_configs.rs`.~~ | ~~Done~~ |
 | W-7 | Info | Security | `auth/refresh_cookie.rs:16` | `SameSite=Strict; HttpOnly; Secure` cookie attributes are correctly set. CSRF protection is properly handled via `SameSite=Strict`. | None needed. |
 | W-8 | Info | Architecture | `lib.rs` | No CORS middleware present. Correct by design since the SvelteKit frontend is served from the same origin. | None needed. |
 | W-9 | Info | Testing | `ocsp.rs:515` | `panic!("expected ResponderID::ByKey")` in `#[cfg(test)]` function. Acceptable for test assertions. | None needed. |

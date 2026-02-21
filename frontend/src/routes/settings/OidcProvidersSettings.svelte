@@ -11,6 +11,7 @@
 	import { isValidLogoUrl } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
+	import { isOnline } from '$lib/stores/network';
 
 	let {
 		onSuccess,
@@ -340,9 +341,10 @@
 				></textarea>
 			</label>
 
-			<div class="flex justify-end gap-2">
+			<div class="flex justify-end gap-2 items-center">
+				{#if !$isOnline}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
 				<button class="btn preset-tonal-surface" onclick={closeOidcModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveOidcProvider}>
+				<button class="btn preset-filled-primary-500" onclick={saveOidcProvider} disabled={!$isOnline}>
 					{editingProvider ? 'Update' : 'Create'}
 				</button>
 			</div>

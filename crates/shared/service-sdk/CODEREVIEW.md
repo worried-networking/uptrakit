@@ -9,9 +9,8 @@ lines), `src/connection.rs` (171 lines), `src/tls.rs` (216 lines),
 
 The service SDK is well-organized with clean trait boundaries and thorough
 error categorization via domain sub-enums. Key issues are the `ServiceType`
-enum constraining new service types at the enrollment boundary,
-non-semantic error variant reuse for URL/directory failures, and the inherent
-TOFU security trade-off (documented by design).
+enum constraining new service types at the enrollment boundary and the
+inherent TOFU security trade-off (documented by design).
 
 ## Role in the Architecture
 
@@ -23,30 +22,13 @@ new service types would use this crate as their primary dependency.
 
 ### High — Extensibility
 
-#### ~~E1: `ServiceType` enum constrains new service types~~ (ACCEPTED)
+#### E1: `ServiceType` enum constrains new service types (ACCEPTED)
 
-**Resolution:** Accepted as a deliberate design tradeoff. All service types
+Accepted as a deliberate design tradeoff. All service types
 are first-party and compiled together. The centralized `ServiceType` enum
 provides exhaustive matching and compile-time safety across the enrollment
 boundary. Adding a new service type requires modifying the `ServiceType`
 enum in `shared-types`, which is acceptable given the current architecture.
-
-### Medium
-
-#### ~~M1: Non-semantic error variant reuse for lifecycle initialization failures~~ (FIXED)
-
-**Resolution:** Added `ProtocolError::Init(String)` variant for pre-protocol
-initialization failures (URL parsing, directory creation). Updated
-`lifecycle.rs` to use `ProtocolError::Init(...)` instead of
-`ProtocolError::Enrollment(...)` for these cases.
-
-#### ~~M2: `recv()` silently ignores unrecognized controller messages~~ (FIXED)
-
-**Resolution:** Sequence validation is now performed before full message
-deserialization using a minimal `SeqOnly` struct that extracts just the
-`seq` field. This ensures unrecognized messages correctly advance the
-sequence counter without causing mismatches on subsequent messages. Applied
-to both text and binary message handlers.
 
 ### Low
 
@@ -64,25 +46,6 @@ trivial MITM attacks. The comment at line 131-132 documents the intent.
 
 **Recommendation:** No change needed. Consider adding a log warning when
 TOFU mode is active (if not already present in `ca.rs`).
-
-#### ~~L2: `Reconnect` outcome has a hardcoded 2-second delay~~ (FIXED)
-
-**File:** `src/lifecycle.rs`
-
-After a `LoopOutcome::Reconnect` (certificate rotation), the lifecycle
-sleeps for a hardcoded 2 seconds before reconnecting.
-
-**Resolution:** Extracted the delay into a named constant with a doc comment:
-
-```rust
-/// Delay before reconnecting after certificate rotation. Allows the
-/// controller to finalize rotation before the service reconnects with
-/// its new certificate.
-const CERT_RECONNECT_DELAY: Duration = Duration::from_secs(2);
-```
-
-The constant is now self-documenting and easy to locate if the delay needs
-adjustment in future.
 
 ### Info
 

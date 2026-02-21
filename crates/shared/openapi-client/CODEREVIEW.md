@@ -9,40 +9,9 @@
 
 The crate provides a typed HTTP client around the Uptrakit web API with strong
 error handling and solid type safety. No critical issues were found. The main
-improvement area is resiliency (timeouts and optional retry strategy).
+improvement area is resiliency (pagination iterator and optional retry strategy).
 
 ## Code Quality Findings
-
-### ~~O-1 (Medium): Missing request/connect timeouts~~ (FIXED)
-
-**Resolution:** Added `connect_timeout(10s)` and `timeout(30s)` to the
-`reqwest::Client` builder in `UptrakitClient::new()`.
-
-### ~~O-2 (Medium): 429 handling lacks actionable retry metadata~~ (FIXED)
-
-**Resolution:** `ClientError::RateLimited` is now a struct variant with
-`retry_after_seconds: Option<u64>`. The `Retry-After` header is parsed from 429
-responses (seconds format). The CLI auth polling loop uses the parsed value when
-available, falling back to the configured interval. Tests added for
-`parse_retry_after` (valid seconds, missing header, non-numeric).
-
-### ~~O-3 (Low): 401 is not represented as a dedicated error variant~~ (FIXED)
-
-**Resolution:** Added `ClientError::NotAuthenticated` variant. All three
-response handlers (`handle_response`, `handle_empty_response`,
-`handle_text_response`) now check for 401 before generic 4xx/5xx mapping. The
-CLI error formatter maps `NotAuthenticated` to a user-friendly message.
-
-### ~~O-4 (Low): One endpoint bypasses helper pattern~~ (FIXED)
-
-~~**Location:** `crates/shared/openapi-client/src/auth.rs`~~
-
-~~`device_auth_poll` manually constructs and sends the request while most methods
-use shared helper functions.~~
-
-**Resolution:** Replaced manual URL construction and request sending with
-`self.post_json_unauth("/api/v1/auth/device/poll", req)`. Removed unused
-`rootcause` import from `auth.rs`.
 
 ### O-5 (Info): Raw response fallback is intentional and acceptable
 

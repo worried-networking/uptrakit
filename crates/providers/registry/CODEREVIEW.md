@@ -10,17 +10,11 @@ provider implementations.
 
 ## Findings
 
-### ~~Critical: hardcoded match arms for every operation~~ (FIXED)
+### Significant: no dynamic provider registration mechanism (ACCEPTED)
 
-**Resolution:** Replaced all four match blocks with a `register_providers!` declarative macro.
-Adding a new provider now requires a single entry in the macro invocation. All provider
-`new()` constructors now consistently return `Result<Self>` and validate their config.
-
-### ~~Significant: no dynamic provider registration mechanism~~ (ACCEPTED)
-
-**Resolution:** Accepted as a deliberate design tradeoff. All providers are
+Accepted as a deliberate design tradeoff. All providers are
 first-party and compiled together via the `register_providers!` macro. The
-macro-based registration (completed earlier) reduces adding a new provider
+macro-based registration reduces adding a new provider
 to a single entry in the macro invocation. Dynamic registration is not needed
 given the current architecture.
 

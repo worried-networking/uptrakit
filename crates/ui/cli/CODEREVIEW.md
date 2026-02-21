@@ -15,8 +15,7 @@ config.rs, error.rs, output.rs, commands/{mod,api,auth,check,history,hosts,sched
 The `uptrakit-cli` crate is a well-structured CLI application built on `clap` that provides
 comprehensive coverage of the controller's REST API via the `uptrakit-openapi-client`. The
 codebase is clean, follows project error-handling conventions, and has good test coverage for
-argument parsing. However, there are security concerns around credential storage, several
-code quality inconsistencies, and a semantic bug in the `check` command.
+argument parsing.
 
 ### Severity Legend
 
@@ -48,99 +47,6 @@ The CLI depends only on `uptrakit-openapi-client`, `uptrakit-build-info`, and
 
 ---
 
-## 1. Security & Safety
-
-### ~~S-2: API token visible in process listing via `--token` flag~~ [FIXED]
-
-**Resolution:** Added `env = "UPTRAKIT_TOKEN"` and `env = "UPTRAKIT_SERVER"` attributes
-to the `--token` and `--server` clap arguments. Priority: CLI arg > env var > stored
-credentials. Environment variables are the recommended approach for automation.
-
----
-
-### ~~S-3: No URL validation before opening in browser~~ [FIXED]
-
-**Resolution:** Added `validate_url_scheme()` function that allows only `https://` URLs
-(or `http://` when `--insecure` is active). The validation runs before `open_url()` in the
-device auth login flow. Dangerous schemes (`file://`, `javascript:`, etc.) are rejected.
-Tests added.
-
----
-
-### ~~S-4: No warning when `--insecure` flag is used~~ [FIXED]
-
-**Resolution:** Added a stderr warning (`WARNING: TLS certificate verification is
-disabled. Connection is insecure.`) when `--insecure` is active, printed before
-dispatching commands.
-
----
-
-## 2. Architecture
-
-### ~~A-1: `check::installed` and `check::available` are functionally identical~~ [FIXED]
-
-**Resolution:** Collapsed `check installed` and `check available` into a single
-`check item` subcommand. The `installed()` and `available()` functions were removed
-and replaced with `item()`. CLI tests updated to match.
-
----
-
-### ~~A-2: Duplicated auth resolution logic~~ [FIXED]
-
-**Resolution:** Extracted `resolve_server_and_token()` into `client.rs`. Both
-`authenticated_client()` and `auth.rs` (formerly `resolve_auth()`) now use
-the shared function. The private `resolve_auth()` function was removed.
-
----
-
-### ~~A-3: Inconsistent parameter passing patterns across commands~~ [FIXED]
-
-**Resolution:** All 9 functions with loose parameters have been converted to parameter structs:
-`hosts::ListParams`, `hosts::ShowParams`, `software_items::ListParams`, `software_items::ShowParams`,
-`scheduler::ListParams`, `scheduler::ShowParams`, `scheduler::TriggerParams`, `check::AllParams`,
-`check::ItemParams`. All call sites in `main.rs` updated accordingly.
-
----
-
-## 3. Code Quality
-
-### ~~Q-1: Human output formatting has inconsistent spacing after colons~~ [FIXED]
-
-**Resolution:** Added missing spaces after colons in `hosts.rs`, `services.rs`,
-and `settings.rs` (5 locations).
-
-### ~~Q-2: Auth output types use `String` instead of `Uuid` for IDs~~ [FIXED]
-
-**Resolution:** Changed `user_id`, `id` fields in `AuthStatusOutput`, `TokenCreateOutput`,
-`TokenEntry`, and `TokenRevokeOutput` from `String` to `Uuid`. Updated all construction
-sites and tests.
-
-### ~~Q-3: `update::trigger` human output uses `{:?}` (Debug format) for status~~ [FIXED]
-
-**Resolution:** Changed `{:?}` to `{}` in `update.rs` and added `Display` impl for
-`TriggerUpdateStatus` in `web-api-types`.
-
-### ~~Q-4: `status_text()` in `api.rs` has limited coverage~~ [LOW] (FIXED)
-
-Replaced hand-written `status_text()` function with `StatusCode::canonical_reason()`, which covers all standard HTTP status codes.
-
-### ~~Q-5: `api.rs` mixes stderr and stdout for Human format~~ [LOW] (FIXED)
-
-**Resolution:** Changed `eprintln!` to `println!` for the HTTP status line in Human
-format output. All output (status line and body) now goes to stdout consistently.
-Stderr is reserved for actual errors/warnings (e.g., `--insecure` warning).
-
-### ~~Q-6: `TokenEntry::created_at` and `TokenEntry::status` use raw strings~~ [LOW] (PARTIALLY FIXED)
-
-~~Could use typed datetime and enum respectively.~~
-
-**Resolution:** `TokenEntry::status` now uses a `TokenStatus` enum (`Active`/`Revoked`) with `Display` and
-`Serialize` impls. `TokenEntry::created_at` remains `String` (ISO 8601 from the API) with a doc comment —
-parsing to `time::OffsetDateTime` is unnecessary overhead for display-only data. Tests added for
-`TokenStatus` serialization and display.
-
----
-
 ## 4. High Availability
 
 ### H-1: No timeout configuration for API calls [LOW]
@@ -154,26 +60,6 @@ Acceptable for a CLI tool; user can retry manually.
 ---
 
 ## 5. Coding Standards Compliance
-
-### ~~C-1: `ensure_dirs()` not called before config/credential file operations~~ [FIXED]
-
-**Resolution:** Added `dirs.ensure_config_dir()` call in `save_config()` before writing,
-matching `save_credentials()` which already calls `dirs.ensure_state_dir()`. Also added
-`ensure_config_dir()` method to the directories crate.
-
-### ~~C-2: Missing test coverage for command execution logic~~ [MEDIUM] (FIXED)
-
-~~60+ tests for CLI argument parsing, but no tests for error paths, config loading, or
-formatting logic.~~
-
-**Resolution:** Added 5 output formatting tests to `output.rs`: Unicode handling, empty
-strings, nested value pretty-print, YAML special characters, and Human format passthrough.
-Added 14 integration tests in `tests/command_execution.rs` using a feature-gated
-`MockApiServer` from `uptrakit-openapi-client`. Tests cover `hosts::list` (success, empty,
-JSON format), `hosts::show` (success, not found, with agents), `services::list`, `services::approve`
-(success, not found), `services::remove`, `software_items::list`, and HTTP error handling for
-401/429/500 responses. Total: 89+ tests. The CLI crate now has a `[lib]` target alongside the
-`[[bin]]` to allow integration test imports.
 
 ### C-3: No `#[non_exhaustive]` on public output structs [LOW]
 
@@ -191,24 +77,3 @@ Low priority since types are only used within the crate.
 - **Device auth flow** correctly handles polling with rate limiting, timeout, and expiry.
 - **CLI parsing tests** are comprehensive with 60+ test cases.
 - **Output format support** (Human/JSON/YAML) is consistent across all commands.
-
----
-
-## Fix Priority
-
-| Priority | ID | Description |
-| --- | --- | --- |
-| ~~1~~ | ~~A-1~~ | ~~Fix or collapse `check installed`/`check available`~~ (FIXED) |
-| ~~2~~ | ~~Q-1~~ | ~~Fix human output spacing inconsistencies~~ (FIXED) |
-| ~~3~~ | ~~Q-2~~ | ~~Use `Uuid` for auth output ID fields~~ (FIXED) |
-| ~~4~~ | ~~Q-3~~ | ~~Fix Debug format in update trigger output~~ (FIXED) |
-| ~~5~~ | ~~A-2~~ | ~~Extract shared auth resolution logic~~ (FIXED) |
-| ~~6~~ | ~~S-2~~ | ~~Add environment variable support for token/server~~ (FIXED) |
-| ~~7~~ | ~~S-3~~ | ~~Validate URL before opening in browser~~ (FIXED) |
-| ~~8~~ | ~~A-3~~ | ~~Standardize parameter passing (struct vs loose)~~ (FIXED) |
-| ~~9~~ | ~~C-1~~ | ~~Call `ensure_dirs()` in config operations~~ (FIXED) |
-| ~~10~~ | ~~C-2~~ | ~~Add tests for formatting and error paths~~ (FIXED) |
-| ~~11~~ | ~~S-4~~ | ~~Warn on `--insecure` usage~~ (FIXED) |
-| ~~12~~ | ~~Q-4~~ | ~~Expand status_text coverage~~ (FIXED) |
-| ~~14~~ | ~~Q-6~~ | ~~Use typed enum for `TokenEntry::status`~~ (PARTIALLY FIXED) |
-| ~~13~~ | ~~Q-5~~ | ~~Document or fix stderr/stdout mixing in api command~~ (FIXED) |

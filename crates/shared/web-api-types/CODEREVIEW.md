@@ -19,121 +19,10 @@ gated for `openapi` (utoipa schema generation).
 
 ## Code Quality Findings
 
-### ~~HIGH: No field validation on request types~~ RESOLVED
-
-**Resolution:** Added a `Validate` trait (in `validation.rs`) with `ValidationError { field, message }`. Implemented
-`Validate` for 7 request types: `RegisterRequest` (email format, first_name non-empty, password 8-1024 chars),
-`LoginRequest` (email format, password non-empty), `CreateOidcProviderRequest` (name non-empty, slug format,
-issuer_url scheme, client_id non-empty), `UpdateScheduledTaskRequest` (cron non-empty, 5 fields),
-`UpdateNetworkSettingsRequest` (trusted_proxies items non-empty, real_ip_header non-empty, pki_addr URL format),
-`CreateSoftwareItemRequest` (name non-empty, exactly one of provider_config_id/provider_config),
-`CreateProviderConfigRequest` (name non-empty). All 7 route handlers wire `req.validate()` at entry, returning 400
-on failure. 18 tests added.
-
-### ~~HIGH: Secrets in plain `String` fields~~ (FIXED)
-
-**Resolution:** All secret fields now use `SecretString` from `uptrakit-shared-types`. This includes passwords,
-tokens, client secrets, access tokens, and refresh tokens across request and response types. `SecretString`
-provides transparent serde, redacted `Debug`/`Display`, and `ZeroizeOnDrop`.
-
-### ~~MEDIUM: Inconsistent `skip_serializing_if` for `Option` fields~~ (FIXED)
-
-**Resolution:** Removed `#[serde(skip_serializing_if = "Option::is_none")]` from all response type `Option` fields
-(`DeviceAuthPollResponse`, `ErrorResponse`, `SystemAlert`, `NetworkSettingsResponse`, `ReleaseAssetInfoRequest`,
-`TriggerUpdateRequest`). All `Option` fields now consistently serialize as `null` when `None`. Kept
-`skip_serializing_if` on request types with PATCH semantics (`CreateMqttClientRequest`, `UpdateMqttClientRequest`)
-and configuration types (`UpdateHookConfig`, `HooksConfig`, `DockerComposeHook`) where absent-vs-null distinction
-is meaningful.
-
-### ~~MEDIUM: `UpdateMqttClientRequest` type mismatch between `username` and `password`~~ (FIXED)
-
-**Resolution:** `password` now uses `Option<serde_json::Value>` (matching `username`) with three-state
-semantics: omit = keep, null = clear, string = set. The route handler parses both fields identically.
-
-### ~~MEDIUM: `ListAgentsQuery` uses `ToSchema` instead of `IntoParams`~~ (NOT APPLICABLE)
-
-**Resolution:** `ListAgentsQuery` does not exist. Agents use `ListServicesQuery` which correctly uses
-`IntoParams`. This finding was a false positive.
-
-### ~~MEDIUM: `uses_remaining` allows negative values~~ (FIXED)
-
-**Resolution:** Changed `uses_remaining` from `Option<i32>` to `Option<u32>` in `MqttEnrollmentTokenResponse`,
-`MqttEnrollmentTokenListResponse`, and `CreateMqttEnrollmentTokenRequest`.
-
-### ~~MEDIUM: Missing test coverage for many modules~~ RESOLVED
-
-~~The following have **zero tests**: `api_tokens`, `hosts`, `oidc_auth`, `provider_configs`, `scheduler`, `server_cert`,
-`services`, `settings`, `settings_agent_certs`, `settings_auth`, `settings_ca`, `settings_combined`, `settings_network`,
-`software_items`, `registration`.~~
-
-**Resolution:** Added 75 tests across 6 critical modules in earlier iteration: `api_tokens` (10), `hosts` (11),
-`services` (9), `software_items` (20), `scheduler` (14), `registration` (14). Then added 54 more tests across
-7 modules: `provider_configs` (7 tests: serde round-trips, Validate rejection/acceptance, defaults),
-`settings_network` (8 tests: serde round-trips, Validate for empty proxies/header/pki_addr, scheme acceptance),
-`oidc_auth` (5 tests: serde round-trips for all 6 structs including SecretString fields),
-`oidc_providers` (9 tests: serde round-trips, Validate for empty name, slug too long, invalid slug, invalid issuer_url,
-empty client_id, valid request, defaults), `settings` (2 tests: serde round-trips),
-`settings_auth` (2 tests: serde round-trips), `settings_agent_certs` (2 tests: serde round-trips),
-`settings_combined` (2 tests: serde round-trips). Total: 243 tests. Only `server_cert` and `settings_ca` remain
-untested (1-line re-exports with no logic to test).
-
-Well-tested modules (good examples): `pagination`, `mqtt_url`, `update_hooks`, `system_alerts`, `settings_mqtt`.
-
-### ~~MEDIUM: Coarse permission model~~ (FIXED)
-
-**Resolution:** Added 4 new permission variants: `ViewSoftware`, `ManageSoftware`,
-`ViewHosts`, `ManageHosts`. Total is now 9 permissions. Route guards updated:
-hosts use `ViewHosts`/`ManageHosts`, software items and provider configs use
-`ViewSoftware`/`ManageSoftware`, update history uses `ViewSoftware`, scheduler
-uses `ManageSoftware`. A backward-compatible migration grants new permissions to
-existing roles that have the corresponding old (broader) permission. Frontend
-permission checks updated accordingly.
-
-### ~~LOW: Duplicate `default_enabled()` functions~~ RESOLVED
-
-**Resolution:** Moved `default_enabled()` to `lib.rs` as a single crate-level function. Both
-`provider_configs.rs` and `software_items.rs` now reference `crate::default_enabled`.
-
-### ~~LOW: Duplicate message response types~~ RESOLVED
-
-**Resolution:** `HostMessageResponse`, `RenewServerCertResponse`, and `RotateCaResponse` are now
-re-exports of the canonical `MessageResponse` from `agents.rs` via `pub use ... as`. Duplicate
-OpenAPI schema entries removed.
-
 ### LOW: Timestamps as `String` instead of typed datetime
 
 Throughout the crate, timestamps use `String`. Using `time::OffsetDateTime` or similar would provide compile-time format
 guarantees.
-
-### ~~LOW: Query filter parameters use raw `String` instead of typed enums~~ RESOLVED
-
-**Resolution:** `ListServicesQuery.r#type` is now `Option<ServiceType>`, `ListServicesQuery.status` is now
-`Option<ServiceStatus>`, and `UpdateHistoryQuery.status` is now `Option<UpdateStatus>`. Invalid filter values
-are rejected at deserialization time by axum/serde with a 400 error. Route handlers, CLI, and openapi-client
-tests updated accordingly. (`ListMqttServicesQuery.status` was a false positive -- it does not exist.)
-
-### ~~LOW: `ProviderConfigResponse.provider_type` is `String` not `ProviderType`~~ RESOLVED
-
-**Resolution:** Changed `provider_type` field from `String` to `ProviderType`. The response builder
-(`provider_config_response_from`) now returns `Option<ProviderConfigResponse>`, logging and skipping rows with
-invalid `provider_type` values. Callers use `filter_map` (list) or `match` (get/create/update).
-
-### ~~LOW: Missing `Display` implementations for some enums~~ RESOLVED
-
-**Resolution:** Added `Display` impls (delegating to `as_str()`) for `UpdateStatus`,
-`RegistrationMode`, `SystemdAction`, and `DockerComposeAction`. Tests verify
-`display_matches_as_str` for all four.
-
-### ~~LOW: Missing OpenAPI schema derives on update hooks types~~ RESOLVED
-
-**Resolution:** Added `#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]` to all 7 public types in
-`update_hooks.rs`: `SystemdAction`, `DockerComposeAction`, `SystemdServiceHook`, `DockerComposeHook`,
-`PredefinedHook`, `UpdateHookConfig`, `HooksConfig`. Also added the derive to `HookShell` in `uptrakit-shared-types`.
-
-### ~~LOW: `HookValidationError` does not use `thiserror`~~ RESOLVED
-
-**Resolution:** Converted from manual `impl Display` + `impl Error` to `#[derive(thiserror::Error)]` with
-`#[error("{field}: {message}")]`.
 
 ### PASS: No production `unwrap`/`panic`
 
@@ -177,13 +66,13 @@ serialization. 16 thorough tests.
 
 | Category | Status | Notes |
 | --- | --- | --- |
-| Input validation | ~~**HIGH**~~ FIXED | `Validate` trait + impls for 7 request types, wired into route handlers |
-| Secret handling | ~~**HIGH**~~ FIXED | All secret fields now use `SecretString` |
+| Input validation | PASS | `Validate` trait + impls for 7 request types, wired into route handlers |
+| Secret handling | PASS | All secret fields now use `SecretString` |
 | Wire dependency | PASS | `HookShell` now imported from `uptrakit-shared-types` directly |
 | OpenAPI correctness | PASS | All hooks types now have OpenAPI schema derives |
 | Serialization | GOOD | Correct attributes; minor consistency issues |
 | Pagination | PASS | Well-implemented and well-tested |
-| Permission model | ~~FAIR~~ GOOD | 9 variants after adding ViewSoftware, ManageSoftware, ViewHosts, ManageHosts |
+| Permission model | GOOD | 9 variants after adding ViewSoftware, ManageSoftware, ViewHosts, ManageHosts |
 | Test coverage | EXCELLENT | 243 tests; only `server_cert` and `settings_ca` (1-line re-exports) remain untested |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | Type safety | GOOD | Typed enums for query filters; `ProviderConfigResponse.provider_type` typed; `uses_remaining` now `u32` |

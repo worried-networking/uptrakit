@@ -90,6 +90,7 @@
 		<header
 			class="relative z-[60] flex items-center justify-between border-b border-surface-200 px-4 py-1 shadow-xs dark:border-surface-700"
 		>
+			<a href="#main-content" class="skip-link">Skip to main content</a>
 			<a href="/" class="text-xl font-bold">Uptrakit</a>
 			<div class="flex items-center gap-2">
 				{#if $user}
@@ -166,7 +167,7 @@
 			{/if}
 
 			<!-- Main content -->
-			<main class="flex-1 overflow-auto">
+			<main id="main-content" class="flex-1 overflow-auto">
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
 				<div class="container mx-auto max-w-2xl p-4">

@@ -5,9 +5,7 @@ Reviewed: `src/lib.rs` (2188 lines), `src/close_reason.rs` (210 lines), `Cargo.t
 ## Summary
 
 The wire crate is well-structured with strong serialization test coverage and
-backward compatibility. Key issues are inconsistent use of `thiserror`,
-missing `#[non_exhaustive]` on several public enums, and the closed nature
-of the message enums limiting protocol extensibility.
+backward compatibility.
 
 ## Role in the Architecture
 
@@ -19,65 +17,13 @@ payload structs, sequence management, and close reasons. It sits between
 
 ### High — Extensibility
 
-#### ~~E1: `ServiceMessage` and `ControllerMessage` enums are closed~~ (ACCEPTED)
+#### E1: `ServiceMessage` and `ControllerMessage` enums are closed (ACCEPTED)
 
-**Resolution:** Accepted as a deliberate design tradeoff. The wire protocol
+Accepted as a deliberate design tradeoff. The wire protocol
 is versioned (`PROTOCOL_VERSION = 1`) and all services are compiled together.
 Closed enums provide exhaustive match checking and compile-time safety. Adding
 a new message type requires modifying the wire crate, which is acceptable
 given the current architecture where all service types are first-party.
-
-### Medium
-
-#### ~~M1: `SeqError` uses manual `Display`/`Error` despite `thiserror` dependency~~ (FIXED)
-
-**Resolution:** Converted `SeqError` to use `#[derive(thiserror::Error)]` with
-`#[error("sequence error: expected {expected}, received {received}")]`, removing
-the manual `Display` and `Error` implementations.
-
-#### ~~M2: `ErrorCode` lacks `#[non_exhaustive]`~~ (FIXED)
-
-**Resolution:** Added `#[non_exhaustive]` to `ErrorCode`.
-
-#### ~~M3: `EnrollmentStatus` lacks `#[non_exhaustive]`~~ (FIXED)
-
-**Resolution:** Added `#[non_exhaustive]` to `EnrollmentStatus`.
-
-#### ~~M4: `UpdateFinalStatus` lacks `#[non_exhaustive]`~~ (FIXED)
-
-**Resolution:** Added `#[non_exhaustive]` to `UpdateFinalStatus`. External consumers
-(e.g., `agent_ws.rs`) now include wildcard match arms.
-
-#### ~~M5: `DisconnectReason` lacks `#[non_exhaustive]`~~ (FIXED)
-
-**Resolution:** Added `#[non_exhaustive]` to `DisconnectReason`.
-
-### Low
-
-#### ~~L1: `ErrorCode` and `EnrollmentStatus` use manual `Display` impls~~ (FIXED)
-
-~~**File:** `src/lib.rs:29-36` (EnrollmentStatus), `src/lib.rs:294-307` (ErrorCode)~~
-
-~~Both enums have manual `Display` impls that produce `snake_case` output
-matching their serde `rename_all`. These could be derived with `strum::Display`
-(`#[strum(serialize_all = "snake_case")]`) or `thiserror` to reduce boilerplate
-and ensure consistency with the serde representation.~~
-
-**Resolution:** Added `strum` dependency. Replaced manual `Display` impls for both
-`ErrorCode` and `EnrollmentStatus` with `#[derive(strum::Display)]` +
-`#[strum(serialize_all = "snake_case")]`. Added tests verifying `Display` output
-matches serde serialization for all variants.
-
-#### ~~L2: `HookCommand::Display` does not round-trip with serde~~ (FIXED)
-
-~~**File:** `src/lib.rs:61-81`~~
-
-~~The `Display` impl for `HookCommand::Shell` only outputs the command string
-(line 64), losing the `shell` field. This is fine for logging but could be
-confusing if used for comparison or reconstruction.~~
-
-**Resolution:** Added doc comment on the `HookCommand` `Display` impl clarifying it is
-for human-readable logging only, not for round-trip serialization.
 
 ### Info
 

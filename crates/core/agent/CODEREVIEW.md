@@ -7,9 +7,7 @@ Reviewed: `src/main.rs` (120 lines), `src/client.rs` (649 lines),
 ## Summary
 
 The agent crate is well-structured with proper error delegation, graceful
-shutdown handling, and bounded output buffers. Key issues are the transitive
-provider-registry dependency, manual error conversion at the `ServiceHandler`
-boundary, and missing platform portability guards.
+shutdown handling, and bounded output buffers.
 
 ## Dependency Analysis
 
@@ -25,74 +23,21 @@ boundary, and missing platform portability guards.
 
 ### High
 
-#### ~~H1: Agent depends on `provider-registry` (extensibility)~~ (ACCEPTED)
+#### H1: Agent depends on `provider-registry` (ACCEPTED)
 
-~~**Location:** `Cargo.toml:28`~~
-
-~~The agent binary depends on `uptrakit-provider-registry`, which transitively
+The agent binary depends on `uptrakit-provider-registry`, which transitively
 pulls in every concrete provider crate (GitHub, Docker Registry, Proxmox
 Helper Scripts, Homebrew). The agent needs the registry to instantiate
 providers from JSON config for local version detection and update execution.
 This is **architecturally justified** -- the agent must be able to run any
 provider locally -- but it creates a large transitive dependency footprint
 that couples the agent binary to all provider implementations at compile
-time.~~
+time.
 
-~~**Impact:** Adding a new provider crate increases the agent's compile time
-and binary size, even if a given agent deployment never uses that provider.~~
-
-~~**Recommendation:** Introduce a `ProviderFactory` trait (in `provider-core`
-or a new `provider-factory` crate) that the registry implements:~~
-
-~~```rust
-pub trait ProviderFactory: Send + Sync {
-    fn create_provider(
-        &self,
-        provider_type: ProviderType,
-        config: &serde_json::Value,
-        executor: Arc<dyn CommandExecutor>,
-    ) -> Result<Box<dyn Provider>>;
-}
-```~~
-
-~~The agent would depend on the factory trait rather than the concrete
-registry. Alternatively, compile provider selection behind **feature flags**
-so deployments can opt into only the providers they need.~~
+**Impact:** Adding a new provider crate increases the agent's compile time
+and binary size, even if a given agent deployment never uses that provider.
 
 **Resolution:** Accepted tradeoff: all agents compiled with all possible providers; adding a new provider only through the registry is acceptable.
-
-### Medium
-
-#### ~~M1: Manual error conversion reconstructs `EnrollmentError` variants~~ (FIXED)
-
-**Resolution:** Added `EnrollmentError::from_agent_error(cert_expired, receive_closed, msg)`
-in the service SDK. Both agent and agent-ssh now use this helper instead of
-manually constructing fake `EnrollmentError` variants.
-
-#### ~~M2: In-flight update task panic handled but not propagated~~ (FIXED)
-
-**Resolution:** Changed error message to include the `JoinError` details:
-`Some(format!("Update task panicked: {e}"))`. The controller now receives
-the actual panic message for debugging.
-
-### Low
-
-#### ~~L1: `DEFAULT_SHUTDOWN_TIMEOUT` and `PING_INTERVAL` are not configurable~~ FIXED
-
-**Resolution:** Ping interval is now controller-managed and per-service configurable.
-The `ServiceHandler::ping_interval()` trait method was removed. The SDK event loop
-starts with no ping timer; when `ServiceSettings` arrives from the controller with
-a `ping_interval` field, the timer is created/updated. The controller reads per-service
-`ping_interval_seconds` from the DB (falling back to service-type defaults: 300s for
-agents/SSH agents, 15s for MQTT). A new `PUT /api/v1/services/:id` endpoint and
-`uptrakit service update --ping-interval` CLI command allow per-service overrides.
-
-#### ~~L2: `compute_local_ca_hash` returns empty string on error~~ FIXED
-
-**Resolution:** Added a `tracing::debug!` log on the error path explaining that the
-file is unreadable and an empty hash will trigger re-fetch from the controller
-(self-healing behavior). Also added a doc comment on `compute_local_ca_hash`
-explaining the empty-string-as-trigger design contract.
 
 ### Info
 
