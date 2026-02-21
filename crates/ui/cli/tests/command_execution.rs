@@ -6,12 +6,12 @@
 
 use uptrakit_cli::commands::{hosts, services, software_items};
 use uptrakit_cli::output::OutputFormat;
+use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::mock::MockApiServer;
 use uptrakit_openapi_client::types::hosts::{HostAgentSummary, HostResponse};
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::{MessageResponse, ServiceResponse};
 use uptrakit_openapi_client::types::software_items::SoftwareItemResponse;
-use uptrakit_openapi_client::Uuid;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 

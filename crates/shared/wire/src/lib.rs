@@ -1354,7 +1354,10 @@ mod tests {
         let json = serde_json::to_value(&payload).unwrap();
         assert_eq!(json["ping_interval"], 42);
         let deserialized: ServiceSettingsPayload = serde_json::from_value(json).unwrap();
-        assert_eq!(deserialized.ping_interval, std::time::Duration::from_secs(42));
+        assert_eq!(
+            deserialized.ping_interval,
+            std::time::Duration::from_secs(42)
+        );
     }
 
     #[test]
@@ -2252,8 +2255,9 @@ mod tests {
 
                         // Check $ref to enum schemas
                         if let Some(ref_val) = prop_schema.get("$ref").and_then(|r| r.as_str()) {
-                            let ref_schema_name =
-                                ref_val.strip_prefix("#/components/schemas/").unwrap_or(ref_val);
+                            let ref_schema_name = ref_val
+                                .strip_prefix("#/components/schemas/")
+                                .unwrap_or(ref_val);
                             if let Some(ref_schema) = self.schemas.get(ref_schema_name)
                                 && let Some(enum_vals) =
                                     ref_schema.get("enum").and_then(|e| e.as_array())
@@ -2273,13 +2277,19 @@ mod tests {
 
     /// Wrap a service message in an envelope and serialize to JSON value.
     fn service_envelope_json(msg: ServiceMessage) -> serde_json::Value {
-        let envelope = ServiceEnvelope { seq: 1, message: msg };
+        let envelope = ServiceEnvelope {
+            seq: 1,
+            message: msg,
+        };
         serde_json::to_value(envelope).unwrap()
     }
 
     /// Wrap a controller message in an envelope and serialize to JSON value.
     fn controller_envelope_json(msg: ControllerMessage) -> serde_json::Value {
-        let envelope = ControllerEnvelope { seq: 1, message: msg };
+        let envelope = ControllerEnvelope {
+            seq: 1,
+            message: msg,
+        };
         serde_json::to_value(envelope).unwrap()
     }
 
@@ -2309,12 +2319,13 @@ mod tests {
     #[test]
     fn spec_conformance_request_certificate() {
         let spec = AsyncApiSpec::load();
-        let json =
-            service_envelope_json(ServiceMessage::RequestCertificate(
-                RequestCertificatePayload {
-                    csr_pem: "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n".to_string(),
-                },
-            ));
+        let json = service_envelope_json(ServiceMessage::RequestCertificate(
+            RequestCertificatePayload {
+                csr_pem:
+                    "-----BEGIN CERTIFICATE REQUEST-----\ntest\n-----END CERTIFICATE REQUEST-----\n"
+                        .to_string(),
+            },
+        ));
         spec.validate("requestCertificatePayload", &json);
     }
 
@@ -2423,23 +2434,21 @@ mod tests {
     #[test]
     fn spec_conformance_release_tenants() {
         let spec = AsyncApiSpec::load();
-        let json = service_envelope_json(ServiceMessage::ReleaseTenants(
-            MqttReleaseTenantsPayload {
+        let json =
+            service_envelope_json(ServiceMessage::ReleaseTenants(MqttReleaseTenantsPayload {
                 mqtt_client_ids: vec![TEST_UUID_1],
-            },
-        ));
+            }));
         spec.validate("mqttReleaseTenantsPayload", &json);
     }
 
     #[test]
     fn spec_conformance_mqtt_client_status() {
         let spec = AsyncApiSpec::load();
-        let json = service_envelope_json(ServiceMessage::MqttClientStatus(
-            MqttClientStatusPayload {
+        let json =
+            service_envelope_json(ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
                 mqtt_client_id: TEST_UUID_1,
                 status: MqttClientConnectionStatus::Online,
-            },
-        ));
+            }));
         spec.validate("mqttClientStatusPayload", &json);
     }
 
@@ -2522,12 +2531,11 @@ mod tests {
     #[test]
     fn spec_conformance_ca_bundle_updated() {
         let spec = AsyncApiSpec::load();
-        let json = controller_envelope_json(ControllerMessage::CaBundleUpdated(
-            CaBundleUpdatedPayload {
-                ca_bundle_pem:
-                    "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n".to_string(),
-            },
-        ));
+        let json =
+            controller_envelope_json(ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
+                ca_bundle_pem: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
+                    .to_string(),
+            }));
         spec.validate("caBundleUpdatedPayload", &json);
     }
 
@@ -2593,11 +2601,9 @@ mod tests {
     #[test]
     fn spec_conformance_registered() {
         let spec = AsyncApiSpec::load();
-        let json = controller_envelope_json(ControllerMessage::Registered(
-            MqttRegisteredPayload {
-                instance_id: "mqtt-node1-01936a1e".to_string(),
-            },
-        ));
+        let json = controller_envelope_json(ControllerMessage::Registered(MqttRegisteredPayload {
+            instance_id: "mqtt-node1-01936a1e".to_string(),
+        }));
         spec.validate("mqttRegisteredPayload", &json);
     }
 
@@ -2652,12 +2658,11 @@ mod tests {
     #[test]
     fn spec_conformance_tenant_revoked() {
         let spec = AsyncApiSpec::load();
-        let json = controller_envelope_json(ControllerMessage::TenantRevoked(
-            MqttTenantRevokedPayload {
+        let json =
+            controller_envelope_json(ControllerMessage::TenantRevoked(MqttTenantRevokedPayload {
                 mqtt_client_id: TEST_UUID_1,
                 reason: "mqtt client disabled".to_string(),
-            },
-        ));
+            }));
         spec.validate("mqttTenantRevokedPayload", &json);
     }
 

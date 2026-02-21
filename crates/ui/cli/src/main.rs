@@ -1,8 +1,8 @@
 use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
-use uptrakit_cli::output::OutputFormat;
 use uptrakit_build_info::BuildInfo;
+use uptrakit_cli::output::OutputFormat;
 use uptrakit_openapi_client::Uuid;
 
 #[derive(Debug, Parser)]
@@ -777,10 +777,7 @@ async fn main() {
                 )
                 .await
             }
-            ServicesCommands::Update {
-                id,
-                ping_interval,
-            } => {
+            ServicesCommands::Update { id, ping_interval } => {
                 commands::services::update(
                     &id,
                     ping_interval,

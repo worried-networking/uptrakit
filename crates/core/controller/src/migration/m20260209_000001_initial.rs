@@ -653,7 +653,11 @@ impl MigrationTrait for Migration {
                     .col(timestamp(Services::CreatedAt))
                     .col(timestamp(Services::UpdatedAt))
                     .col(timestamp_null(Services::DeactivatedAt))
-                    .col(ColumnDef::new(Services::PingIntervalSeconds).integer().null())
+                    .col(
+                        ColumnDef::new(Services::PingIntervalSeconds)
+                            .integer()
+                            .null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_services_tenant")

@@ -147,5 +147,4 @@ mod tests {
         };
         assert_ne!(a, c);
     }
-
 }

@@ -55,8 +55,7 @@ impl MockApiServer {
 
     /// Return an unauthenticated client pointing at the mock server.
     pub fn client_unauth(&self) -> UptrakitClient {
-        UptrakitClient::new(&self.server.base_url(), None, false)
-            .expect("mock client creation")
+        UptrakitClient::new(&self.server.base_url(), None, false).expect("mock client creation")
     }
 
     /// Raw access to the underlying [`MockServer`] for custom scenarios.
@@ -76,77 +75,107 @@ impl MockApiServer {
 
     /// Authentication endpoints (`/api/v1/auth/…`).
     pub fn auth(&self) -> MockAuth<'_> {
-        MockAuth { server: &self.server }
+        MockAuth {
+            server: &self.server,
+        }
     }
 
     /// API token endpoints (`/api/v1/auth/api-tokens`).
     pub fn api_tokens(&self) -> MockApiTokens<'_> {
-        MockApiTokens { server: &self.server }
+        MockApiTokens {
+            server: &self.server,
+        }
     }
 
     /// Health endpoint (`/healthz`).
     pub fn health(&self) -> MockHealth<'_> {
-        MockHealth { server: &self.server }
+        MockHealth {
+            server: &self.server,
+        }
     }
 
     /// Host endpoints (`/api/v1/hosts`).
     pub fn hosts(&self) -> MockHosts<'_> {
-        MockHosts { server: &self.server }
+        MockHosts {
+            server: &self.server,
+        }
     }
 
     /// OIDC authentication endpoints (`/api/v1/auth/oidc/…`).
     pub fn oidc_auth(&self) -> MockOidcAuth<'_> {
-        MockOidcAuth { server: &self.server }
+        MockOidcAuth {
+            server: &self.server,
+        }
     }
 
     /// OIDC provider settings (`/api/v1/settings/oidc-providers`).
     pub fn oidc_providers(&self) -> MockOidcProviders<'_> {
-        MockOidcProviders { server: &self.server }
+        MockOidcProviders {
+            server: &self.server,
+        }
     }
 
     /// PKI endpoints (`/api/v1/pki/…`).
     pub fn pki(&self) -> MockPki<'_> {
-        MockPki { server: &self.server }
+        MockPki {
+            server: &self.server,
+        }
     }
 
     /// Provider configuration endpoints (`/api/v1/provider-configs`).
     pub fn provider_configs(&self) -> MockProviderConfigs<'_> {
-        MockProviderConfigs { server: &self.server }
+        MockProviderConfigs {
+            server: &self.server,
+        }
     }
 
     /// Scheduler endpoints (`/api/v1/scheduler/tasks`).
     pub fn scheduler(&self) -> MockScheduler<'_> {
-        MockScheduler { server: &self.server }
+        MockScheduler {
+            server: &self.server,
+        }
     }
 
     /// Service endpoints (`/api/v1/services`).
     pub fn services(&self) -> MockServices<'_> {
-        MockServices { server: &self.server }
+        MockServices {
+            server: &self.server,
+        }
     }
 
     /// Settings endpoints (`/api/v1/settings`).
     pub fn settings(&self) -> MockSettings<'_> {
-        MockSettings { server: &self.server }
+        MockSettings {
+            server: &self.server,
+        }
     }
 
     /// MQTT settings endpoints (`/api/v1/settings/mqtt`).
     pub fn settings_mqtt(&self) -> MockSettingsMqtt<'_> {
-        MockSettingsMqtt { server: &self.server }
+        MockSettingsMqtt {
+            server: &self.server,
+        }
     }
 
     /// Software item endpoints (`/api/v1/software-items`).
     pub fn software_items(&self) -> MockSoftwareItems<'_> {
-        MockSoftwareItems { server: &self.server }
+        MockSoftwareItems {
+            server: &self.server,
+        }
     }
 
     /// System alert endpoints (`/api/v1/system/alerts`).
     pub fn system_alerts(&self) -> MockSystemAlerts<'_> {
-        MockSystemAlerts { server: &self.server }
+        MockSystemAlerts {
+            server: &self.server,
+        }
     }
 
     /// Update history endpoints (`/api/v1/update-history`).
     pub fn update_history(&self) -> MockUpdateHistory<'_> {
-        MockUpdateHistory { server: &self.server }
+        MockUpdateHistory {
+            server: &self.server,
+        }
     }
 }
 
@@ -181,7 +210,11 @@ impl<'a> MockEndpoint<'a> {
 
     /// Respond [`StatusCode::NO_CONTENT`] with no body.
     pub fn no_content(self) -> Mock<'a> {
-        let Self { server, method, path } = self;
+        let Self {
+            server,
+            method,
+            path,
+        } = self;
         server.mock(move |when, then| {
             when.method(method.as_str()).path(path.as_str());
             then.status(StatusCode::NO_CONTENT.as_u16());
@@ -202,7 +235,11 @@ impl<'a> MockEndpoint<'a> {
     /// Respond [`StatusCode::TOO_MANY_REQUESTS`], optionally including a
     /// `Retry-After` header.
     pub fn rate_limited(self, retry_after: Option<u64>) -> Mock<'a> {
-        let Self { server, method, path } = self;
+        let Self {
+            server,
+            method,
+            path,
+        } = self;
         let retry_after_str = retry_after.map(|s| s.to_string());
         server.mock(move |when, then| {
             when.method(method.as_str()).path(path.as_str());
@@ -230,7 +267,11 @@ impl<'a> MockEndpoint<'a> {
 
     /// Respond with the given [`StatusCode`] and a raw JSON string body.
     pub fn respond_raw(self, status: StatusCode, json: impl Into<String>) -> Mock<'a> {
-        let Self { server, method, path } = self;
+        let Self {
+            server,
+            method,
+            path,
+        } = self;
         let status = status.as_u16();
         let json: String = json.into();
         server.mock(move |when, then| {
@@ -392,11 +433,7 @@ impl<'a> MockOidcAuth<'a> {
 
     /// Mock `POST /api/v1/auth/oidc/complete-registration`.
     pub fn on_complete_registration(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(
-            self.server,
-            "POST",
-            paths::oidc_auth::COMPLETE_REGISTRATION,
-        )
+        MockEndpoint::new(self.server, "POST", paths::oidc_auth::COMPLETE_REGISTRATION)
     }
 }
 
@@ -581,11 +618,7 @@ impl<'a> MockServices<'a> {
 
     /// Mock `GET /api/v1/services/enrollment-token/status`.
     pub fn on_enrollment_token_status(&self) -> MockEndpoint<'_> {
-        MockEndpoint::new(
-            self.server,
-            "GET",
-            paths::services::ENROLLMENT_TOKEN_STATUS,
-        )
+        MockEndpoint::new(self.server, "GET", paths::services::ENROLLMENT_TOKEN_STATUS)
     }
 }
 

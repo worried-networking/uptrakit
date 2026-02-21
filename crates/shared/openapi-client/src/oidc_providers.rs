@@ -11,7 +11,8 @@ impl UptrakitClient {
         &self,
         req: &CreateOidcProviderRequest,
     ) -> Result<OidcProviderResponse> {
-        self.post_json(crate::paths::oidc_providers::BASE, req).await
+        self.post_json(crate::paths::oidc_providers::BASE, req)
+            .await
     }
 
     /// List all OIDC providers.

@@ -55,8 +55,7 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateServiceRequest,
     ) -> Result<ServiceResponse> {
-        self.put_json(&crate::paths::services::by_id(id), req)
-            .await
+        self.put_json(&crate::paths::services::by_id(id), req).await
     }
 
     /// Deactivate (remove) a service.

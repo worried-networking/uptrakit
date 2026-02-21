@@ -28,7 +28,8 @@ impl UptrakitClient {
         &self,
         req: &CreateSoftwareItemRequest,
     ) -> Result<SoftwareItemResponse> {
-        self.post_json(crate::paths::software_items::BASE, req).await
+        self.post_json(crate::paths::software_items::BASE, req)
+            .await
     }
 
     /// Update an existing software item.
