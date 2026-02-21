@@ -13,8 +13,7 @@
 	let error: string | null = $state(null);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
-	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null =
-		$state(null);
+	let confirmAction: { serviceId: string; action: 'approve' | 'reject' | 'delete'; name: string } | null = $state(null);
 	let mergeSource: { id: string; name: string; type: ServiceType } | null = $state(null);
 	let mergeTargetId: string | null = $state(null);
 	let submitting: boolean = $state(false);
@@ -150,12 +149,15 @@
 	}
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={(e) => {
-	if (e.key === 'Escape') {
-		if (confirmAction) cancelConfirm();
-		else if (mergeSource) cancelMerge();
-	}
-}} />
+<svelte:window
+	onclick={handleWindowClick}
+	onkeydown={(e) => {
+		if (e.key === 'Escape') {
+			if (confirmAction) cancelConfirm();
+			else if (mergeSource) cancelMerge();
+		}
+	}}
+/>
 
 {#if $user}
 	<h1 class="h1 mb-4">Services</h1>
@@ -325,11 +327,15 @@
 
 	{#if mergeSource}
 		<ModalBackdrop onclose={cancelMerge}>
-			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl" role="dialog" aria-modal="true">
+			<div
+				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
+				role="dialog"
+				aria-modal="true"
+			>
 				<h3 class="h3">Merge Service</h3>
 				<p>
-					Merge <strong>{mergeSource.name}</strong> into an existing service.
-					The source service's enrollment will be transferred to the target, preserving the target's history.
+					Merge <strong>{mergeSource.name}</strong> into an existing service. The source service's enrollment will be transferred
+					to the target, preserving the target's history.
 				</p>
 				<label class="label">
 					<span>Select target service</span>
@@ -342,11 +348,7 @@
 				</label>
 				<div class="flex justify-end gap-2">
 					<button class="btn preset-tonal-surface" onclick={cancelMerge}>Cancel</button>
-					<button
-						class="btn preset-filled-primary-500"
-						disabled={!mergeTargetId || submitting}
-						onclick={executeMerge}
-					>
+					<button class="btn preset-filled-primary-500" disabled={!mergeTargetId || submitting} onclick={executeMerge}>
 						{submitting ? 'Merging...' : 'Merge'}
 					</button>
 				</div>

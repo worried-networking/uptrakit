@@ -1,8 +1,5 @@
 <script lang="ts">
-	import {
-		createEnrollmentToken,
-		revokeEnrollmentToken
-	} from '$lib/api';
+	import { createEnrollmentToken, revokeEnrollmentToken } from '$lib/api';
 	import type { EnrollmentTokenStatus } from '$lib/types';
 	import { copyToClipboard } from '$lib/utils';
 
@@ -124,9 +121,11 @@
 				<button
 					class="btn btn-sm preset-tonal flex-shrink-0"
 					onclick={async () => {
-						if (generatedToken && await copyToClipboard(generatedToken)) {
+						if (generatedToken && (await copyToClipboard(generatedToken))) {
 							agentCopied = true;
-							setTimeout(() => { agentCopied = false; }, 2000);
+							setTimeout(() => {
+								agentCopied = false;
+							}, 2000);
 						}
 					}}
 				>
@@ -141,9 +140,7 @@
 			{enrollmentConfigured ? 'Regenerate' : 'Generate'}
 		</button>
 		{#if enrollmentConfigured}
-			<button class="btn preset-filled-error-500" onclick={handleRevokeToken}>
-				Revoke
-			</button>
+			<button class="btn preset-filled-error-500" onclick={handleRevokeToken}> Revoke </button>
 		{/if}
 	</div>
 </div>
@@ -152,8 +149,7 @@
 <div class="card mb-6 p-6">
 	<h2 class="h3 mb-4">MQTT Enrollment Token</h2>
 	<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
-		This token is used by MQTT services to register with the controller.
-		It is separate from the agent enrollment token.
+		This token is used by MQTT services to register with the controller. It is separate from the agent enrollment token.
 	</p>
 	<div class="mb-4 flex items-center gap-3">
 		<span>Status:</span>
@@ -172,9 +168,11 @@
 				<button
 					class="btn btn-sm preset-tonal flex-shrink-0"
 					onclick={async () => {
-						if (mqttGeneratedToken && await copyToClipboard(mqttGeneratedToken)) {
+						if (mqttGeneratedToken && (await copyToClipboard(mqttGeneratedToken))) {
 							mqttCopied = true;
-							setTimeout(() => { mqttCopied = false; }, 2000);
+							setTimeout(() => {
+								mqttCopied = false;
+							}, 2000);
 						}
 					}}
 				>
@@ -189,9 +187,7 @@
 			{mqttEnrollmentConfigured ? 'Regenerate' : 'Generate'}
 		</button>
 		{#if mqttEnrollmentConfigured}
-			<button class="btn preset-filled-error-500" onclick={handleRevokeMqttToken}>
-				Revoke
-			</button>
+			<button class="btn preset-filled-error-500" onclick={handleRevokeMqttToken}> Revoke </button>
 		{/if}
 	</div>
 </div>
@@ -200,8 +196,8 @@
 <div class="card mb-6 p-6">
 	<h2 class="h3 mb-4">SSH Agent Enrollment Token</h2>
 	<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
-		This token is used by SSH agents to register with the controller.
-		It is separate from the agent and MQTT enrollment tokens.
+		This token is used by SSH agents to register with the controller. It is separate from the agent and MQTT enrollment
+		tokens.
 	</p>
 	<div class="mb-4 flex items-center gap-3">
 		<span>Status:</span>
@@ -220,9 +216,11 @@
 				<button
 					class="btn btn-sm preset-tonal flex-shrink-0"
 					onclick={async () => {
-						if (sshAgentGeneratedToken && await copyToClipboard(sshAgentGeneratedToken)) {
+						if (sshAgentGeneratedToken && (await copyToClipboard(sshAgentGeneratedToken))) {
 							sshAgentCopied = true;
-							setTimeout(() => { sshAgentCopied = false; }, 2000);
+							setTimeout(() => {
+								sshAgentCopied = false;
+							}, 2000);
 						}
 					}}
 				>
@@ -237,9 +235,7 @@
 			{sshAgentEnrollmentConfigured ? 'Regenerate' : 'Generate'}
 		</button>
 		{#if sshAgentEnrollmentConfigured}
-			<button class="btn preset-filled-error-500" onclick={handleRevokeSshAgentToken}>
-				Revoke
-			</button>
+			<button class="btn preset-filled-error-500" onclick={handleRevokeSshAgentToken}> Revoke </button>
 		{/if}
 	</div>
 </div>

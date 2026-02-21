@@ -32,9 +32,7 @@
 	const canView = $derived($user?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived($user?.permissions.includes(Permission.ManageSoftware) ?? false);
 
-	const homebrewConfigs = $derived(
-		providerConfigs.filter((config) => config.provider_type === 'homebrew')
-	);
+	const homebrewConfigs = $derived(providerConfigs.filter((config) => config.provider_type === 'homebrew'));
 	const canToggleCreate = $derived(providerConfigs.length > 0);
 
 	const providerTypeOptions = [
@@ -87,7 +85,10 @@
 					ensureProviderConfigTemplate();
 				}
 			} else {
-				providerConfigError = configsPromise.reason instanceof Error ? configsPromise.reason.message : 'Failed to load provider configurations.';
+				providerConfigError =
+					configsPromise.reason instanceof Error
+						? configsPromise.reason.message
+						: 'Failed to load provider configurations.';
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load software items';
@@ -249,7 +250,7 @@
 							<span>Provider config</span>
 							{#if createNewConfig}
 								<select class="select" bind:value={providerConfigType} onchange={ensureProviderConfigTemplate}>
-									{#each providerTypeOptions as option}
+									{#each providerTypeOptions as option (option.value)}
 										<option value={option.value}>{option.label}</option>
 									{/each}
 								</select>
@@ -338,11 +339,7 @@
 						</p>
 					{/if}
 					<div class="flex justify-end">
-						<button
-							class="btn preset-filled-primary-500"
-							disabled={submitting}
-							onclick={submitSoftware}
-						>
+						<button class="btn preset-filled-primary-500" disabled={submitting} onclick={submitSoftware}>
 							{submitting ? 'Registering...' : 'Register Software'}
 						</button>
 					</div>
@@ -395,9 +392,7 @@
 							<tr>
 								<td colspan="6" class="py-8 text-center">
 									<p class="text-lg font-medium">No software registered yet</p>
-									<p class="mt-1 text-sm text-surface-500">
-										Register a package to start tracking.
-									</p>
+									<p class="mt-1 text-sm text-surface-500">Register a package to start tracking.</p>
 								</td>
 							</tr>
 						{/each}

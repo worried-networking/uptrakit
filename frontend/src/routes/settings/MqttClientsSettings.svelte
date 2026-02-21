@@ -1,9 +1,5 @@
 <script lang="ts">
-	import {
-		createMqttClient,
-		updateMqttClient,
-		deleteMqttClient
-	} from '$lib/api';
+	import { createMqttClient, updateMqttClient, deleteMqttClient } from '$lib/api';
 	import {
 		type CreateMqttClient,
 		type MqttClientResponse,
@@ -151,23 +147,23 @@
 	}
 </script>
 
-<svelte:window onkeydown={(e) => {
-	if (e.key === 'Escape') {
-		if (showMqttModal) closeMqttModal();
-		else if (mqttDeleteConfirm) mqttDeleteConfirm = null;
-	}
-}} />
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape') {
+			if (showMqttModal) closeMqttModal();
+			else if (mqttDeleteConfirm) mqttDeleteConfirm = null;
+		}
+	}}
+/>
 
 <div class="card mb-6 p-6">
 	<div class="mb-4 flex items-center justify-between">
 		<h2 class="h3">MQTT Clients</h2>
-		<button class="btn preset-filled-primary-500" onclick={openCreateMqtt}>
-			Add Client
-		</button>
+		<button class="btn preset-filled-primary-500" onclick={openCreateMqtt}> Add Client </button>
 	</div>
 	<p class="mb-4 text-surface-600 dark:text-surface-400">
-		Configure MQTT broker connections for Home Assistant integration.
-		Use a URL like <code>mqtt://broker:1883</code> or <code>mqtts://broker:8883</code>.
+		Configure MQTT broker connections for Home Assistant integration. Use a URL like <code>mqtt://broker:1883</code> or
+		<code>mqtts://broker:8883</code>.
 	</p>
 
 	{#if mqttClients.length === 0}
@@ -214,16 +210,8 @@
 							</td>
 							<td>
 								<div class="flex gap-1">
-									<button
-										class="btn btn-sm preset-tonal"
-										onclick={() => openEditMqtt(client)}
-									>
-										Edit
-									</button>
-									<button
-										class="btn btn-sm preset-tonal-error"
-										onclick={() => requestDeleteMqtt(client)}
-									>
+									<button class="btn btn-sm preset-tonal" onclick={() => openEditMqtt(client)}> Edit </button>
+									<button class="btn btn-sm preset-tonal-error" onclick={() => requestDeleteMqtt(client)}>
 										Delete
 									</button>
 								</div>
@@ -243,13 +231,19 @@
 		entityName={mqttDeleteConfirm.url}
 		confirmLabel="Delete"
 		onconfirm={executeDeleteMqtt}
-		oncancel={() => { mqttDeleteConfirm = null; }}
+		oncancel={() => {
+			mqttDeleteConfirm = null;
+		}}
 	/>
 {/if}
 
 {#if showMqttModal}
 	<ModalBackdrop onclose={closeMqttModal}>
-		<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl" role="dialog" aria-modal="true">
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
 			<h3 class="h3">{editingMqttClient ? 'Edit MQTT Client' : 'Add MQTT Client'}</h3>
 
 			<label class="flex items-center gap-3">
@@ -304,7 +298,9 @@
 				<textarea
 					class="textarea font-mono text-sm"
 					rows="4"
-					placeholder={editingMqttClient ? 'Leave blank to keep current' : '(optional) Paste PEM-encoded CA certificate for private brokers'}
+					placeholder={editingMqttClient
+						? 'Leave blank to keep current'
+						: '(optional) Paste PEM-encoded CA certificate for private brokers'}
 					bind:value={mqttForm.ca_pem}
 				></textarea>
 			</label>

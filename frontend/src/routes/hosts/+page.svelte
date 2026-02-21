@@ -107,12 +107,15 @@
 	const canManage = $derived($user?.permissions.includes(Permission.ManageHosts) ?? false);
 </script>
 
-<svelte:window onclick={handleWindowClick} onkeydown={(e) => {
-	if (e.key === 'Escape') {
-		if (confirmAction) cancelConfirm();
-		else if (editHost) cancelEdit();
-	}
-}} />
+<svelte:window
+	onclick={handleWindowClick}
+	onkeydown={(e) => {
+		if (e.key === 'Escape') {
+			if (confirmAction) cancelConfirm();
+			else if (editHost) cancelEdit();
+		}
+	}}
+/>
 
 {#if $user}
 	<h1 class="h1 mb-6">Hosts</h1>
@@ -222,7 +225,11 @@
 
 	{#if editHost}
 		<ModalBackdrop onclose={cancelEdit}>
-			<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl" role="dialog" aria-modal="true">
+			<div
+				class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
+				role="dialog"
+				aria-modal="true"
+			>
 				<h3 class="h3">Edit Host Name</h3>
 				<label class="label">
 					<span>Friendly Name</span>

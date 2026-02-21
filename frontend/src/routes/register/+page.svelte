@@ -46,47 +46,22 @@
 	<form onsubmit={onSubmit} class="space-y-4">
 		<label class="label">
 			<span>Email</span>
-			<input
-				class="input"
-				type="email"
-				bind:value={email}
-				required
-				autocomplete="email"
-			/>
+			<input class="input" type="email" bind:value={email} required autocomplete="email" />
 		</label>
 
 		<label class="label">
 			<span>First name</span>
-			<input
-				class="input"
-				type="text"
-				bind:value={firstName}
-				required
-				autocomplete="given-name"
-			/>
+			<input class="input" type="text" bind:value={firstName} required autocomplete="given-name" />
 		</label>
 
 		<label class="label">
 			<span>Last name</span>
-			<input
-				class="input"
-				type="text"
-				bind:value={lastName}
-				required
-				autocomplete="family-name"
-			/>
+			<input class="input" type="text" bind:value={lastName} required autocomplete="family-name" />
 		</label>
 
 		<label class="label">
 			<span>Password</span>
-			<input
-				class="input"
-				type="password"
-				bind:value={password}
-				required
-				minlength={8}
-				autocomplete="new-password"
-			/>
+			<input class="input" type="password" bind:value={password} required minlength={8} autocomplete="new-password" />
 		</label>
 
 		<label class="flex items-center space-x-2">
@@ -97,12 +72,7 @@
 		{#if showToken}
 			<label class="label">
 				<span>Invite token</span>
-				<input
-					class="input"
-					type="text"
-					bind:value={registrationToken}
-					autocomplete="off"
-				/>
+				<input class="input" type="text" bind:value={registrationToken} autocomplete="off" />
 			</label>
 		{/if}
 

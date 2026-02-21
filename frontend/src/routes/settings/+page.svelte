@@ -2,11 +2,7 @@
 	import { user } from '$lib/auth';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount, tick } from 'svelte';
-	import {
-		getCombinedSettings,
-		getOidcProviders,
-		getMqttClients
-	} from '$lib/api';
+	import { getCombinedSettings, getOidcProviders, getMqttClients } from '$lib/api';
 	import { Permission } from '$lib/types';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 
@@ -76,10 +72,7 @@
 			} catch {
 				// Suppress polling errors to avoid notification spam.
 				mqttPollAttempt++;
-				const baseDelay = Math.min(
-					initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1),
-					maxMqttPollDelay
-				);
+				const baseDelay = Math.min(initialMqttPollDelay * Math.pow(2, mqttPollAttempt - 1), maxMqttPollDelay);
 				const delay = baseDelay * (0.5 + Math.random() * 0.5); // Jitter to prevent thundering herd
 				scheduleNextPoll(delay);
 			}
@@ -113,8 +106,8 @@
 
 		const results = await Promise.allSettled([
 			getCombinedSettings(), // results[0]
-			getOidcProviders(),     // results[1]
-			getMqttClients()        // results[2]
+			getOidcProviders(), // results[1]
+			getMqttClients() // results[2]
 		]);
 
 		// Combined Settings
@@ -139,14 +132,16 @@
 		if (results[1].status === 'fulfilled') {
 			oidcProvidersRef?.load(results[1].value);
 		} else {
-			oidcProvidersError = results[1].reason instanceof Error ? results[1].reason.message : 'Failed to load OIDC providers.';
+			oidcProvidersError =
+				results[1].reason instanceof Error ? results[1].reason.message : 'Failed to load OIDC providers.';
 		}
 
 		// MQTT Clients
 		if (results[2].status === 'fulfilled') {
 			mqttClientsRef?.load(results[2].value);
 		} else {
-			mqttClientsError = results[2].reason instanceof Error ? results[2].reason.message : 'Failed to load MQTT clients.';
+			mqttClientsError =
+				results[2].reason instanceof Error ? results[2].reason.message : 'Failed to load MQTT clients.';
 		}
 
 		loading = false;

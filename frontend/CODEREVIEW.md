@@ -44,16 +44,16 @@ The review identifies issues across six categories. The most significant finding
 
 ### 1.1 Positive Findings
 
-| Finding | Location |
-|---------|----------|
+| Finding                                                                                                      | Location                         |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------- |
 | Clean SPA architecture with SvelteKit static adapter; CSR-only is appropriate for an admin panel behind auth | `svelte.config.js`, `+layout.ts` |
-| Good separation of concerns: `lib/` for shared code, `routes/` for pages, `components/` for reusable UI | `src/` tree |
-| Centralized API client with type-safe functions and consistent request/response patterns | `lib/api.ts` |
-| Centralized auth guard in root layout prevents unauthorized access to protected routes | `+layout.svelte:48-57` |
-| Permission-based navigation filtering using derived state | `+layout.svelte:67-80` |
-| In-memory access token (never persisted to localStorage) | `lib/auth.ts:9` |
-| Token refresh deduplication prevents redundant concurrent refresh requests | `lib/api.ts:64,122-128` |
-| Settings components use `Promise.allSettled` for parallel loading with individual error handling | `settings/+page.svelte:113-151` |
+| Good separation of concerns: `lib/` for shared code, `routes/` for pages, `components/` for reusable UI      | `src/` tree                      |
+| Centralized API client with type-safe functions and consistent request/response patterns                     | `lib/api.ts`                     |
+| Centralized auth guard in root layout prevents unauthorized access to protected routes                       | `+layout.svelte:48-57`           |
+| Permission-based navigation filtering using derived state                                                    | `+layout.svelte:67-80`           |
+| In-memory access token (never persisted to localStorage)                                                     | `lib/auth.ts:9`                  |
+| Token refresh deduplication prevents redundant concurrent refresh requests                                   | `lib/api.ts:64,122-128`          |
+| Settings components use `Promise.allSettled` for parallel loading with individual error handling             | `settings/+page.svelte:113-151`  |
 
 ### 1.2 Issues
 
@@ -70,15 +70,14 @@ runes (`$state()`, `$derived()`, `$effect()`) everywhere else. This inconsistenc
 consistency. Alternatively, document the intentional choice (e.g., stores for cross-component reactivity vs
 runes for component-local state).
 
-#### ARC-02: No linter or formatter configuration
+#### ~~ARC-02: No linter or formatter configuration~~ (FIXED)
 
-**Severity:** Medium
-**Location:** Project root (`frontend/`)
-
-No ESLint, Prettier, or equivalent configuration exists. The CI runs `svelte-check` and `vite build` but has
-no linting step. This means style inconsistencies, unused imports, and potential bugs go undetected.
-
-**Recommendation:** Add ESLint with `eslint-plugin-svelte` and Prettier. Add a CI lint step.
+**Resolution:** Added ESLint flat config (`eslint.config.js`) with `@eslint/js`,
+`typescript-eslint`, `eslint-plugin-svelte`, and `eslint-config-prettier`. Added
+Prettier config (`.prettierrc`) with `prettier-plugin-svelte`. Added npm scripts
+(`lint`, `format`, `format:check`) and CI steps for both. Fixed 4 ESLint issues
+(3 missing `{#each}` keys, 1 unused svelte-ignore comment). All existing code
+passes both linters cleanly.
 
 #### ARC-03: Settings components use imperative API via `export function`
 
@@ -115,19 +114,19 @@ than the API (e.g., split deployment with a CDN), this would require a code chan
 
 ### 2.1 Positive Findings
 
-| Finding | Location |
-|---------|----------|
-| Content Security Policy header in `app.html` restricts default-src, script-src, style-src, img-src, connect-src, font-src, object-src, base-uri, and form-action | `app.html:9` |
-| In-memory access token never touches localStorage or sessionStorage | `lib/auth.ts:9` |
-| Refresh token is HttpOnly + Secure + SameSite=Strict (backend-enforced) | Backend `refresh_cookie.rs` |
-| OIDC authorize URL validated as HTTPS before redirect | `lib/auth.ts:63-65` |
-| Logo URLs validated as HTTPS via `isValidLogoUrl()` using `URL()` constructor (rejects `javascript:`, `data:`, etc.) | `lib/utils.ts:6-14` |
-| Redirect parameter validated: must start with `/` and not `//` (prevents open redirect) | `login/+page.svelte:89-95` |
-| `credentials: 'same-origin'` on all fetch calls (refresh token cookie only sent to same origin) | `lib/api.ts:85,108` |
-| Device code validated with strict regex before use | `device/+page.svelte:10` |
-| `referrerpolicy="no-referrer"` on external OIDC provider images | `login/+page.svelte:257` |
-| `encodeURIComponent` used for all URL parameters | Multiple locations |
-| `RefreshError` class distinguishes 4xx (real auth failure) from 5xx (transient) to avoid unnecessary logouts | `lib/api.ts:71-79` |
+| Finding                                                                                                                                                          | Location                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Content Security Policy header in `app.html` restricts default-src, script-src, style-src, img-src, connect-src, font-src, object-src, base-uri, and form-action | `app.html:9`                |
+| In-memory access token never touches localStorage or sessionStorage                                                                                              | `lib/auth.ts:9`             |
+| Refresh token is HttpOnly + Secure + SameSite=Strict (backend-enforced)                                                                                          | Backend `refresh_cookie.rs` |
+| OIDC authorize URL validated as HTTPS before redirect                                                                                                            | `lib/auth.ts:63-65`         |
+| Logo URLs validated as HTTPS via `isValidLogoUrl()` using `URL()` constructor (rejects `javascript:`, `data:`, etc.)                                             | `lib/utils.ts:6-14`         |
+| Redirect parameter validated: must start with `/` and not `//` (prevents open redirect)                                                                          | `login/+page.svelte:89-95`  |
+| `credentials: 'same-origin'` on all fetch calls (refresh token cookie only sent to same origin)                                                                  | `lib/api.ts:85,108`         |
+| Device code validated with strict regex before use                                                                                                               | `device/+page.svelte:10`    |
+| `referrerpolicy="no-referrer"` on external OIDC provider images                                                                                                  | `login/+page.svelte:257`    |
+| `encodeURIComponent` used for all URL parameters                                                                                                                 | Multiple locations          |
+| `RefreshError` class distinguishes 4xx (real auth failure) from 5xx (transient) to avoid unnecessary logouts                                                     | `lib/api.ts:71-79`          |
 
 ### 2.2 Issues
 
@@ -209,16 +208,16 @@ trusted.
 
 ### 3.1 Positive Findings
 
-| Finding | Location |
-|---------|----------|
-| TypeScript strict mode enabled | `tsconfig.json` |
-| Consistent error handling pattern across all pages: `try/catch` with `Error` message extraction | All pages |
-| Well-implemented abort signal handling with `AbortSignal.timeout()` and `AbortSignal.any()` | `lib/api.ts:102-105` |
-| Clean component API with fully typed `$props()` | All components |
-| `ModalBackdrop` has proper focus trapping and focus restoration | `components/ModalBackdrop.svelte` |
-| `ContextMenu` has viewport-aware positioning to prevent overflow | `components/ContextMenu.svelte` |
-| `Pagination` is clean and minimal | `components/Pagination.svelte` |
-| Proper use of `Promise.allSettled` for parallel loads with individual error handling | `settings/+page.svelte`, `software/+page.svelte` |
+| Finding                                                                                         | Location                                         |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| TypeScript strict mode enabled                                                                  | `tsconfig.json`                                  |
+| Consistent error handling pattern across all pages: `try/catch` with `Error` message extraction | All pages                                        |
+| Well-implemented abort signal handling with `AbortSignal.timeout()` and `AbortSignal.any()`     | `lib/api.ts:102-105`                             |
+| Clean component API with fully typed `$props()`                                                 | All components                                   |
+| `ModalBackdrop` has proper focus trapping and focus restoration                                 | `components/ModalBackdrop.svelte`                |
+| `ContextMenu` has viewport-aware positioning to prevent overflow                                | `components/ContextMenu.svelte`                  |
+| `Pagination` is clean and minimal                                                               | `components/Pagination.svelte`                   |
+| Proper use of `Promise.allSettled` for parallel loads with individual error handling            | `settings/+page.svelte`, `software/+page.svelte` |
 
 ### 3.2 Issues
 
@@ -241,6 +240,7 @@ the `refsReady` flag continues to prevent premature calls. The full props-based 
 **Location:** `settings/EnrollmentTokenSettings.svelte`
 
 The component has three nearly identical sets of:
+
 - State variables: `enrollmentConfigured`/`generatedToken`, `mqttEnrollmentConfigured`/`mqttGeneratedToken`,
   `sshAgentEnrollmentConfigured`/`sshAgentGeneratedToken`
 - Functions: `handleGenerateToken`/`handleRevokeToken` (repeated 3 times with only the `type` parameter
@@ -253,10 +253,11 @@ of `{ type, label, description }` objects.
 #### ~~CQ-04: Fragile `$effect` dependency tracking in services page~~ (FIXED)
 
 **Resolution:** Made the `typeFilter` dependency explicit in the `$effect` body:
+
 ```typescript
 $effect(() => {
-    const _filter = typeFilter; // explicit dependency tracking
-    loadServices(1);
+	const _filter = typeFilter; // explicit dependency tracking
+	loadServices(1);
 });
 ```
 
@@ -284,8 +285,8 @@ as intentional. Alternatively, provide a cleanup function for testing.
 ```typescript
 const mq = window.matchMedia('(prefers-color-scheme: dark)');
 mq.addEventListener('change', () => {
-    const current = getStored();
-    if (current === 'system') applyTheme('system');
+	const current = getStored();
+	if (current === 'system') applyTheme('system');
 });
 ```
 
@@ -298,9 +299,9 @@ Similar to CQ-05 — the listener lives for the app lifetime, which is appropria
 
 ```typescript
 $effect(() => {
-    if ($user) {
-        goto('/');
-    }
+	if ($user) {
+		goto('/');
+	}
 });
 ```
 
@@ -327,14 +328,14 @@ use different naming conventions due to the underlying backend types.
 
 ### 4.1 Positive Findings
 
-| Finding | Location |
-|---------|----------|
-| Token refresh deduplication prevents concurrent refresh storms | `lib/api.ts:122-128` |
-| `RefreshError` class separates 4xx (auth) from 5xx (transient) — avoids forced logout on server errors | `lib/api.ts:71-79,159-166` |
-| MQTT polling uses exponential backoff (10s base, 5min cap) | `settings/+page.svelte:67-93` |
-| `Promise.allSettled` for settings loading — partial failure doesn't block other sections | `settings/+page.svelte:113-151` |
-| Individual "Retry All" buttons per settings section | `settings/+page.svelte:166-206` |
-| Polling stopped on component destroy via `onDestroy` | `settings/+page.svelte:63-65` |
+| Finding                                                                                                | Location                        |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| Token refresh deduplication prevents concurrent refresh storms                                         | `lib/api.ts:122-128`            |
+| `RefreshError` class separates 4xx (auth) from 5xx (transient) — avoids forced logout on server errors | `lib/api.ts:71-79,159-166`      |
+| MQTT polling uses exponential backoff (10s base, 5min cap)                                             | `settings/+page.svelte:67-93`   |
+| `Promise.allSettled` for settings loading — partial failure doesn't block other sections               | `settings/+page.svelte:113-151` |
+| Individual "Retry All" buttons per settings section                                                    | `settings/+page.svelte:166-206` |
+| Polling stopped on component destroy via `onDestroy`                                                   | `settings/+page.svelte:63-65`   |
 
 ### 4.2 Issues
 
@@ -418,27 +419,27 @@ service status changes and MQTT connection status.
 
 ### 5.1 Current State
 
-| Metric | Value |
-|--------|-------|
-| Test files | 1 (`lib/auth.test.ts`) |
-| Test cases | 3 |
-| Test framework | Vitest 4.0.18 + jsdom |
-| Code coverage | Not configured |
+| Metric         | Value                  |
+| -------------- | ---------------------- |
+| Test files     | 1 (`lib/auth.test.ts`) |
+| Test cases     | 3                      |
+| Test framework | Vitest 4.0.18 + jsdom  |
+| Code coverage  | Not configured         |
 
 The existing tests cover `initialize()`: success path, refresh failure, and existing token reuse. They
 use proper mocking of the `api` module.
 
 ### 5.2 Coverage Gaps
 
-| Area | Risk | Priority |
-|------|------|----------|
-| API client (`lib/api.ts`) — token refresh, error extraction, retry logic | High | High |
-| Auth functions — `handleLogin`, `handleLogout`, `handleOidcLogin`, `handleOidcCallback` | High | High |
-| Utility functions — `isValidLogoUrl`, `formatDate`, `copyToClipboard` | Medium | Medium |
-| Route components — services, hosts, software, settings | Medium | Medium |
-| Shared components — ModalBackdrop focus trapping, ContextMenu positioning | Low | Low |
-| `safeRedirect()` — open redirect prevention | High | High |
-| Integration / E2E tests | High | Medium |
+| Area                                                                                    | Risk   | Priority |
+| --------------------------------------------------------------------------------------- | ------ | -------- |
+| API client (`lib/api.ts`) — token refresh, error extraction, retry logic                | High   | High     |
+| Auth functions — `handleLogin`, `handleLogout`, `handleOidcLogin`, `handleOidcCallback` | High   | High     |
+| Utility functions — `isValidLogoUrl`, `formatDate`, `copyToClipboard`                   | Medium | Medium   |
+| Route components — services, hosts, software, settings                                  | Medium | Medium   |
+| Shared components — ModalBackdrop focus trapping, ContextMenu positioning               | Low    | Low      |
+| `safeRedirect()` — open redirect prevention                                             | High   | High     |
+| Integration / E2E tests                                                                 | High   | Medium   |
 
 ### 5.3 Recommendations
 
@@ -455,16 +456,16 @@ use proper mocking of the `api` module.
 
 ### 6.1 Positive Findings
 
-| Finding | Location |
-|---------|----------|
-| `role="dialog"` and `aria-modal="true"` on all modal dialogs | `ConfirmDialog.svelte`, `ModalBackdrop.svelte` users |
-| `role="menu"` and `role="menuitem"` on context menus | `ContextMenu.svelte`, `services/+page.svelte` |
-| `aria-label` on action buttons (e.g., "Actions for {name}") | `services/+page.svelte:239`, `hosts/+page.svelte:157` |
-| `aria-label="Pagination"` on pagination nav | `Pagination.svelte:14` |
-| Focus trapping in `ModalBackdrop` with Tab/Shift+Tab cycling | `ModalBackdrop.svelte:28-49` |
-| Focus restoration on modal close | `ModalBackdrop.svelte:20-25` |
-| `lang="en"` on html element | `app.html:2` |
-| Proper `autocomplete` attributes on form inputs | `login/+page.svelte`, `register/+page.svelte` |
+| Finding                                                      | Location                                              |
+| ------------------------------------------------------------ | ----------------------------------------------------- |
+| `role="dialog"` and `aria-modal="true"` on all modal dialogs | `ConfirmDialog.svelte`, `ModalBackdrop.svelte` users  |
+| `role="menu"` and `role="menuitem"` on context menus         | `ContextMenu.svelte`, `services/+page.svelte`         |
+| `aria-label` on action buttons (e.g., "Actions for {name}")  | `services/+page.svelte:239`, `hosts/+page.svelte:157` |
+| `aria-label="Pagination"` on pagination nav                  | `Pagination.svelte:14`                                |
+| Focus trapping in `ModalBackdrop` with Tab/Shift+Tab cycling | `ModalBackdrop.svelte:28-49`                          |
+| Focus restoration on modal close                             | `ModalBackdrop.svelte:20-25`                          |
+| `lang="en"` on html element                                  | `app.html:2`                                          |
+| Proper `autocomplete` attributes on form inputs              | `login/+page.svelte`, `register/+page.svelte`         |
 
 ### 6.2 Issues
 
@@ -497,56 +498,56 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 
 ### Issues by Severity
 
-| Severity | Count | IDs |
-|----------|-------|-----|
-| Medium | 2 | ARC-02, HA-02 |
-| Medium (Fixed) | 4 | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~, ~~CQ-02~~ |
-| Low | 14 | ARC-01, ARC-03, ARC-04, SEC-02, SEC-03, SEC-04, SEC-05, CQ-03, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, A11Y-02, A11Y-03 |
+| Severity       | Count | IDs                                                                                                                              |
+| -------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Medium         | 1     | HA-02                                                                                                                            |
+| Medium (Fixed) | 5     | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~, ~~CQ-02~~, ~~ARC-02~~                                                                        |
+| Low            | 14    | ARC-01, ARC-03, ARC-04, SEC-02, SEC-03, SEC-04, SEC-05, CQ-03, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, A11Y-02, A11Y-03 |
 
 ### Issues by Category
 
-| Category | Count |
-|----------|-------|
-| Architecture | 4 |
-| Security | 5 |
-| Code Quality | 8 |
-| Backend HA | 6 |
-| Accessibility | 3 |
+| Category      | Count |
+| ------------- | ----- |
+| Architecture  | 4     |
+| Security      | 5     |
+| Code Quality  | 8     |
+| Backend HA    | 6     |
+| Accessibility | 3     |
 
 ### File-Level Summary
 
-| File | Issues | Notes |
-|------|--------|-------|
-| `app.html` | ~~SEC-01~~, SEC-05 | CSP script-src tightened with SHA-256 hash |
-| `lib/api.ts` | SEC-02, SEC-03 | Core API client is well-structured |
-| `lib/auth.ts` | ARC-01 | Mixed store pattern |
-| `lib/theme.ts` | ARC-01, CQ-06 | Listener cleanup |
-| `lib/stores/network.ts` | ARC-01, CQ-05 | Listener cleanup |
-| `lib/notifications.svelte.ts` | — | Clean implementation |
-| `lib/utils.ts` | — | Clean implementation |
-| `lib/types.ts` | — | Comprehensive type coverage |
-| `lib/auth.test.ts` | — | Good tests, need more coverage |
-| `+layout.svelte` | A11Y-03, HA-03 | Good auth guard pattern |
-| `+layout.ts` | — | Clean |
-| `login/+page.svelte` | SEC-04, CQ-07 | Complex but well-handled |
-| `register/+page.svelte` | CQ-07 | Minor |
-| `device/+page.svelte` | — | Good device code validation |
-| `services/+page.svelte` | CQ-01, CQ-04, HA-04 | Double load bug |
-| `hosts/+page.svelte` | HA-04 | No retry button |
-| `software/+page.svelte` | — | Clean implementation |
-| `settings/+page.svelte` | ~~CQ-02~~, ~~HA-01~~, HA-02 | Component refs now properly typed; jitter added to backoff |
-| `settings/EnrollmentTokenSettings.svelte` | CQ-03 | Code duplication |
-| `settings/RegistrationSettings.svelte` | — | Clean |
-| `settings/AuthenticationSettings.svelte` | — | Clean |
-| `settings/AgentCertificateSettings.svelte` | — | Clean |
-| `settings/MqttClientsSettings.svelte` | CQ-08 | Minor naming inconsistency |
-| `settings/OidcProvidersSettings.svelte` | — | Clean |
-| `settings/global/+page.svelte` | — | Clean |
-| `components/ToastNotifications.svelte` | ~~A11Y-01~~ | ARIA live regions added |
-| `components/ContextMenu.svelte` | A11Y-02 | No keyboard nav |
-| `components/ConfirmDialog.svelte` | — | Clean |
-| `components/ModalBackdrop.svelte` | — | Excellent focus management |
-| `components/Pagination.svelte` | — | Clean and minimal |
+| File                                       | Issues                      | Notes                                                      |
+| ------------------------------------------ | --------------------------- | ---------------------------------------------------------- |
+| `app.html`                                 | ~~SEC-01~~, SEC-05          | CSP script-src tightened with SHA-256 hash                 |
+| `lib/api.ts`                               | SEC-02, SEC-03              | Core API client is well-structured                         |
+| `lib/auth.ts`                              | ARC-01                      | Mixed store pattern                                        |
+| `lib/theme.ts`                             | ARC-01, CQ-06               | Listener cleanup                                           |
+| `lib/stores/network.ts`                    | ARC-01, CQ-05               | Listener cleanup                                           |
+| `lib/notifications.svelte.ts`              | —                           | Clean implementation                                       |
+| `lib/utils.ts`                             | —                           | Clean implementation                                       |
+| `lib/types.ts`                             | —                           | Comprehensive type coverage                                |
+| `lib/auth.test.ts`                         | —                           | Good tests, need more coverage                             |
+| `+layout.svelte`                           | A11Y-03, HA-03              | Good auth guard pattern                                    |
+| `+layout.ts`                               | —                           | Clean                                                      |
+| `login/+page.svelte`                       | SEC-04, CQ-07               | Complex but well-handled                                   |
+| `register/+page.svelte`                    | CQ-07                       | Minor                                                      |
+| `device/+page.svelte`                      | —                           | Good device code validation                                |
+| `services/+page.svelte`                    | ~~CQ-01~~, ~~CQ-04~~, HA-04 | Double load + fragile effect fixed                         |
+| `hosts/+page.svelte`                       | HA-04                       | No retry button                                            |
+| `software/+page.svelte`                    | —                           | Clean implementation                                       |
+| `settings/+page.svelte`                    | ~~CQ-02~~, ~~HA-01~~, HA-02 | Component refs now properly typed; jitter added to backoff |
+| `settings/EnrollmentTokenSettings.svelte`  | CQ-03                       | Code duplication                                           |
+| `settings/RegistrationSettings.svelte`     | —                           | Clean                                                      |
+| `settings/AuthenticationSettings.svelte`   | —                           | Clean                                                      |
+| `settings/AgentCertificateSettings.svelte` | —                           | Clean                                                      |
+| `settings/MqttClientsSettings.svelte`      | CQ-08                       | Minor naming inconsistency                                 |
+| `settings/OidcProvidersSettings.svelte`    | —                           | Clean                                                      |
+| `settings/global/+page.svelte`             | —                           | Clean                                                      |
+| `components/ToastNotifications.svelte`     | ~~A11Y-01~~                 | ARIA live regions added                                    |
+| `components/ContextMenu.svelte`            | A11Y-02                     | No keyboard nav                                            |
+| `components/ConfirmDialog.svelte`          | —                           | Clean                                                      |
+| `components/ModalBackdrop.svelte`          | —                           | Excellent focus management                                 |
+| `components/Pagination.svelte`             | —                           | Clean and minimal                                          |
 
 ---
 
@@ -557,7 +558,7 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 1. **Fix double load bug on services page** (CQ-01): Remove the `onMount` call since `$effect` handles
    initial load.
 2. **Add jitter to MQTT polling backoff** (HA-01): Prevents thundering herd in multi-client scenarios.
-3. **Add linter configuration** (ARC-02): ESLint + Prettier + CI step.
+3. ~~**Add linter configuration** (ARC-02): ESLint + Prettier + CI step.~~ (DONE)
 4. **Add tests for security-critical functions** (Testing): `safeRedirect()`, `isValidLogoUrl()`,
    `authenticatedFetch` retry logic.
 5. **Add `aria-live` to toast notifications** (A11Y-01): Required for screen reader users.

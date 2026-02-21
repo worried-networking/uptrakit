@@ -1,16 +1,8 @@
 <script lang="ts">
 	import { user } from '$lib/auth';
 	import { goto } from '$app/navigation';
-	import {
-		getSystemAlerts,
-		renewServerCertificate,
-		getNetworkSettings,
-		updateNetworkSettings
-	} from '$lib/api';
-	import {
-		Permission,
-		type SystemAlert
-	} from '$lib/types';
+	import { getSystemAlerts, renewServerCertificate, getNetworkSettings, updateNetworkSettings } from '$lib/api';
+	import { Permission, type SystemAlert } from '$lib/types';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
 
 	// --- Network Settings ---
@@ -42,10 +34,7 @@
 
 	async function loadGlobalSettings() {
 		loading = true;
-		const results = await Promise.allSettled([
-			getNetworkSettings(),
-			getSystemAlerts()
-		]);
+		const results = await Promise.allSettled([getNetworkSettings(), getSystemAlerts()]);
 
 		if (results[0].status === 'fulfilled') {
 			const net = results[0].value;
@@ -119,8 +108,8 @@
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Network Settings</h2>
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
-				Configure reverse proxy trust, client IP detection, and listen addresses.
-				Changes to listen addresses require a restart to take effect.
+				Configure reverse proxy trust, client IP detection, and listen addresses. Changes to listen addresses require a
+				restart to take effect.
 			</p>
 
 			<label class="label mb-4">
@@ -159,32 +148,30 @@
 				<input class="input" type="text" bind:value={httpsAddr} />
 			</label>
 
-			<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}>
-				Save
-			</button>
+			<button class="btn preset-filled-primary-500" onclick={saveNetworkSettings}> Save </button>
 		</div>
 
 		<!-- Section 2: Controller TLS Certificate -->
 		<div class="card mb-6 p-6">
 			<h2 class="h3 mb-4">Controller TLS Certificate</h2>
 			<p class="mb-4 text-surface-600 dark:text-surface-400">
-				The controller's HTTPS certificate is automatically renewed before expiration.
-				You can manually renew it here to re-issue under the current active CA.
+				The controller's HTTPS certificate is automatically renewed before expiration. You can manually renew it here to
+				re-issue under the current active CA.
 			</p>
 
 			{#if tlsAlerts.length > 0}
 				{#each tlsAlerts as alert (alert.id)}
-					<aside class="mb-4 rounded-lg p-4 {alert.severity === 'warning' ? 'preset-filled-warning-500' : 'preset-filled-surface-400-600'}">
+					<aside
+						class="mb-4 rounded-lg p-4 {alert.severity === 'warning'
+							? 'preset-filled-warning-500'
+							: 'preset-filled-surface-400-600'}"
+					>
 						<p>{alert.message}</p>
 					</aside>
 				{/each}
 			{/if}
 
-			<button
-				class="btn preset-filled-primary-500"
-				onclick={handleRenewServerCert}
-				disabled={renewingCert}
-			>
+			<button class="btn preset-filled-primary-500" onclick={handleRenewServerCert} disabled={renewingCert}>
 				{renewingCert ? 'Renewing...' : 'Renew Server Certificate'}
 			</button>
 		</div>

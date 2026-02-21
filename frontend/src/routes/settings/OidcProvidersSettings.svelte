@@ -7,11 +7,7 @@
 		activateOidcProvider,
 		deactivateOidcProvider
 	} from '$lib/api';
-	import type {
-		OidcProviderResponse,
-		CreateOidcProviderRequest,
-		UpdateOidcProviderRequest
-	} from '$lib/types';
+	import type { OidcProviderResponse, CreateOidcProviderRequest, UpdateOidcProviderRequest } from '$lib/types';
 	import { isValidLogoUrl } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
@@ -125,9 +121,7 @@
 				if (oidcForm.role_claim_path) data.role_claim_path = oidcForm.role_claim_path;
 
 				const updated = await updateOidcProvider(editingProvider.id, data);
-				oidcProviders = oidcProviders.map((p) =>
-					p.id === updated.id ? updated : p
-				);
+				oidcProviders = oidcProviders.map((p) => (p.id === updated.id ? updated : p));
 				onSuccess('OIDC provider updated.');
 			} else {
 				const data: CreateOidcProviderRequest = {
@@ -180,30 +174,26 @@
 			}
 			// Activation may deactivate others, so reload all
 			oidcProviders = await getOidcProviders();
-			onSuccess(
-				updated.is_active
-					? `${updated.name} activated.`
-					: `${updated.name} deactivated.`
-			);
+			onSuccess(updated.is_active ? `${updated.name} activated.` : `${updated.name} deactivated.`);
 		} catch (e) {
 			onError(e instanceof Error ? e.message : 'Failed to update provider status');
 		}
 	}
 </script>
 
-<svelte:window onkeydown={(e) => {
-	if (e.key === 'Escape') {
-		if (showOidcModal) closeOidcModal();
-		else if (deleteConfirm) deleteConfirm = null;
-	}
-}} />
+<svelte:window
+	onkeydown={(e) => {
+		if (e.key === 'Escape') {
+			if (showOidcModal) closeOidcModal();
+			else if (deleteConfirm) deleteConfirm = null;
+		}
+	}}
+/>
 
 <div class="card mb-6 p-6">
 	<div class="mb-4 flex items-center justify-between">
 		<h2 class="h3">OIDC Providers</h2>
-		<button class="btn preset-filled-primary-500" onclick={openCreateOidc}>
-			Add Provider
-		</button>
+		<button class="btn preset-filled-primary-500" onclick={openCreateOidc}> Add Provider </button>
 	</div>
 
 	{#if oidcProviders.length === 0}
@@ -233,31 +223,17 @@
 							</td>
 							<td>
 								<div class="flex gap-1">
-									<button
-										class="btn btn-sm preset-tonal"
-										onclick={() => openEditOidc(provider)}
-									>
-										Edit
-									</button>
+									<button class="btn btn-sm preset-tonal" onclick={() => openEditOidc(provider)}> Edit </button>
 									{#if provider.is_active}
-										<button
-											class="btn btn-sm preset-tonal-warning"
-											onclick={() => toggleOidcActive(provider)}
-										>
+										<button class="btn btn-sm preset-tonal-warning" onclick={() => toggleOidcActive(provider)}>
 											Deactivate
 										</button>
 									{:else}
-										<button
-											class="btn btn-sm preset-tonal-success"
-											onclick={() => toggleOidcActive(provider)}
-										>
+										<button class="btn btn-sm preset-tonal-success" onclick={() => toggleOidcActive(provider)}>
 											Activate
 										</button>
 									{/if}
-									<button
-										class="btn btn-sm preset-tonal-error"
-										onclick={() => requestDeleteOidc(provider)}
-									>
+									<button class="btn btn-sm preset-tonal-error" onclick={() => requestDeleteOidc(provider)}>
 										Delete
 									</button>
 								</div>
@@ -277,13 +253,19 @@
 		entityName={deleteConfirm.name}
 		confirmLabel="Delete"
 		onconfirm={executeDeleteOidc}
-		oncancel={() => { deleteConfirm = null; }}
+		oncancel={() => {
+			deleteConfirm = null;
+		}}
 	/>
 {/if}
 
 {#if showOidcModal}
 	<ModalBackdrop onclose={closeOidcModal}>
-		<div class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl" role="dialog" aria-modal="true">
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-2xl max-h-[90vh] space-y-4 overflow-y-auto p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
 			<h3 class="h3">{editingProvider ? 'Edit OIDC Provider' : 'Add OIDC Provider'}</h3>
 
 			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -293,7 +275,14 @@
 				</label>
 				<label class="label">
 					<span>Slug</span>
-					<input class="input" type="text" bind:value={oidcForm.slug} oninput={() => { slugTouched = true; }} />
+					<input
+						class="input"
+						type="text"
+						bind:value={oidcForm.slug}
+						oninput={() => {
+							slugTouched = true;
+						}}
+					/>
 				</label>
 			</div>
 

@@ -35,7 +35,5 @@
 		<input class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
 		<span>Enable password authentication</span>
 	</label>
-	<button class="btn preset-filled-primary-500" onclick={saveAuthentication}>
-		Save
-	</button>
+	<button class="btn preset-filled-primary-500" onclick={saveAuthentication}> Save </button>
 </div>

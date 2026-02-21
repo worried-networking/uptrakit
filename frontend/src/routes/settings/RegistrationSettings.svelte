@@ -21,7 +21,9 @@
 
 	async function saveRegistration() {
 		try {
-			const data: { mode: 'open' | 'invite' | 'closed'; token?: string; require_token_for_oidc?: boolean } = { mode: regMode };
+			const data: { mode: 'open' | 'invite' | 'closed'; token?: string; require_token_for_oidc?: boolean } = {
+				mode: regMode
+			};
 			if (regMode === 'invite' && regToken) {
 				data.token = regToken;
 			}
@@ -53,23 +55,20 @@
 	{#if regMode === 'invite'}
 		<label class="label mb-4">
 			<span>Registration Token</span>
-			<input
-				class="input"
-				type="text"
-				placeholder="Enter a new registration token"
-				bind:value={regToken}
-			/>
-			<small class="text-surface-600 dark:text-surface-400">Set a new token for invite-only registration. Leave blank to keep the current token.</small>
+			<input class="input" type="text" placeholder="Enter a new registration token" bind:value={regToken} />
+			<small class="text-surface-600 dark:text-surface-400"
+				>Set a new token for invite-only registration. Leave blank to keep the current token.</small
+			>
 		</label>
 
 		<label class="mb-4 flex items-center gap-3">
 			<input class="checkbox" type="checkbox" bind:checked={regRequireTokenForOidc} />
 			<span>Require registration token for OIDC users</span>
 		</label>
-		<small class="mb-4 block text-surface-600 dark:text-surface-400">When enabled, users signing in via OIDC for the first time must also provide the registration token.</small>
+		<small class="mb-4 block text-surface-600 dark:text-surface-400"
+			>When enabled, users signing in via OIDC for the first time must also provide the registration token.</small
+		>
 	{/if}
 
-	<button class="btn preset-filled-primary-500" onclick={saveRegistration}>
-		Save
-	</button>
+	<button class="btn preset-filled-primary-500" onclick={saveRegistration}> Save </button>
 </div>

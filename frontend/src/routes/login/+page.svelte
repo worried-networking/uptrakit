@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { user, handleLogin, handleOidcLogin, handleOidcCallback, handleOidcLink, handleOidcCompleteRegistration } from '$lib/auth';
+	import {
+		user,
+		handleLogin,
+		handleOidcLogin,
+		handleOidcCallback,
+		handleOidcLink,
+		handleOidcCompleteRegistration
+	} from '$lib/auth';
 	import { getAuthMethods } from '$lib/api';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -246,7 +253,7 @@
 		<!-- Normal Login UI -->
 		{#if authMethods}
 			<!-- OIDC Provider Buttons -->
-			{#each authMethods.oidc_providers as provider}
+			{#each authMethods.oidc_providers as provider (provider.id)}
 				<button
 					type="button"
 					class="btn preset-filled-secondary-500 mb-3 flex w-full items-center justify-center gap-2"
@@ -274,24 +281,12 @@
 				<form onsubmit={onSubmit} class="space-y-4">
 					<label class="label">
 						<span>Email</span>
-						<input
-							class="input"
-							type="email"
-							bind:value={email}
-							required
-							autocomplete="email"
-						/>
+						<input class="input" type="email" bind:value={email} required autocomplete="email" />
 					</label>
 
 					<label class="label">
 						<span>Password</span>
-						<input
-							class="input"
-							type="password"
-							bind:value={password}
-							required
-							autocomplete="current-password"
-						/>
+						<input class="input" type="password" bind:value={password} required autocomplete="current-password" />
 					</label>
 
 					<button type="submit" class="btn preset-filled-primary-500 w-full">Login</button>

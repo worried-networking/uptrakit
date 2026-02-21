@@ -100,9 +100,7 @@ export async function refreshAccessToken(): Promise<RefreshResponse> {
  */
 async function authenticatedFetch(path: string, options: RequestInit = {}): Promise<Response> {
 	const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-	const combinedSignal = options.signal
-		? AbortSignal.any([options.signal, timeoutSignal])
-		: timeoutSignal;
+	const combinedSignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
 
 	const res = await fetch(`${BASE}${path}`, {
 		credentials: 'same-origin',
@@ -122,8 +120,12 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 		if (!refreshPromise) {
 			refreshPromise = refreshAccessToken();
 			refreshPromise.then(
-				() => { refreshPromise = null; },
-				() => { refreshPromise = null; }
+				() => {
+					refreshPromise = null;
+				},
+				() => {
+					refreshPromise = null;
+				}
 			);
 		}
 
@@ -149,7 +151,10 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 			});
 		} catch (refreshErr) {
 			// Network/timeout errors — keep session, surface the error
-			if (refreshErr instanceof DOMException && (refreshErr.name === 'TimeoutError' || refreshErr.name === 'AbortError')) {
+			if (
+				refreshErr instanceof DOMException &&
+				(refreshErr.name === 'TimeoutError' || refreshErr.name === 'AbortError')
+			) {
 				throw new Error('Token refresh timed out. Please try again.');
 			}
 			if (refreshErr instanceof TypeError) {
@@ -335,9 +340,7 @@ export function getRegistrationSettings(): Promise<RegistrationSettings> {
 	return request('/settings/registration');
 }
 
-export function updateRegistrationSettings(
-	data: UpdateRegistrationSettings
-): Promise<RegistrationSettings> {
+export function updateRegistrationSettings(data: UpdateRegistrationSettings): Promise<RegistrationSettings> {
 	return request('/settings/registration', { method: 'PUT', body: JSON.stringify(data) });
 }
 
@@ -345,9 +348,7 @@ export function getAuthenticationSettings(): Promise<AuthenticationSettings> {
 	return request('/settings/authentication');
 }
 
-export function updateAuthenticationSettings(
-	data: UpdateAuthenticationSettings
-): Promise<AuthenticationSettings> {
+export function updateAuthenticationSettings(data: UpdateAuthenticationSettings): Promise<AuthenticationSettings> {
 	return request('/settings/authentication', { method: 'PUT', body: JSON.stringify(data) });
 }
 
@@ -427,10 +428,7 @@ export function createOidcProvider(data: CreateOidcProviderRequest): Promise<Oid
 	return request('/settings/oidc-providers', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export function updateOidcProvider(
-	id: string,
-	data: UpdateOidcProviderRequest
-): Promise<OidcProviderResponse> {
+export function updateOidcProvider(id: string, data: UpdateOidcProviderRequest): Promise<OidcProviderResponse> {
 	return request(`/settings/oidc-providers/${id}`, {
 		method: 'PUT',
 		body: JSON.stringify(data)
@@ -483,10 +481,7 @@ export function getProviderConfigs(
 	return request(`/provider-configs${query ? `?${query}` : ''}`);
 }
 
-export function getSoftwareItems(
-	page?: number,
-	perPage?: number
-): Promise<PaginatedResponse<SoftwareItemResponse>> {
+export function getSoftwareItems(page?: number, perPage?: number): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
@@ -494,9 +489,7 @@ export function getSoftwareItems(
 	return request(`/software-items${query ? `?${query}` : ''}`);
 }
 
-export function createSoftwareItem(
-	data: CreateSoftwareItemRequest
-): Promise<SoftwareItemResponse> {
+export function createSoftwareItem(data: CreateSoftwareItemRequest): Promise<SoftwareItemResponse> {
 	return request('/software-items', {
 		method: 'POST',
 		body: JSON.stringify(data)

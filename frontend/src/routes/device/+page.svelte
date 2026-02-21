@@ -49,10 +49,7 @@
 		<p class="mb-4 text-center text-surface-600 dark:text-surface-400">
 			You need to log in before you can authorize a device.
 		</p>
-		<a
-			href="/login?redirect=/device?code={encodeURIComponent(code)}"
-			class="btn preset-filled-primary-500 w-full"
-		>
+		<a href="/login?redirect=/device?code={encodeURIComponent(code)}" class="btn preset-filled-primary-500 w-full">
 			Log in
 		</a>
 	{:else}
@@ -70,12 +67,7 @@
 			<span class="font-mono text-3xl font-bold tracking-widest">{code}</span>
 		</div>
 
-		<button
-			type="button"
-			class="btn preset-filled-primary-500 w-full"
-			disabled={approving}
-			onclick={onApprove}
-		>
+		<button type="button" class="btn preset-filled-primary-500 w-full" disabled={approving} onclick={onApprove}>
 			{approving ? 'Authorizing...' : 'Approve'}
 		</button>
 	{/if}
