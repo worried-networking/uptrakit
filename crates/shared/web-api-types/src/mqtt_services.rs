@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
@@ -16,9 +17,13 @@ pub struct MqttEnrollmentTokenResponse {
     pub id: Uuid,
     pub name: String,
     pub token: SecretString,
-    pub expires_at: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub expires_at: Option<OffsetDateTime>,
     pub uses_remaining: Option<u32>,
-    pub created_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
 }
 
 /// Response for listing MQTT enrollment tokens.
@@ -27,9 +32,13 @@ pub struct MqttEnrollmentTokenResponse {
 pub struct MqttEnrollmentTokenListResponse {
     pub id: Uuid,
     pub name: String,
-    pub expires_at: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub expires_at: Option<OffsetDateTime>,
     pub uses_remaining: Option<u32>,
-    pub created_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
 }
 
 /// Request to create a new MQTT enrollment token.

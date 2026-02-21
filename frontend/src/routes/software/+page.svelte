@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { user } from '$lib/auth';
+	import { getUser } from '$lib/auth.svelte';
 	import { getSoftwareItems, getProviderConfigs, createSoftwareItem } from '$lib/api';
 	import { showError, showSuccess, clearError } from '$lib/notifications.svelte';
 	import { formatDate } from '$lib/utils';
@@ -29,8 +29,8 @@
 	let enabled: boolean = $state(true);
 	let configOverrideText: string = $state('');
 
-	const canView = $derived($user?.permissions.includes(Permission.ViewSoftware) ?? false);
-	const canManage = $derived($user?.permissions.includes(Permission.ManageSoftware) ?? false);
+	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
 	const homebrewConfigs = $derived(providerConfigs.filter((config) => config.provider_type === 'homebrew'));
 	const canToggleCreate = $derived(providerConfigs.length > 0);
@@ -226,7 +226,7 @@
 	}
 </script>
 
-{#if $user}
+{#if getUser()}
 	<h1 class="h1 mb-4">Software</h1>
 
 	{#if !canView}

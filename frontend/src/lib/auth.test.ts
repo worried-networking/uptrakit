@@ -1,16 +1,17 @@
-import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from './api';
 import {
 	getAccessToken,
+	getLoading,
+	getUser,
 	handleLogin,
 	handleLogout,
 	handleOidcCallback,
 	initialize,
-	loading,
 	setAccessToken,
-	user
-} from './auth';
+	setLoading,
+	setUser
+} from './auth.svelte';
 import type { AuthResponse, RefreshResponse, User } from './types';
 
 vi.mock('./api', () => ({
@@ -50,8 +51,8 @@ const sampleAuthResponse: AuthResponse = {
 
 beforeEach(() => {
 	setAccessToken(null);
-	user.set(null);
-	loading.set(true);
+	setUser(null);
+	setLoading(true);
 	vi.clearAllMocks();
 });
 
@@ -65,8 +66,8 @@ describe('initialize', () => {
 		expect(api.refreshAccessToken).toHaveBeenCalledTimes(1);
 		expect(api.me).toHaveBeenCalledTimes(1);
 		expect(getAccessToken()).toBe(sampleRefresh.access_token);
-		expect(get(user)).toEqual(sampleUser);
-		expect(get(loading)).toBe(false);
+		expect(getUser()).toEqual(sampleUser);
+		expect(getLoading()).toBe(false);
 	});
 
 	it('stays anonymous when refresh fails', async () => {
@@ -77,8 +78,8 @@ describe('initialize', () => {
 		expect(api.refreshAccessToken).toHaveBeenCalledTimes(1);
 		expect(api.me).not.toHaveBeenCalled();
 		expect(getAccessToken()).toBeNull();
-		expect(get(user)).toBeNull();
-		expect(get(loading)).toBe(false);
+		expect(getUser()).toBeNull();
+		expect(getLoading()).toBe(false);
 	});
 
 	it('uses existing access token without refresh', async () => {
@@ -90,19 +91,19 @@ describe('initialize', () => {
 		expect(api.refreshAccessToken).not.toHaveBeenCalled();
 		expect(api.me).toHaveBeenCalledTimes(1);
 		expect(getAccessToken()).toBe('existing-token');
-		expect(get(user)).toEqual(sampleUser);
-		expect(get(loading)).toBe(false);
+		expect(getUser()).toEqual(sampleUser);
+		expect(getLoading()).toBe(false);
 	});
 });
 
 describe('handleLogin', () => {
-	it('sets accessToken and user store on success', async () => {
+	it('sets accessToken and user on success', async () => {
 		vi.mocked(api.login).mockResolvedValue(sampleAuthResponse);
 
 		await handleLogin({ email: 'user@example.com', password: 'secret' });
 
 		expect(getAccessToken()).toBe('auth-access-token');
-		expect(get(user)).toEqual(sampleUser);
+		expect(getUser()).toEqual(sampleUser);
 	});
 
 	it('propagates errors without touching the token or user', async () => {
@@ -111,25 +112,25 @@ describe('handleLogin', () => {
 		await expect(handleLogin({ email: 'user@example.com', password: 'wrong' })).rejects.toThrow('Invalid credentials');
 
 		expect(getAccessToken()).toBeNull();
-		expect(get(user)).toBeNull();
+		expect(getUser()).toBeNull();
 	});
 });
 
 describe('handleLogout', () => {
-	it('clears accessToken and user store on success', async () => {
+	it('clears accessToken and user on success', async () => {
 		setAccessToken('some-token');
-		user.set(sampleUser);
+		setUser(sampleUser);
 		vi.mocked(api.logout).mockResolvedValue(undefined);
 
 		await handleLogout();
 
 		expect(getAccessToken()).toBeNull();
-		expect(get(user)).toBeNull();
+		expect(getUser()).toBeNull();
 	});
 
-	it('clears accessToken and user store even when API call throws', async () => {
+	it('clears accessToken and user even when API call throws', async () => {
 		setAccessToken('some-token');
-		user.set(sampleUser);
+		setUser(sampleUser);
 		vi.mocked(api.logout).mockRejectedValue(new Error('Network error'));
 
 		// handleLogout uses try/finally — the error propagates, but state is always cleared
@@ -137,19 +138,19 @@ describe('handleLogout', () => {
 
 		// State must be cleared regardless of API error (via finally block)
 		expect(getAccessToken()).toBeNull();
-		expect(get(user)).toBeNull();
+		expect(getUser()).toBeNull();
 	});
 });
 
 describe('handleOidcCallback', () => {
-	it('sets accessToken and user store on successful oidcExchange', async () => {
+	it('sets accessToken and user on successful oidcExchange', async () => {
 		vi.mocked(api.oidcExchange).mockResolvedValue(sampleAuthResponse);
 
 		await handleOidcCallback('oidc-auth-code');
 
 		expect(api.oidcExchange).toHaveBeenCalledWith('oidc-auth-code');
 		expect(getAccessToken()).toBe('auth-access-token');
-		expect(get(user)).toEqual(sampleUser);
+		expect(getUser()).toEqual(sampleUser);
 	});
 
 	it('propagates errors without setting the token or user', async () => {
@@ -158,6 +159,6 @@ describe('handleOidcCallback', () => {
 		await expect(handleOidcCallback('bad-code')).rejects.toThrow('OIDC exchange failed');
 
 		expect(getAccessToken()).toBeNull();
-		expect(get(user)).toBeNull();
+		expect(getUser()).toBeNull();
 	});
 });

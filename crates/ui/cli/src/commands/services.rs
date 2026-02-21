@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::services::{
     ListServicesQuery, MergeAgentRequest, ParseServiceStatusError, ParseServiceTypeError,
@@ -47,6 +48,10 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
             "ID", "TYPE", "HOSTNAME", "FRIENDLY NAME", "STATUS"
         ));
         for s in &resp.items {
+            let last_seen = s
+                .last_seen_at
+                .as_ref()
+                .map(|dt| dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string()));
             human.push_str(&format!(
                 "{:<38} {:<12} {:<20} {:<25} {:<12} {}\n",
                 s.id,
@@ -54,7 +59,7 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
                 s.hostname,
                 s.friendly_name,
                 s.status,
-                s.last_seen_at.as_deref().unwrap_or("-")
+                last_seen.as_deref().unwrap_or("-")
             ));
         }
         human.push_str(&format!(
@@ -89,14 +94,23 @@ pub async fn show(
     if let Some(ref ver) = resp.client_version {
         human.push_str(&format!("Client Version: {}\n", ver));
     }
-    if let Some(ref seen) = resp.last_seen_at {
-        human.push_str(&format!("Last Seen:     {}\n", seen));
+    if let Some(seen) = resp.last_seen_at {
+        human.push_str(&format!(
+            "Last Seen:     {}\n",
+            seen.format(&Rfc3339).unwrap_or_else(|_| seen.to_string())
+        ));
     }
     if let Some(ping) = resp.ping_interval_seconds {
         human.push_str(&format!("Ping Interval: {}s\n", ping));
     }
-    human.push_str(&format!("Created:       {}\n", resp.created_at));
-    human.push_str(&format!("Updated:       {}\n", resp.updated_at));
+    human.push_str(&format!(
+        "Created:       {}\n",
+        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+    ));
+    human.push_str(&format!(
+        "Updated:       {}\n",
+        resp.updated_at.format(&Rfc3339).unwrap_or_else(|_| resp.updated_at.to_string())
+    ));
 
     print_output(format, &human, &resp)
 }

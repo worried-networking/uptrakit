@@ -1,19 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		user,
+		getUser,
 		handleLogin,
 		handleOidcLogin,
 		handleOidcCallback,
 		handleOidcLink,
 		handleOidcCompleteRegistration
-	} from '$lib/auth';
+	} from '$lib/auth.svelte';
 	import { getAuthMethods } from '$lib/api';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import type { AuthMethodsResponse } from '$lib/types';
 	import { isValidLogoUrl, safeRedirect as safeRedirectFn } from '$lib/utils';
-	import { isOnline } from '$lib/stores/network';
+	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let email = $state('');
 	let password = $state('');
@@ -31,7 +31,7 @@
 	let hasRedirected = false;
 
 	$effect(() => {
-		if ($user && !hasRedirected) {
+		if (getUser() && !hasRedirected) {
 			hasRedirected = true;
 			goto('/');
 		}
@@ -182,10 +182,10 @@
 				/>
 			</label>
 			<div class="flex items-center gap-2">
-				<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}
+				<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!getIsOnline()}
 					>Complete Registration</button
 				>
-				{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+				{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
 			</div>
 		</form>
 	{:else if linkRequired}
@@ -252,8 +252,10 @@
 				/>
 			</label>
 			<div class="flex items-center gap-2">
-				<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}>Link Account</button>
-				{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+				<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!getIsOnline()}
+					>Link Account</button
+				>
+				{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
 			</div>
 		</form>
 	{:else if !registrationTokenRequired}
@@ -297,8 +299,8 @@
 					</label>
 
 					<div class="flex items-center gap-2">
-						<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}>Login</button>
-						{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+						<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!getIsOnline()}>Login</button>
+						{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
 					</div>
 				</form>
 

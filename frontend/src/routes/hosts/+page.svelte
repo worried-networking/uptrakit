@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { user } from '$lib/auth';
+	import { getUser } from '$lib/auth.svelte';
 	import { getHosts, updateHost, deactivateHost } from '$lib/api';
 	import type { HostResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
@@ -115,7 +115,7 @@
 		}
 	}
 
-	const canManage = $derived($user?.permissions.includes(Permission.ManageHosts) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
 </script>
 
 <svelte:window
@@ -128,7 +128,7 @@
 	}}
 />
 
-{#if $user}
+{#if getUser()}
 	<h1 class="h1 mb-6">Hosts</h1>
 
 	{#if error}

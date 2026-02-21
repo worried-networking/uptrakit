@@ -1,7 +1,7 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "host_software_items")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

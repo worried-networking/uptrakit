@@ -123,7 +123,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                         if send_pong(sink, out_seq, service_ts).await.is_err() {
                             return;
                         }
-                        if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                        if let Err(e) = record_service_activity(state.db(), service_id, None).await {
                             tracing::warn!(error = %e, %service_id, "failed to record service activity");
                         }
                     }
@@ -165,7 +165,7 @@ pub(crate) async fn handle_mqtt_authenticated(
 
     // Create lease coordinator.
     let lease_coordinator =
-        MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+        MqttLeaseCoordinator::new(state.db().clone(), state.service_connections.clone());
 
     // Reconcile MQTT clients if reconnecting with active clients.
     let tenant_configs = if !active_mqtt_clients.is_empty() {
@@ -256,7 +256,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
-                                if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                                if let Err(e) = record_service_activity(state.db(), service_id, None).await {
                                     tracing::warn!(error = %e, %service_id, "failed to record service activity");
                                 }
 
@@ -296,7 +296,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                                 };
 
                                 if let Err(e) = mqtt_client_store::update_mqtt_client_status(
-                                    &state.db,
+                                    state.db(),
                                     payload.mqtt_client_id,
                                     status,
                                 )
@@ -308,7 +308,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                             ServiceMessage::RenewCertificate(payload) => {
                                 // Re-fetch service from DB, verify still approved
                                 let service = match mqtt_service::Entity::find_by_id(service_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(s)) if s.status == mqtt_service::ServiceStatus::Approved && s.deactivated_at.is_none() => s,
@@ -327,7 +327,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                                 match do_sign_mqtt_service_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
-                                    &state.db,
+                                    state.db(),
                                     service,
                                     &payload.csr_pem,
                                 ).await {
@@ -341,7 +341,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                                         }
 
                                         if let Err(e) = revoke_mqtt_service_certificate(
-                                            &state.db,
+                                            state.db(),
                                             &cert.serial,
                                             &cert.ca_fingerprint,
                                             mqtt_service_certificate::RevocationReason::CertificateRenewed,
@@ -349,7 +349,7 @@ pub(crate) async fn handle_mqtt_authenticated(
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
-                                        if let Err(e) = crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await {
+                                        if let Err(e) = crate::settings_store::bump_revocation_version(state.db(), state.default_tenant_id).await {
                                             tracing::warn!(error = ?e, "failed to bump revocation version counter");
                                         }
                                         state.revocation_notify.notify_one();
@@ -478,7 +478,7 @@ pub(crate) async fn handle_mqtt_enrolled(
                                     break;
                                 };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
-                                if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                                if let Err(e) = record_service_activity(state.db(), service_id, None).await {
                                     tracing::warn!(error = %e, %service_id, "failed to record service activity");
                                 }
                             }
@@ -496,7 +496,7 @@ pub(crate) async fn handle_mqtt_enrolled(
 
                                 // Re-fetch service from DB.
                                 let service = match mqtt_service::Entity::find_by_id(service_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(s)) => s,
@@ -515,7 +515,7 @@ pub(crate) async fn handle_mqtt_enrolled(
                                 match do_sign_mqtt_service_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
-                                    &state.db,
+                                    state.db(),
                                     service,
                                     &payload.csr_pem,
                                 )
@@ -580,7 +580,7 @@ pub(crate) async fn handle_mqtt_enrolled(
             // client-controlled ping frequency.
             _ = approval_poll.tick(), if !approved => {
                 if let Ok(Some(s)) = mqtt_service::Entity::find_by_id(service_id)
-                    .one(&state.db)
+                    .one(state.db())
                     .await
                 {
                     match s.status {

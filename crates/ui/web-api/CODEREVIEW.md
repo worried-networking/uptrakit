@@ -45,24 +45,31 @@ for multi-table queries.
 to absorb schema evolution. This makes it harder for external developers to understand the API
 layer without also understanding the database schema.
 
-### Significant: AppState exposes raw DatabaseConnection
+### ~~Significant: AppState exposes raw DatabaseConnection~~ RESOLVED
 
-**Location:** `src/lib.rs:157-163`
+**Location:** `src/lib.rs`, `src/tenant_db.rs`
+
+This finding has been addressed. The `db` field on `AppState` is now private, accessible only
+through a `db()` accessor method. Tenant-scoped route handlers use the `TenantDb` Axum extractor
+(defined in `src/tenant_db.rs`) which combines a `DatabaseConnection` with a verified `tenant_id`.
+This makes it structurally impossible to access tenant data without first resolving the tenant
+context through the extractor machinery.
 
 ```rust
-pub struct AppState {
-    pub db: DatabaseConnection,
-    // ...
+// tenant_db.rs
+pub struct TenantDb {
+    db: DatabaseConnection,   // private — callers use .db()
+    pub tenant_id: Uuid,
+}
+
+impl FromRequestParts<Arc<AppState>> for TenantDb {
+    // Resolves TenantContext, then pairs the connection with tenant_id
 }
 ```
 
-Any handler with access to `AppState` can execute arbitrary database queries. There is no
-query scoping, no repository pattern, and no abstraction boundary between the API layer and the
-database.
-
-**Impact:** Multi-tenancy isolation relies on manual tenant ID filtering in every query. A missed
-filter could leak data across tenants. External developers extending the API must understand the
-full entity schema and tenant isolation patterns.
+Tenant-agnostic routes (PKI, authentication, WebSocket handlers) continue to use
+`State(state)` and call `state.db()`. All handler code passes `cargo check` and
+`cargo clippy --deny warnings` cleanly.
 
 ### Minor: provider registry used directly in handlers
 
@@ -112,9 +119,11 @@ This would:
 - **Proper secret redaction.**
   `CaKeyStore::Debug` implementation redacts all key material. `Zeroizing`
   wrappers on private key fields.
-- **Well-designed AppState** (`lib.rs:156-206`).
+- **Well-designed AppState** (`lib.rs`).
   Clean separation of public CA snapshot (clonable, debuggable) from private
-  key store (non-Clone, non-Debug, behind `RwLock`).
+  key store (non-Clone, non-Debug, behind `RwLock`). Construction uses a
+  type-safe builder (`AppState::builder()...build()`) that returns `Result`,
+  so missing fields are caught at startup rather than causing a runtime panic.
 - **Feature-gated OIDC** -- `#[cfg(feature = "oidc")]` cleanly gates all OIDC functionality.
 - **30+ route modules** organized by domain with consistent patterns.
 

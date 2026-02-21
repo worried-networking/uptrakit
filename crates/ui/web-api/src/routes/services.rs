@@ -4,8 +4,8 @@ use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::middleware::tenant_context::TenantContext;
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
+use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -19,7 +19,6 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
 use uptrakit_shared_db::entity::prelude::{
     RevocationReason, Service, ServiceCertificate, ServiceHost,
@@ -36,10 +35,6 @@ pub use uptrakit_web_api_types::services::{
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn format_rfc3339(dt: OffsetDateTime) -> String {
-    dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
-}
-
 fn model_to_response(m: service::Model) -> ServiceResponse {
     ServiceResponse {
         id: m.id,
@@ -49,9 +44,9 @@ fn model_to_response(m: service::Model) -> ServiceResponse {
         ip_address: m.ip_address,
         status: m.status,
         client_version: m.client_version,
-        last_seen_at: m.last_seen_at.map(format_rfc3339),
-        created_at: format_rfc3339(m.created_at),
-        updated_at: format_rfc3339(m.updated_at),
+        last_seen_at: m.last_seen_at,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
         ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
     }
 }
@@ -89,8 +84,7 @@ fn enrollment_setting_key(type_param: Option<&ServiceType>) -> SettingKey {
     security(("bearer_token" = []))
 )]
 pub async fn list_services(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
@@ -101,7 +95,7 @@ pub async fn list_services(
     let pagination = query.pagination().resolve();
 
     let mut q = Service::find()
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null());
 
     if let Some(ref type_filter) = query.r#type {
@@ -114,7 +108,7 @@ pub async fn list_services(
 
     let base_query = q.order_by_desc(service::Column::CreatedAt);
 
-    let total = match base_query.clone().count(&state.db).await {
+    let total = match base_query.clone().count(tenant_db.db()).await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to count services: {}", e);
@@ -125,7 +119,7 @@ pub async fn list_services(
     let services = match base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
-        .all(&state.db)
+        .all(tenant_db.db())
         .await
     {
         Ok(s) => s,
@@ -160,8 +154,7 @@ pub async fn list_services(
     security(("bearer_token" = []))
 )]
 pub async fn get_service(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -175,9 +168,9 @@ pub async fn get_service(
     };
 
     let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(s)) => s,
@@ -210,8 +203,7 @@ pub async fn get_service(
     security(("bearer_token" = []))
 )]
 pub async fn update_service(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
     Json(body): Json<UpdateServiceRequest>,
@@ -226,9 +218,9 @@ pub async fn update_service(
     };
 
     let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(s)) => s,
@@ -252,7 +244,7 @@ pub async fn update_service(
 
     active.updated_at = Set(OffsetDateTime::now_utc());
 
-    let updated = match active.update(&state.db).await {
+    let updated = match active.update(tenant_db.db()).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to update service: {}", e);
@@ -281,7 +273,7 @@ pub async fn update_service(
 )]
 pub async fn approve_service(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -295,9 +287,9 @@ pub async fn approve_service(
     };
 
     let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(s)) => s,
@@ -317,7 +309,7 @@ pub async fn approve_service(
     active.status = Set(service::ServiceStatus::Approved);
     active.updated_at = Set(now);
 
-    let updated = match active.update(&state.db).await {
+    let updated = match active.update(tenant_db.db()).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to approve service: {}", e);
@@ -355,7 +347,7 @@ pub async fn approve_service(
 )]
 pub async fn reject_service(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -369,9 +361,9 @@ pub async fn reject_service(
     };
 
     let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(s)) => s,
@@ -392,7 +384,7 @@ pub async fn reject_service(
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
-    let updated = match active.update(&state.db).await {
+    let updated = match active.update(tenant_db.db()).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to reject service: {}", e);
@@ -433,7 +425,7 @@ pub async fn reject_service(
 )]
 pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -447,9 +439,9 @@ pub async fn deactivate_service(
     };
 
     let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(s)) => s,
@@ -465,7 +457,7 @@ pub async fn deactivate_service(
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
-    if let Err(e) = active.update(&state.db).await {
+    if let Err(e) = active.update(tenant_db.db()).await {
         tracing::error!("Failed to deactivate service: {}", e);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -482,14 +474,15 @@ pub async fn deactivate_service(
         )
         .filter(service_certificate::Column::ServiceId.eq(service_id))
         .filter(service_certificate::Column::RevokedAt.is_null())
-        .exec(&state.db)
+        .exec(tenant_db.db())
         .await
     {
         tracing::error!("Failed to revoke certificates: {}", e);
     }
 
     if let Err(e) =
-        crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await
+        crate::settings_store::bump_revocation_version(tenant_db.db(), state.default_tenant_id)
+            .await
     {
         tracing::warn!(error = ?e, "failed to bump revocation version counter");
     }
@@ -529,7 +522,7 @@ pub async fn deactivate_service(
 )]
 pub async fn merge_service(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(target_id): Path<String>,
     Json(body): Json<MergeAgentRequest>,
@@ -549,7 +542,7 @@ pub async fn merge_service(
         return error_response(StatusCode::BAD_REQUEST, "Cannot merge service into itself");
     }
 
-    let txn = match state.db.begin().await {
+    let txn = match tenant_db.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to begin transaction: {e}");
@@ -560,7 +553,7 @@ pub async fn merge_service(
     // Find target service (must be approved, not deactivated, agent type)
     let target = match Service::find_by_id(target_uuid)
         .lock_exclusive()
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
@@ -594,7 +587,7 @@ pub async fn merge_service(
     // Find source service (must be pending, not deactivated, agent type)
     let source = match Service::find_by_id(source_uuid)
         .lock_exclusive()
-        .filter(service::Column::TenantId.eq(tenant.tenant_id))
+        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
@@ -780,7 +773,7 @@ pub async fn create_enrollment_token(
     };
 
     if let Err(e) = upsert_setting(
-        &state.db,
+        state.db(),
         state.default_tenant_id,
         setting_key,
         serde_json::Value::String(hash.expose_secret().to_string()),
@@ -826,7 +819,7 @@ pub async fn revoke_enrollment_token(
 
     let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
-    if let Err(e) = delete_setting(&state.db, state.default_tenant_id, setting_key).await {
+    if let Err(e) = delete_setting(state.db(), state.default_tenant_id, setting_key).await {
         tracing::error!("Failed to delete enrollment token: {:?}", e);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -846,6 +839,7 @@ mod tests {
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
     use crate::settings::Settings;
+    use crate::tenant_db::TenantDb;
     use axum::Json;
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
@@ -1068,9 +1062,11 @@ mod tests {
             permissions: vec![Permission::ManageAgents],
         };
 
+        let tenant_db = TenantDb::new_for_test(state.db().clone(), tenant_id);
+
         let response = merge_service(
-            State(state),
-            TenantContext { tenant_id },
+            State(Arc::clone(&state)),
+            tenant_db,
             axum::Extension(auth_user),
             Path(target.id.to_string()),
             Json(MergeAgentRequest {
@@ -1118,7 +1114,7 @@ pub async fn enrollment_token_status(
     let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     let configured = matches!(
-        load_setting(&state.db, state.default_tenant_id, setting_key).await,
+        load_setting(state.db(), state.default_tenant_id, setting_key).await,
         Ok(Some(_))
     );
 

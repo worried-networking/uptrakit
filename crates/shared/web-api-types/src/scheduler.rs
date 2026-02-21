@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::validation::{Validate, ValidationError};
@@ -13,13 +14,21 @@ pub struct ScheduledTaskResponse {
     pub cron_expression: String,
     pub enabled: bool,
     pub task_config: Option<serde_json::Value>,
-    pub last_run_at: Option<String>,
-    pub next_run_at: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub last_run_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub next_run_at: OffsetDateTime,
     pub is_running: bool,
     pub last_error: Option<String>,
     pub run_count: i64,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub updated_at: OffsetDateTime,
 }
 
 /// Request to update a scheduled task.
@@ -80,6 +89,7 @@ mod tests {
 
     #[test]
     fn scheduled_task_response_round_trip_all_fields() {
+        use time::macros::datetime;
         let resp = ScheduledTaskResponse {
             id: sample_uuid(),
             task_type: "version_check".to_string(),
@@ -87,13 +97,13 @@ mod tests {
             cron_expression: "0 0 * * *".to_string(),
             enabled: true,
             task_config: Some(serde_json::json!({"timeout": 30})),
-            last_run_at: Some("2025-06-01T00:00:00Z".to_string()),
-            next_run_at: "2025-06-02T00:00:00Z".to_string(),
+            last_run_at: Some(datetime!(2025-06-01 00:00:00 UTC)),
+            next_run_at: datetime!(2025-06-02 00:00:00 UTC),
             is_running: false,
             last_error: Some("timeout exceeded".to_string()),
             run_count: 42,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-06-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-06-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ScheduledTaskResponse =
@@ -104,11 +114,8 @@ mod tests {
         assert_eq!(deserialized.cron_expression, "0 0 * * *");
         assert!(deserialized.enabled);
         assert!(deserialized.task_config.is_some());
-        assert_eq!(
-            deserialized.last_run_at.as_deref(),
-            Some("2025-06-01T00:00:00Z")
-        );
-        assert_eq!(deserialized.next_run_at, "2025-06-02T00:00:00Z");
+        assert_eq!(deserialized.last_run_at, Some(datetime!(2025-06-01 00:00:00 UTC)));
+        assert_eq!(deserialized.next_run_at, datetime!(2025-06-02 00:00:00 UTC));
         assert!(!deserialized.is_running);
         assert_eq!(deserialized.last_error.as_deref(), Some("timeout exceeded"));
         assert_eq!(deserialized.run_count, 42);
@@ -116,6 +123,7 @@ mod tests {
 
     #[test]
     fn scheduled_task_response_round_trip_none_fields() {
+        use time::macros::datetime;
         let resp = ScheduledTaskResponse {
             id: sample_uuid(),
             task_type: "cleanup".to_string(),
@@ -124,12 +132,12 @@ mod tests {
             enabled: false,
             task_config: None,
             last_run_at: None,
-            next_run_at: "2025-06-08T00:00:00Z".to_string(),
+            next_run_at: datetime!(2025-06-08 00:00:00 UTC),
             is_running: false,
             last_error: None,
             run_count: 0,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ScheduledTaskResponse =
@@ -143,6 +151,7 @@ mod tests {
 
     #[test]
     fn scheduled_task_response_is_running_true() {
+        use time::macros::datetime;
         let resp = ScheduledTaskResponse {
             id: sample_uuid(),
             task_type: "sync".to_string(),
@@ -151,12 +160,12 @@ mod tests {
             enabled: true,
             task_config: None,
             last_run_at: None,
-            next_run_at: "2025-06-01T00:05:00Z".to_string(),
+            next_run_at: datetime!(2025-06-01 00:05:00 UTC),
             is_running: true,
             last_error: None,
             run_count: 10,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: ScheduledTaskResponse =

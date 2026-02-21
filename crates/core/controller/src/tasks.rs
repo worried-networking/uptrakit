@@ -139,7 +139,7 @@ pub fn spawn_denylist_cleanup(
 /// Periodic settings version check for cross-instance cache invalidation.
 pub fn spawn_settings_reload(token: CancellationToken, app_state: Arc<AppState>) -> JoinHandle<()> {
     let settings = app_state.settings.clone();
-    let db = app_state.db.clone();
+    let db = app_state.db().clone();
     let tid = app_state.default_tenant_id;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(durations::SETTINGS_POLL_INTERVAL);
@@ -171,7 +171,7 @@ pub fn spawn_ca_reload(
     crl_manager: Arc<crate::crl_manager::CrlManager>,
     initial_ca_version: i64,
 ) -> JoinHandle<()> {
-    let db = app_state.db.clone();
+    let db = app_state.db().clone();
     let settings = app_state.settings.clone();
     let ca_key_store = Arc::clone(&app_state.ca_key_store);
     let tenant_id = app_state.default_tenant_id;
@@ -235,7 +235,7 @@ pub fn spawn_ca_reload(
 /// Cross-controller notification delivery via event polling.
 pub fn spawn_event_poller(token: CancellationToken, app_state: Arc<AppState>) -> JoinHandle<()> {
     let event_poller = uptrakit_web_api::event_poller::EventPoller::new(
-        app_state.db.clone(),
+        app_state.db().clone(),
         app_state.service_connections.clone(),
         app_state.controller_id,
     );
@@ -253,7 +253,7 @@ pub fn spawn_ca_rotation(
     ca_tx: tokio::sync::watch::Sender<crate::pki::CaSnapshot>,
     crl_manager: Arc<crate::crl_manager::CrlManager>,
 ) -> JoinHandle<()> {
-    let db = app_state.db.clone();
+    let db = app_state.db().clone();
     let settings = app_state.settings.clone();
     let ca_key_store = Arc::clone(&app_state.ca_key_store);
     let notification_service = app_state.notification_service.clone();

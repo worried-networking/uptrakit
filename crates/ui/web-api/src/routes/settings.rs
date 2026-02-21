@@ -78,7 +78,7 @@ pub async fn update_registration_settings(
     let mut reg = state.settings.registration();
     if let Err(e) = reg
         .update(
-            &state.db,
+            state.db(),
             state.default_tenant_id,
             req.mode,
             req.token.map(|t| t.expose_secret().to_string()),

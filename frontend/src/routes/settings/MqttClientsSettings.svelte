@@ -8,12 +8,14 @@
 	} from '$lib/types';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
-	import { isOnline } from '$lib/stores/network';
+	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let {
+		clients,
 		onSuccess,
 		onError
 	}: {
+		clients: MqttClientResponse[] | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
@@ -32,9 +34,11 @@
 	});
 	let mqttDeleteConfirm: { id: string; url: string } | null = $state(null);
 
-	export function load(clients: MqttClientResponse[]) {
-		mqttClients = clients;
-	}
+	$effect(() => {
+		if (clients !== undefined) {
+			mqttClients = clients;
+		}
+	});
 
 	function openCreateMqtt() {
 		editingMqttClient = null;
@@ -162,66 +166,71 @@
 		<h2 class="h3">MQTT Clients</h2>
 		<button class="btn preset-filled-primary-500" onclick={openCreateMqtt}> Add Client </button>
 	</div>
-	<p class="mb-4 text-surface-600 dark:text-surface-400">
-		Configure MQTT broker connections for Home Assistant integration. Use a URL like <code>mqtt://broker:1883</code> or
-		<code>mqtts://broker:8883</code>.
-	</p>
-
-	{#if mqttClients.length === 0}
-		<p class="py-4 text-center text-surface-600 dark:text-surface-400">No MQTT clients configured.</p>
+	{#if clients === undefined}
+		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
 	{:else}
-		<div class="table-wrap">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>URL</th>
-						<th>Client ID</th>
-						<th>Topic Prefix</th>
-						<th>Status</th>
-						<th class="w-48">Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each mqttClients as client (client.id)}
+		<p class="mb-4 text-surface-600 dark:text-surface-400">
+			Configure MQTT broker connections for Home Assistant integration. Use a URL like <code>mqtt://broker:1883</code>
+			or
+			<code>mqtts://broker:8883</code>.
+		</p>
+
+		{#if mqttClients.length === 0}
+			<p class="py-4 text-center text-surface-600 dark:text-surface-400">No MQTT clients configured.</p>
+		{:else}
+			<div class="table-wrap">
+				<table class="table">
+					<thead>
 						<tr>
-							<td>{client.url}</td>
-							<td>{client.client_id}</td>
-							<td>{client.topic_prefix}</td>
-							<td>
-								{#if client.enabled}
-									{@const connectionText = connectionLabel(client.connection_status)}
-									<span class="inline-flex items-center gap-2">
-										<span
-											class={`h-2.5 w-2.5 rounded-full ${connectionColor(client.connection_status)}`}
-											title={connectionText}
-											aria-label={connectionText}
-										></span>
-										<span class="badge preset-filled-success-500">Enabled</span>
-									</span>
-								{:else}
-									<span class="inline-flex items-center gap-2">
-										<span
-											class="h-2.5 w-2.5 rounded-full bg-surface-400 dark:bg-surface-600"
-											title="Disabled"
-											aria-label="Disabled"
-										></span>
-										<span class="badge preset-tonal">Disabled</span>
-									</span>
-								{/if}
-							</td>
-							<td>
-								<div class="flex gap-1">
-									<button class="btn btn-sm preset-tonal" onclick={() => openEditMqtt(client)}> Edit </button>
-									<button class="btn btn-sm preset-tonal-error" onclick={() => requestDeleteMqtt(client)}>
-										Delete
-									</button>
-								</div>
-							</td>
+							<th>URL</th>
+							<th>Client ID</th>
+							<th>Topic Prefix</th>
+							<th>Status</th>
+							<th class="w-48">Actions</th>
 						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+					</thead>
+					<tbody>
+						{#each mqttClients as client (client.id)}
+							<tr>
+								<td>{client.url}</td>
+								<td>{client.client_id}</td>
+								<td>{client.topic_prefix}</td>
+								<td>
+									{#if client.enabled}
+										{@const connectionText = connectionLabel(client.connection_status)}
+										<span class="inline-flex items-center gap-2">
+											<span
+												class={`h-2.5 w-2.5 rounded-full ${connectionColor(client.connection_status)}`}
+												title={connectionText}
+												aria-label={connectionText}
+											></span>
+											<span class="badge preset-filled-success-500">Enabled</span>
+										</span>
+									{:else}
+										<span class="inline-flex items-center gap-2">
+											<span
+												class="h-2.5 w-2.5 rounded-full bg-surface-400 dark:bg-surface-600"
+												title="Disabled"
+												aria-label="Disabled"
+											></span>
+											<span class="badge preset-tonal">Disabled</span>
+										</span>
+									{/if}
+								</td>
+								<td>
+									<div class="flex gap-1">
+										<button class="btn btn-sm preset-tonal" onclick={() => openEditMqtt(client)}> Edit </button>
+										<button class="btn btn-sm preset-tonal-error" onclick={() => requestDeleteMqtt(client)}>
+											Delete
+										</button>
+									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -307,9 +316,9 @@
 			</label>
 
 			<div class="flex justify-end gap-2 items-center">
-				{#if !$isOnline}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
+				{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
 				<button class="btn preset-tonal-surface" onclick={closeMqttModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveMqttClient} disabled={!$isOnline}>
+				<button class="btn preset-filled-primary-500" onclick={saveMqttClient} disabled={!getIsOnline()}>
 					{editingMqttClient ? 'Update' : 'Create'}
 				</button>
 			</div>

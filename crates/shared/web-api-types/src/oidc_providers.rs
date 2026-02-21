@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use time::OffsetDateTime;
 use uptrakit_shared_types::SecretString;
 use uuid::Uuid;
 
@@ -61,8 +62,12 @@ pub struct OidcProviderResponse {
     pub role_claim_path: Option<String>,
     pub role_mapping: HashMap<String, String>,
     pub is_active: bool,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub updated_at: OffsetDateTime,
 }
 
 impl Validate for CreateOidcProviderRequest {
@@ -220,6 +225,7 @@ mod tests {
 
     #[test]
     fn response_round_trip() {
+        use time::macros::datetime;
         let resp = OidcProviderResponse {
             id: sample_uuid(),
             name: "Keycloak".to_string(),
@@ -233,8 +239,8 @@ mod tests {
             role_claim_path: Some("resource_access.uptrakit.roles".to_string()),
             role_mapping: HashMap::from([("admin".to_string(), "admin".to_string())]),
             is_active: true,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-06-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-06-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: OidcProviderResponse =

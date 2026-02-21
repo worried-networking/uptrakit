@@ -57,33 +57,26 @@ The review identifies remaining open issues across several categories:
 
 ### 1.2 Issues
 
-#### ARC-01: Mixed Svelte 4 / Svelte 5 state management patterns
+#### ~~ARC-01: Mixed Svelte 4 / Svelte 5 state management patterns~~ RESOLVED
 
-**Severity:** Low
-**Location:** `lib/auth.ts`, `lib/theme.ts`, `lib/stores/network.ts` (Svelte 4 `writable()`) vs
-`lib/notifications.svelte.ts` and all page components (Svelte 5 `$state()`)
+**Location:** `lib/auth.svelte.ts`, `lib/theme.svelte.ts`, `lib/stores/network.svelte.ts`
 
-The codebase uses Svelte 4 stores (`writable()`) for auth, theme, and network status, while using Svelte 5
-runes (`$state()`, `$derived()`, `$effect()`) everywhere else. This inconsistency adds cognitive load.
+Svelte 4 `writable()` stores in `auth.ts`, `theme.ts`, and `stores/network.ts` have been
+migrated to Svelte 5 runes. The old files have been deleted and replaced with
+`.svelte.ts` counterparts using module-level `$state()` with exported getter/setter pairs
+(e.g., `getUser()` / `setUser()`), matching the existing pattern in
+`notifications.svelte.ts`. All 9 consumer files updated. Also resolves CQ-05 and CQ-06:
+event listener cleanup documented in each file.
 
-**Recommendation:** Migrate `auth.ts`, `theme.ts`, and `stores/network.ts` to Svelte 5 runes for
-consistency. Alternatively, document the intentional choice (e.g., stores for cross-component reactivity vs
-runes for component-local state).
+#### ~~ARC-03: Settings components use imperative API via `export function`~~ RESOLVED
 
-#### ARC-03: Settings components use imperative API via `export function`
+**Location:** `settings/+page.svelte`, all six settings component files
 
-**Severity:** Low
-**Location:** `settings/RegistrationSettings.svelte`, `AuthenticationSettings.svelte`,
-`AgentCertificateSettings.svelte`, `EnrollmentTokenSettings.svelte`, `MqttClientsSettings.svelte`,
-`OidcProvidersSettings.svelte`
-
-Settings components expose `load()` methods called imperatively from the parent via `bind:this`. The parent
-stores component refs with `$state(undefined!)`, which is a TypeScript escape hatch. This pattern is unusual
-for Svelte and makes the data flow harder to trace.
-
-**Recommendation:** Consider passing loaded data as props instead, with the parent holding the loaded state
-and passing it down. This eliminates the need for `bind:this`, the `undefined!` assertions, and the `refsReady`
-coordination logic.
+State has been lifted to the parent (`settings/+page.svelte`). The parent now holds typed
+data variables (e.g., `let registrationSettings: RegistrationSettings | undefined = $state(undefined)`)
+and passes them as props to each component. Components accept a typed `settings` prop and
+initialize their own local state via `$effect`. All `bind:this` refs, `export function load()` methods,
+`$state(undefined!)` assertions, and the `refsReady` coordination flag have been removed.
 
 #### ARC-04: Single API base path with no configuration
 
@@ -315,7 +308,7 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 
 | Severity | Count | IDs                                                                       |
 | -------- | ----- | ------------------------------------------------------------------------- |
-| Low      | 10    | ARC-01, ARC-03, ARC-04, SEC-04, SEC-05, CQ-05, CQ-06, CQ-08, HA-05, HA-06 |
+| Low      | 6     | ARC-04, SEC-04, SEC-05, CQ-08, HA-05, HA-06 (ARC-01, ARC-03, CQ-05, CQ-06 resolved) |
 
 ### Issues by Category
 
@@ -333,9 +326,9 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 | ------------------------------------------ | ------------- | -------------------------------------------------------------------------- |
 | `app.html`                                 | SEC-05        | CSP script-src tightened with SHA-256 hash                                 |
 | `lib/api.ts`                               | —             | Core API client; error length now capped; path params encoded              |
-| `lib/auth.ts`                              | ARC-01        | Mixed store pattern                                                        |
-| `lib/theme.ts`                             | ARC-01, CQ-06 | Listener cleanup                                                           |
-| `lib/stores/network.ts`                    | ARC-01, CQ-05 | Listener cleanup                                                           |
+| `lib/auth.svelte.ts`                       | ~~ARC-01~~    | Migrated to Svelte 5 runes (renamed from `auth.ts`)                        |
+| `lib/theme.svelte.ts`                      | ~~ARC-01, CQ-06~~ | Migrated to runes; cleanup documented (renamed from `theme.ts`)        |
+| `lib/stores/network.svelte.ts`             | ~~ARC-01, CQ-05~~ | Migrated to runes; cleanup documented (renamed from `network.ts`)      |
 | `lib/notifications.svelte.ts`              | —             | Clean implementation                                                       |
 | `lib/utils.ts`                             | —             | Clean implementation                                                       |
 | `lib/types.ts`                             | —             | Comprehensive type coverage                                                |
@@ -366,14 +359,17 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 
 ## 8. Recommendations
 
+### Resolved in this PR
+
+- ~~**Refactor settings to use props instead of imperative refs** (ARC-03)~~ — Done.
+- ~~**Standardize state management** (ARC-01)~~ — Done. CQ-05/CQ-06 also resolved.
+
 ### Priority 1 (Should consider)
 
-1. **Refactor settings to use props instead of imperative refs** (ARC-03): Eliminates
-   `$state(undefined!)` and simplifies data flow.
+1. **Show session-expired modal instead of hard redirect** (HA-05).
+2. **Configure Vitest code coverage** and set a minimum threshold.
 
 ### Priority 2 (Nice to have)
 
-2. **Standardize state management** (ARC-01): Migrate remaining Svelte 4 stores to runes.
-3. **Show session-expired modal instead of hard redirect** (HA-05).
-4. **Configure Vitest code coverage** and set a minimum threshold.
-5. **Add Playwright E2E tests** covering auth flows and settings management.
+3. **Add Playwright E2E tests** covering auth flows and settings management.
+4. **Configurable API base path** (ARC-04): Read `BASE` from an environment variable.

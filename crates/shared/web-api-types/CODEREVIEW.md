@@ -19,10 +19,14 @@ gated for `openapi` (utoipa schema generation).
 
 ## Code Quality Findings
 
-### LOW: Timestamps as `String` instead of typed datetime
+### ~~LOW: Timestamps as `String` instead of typed datetime~~ RESOLVED
 
-Throughout the crate, timestamps use `String`. Using `time::OffsetDateTime` or similar would provide compile-time format
-guarantees.
+All 29 timestamp fields across 9 modules have been migrated from `String` to
+`time::OffsetDateTime` with `#[serde(with = "time::serde::rfc3339")]` (required) and
+`#[serde(with = "time::serde::rfc3339::option")]` (optional). OpenAPI schemas include
+`#[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]`.
+Route handlers no longer call `format_rfc3339()` — timestamps are passed directly as
+`OffsetDateTime` values and serialized automatically. Wire format is unchanged (RFC 3339).
 
 ### PASS: No production `unwrap`/`panic`
 

@@ -203,34 +203,36 @@ async fn run(args: cli::Args) -> Result<()> {
     );
     let token_denylist = Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new());
 
-    let app_state = Arc::new(AppState {
-        ca_snapshot: ca_rx,
-        ca_key_store,
-        db: db_conn,
-        settings,
-        cert_signer,
-        service_connections: service_connections.clone(),
-        revocation_notify,
-        #[cfg(feature = "oidc")]
-        oidc_flow_store,
-        #[cfg(feature = "oidc")]
-        account_link_store,
-        jwt: Arc::new(jwt_manager),
-        #[cfg(feature = "oidc")]
-        oidc_token_exchange_store,
-        #[cfg(feature = "oidc")]
-        oidc_registration_store,
-        device_flow_store,
-        rate_limit_store,
-        pki_path,
-        rustls_config: rustls_config.clone(),
-        crl_pem_cache,
-        ca_rotation_trigger,
-        default_tenant_id,
-        controller_id,
-        notification_service,
-        token_denylist,
-    });
+    let builder = AppState::builder()
+        .ca_snapshot(ca_rx)
+        .ca_key_store(ca_key_store)
+        .db(db_conn)
+        .settings(settings)
+        .cert_signer(cert_signer)
+        .service_connections(service_connections.clone())
+        .revocation_notify(revocation_notify)
+        .jwt(Arc::new(jwt_manager))
+        .device_flow_store(device_flow_store)
+        .rate_limit_store(rate_limit_store)
+        .pki_path(pki_path)
+        .rustls_config(rustls_config.clone())
+        .crl_pem_cache(crl_pem_cache)
+        .ca_rotation_trigger(ca_rotation_trigger)
+        .default_tenant_id(default_tenant_id)
+        .controller_id(controller_id)
+        .notification_service(notification_service)
+        .token_denylist(token_denylist);
+
+    #[cfg(feature = "oidc")]
+    let builder = builder
+        .oidc_flow_store(oidc_flow_store)
+        .account_link_store(account_link_store)
+        .oidc_token_exchange_store(oidc_token_exchange_store)
+        .oidc_registration_store(oidc_registration_store);
+
+    let app_state = Arc::new(builder.build().map_err(|e| {
+        report!(AppError::Config(format!("failed to build AppState: {e}")))
+    })?);
 
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(CancellationToken::new());
@@ -266,7 +268,7 @@ async fn run(args: cli::Args) -> Result<()> {
         use uptrakit_shared_db::entity::scheduled_task::ScheduledTaskType;
 
         let mut sched = scheduler::Scheduler::new(
-            app_state.db.clone(),
+            app_state.db().clone(),
             scheduler::SchedulerConfig::new(controller_id, default_tenant_id),
         );
 
@@ -288,14 +290,14 @@ async fn run(args: cli::Args) -> Result<()> {
         sched.register(
             ScheduledTaskType::StaleLeaseCleanup,
             Box::new(stale_lease_cleanup::StaleLeaseCleanupExecutor::new(
-                app_state.db.clone(),
+                app_state.db().clone(),
                 service_connections.clone(),
             )),
         );
         sched.register(
             ScheduledTaskType::EventCleanup,
             Box::new(event_cleanup::EventCleanupExecutor::new(
-                app_state.db.clone(),
+                app_state.db().clone(),
             )),
         );
         if ca_managed {
@@ -310,14 +312,14 @@ async fn run(args: cli::Args) -> Result<()> {
         sched.register(
             ScheduledTaskType::VersionCheck,
             Box::new(version_check::VersionCheckExecutor::new(
-                app_state.db.clone(),
+                app_state.db().clone(),
                 app_state.notification_service.clone(),
             )),
         );
         sched.register(
             ScheduledTaskType::ServiceCertCheck,
             Box::new(service_cert_check::ServiceCertCheckExecutor::new(
-                app_state.db.clone(),
+                app_state.db().clone(),
                 app_state.notification_service.clone(),
             )),
         );

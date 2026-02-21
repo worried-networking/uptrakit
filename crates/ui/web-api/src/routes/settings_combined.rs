@@ -77,7 +77,7 @@ pub async fn get_combined_settings(
 
     let agent_configured = matches!(
         load_setting(
-            &state.db,
+            state.db(),
             state.default_tenant_id,
             SettingKey::EnrollmentTokenHash
         )
@@ -86,7 +86,7 @@ pub async fn get_combined_settings(
     );
     let mqtt_configured = matches!(
         load_setting(
-            &state.db,
+            state.db(),
             state.default_tenant_id,
             SettingKey::MqttEnrollmentTokenHash
         )
@@ -95,7 +95,7 @@ pub async fn get_combined_settings(
     );
     let ssh_agent_configured = matches!(
         load_setting(
-            &state.db,
+            state.db(),
             state.default_tenant_id,
             SettingKey::SshAgentEnrollmentTokenHash
         )

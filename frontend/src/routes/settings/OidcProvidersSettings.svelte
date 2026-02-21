@@ -11,12 +11,14 @@
 	import { isValidLogoUrl } from '$lib/utils';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
-	import { isOnline } from '$lib/stores/network';
+	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let {
+		providers,
 		onSuccess,
 		onError
 	}: {
+		providers: OidcProviderResponse[] | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
@@ -39,9 +41,11 @@
 	let slugTouched: boolean = $state(false);
 	let deleteConfirm: { id: string; name: string } | null = $state(null);
 
-	export function load(providers: OidcProviderResponse[]) {
-		oidcProviders = providers;
-	}
+	$effect(() => {
+		if (providers !== undefined) {
+			oidcProviders = providers;
+		}
+	});
 
 	function slugify(text: string): string {
 		return text
@@ -342,9 +346,9 @@
 			</label>
 
 			<div class="flex justify-end gap-2 items-center">
-				{#if !$isOnline}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
+				{#if !getIsOnline()}<span class="text-warning-500 text-sm mr-auto">Offline</span>{/if}
 				<button class="btn preset-tonal-surface" onclick={closeOidcModal}>Cancel</button>
-				<button class="btn preset-filled-primary-500" onclick={saveOidcProvider} disabled={!$isOnline}>
+				<button class="btn preset-filled-primary-500" onclick={saveOidcProvider} disabled={!getIsOnline()}>
 					{editingProvider ? 'Update' : 'Create'}
 				</button>
 			</div>

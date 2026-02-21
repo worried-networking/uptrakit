@@ -28,9 +28,15 @@
 	];
 
 	let {
+		agentStatus,
+		mqttStatus,
+		sshAgentStatus,
 		onSuccess,
 		onError
 	}: {
+		agentStatus: EnrollmentTokenStatus | undefined;
+		mqttStatus: EnrollmentTokenStatus | undefined;
+		sshAgentStatus: EnrollmentTokenStatus | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
@@ -53,17 +59,23 @@
 		ssh_agent: false
 	});
 
-	export function loadAgent(status: EnrollmentTokenStatus) {
-		configured.agent = status.configured;
-	}
+	$effect(() => {
+		if (agentStatus) {
+			configured.agent = agentStatus.configured;
+		}
+	});
 
-	export function loadMqtt(status: EnrollmentTokenStatus) {
-		configured.mqtt = status.configured;
-	}
+	$effect(() => {
+		if (mqttStatus) {
+			configured.mqtt = mqttStatus.configured;
+		}
+	});
 
-	export function loadSshAgent(status: EnrollmentTokenStatus) {
-		configured.ssh_agent = status.configured;
-	}
+	$effect(() => {
+		if (sshAgentStatus) {
+			configured.ssh_agent = sshAgentStatus.configured;
+		}
+	});
 
 	async function handleGenerate(section: TokenSection) {
 		try {
@@ -104,44 +116,52 @@
 			}, 2000);
 		}
 	}
+
+	function isLoading(): boolean {
+		return agentStatus === undefined || mqttStatus === undefined || sshAgentStatus === undefined;
+	}
 </script>
 
 {#each tokenSections as section (section.type)}
 	<div class="card mb-6 p-6">
 		<h2 class="h3 mb-4">{section.label}</h2>
-		{#if section.description}
-			<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
-				{section.description}
-			</p>
-		{/if}
-		<div class="mb-4 flex items-center gap-3">
-			<span>Status:</span>
-			{#if configured[section.type]}
-				<span class="badge preset-filled-success-500">Configured</span>
-			{:else}
-				<span class="badge preset-tonal">Not configured</span>
+		{#if isLoading()}
+			<p class="text-surface-600 dark:text-surface-400">Loading...</p>
+		{:else}
+			{#if section.description}
+				<p class="mb-4 text-sm text-surface-600 dark:text-surface-400">
+					{section.description}
+				</p>
 			{/if}
-		</div>
+			<div class="mb-4 flex items-center gap-3">
+				<span>Status:</span>
+				{#if configured[section.type]}
+					<span class="badge preset-filled-success-500">Configured</span>
+				{:else}
+					<span class="badge preset-tonal">Not configured</span>
+				{/if}
+			</div>
 
-		{#if generatedTokens[section.type]}
-			<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
-				<p class="font-bold">Copy it now — it will not be shown again</p>
-				<div class="mt-2 flex items-start gap-2">
-					<code class="flex-1 break-all">{generatedTokens[section.type]}</code>
-					<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={() => handleCopy(section.type)}>
-						{copied[section.type] ? 'Copied!' : 'Copy'}
-					</button>
-				</div>
-			</aside>
-		{/if}
-
-		<div class="flex gap-2">
-			<button class="btn preset-filled-primary-500" onclick={() => handleGenerate(section)}>
-				{configured[section.type] ? 'Regenerate' : 'Generate'}
-			</button>
-			{#if configured[section.type]}
-				<button class="btn preset-filled-error-500" onclick={() => handleRevoke(section)}> Revoke </button>
+			{#if generatedTokens[section.type]}
+				<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">
+					<p class="font-bold">Copy it now — it will not be shown again</p>
+					<div class="mt-2 flex items-start gap-2">
+						<code class="flex-1 break-all">{generatedTokens[section.type]}</code>
+						<button class="btn btn-sm preset-tonal flex-shrink-0" onclick={() => handleCopy(section.type)}>
+							{copied[section.type] ? 'Copied!' : 'Copy'}
+						</button>
+					</div>
+				</aside>
 			{/if}
-		</div>
+
+			<div class="flex gap-2">
+				<button class="btn preset-filled-primary-500" onclick={() => handleGenerate(section)}>
+					{configured[section.type] ? 'Regenerate' : 'Generate'}
+				</button>
+				{#if configured[section.type]}
+					<button class="btn preset-filled-error-500" onclick={() => handleRevoke(section)}> Revoke </button>
+				{/if}
+			</div>
+		{/if}
 	</div>
 {/each}

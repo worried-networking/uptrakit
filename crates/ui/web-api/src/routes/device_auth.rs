@@ -149,7 +149,7 @@ pub async fn device_auth_poll(
             let token_name = client_name.unwrap_or_else(|| "cli-device-auth".into());
 
             // Create an API token for the user
-            let service = ApiTokenService::new(state.db.clone());
+            let service = ApiTokenService::new(state.db().clone());
             match service.create_token(user_id, &token_name).await {
                 Ok(created) => (
                     StatusCode::OK,

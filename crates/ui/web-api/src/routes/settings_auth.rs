@@ -86,7 +86,7 @@ pub async fn update_authentication_settings(
                     .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
                     .filter(oidc_provider::Column::IsActive.eq(true))
                     .filter(oidc_provider::Column::DeletedAt.is_null())
-                    .all(&state.db)
+                    .all(state.db())
                     .await
                     .unwrap_or_default();
 
@@ -109,7 +109,7 @@ pub async fn update_authentication_settings(
 
         let mut auth_settings = state.settings.authentication();
         auth_settings.password_auth_enabled = password_enabled;
-        if let Err(e) = auth_settings.save(&state.db, state.default_tenant_id).await {
+        if let Err(e) = auth_settings.save(state.db(), state.default_tenant_id).await {
             tracing::error!("Failed to save authentication settings: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }

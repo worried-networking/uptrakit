@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { user, loading } from '$lib/auth';
+	import { getUser, getLoading } from '$lib/auth.svelte';
 	import { approveDeviceAuth } from '$lib/api';
 	import { page } from '$app/stores';
 
@@ -11,7 +11,7 @@
 	let rawCode = $derived($page.url.searchParams.get('code') || '');
 	let code = $derived(DEVICE_CODE_PATTERN.test(rawCode) ? rawCode : '');
 	let invalidCode = $derived(rawCode !== '' && code === '');
-	let isLoggedIn = $derived(!!$user);
+	let isLoggedIn = $derived(!!getUser());
 
 	async function onApprove() {
 		if (!code) return;
@@ -31,7 +31,7 @@
 <div class="card mx-auto mt-8 max-w-md p-8">
 	<h2 class="h2 mb-6 text-center">Authorize Device</h2>
 
-	{#if $loading}
+	{#if getLoading()}
 		<p class="text-center text-surface-600 dark:text-surface-400">Loading...</p>
 	{:else if success}
 		<aside class="mb-4 rounded-lg p-4 preset-filled-success-500">

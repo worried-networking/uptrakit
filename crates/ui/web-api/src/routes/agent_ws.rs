@@ -105,7 +105,7 @@ pub(crate) async fn handle_agent_authenticated(
 
     // Cache host IDs linked to this agent for update ownership validation.
     // Refreshed on ReportHosts (which may link new hosts).
-    let mut linked_host_ids: HashSet<uuid::Uuid> = load_linked_host_ids(&state.db, agent_id)
+    let mut linked_host_ids: HashSet<uuid::Uuid> = load_linked_host_ids(state.db(), agent_id)
         .await
         .unwrap_or_default();
 
@@ -140,7 +140,7 @@ pub(crate) async fn handle_agent_authenticated(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
-                                if let Err(e) = record_service_activity(&state.db, agent_id, None).await {
+                                if let Err(e) = record_service_activity(state.db(), agent_id, None).await {
                                     tracing::warn!(error = %e, %agent_id, "failed to record service activity");
                                 }
                             }
@@ -200,7 +200,7 @@ pub(crate) async fn handle_agent_authenticated(
 
                                 // Look up agent hostname from DB for host linking
                                 let agent_model = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(a)) => a,
@@ -211,7 +211,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 let mut active: uptrakit_shared_db::entity::service::ActiveModel = agent_model.clone().into();
                                 active.client_version = Set(Some(payload.agent_version.clone()));
                                 active.updated_at = Set(time::OffsetDateTime::now_utc());
-                                if let Err(e) = active.update(&state.db).await {
+                                if let Err(e) = active.update(state.db()).await {
                                     tracing::error!(error = %e, "failed to update client_version");
                                 }
 
@@ -219,7 +219,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     let host_hostname = host_info.hostname.as_deref().unwrap_or(&agent_model.hostname);
                                     let host_ip = host_info.ip_address.as_deref().or(agent_model.ip_address.as_deref());
                                     if let Err(e) = find_or_create_host_and_link(
-                                        &state.db,
+                                        state.db(),
                                         agent_model.tenant_id,
                                         agent_id,
                                         host_info,
@@ -231,14 +231,14 @@ pub(crate) async fn handle_agent_authenticated(
                                 }
 
                                 // Refresh cached host IDs (may have linked a new host).
-                                if let Ok(ids) = load_linked_host_ids(&state.db, agent_id).await {
+                                if let Ok(ids) = load_linked_host_ids(state.db(), agent_id).await {
                                     linked_host_ids = ids;
                                 }
                             }
                             ServiceMessage::RenewCertificate(payload) => {
                                 // Re-fetch agent from DB, verify still approved
                                 let agent = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(a)) if a.status == uptrakit_shared_db::entity::service::ServiceStatus::Approved && a.deactivated_at.is_none() => a,
@@ -258,7 +258,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 match do_sign_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
-                                    &state.db,
+                                    state.db(),
                                     agent,
                                     &payload.csr_pem,
                                 ).await {
@@ -272,11 +272,11 @@ pub(crate) async fn handle_agent_authenticated(
                                         }
 
                                         // Revoke old cert
-                                        if let Err(e) = revoke_certificate(&state.db, &cert.serial, &cert.ca_fingerprint, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
+                                        if let Err(e) = revoke_certificate(state.db(), &cert.serial, &cert.ca_fingerprint, uptrakit_shared_db::entity::prelude::RevocationReason::CertificateRenewed).await {
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
-                                        if let Err(e) = crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await {
+                                        if let Err(e) = crate::settings_store::bump_revocation_version(state.db(), state.default_tenant_id).await {
                                             tracing::warn!(error = ?e, "failed to bump revocation version counter");
                                         }
                                         state.revocation_notify.notify_one();
@@ -302,7 +302,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 // Look up hosts linked to this agent
                                 let host_ids: Vec<uuid::Uuid> = match uptrakit_shared_db::entity::prelude::ServiceHost::find()
                                     .filter(uptrakit_shared_db::entity::service_host::Column::ServiceId.eq(agent_id))
-                                    .all(&state.db)
+                                    .all(state.db())
                                     .await
                                 {
                                     Ok(links) => links.into_iter().map(|l| l.host_id).collect(),
@@ -335,14 +335,14 @@ pub(crate) async fn handle_agent_authenticated(
                                     if let Some(ref installed_version) = result.installed_version {
                                         for &host_id in &host_ids {
                                             match uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((host_id, software_item_id))
-                                                .one(&state.db)
+                                                .one(state.db())
                                                 .await
                                             {
                                                 Ok(Some(existing)) => {
                                                     let mut active: uptrakit_shared_db::entity::host_software_item::ActiveModel = existing.into();
                                                     active.installed_version = Set(Some(installed_version.clone()));
                                                     active.installed_version_detected_at = Set(Some(now));
-                                                    if let Err(e) = active.update(&state.db).await {
+                                                    if let Err(e) = active.update(state.db()).await {
                                                         tracing::warn!(
                                                             error = %e,
                                                             host_id = %host_id,
@@ -375,7 +375,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     // record for this software item.
                                     if let Some(ref latest_version) = result.latest_version {
                                         upsert_available_version(
-                                            &state.db,
+                                            state.db(),
                                             software_item_id,
                                             latest_version,
                                             now,
@@ -391,7 +391,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     "update started"
                                 );
                                 let record = match validate_update_ownership(
-                                    &state.db, agent_id, payload.update_history_id, &linked_host_ids,
+                                    state.db(), agent_id, payload.update_history_id, &linked_host_ids,
                                 ).await {
                                     Ok(r) => r,
                                     Err(_) => continue,
@@ -404,7 +404,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 }
                                 active.output = Set(String::new());
                                 active.output_bytes = Set(0);
-                                if let Err(e) = active.update(&state.db).await {
+                                if let Err(e) = active.update(state.db()).await {
                                     tracing::warn!(error = %e, "failed to update update_history status");
                                 }
                                 if let Err(e) = UpdateOutputLine::delete_many()
@@ -412,7 +412,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         update_output_line::Column::UpdateHistoryId
                                             .eq(payload.update_history_id),
                                     )
-                                    .exec(&state.db)
+                                    .exec(state.db())
                                     .await
                                 {
                                     tracing::warn!(error = %e, "failed to clear update output lines");
@@ -425,7 +425,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     "update output"
                                 );
                                 if validate_update_ownership(
-                                    &state.db, agent_id, payload.update_history_id, &linked_host_ids,
+                                    state.db(), agent_id, payload.update_history_id, &linked_host_ids,
                                 )
                                 .await
                                 .is_err()
@@ -445,7 +445,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         update_history::Column::OutputBytes
                                             .lt(MAX_UPDATE_OUTPUT_BYTES as i64),
                                     )
-                                    .exec(&state.db)
+                                    .exec(state.db())
                                     .await;
 
                                 let Ok(updated) = updated else {
@@ -471,7 +471,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     output: Set(output_line),
                                     created_at: Set(time::OffsetDateTime::now_utc()),
                                 };
-                                if let Err(e) = UpdateOutputLine::insert(line).exec(&state.db).await {
+                                if let Err(e) = UpdateOutputLine::insert(line).exec(state.db()).await {
                                     tracing::warn!(error = %e, "failed to insert update output line");
                                 }
                             }
@@ -483,7 +483,7 @@ pub(crate) async fn handle_agent_authenticated(
                                     "update result"
                                 );
                                 let record = match validate_update_ownership(
-                                    &state.db, agent_id, payload.update_history_id, &linked_host_ids,
+                                    state.db(), agent_id, payload.update_history_id, &linked_host_ids,
                                 ).await {
                                     Ok(r) => r,
                                     Err(_) => continue,
@@ -504,7 +504,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 if payload.from_version.is_some() {
                                     active.from_version = Set(payload.from_version);
                                 }
-                                if let Err(e) = active.update(&state.db).await {
+                                if let Err(e) = active.update(state.db()).await {
                                     tracing::warn!(error = %e, "failed to update update_history result");
                                 }
 
@@ -513,7 +513,7 @@ pub(crate) async fn handle_agent_authenticated(
                                         update_output_line::Column::UpdateHistoryId
                                             .eq(payload.update_history_id),
                                     )
-                                    .exec(&state.db)
+                                    .exec(state.db())
                                     .await
                                 {
                                     tracing::warn!(error = %e, "failed to clear update output lines");
@@ -522,14 +522,14 @@ pub(crate) async fn handle_agent_authenticated(
                                 if payload.status == UpdateFinalStatus::Completed
                                     && let Some(ref to_version) = payload.to_version
                                     && let Ok(Some(link)) = uptrakit_shared_db::entity::prelude::HostSoftwareItem::find_by_id((record.host_id, record.software_item_id))
-                                        .one(&state.db)
+                                        .one(state.db())
                                         .await
                                 {
                                     let mut link_active: host_software_item::ActiveModel = link.into();
                                     link_active.installed_version = Set(Some(to_version.clone()));
                                     link_active.installed_version_detected_at = Set(Some(time::OffsetDateTime::now_utc()));
                                     link_active.last_updated_at = Set(Some(time::OffsetDateTime::now_utc()));
-                                    if let Err(e) = link_active.update(&state.db).await {
+                                    if let Err(e) = link_active.update(state.db()).await {
                                         tracing::warn!(error = %e, "failed to update host_software_item installed_version");
                                     }
                                 }
@@ -640,7 +640,7 @@ pub(crate) async fn run_agent_enrolled_loop(
 
     // Check current status to set initial approved flag.
     if let Ok(Some(agent)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
-        .one(&state.db)
+        .one(state.db())
         .await
         && agent.status == uptrakit_shared_db::entity::service::ServiceStatus::Approved
     {
@@ -682,7 +682,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
-                                if let Err(e) = record_service_activity(&state.db, agent_id, None).await {
+                                if let Err(e) = record_service_activity(state.db(), agent_id, None).await {
                                     tracing::warn!(error = %e, %agent_id, "failed to record service activity");
                                 }
                             }
@@ -700,7 +700,7 @@ pub(crate) async fn run_agent_enrolled_loop(
 
                                 // Re-fetch agent from DB
                                 let agent = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(a)) => a,
@@ -719,7 +719,7 @@ pub(crate) async fn run_agent_enrolled_loop(
                                 match do_sign_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
-                                    &state.db,
+                                    state.db(),
                                     agent,
                                     &payload.csr_pem,
                                 ).await {
@@ -837,7 +837,7 @@ pub(crate) async fn run_agent_enrolled_loop(
             // client-controlled ping frequency.
             _ = approval_poll.tick(), if !approved => {
                 if let Ok(Some(s)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
-                    .one(&state.db)
+                    .one(state.db())
                     .await
                 {
                     match s.status {
@@ -885,7 +885,7 @@ async fn deliver_pending_updates(
     // 1. Find host_ids linked to this agent
     let host_links = agent_host::Entity::find()
         .filter(agent_host::Column::ServiceId.eq(agent_id))
-        .all(&state.db)
+        .all(state.db())
         .await
         .context_to::<AgentWsError>()?;
 
@@ -899,7 +899,7 @@ async fn deliver_pending_updates(
     let pending_updates = update_history::Entity::find()
         .filter(update_history::Column::HostId.is_in(host_ids))
         .filter(update_history::Column::Status.eq(update_history::UpdateStatus::Pending))
-        .all(&state.db)
+        .all(state.db())
         .await
         .context_to::<AgentWsError>()?;
 
@@ -917,7 +917,7 @@ async fn deliver_pending_updates(
     for update_record in pending_updates {
         let item = match software_item::Entity::find_by_id(update_record.software_item_id)
             .filter(software_item::Column::DeactivatedAt.is_null())
-            .one(&state.db)
+            .one(state.db())
             .await
         {
             Ok(Some(i)) => i,
@@ -937,7 +937,7 @@ async fn deliver_pending_updates(
 
         let provider_cfg = match provider_config::Entity::find_by_id(item.provider_config_id)
             .filter(provider_config::Column::DeactivatedAt.is_null())
-            .one(&state.db)
+            .one(state.db())
             .await
         {
             Ok(Some(c)) => c,

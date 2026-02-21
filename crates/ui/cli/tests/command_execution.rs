@@ -4,6 +4,7 @@
 //! corresponding CLI command function with the mock server's URL and a dummy
 //! token, and asserts the result.
 
+use time::macros::datetime;
 use uptrakit_cli::commands::{hosts, services, software_items};
 use uptrakit_cli::output::OutputFormat;
 use uptrakit_openapi_client::Uuid;
@@ -37,9 +38,9 @@ fn sample_host() -> HostResponse {
         os_version: Some("Ubuntu 22.04".to_string()),
         architecture: Some("x86_64".to_string()),
         ip_address: Some("192.168.1.100".to_string()),
-        last_seen_at: Some("2025-01-01T00:00:00Z".to_string()),
-        created_at: "2025-01-01T00:00:00Z".to_string(),
-        updated_at: "2025-01-01T00:00:00Z".to_string(),
+        last_seen_at: Some(datetime!(2025-01-01 00:00:00 UTC)),
+        created_at: datetime!(2025-01-01 00:00:00 UTC),
+        updated_at: datetime!(2025-01-01 00:00:00 UTC),
         agents: vec![],
     }
 }
@@ -63,9 +64,9 @@ fn sample_service() -> ServiceResponse {
         ip_address: None,
         status: "approved".parse().unwrap(),
         client_version: Some("1.0.0".to_string()),
-        last_seen_at: Some("2025-01-01T00:00:00Z".to_string()),
-        created_at: "2025-01-01T00:00:00Z".to_string(),
-        updated_at: "2025-01-01T00:00:00Z".to_string(),
+        last_seen_at: Some(datetime!(2025-01-01 00:00:00 UTC)),
+        created_at: datetime!(2025-01-01 00:00:00 UTC),
+        updated_at: datetime!(2025-01-01 00:00:00 UTC),
         ping_interval_seconds: None,
     }
 }
@@ -92,8 +93,8 @@ fn sample_software_item() -> SoftwareItemResponse {
         enabled: true,
         last_checked_at: None,
         host_count: 2,
-        created_at: "2025-01-01T00:00:00Z".to_string(),
-        updated_at: "2025-01-01T00:00:00Z".to_string(),
+        created_at: datetime!(2025-01-01 00:00:00 UTC),
+        updated_at: datetime!(2025-01-01 00:00:00 UTC),
     }
 }
 

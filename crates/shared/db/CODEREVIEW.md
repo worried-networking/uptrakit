@@ -88,12 +88,6 @@ All many-to-many relationships use proper junction tables with `via()`. All one-
 None of the entities implement validation in `ActiveModelBehavior`. All use empty impls. Acceptable if validation is
 handled in the service layer.
 
-### INFORMATIONAL: Missing `Eq` derives
-
-Most entity models derive `PartialEq` but not `Eq`. For models without `EncryptedString` fields, adding `Eq` is free
-and enables `HashSet`/`HashMap` usage. Entities containing `EncryptedString` (`ca_certificate`, `oidc_provider`,
-`mqtt_client`) correctly cannot derive `Eq`.
-
 ### INFORMATIONAL: `controller_event.message_json` as `String`
 
 The field stores JSON but uses `column_type = "Text"`. Using `serde_json::Value` with `column_type = "Json"` would
@@ -109,6 +103,7 @@ enable database-level JSON validation and query capabilities. May be intentional
 | Key management | PASS | `OnceLock`, HA verification, single init |
 | `EncryptedString` | PASS | Eager encryption, redaction, legacy fallback |
 | Entity consistency | PASS | 34 entities follow identical patterns |
+| `Eq` derives | PASS | All 21 eligible entity models now derive `Eq` |
 | Error handling | PASS | rootcause/thiserror throughout |
 | `unwrap`/`panic` | PASS | Zero in production code |
 | PKCE verifier | PASS | Now encrypted with `EncryptedString` |

@@ -14,6 +14,7 @@ pub mod service_connections;
 pub mod setting_key;
 pub mod settings;
 pub mod settings_store;
+pub mod tenant_db;
 pub mod update_hooks;
 
 pub use setting_key::SettingKey;
@@ -160,7 +161,7 @@ pub struct AppState {
     /// Private CA key store — only for OCSP, CRL, and cert signing operations.
     pub ca_key_store: CaKeyStoreRef,
     /// Database connection pool.
-    pub db: DatabaseConnection,
+    db: DatabaseConnection,
     /// Application settings catalogue (includes network settings).
     pub settings: Settings,
     /// Agent certificate signer for mTLS enrollment.
@@ -203,6 +204,288 @@ pub struct AppState {
     pub notification_service: NotificationService,
     /// In-memory denylist for immediate JWT access token revocation.
     pub token_denylist: Arc<auth::token_denylist::TokenDenylist>,
+}
+
+/// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
+#[derive(Debug)]
+pub struct AppStateBuildError(pub &'static str);
+
+impl std::fmt::Display for AppStateBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "missing required AppState field: {}", self.0)
+    }
+}
+
+impl std::error::Error for AppStateBuildError {}
+
+/// Incremental builder for [`AppState`].
+///
+/// Obtain a builder via [`AppState::builder`], call each setter exactly once
+/// (all fields are required), then call [`AppStateBuilder::build`].
+pub struct AppStateBuilder {
+    ca_snapshot: Option<CaSnapshotReceiver>,
+    ca_key_store: Option<CaKeyStoreRef>,
+    db: Option<DatabaseConnection>,
+    settings: Option<Settings>,
+    cert_signer: Option<Arc<dyn cert_signer::AgentCertSigner>>,
+    service_connections: Option<ServiceConnectionRegistry>,
+    revocation_notify: Option<Arc<tokio::sync::Notify>>,
+    #[cfg(feature = "oidc")]
+    oidc_flow_store: Option<OidcFlowStore>,
+    #[cfg(feature = "oidc")]
+    account_link_store: Option<AccountLinkStore>,
+    jwt: Option<Arc<JwtManager>>,
+    #[cfg(feature = "oidc")]
+    oidc_token_exchange_store: Option<OidcTokenExchangeStore>,
+    #[cfg(feature = "oidc")]
+    oidc_registration_store: Option<OidcRegistrationStore>,
+    device_flow_store: Option<DeviceFlowStore>,
+    rate_limit_store: Option<RateLimitStore>,
+    pki_path: Option<std::path::PathBuf>,
+    rustls_config: Option<axum_server::tls_rustls::RustlsConfig>,
+    crl_pem_cache: Option<Arc<tokio::sync::RwLock<String>>>,
+    ca_rotation_trigger: Option<Arc<tokio::sync::Notify>>,
+    default_tenant_id: Option<uuid::Uuid>,
+    controller_id: Option<uuid::Uuid>,
+    notification_service: Option<NotificationService>,
+    token_denylist: Option<Arc<auth::token_denylist::TokenDenylist>>,
+}
+
+impl AppStateBuilder {
+    fn new() -> Self {
+        Self {
+            ca_snapshot: None,
+            ca_key_store: None,
+            db: None,
+            settings: None,
+            cert_signer: None,
+            service_connections: None,
+            revocation_notify: None,
+            #[cfg(feature = "oidc")]
+            oidc_flow_store: None,
+            #[cfg(feature = "oidc")]
+            account_link_store: None,
+            jwt: None,
+            #[cfg(feature = "oidc")]
+            oidc_token_exchange_store: None,
+            #[cfg(feature = "oidc")]
+            oidc_registration_store: None,
+            device_flow_store: None,
+            rate_limit_store: None,
+            pki_path: None,
+            rustls_config: None,
+            crl_pem_cache: None,
+            ca_rotation_trigger: None,
+            default_tenant_id: None,
+            controller_id: None,
+            notification_service: None,
+            token_denylist: None,
+        }
+    }
+
+    pub fn ca_snapshot(mut self, v: CaSnapshotReceiver) -> Self {
+        self.ca_snapshot = Some(v);
+        self
+    }
+
+    pub fn ca_key_store(mut self, v: CaKeyStoreRef) -> Self {
+        self.ca_key_store = Some(v);
+        self
+    }
+
+    /// Set the database connection. Accessible via [`AppState::db`] after build.
+    pub fn db(mut self, v: DatabaseConnection) -> Self {
+        self.db = Some(v);
+        self
+    }
+
+    pub fn settings(mut self, v: Settings) -> Self {
+        self.settings = Some(v);
+        self
+    }
+
+    pub fn cert_signer(mut self, v: Arc<dyn cert_signer::AgentCertSigner>) -> Self {
+        self.cert_signer = Some(v);
+        self
+    }
+
+    pub fn service_connections(mut self, v: ServiceConnectionRegistry) -> Self {
+        self.service_connections = Some(v);
+        self
+    }
+
+    pub fn revocation_notify(mut self, v: Arc<tokio::sync::Notify>) -> Self {
+        self.revocation_notify = Some(v);
+        self
+    }
+
+    #[cfg(feature = "oidc")]
+    pub fn oidc_flow_store(mut self, v: OidcFlowStore) -> Self {
+        self.oidc_flow_store = Some(v);
+        self
+    }
+
+    #[cfg(feature = "oidc")]
+    pub fn account_link_store(mut self, v: AccountLinkStore) -> Self {
+        self.account_link_store = Some(v);
+        self
+    }
+
+    pub fn jwt(mut self, v: Arc<JwtManager>) -> Self {
+        self.jwt = Some(v);
+        self
+    }
+
+    #[cfg(feature = "oidc")]
+    pub fn oidc_token_exchange_store(mut self, v: OidcTokenExchangeStore) -> Self {
+        self.oidc_token_exchange_store = Some(v);
+        self
+    }
+
+    #[cfg(feature = "oidc")]
+    pub fn oidc_registration_store(mut self, v: OidcRegistrationStore) -> Self {
+        self.oidc_registration_store = Some(v);
+        self
+    }
+
+    pub fn device_flow_store(mut self, v: DeviceFlowStore) -> Self {
+        self.device_flow_store = Some(v);
+        self
+    }
+
+    pub fn rate_limit_store(mut self, v: RateLimitStore) -> Self {
+        self.rate_limit_store = Some(v);
+        self
+    }
+
+    pub fn pki_path(mut self, v: std::path::PathBuf) -> Self {
+        self.pki_path = Some(v);
+        self
+    }
+
+    pub fn rustls_config(mut self, v: axum_server::tls_rustls::RustlsConfig) -> Self {
+        self.rustls_config = Some(v);
+        self
+    }
+
+    pub fn crl_pem_cache(mut self, v: Arc<tokio::sync::RwLock<String>>) -> Self {
+        self.crl_pem_cache = Some(v);
+        self
+    }
+
+    pub fn ca_rotation_trigger(mut self, v: Arc<tokio::sync::Notify>) -> Self {
+        self.ca_rotation_trigger = Some(v);
+        self
+    }
+
+    pub fn default_tenant_id(mut self, v: uuid::Uuid) -> Self {
+        self.default_tenant_id = Some(v);
+        self
+    }
+
+    pub fn controller_id(mut self, v: uuid::Uuid) -> Self {
+        self.controller_id = Some(v);
+        self
+    }
+
+    pub fn notification_service(mut self, v: NotificationService) -> Self {
+        self.notification_service = Some(v);
+        self
+    }
+
+    pub fn token_denylist(mut self, v: Arc<auth::token_denylist::TokenDenylist>) -> Self {
+        self.token_denylist = Some(v);
+        self
+    }
+
+    /// Consume the builder and produce an [`AppState`].
+    ///
+    /// Returns [`AppStateBuildError`] naming the first field that was not set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any required field was not set before calling `build`.
+    pub fn build(self) -> Result<AppState, AppStateBuildError> {
+        Ok(AppState {
+            ca_snapshot: self
+                .ca_snapshot
+                .ok_or(AppStateBuildError("ca_snapshot"))?,
+            ca_key_store: self
+                .ca_key_store
+                .ok_or(AppStateBuildError("ca_key_store"))?,
+            db: self.db.ok_or(AppStateBuildError("db"))?,
+            settings: self.settings.ok_or(AppStateBuildError("settings"))?,
+            cert_signer: self
+                .cert_signer
+                .ok_or(AppStateBuildError("cert_signer"))?,
+            service_connections: self
+                .service_connections
+                .ok_or(AppStateBuildError("service_connections"))?,
+            revocation_notify: self
+                .revocation_notify
+                .ok_or(AppStateBuildError("revocation_notify"))?,
+            #[cfg(feature = "oidc")]
+            oidc_flow_store: self
+                .oidc_flow_store
+                .ok_or(AppStateBuildError("oidc_flow_store"))?,
+            #[cfg(feature = "oidc")]
+            account_link_store: self
+                .account_link_store
+                .ok_or(AppStateBuildError("account_link_store"))?,
+            jwt: self.jwt.ok_or(AppStateBuildError("jwt"))?,
+            #[cfg(feature = "oidc")]
+            oidc_token_exchange_store: self
+                .oidc_token_exchange_store
+                .ok_or(AppStateBuildError("oidc_token_exchange_store"))?,
+            #[cfg(feature = "oidc")]
+            oidc_registration_store: self
+                .oidc_registration_store
+                .ok_or(AppStateBuildError("oidc_registration_store"))?,
+            device_flow_store: self
+                .device_flow_store
+                .ok_or(AppStateBuildError("device_flow_store"))?,
+            rate_limit_store: self
+                .rate_limit_store
+                .ok_or(AppStateBuildError("rate_limit_store"))?,
+            pki_path: self.pki_path.ok_or(AppStateBuildError("pki_path"))?,
+            rustls_config: self
+                .rustls_config
+                .ok_or(AppStateBuildError("rustls_config"))?,
+            crl_pem_cache: self
+                .crl_pem_cache
+                .ok_or(AppStateBuildError("crl_pem_cache"))?,
+            ca_rotation_trigger: self
+                .ca_rotation_trigger
+                .ok_or(AppStateBuildError("ca_rotation_trigger"))?,
+            default_tenant_id: self
+                .default_tenant_id
+                .ok_or(AppStateBuildError("default_tenant_id"))?,
+            controller_id: self
+                .controller_id
+                .ok_or(AppStateBuildError("controller_id"))?,
+            notification_service: self
+                .notification_service
+                .ok_or(AppStateBuildError("notification_service"))?,
+            token_denylist: self
+                .token_denylist
+                .ok_or(AppStateBuildError("token_denylist"))?,
+        })
+    }
+}
+
+impl AppState {
+    /// Create a new builder for [`AppState`].
+    ///
+    /// This is the only public way to construct an `AppState` from outside the
+    /// crate, preserving the `db` field encapsulation enforced by [`AppState::db`].
+    pub fn builder() -> AppStateBuilder {
+        AppStateBuilder::new()
+    }
+
+    /// Returns a reference to the underlying database connection.
+    pub fn db(&self) -> &DatabaseConnection {
+        &self.db
+    }
 }
 
 /// OpenAPI documentation (core — always available)

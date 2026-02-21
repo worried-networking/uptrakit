@@ -32,18 +32,14 @@ pub async fn create_api_token(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateApiTokenRequest>,
 ) -> Response {
-    let service = ApiTokenService::new(state.db.clone());
+    let service = ApiTokenService::new(state.db().clone());
 
     match service.create_token(auth_user.user_id, &req.name).await {
         Ok(created) => {
-            let format = time::format_description::well_known::Rfc3339;
             let response = CreateApiTokenResponse {
                 id: created.id,
                 token: SecretString::new(created.plaintext_token),
-                created_at: created
-                    .created_at
-                    .format(&format)
-                    .unwrap_or_else(|_| created.created_at.to_string()),
+                created_at: created.created_at,
             };
             (StatusCode::CREATED, Json(response)).into_response()
         }
@@ -69,23 +65,19 @@ pub async fn list_api_tokens(
     State(state): State<Arc<AppState>>,
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
-    let service = ApiTokenService::new(state.db.clone());
+    let service = ApiTokenService::new(state.db().clone());
 
     match service.list_tokens(auth_user.user_id).await {
         Ok(tokens) => {
-            let format = time::format_description::well_known::Rfc3339;
             let response = ApiTokenListResponse {
                 tokens: tokens
                     .into_iter()
                     .map(|t| ApiTokenResponse {
                         id: t.id,
                         name: t.name,
-                        created_at: t
-                            .created_at
-                            .format(&format)
-                            .unwrap_or_else(|_| t.created_at.to_string()),
-                        last_used_at: t.last_used_at.and_then(|dt| dt.format(&format).ok()),
-                        revoked_at: t.revoked_at.and_then(|dt| dt.format(&format).ok()),
+                        created_at: t.created_at,
+                        last_used_at: t.last_used_at,
+                        revoked_at: t.revoked_at,
                     })
                     .collect(),
             };
@@ -125,7 +117,7 @@ pub async fn revoke_api_token(
         }
     };
 
-    let service = ApiTokenService::new(state.db.clone());
+    let service = ApiTokenService::new(state.db().clone());
 
     match service.revoke_token(token_id, auth_user.user_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),

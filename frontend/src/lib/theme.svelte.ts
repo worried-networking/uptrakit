@@ -1,5 +1,3 @@
-import { writable } from 'svelte/store';
-
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 const STORAGE_KEY = 'theme-mode';
@@ -11,7 +9,11 @@ function getStored(): ThemeMode {
 	return 'system';
 }
 
-export const themeMode = writable<ThemeMode>(getStored());
+let themeMode = $state<ThemeMode>(getStored());
+
+export function getThemeMode(): ThemeMode {
+	return themeMode;
+}
 
 export function applyTheme(mode: ThemeMode) {
 	const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -21,7 +23,7 @@ export function applyTheme(mode: ThemeMode) {
 
 export function setThemeMode(mode: ThemeMode) {
 	localStorage.setItem(STORAGE_KEY, mode);
-	themeMode.set(mode);
+	themeMode = mode;
 	applyTheme(mode);
 }
 

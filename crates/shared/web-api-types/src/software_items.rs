@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::provider_configs::CreateProviderConfigRequest;
@@ -50,10 +51,16 @@ pub struct SoftwareItemResponse {
     pub package_identifier: String,
     pub config_override: Option<serde_json::Value>,
     pub enabled: bool,
-    pub last_checked_at: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub updated_at: OffsetDateTime,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -67,10 +74,16 @@ pub struct SoftwareItemDetailResponse {
     pub package_identifier: String,
     pub config_override: Option<serde_json::Value>,
     pub enabled: bool,
-    pub last_checked_at: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub updated_at: OffsetDateTime,
     pub hosts: Vec<SoftwareItemHostSummary>,
 }
 
@@ -81,9 +94,15 @@ pub struct SoftwareItemHostSummary {
     pub hostname: String,
     pub friendly_name: String,
     pub installed_version: Option<String>,
-    pub installed_version_detected_at: Option<String>,
-    pub last_updated_at: Option<String>,
-    pub linked_at: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub installed_version_detected_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
+    pub last_updated_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub linked_at: OffsetDateTime,
 }
 
 /// Status returned when triggering an update.
@@ -338,6 +357,7 @@ mod tests {
 
     #[test]
     fn software_item_response_round_trip() {
+        use time::macros::datetime;
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "Node.js".to_string(),
@@ -347,10 +367,10 @@ mod tests {
             package_identifier: "nodejs/node".to_string(),
             config_override: Some(serde_json::json!({"key": "value"})),
             enabled: true,
-            last_checked_at: Some("2025-06-01T12:00:00Z".to_string()),
+            last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
             host_count: 5,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-06-01T12:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-06-01 12:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =
@@ -364,6 +384,7 @@ mod tests {
 
     #[test]
     fn software_item_response_none_optional_fields() {
+        use time::macros::datetime;
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "Test".to_string(),
@@ -375,8 +396,8 @@ mod tests {
             enabled: false,
             last_checked_at: None,
             host_count: 0,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =

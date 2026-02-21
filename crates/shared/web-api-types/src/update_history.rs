@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -81,7 +82,22 @@ pub struct UpdateHistoryResponse {
     pub status: UpdateStatus,
     pub output: String,
     pub initiated_by: String,
-    pub started_at: String,
-    pub completed_at: Option<String>,
-    pub created_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub started_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = Option<String>, format = DateTime)
+    )]
+    pub completed_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub created_at: OffsetDateTime,
 }

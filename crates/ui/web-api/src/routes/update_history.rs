@@ -1,18 +1,14 @@
-use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::middleware::tenant_context::TenantContext;
+use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
-use std::sync::Arc;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{host, prelude::*, update_history, update_output_line};
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -21,10 +17,6 @@ pub use uptrakit_web_api_types::update_history::{
 };
 
 // --- Helpers ---
-
-fn format_rfc3339(dt: OffsetDateTime) -> String {
-    dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
-}
 
 fn db_status_to_api(status: &update_history::UpdateStatus) -> UpdateStatus {
     match status {
@@ -54,9 +46,9 @@ fn build_response(
         status: db_status_to_api(&record.status),
         output,
         initiated_by: record.initiated_by.clone(),
-        started_at: format_rfc3339(record.started_at),
-        completed_at: record.completed_at.map(format_rfc3339),
-        created_at: format_rfc3339(record.created_at),
+        started_at: record.started_at,
+        completed_at: record.completed_at,
+        created_at: record.created_at,
     }
 }
 
@@ -141,8 +133,7 @@ async fn resolve_software_item_name(
     security(("bearer_token" = []))
 )]
 pub async fn list_update_history(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Query(query): Query<UpdateHistoryQuery>,
 ) -> Response {
@@ -153,7 +144,7 @@ pub async fn list_update_history(
     let pagination = query.pagination().resolve();
 
     // Tenant scoping: get all host IDs belonging to this tenant
-    let host_ids = match tenant_host_ids(&state.db, tenant.tenant_id).await {
+    let host_ids = match tenant_host_ids(tenant_db.db(), tenant_db.tenant_id).await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::error!("Failed to load tenant hosts: {e}");
@@ -189,7 +180,7 @@ pub async fn list_update_history(
 
     let base_query = q.order_by_desc(update_history::Column::CreatedAt);
 
-    let total = match base_query.clone().count(&state.db).await {
+    let total = match base_query.clone().count(tenant_db.db()).await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to count update history: {e}");
@@ -200,7 +191,7 @@ pub async fn list_update_history(
     let records = match base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
-        .all(&state.db)
+        .all(tenant_db.db())
         .await
     {
         Ok(r) => r,
@@ -212,8 +203,8 @@ pub async fn list_update_history(
 
     let mut items = Vec::with_capacity(records.len());
     for record in records {
-        let host_name = resolve_host_name(&state.db, record.host_id).await;
-        let si_name = resolve_software_item_name(&state.db, record.software_item_id).await;
+        let host_name = resolve_host_name(tenant_db.db(), record.host_id).await;
+        let si_name = resolve_software_item_name(tenant_db.db(), record.software_item_id).await;
         items.push(build_response(
             &record,
             host_name,
@@ -244,8 +235,7 @@ pub async fn list_update_history(
     security(("bearer_token" = []))
 )]
 pub async fn get_update_history(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -258,7 +248,7 @@ pub async fn get_update_history(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let record = match UpdateHistory::find_by_id(record_id).one(&state.db).await {
+    let record = match UpdateHistory::find_by_id(record_id).one(tenant_db.db()).await {
         Ok(Some(r)) => r,
         Ok(None) => {
             return error_response(StatusCode::NOT_FOUND, "Update history record not found");
@@ -271,8 +261,8 @@ pub async fn get_update_history(
 
     // Tenant scoping: verify the record's host belongs to this tenant
     let host = match Host::find_by_id(record.host_id)
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
-        .one(&state.db)
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(h)) => h,
@@ -285,9 +275,9 @@ pub async fn get_update_history(
         }
     };
 
-    let si_name = resolve_software_item_name(&state.db, record.software_item_id).await;
+    let si_name = resolve_software_item_name(tenant_db.db(), record.software_item_id).await;
     let output = if record.output.is_empty() {
-        match load_output_lines(&state.db, record.id).await {
+        match load_output_lines(tenant_db.db(), record.id).await {
             Ok(output) => output,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to load update output lines");
@@ -304,6 +294,7 @@ pub async fn get_update_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use time::OffsetDateTime;
 
     #[test]
     fn build_response_completed_status() {

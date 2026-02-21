@@ -290,7 +290,7 @@ pub async fn service_ws(
         }
     } else if let Some(secret) = extract_bearer(&headers) {
         // Try unified lookup: find any non-deactivated service by secret hash.
-        match lookup_by_secret(&state.db, &secret).await {
+        match lookup_by_secret(state.db(), &secret).await {
             Ok(service) => {
                 tracing::info!(
                     service_id = %service.id,
@@ -444,7 +444,7 @@ async fn handle_authenticated(
             )
             .filter(uptrakit_shared_db::entity::service_certificate::Column::RevokedAt.is_null())
             .order_by_desc(uptrakit_shared_db::entity::service_certificate::Column::CreatedAt)
-            .one(&state.db)
+            .one(state.db())
             .await
         {
             Ok(Some(record)) => {
@@ -477,7 +477,7 @@ async fn handle_authenticated(
             .filter(
                 uptrakit_shared_db::entity::service_certificate::Column::ServiceId.eq(service_id),
             )
-            .one(&state.db)
+            .one(state.db())
             .await
         {
             Ok(Some(record)) => {
@@ -511,7 +511,7 @@ async fn handle_authenticated(
 
     // 2. Service status check -- also determines service_type.
     let service = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-        .one(&state.db)
+        .one(state.db())
         .await
     {
         Ok(Some(svc)) => {
@@ -548,7 +548,7 @@ async fn handle_authenticated(
     let previous_last_seen_at = service.last_seen_at;
     let now = time::OffsetDateTime::now_utc();
 
-    if let Err(e) = record_service_activity(&state.db, service_id, client_ip).await {
+    if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
         tracing::error!(error = %e, %service_id, "failed to update service activity");
     }
 
@@ -556,7 +556,7 @@ async fn handle_authenticated(
     let mut active: uptrakit_shared_db::entity::service_certificate::ActiveModel =
         cert_record.into();
     active.last_seen_at = Set(Some(now));
-    if let Err(e) = active.update(&state.db).await {
+    if let Err(e) = active.update(state.db()).await {
         tracing::error!(error = %e, "failed to update certificate last_seen_at");
     }
 
@@ -648,7 +648,7 @@ async fn handle_enrolled(
 
     // Look up service to determine type and current status.
     let service = match uptrakit_shared_db::entity::prelude::Service::find_by_id(service_id)
-        .one(&state.db)
+        .one(state.db())
         .await
     {
         Ok(Some(s)) => s,
@@ -664,7 +664,7 @@ async fn handle_enrolled(
 
     let (mut sink, mut stream) = socket.split();
 
-    if let Err(e) = record_service_activity(&state.db, service_id, client_ip).await {
+    if let Err(e) = record_service_activity(state.db(), service_id, client_ip).await {
         tracing::error!(error = %e, %service_id, "failed to update service activity");
     }
 
@@ -920,7 +920,7 @@ async fn enroll_agent(
     use crate::routes::agents::{EnrollParams, ServiceStatus, do_enroll};
 
     let result = do_enroll(EnrollParams {
-        db: &state.db,
+        db: state.db(),
         settings: &state.settings,
         tenant_id: state.default_tenant_id,
         hostname: &payload.hostname,
@@ -993,7 +993,7 @@ async fn enroll_mqtt(
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
     let result = super::mqtt_ws::do_mqtt_service_enroll(
-        &state.db,
+        state.db(),
         &state.settings,
         state.default_tenant_id,
         &payload.hostname,
@@ -1068,7 +1068,7 @@ async fn enroll_ssh_agent(
     out_seq: &mut OutgoingSeq,
 ) -> Option<(uuid::Uuid, bool)> {
     let result = super::ssh_agent_ws::do_ssh_agent_enroll(
-        &state.db,
+        state.db(),
         &state.settings,
         state.default_tenant_id,
         &payload.hostname,

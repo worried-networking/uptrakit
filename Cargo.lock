@@ -6339,6 +6339,7 @@ dependencies = [
  "serde_json",
  "strum",
  "thiserror 2.0.18",
+ "time",
  "uptrakit-shared-types",
  "utoipa",
  "uuid",

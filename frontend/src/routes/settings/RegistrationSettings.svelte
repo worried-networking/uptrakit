@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { updateRegistrationSettings } from '$lib/api';
 	import type { RegistrationSettings } from '$lib/types';
-	import { isOnline } from '$lib/stores/network';
+	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let {
+		settings,
 		onSuccess,
 		onError
 	}: {
+		settings: RegistrationSettings | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
@@ -15,10 +17,12 @@
 	let regToken: string = $state('');
 	let regRequireTokenForOidc: boolean = $state(false);
 
-	export async function load(settings: RegistrationSettings) {
-		regMode = settings.mode;
-		regRequireTokenForOidc = settings.require_token_for_oidc;
-	}
+	$effect(() => {
+		if (settings) {
+			regMode = settings.mode;
+			regRequireTokenForOidc = settings.require_token_for_oidc;
+		}
+	});
 
 	async function saveRegistration() {
 		try {
@@ -44,35 +48,39 @@
 
 <div class="card mb-6 p-6">
 	<h2 class="h3 mb-4">Registration</h2>
-	<label class="label mb-4">
-		<span>Registration Mode</span>
-		<select class="select" bind:value={regMode}>
-			<option value="open">Open</option>
-			<option value="invite">Invite Only</option>
-			<option value="closed">Closed</option>
-		</select>
-	</label>
-
-	{#if regMode === 'invite'}
+	{#if settings === undefined}
+		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
+	{:else}
 		<label class="label mb-4">
-			<span>Registration Token</span>
-			<input class="input" type="text" placeholder="Enter a new registration token" bind:value={regToken} />
-			<small class="text-surface-600 dark:text-surface-400"
-				>Set a new token for invite-only registration. Leave blank to keep the current token.</small
+			<span>Registration Mode</span>
+			<select class="select" bind:value={regMode}>
+				<option value="open">Open</option>
+				<option value="invite">Invite Only</option>
+				<option value="closed">Closed</option>
+			</select>
+		</label>
+
+		{#if regMode === 'invite'}
+			<label class="label mb-4">
+				<span>Registration Token</span>
+				<input class="input" type="text" placeholder="Enter a new registration token" bind:value={regToken} />
+				<small class="text-surface-600 dark:text-surface-400"
+					>Set a new token for invite-only registration. Leave blank to keep the current token.</small
+				>
+			</label>
+
+			<label class="mb-4 flex items-center gap-3">
+				<input class="checkbox" type="checkbox" bind:checked={regRequireTokenForOidc} />
+				<span>Require registration token for OIDC users</span>
+			</label>
+			<small class="mb-4 block text-surface-600 dark:text-surface-400"
+				>When enabled, users signing in via OIDC for the first time must also provide the registration token.</small
 			>
-		</label>
+		{/if}
 
-		<label class="mb-4 flex items-center gap-3">
-			<input class="checkbox" type="checkbox" bind:checked={regRequireTokenForOidc} />
-			<span>Require registration token for OIDC users</span>
-		</label>
-		<small class="mb-4 block text-surface-600 dark:text-surface-400"
-			>When enabled, users signing in via OIDC for the first time must also provide the registration token.</small
-		>
+		<div class="flex items-center gap-2">
+			<button class="btn preset-filled-primary-500" onclick={saveRegistration} disabled={!getIsOnline()}> Save </button>
+			{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
+		</div>
 	{/if}
-
-	<div class="flex items-center gap-2">
-		<button class="btn preset-filled-primary-500" onclick={saveRegistration} disabled={!$isOnline}> Save </button>
-		{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
-	</div>
 </div>

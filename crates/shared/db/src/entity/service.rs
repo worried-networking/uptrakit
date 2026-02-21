@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 // Canonical types from shared-types with feature-gated SeaORM derives.
 pub use uptrakit_shared_types::{ServiceStatus, ServiceType};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "services")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

@@ -1,12 +1,11 @@
-use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::middleware::tenant_context::TenantContext;
+use crate::tenant_db::TenantDb;
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -14,7 +13,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
-use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::prelude::*;
@@ -63,14 +61,8 @@ fn provider_config_response_from(m: provider_config::Model) -> Option<ProviderCo
         provider_type,
         config,
         enabled: m.enabled,
-        created_at: m
-            .created_at
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| m.created_at.to_string()),
-        updated_at: m
-            .updated_at
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| m.updated_at.to_string()),
+        created_at: m.created_at,
+        updated_at: m.updated_at,
     })
 }
 
@@ -87,8 +79,7 @@ fn provider_config_response_from(m: provider_config::Model) -> Option<ProviderCo
     security(("bearer_token" = []))
 )]
 pub async fn create_provider_config(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<CreateProviderConfigRequest>,
 ) -> Response {
@@ -103,7 +94,7 @@ pub async fn create_provider_config(
     let now = OffsetDateTime::now_utc();
     let model = provider_config::ActiveModel {
         id: Set(generate_uuid()),
-        tenant_id: Set(tenant.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
         provider_type: Set(req.provider_type.to_string()),
         config: Set(req.config),
@@ -113,7 +104,7 @@ pub async fn create_provider_config(
         deactivated_at: Set(None),
     };
 
-    match model.insert(&state.db).await {
+    match model.insert(tenant_db.db()).await {
         Ok(inserted) => match provider_config_response_from(inserted) {
             Some(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
             None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
@@ -140,8 +131,7 @@ pub async fn create_provider_config(
     security(("bearer_token" = []))
 )]
 pub async fn list_provider_configs(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Query(params): Query<PaginationParams>,
 ) -> Response {
@@ -152,11 +142,11 @@ pub async fn list_provider_configs(
     let pagination = params.resolve();
 
     let base_query = ProviderConfig::find()
-        .filter(provider_config::Column::TenantId.eq(tenant.tenant_id))
+        .filter(provider_config::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .order_by_asc(provider_config::Column::Name);
 
-    let total = match base_query.clone().count(&state.db).await {
+    let total = match base_query.clone().count(tenant_db.db()).await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to count provider configs: {e}");
@@ -167,7 +157,7 @@ pub async fn list_provider_configs(
     match base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
-        .all(&state.db)
+        .all(tenant_db.db())
         .await
     {
         Ok(configs) => {
@@ -201,8 +191,7 @@ pub async fn list_provider_configs(
     security(("bearer_token" = []))
 )]
 pub async fn get_provider_config(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -215,7 +204,7 @@ pub async fn get_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match find_active_config(&state.db, tenant.tenant_id, config_id).await {
+    match find_active_config(tenant_db.db(), tenant_db.tenant_id, config_id).await {
         Some(config) => match provider_config_response_from(config) {
             Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
             None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
@@ -238,8 +227,7 @@ pub async fn get_provider_config(
     security(("bearer_token" = []))
 )]
 pub async fn update_provider_config(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
     Json(req): Json<UpdateProviderConfigRequest>,
@@ -253,7 +241,7 @@ pub async fn update_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let existing = match find_active_config(&state.db, tenant.tenant_id, config_id).await {
+    let existing = match find_active_config(tenant_db.db(), tenant_db.tenant_id, config_id).await {
         Some(c) => c,
         None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     };
@@ -298,7 +286,7 @@ pub async fn update_provider_config(
     }
     model.updated_at = Set(now);
 
-    match model.update(&state.db).await {
+    match model.update(tenant_db.db()).await {
         Ok(updated) => match provider_config_response_from(updated) {
             Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
             None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
@@ -323,8 +311,7 @@ pub async fn update_provider_config(
     security(("bearer_token" = []))
 )]
 pub async fn delete_provider_config(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Path(id): Path<String>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
@@ -337,7 +324,7 @@ pub async fn delete_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let config = match find_active_config(&state.db, tenant.tenant_id, config_id).await {
+    let config = match find_active_config(tenant_db.db(), tenant_db.tenant_id, config_id).await {
         Some(c) => c,
         None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     };
@@ -348,7 +335,7 @@ pub async fn delete_provider_config(
     model.enabled = Set(false);
     model.updated_at = Set(now);
 
-    match model.update(&state.db).await {
+    match model.update(tenant_db.db()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to soft-delete provider config: {e}");

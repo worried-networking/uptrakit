@@ -3,8 +3,8 @@ use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::middleware::tenant_context::TenantContext;
 use crate::routes::provider_configs::{validate_hooks_in_config, validate_provider_config_request};
+use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -17,7 +17,6 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{
     host, host_software_item, prelude::*, provider_config, service, service_host, software_item,
     update_history,
@@ -35,10 +34,6 @@ pub use uptrakit_web_api_types::software_items::{
 
 // --- Helpers ---
 
-fn format_rfc3339(dt: OffsetDateTime) -> String {
-    dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
-}
-
 fn build_list_response(
     item: software_item::Model,
     config: &provider_config::Model,
@@ -53,10 +48,10 @@ fn build_list_response(
         package_identifier: item.package_identifier,
         config_override: item.config_override,
         enabled: item.enabled,
-        last_checked_at: item.last_checked_at.map(format_rfc3339),
+        last_checked_at: item.last_checked_at,
         host_count,
-        created_at: format_rfc3339(item.created_at),
-        updated_at: format_rfc3339(item.updated_at),
+        created_at: item.created_at,
+        updated_at: item.updated_at,
     }
 }
 
@@ -75,10 +70,10 @@ fn build_detail_response(
         package_identifier: item.package_identifier,
         config_override: item.config_override,
         enabled: item.enabled,
-        last_checked_at: item.last_checked_at.map(format_rfc3339),
+        last_checked_at: item.last_checked_at,
         host_count,
-        created_at: format_rfc3339(item.created_at),
-        updated_at: format_rfc3339(item.updated_at),
+        created_at: item.created_at,
+        updated_at: item.updated_at,
         hosts,
     }
 }
@@ -194,11 +189,9 @@ async fn load_item_hosts(
                 hostname: h.hostname,
                 friendly_name: h.friendly_name,
                 installed_version: link.installed_version,
-                installed_version_detected_at: link
-                    .installed_version_detected_at
-                    .map(format_rfc3339),
-                last_updated_at: link.last_updated_at.map(format_rfc3339),
-                linked_at: format_rfc3339(link.linked_at),
+                installed_version_detected_at: link.installed_version_detected_at,
+                last_updated_at: link.last_updated_at,
+                linked_at: link.linked_at,
             });
         }
     }
@@ -253,8 +246,7 @@ fn validate_config_override(
     security(("bearer_token" = []))
 )]
 pub async fn create_software_item(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Json(req): Json<CreateSoftwareItemRequest>,
 ) -> Response {
@@ -266,7 +258,7 @@ pub async fn create_software_item(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let txn = match state.db.begin().await {
+    let txn = match tenant_db.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to begin software item transaction: {e}");
@@ -278,7 +270,8 @@ pub async fn create_software_item(
     {
         (Some(provider_config_id), None) => {
             let config =
-                match find_active_provider_config(&txn, tenant.tenant_id, provider_config_id).await
+                match find_active_provider_config(&txn, tenant_db.tenant_id, provider_config_id)
+                    .await
                 {
                     Some(c) => c,
                     None => {
@@ -299,7 +292,7 @@ pub async fn create_software_item(
             let provider_config_id = generate_uuid();
             let model = provider_config::ActiveModel {
                 id: Set(provider_config_id),
-                tenant_id: Set(tenant.tenant_id),
+                tenant_id: Set(tenant_db.tenant_id),
                 name: Set(inline.name.clone()),
                 provider_type: Set(inline.provider_type.to_string()),
                 config: Set(inline.config.clone()),
@@ -380,7 +373,7 @@ pub async fn create_software_item(
     let now = OffsetDateTime::now_utc();
     let model = software_item::ActiveModel {
         id: Set(generate_uuid()),
-        tenant_id: Set(tenant.tenant_id),
+        tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
         provider_config_id: Set(provider_config_id),
         package_identifier: Set(package_identifier),
@@ -424,8 +417,7 @@ pub async fn create_software_item(
     security(("bearer_token" = []))
 )]
 pub async fn list_software_items(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Query(params): Query<PaginationParams>,
 ) -> Response {
@@ -436,11 +428,11 @@ pub async fn list_software_items(
     let pagination = params.resolve();
 
     let base_query = SoftwareItem::find()
-        .filter(software_item::Column::TenantId.eq(tenant.tenant_id))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .order_by_asc(software_item::Column::Name);
 
-    let total = match base_query.clone().count(&state.db).await {
+    let total = match base_query.clone().count(tenant_db.db()).await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to count software items: {e}");
@@ -451,7 +443,7 @@ pub async fn list_software_items(
     let items = match base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
-        .all(&state.db)
+        .all(tenant_db.db())
         .await
     {
         Ok(items) => items,
@@ -463,21 +455,24 @@ pub async fn list_software_items(
 
     let mut response = Vec::with_capacity(items.len());
     for item in items {
-        let config =
-            match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
-                .await
-            {
-                Some(c) => c,
-                None => {
-                    tracing::warn!(
-                        "Software item {} references missing provider config {}",
-                        item.id,
-                        item.provider_config_id
-                    );
-                    continue;
-                }
-            };
-        let host_count = count_linked_hosts(&state.db, item.id).await;
+        let config = match find_active_provider_config(
+            tenant_db.db(),
+            tenant_db.tenant_id,
+            item.provider_config_id,
+        )
+        .await
+        {
+            Some(c) => c,
+            None => {
+                tracing::warn!(
+                    "Software item {} references missing provider config {}",
+                    item.id,
+                    item.provider_config_id
+                );
+                continue;
+            }
+        };
+        let host_count = count_linked_hosts(tenant_db.db(), item.id).await;
         response.push(build_list_response(item, &config, host_count));
     }
 
@@ -501,8 +496,7 @@ pub async fn list_software_items(
     security(("bearer_token" = []))
 )]
 pub async fn get_software_item(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -515,27 +509,30 @@ pub async fn get_software_item(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let item = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
-    let config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
-            .await
-        {
-            Some(c) => c,
-            None => {
-                tracing::error!(
-                    "Software item {} references missing provider config {}",
-                    item.id,
-                    item.provider_config_id
-                );
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
+    let config = match find_active_provider_config(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        item.provider_config_id,
+    )
+    .await
+    {
+        Some(c) => c,
+        None => {
+            tracing::error!(
+                "Software item {} references missing provider config {}",
+                item.id,
+                item.provider_config_id
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-    let hosts = load_item_hosts(&state.db, item_id).await;
+    let hosts = load_item_hosts(tenant_db.db(), item_id).await;
     let host_count = hosts.len() as u64;
     let resp = build_detail_response(item, &config, host_count, hosts);
     (StatusCode::OK, Json(resp)).into_response()
@@ -556,8 +553,7 @@ pub async fn get_software_item(
     security(("bearer_token" = []))
 )]
 pub async fn update_software_item(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
     Json(req): Json<UpdateSoftwareItemRequest>,
@@ -571,25 +567,28 @@ pub async fn update_software_item(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let existing = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let existing = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
-    let config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, existing.provider_config_id)
-            .await
-        {
-            Some(c) => c,
-            None => {
-                tracing::error!(
-                    "Software item {} references missing provider config {}",
-                    existing.id,
-                    existing.provider_config_id
-                );
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
+    let config = match find_active_provider_config(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        existing.provider_config_id,
+    )
+    .await
+    {
+        Some(c) => c,
+        None => {
+            tracing::error!(
+                "Software item {} references missing provider config {}",
+                existing.id,
+                existing.provider_config_id
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     // Determine the effective package_identifier for uniqueness check
     let new_package_id = req
@@ -604,7 +603,7 @@ pub async fn update_software_item(
             .filter(software_item::Column::PackageIdentifier.eq(new_package_id))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .filter(software_item::Column::Id.ne(item_id))
-            .one(&state.db)
+            .one(tenant_db.db())
             .await;
 
         match duplicate {
@@ -666,9 +665,9 @@ pub async fn update_software_item(
     }
     model.updated_at = Set(now);
 
-    match model.update(&state.db).await {
+    match model.update(tenant_db.db()).await {
         Ok(updated) => {
-            let host_count = count_linked_hosts(&state.db, item_id).await;
+            let host_count = count_linked_hosts(tenant_db.db(), item_id).await;
             let resp = build_list_response(updated, &config, host_count);
             (StatusCode::OK, Json(resp)).into_response()
         }
@@ -692,8 +691,7 @@ pub async fn update_software_item(
     security(("bearer_token" = []))
 )]
 pub async fn delete_software_item(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -706,7 +704,7 @@ pub async fn delete_software_item(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let item = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
@@ -717,7 +715,7 @@ pub async fn delete_software_item(
     model.enabled = Set(false);
     model.updated_at = Set(now);
 
-    match model.update(&state.db).await {
+    match model.update(tenant_db.db()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to soft-delete software item: {e}");
@@ -741,8 +739,7 @@ pub async fn delete_software_item(
     security(("bearer_token" = []))
 )]
 pub async fn assign_hosts(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
     Json(req): Json<AssignHostsRequest>,
@@ -756,7 +753,7 @@ pub async fn assign_hosts(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let item = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
@@ -771,7 +768,7 @@ pub async fn assign_hosts(
         // Verify host exists and is active
         let host_exists = Host::find_by_id(host_id)
             .filter(host::Column::DeactivatedAt.is_null())
-            .one(&state.db)
+            .one(tenant_db.db())
             .await;
 
         match host_exists {
@@ -790,7 +787,7 @@ pub async fn assign_hosts(
 
         // Check if link already exists
         let existing_link = HostSoftwareItem::find_by_id((host_id, item_id))
-            .one(&state.db)
+            .one(tenant_db.db())
             .await;
 
         match existing_link {
@@ -807,7 +804,7 @@ pub async fn assign_hosts(
                     last_updated_at: Set(None),
                     linked_at: Set(now),
                 };
-                if let Err(e) = link.insert(&state.db).await {
+                if let Err(e) = link.insert(tenant_db.db()).await {
                     tracing::error!("Failed to link host {host_id} to software item: {e}");
                     return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -823,22 +820,25 @@ pub async fn assign_hosts(
     }
 
     // Reload the item to reflect the current state
-    let config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
-            .await
-        {
-            Some(c) => c,
-            None => {
-                tracing::error!(
-                    "Software item {} references missing provider config {}",
-                    item.id,
-                    item.provider_config_id
-                );
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        };
+    let config = match find_active_provider_config(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        item.provider_config_id,
+    )
+    .await
+    {
+        Some(c) => c,
+        None => {
+            tracing::error!(
+                "Software item {} references missing provider config {}",
+                item.id,
+                item.provider_config_id
+            );
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
-    let hosts = load_item_hosts(&state.db, item_id).await;
+    let hosts = load_item_hosts(tenant_db.db(), item_id).await;
     let host_count = hosts.len() as u64;
     let resp = build_detail_response(item, &config, host_count, hosts);
     (StatusCode::OK, Json(resp)).into_response()
@@ -860,8 +860,7 @@ pub async fn assign_hosts(
     security(("bearer_token" = []))
 )]
 pub async fn unassign_host(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
@@ -880,7 +879,7 @@ pub async fn unassign_host(
     };
 
     // Verify the software item exists
-    if find_active_item(&state.db, tenant.tenant_id, item_id)
+    if find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
         .await
         .is_none()
     {
@@ -889,7 +888,7 @@ pub async fn unassign_host(
 
     // Find and delete the link
     let link = match HostSoftwareItem::find_by_id((host_id, item_id))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(l)) => l,
@@ -905,7 +904,7 @@ pub async fn unassign_host(
         }
     };
 
-    match link.delete(&state.db).await {
+    match link.delete(tenant_db.db()).await {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             tracing::error!("Failed to delete host-software-item link: {e}");
@@ -934,7 +933,7 @@ pub async fn unassign_host(
 )]
 pub async fn trigger_update(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path((id, host_id_str)): Path<(String, String)>,
     Json(req): Json<TriggerUpdateRequest>,
@@ -954,16 +953,16 @@ pub async fn trigger_update(
     };
 
     // 1. Verify software item exists and is active
-    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let item = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     // 2. Verify host exists, is active, and belongs to tenant
     let host_record = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(h)) => h,
@@ -976,7 +975,7 @@ pub async fn trigger_update(
 
     // 3. Verify host is assigned to software item
     let _link = match HostSoftwareItem::find_by_id((host_id, item_id))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(l)) => l,
@@ -995,7 +994,7 @@ pub async fn trigger_update(
     // 4. Find agent linked to host
     let agent_link = match ServiceHost::find()
         .filter(service_host::Column::HostId.eq(host_id))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(l)) => l,
@@ -1011,7 +1010,7 @@ pub async fn trigger_update(
     // Verify agent exists and is approved
     let agent = match Service::find_by_id(agent_link.service_id)
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(a)) => {
@@ -1037,7 +1036,7 @@ pub async fn trigger_update(
             update_history::UpdateStatus::Pending,
             update_history::UpdateStatus::InProgress,
         ]))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await;
 
     match existing_update {
@@ -1055,18 +1054,21 @@ pub async fn trigger_update(
     }
 
     // 6. Load provider config
-    let provider_config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
-            .await
-        {
-            Some(c) => c,
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Provider config not found",
-                );
-            }
-        };
+    let provider_config = match find_active_provider_config(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        item.provider_config_id,
+    )
+    .await
+    {
+        Some(c) => c,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Provider config not found",
+            );
+        }
+    };
 
     // 7. Create update_history record with status = pending
     let now = OffsetDateTime::now_utc();
@@ -1086,7 +1088,7 @@ pub async fn trigger_update(
         created_at: Set(now),
     };
 
-    if let Err(e) = update_record.insert(&state.db).await {
+    if let Err(e) = update_record.insert(tenant_db.db()).await {
         tracing::error!("Failed to create update history record: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -1197,7 +1199,7 @@ pub async fn trigger_update(
 )]
 pub async fn check_versions(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -1211,24 +1213,27 @@ pub async fn check_versions(
     };
 
     // Verify software item exists and is active
-    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let item = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     // Load provider config
-    let provider_config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
-            .await
-        {
-            Some(c) => c,
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Provider config not found",
-                );
-            }
-        };
+    let provider_config = match find_active_provider_config(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        item.provider_config_id,
+    )
+    .await
+    {
+        Some(c) => c,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Provider config not found",
+            );
+        }
+    };
 
     let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
         serde_json::Value::String(provider_config.provider_type.clone()),
@@ -1248,7 +1253,7 @@ pub async fn check_versions(
     // Find all hosts assigned to this software item that have agents
     let links = match HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
-        .all(&state.db)
+        .all(tenant_db.db())
         .await
     {
         Ok(links) => links,
@@ -1281,7 +1286,7 @@ pub async fn check_versions(
         // Find agent linked to this host
         let agent_link = match ServiceHost::find()
             .filter(service_host::Column::HostId.eq(link.host_id))
-            .one(&state.db)
+            .one(tenant_db.db())
             .await
         {
             Ok(Some(l)) => l,
@@ -1295,7 +1300,7 @@ pub async fn check_versions(
         // Verify agent exists and is approved
         let agent = match Service::find_by_id(agent_link.service_id)
             .filter(service::Column::DeactivatedAt.is_null())
-            .one(&state.db)
+            .one(tenant_db.db())
             .await
         {
             Ok(Some(a)) if a.status == service::ServiceStatus::Approved => a,
@@ -1346,7 +1351,7 @@ pub async fn check_versions(
 )]
 pub async fn check_versions_host(
     State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
@@ -1365,16 +1370,16 @@ pub async fn check_versions_host(
     };
 
     // Verify software item exists and is active
-    let item = match find_active_item(&state.db, tenant.tenant_id, item_id).await {
+    let item = match find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
         Some(i) => i,
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
     // Verify host exists and belongs to tenant
     match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(_)) => {}
@@ -1387,7 +1392,7 @@ pub async fn check_versions_host(
 
     // Verify host is assigned to software item
     match HostSoftwareItem::find_by_id((host_id, item_id))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(_)) => {}
@@ -1406,7 +1411,7 @@ pub async fn check_versions_host(
     // Find agent linked to host
     let agent_link = match ServiceHost::find()
         .filter(service_host::Column::HostId.eq(host_id))
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(l)) => l,
@@ -1422,7 +1427,7 @@ pub async fn check_versions_host(
     // Verify agent exists and is approved
     let agent = match Service::find_by_id(agent_link.service_id)
         .filter(service::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(a)) => {
@@ -1441,18 +1446,21 @@ pub async fn check_versions_host(
     };
 
     // Load provider config
-    let provider_config =
-        match find_active_provider_config(&state.db, tenant.tenant_id, item.provider_config_id)
-            .await
-        {
-            Some(c) => c,
-            None => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Provider config not found",
-                );
-            }
-        };
+    let provider_config = match find_active_provider_config(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        item.provider_config_id,
+    )
+    .await
+    {
+        Some(c) => c,
+        None => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Provider config not found",
+            );
+        }
+    };
 
     let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
         serde_json::Value::String(provider_config.provider_type.clone()),
@@ -1565,9 +1573,9 @@ mod tests {
             hostname: "web-01".to_string(),
             friendly_name: "Web Server 1".to_string(),
             installed_version: Some("7.2.4".to_string()),
-            installed_version_detected_at: Some(format_rfc3339(now)),
+            installed_version_detected_at: Some(now),
             last_updated_at: None,
-            linked_at: format_rfc3339(now),
+            linked_at: now,
         }];
 
         let resp = build_detail_response(item, &config, 1, hosts);

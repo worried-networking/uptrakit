@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uptrakit_shared_types::ProviderType;
 use uuid::Uuid;
 
@@ -34,8 +35,12 @@ pub struct ProviderConfigResponse {
     /// Provider-specific configuration with secrets masked.
     pub config: serde_json::Value,
     pub enabled: bool,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
+    pub updated_at: OffsetDateTime,
 }
 
 impl Validate for CreateProviderConfigRequest {
@@ -146,14 +151,15 @@ mod tests {
 
     #[test]
     fn response_round_trip() {
+        use time::macros::datetime;
         let resp = ProviderConfigResponse {
             id: sample_uuid(),
             name: "docker-hub".to_string(),
             provider_type: ProviderType::DockerRegistry,
             config: serde_json::json!({"registry": "docker.io"}),
             enabled: true,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-06-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-06-01 00:00:00 UTC),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let de: ProviderConfigResponse =

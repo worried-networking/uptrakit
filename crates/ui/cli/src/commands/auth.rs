@@ -4,6 +4,8 @@ use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use serde::Serialize;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::api_tokens::CreateApiTokenRequest;
 use uptrakit_openapi_client::types::device_auth::{DeviceAuthPollRequest, DeviceAuthStartRequest};
@@ -54,9 +56,8 @@ impl std::fmt::Display for TokenStatus {
 pub struct TokenEntry {
     pub id: Uuid,
     pub name: String,
-    /// ISO 8601 datetime string from the API (e.g. `"2025-01-01T00:00:00Z"`).
-    /// Kept as `String` because the CLI only displays it — no parsing needed.
-    pub created_at: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
     pub status: TokenStatus,
 }
 
@@ -301,7 +302,7 @@ pub async fn token_list(
             TokenEntry {
                 id: t.id,
                 name: t.name.clone(),
-                created_at: t.created_at.clone(),
+                created_at: t.created_at,
                 status,
             }
         })
@@ -316,9 +317,10 @@ pub async fn token_list(
             "ID", "NAME", "CREATED"
         ));
         for t in &entries {
+            let created = t.created_at.format(&Rfc3339).unwrap_or_else(|_| t.created_at.to_string());
             human.push_str(&format!(
                 "{:<38} {:<30} {:<25} {}\n",
-                t.id, t.name, t.created_at, t.status,
+                t.id, t.name, created, t.status,
             ));
         }
     }
@@ -441,6 +443,7 @@ mod tests {
 
     #[test]
     fn token_list_output_serialization() {
+        use time::macros::datetime;
         let id1 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").expect("uuid");
         let id2 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").expect("uuid");
         let output = TokenListOutput {
@@ -448,13 +451,13 @@ mod tests {
                 TokenEntry {
                     id: id1,
                     name: "my-token".to_string(),
-                    created_at: "2025-01-01T00:00:00Z".to_string(),
+                    created_at: datetime!(2025-01-01 00:00:00 UTC),
                     status: TokenStatus::Active,
                 },
                 TokenEntry {
                     id: id2,
                     name: "old-token".to_string(),
-                    created_at: "2024-06-15T12:00:00Z".to_string(),
+                    created_at: datetime!(2024-06-15 12:00:00 UTC),
                     status: TokenStatus::Revoked,
                 },
             ],

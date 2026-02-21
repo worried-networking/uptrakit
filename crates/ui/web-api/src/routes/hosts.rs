@@ -1,12 +1,11 @@
-use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::middleware::tenant_context::TenantContext;
 use crate::routes::services::ServiceStatus;
+use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -14,9 +13,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
-use std::sync::Arc;
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 use uptrakit_shared_db::entity::{
     host,
     prelude::{Host, Service as Agent, ServiceHost as AgentHost},
@@ -47,8 +44,7 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
     security(("bearer_token" = []))
 )]
 pub async fn list_hosts(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Query(params): Query<PaginationParams>,
 ) -> Response {
@@ -59,11 +55,11 @@ pub async fn list_hosts(
     let pagination = params.resolve();
 
     let base_query = Host::find()
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .order_by_desc(host::Column::CreatedAt);
 
-    let total = match base_query.clone().count(&state.db).await {
+    let total = match base_query.clone().count(tenant_db.db()).await {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("Failed to count hosts: {}", e);
@@ -74,7 +70,7 @@ pub async fn list_hosts(
     let hosts = match base_query
         .offset(Some(pagination.offset()))
         .limit(Some(pagination.per_page))
-        .all(&state.db)
+        .all(tenant_db.db())
         .await
     {
         Ok(h) => h,
@@ -86,7 +82,7 @@ pub async fn list_hosts(
 
     let mut items = Vec::with_capacity(hosts.len());
     for h in hosts {
-        let agents = load_host_agents(&state.db, h.id, tenant.tenant_id).await;
+        let agents = load_host_agents(tenant_db.db(), h.id, tenant_db.tenant_id).await;
         items.push(host_to_response(h, agents));
     }
 
@@ -114,8 +110,7 @@ pub async fn list_hosts(
     security(("bearer_token" = []))
 )]
 pub async fn get_host(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -129,9 +124,9 @@ pub async fn get_host(
     };
 
     let host_model = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(h)) => h,
@@ -142,7 +137,7 @@ pub async fn get_host(
         }
     };
 
-    let agents = load_host_agents(&state.db, host_id, tenant.tenant_id).await;
+    let agents = load_host_agents(tenant_db.db(), host_id, tenant_db.tenant_id).await;
     (StatusCode::OK, Json(host_to_response(host_model, agents))).into_response()
 }
 
@@ -164,8 +159,7 @@ pub async fn get_host(
     security(("bearer_token" = []))
 )]
 pub async fn update_host(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
     Json(body): Json<UpdateHostRequest>,
@@ -180,9 +174,9 @@ pub async fn update_host(
     };
 
     let host_model = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(h)) => h,
@@ -199,7 +193,7 @@ pub async fn update_host(
     }
     active.updated_at = Set(OffsetDateTime::now_utc());
 
-    let updated = match active.update(&state.db).await {
+    let updated = match active.update(tenant_db.db()).await {
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to update host: {}", e);
@@ -207,7 +201,7 @@ pub async fn update_host(
         }
     };
 
-    let agents = load_host_agents(&state.db, host_id, tenant.tenant_id).await;
+    let agents = load_host_agents(tenant_db.db(), host_id, tenant_db.tenant_id).await;
     (StatusCode::OK, Json(host_to_response(updated, agents))).into_response()
 }
 
@@ -228,8 +222,7 @@ pub async fn update_host(
     security(("bearer_token" = []))
 )]
 pub async fn deactivate_host(
-    State(state): State<Arc<AppState>>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -243,9 +236,9 @@ pub async fn deactivate_host(
     };
 
     let host_model = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant.tenant_id))
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
-        .one(&state.db)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(h)) => h,
@@ -261,7 +254,7 @@ pub async fn deactivate_host(
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
-    if let Err(e) = active.update(&state.db).await {
+    if let Err(e) = active.update(tenant_db.db()).await {
         tracing::error!("Failed to deactivate host: {}", e);
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -277,10 +270,6 @@ pub async fn deactivate_host(
 
 // --- Helpers ---
 
-fn format_rfc3339(dt: OffsetDateTime) -> String {
-    dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string())
-}
-
 fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostResponse {
     HostResponse {
         id: h.id,
@@ -291,9 +280,9 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
         os_version: h.os_version,
         architecture: h.architecture,
         ip_address: h.ip_address,
-        last_seen_at: h.last_seen_at.map(format_rfc3339),
-        created_at: format_rfc3339(h.created_at),
-        updated_at: format_rfc3339(h.updated_at),
+        last_seen_at: h.last_seen_at,
+        created_at: h.created_at,
+        updated_at: h.updated_at,
         agents,
     }
 }

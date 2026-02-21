@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::{CliError, Result};
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::update_history::{ParseUpdateStatusError, UpdateHistoryQuery};
 
@@ -90,9 +91,15 @@ pub async fn show(
     human.push_str(&format!("To Version:    {}\n", resp.to_version));
     human.push_str(&format!("Status:        {}\n", resp.status.as_str()));
     human.push_str(&format!("Initiated By:  {}\n", resp.initiated_by));
-    human.push_str(&format!("Started At:    {}\n", resp.started_at));
-    if let Some(ref completed) = resp.completed_at {
-        human.push_str(&format!("Completed At:  {}\n", completed));
+    human.push_str(&format!(
+        "Started At:    {}\n",
+        resp.started_at.format(&Rfc3339).unwrap_or_else(|_| resp.started_at.to_string())
+    ));
+    if let Some(completed) = resp.completed_at {
+        human.push_str(&format!(
+            "Completed At:  {}\n",
+            completed.format(&Rfc3339).unwrap_or_else(|_| completed.to_string())
+        ));
     }
     if !resp.output.is_empty() {
         human.push_str(&format!("\nOutput:\n{}\n", resp.output));

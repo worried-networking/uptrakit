@@ -109,7 +109,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
     // Cache host IDs linked to this SSH agent for future ownership validation.
     // Refreshed on ReportHosts (which may link new hosts).
     let mut linked_host_ids: HashSet<uuid::Uuid> =
-        load_ssh_agent_linked_host_ids(&state.db, service_id)
+        load_ssh_agent_linked_host_ids(state.db(), service_id)
             .await
             .unwrap_or_default();
 
@@ -143,14 +143,14 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                             ServiceMessage::Ping(PingPayload { service_ts }) => {
                                 let Ok(controller_ts) = send_pong(sink, out_seq, service_ts).await else { break };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong");
-                                if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                                if let Err(e) = record_service_activity(state.db(), service_id, None).await {
                                     tracing::warn!(error = %e, %service_id, "failed to record service activity");
                                 }
                             }
                             ServiceMessage::RenewCertificate(payload) => {
                                 // Re-fetch service from DB, verify still approved
                                 let service = match ssh_agent_service::Entity::find_by_id(service_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(s)) if s.status == ssh_agent_service::ServiceStatus::Approved && s.deactivated_at.is_none() => s,
@@ -169,7 +169,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                 match do_sign_ssh_agent_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
-                                    &state.db,
+                                    state.db(),
                                     service,
                                     &payload.csr_pem,
                                 ).await {
@@ -183,7 +183,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                         }
 
                                         if let Err(e) = revoke_ssh_agent_certificate(
-                                            &state.db,
+                                            state.db(),
                                             &cert.serial,
                                             &cert.ca_fingerprint,
                                             ssh_agent_service_certificate::RevocationReason::CertificateRenewed,
@@ -191,7 +191,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                             tracing::error!(error = %e, "failed to revoke old certificate");
                                         }
 
-                                        if let Err(e) = crate::settings_store::bump_revocation_version(&state.db, state.default_tenant_id).await {
+                                        if let Err(e) = crate::settings_store::bump_revocation_version(state.db(), state.default_tenant_id).await {
                                             tracing::warn!(error = ?e, "failed to bump revocation version counter");
                                         }
                                         state.revocation_notify.notify_one();
@@ -268,7 +268,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
 
                                 // Look up SSH agent service from DB.
                                 let service_model = match ssh_agent_service::Entity::find_by_id(service_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(s)) => s,
@@ -279,7 +279,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                 let mut active: ssh_agent_service::ActiveModel = service_model.clone().into();
                                 active.client_version = Set(Some(payload.agent_version.clone()));
                                 active.updated_at = Set(time::OffsetDateTime::now_utc());
-                                if let Err(e) = active.update(&state.db).await {
+                                if let Err(e) = active.update(state.db()).await {
                                     tracing::error!(error = %e, "failed to update SSH agent client_version");
                                 }
 
@@ -287,7 +287,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                     let host_hostname = host_info.hostname.as_deref().unwrap_or(&service_model.hostname);
                                     let host_ip = host_info.ip_address.as_deref().or(service_model.ip_address.as_deref());
                                     if let Err(e) = find_or_create_host_and_link(
-                                        &state.db,
+                                        state.db(),
                                         service_model.tenant_id,
                                         service_id,
                                         host_info,
@@ -299,7 +299,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                 }
 
                                 // Refresh cached host IDs (may have linked new hosts).
-                                if let Ok(ids) = load_ssh_agent_linked_host_ids(&state.db, service_id).await {
+                                if let Ok(ids) = load_ssh_agent_linked_host_ids(state.db(), service_id).await {
                                     linked_host_ids = ids;
                                 }
                             }
@@ -406,7 +406,7 @@ pub(crate) async fn handle_ssh_agent_enrolled(
                                     break;
                                 };
                                 tracing::trace!(service_ts, controller_ts, "ping/pong (enrolled)");
-                                if let Err(e) = record_service_activity(&state.db, service_id, None).await {
+                                if let Err(e) = record_service_activity(state.db(), service_id, None).await {
                                     tracing::warn!(error = %e, %service_id, "failed to record service activity");
                                 }
                             }
@@ -424,7 +424,7 @@ pub(crate) async fn handle_ssh_agent_enrolled(
 
                                 // Re-fetch service from DB.
                                 let service = match ssh_agent_service::Entity::find_by_id(service_id)
-                                    .one(&state.db)
+                                    .one(state.db())
                                     .await
                                 {
                                     Ok(Some(s)) => s,
@@ -443,7 +443,7 @@ pub(crate) async fn handle_ssh_agent_enrolled(
                                 match do_sign_ssh_agent_csr(
                                     state.cert_signer.as_ref(),
                                     &state.settings,
-                                    &state.db,
+                                    state.db(),
                                     service,
                                     &payload.csr_pem,
                                 )
@@ -508,7 +508,7 @@ pub(crate) async fn handle_ssh_agent_enrolled(
             // client-controlled ping frequency.
             _ = approval_poll.tick(), if !approved => {
                 if let Ok(Some(s)) = ssh_agent_service::Entity::find_by_id(service_id)
-                    .one(&state.db)
+                    .one(state.db())
                     .await
                 {
                     match s.status {

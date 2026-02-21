@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { user, handleRegister } from '$lib/auth';
+	import { getUser, handleRegister } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { isOnline } from '$lib/stores/network';
+	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let email = $state('');
 	let firstName = $state('');
@@ -13,7 +13,7 @@
 	let hasRedirected = false;
 
 	$effect(() => {
-		if ($user && !hasRedirected) {
+		if (getUser() && !hasRedirected) {
 			hasRedirected = true;
 			goto('/');
 		}
@@ -80,8 +80,8 @@
 		{/if}
 
 		<div class="flex items-center gap-2">
-			<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!$isOnline}>Register</button>
-			{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
+			<button type="submit" class="btn preset-filled-primary-500 w-full" disabled={!getIsOnline()}>Register</button>
+			{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
 		</div>
 	</form>
 

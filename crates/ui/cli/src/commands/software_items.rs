@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginationParams;
 
@@ -73,12 +74,21 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
         human.push_str(&format!("Package ID:      {}\n", resp.package_identifier));
     }
     human.push_str(&format!("Enabled:         {}\n", resp.enabled));
-    if let Some(ref checked) = resp.last_checked_at {
-        human.push_str(&format!("Last Checked:    {}\n", checked));
+    if let Some(checked) = resp.last_checked_at {
+        human.push_str(&format!(
+            "Last Checked:    {}\n",
+            checked.format(&Rfc3339).unwrap_or_else(|_| checked.to_string())
+        ));
     }
     human.push_str(&format!("Host Count:      {}\n", resp.host_count));
-    human.push_str(&format!("Created:         {}\n", resp.created_at));
-    human.push_str(&format!("Updated:         {}\n", resp.updated_at));
+    human.push_str(&format!(
+        "Created:         {}\n",
+        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+    ));
+    human.push_str(&format!(
+        "Updated:         {}\n",
+        resp.updated_at.format(&Rfc3339).unwrap_or_else(|_| resp.updated_at.to_string())
+    ));
 
     if !resp.hosts.is_empty() {
         human.push_str("\nAssigned Hosts:\n");
@@ -87,12 +97,13 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
             "HOST ID", "HOSTNAME", "INSTALLED"
         ));
         for h in &resp.hosts {
+            let linked = h.linked_at.format(&Rfc3339).unwrap_or_else(|_| h.linked_at.to_string());
             human.push_str(&format!(
                 "  {:<38} {:<20} {:<15} {}\n",
                 h.host_id,
                 h.hostname,
                 h.installed_version.as_deref().unwrap_or("-"),
-                h.linked_at
+                linked
             ));
         }
     }

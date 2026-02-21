@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginationParams;
 
@@ -81,10 +82,16 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     if let Some(ref ip) = resp.ip_address {
         human.push_str(&format!("IP Address:   {}\n", ip));
     }
-    if let Some(ref seen) = resp.last_seen_at {
-        human.push_str(&format!("Last Seen:    {}\n", seen));
+    if let Some(seen) = resp.last_seen_at {
+        human.push_str(&format!(
+            "Last Seen:    {}\n",
+            seen.format(&Rfc3339).unwrap_or_else(|_| seen.to_string())
+        ));
     }
-    human.push_str(&format!("Created:      {}\n", resp.created_at));
+    human.push_str(&format!(
+        "Created:      {}\n",
+        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+    ));
     if !resp.agents.is_empty() {
         human.push_str("Agents:\n");
         for a in &resp.agents {

@@ -192,34 +192,36 @@ async fn build_state(
         controller_id,
     );
 
-    Arc::new(AppState {
-        ca_snapshot: ca_rx,
-        ca_key_store,
-        db: db.clone(),
-        settings,
-        cert_signer: Arc::new(NoopCertSigner),
-        service_connections,
-        revocation_notify: Arc::new(tokio::sync::Notify::const_new()),
-        #[cfg(feature = "oidc")]
-        oidc_flow_store: OidcFlowStore::new(db.clone()),
-        #[cfg(feature = "oidc")]
-        account_link_store: AccountLinkStore::new(db.clone()),
-        jwt: Arc::new(JwtManager::from_secret(b"test-secret-reverse-proxy")),
-        #[cfg(feature = "oidc")]
-        oidc_token_exchange_store: OidcTokenExchangeStore::new(db.clone()),
-        #[cfg(feature = "oidc")]
-        oidc_registration_store: OidcRegistrationStore::new(db.clone()),
-        device_flow_store: DeviceFlowStore::new(db.clone()),
-        rate_limit_store: RateLimitStore::new(db.clone()),
-        pki_path: std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"),
-        rustls_config: rustls_cfg,
-        crl_pem_cache: Arc::new(tokio::sync::RwLock::new(String::new())),
-        ca_rotation_trigger: Arc::new(tokio::sync::Notify::const_new()),
-        default_tenant_id: uuid::Uuid::nil(),
-        controller_id,
-        notification_service,
-        token_denylist: Arc::new(uptrakit_web_api::auth::token_denylist::TokenDenylist::new()),
-    })
+    let builder = AppState::builder()
+        .ca_snapshot(ca_rx)
+        .ca_key_store(ca_key_store)
+        .db(db.clone())
+        .settings(settings)
+        .cert_signer(Arc::new(NoopCertSigner))
+        .service_connections(service_connections)
+        .revocation_notify(Arc::new(tokio::sync::Notify::const_new()))
+        .jwt(Arc::new(JwtManager::from_secret(b"test-secret-reverse-proxy")))
+        .device_flow_store(DeviceFlowStore::new(db.clone()))
+        .rate_limit_store(RateLimitStore::new(db.clone()))
+        .pki_path(std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"))
+        .rustls_config(rustls_cfg)
+        .crl_pem_cache(Arc::new(tokio::sync::RwLock::new(String::new())))
+        .ca_rotation_trigger(Arc::new(tokio::sync::Notify::const_new()))
+        .default_tenant_id(uuid::Uuid::nil())
+        .controller_id(controller_id)
+        .notification_service(notification_service)
+        .token_denylist(Arc::new(
+            uptrakit_web_api::auth::token_denylist::TokenDenylist::new(),
+        ));
+
+    #[cfg(feature = "oidc")]
+    let builder = builder
+        .oidc_flow_store(OidcFlowStore::new(db.clone()))
+        .account_link_store(AccountLinkStore::new(db.clone()))
+        .oidc_token_exchange_store(OidcTokenExchangeStore::new(db.clone()))
+        .oidc_registration_store(OidcRegistrationStore::new(db.clone()));
+
+    Arc::new(builder.build().expect("all AppState fields set in test builder"))
 }
 
 fn build_router(state: Arc<AppState>) -> Router {

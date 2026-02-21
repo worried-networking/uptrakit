@@ -2,6 +2,7 @@ use crate::client::authenticated_client;
 use crate::error::Result;
 use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
+use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 
 /// Parameters for listing scheduled tasks.
@@ -45,9 +46,10 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
             "ID", "TYPE", "CRON", "ENABLED"
         ));
         for task in &resp {
+            let next_run = task.next_run_at.format(&Rfc3339).unwrap_or_else(|_| task.next_run_at.to_string());
             human.push_str(&format!(
                 "{:<38} {:<25} {:<15} {:<8} {}\n",
-                task.id, task.task_type, task.cron_expression, task.enabled, task.next_run_at
+                task.id, task.task_type, task.cron_expression, task.enabled, next_run
             ));
         }
     }
@@ -68,15 +70,27 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     human.push_str(&format!("Enabled:    {}\n", resp.enabled));
     human.push_str(&format!("Running:    {}\n", resp.is_running));
     human.push_str(&format!("Run Count:  {}\n", resp.run_count));
-    if let Some(ref last) = resp.last_run_at {
-        human.push_str(&format!("Last Run:   {}\n", last));
+    if let Some(last) = resp.last_run_at {
+        human.push_str(&format!(
+            "Last Run:   {}\n",
+            last.format(&Rfc3339).unwrap_or_else(|_| last.to_string())
+        ));
     }
-    human.push_str(&format!("Next Run:   {}\n", resp.next_run_at));
+    human.push_str(&format!(
+        "Next Run:   {}\n",
+        resp.next_run_at.format(&Rfc3339).unwrap_or_else(|_| resp.next_run_at.to_string())
+    ));
     if let Some(ref err) = resp.last_error {
         human.push_str(&format!("Last Error: {}\n", err));
     }
-    human.push_str(&format!("Created:    {}\n", resp.created_at));
-    human.push_str(&format!("Updated:    {}\n", resp.updated_at));
+    human.push_str(&format!(
+        "Created:    {}\n",
+        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+    ));
+    human.push_str(&format!(
+        "Updated:    {}\n",
+        resp.updated_at.format(&Rfc3339).unwrap_or_else(|_| resp.updated_at.to_string())
+    ));
 
     print_output(params.format, &human, &resp)
 }

@@ -1,21 +1,25 @@
 <script lang="ts">
 	import { updateAuthenticationSettings } from '$lib/api';
 	import type { AuthenticationSettings } from '$lib/types';
-	import { isOnline } from '$lib/stores/network';
+	import { getIsOnline } from '$lib/stores/network.svelte';
 
 	let {
+		settings,
 		onSuccess,
 		onError
 	}: {
+		settings: AuthenticationSettings | undefined;
 		onSuccess: (msg: string) => void;
 		onError: (msg: string) => void;
 	} = $props();
 
 	let passwordAuthEnabled: boolean = $state(true);
 
-	export async function load(settings: AuthenticationSettings) {
-		passwordAuthEnabled = settings.password_auth_enabled;
-	}
+	$effect(() => {
+		if (settings) {
+			passwordAuthEnabled = settings.password_auth_enabled;
+		}
+	});
 
 	async function saveAuthentication() {
 		try {
@@ -32,12 +36,18 @@
 
 <div class="card mb-6 p-6">
 	<h2 class="h3 mb-4">Authentication</h2>
-	<label class="mb-4 flex items-center gap-3">
-		<input class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
-		<span>Enable password authentication</span>
-	</label>
-	<div class="flex items-center gap-2">
-		<button class="btn preset-filled-primary-500" onclick={saveAuthentication} disabled={!$isOnline}> Save </button>
-		{#if !$isOnline}<span class="text-warning-500 text-sm">Offline</span>{/if}
-	</div>
+	{#if settings === undefined}
+		<p class="text-surface-600 dark:text-surface-400">Loading...</p>
+	{:else}
+		<label class="mb-4 flex items-center gap-3">
+			<input class="checkbox" type="checkbox" bind:checked={passwordAuthEnabled} />
+			<span>Enable password authentication</span>
+		</label>
+		<div class="flex items-center gap-2">
+			<button class="btn preset-filled-primary-500" onclick={saveAuthentication} disabled={!getIsOnline()}>
+				Save
+			</button>
+			{#if !getIsOnline()}<span class="text-warning-500 text-sm">Offline</span>{/if}
+		</div>
+	{/if}
 </div>

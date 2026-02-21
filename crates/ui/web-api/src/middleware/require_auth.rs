@@ -92,7 +92,7 @@ async fn authenticate_api_token(
     state: &AppState,
     token: &str,
 ) -> std::result::Result<AuthenticatedUser, AuthFailure> {
-    let service = ApiTokenService::new(state.db.clone());
+    let service = ApiTokenService::new(state.db().clone());
 
     let (user_id, _token_id) = service
         .verify_token(token)
@@ -101,7 +101,7 @@ async fn authenticate_api_token(
 
     // Check user is active
     let user = User::find_by_id(user_id)
-        .one(&state.db)
+        .one(state.db())
         .await
         .map_err(|_| AuthFailure::InternalError)?
         .ok_or(AuthFailure::Unauthorized("User not found"))?;
@@ -111,7 +111,7 @@ async fn authenticate_api_token(
     }
 
     // Fetch permissions from DB
-    let permissions = get_user_permissions(&state.db, state.default_tenant_id, user_id)
+    let permissions = get_user_permissions(state.db(), state.default_tenant_id, user_id)
         .await
         .unwrap_or_default();
 

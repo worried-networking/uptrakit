@@ -80,7 +80,7 @@ pub async fn register(
 
     // Run user creation + first-user check + role assignment inside a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
-    let txn = match state.db.begin().await {
+    let txn = match state.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start transaction: {e}");
@@ -143,7 +143,7 @@ pub async fn register(
     }
 
     // Get user permissions
-    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user_id).await
+    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user_id).await
     {
         Ok(p) => p,
         Err(e) => {
@@ -153,7 +153,7 @@ pub async fn register(
     };
 
     // Create refresh token
-    let session_service = SessionService::new(state.db.clone());
+    let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
         .create_refresh_token(user_id, AuthMethod::Password, None, None)
         .await
@@ -230,7 +230,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     // Find user by email
     let user = match User::find()
         .filter(user::Column::Email.eq(&req.email))
-        .one(&state.db)
+        .one(state.db())
         .await
     {
         Ok(Some(user)) => user,
@@ -266,7 +266,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     }
 
     // Get user permissions
-    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user.id).await
+    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
     {
         Ok(p) => p,
         Err(e) => {
@@ -276,7 +276,7 @@ pub async fn login(State(state): State<Arc<AppState>>, Json(req): Json<LoginRequ
     };
 
     // Create refresh token
-    let session_service = SessionService::new(state.db.clone());
+    let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
         .create_refresh_token(user.id, AuthMethod::Password, None, None)
         .await
@@ -360,7 +360,7 @@ pub async fn logout(
     let refresh_token = cookie_token.or(body_token);
 
     if let Some(token) = &refresh_token {
-        let session_service = SessionService::new(state.db.clone());
+        let session_service = SessionService::new(state.db().clone());
 
         // Verify the token to get the user_id before revoking
         if let Ok(verified) = session_service.verify_refresh_token(token).await {
@@ -667,7 +667,7 @@ pub async fn me(
     axum::Extension(auth_user): axum::Extension<AuthenticatedUser>,
 ) -> Response {
     // Get user info from DB (fresh data)
-    let user = match User::find_by_id(auth_user.user_id).one(&state.db).await {
+    let user = match User::find_by_id(auth_user.user_id).one(state.db()).await {
         Ok(Some(user)) => user,
         _ => {
             return error_response(StatusCode::UNAUTHORIZED, "User not found");
@@ -679,7 +679,7 @@ pub async fn me(
     }
 
     // Get fresh user permissions from DB
-    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user.id).await
+    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
     {
         Ok(p) => p,
         Err(e) => {
@@ -735,7 +735,7 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
     };
 
     // Rotate refresh token: revoke old, create new
-    let session_service = SessionService::new(state.db.clone());
+    let session_service = SessionService::new(state.db().clone());
     let (verified, new_refresh_token) = match session_service
         .rotate_refresh_token(&refresh_token)
         .await
@@ -747,7 +747,7 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
     };
 
     // Check user is active
-    let user = match User::find_by_id(verified.user_id).one(&state.db).await {
+    let user = match User::find_by_id(verified.user_id).one(state.db()).await {
         Ok(Some(user)) => user,
         _ => {
             return error_response(StatusCode::UNAUTHORIZED, "User not found");
@@ -763,7 +763,7 @@ pub async fn refresh(State(state): State<Arc<AppState>>, req: axum::extract::Req
     }
 
     // Get fresh permissions from DB
-    let permissions = match get_user_permissions(&state.db, state.default_tenant_id, user.id).await
+    let permissions = match get_user_permissions(state.db(), state.default_tenant_id, user.id).await
     {
         Ok(p) => p,
         Err(e) => {

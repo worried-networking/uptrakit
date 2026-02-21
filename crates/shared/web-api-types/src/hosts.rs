@@ -1,5 +1,6 @@
 use crate::services::ServiceStatus;
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub use super::agents::MessageResponse as HostMessageResponse;
@@ -15,9 +16,24 @@ pub struct HostResponse {
     pub os_version: Option<String>,
     pub architecture: Option<String>,
     pub ip_address: Option<String>,
-    pub last_seen_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = Option<String>, format = DateTime)
+    )]
+    pub last_seen_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub updated_at: OffsetDateTime,
     pub agents: Vec<HostAgentSummary>,
 }
 
@@ -38,6 +54,7 @@ pub struct UpdateHostRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use time::macros::datetime;
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
@@ -94,9 +111,9 @@ mod tests {
             os_version: Some("Ubuntu 22.04".to_string()),
             architecture: Some("x86_64".to_string()),
             ip_address: Some("192.168.1.100".to_string()),
-            last_seen_at: Some("2025-06-01T12:00:00Z".to_string()),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-06-01T12:00:00Z".to_string(),
+            last_seen_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-06-01 12:00:00 UTC),
             agents: vec![HostAgentSummary {
                 id: sample_agent_uuid(),
                 friendly_name: "agent-1".to_string(),
@@ -114,10 +131,7 @@ mod tests {
         assert_eq!(deserialized.os_version.as_deref(), Some("Ubuntu 22.04"));
         assert_eq!(deserialized.architecture.as_deref(), Some("x86_64"));
         assert_eq!(deserialized.ip_address.as_deref(), Some("192.168.1.100"));
-        assert_eq!(
-            deserialized.last_seen_at.as_deref(),
-            Some("2025-06-01T12:00:00Z")
-        );
+        assert!(deserialized.last_seen_at.is_some());
         assert_eq!(deserialized.agents.len(), 1);
         assert_eq!(deserialized.agents[0].status, ServiceStatus::Approved);
     }
@@ -134,8 +148,8 @@ mod tests {
             architecture: None,
             ip_address: None,
             last_seen_at: None,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![],
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
@@ -161,8 +175,8 @@ mod tests {
             architecture: None,
             ip_address: None,
             last_seen_at: None,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![],
         };
         let json_value =
@@ -196,8 +210,8 @@ mod tests {
             architecture: None,
             ip_address: None,
             last_seen_at: None,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
             agents: vec![
                 HostAgentSummary {
                     id: sample_agent_uuid(),

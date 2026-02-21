@@ -1,9 +1,11 @@
-import { writable } from 'svelte/store';
-
-export const isOnline = writable(true); // Default to online
+let isOnline = $state(true); // Default to online
 
 function updateOnlineStatus() {
-	isOnline.set(navigator.onLine);
+	isOnline = navigator.onLine;
+}
+
+export function getIsOnline(): boolean {
+	return isOnline;
 }
 
 // Check initial status

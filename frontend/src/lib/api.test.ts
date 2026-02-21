@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { extractErrorMessage, me } from './api';
-import { getAccessToken, setAccessToken } from './auth';
+import { getAccessToken, setAccessToken } from './auth.svelte';
 import type { RefreshResponse, User } from './types';
 
-// Mock ./auth to avoid Svelte store initialization in test environment
-vi.mock('./auth', () => ({
+// Mock ./auth.svelte to avoid Svelte rune initialization in test environment
+vi.mock('./auth.svelte', () => ({
 	getAccessToken: vi.fn().mockReturnValue(null),
 	setAccessToken: vi.fn()
 }));

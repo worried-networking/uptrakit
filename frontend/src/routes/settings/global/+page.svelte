@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { user } from '$lib/auth';
+	import { getUser } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { getSystemAlerts, renewServerCertificate, getNetworkSettings, updateNetworkSettings } from '$lib/api';
 	import { Permission, type SystemAlert } from '$lib/types';
@@ -18,10 +18,10 @@
 	// --- Loading ---
 	let loading: boolean = $state(true);
 
-	const canManageGlobalSettings = $derived($user?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
+	const canManageGlobalSettings = $derived(getUser()?.permissions.includes(Permission.ManageGlobalSettings) ?? false);
 
 	$effect(() => {
-		if ($user && !canManageGlobalSettings) {
+		if (getUser() && !canManageGlobalSettings) {
 			goto('/');
 		}
 	});
@@ -96,7 +96,7 @@
 	}
 </script>
 
-{#if $user && canManageGlobalSettings}
+{#if getUser() && canManageGlobalSettings}
 	<h1 class="h1 mb-6">Global Settings</h1>
 
 	{#if loading}

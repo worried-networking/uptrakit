@@ -97,7 +97,7 @@ pub async fn list_mqtt_settings(
     }
 
     let tenant_id = tenant.tenant_id;
-    match mqtt_client_store::load_mqtt_clients(&state.db, tenant_id).await {
+    match mqtt_client_store::load_mqtt_clients(state.db(), tenant_id).await {
         Ok(models) => {
             let mqtt_client_ids: Vec<uuid::Uuid> = models.iter().map(|m| m.id).collect();
             let leases: Vec<mqtt_lease::Model> = if mqtt_client_ids.is_empty() {
@@ -105,7 +105,7 @@ pub async fn list_mqtt_settings(
             } else {
                 match mqtt_lease::Entity::find()
                     .filter(mqtt_lease::Column::MqttClientId.is_in(mqtt_client_ids))
-                    .all(&state.db)
+                    .all(state.db())
                     .await
                 {
                     Ok(values) => values,
@@ -204,7 +204,7 @@ pub async fn create_mqtt_settings(
     }
 
     match mqtt_client_store::create_mqtt_client(mqtt_client_store::CreateMqttClientParams {
-        db: &state.db,
+        db: state.db(),
         tenant_id,
         max_clients,
         enabled,
@@ -222,7 +222,7 @@ pub async fn create_mqtt_settings(
         Ok(model) => {
             let status = resolve_connection_status(&model, None);
             let lease_coordinator =
-                MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+                MqttLeaseCoordinator::new(state.db().clone(), state.service_connections.clone());
             match lease_coordinator
                 .lease_new_client_to_least_busy(&model)
                 .await
@@ -338,7 +338,7 @@ pub async fn update_mqtt_limit(
 
     // Persist to DB
     if let Err(e) = crate::settings_store::upsert_setting(
-        &state.db,
+        state.db(),
         state.default_tenant_id,
         crate::SettingKey::MqttMaxClientsPerTenant,
         serde_json::Value::Number(serde_json::Number::from(req.max_clients_per_tenant)),
@@ -394,11 +394,11 @@ pub async fn get_mqtt_settings(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
-    match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
+    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id).await {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {
             let heartbeat_at = match mqtt_lease::Entity::find()
                 .filter(mqtt_lease::Column::MqttClientId.eq(model.id))
-                .one(&state.db)
+                .one(state.db())
                 .await
             {
                 Ok(lease) => lease.map(|l| l.heartbeat_at),
@@ -456,7 +456,7 @@ pub async fn update_mqtt_settings(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
-    let existing = match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await
+    let existing = match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id).await
     {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => model,
         Ok(Some(_)) | Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
@@ -545,7 +545,7 @@ pub async fn update_mqtt_settings(
     }
 
     match mqtt_client_store::update_mqtt_client(mqtt_client_store::UpdateMqttClientParams {
-        db: &state.db,
+        db: state.db(),
         existing,
         enabled: req.enabled,
         transport,
@@ -562,7 +562,7 @@ pub async fn update_mqtt_settings(
         Ok(model) => {
             // Push config update to MQTT service if assigned
             let lease_coordinator =
-                MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+                MqttLeaseCoordinator::new(state.db().clone(), state.service_connections.clone());
             if let Err(e) = lease_coordinator
                 .push_mqtt_client_config_update(mqtt_client_id)
                 .await
@@ -572,7 +572,7 @@ pub async fn update_mqtt_settings(
 
             let heartbeat_at = match mqtt_lease::Entity::find()
                 .filter(mqtt_lease::Column::MqttClientId.eq(model.id))
-                .one(&state.db)
+                .one(state.db())
                 .await
             {
                 Ok(lease) => lease.map(|l| l.heartbeat_at),
@@ -626,7 +626,7 @@ pub async fn delete_mqtt_settings(
     };
 
     // Verify tenant ownership
-    match mqtt_client_store::load_mqtt_client_by_id(&state.db, mqtt_client_id).await {
+    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id).await {
         Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {}
         Ok(Some(_)) | Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
@@ -637,7 +637,7 @@ pub async fn delete_mqtt_settings(
 
     // Revoke lease first
     let lease_coordinator =
-        MqttLeaseCoordinator::new(state.db.clone(), state.service_connections.clone());
+        MqttLeaseCoordinator::new(state.db().clone(), state.service_connections.clone());
     if let Err(e) = lease_coordinator
         .revoke_mqtt_client(mqtt_client_id, "mqtt client deleted")
         .await
@@ -645,7 +645,7 @@ pub async fn delete_mqtt_settings(
         tracing::warn!("Failed to revoke MQTT client lease: {e:?}");
     }
 
-    match mqtt_client_store::delete_mqtt_client(&state.db, mqtt_client_id).await {
+    match mqtt_client_store::delete_mqtt_client(state.db(), mqtt_client_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             if let mqtt_client_store::MqttClientError::NotFound = e.current_context() {

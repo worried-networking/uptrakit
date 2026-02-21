@@ -5,7 +5,6 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
 use sea_orm::{ActiveEnum, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
-use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use uptrakit_shared_db::entity::scheduled_task;
@@ -28,22 +27,13 @@ fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
         cron_expression: m.cron_expression.clone(),
         enabled: m.enabled,
         task_config: m.task_config.clone(),
-        last_run_at: m.last_run_at.and_then(|t| t.format(&Rfc3339).ok()),
-        next_run_at: m
-            .next_run_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| m.next_run_at.to_string()),
+        last_run_at: m.last_run_at,
+        next_run_at: m.next_run_at,
         is_running: m.locked_by.is_some(),
         last_error: m.last_error.clone(),
         run_count: m.run_count,
-        created_at: m
-            .created_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| m.created_at.to_string()),
-        updated_at: m
-            .updated_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| m.updated_at.to_string()),
+        created_at: m.created_at,
+        updated_at: m.updated_at,
     }
 }
 
@@ -68,7 +58,7 @@ pub async fn list_scheduled_tasks(
 
     let tasks = match scheduled_task::Entity::find()
         .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .all(&state.db)
+        .all(state.db())
         .await
     {
         Ok(t) => t,
@@ -113,7 +103,7 @@ pub async fn get_scheduled_task(
 
     let task = match scheduled_task::Entity::find_by_id(task_id)
         .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .one(&state.db)
+        .one(state.db())
         .await
     {
         Ok(Some(t)) => t,
@@ -165,7 +155,7 @@ pub async fn update_scheduled_task(
 
     let task = match scheduled_task::Entity::find_by_id(task_id)
         .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .one(&state.db)
+        .one(state.db())
         .await
     {
         Ok(Some(t)) => t,
@@ -207,7 +197,7 @@ pub async fn update_scheduled_task(
 
     active.updated_at = ActiveValue::Set(now);
 
-    let updated = match active.update(&state.db).await {
+    let updated = match active.update(state.db()).await {
         Ok(m) => m,
         Err(e) => {
             tracing::error!(error = %e, "failed to update scheduled task");
@@ -250,7 +240,7 @@ pub async fn trigger_scheduled_task(
     // Verify task exists for this tenant
     match scheduled_task::Entity::find_by_id(task_id)
         .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .one(&state.db)
+        .one(state.db())
         .await
     {
         Ok(Some(_)) => {}
@@ -272,7 +262,7 @@ pub async fn trigger_scheduled_task(
             sea_orm::sea_query::Expr::value(now),
         )
         .filter(scheduled_task::Column::Id.eq(task_id))
-        .exec(&state.db)
+        .exec(state.db())
         .await;
 
     match result {

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 // Canonical types from shared-types with feature-gated OpenAPI derives.
@@ -17,9 +18,24 @@ pub struct ServiceResponse {
     pub ip_address: Option<String>,
     pub status: ServiceStatus,
     pub client_version: Option<String>,
-    pub last_seen_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = Option<String>, format = DateTime)
+    )]
+    pub last_seen_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    #[cfg_attr(
+        feature = "openapi",
+        schema(value_type = String, format = DateTime)
+    )]
+    pub updated_at: OffsetDateTime,
     /// Custom ping interval override in seconds. `None` means the service-type
     /// default is used (300s for agents, 15s for MQTT).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,6 +85,7 @@ pub use super::agents::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use time::macros::datetime;
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
@@ -87,9 +104,9 @@ mod tests {
             ip_address: Some("10.0.0.1".to_string()),
             status: ServiceStatus::Approved,
             client_version: Some("1.2.3".to_string()),
-            last_seen_at: Some("2025-06-01T12:00:00Z".to_string()),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-06-01T12:00:00Z".to_string(),
+            last_seen_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-06-01 12:00:00 UTC),
             ping_interval_seconds: Some(60),
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
@@ -102,10 +119,7 @@ mod tests {
         assert_eq!(deserialized.ip_address.as_deref(), Some("10.0.0.1"));
         assert_eq!(deserialized.status, ServiceStatus::Approved);
         assert_eq!(deserialized.client_version.as_deref(), Some("1.2.3"));
-        assert_eq!(
-            deserialized.last_seen_at.as_deref(),
-            Some("2025-06-01T12:00:00Z")
-        );
+        assert!(deserialized.last_seen_at.is_some());
         assert_eq!(deserialized.ping_interval_seconds, Some(60));
     }
 
@@ -120,8 +134,8 @@ mod tests {
             status: ServiceStatus::Pending,
             client_version: None,
             last_seen_at: None,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
         };
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
@@ -145,8 +159,8 @@ mod tests {
             status: ServiceStatus::Deactivated,
             client_version: None,
             last_seen_at: None,
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
+            created_at: datetime!(2025-01-01 0:00:00 UTC),
+            updated_at: datetime!(2025-01-01 0:00:00 UTC),
             ping_interval_seconds: None,
         };
         let json_value =

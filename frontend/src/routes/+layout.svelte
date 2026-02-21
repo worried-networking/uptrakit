@@ -4,10 +4,10 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { user, loading, initialize, handleLogout } from '$lib/auth';
-	import { themeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme';
+	import { getUser, getLoading, initialize, handleLogout } from '$lib/auth.svelte';
+	import { getThemeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme.svelte';
 	import { getSystemAlerts } from '$lib/api';
-	import { isOnline } from '$lib/stores/network'; // Import the new store
+	import { getIsOnline } from '$lib/stores/network.svelte';
 	import { Permission } from '$lib/types';
 	import ToastNotifications from '$lib/components/ToastNotifications.svelte';
 	import '../app.css';
@@ -20,7 +20,7 @@
 	let dismissedAlerts: Set<string> = $state(new Set());
 
 	function cycleTheme() {
-		const i = themeCycle.indexOf($themeMode);
+		const i = themeCycle.indexOf(getThemeMode());
 		setThemeMode(themeCycle[(i + 1) % themeCycle.length]);
 	}
 
@@ -46,18 +46,18 @@
 
 	// Centralized auth guard — redirects unauthenticated users on protected routes
 	$effect(() => {
-		if ($loading) return;
+		if (getLoading()) return;
 
 		const path = $page.url.pathname;
 		const isPublic = publicRoutes.has(path);
 
-		if (!$user && !isPublic) {
+		if (!getUser() && !isPublic) {
 			goto('/login?redirect=' + encodeURIComponent(path + $page.url.search));
 		}
 	});
 
 	$effect(() => {
-		if ($user?.permissions.includes(Permission.ManageGlobalSettings)) {
+		if (getUser()?.permissions.includes(Permission.ManageGlobalSettings)) {
 			fetchAlerts();
 		}
 	});
@@ -74,13 +74,13 @@
 	];
 
 	const navItems = $derived(
-		allNavItems.filter((item) => !item.permission || $user?.permissions.includes(item.permission))
+		allNavItems.filter((item) => !item.permission || getUser()?.permissions.includes(item.permission))
 	);
 
-	let showSidebar = $derived($user && !publicRoutes.has($page.url.pathname));
+	let showSidebar = $derived(getUser() && !publicRoutes.has($page.url.pathname));
 </script>
 
-{#if $loading}
+{#if getLoading()}
 	<div class="flex h-screen items-center justify-center">
 		<p class="text-lg">Loading...</p>
 	</div>
@@ -93,21 +93,21 @@
 			<a href="#main-content" class="skip-link">Skip to main content</a>
 			<a href="/" class="text-xl font-bold">Uptrakit</a>
 			<div class="flex items-center gap-2">
-				{#if $user}
-					<span class="mr-2">{$user.email}</span>
+				{#if getUser()}
+					<span class="mr-2">{getUser()?.email}</span>
 				{/if}
 				<button
 					class="btn-icon preset-tonal-surface"
-					title={$themeMode === 'light' ? 'Light mode' : $themeMode === 'dark' ? 'Dark mode' : 'System mode'}
+					title={getThemeMode() === 'light' ? 'Light mode' : getThemeMode() === 'dark' ? 'Dark mode' : 'System mode'}
 					onclick={cycleTheme}
 				>
-					{#if $themeMode === 'light'}
+					{#if getThemeMode() === 'light'}
 						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
 							<path
 								d="M10 2a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 2Zm0 13a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0v-1.5A.75.75 0 0 1 10 15Zm-8-5a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 2 10Zm13 0a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 0 1.5h-1.5A.75.75 0 0 1 15 10Zm-2.05-4.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-7.78 7.78a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM14.95 12.95a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM7.17 5.17a.75.75 0 0 1 0 1.06L6.11 7.29a.75.75 0 0 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM10 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"
 							/>
 						</svg>
-					{:else if $themeMode === 'dark'}
+					{:else if getThemeMode() === 'dark'}
 						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-5 w-5">
 							<path
 								fill-rule="evenodd"
@@ -125,7 +125,7 @@
 						</svg>
 					{/if}
 				</button>
-				{#if $user}
+				{#if getUser()}
 					<button class="btn preset-tonal-surface" onclick={handleLogout}> Logout </button>
 				{:else}
 					<a href="/login" class="btn preset-tonal-surface">Login</a>
@@ -134,7 +134,7 @@
 			</div>
 		</header>
 
-		{#if !$isOnline}
+		{#if !getIsOnline()}
 			<div class="preset-filled-warning-500 text-center p-2">
 				You are currently offline. Some features may not be available.
 			</div>
@@ -171,7 +171,7 @@
 				<ToastNotifications alerts={visibleAlerts} onDismiss={dismissAlert} />
 
 				<div class="container mx-auto max-w-2xl p-4">
-					{#if $user || publicRoutes.has($page.url.pathname)}
+					{#if getUser() || publicRoutes.has($page.url.pathname)}
 						{@render children()}
 					{/if}
 				</div>

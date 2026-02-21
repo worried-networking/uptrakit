@@ -61,7 +61,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
         .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::DeletedAt.is_null())
-        .all(&state.db)
+        .all(state.db())
         .await
         .unwrap_or_default();
 
@@ -76,7 +76,7 @@ pub async fn auth_methods(State(state): State<Arc<AppState>>) -> Response {
         .collect();
 
     let setup_required = User::find()
-        .count(&state.db)
+        .count(state.db())
         .await
         .map(|c| c == 0)
         .unwrap_or(false);
@@ -133,7 +133,7 @@ pub async fn oidc_authorize(
     };
 
     let provider =
-        match find_active_provider(&state.db, state.default_tenant_id, provider_uuid).await {
+        match find_active_provider(state.db(), state.default_tenant_id, provider_uuid).await {
             Some(p) => p,
             None => return error_response(StatusCode::NOT_FOUND, "Provider not found or inactive"),
         };
@@ -249,7 +249,7 @@ pub async fn oidc_callback(
 
     // Load provider
     let provider =
-        match find_active_provider(&state.db, state.default_tenant_id, flow.provider_id).await {
+        match find_active_provider(state.db(), state.default_tenant_id, flow.provider_id).await {
             Some(p) => p,
             None => return Redirect::to("/login?error=oidc_provider_gone").into_response(),
         };
@@ -359,7 +359,7 @@ pub async fn oidc_callback(
         let has_link = UserOidcLink::find()
             .filter(user_oidc_link::Column::ProviderId.eq(flow.provider_id))
             .filter(user_oidc_link::Column::OidcSubject.eq(&sub))
-            .count(&state.db)
+            .count(state.db())
             .await
             .unwrap_or(1)
             > 0;
@@ -368,7 +368,7 @@ pub async fn oidc_callback(
             // Check if a user with this email already exists
             let has_user = User::find()
                 .filter(uptrakit_shared_db::entity::user::Column::Email.eq(&email))
-                .count(&state.db)
+                .count(state.db())
                 .await
                 .unwrap_or(1)
                 > 0;
@@ -376,7 +376,7 @@ pub async fn oidc_callback(
             if !has_user {
                 // This would be a brand-new user — check if token is required
                 let is_first_user = User::find()
-                    .count(&state.db)
+                    .count(state.db())
                     .await
                     .map(|c| c == 0)
                     .unwrap_or(false);
@@ -415,7 +415,7 @@ pub async fn oidc_callback(
 
     // Resolve user inside a transaction to prevent the race where two concurrent
     // OIDC callbacks both see user_count == 1 and both get the owner role.
-    let txn = match state.db.begin().await {
+    let txn = match state.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start OIDC callback transaction: {e}");
@@ -646,7 +646,7 @@ pub async fn oidc_exchange(
     };
 
     // Create refresh token
-    let session_service = SessionService::new(state.db.clone());
+    let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
         .create_refresh_token(
             pending.user_id,
@@ -666,13 +666,13 @@ pub async fn oidc_exchange(
     };
 
     // Get user info
-    let user = match User::find_by_id(pending.user_id).one(&state.db).await {
+    let user = match User::find_by_id(pending.user_id).one(state.db()).await {
         Ok(Some(u)) => u,
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
     let permissions =
-        super::auth::get_user_permissions(&state.db, state.default_tenant_id, pending.user_id)
+        super::auth::get_user_permissions(state.db(), state.default_tenant_id, pending.user_id)
             .await
             .unwrap_or_default();
 
@@ -759,7 +759,7 @@ pub async fn oidc_complete_registration(
 
     // 3. Wrap user creation + first-user check + role assignment in a transaction
     // to prevent the race where two concurrent registrations both see count == 0.
-    let txn = match state.db.begin().await {
+    let txn = match state.db().begin().await {
         Ok(txn) => txn,
         Err(e) => {
             tracing::error!("Failed to start OIDC complete-registration transaction: {e}");
@@ -891,7 +891,7 @@ pub async fn oidc_complete_registration(
     }
 
     // 9. Create session + JWT (same pattern as oidc_exchange)
-    let session_service = SessionService::new(state.db.clone());
+    let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
         .create_refresh_token(
             user_id,
@@ -913,7 +913,7 @@ pub async fn oidc_complete_registration(
     };
 
     let permissions =
-        super::auth::get_user_permissions(&state.db, state.default_tenant_id, user_id)
+        super::auth::get_user_permissions(state.db(), state.default_tenant_id, user_id)
             .await
             .unwrap_or_default();
 
@@ -932,7 +932,7 @@ pub async fn oidc_complete_registration(
         }
     };
 
-    let user = match User::find_by_id(user_id).one(&state.db).await {
+    let user = match User::find_by_id(user_id).one(state.db()).await {
         Ok(Some(u)) => u,
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
@@ -1009,7 +1009,7 @@ pub async fn oidc_link(
             return error_response(StatusCode::BAD_REQUEST, message);
         }
         // Password verification
-        let user = match User::find_by_id(pending.user_id).one(&state.db).await {
+        let user = match User::find_by_id(pending.user_id).one(state.db()).await {
             Ok(Some(u)) => u,
             _ => return error_response(StatusCode::UNAUTHORIZED, "User not found"),
         };
@@ -1055,7 +1055,7 @@ pub async fn oidc_link(
         linked_at: Set(OffsetDateTime::now_utc()),
     };
 
-    if let Err(e) = link.insert(&state.db).await {
+    if let Err(e) = link.insert(state.db()).await {
         tracing::error!("Failed to create OIDC link: {e}");
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
@@ -1064,7 +1064,7 @@ pub async fn oidc_link(
     if !pending.mapped_roles.is_empty() {
         // Load provider for role sync
         if let Some(provider) =
-            find_active_provider(&state.db, state.default_tenant_id, pending.provider_id).await
+            find_active_provider(state.db(), state.default_tenant_id, pending.provider_id).await
         {
             // Build a minimal claims object just for role sync
             // We already have the mapped roles, so we build fake claims matching the mapping
@@ -1095,7 +1095,7 @@ pub async fn oidc_link(
                 );
             }
             let _ = sync_oidc_roles(
-                &state.db,
+                state.db(),
                 state.default_tenant_id,
                 pending.user_id,
                 &provider,
@@ -1106,7 +1106,7 @@ pub async fn oidc_link(
     }
 
     // Create refresh token
-    let session_service = SessionService::new(state.db.clone());
+    let session_service = SessionService::new(state.db().clone());
     let refresh_token = match session_service
         .create_refresh_token(
             pending.user_id,
@@ -1126,13 +1126,13 @@ pub async fn oidc_link(
     };
 
     // Get user info for response
-    let user = match User::find_by_id(pending.user_id).one(&state.db).await {
+    let user = match User::find_by_id(pending.user_id).one(state.db()).await {
         Ok(Some(u)) => u,
         _ => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
     };
 
     let permissions =
-        super::auth::get_user_permissions(&state.db, state.default_tenant_id, pending.user_id)
+        super::auth::get_user_permissions(state.db(), state.default_tenant_id, pending.user_id)
             .await
             .unwrap_or_default();
 

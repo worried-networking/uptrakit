@@ -1,4 +1,4 @@
-import { getAccessToken, setAccessToken } from './auth';
+import { getAccessToken, setAccessToken } from './auth.svelte';
 import type {
 	AgentCertificateSettings,
 	AuthenticationSettings,

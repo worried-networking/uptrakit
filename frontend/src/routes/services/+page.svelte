@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { user } from '$lib/auth';
+	import { getUser } from '$lib/auth.svelte';
 	import { getServices, approveService, rejectService, deleteService, mergeService, updateService } from '$lib/api';
 	import type { ServiceResponse, ServiceType } from '$lib/types';
 	import { Permission } from '$lib/types';
@@ -23,7 +23,7 @@
 	let totalPages: number = $state(1);
 	let typeFilter: 'all' | ServiceType = $state('all');
 
-	const canManage = $derived($user?.permissions.includes(Permission.ManageAgents) ?? false);
+	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -212,7 +212,7 @@
 	}}
 />
 
-{#if $user}
+{#if getUser()}
 	<h1 class="h1 mb-4">Services</h1>
 
 	<div class="mb-6 flex flex-wrap gap-2">
