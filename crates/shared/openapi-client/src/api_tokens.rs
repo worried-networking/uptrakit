@@ -11,18 +11,17 @@ impl UptrakitClient {
         &self,
         req: &CreateApiTokenRequest,
     ) -> Result<CreateApiTokenResponse> {
-        self.post_json("/api/v1/auth/api-tokens", req).await
+        self.post_json(crate::paths::api_tokens::BASE, req).await
     }
 
     /// List all API tokens for the current user.
     pub async fn list_api_tokens(&self) -> Result<ApiTokenListResponse> {
-        self.get("/api/v1/auth/api-tokens").await
+        self.get(crate::paths::api_tokens::BASE).await
     }
 
     /// Revoke an API token by ID.
     pub async fn revoke_api_token(&self, id: &Uuid) -> Result<()> {
-        let path = format!("/api/v1/auth/api-tokens/{id}");
-        self.delete(&path).await
+        self.delete(&crate::paths::api_tokens::by_id(id)).await
     }
 }
 

@@ -1,6 +1,8 @@
 #[cfg(feature = "mock")]
 pub mod mock;
 
+pub(crate) mod paths;
+
 pub mod api_tokens;
 pub mod auth;
 pub mod error;

@@ -12,7 +12,8 @@ impl UptrakitClient {
         &self,
         req: &CreateProviderConfigRequest,
     ) -> Result<ProviderConfigResponse> {
-        self.post_json("/api/v1/provider-configs", req).await
+        self.post_json(crate::paths::provider_configs::BASE, req)
+            .await
     }
 
     /// List provider configurations with pagination.
@@ -20,14 +21,13 @@ impl UptrakitClient {
         &self,
         params: &PaginationParams,
     ) -> Result<PaginatedResponse<ProviderConfigResponse>> {
-        self.get_with_query("/api/v1/provider-configs", params)
+        self.get_with_query(crate::paths::provider_configs::BASE, params)
             .await
     }
 
     /// Get a single provider configuration by ID.
     pub async fn get_provider_config(&self, id: &Uuid) -> Result<ProviderConfigResponse> {
-        let path = format!("/api/v1/provider-configs/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::provider_configs::by_id(id)).await
     }
 
     /// Update an existing provider configuration.
@@ -36,14 +36,14 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateProviderConfigRequest,
     ) -> Result<ProviderConfigResponse> {
-        let path = format!("/api/v1/provider-configs/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::provider_configs::by_id(id), req)
+            .await
     }
 
     /// Delete a provider configuration.
     pub async fn delete_provider_config(&self, id: &Uuid) -> Result<()> {
-        let path = format!("/api/v1/provider-configs/{id}");
-        self.delete(&path).await
+        self.delete(&crate::paths::provider_configs::by_id(id))
+            .await
     }
 }
 

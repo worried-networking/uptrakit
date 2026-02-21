@@ -112,7 +112,7 @@ fn paginated_software_item() -> PaginatedResponse<SoftwareItemResponse> {
 #[tokio::test]
 async fn hosts_list_success() {
     let server = MockApiServer::start();
-    let _m = server.on_list_hosts().ok(&paginated_host());
+    let _m = server.hosts().on_list().ok(&paginated_host());
 
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
@@ -137,7 +137,7 @@ async fn hosts_list_empty() {
         per_page: 20,
         total_pages: 0,
     };
-    let _m = server.on_list_hosts().ok(&empty);
+    let _m = server.hosts().on_list().ok(&empty);
 
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
@@ -156,7 +156,7 @@ async fn hosts_list_empty() {
 async fn hosts_show_success() {
     let server = MockApiServer::start();
     let id = host_id();
-    let _m = server.on_get_host(&id).ok(&sample_host());
+    let _m = server.hosts().on_get(&id).ok(&sample_host());
 
     let result = hosts::show(hosts::ShowParams {
         id: &id,
@@ -174,7 +174,7 @@ async fn hosts_show_success() {
 async fn hosts_show_not_found() {
     let server = MockApiServer::start();
     let id = host_id();
-    let _m = server.on_get_host(&id).not_found("host not found");
+    let _m = server.hosts().on_get(&id).not_found("host not found");
 
     let result = hosts::show(hosts::ShowParams {
         id: &id,
@@ -197,7 +197,7 @@ async fn hosts_show_not_found() {
 #[tokio::test]
 async fn hosts_list_json_format() {
     let server = MockApiServer::start();
-    let _m = server.on_list_hosts().ok(&paginated_host());
+    let _m = server.hosts().on_list().ok(&paginated_host());
 
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
@@ -217,7 +217,7 @@ async fn hosts_list_json_format() {
 #[tokio::test]
 async fn services_list_success() {
     let server = MockApiServer::start();
-    let _m = server.on_list_services().ok(&paginated_service());
+    let _m = server.services().on_list().ok(&paginated_service());
 
     let result = services::list(services::ListParams {
         server: Some(&server.server().base_url()),
@@ -238,7 +238,7 @@ async fn services_list_success() {
 async fn services_approve_success() {
     let server = MockApiServer::start();
     let id = service_id();
-    let _m = server.on_approve_service(&id).ok(&sample_service());
+    let _m = server.services().on_approve(&id).ok(&sample_service());
 
     let result = services::approve(
         &id,
@@ -256,7 +256,10 @@ async fn services_approve_success() {
 async fn services_approve_not_found() {
     let server = MockApiServer::start();
     let id = service_id();
-    let _m = server.on_approve_service(&id).not_found("service not found");
+    let _m = server
+        .services()
+        .on_approve(&id)
+        .not_found("service not found");
 
     let result = services::approve(
         &id,
@@ -275,7 +278,10 @@ async fn services_approve_not_found() {
 #[tokio::test]
 async fn software_items_list_success() {
     let server = MockApiServer::start();
-    let _m = server.on_list_software_items().ok(&paginated_software_item());
+    let _m = server
+        .software_items()
+        .on_list()
+        .ok(&paginated_software_item());
 
     let result = software_items::list(software_items::ListParams {
         server: Some(&server.server().base_url()),
@@ -295,7 +301,7 @@ async fn software_items_list_success() {
 #[tokio::test]
 async fn api_401_returns_not_authenticated() {
     let server = MockApiServer::start();
-    let _m = server.on_list_hosts().unauthorized();
+    let _m = server.hosts().on_list().unauthorized();
 
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
@@ -321,7 +327,7 @@ async fn api_401_returns_not_authenticated() {
 #[tokio::test]
 async fn api_429_returns_rate_limited() {
     let server = MockApiServer::start();
-    let _m = server.on_list_hosts().rate_limited(Some(60));
+    let _m = server.hosts().on_list().rate_limited(Some(60));
 
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
@@ -346,7 +352,8 @@ async fn api_429_returns_rate_limited() {
 async fn api_500_returns_server_error() {
     let server = MockApiServer::start();
     let _m = server
-        .on_list_hosts()
+        .hosts()
+        .on_list()
         .internal_error("internal server error");
 
     let result = hosts::list(hosts::ListParams {
@@ -378,7 +385,7 @@ async fn services_remove_success() {
     let msg = MessageResponse {
         message: "Service removed.".to_string(),
     };
-    let _m = server.on_remove_service(&id).ok(&msg);
+    let _m = server.services().on_remove(&id).ok(&msg);
 
     let result = services::remove(
         &id,
@@ -404,7 +411,7 @@ async fn hosts_show_with_agents() {
         friendly_name: "agent-1".to_string(),
         status: "approved".parse().unwrap(),
     }];
-    let _m = server.on_get_host(&id).ok(&host);
+    let _m = server.hosts().on_get(&id).ok(&host);
 
     let result = hosts::show(hosts::ShowParams {
         id: &id,

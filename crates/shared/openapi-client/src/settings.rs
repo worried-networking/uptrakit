@@ -19,12 +19,12 @@ use uptrakit_web_api_types::settings_network::{
 impl UptrakitClient {
     /// Get combined settings (registration, authentication, certificates, enrollment tokens).
     pub async fn get_combined_settings(&self) -> Result<CombinedSettingsResponse> {
-        self.get("/api/v1/settings").await
+        self.get(crate::paths::settings::COMBINED).await
     }
 
     /// Get registration settings.
     pub async fn get_registration_settings(&self) -> Result<RegistrationSettingsResponse> {
-        self.get("/api/v1/settings/registration").await
+        self.get(crate::paths::settings::REGISTRATION).await
     }
 
     /// Update registration settings.
@@ -32,12 +32,13 @@ impl UptrakitClient {
         &self,
         req: &UpdateRegistrationSettingsRequest,
     ) -> Result<RegistrationSettingsResponse> {
-        self.put_json("/api/v1/settings/registration", req).await
+        self.put_json(crate::paths::settings::REGISTRATION, req)
+            .await
     }
 
     /// Get authentication settings.
     pub async fn get_authentication_settings(&self) -> Result<AuthenticationSettingsResponse> {
-        self.get("/api/v1/settings/authentication").await
+        self.get(crate::paths::settings::AUTHENTICATION).await
     }
 
     /// Update authentication settings.
@@ -45,12 +46,13 @@ impl UptrakitClient {
         &self,
         req: &UpdateAuthenticationSettingsRequest,
     ) -> Result<AuthenticationSettingsResponse> {
-        self.put_json("/api/v1/settings/authentication", req).await
+        self.put_json(crate::paths::settings::AUTHENTICATION, req)
+            .await
     }
 
     /// Get agent certificate settings.
     pub async fn get_agent_certificate_settings(&self) -> Result<AgentCertificateSettingsResponse> {
-        self.get("/api/v1/settings/agent-certificates").await
+        self.get(crate::paths::settings::AGENT_CERTIFICATES).await
     }
 
     /// Update agent certificate settings.
@@ -58,13 +60,13 @@ impl UptrakitClient {
         &self,
         req: &UpdateAgentCertificateSettingsRequest,
     ) -> Result<AgentCertificateSettingsResponse> {
-        self.put_json("/api/v1/settings/agent-certificates", req)
+        self.put_json(crate::paths::settings::AGENT_CERTIFICATES, req)
             .await
     }
 
     /// Get network settings.
     pub async fn get_network_settings(&self) -> Result<NetworkSettingsResponse> {
-        self.get("/api/v1/settings/network").await
+        self.get(crate::paths::settings::NETWORK).await
     }
 
     /// Update network settings.
@@ -72,17 +74,17 @@ impl UptrakitClient {
         &self,
         req: &UpdateNetworkSettingsRequest,
     ) -> Result<NetworkSettingsResponse> {
-        self.put_json("/api/v1/settings/network", req).await
+        self.put_json(crate::paths::settings::NETWORK, req).await
     }
 
     /// Rotate the CA certificate.
     pub async fn rotate_ca(&self) -> Result<RotateCaResponse> {
-        self.post_empty("/api/v1/settings/rotate-ca").await
+        self.post_empty(crate::paths::settings::ROTATE_CA).await
     }
 
     /// Renew the server TLS certificate.
     pub async fn renew_server_certificate(&self) -> Result<RenewServerCertResponse> {
-        self.post_empty("/api/v1/settings/renew-server-certificate")
+        self.post_empty(crate::paths::settings::RENEW_SERVER_CERT)
             .await
     }
 }

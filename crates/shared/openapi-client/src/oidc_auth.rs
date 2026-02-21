@@ -11,21 +11,21 @@ impl UptrakitClient {
     ///
     /// This endpoint does not require authentication.
     pub async fn oidc_authorize(&self, provider_id: &Uuid) -> Result<OidcAuthorizeResponse> {
-        let path = format!("/api/v1/auth/oidc/{provider_id}/authorize");
-        self.get_unauth(&path).await
+        self.get_unauth(&crate::paths::oidc_auth::authorize(provider_id))
+            .await
     }
 
     /// Exchange an OIDC authorization code for tokens.
     ///
     /// This endpoint does not require authentication.
     pub async fn oidc_exchange(&self, req: &OidcExchangeRequest) -> Result<AuthResponse> {
-        self.post_json_unauth("/api/v1/auth/oidc/exchange", req)
+        self.post_json_unauth(crate::paths::oidc_auth::EXCHANGE, req)
             .await
     }
 
     /// Link an OIDC account to an existing user.
     pub async fn oidc_link(&self, req: &OidcLinkRequest) -> Result<AuthResponse> {
-        self.post_json("/api/v1/auth/oidc/link", req).await
+        self.post_json(crate::paths::oidc_auth::LINK, req).await
     }
 
     /// Complete OIDC registration with a registration code and token.
@@ -35,7 +35,7 @@ impl UptrakitClient {
         &self,
         req: &OidcCompleteRegistrationRequest,
     ) -> Result<AuthResponse> {
-        self.post_json_unauth("/api/v1/auth/oidc/complete-registration", req)
+        self.post_json_unauth(crate::paths::oidc_auth::COMPLETE_REGISTRATION, req)
             .await
     }
 }

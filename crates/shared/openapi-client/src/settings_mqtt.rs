@@ -9,7 +9,7 @@ use uuid::Uuid;
 impl UptrakitClient {
     /// List all MQTT client configurations.
     pub async fn list_mqtt_settings(&self) -> Result<Vec<MqttClientResponse>> {
-        self.get("/api/v1/settings/mqtt").await
+        self.get(crate::paths::settings_mqtt::BASE).await
     }
 
     /// Create a new MQTT client configuration.
@@ -17,12 +17,12 @@ impl UptrakitClient {
         &self,
         req: &CreateMqttClientRequest,
     ) -> Result<MqttClientResponse> {
-        self.post_json("/api/v1/settings/mqtt", req).await
+        self.post_json(crate::paths::settings_mqtt::BASE, req).await
     }
 
     /// Get the MQTT client limit.
     pub async fn get_mqtt_limit(&self) -> Result<MqttLimitResponse> {
-        self.get("/api/v1/settings/mqtt/limit").await
+        self.get(crate::paths::settings_mqtt::LIMIT).await
     }
 
     /// Update the MQTT client limit.
@@ -30,13 +30,12 @@ impl UptrakitClient {
         &self,
         req: &UpdateMqttLimitRequest,
     ) -> Result<MqttLimitResponse> {
-        self.put_json("/api/v1/settings/mqtt/limit", req).await
+        self.put_json(crate::paths::settings_mqtt::LIMIT, req).await
     }
 
     /// Get a single MQTT client configuration by ID.
     pub async fn get_mqtt_settings(&self, id: &Uuid) -> Result<MqttClientResponse> {
-        let path = format!("/api/v1/settings/mqtt/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::settings_mqtt::by_id(id)).await
     }
 
     /// Update an existing MQTT client configuration.
@@ -45,14 +44,13 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateMqttClientRequest,
     ) -> Result<MqttClientResponse> {
-        let path = format!("/api/v1/settings/mqtt/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::settings_mqtt::by_id(id), req)
+            .await
     }
 
     /// Delete an MQTT client configuration.
     pub async fn delete_mqtt_settings(&self, id: &Uuid) -> Result<()> {
-        let path = format!("/api/v1/settings/mqtt/{id}");
-        self.delete(&path).await
+        self.delete(&crate::paths::settings_mqtt::by_id(id)).await
     }
 }
 

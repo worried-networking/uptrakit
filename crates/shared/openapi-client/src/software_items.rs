@@ -14,13 +14,13 @@ impl UptrakitClient {
         &self,
         params: &PaginationParams,
     ) -> Result<PaginatedResponse<SoftwareItemResponse>> {
-        self.get_with_query("/api/v1/software-items", params).await
+        self.get_with_query(crate::paths::software_items::BASE, params)
+            .await
     }
 
     /// Get a single software item by ID (detailed view with host info).
     pub async fn get_software_item(&self, id: &Uuid) -> Result<SoftwareItemDetailResponse> {
-        let path = format!("/api/v1/software-items/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::software_items::by_id(id)).await
     }
 
     /// Create a new software item.
@@ -28,7 +28,7 @@ impl UptrakitClient {
         &self,
         req: &CreateSoftwareItemRequest,
     ) -> Result<SoftwareItemResponse> {
-        self.post_json("/api/v1/software-items", req).await
+        self.post_json(crate::paths::software_items::BASE, req).await
     }
 
     /// Update an existing software item.
@@ -37,14 +37,13 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateSoftwareItemRequest,
     ) -> Result<SoftwareItemResponse> {
-        let path = format!("/api/v1/software-items/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::software_items::by_id(id), req)
+            .await
     }
 
     /// Delete a software item.
     pub async fn delete_software_item(&self, id: &Uuid) -> Result<()> {
-        let path = format!("/api/v1/software-items/{id}");
-        self.delete(&path).await
+        self.delete(&crate::paths::software_items::by_id(id)).await
     }
 
     /// Assign hosts to a software item.
@@ -53,20 +52,20 @@ impl UptrakitClient {
         id: &Uuid,
         req: &AssignHostsRequest,
     ) -> Result<SoftwareItemDetailResponse> {
-        let path = format!("/api/v1/software-items/{id}/hosts");
-        self.post_json(&path, req).await
+        self.post_json(&crate::paths::software_items::hosts(id), req)
+            .await
     }
 
     /// Unassign a host from a software item.
     pub async fn unassign_host(&self, item_id: &Uuid, host_id: &Uuid) -> Result<()> {
-        let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}");
-        self.delete(&path).await
+        self.delete(&crate::paths::software_items::host(item_id, host_id))
+            .await
     }
 
     /// Trigger a version check for a software item across all assigned hosts.
     pub async fn check_versions(&self, item_id: &Uuid) -> Result<TriggerVersionCheckResponse> {
-        let path = format!("/api/v1/software-items/{item_id}/check-versions");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::software_items::check_versions(item_id))
+            .await
     }
 
     /// Trigger a version check for a software item on a specific host.
@@ -75,8 +74,10 @@ impl UptrakitClient {
         item_id: &Uuid,
         host_id: &Uuid,
     ) -> Result<TriggerVersionCheckResponse> {
-        let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}/check-versions");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::software_items::host_check_versions(
+            item_id, host_id,
+        ))
+        .await
     }
 
     /// Trigger an update for a software item on a specific host.
@@ -86,8 +87,11 @@ impl UptrakitClient {
         host_id: &Uuid,
         req: &TriggerUpdateRequest,
     ) -> Result<TriggerUpdateResponse> {
-        let path = format!("/api/v1/software-items/{item_id}/hosts/{host_id}/update");
-        self.post_json(&path, req).await
+        self.post_json(
+            &crate::paths::software_items::host_update(item_id, host_id),
+            req,
+        )
+        .await
     }
 }
 

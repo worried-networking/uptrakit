@@ -11,18 +11,17 @@ impl UptrakitClient {
         &self,
         req: &CreateOidcProviderRequest,
     ) -> Result<OidcProviderResponse> {
-        self.post_json("/api/v1/settings/oidc-providers", req).await
+        self.post_json(crate::paths::oidc_providers::BASE, req).await
     }
 
     /// List all OIDC providers.
     pub async fn list_oidc_providers(&self) -> Result<Vec<OidcProviderResponse>> {
-        self.get("/api/v1/settings/oidc-providers").await
+        self.get(crate::paths::oidc_providers::BASE).await
     }
 
     /// Get a single OIDC provider by ID.
     pub async fn get_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse> {
-        let path = format!("/api/v1/settings/oidc-providers/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::oidc_providers::by_id(id)).await
     }
 
     /// Update an existing OIDC provider.
@@ -31,26 +30,25 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateOidcProviderRequest,
     ) -> Result<OidcProviderResponse> {
-        let path = format!("/api/v1/settings/oidc-providers/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::oidc_providers::by_id(id), req)
+            .await
     }
 
     /// Delete an OIDC provider.
     pub async fn delete_oidc_provider(&self, id: &Uuid) -> Result<()> {
-        let path = format!("/api/v1/settings/oidc-providers/{id}");
-        self.delete(&path).await
+        self.delete(&crate::paths::oidc_providers::by_id(id)).await
     }
 
     /// Activate an OIDC provider.
     pub async fn activate_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse> {
-        let path = format!("/api/v1/settings/oidc-providers/{id}/activate");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::oidc_providers::activate(id))
+            .await
     }
 
     /// Deactivate an OIDC provider.
     pub async fn deactivate_oidc_provider(&self, id: &Uuid) -> Result<OidcProviderResponse> {
-        let path = format!("/api/v1/settings/oidc-providers/{id}/deactivate");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::oidc_providers::deactivate(id))
+            .await
     }
 }
 

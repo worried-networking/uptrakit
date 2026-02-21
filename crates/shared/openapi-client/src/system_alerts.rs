@@ -5,6 +5,6 @@ use uptrakit_web_api_types::system_alerts::SystemAlertsResponse;
 impl UptrakitClient {
     /// Get active system alerts.
     pub async fn get_system_alerts(&self) -> Result<SystemAlertsResponse> {
-        self.get("/api/v1/system/alerts").await
+        self.get(crate::paths::system_alerts::ALERTS).await
     }
 }

@@ -30,25 +30,23 @@ impl UptrakitClient {
         &self,
         query: &ListServicesQuery,
     ) -> Result<PaginatedResponse<ServiceResponse>> {
-        self.get_with_query("/api/v1/services", query).await
+        self.get_with_query(crate::paths::services::BASE, query)
+            .await
     }
 
     /// Get a single service by ID.
     pub async fn get_service(&self, id: &Uuid) -> Result<ServiceResponse> {
-        let path = format!("/api/v1/services/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::services::by_id(id)).await
     }
 
     /// Approve a pending service.
     pub async fn approve_service(&self, id: &Uuid) -> Result<ServiceResponse> {
-        let path = format!("/api/v1/services/{id}/approve");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::services::approve(id)).await
     }
 
     /// Reject a pending service.
     pub async fn reject_service(&self, id: &Uuid) -> Result<ServiceResponse> {
-        let path = format!("/api/v1/services/{id}/reject");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::services::reject(id)).await
     }
 
     /// Update a service's configurable settings (e.g. ping interval).
@@ -57,14 +55,13 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateServiceRequest,
     ) -> Result<ServiceResponse> {
-        let path = format!("/api/v1/services/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::services::by_id(id), req)
+            .await
     }
 
     /// Deactivate (remove) a service.
     pub async fn remove_service(&self, id: &Uuid) -> Result<MessageResponse> {
-        let path = format!("/api/v1/services/{id}");
-        self.delete_json(&path).await
+        self.delete_json(&crate::paths::services::by_id(id)).await
     }
 
     /// Merge a pending source service into an approved target service.
@@ -73,8 +70,8 @@ impl UptrakitClient {
         target_id: &Uuid,
         req: &MergeAgentRequest,
     ) -> Result<ServiceResponse> {
-        let path = format!("/api/v1/services/{target_id}/merge");
-        self.post_json(&path, req).await
+        self.post_json(&crate::paths::services::merge(target_id), req)
+            .await
     }
 
     /// Create an enrollment token for a service type.
@@ -83,14 +80,14 @@ impl UptrakitClient {
         service_type: Option<ServiceType>,
     ) -> Result<EnrollmentTokenResponse> {
         let query = EnrollmentTokenQuery::from_service_type(service_type);
-        self.post_empty_with_query("/api/v1/services/enrollment-token", &query)
+        self.post_empty_with_query(crate::paths::services::ENROLLMENT_TOKEN, &query)
             .await
     }
 
     /// Revoke the enrollment token for a service type.
     pub async fn revoke_enrollment_token(&self, service_type: Option<ServiceType>) -> Result<()> {
         let query = EnrollmentTokenQuery::from_service_type(service_type);
-        self.delete_with_query("/api/v1/services/enrollment-token", &query)
+        self.delete_with_query(crate::paths::services::ENROLLMENT_TOKEN, &query)
             .await
     }
 
@@ -100,7 +97,7 @@ impl UptrakitClient {
         service_type: Option<ServiceType>,
     ) -> Result<EnrollmentTokenStatusResponse> {
         let query = EnrollmentTokenQuery::from_service_type(service_type);
-        self.get_with_query("/api/v1/services/enrollment-token/status", &query)
+        self.get_with_query(crate::paths::services::ENROLLMENT_TOKEN_STATUS, &query)
             .await
     }
 }

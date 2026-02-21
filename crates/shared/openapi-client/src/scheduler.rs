@@ -8,13 +8,12 @@ use uuid::Uuid;
 impl UptrakitClient {
     /// List all scheduled tasks.
     pub async fn list_scheduled_tasks(&self) -> Result<Vec<ScheduledTaskResponse>> {
-        self.get("/api/v1/scheduler/tasks").await
+        self.get(crate::paths::scheduler::BASE).await
     }
 
     /// Get a single scheduled task by ID.
     pub async fn get_scheduled_task(&self, id: &Uuid) -> Result<ScheduledTaskResponse> {
-        let path = format!("/api/v1/scheduler/tasks/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::scheduler::by_id(id)).await
     }
 
     /// Update a scheduled task (cron expression, enabled state, or config).
@@ -23,14 +22,13 @@ impl UptrakitClient {
         id: &Uuid,
         req: &UpdateScheduledTaskRequest,
     ) -> Result<ScheduledTaskResponse> {
-        let path = format!("/api/v1/scheduler/tasks/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::scheduler::by_id(id), req)
+            .await
     }
 
     /// Trigger immediate execution of a scheduled task.
     pub async fn trigger_scheduled_task(&self, id: &Uuid) -> Result<TriggerScheduledTaskResponse> {
-        let path = format!("/api/v1/scheduler/tasks/{id}/trigger");
-        self.post_empty(&path).await
+        self.post_empty(&crate::paths::scheduler::trigger(id)).await
     }
 }
 

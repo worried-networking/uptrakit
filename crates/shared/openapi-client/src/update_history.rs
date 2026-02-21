@@ -10,13 +10,13 @@ impl UptrakitClient {
         &self,
         query: &UpdateHistoryQuery,
     ) -> Result<PaginatedResponse<UpdateHistoryResponse>> {
-        self.get_with_query("/api/v1/update-history", query).await
+        self.get_with_query(crate::paths::update_history::BASE, query)
+            .await
     }
 
     /// Get a single update history entry by ID.
     pub async fn get_update_history(&self, id: &Uuid) -> Result<UpdateHistoryResponse> {
-        let path = format!("/api/v1/update-history/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::update_history::by_id(id)).await
     }
 }
 

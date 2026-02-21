@@ -6,6 +6,6 @@ impl UptrakitClient {
     ///
     /// This endpoint does not require authentication. Returns `"ok"` on success.
     pub async fn healthz(&self) -> Result<String> {
-        self.get_text_unauth("/healthz").await
+        self.get_text_unauth(crate::paths::health::HEALTHZ).await
     }
 }

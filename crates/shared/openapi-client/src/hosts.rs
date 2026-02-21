@@ -10,25 +10,22 @@ impl UptrakitClient {
         &self,
         params: &PaginationParams,
     ) -> Result<PaginatedResponse<HostResponse>> {
-        self.get_with_query("/api/v1/hosts", params).await
+        self.get_with_query(crate::paths::hosts::BASE, params).await
     }
 
     /// Get a single host by ID.
     pub async fn get_host(&self, id: &Uuid) -> Result<HostResponse> {
-        let path = format!("/api/v1/hosts/{id}");
-        self.get(&path).await
+        self.get(&crate::paths::hosts::by_id(id)).await
     }
 
     /// Update a host (e.g. change its friendly name).
     pub async fn update_host(&self, id: &Uuid, req: &UpdateHostRequest) -> Result<HostResponse> {
-        let path = format!("/api/v1/hosts/{id}");
-        self.put_json(&path, req).await
+        self.put_json(&crate::paths::hosts::by_id(id), req).await
     }
 
     /// Deactivate (remove) a host.
     pub async fn deactivate_host(&self, id: &Uuid) -> Result<HostMessageResponse> {
-        let path = format!("/api/v1/hosts/{id}");
-        self.delete_json(&path).await
+        self.delete_json(&crate::paths::hosts::by_id(id)).await
     }
 }
 

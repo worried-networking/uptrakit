@@ -15,33 +15,33 @@ impl UptrakitClient {
     ///
     /// This endpoint does not require authentication.
     pub async fn register(&self, req: &RegisterRequest) -> Result<AuthResponse> {
-        self.post_json_unauth("/api/v1/auth/register", req).await
+        self.post_json_unauth(crate::paths::auth::REGISTER, req).await
     }
 
     /// Log in with email and password.
     ///
     /// This endpoint does not require authentication.
     pub async fn login(&self, req: &LoginRequest) -> Result<AuthResponse> {
-        self.post_json_unauth("/api/v1/auth/login", req).await
+        self.post_json_unauth(crate::paths::auth::LOGIN, req).await
     }
 
     /// Refresh an access token using a refresh token.
     ///
     /// This endpoint does not require authentication.
     pub async fn refresh(&self, req: &RefreshRequest) -> Result<RefreshResponse> {
-        self.post_json_unauth("/api/v1/auth/refresh", req).await
+        self.post_json_unauth(crate::paths::auth::REFRESH, req).await
     }
 
     /// Log out by revoking a refresh token.
     pub async fn logout(&self, req: &LogoutRequest) -> Result<()> {
-        self.post_json_no_content("/api/v1/auth/logout", req).await
+        self.post_json_no_content(crate::paths::auth::LOGOUT, req).await
     }
 
     /// List available authentication methods.
     ///
     /// This endpoint does not require authentication.
     pub async fn auth_methods(&self) -> Result<AuthMethodsResponse> {
-        self.get_unauth("/api/v1/auth/methods").await
+        self.get_unauth(crate::paths::auth::METHODS).await
     }
 
     /// Start a device authorization flow (RFC 8628-style).
@@ -51,7 +51,7 @@ impl UptrakitClient {
         &self,
         req: &DeviceAuthStartRequest,
     ) -> Result<DeviceAuthStartResponse> {
-        self.post_json_unauth("/api/v1/auth/device", req).await
+        self.post_json_unauth(crate::paths::auth::DEVICE, req).await
     }
 
     /// Poll for device authorization completion.
@@ -63,7 +63,7 @@ impl UptrakitClient {
         &self,
         req: &DeviceAuthPollRequest,
     ) -> Result<DeviceAuthPollResponse> {
-        self.post_json_unauth("/api/v1/auth/device/poll", req).await
+        self.post_json_unauth(crate::paths::auth::DEVICE_POLL, req).await
     }
 
     /// Approve a pending device authorization request.
@@ -71,12 +71,12 @@ impl UptrakitClient {
         &self,
         req: &DeviceAuthApproveRequest,
     ) -> Result<DeviceAuthApproveResponse> {
-        self.post_json("/api/v1/auth/device/approve", req).await
+        self.post_json(crate::paths::auth::DEVICE_APPROVE, req).await
     }
 
     /// Retrieve the current authenticated user's profile.
     pub async fn me(&self) -> Result<UserResponse> {
-        self.get("/api/v1/auth/me").await
+        self.get(crate::paths::auth::ME).await
     }
 }
 

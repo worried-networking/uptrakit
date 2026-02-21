@@ -321,6 +321,24 @@ The openapi-client must mirror the web API:
 - **Changed request/response types** -> update the client method signature.
 - **Removed endpoint** -> remove the client method.
 
+## Path constants (`paths` module)
+
+All URL strings used by the client and the mock are defined exactly once in
+`src/paths.rs` as `pub(crate)` sub-modules — one per resource group. Each
+sub-module holds:
+
+- `pub(crate) const NAME: &str` — static paths with no runtime parameters.
+- `pub(crate) fn name(id: &Uuid) -> String` — paths that embed one or more
+  IDs resolved at call time.
+
+When an API path changes, update `paths.rs`. The compiler will catch every
+stale reference in both the client methods and the mock helpers.
+
+Sub-modules: `auth`, `api_tokens`, `health`, `hosts`, `oidc_auth`,
+`oidc_providers`, `pki`, `provider_configs`, `scheduler`, `services`,
+`settings`, `settings_mqtt`, `software_items`, `system_alerts`,
+`update_history`.
+
 ## Mock testing feature
 
 The `mock` feature provides a first-class HTTP mocking layer for integration tests in crates
@@ -338,8 +356,9 @@ uptrakit-openapi-client = { path = "...", features = ["mock"] }
 
 ### Using `MockApiServer`
 
-`MockApiServer` starts a real HTTP server on a random port and provides endpoint-aware
-convenience methods. Test code never needs to know API URL paths.
+`MockApiServer` starts a real HTTP server on a random port. Endpoints are
+accessed through typed **section accessors** that mirror the client module
+structure. Test code never needs to know API URL paths.
 
 ```rust
 use uptrakit_openapi_client::mock::MockApiServer;
@@ -350,8 +369,8 @@ use uptrakit_openapi_client::types::hosts::HostResponse;
 async fn list_hosts_returns_empty() {
     let server = MockApiServer::start();
 
-    // Register a mock for GET /api/v1/hosts
-    let _m = server.on_list_hosts().ok(&PaginatedResponse::<HostResponse>::default());
+    // Register a mock through the typed section accessor
+    let _m = server.hosts().on_list().ok(&PaginatedResponse::<HostResponse>::default());
 
     // Get a pre-authenticated client pointing at the mock server
     let client = server.client();
@@ -379,32 +398,178 @@ All response methods use `reqwest::StatusCode` for type safety:
 All methods return `httpmock::Mock<'_>` which can be used for call-count assertions:
 
 ```rust
-let m = server.on_list_hosts().ok(&response);
+let m = server.hosts().on_list().ok(&response);
 // ... exercise code under test ...
 m.assert();       // exactly 1 call
 m.assert_hits(2); // exactly N calls
 ```
 
-### Pre-defined endpoint helpers
+### Section accessors and endpoint helpers
 
-`MockApiServer` provides helpers for all major API endpoints so tests never hard-code paths:
+`MockApiServer` exposes a typed section accessor per resource group. Each section
+provides `on_*` helpers for every endpoint, so tests never hard-code paths.
+
+#### `server.auth()` → `MockAuth`
 
 | Method | HTTP | Path |
 | --- | --- | --- |
-| `on_list_hosts()` | GET | `/api/v1/hosts` |
-| `on_get_host(id)` | GET | `/api/v1/hosts/{id}` |
-| `on_list_services()` | GET | `/api/v1/services` |
-| `on_get_service(id)` | GET | `/api/v1/services/{id}` |
-| `on_approve_service(id)` | POST | `/api/v1/services/{id}/approve` |
-| `on_reject_service(id)` | POST | `/api/v1/services/{id}/reject` |
-| `on_remove_service(id)` | DELETE | `/api/v1/services/{id}` |
-| `on_list_software_items()` | GET | `/api/v1/software-items` |
-| `on_get_software_item(id)` | GET | `/api/v1/software-items/{id}` |
-| `on_list_scheduled_tasks()` | GET | `/api/v1/scheduler/tasks` |
-| `on_trigger_scheduled_task(id)` | POST | `/api/v1/scheduler/tasks/{id}/trigger` |
+| `on_register()` | POST | `/api/v1/auth/register` |
+| `on_login()` | POST | `/api/v1/auth/login` |
+| `on_refresh()` | POST | `/api/v1/auth/refresh` |
+| `on_logout()` | POST | `/api/v1/auth/logout` |
+| `on_me()` | GET | `/api/v1/auth/me` |
+| `on_auth_methods()` | GET | `/api/v1/auth/methods` |
+| `on_device_auth_start()` | POST | `/api/v1/auth/device` |
+| `on_device_auth_poll()` | POST | `/api/v1/auth/device/poll` |
+| `on_device_auth_approve()` | POST | `/api/v1/auth/device/approve` |
+
+#### `server.api_tokens()` → `MockApiTokens`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/auth/api-tokens` |
+| `on_create()` | POST | `/api/v1/auth/api-tokens` |
+| `on_revoke(id)` | DELETE | `/api/v1/auth/api-tokens/{id}` |
+
+#### `server.health()` → `MockHealth`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
 | `on_healthz()` | GET | `/healthz` |
-| `on_system_alerts()` | GET | `/api/v1/system/alerts` |
-| `on(method, path)` | any | Generic fallback for unlisted endpoints |
+
+#### `server.hosts()` → `MockHosts`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/hosts` |
+| `on_get(id)` | GET | `/api/v1/hosts/{id}` |
+| `on_update(id)` | PUT | `/api/v1/hosts/{id}` |
+| `on_deactivate(id)` | DELETE | `/api/v1/hosts/{id}` |
+
+#### `server.oidc_auth()` → `MockOidcAuth`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_authorize(provider_id)` | GET | `/api/v1/auth/oidc/{provider_id}/authorize` |
+| `on_exchange()` | POST | `/api/v1/auth/oidc/exchange` |
+| `on_link()` | POST | `/api/v1/auth/oidc/link` |
+| `on_complete_registration()` | POST | `/api/v1/auth/oidc/complete-registration` |
+
+#### `server.oidc_providers()` → `MockOidcProviders`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/settings/oidc-providers` |
+| `on_create()` | POST | `/api/v1/settings/oidc-providers` |
+| `on_get(id)` | GET | `/api/v1/settings/oidc-providers/{id}` |
+| `on_update(id)` | PUT | `/api/v1/settings/oidc-providers/{id}` |
+| `on_delete(id)` | DELETE | `/api/v1/settings/oidc-providers/{id}` |
+| `on_activate(id)` | POST | `/api/v1/settings/oidc-providers/{id}/activate` |
+| `on_deactivate(id)` | POST | `/api/v1/settings/oidc-providers/{id}/deactivate` |
+
+#### `server.pki()` → `MockPki`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_ca_cert()` | GET | `/api/v1/pki/ca.crt` |
+| `on_ca_crl()` | GET | `/api/v1/pki/ca.crl` |
+
+#### `server.provider_configs()` → `MockProviderConfigs`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/provider-configs` |
+| `on_create()` | POST | `/api/v1/provider-configs` |
+| `on_get(id)` | GET | `/api/v1/provider-configs/{id}` |
+| `on_update(id)` | PUT | `/api/v1/provider-configs/{id}` |
+| `on_delete(id)` | DELETE | `/api/v1/provider-configs/{id}` |
+
+#### `server.scheduler()` → `MockScheduler`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/scheduler/tasks` |
+| `on_get(id)` | GET | `/api/v1/scheduler/tasks/{id}` |
+| `on_update(id)` | PUT | `/api/v1/scheduler/tasks/{id}` |
+| `on_trigger(id)` | POST | `/api/v1/scheduler/tasks/{id}/trigger` |
+
+#### `server.services()` → `MockServices`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/services` |
+| `on_get(id)` | GET | `/api/v1/services/{id}` |
+| `on_update(id)` | PUT | `/api/v1/services/{id}` |
+| `on_approve(id)` | POST | `/api/v1/services/{id}/approve` |
+| `on_reject(id)` | POST | `/api/v1/services/{id}/reject` |
+| `on_remove(id)` | DELETE | `/api/v1/services/{id}` |
+| `on_merge(target_id)` | POST | `/api/v1/services/{id}/merge` |
+| `on_create_enrollment_token()` | POST | `/api/v1/services/enrollment-token` |
+| `on_revoke_enrollment_token()` | DELETE | `/api/v1/services/enrollment-token` |
+| `on_enrollment_token_status()` | GET | `/api/v1/services/enrollment-token/status` |
+
+#### `server.settings()` → `MockSettings`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_get_combined()` | GET | `/api/v1/settings` |
+| `on_get_registration()` | GET | `/api/v1/settings/registration` |
+| `on_update_registration()` | PUT | `/api/v1/settings/registration` |
+| `on_get_authentication()` | GET | `/api/v1/settings/authentication` |
+| `on_update_authentication()` | PUT | `/api/v1/settings/authentication` |
+| `on_get_agent_certificates()` | GET | `/api/v1/settings/agent-certificates` |
+| `on_update_agent_certificates()` | PUT | `/api/v1/settings/agent-certificates` |
+| `on_get_network()` | GET | `/api/v1/settings/network` |
+| `on_update_network()` | PUT | `/api/v1/settings/network` |
+| `on_rotate_ca()` | POST | `/api/v1/settings/rotate-ca` |
+| `on_renew_server_certificate()` | POST | `/api/v1/settings/renew-server-certificate` |
+
+#### `server.settings_mqtt()` → `MockSettingsMqtt`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/settings/mqtt` |
+| `on_create()` | POST | `/api/v1/settings/mqtt` |
+| `on_get_limit()` | GET | `/api/v1/settings/mqtt/limit` |
+| `on_update_limit()` | PUT | `/api/v1/settings/mqtt/limit` |
+| `on_get(id)` | GET | `/api/v1/settings/mqtt/{id}` |
+| `on_update(id)` | PUT | `/api/v1/settings/mqtt/{id}` |
+| `on_delete(id)` | DELETE | `/api/v1/settings/mqtt/{id}` |
+
+#### `server.software_items()` → `MockSoftwareItems`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/software-items` |
+| `on_create()` | POST | `/api/v1/software-items` |
+| `on_get(id)` | GET | `/api/v1/software-items/{id}` |
+| `on_update(id)` | PUT | `/api/v1/software-items/{id}` |
+| `on_delete(id)` | DELETE | `/api/v1/software-items/{id}` |
+| `on_assign_hosts(id)` | POST | `/api/v1/software-items/{id}/hosts` |
+| `on_unassign_host(item_id, host_id)` | DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` |
+| `on_check_versions(id)` | POST | `/api/v1/software-items/{id}/check-versions` |
+| `on_check_versions_host(item_id, host_id)` | POST | `/api/v1/software-items/{id}/hosts/{host_id}/check-versions` |
+| `on_trigger_update(item_id, host_id)` | POST | `/api/v1/software-items/{id}/hosts/{host_id}/update` |
+
+#### `server.system_alerts()` → `MockSystemAlerts`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_get()` | GET | `/api/v1/system/alerts` |
+
+#### `server.update_history()` → `MockUpdateHistory`
+
+| Method | HTTP | Path |
+| --- | --- | --- |
+| `on_list()` | GET | `/api/v1/update-history` |
+| `on_get(id)` | GET | `/api/v1/update-history/{id}` |
+
+#### Generic escape hatch
+
+```rust
+// Match any endpoint by method and path (case-insensitive method)
+server.on("DELETE", "/api/v1/some/custom/path")
+```
 
 ### Client helpers
 
