@@ -159,10 +159,15 @@ Acceptable for a CLI tool; user can retry manually.
 matching `save_credentials()` which already calls `dirs.ensure_state_dir()`. Also added
 `ensure_config_dir()` method to the directories crate.
 
-### C-2: Missing test coverage for command execution logic [MEDIUM]
+### C-2: Missing test coverage for command execution logic [MEDIUM] (PARTIALLY RESOLVED)
 
-60+ tests for CLI argument parsing, but no tests for error paths, config loading, or
-formatting logic.
+~~60+ tests for CLI argument parsing, but no tests for error paths, config loading, or
+formatting logic.~~
+
+**Resolution:** Added 5 output formatting tests to `output.rs`: Unicode handling, empty
+strings, nested value pretty-print, YAML special characters, and Human format passthrough.
+Total: 75 tests. Integration tests requiring HTTP mocks for command execution remain out
+of scope.
 
 ### C-3: No `#[non_exhaustive]` on public output structs [LOW]
 

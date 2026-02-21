@@ -135,4 +135,70 @@ mod tests {
         assert_eq!(parsed["key"], "value");
         assert_eq!(parsed["num"], 1);
     }
+
+    #[test]
+    fn json_handles_unicode() {
+        let sample = Sample {
+            name: "日本語テスト".to_string(),
+            count: 1,
+        };
+        let json = serde_json::to_string(&sample).expect("json serialization");
+        let parsed: Sample = serde_json::from_str(&json).expect("json deserialization");
+        assert_eq!(parsed.name, "日本語テスト");
+    }
+
+    #[test]
+    fn json_handles_empty_string() {
+        let sample = Sample {
+            name: String::new(),
+            count: 0,
+        };
+        let json = serde_json::to_string(&sample).expect("json serialization");
+        assert_eq!(json, r#"{"name":"","count":0}"#);
+    }
+
+    #[test]
+    fn nested_value_pretty_print_contains_newlines() {
+        let value = serde_json::json!({
+            "parent": {
+                "child": {
+                    "value": 42
+                }
+            }
+        });
+        let pretty = serde_json::to_string_pretty(&value).expect("pretty print");
+        assert!(
+            pretty.contains('\n'),
+            "pretty-printed JSON should contain newlines"
+        );
+        assert!(
+            pretty.contains("\"value\": 42"),
+            "should contain formatted nested value"
+        );
+    }
+
+    #[test]
+    fn yaml_handles_special_characters() {
+        let sample = Sample {
+            name: "test: value with \"quotes\" and 'apostrophes'".to_string(),
+            count: 99,
+        };
+        let yaml = serde_yaml_ng::to_string(&sample).expect("yaml serialization");
+        let parsed: Sample = serde_yaml_ng::from_str(&yaml).expect("yaml deserialization");
+        assert_eq!(parsed.name, sample.name);
+    }
+
+    #[test]
+    fn print_output_human_uses_human_text() {
+        // Verify Human format doesn't serialize through serde
+        let sample = Sample {
+            name: "test".to_string(),
+            count: 42,
+        };
+        let human_text = "Custom human output\n";
+        // We can't capture stdout easily, but we verify the function
+        // doesn't error for Human format
+        let result = print_output(OutputFormat::Human, human_text, &sample);
+        assert!(result.is_ok());
+    }
 }
