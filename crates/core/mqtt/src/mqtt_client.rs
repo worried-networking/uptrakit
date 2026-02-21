@@ -450,7 +450,7 @@ mod tests {
         assert!(matches!(outcome, ShutdownOutcome::Completed));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn shutdown_task_aborts_on_timeout() {
         let token = CancellationToken::new();
         let handle = tokio::spawn(async {

@@ -35,6 +35,7 @@ uuid = { workspace = true, features = ["v7", "serde"] }
 [dev-dependencies]
 tempfile = { workspace = true }
 time = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite = { workspace = true }
 
 [build-dependencies]
