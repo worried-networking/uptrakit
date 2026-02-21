@@ -227,25 +227,13 @@ trusted.
 **Resolution:** Removed the duplicate `onMount(() => loadServices(1))` call. The `$effect` handles
 initial load. Also made the `typeFilter` dependency explicit (see CQ-04).
 
-#### CQ-02: Non-null assertion `$state(undefined!)` for component refs
+#### ~~CQ-02: Non-null assertion `$state(undefined!)` for component refs~~ (FIXED)
 
-**Severity:** Medium
-**Location:** `settings/+page.svelte:23-28`
-
-```typescript
-let registrationRef: RegistrationSettings = $state(undefined!);
-let authenticationRef: AuthenticationSettings = $state(undefined!);
-// ... 4 more
-```
-
-Using `undefined!` bypasses TypeScript's null safety. These refs are `undefined` until the component mounts,
-but the code calls methods on them (e.g., `registrationRef.load(...)`) assuming they're initialized.
-
-The `refsReady` flag (`settings/+page.svelte:21,58-61`) mitigates this by delaying `loadAllSettings()` until
-after `tick()`, but this is a fragile coordination pattern.
-
-**Recommendation:** See ARC-03. Passing loaded data as props eliminates this issue entirely. If the current
-pattern is kept, add a null check before calling load methods.
+**Resolution:** Replaced all 6 `$state(undefined!)` declarations with properly typed optional
+state (`T | undefined = $state(undefined)`) and added optional chaining (`?.`) to all call
+sites in `loadAllSettings()` and `startMqttPolling()`. TypeScript null safety is now respected;
+the `refsReady` flag continues to prevent premature calls. The full props-based refactor
+(ARC-03) remains a future enhancement.
 
 #### CQ-03: Significant code duplication in EnrollmentTokenSettings
 
@@ -511,8 +499,8 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 
 | Severity | Count | IDs |
 |----------|-------|-----|
-| Medium | 3 | ARC-02, CQ-02, HA-02 |
-| Medium (Fixed) | 3 | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~ |
+| Medium | 2 | ARC-02, HA-02 |
+| Medium (Fixed) | 4 | ~~SEC-01~~, ~~HA-01~~, ~~A11Y-01~~, ~~CQ-02~~ |
 | Low | 14 | ARC-01, ARC-03, ARC-04, SEC-02, SEC-03, SEC-04, SEC-05, CQ-03, CQ-05, CQ-06, CQ-07, HA-03, HA-04, HA-05, HA-06, A11Y-02, A11Y-03 |
 
 ### Issues by Category
@@ -546,7 +534,7 @@ There is no skip link for keyboard users to bypass the header and sidebar naviga
 | `services/+page.svelte` | CQ-01, CQ-04, HA-04 | Double load bug |
 | `hosts/+page.svelte` | HA-04 | No retry button |
 | `software/+page.svelte` | — | Clean implementation |
-| `settings/+page.svelte` | CQ-02, ~~HA-01~~, HA-02 | Component ref pattern; jitter added to backoff |
+| `settings/+page.svelte` | ~~CQ-02~~, ~~HA-01~~, HA-02 | Component refs now properly typed; jitter added to backoff |
 | `settings/EnrollmentTokenSettings.svelte` | CQ-03 | Code duplication |
 | `settings/RegistrationSettings.svelte` | — | Clean |
 | `settings/AuthenticationSettings.svelte` | — | Clean |

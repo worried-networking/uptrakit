@@ -20,12 +20,12 @@
 	let loading: boolean = $state(true);
 	let refsReady: boolean = $state(false);
 
-	let registrationRef: RegistrationSettings = $state(undefined!);
-	let authenticationRef: AuthenticationSettings = $state(undefined!);
-	let mqttClientsRef: MqttClientsSettings = $state(undefined!);
-	let oidcProvidersRef: OidcProvidersSettings = $state(undefined!);
-	let agentCertificateRef: AgentCertificateSettings = $state(undefined!);
-	let enrollmentTokenRef: EnrollmentTokenSettings = $state(undefined!);
+	let registrationRef: RegistrationSettings | undefined = $state(undefined);
+	let authenticationRef: AuthenticationSettings | undefined = $state(undefined);
+	let mqttClientsRef: MqttClientsSettings | undefined = $state(undefined);
+	let oidcProvidersRef: OidcProvidersSettings | undefined = $state(undefined);
+	let agentCertificateRef: AgentCertificateSettings | undefined = $state(undefined);
+	let enrollmentTokenRef: EnrollmentTokenSettings | undefined = $state(undefined);
 	let mqttPollHandle: ReturnType<typeof setTimeout> | null = $state(null);
 
 	let registrationError: string | null = $state(null);
@@ -70,7 +70,7 @@
 		const poll = async () => {
 			try {
 				const clients = await getMqttClients();
-				mqttClientsRef.load(clients);
+				mqttClientsRef?.load(clients);
 				mqttPollAttempt = 0; // Reset on success
 				scheduleNextPoll(initialMqttPollDelay);
 			} catch {
@@ -120,12 +120,12 @@
 		// Combined Settings
 		if (results[0].status === 'fulfilled') {
 			const combined = results[0].value;
-			registrationRef.load(combined.registration);
-			authenticationRef.load(combined.authentication);
-			agentCertificateRef.load(combined.agent_certificates);
-			enrollmentTokenRef.loadAgent(combined.enrollment_tokens.agent);
-			enrollmentTokenRef.loadMqtt(combined.enrollment_tokens.mqtt);
-			enrollmentTokenRef.loadSshAgent(combined.enrollment_tokens.ssh_agent);
+			registrationRef?.load(combined.registration);
+			authenticationRef?.load(combined.authentication);
+			agentCertificateRef?.load(combined.agent_certificates);
+			enrollmentTokenRef?.loadAgent(combined.enrollment_tokens.agent);
+			enrollmentTokenRef?.loadMqtt(combined.enrollment_tokens.mqtt);
+			enrollmentTokenRef?.loadSshAgent(combined.enrollment_tokens.ssh_agent);
 		} else {
 			// This error affects multiple refs, so set specific errors for each
 			const msg = results[0].reason instanceof Error ? results[0].reason.message : 'Failed to load combined settings.';
@@ -137,14 +137,14 @@
 
 		// OIDC Providers
 		if (results[1].status === 'fulfilled') {
-			oidcProvidersRef.load(results[1].value);
+			oidcProvidersRef?.load(results[1].value);
 		} else {
 			oidcProvidersError = results[1].reason instanceof Error ? results[1].reason.message : 'Failed to load OIDC providers.';
 		}
 
 		// MQTT Clients
 		if (results[2].status === 'fulfilled') {
-			mqttClientsRef.load(results[2].value);
+			mqttClientsRef?.load(results[2].value);
 		} else {
 			mqttClientsError = results[2].reason instanceof Error ? results[2].reason.message : 'Failed to load MQTT clients.';
 		}
