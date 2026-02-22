@@ -20,9 +20,7 @@ use sea_orm::{
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
-use uptrakit_shared_db::entity::prelude::{
-    RevocationReason, Service, ServiceCertificate, ServiceHost,
-};
+use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
 use uptrakit_shared_db::entity::{service, service_certificate, service_host};
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
@@ -94,8 +92,7 @@ pub async fn list_services(
 
     let pagination = query.pagination().resolve();
 
-    let mut q = Service::find()
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+    let mut q = tenant_db.find::<service::Entity>()
         .filter(service::Column::DeactivatedAt.is_null());
 
     if let Some(ref type_filter) = query.r#type {
@@ -167,8 +164,7 @@ pub async fn get_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -217,8 +213,7 @@ pub async fn update_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -286,8 +281,7 @@ pub async fn approve_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -360,8 +354,7 @@ pub async fn reject_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -438,8 +431,7 @@ pub async fn deactivate_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match Service::find_by_id(service_id)
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
+    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -551,9 +543,8 @@ pub async fn merge_service(
     };
 
     // Find target service (must be approved, not deactivated, agent type)
-    let target = match Service::find_by_id(target_uuid)
+    let target = match tenant_db.find_by_id::<service::Entity, _>(target_uuid)
         .lock_exclusive()
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
@@ -585,9 +576,8 @@ pub async fn merge_service(
     }
 
     // Find source service (must be pending, not deactivated, agent type)
-    let source = match Service::find_by_id(source_uuid)
+    let source = match tenant_db.find_by_id::<service::Entity, _>(source_uuid)
         .lock_exclusive()
-        .filter(service::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
@@ -844,7 +834,7 @@ mod tests {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
-    use uptrakit_shared_db::entity::prelude::AuthMethod;
+    use uptrakit_shared_db::entity::prelude::{AuthMethod, Service};
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());

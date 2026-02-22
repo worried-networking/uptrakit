@@ -34,3 +34,5 @@ pub mod user_oidc_link;
 pub mod user_role;
 
 pub mod prelude;
+pub mod tenant_scoped;
+pub use tenant_scoped::TenantScoped;

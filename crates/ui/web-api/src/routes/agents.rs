@@ -8,13 +8,8 @@ use std::net::IpAddr;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::HostInfo;
-use uptrakit_shared_db::entity::prelude::{
-    RevocationReason, ServiceCertificate as AgentCertificate, ServiceHost as AgentHost,
-};
-use uptrakit_shared_db::entity::{
-    host, prelude::Host, service as agent, service_certificate as agent_certificate,
-    service_host as agent_host,
-};
+use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
+use uptrakit_shared_db::entity::{host, prelude::Host, service, service_certificate, service_host};
 use uptrakit_shared_macros::impl_report_conversion;
 
 pub use uptrakit_web_api_types::services::ServiceStatus;
@@ -45,7 +40,7 @@ impl_report_conversion!(sea_orm::DbErr => AgentRouteError::Database);
 
 /// Result of a successful enrollment.
 pub(crate) struct EnrollResult {
-    pub agent: agent::Model,
+    pub service: service::Model,
     pub enrollment_secret: String,
     pub status: ServiceStatus,
 }
@@ -137,15 +132,15 @@ pub(crate) async fn do_enroll(
 
     let now = OffsetDateTime::now_utc();
     let db_status = match status {
-        ServiceStatus::Pending => agent::ServiceStatus::Pending,
-        ServiceStatus::Approved => agent::ServiceStatus::Approved,
-        ServiceStatus::Rejected => agent::ServiceStatus::Rejected,
-        ServiceStatus::Deactivated => agent::ServiceStatus::Deactivated,
+        ServiceStatus::Pending => service::ServiceStatus::Pending,
+        ServiceStatus::Approved => service::ServiceStatus::Approved,
+        ServiceStatus::Rejected => service::ServiceStatus::Rejected,
+        ServiceStatus::Deactivated => service::ServiceStatus::Deactivated,
     };
-    let model = agent::ActiveModel {
+    let model = service::ActiveModel {
         id: Set(agent_id),
         tenant_id: Set(tenant_id),
-        service_type: Set(agent::ServiceType::Agent),
+        service_type: Set(service::ServiceType::Agent),
         hostname: Set(hostname.to_string()),
         friendly_name: Set(friendly_name.to_string()),
         ip_address: Set(ip_str.clone()),
@@ -162,7 +157,7 @@ pub(crate) async fn do_enroll(
     let inserted = model.insert(db).await.context_to::<AgentRouteError>()?;
 
     Ok(EnrollResult {
-        agent: inserted,
+        service: inserted,
         enrollment_secret,
         status,
     })
@@ -235,13 +230,13 @@ pub(crate) async fn find_or_create_host_and_link(
     };
 
     // Upsert agent_host link — insert if not exists
-    let existing_link = AgentHost::find_by_id((agent_id, host_id))
+    let existing_link = ServiceHost::find_by_id((agent_id, host_id))
         .one(db)
         .await
         .context_to::<AgentRouteError>()?;
 
     if existing_link.is_none() {
-        let link = agent_host::ActiveModel {
+        let link = service_host::ActiveModel {
             service_id: Set(agent_id),
             host_id: Set(host_id),
             linked_at: Set(now),
@@ -257,10 +252,10 @@ pub(crate) async fn do_sign_csr(
     cert_signer: &dyn crate::cert_signer::AgentCertSigner,
     settings: &crate::settings::Settings,
     db: &sea_orm::DatabaseConnection,
-    agent: agent::Model,
+    service: service::Model,
     csr_pem: &str,
 ) -> Result<SignedCertBundle, Report<AgentRouteError>> {
-    if agent.status != agent::ServiceStatus::Approved {
+    if service.status != service::ServiceStatus::Approved {
         bail!(AgentRouteError::Forbidden("Agent is not approved".into()));
     }
 
@@ -269,7 +264,7 @@ pub(crate) async fn do_sign_csr(
     let ca_fp = cert_signer.active_ca_fingerprint();
 
     let bundle = cert_signer
-        .sign_agent_csr(csr_pem, &agent.id, lifetime)
+        .sign_agent_csr(csr_pem, &service.id, lifetime)
         .await
         .map_err(|e| {
             tracing::error!("Failed to sign agent certificate: {e}");
@@ -277,7 +272,7 @@ pub(crate) async fn do_sign_csr(
         })?;
 
     // Record certificate in DB for revocation tracking
-    if let Err(e) = record_certificate(db, agent.id, &bundle.cert_pem, &ca_fp).await {
+    if let Err(e) = record_certificate(db, service.id, &bundle.cert_pem, &ca_fp).await {
         tracing::error!("Failed to record agent certificate: {:?}", e);
         bail!(AgentRouteError::Internal("Internal server error".into()));
     }
@@ -285,7 +280,7 @@ pub(crate) async fn do_sign_csr(
     // Invalidate enrollment secret
     let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
     let now = OffsetDateTime::now_utc();
-    let mut active: agent::ActiveModel = agent.into();
+    let mut active: service::ActiveModel = service.into();
     active.enrollment_secret_hash = Set(invalidated_hash);
     active.last_seen_at = Set(Some(now));
     active.updated_at = Set(now);
@@ -324,7 +319,7 @@ async fn record_certificate(
 ) -> Result<(), Report<CertRecordError>> {
     let (serial, not_before, not_after) = parse_cert_metadata(cert_pem)?;
 
-    let record = agent_certificate::ActiveModel {
+    let record = service_certificate::ActiveModel {
         ca_fingerprint: Set(ca_fingerprint.to_string()),
         serial_number: Set(serial),
         service_id: Set(agent_id),
@@ -348,18 +343,18 @@ pub(crate) async fn revoke_certificate(
     ca_fingerprint: &str,
     reason: RevocationReason,
 ) -> Result<(), Report<CertRecordError>> {
-    AgentCertificate::update_many()
+    ServiceCertificate::update_many()
         .col_expr(
-            agent_certificate::Column::RevokedAt,
+            service_certificate::Column::RevokedAt,
             Expr::value(Some(OffsetDateTime::now_utc())),
         )
         .col_expr(
-            agent_certificate::Column::RevocationReason,
+            service_certificate::Column::RevocationReason,
             Expr::value(Some(reason)),
         )
-        .filter(agent_certificate::Column::CaFingerprint.eq(ca_fingerprint))
-        .filter(agent_certificate::Column::SerialNumber.eq(serial_number))
-        .filter(agent_certificate::Column::RevokedAt.is_null())
+        .filter(service_certificate::Column::CaFingerprint.eq(ca_fingerprint))
+        .filter(service_certificate::Column::SerialNumber.eq(serial_number))
+        .filter(service_certificate::Column::RevokedAt.is_null())
         .exec(db)
         .await
         .context_to::<CertRecordError>()?;

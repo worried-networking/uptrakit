@@ -11,7 +11,7 @@ use uptrakit_internal_wire::{
     ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host_software_item, provider_config, service_host as agent_host,
+    available_version, host_software_item, provider_config, service_host,
     software_item, update_history,
 };
 
@@ -883,8 +883,8 @@ async fn deliver_pending_updates(
     out_seq: &mut OutgoingSeq,
 ) -> AgentWsResult<()> {
     // 1. Find host_ids linked to this agent
-    let host_links = agent_host::Entity::find()
-        .filter(agent_host::Column::ServiceId.eq(agent_id))
+    let host_links = service_host::Entity::find()
+        .filter(service_host::Column::ServiceId.eq(agent_id))
         .all(state.db())
         .await
         .context_to::<AgentWsError>()?;
@@ -1017,8 +1017,8 @@ async fn load_linked_host_ids(
     db: &sea_orm::DatabaseConnection,
     agent_id: uuid::Uuid,
 ) -> AgentWsResult<HashSet<uuid::Uuid>> {
-    let links = agent_host::Entity::find()
-        .filter(agent_host::Column::ServiceId.eq(agent_id))
+    let links = service_host::Entity::find()
+        .filter(service_host::Column::ServiceId.eq(agent_id))
         .all(db)
         .await
         .context_to::<AgentWsError>()?;

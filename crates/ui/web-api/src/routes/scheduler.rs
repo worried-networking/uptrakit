@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use http::StatusCode;
@@ -10,10 +8,10 @@ use uuid::Uuid;
 use uptrakit_shared_db::entity::scheduled_task;
 use uptrakit_web_api_types::validation::Validate;
 
-use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::scheduler::{
     ScheduledTaskResponse, TriggerScheduledTaskResponse, UpdateScheduledTaskRequest,
@@ -49,16 +47,15 @@ fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
     security(("bearer_token" = []))
 )]
 pub async fn list_scheduled_tasks(
-    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSoftware) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let tasks = match scheduled_task::Entity::find()
-        .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .all(state.db())
+    let tasks = match tenant_db.find::<scheduled_task::Entity>()
+        .all(tenant_db.db())
         .await
     {
         Ok(t) => t,
@@ -88,7 +85,7 @@ pub async fn list_scheduled_tasks(
     security(("bearer_token" = []))
 )]
 pub async fn get_scheduled_task(
-    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -101,9 +98,8 @@ pub async fn get_scheduled_task(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
     };
 
-    let task = match scheduled_task::Entity::find_by_id(task_id)
-        .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .one(state.db())
+    let task = match tenant_db.find_by_id::<scheduled_task::Entity, _>(task_id)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(t)) => t,
@@ -135,7 +131,7 @@ pub async fn get_scheduled_task(
     security(("bearer_token" = []))
 )]
 pub async fn update_scheduled_task(
-    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
     Json(req): Json<UpdateScheduledTaskRequest>,
@@ -153,9 +149,8 @@ pub async fn update_scheduled_task(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
     };
 
-    let task = match scheduled_task::Entity::find_by_id(task_id)
-        .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .one(state.db())
+    let task = match tenant_db.find_by_id::<scheduled_task::Entity, _>(task_id)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(t)) => t,
@@ -197,7 +192,7 @@ pub async fn update_scheduled_task(
 
     active.updated_at = ActiveValue::Set(now);
 
-    let updated = match active.update(state.db()).await {
+    let updated = match active.update(tenant_db.db()).await {
         Ok(m) => m,
         Err(e) => {
             tracing::error!(error = %e, "failed to update scheduled task");
@@ -224,7 +219,7 @@ pub async fn update_scheduled_task(
     security(("bearer_token" = []))
 )]
 pub async fn trigger_scheduled_task(
-    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
     Extension(user): Extension<AuthenticatedUser>,
     Path(id): Path<String>,
 ) -> Response {
@@ -238,9 +233,8 @@ pub async fn trigger_scheduled_task(
     };
 
     // Verify task exists for this tenant
-    match scheduled_task::Entity::find_by_id(task_id)
-        .filter(scheduled_task::Column::TenantId.eq(state.default_tenant_id))
-        .one(state.db())
+    match tenant_db.find_by_id::<scheduled_task::Entity, _>(task_id)
+        .one(tenant_db.db())
         .await
     {
         Ok(Some(_)) => {}
@@ -262,7 +256,7 @@ pub async fn trigger_scheduled_task(
             sea_orm::sea_query::Expr::value(now),
         )
         .filter(scheduled_task::Column::Id.eq(task_id))
-        .exec(state.db())
+        .exec(tenant_db.db())
         .await;
 
     match result {

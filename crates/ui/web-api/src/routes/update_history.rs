@@ -82,12 +82,10 @@ async fn load_output_lines(
 
 /// Collect all host IDs belonging to a tenant (for tenant scoping).
 async fn tenant_host_ids(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
+    tenant_db: &TenantDb,
 ) -> Result<Vec<uuid::Uuid>, sea_orm::DbErr> {
-    let hosts = Host::find()
-        .filter(host::Column::TenantId.eq(tenant_id))
-        .all(db)
+    let hosts = tenant_db.find::<host::Entity>()
+        .all(tenant_db.db())
         .await?;
     Ok(hosts.into_iter().map(|h| h.id).collect())
 }
@@ -144,7 +142,7 @@ pub async fn list_update_history(
     let pagination = query.pagination().resolve();
 
     // Tenant scoping: get all host IDs belonging to this tenant
-    let host_ids = match tenant_host_ids(tenant_db.db(), tenant_db.tenant_id).await {
+    let host_ids = match tenant_host_ids(&tenant_db).await {
         Ok(ids) => ids,
         Err(e) => {
             tracing::error!("Failed to load tenant hosts: {e}");
@@ -260,8 +258,7 @@ pub async fn get_update_history(
     };
 
     // Tenant scoping: verify the record's host belongs to this tenant
-    let host = match Host::find_by_id(record.host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+    let host = match tenant_db.find_by_id::<host::Entity, _>(record.host_id)
         .one(tenant_db.db())
         .await
     {

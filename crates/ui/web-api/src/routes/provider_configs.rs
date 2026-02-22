@@ -10,12 +10,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
-use uptrakit_shared_db::entity::prelude::*;
 use uptrakit_shared_db::entity::provider_config;
 use uptrakit_web_api_types::validation::Validate;
 
@@ -141,8 +139,7 @@ pub async fn list_provider_configs(
 
     let pagination = params.resolve();
 
-    let base_query = ProviderConfig::find()
-        .filter(provider_config::Column::TenantId.eq(tenant_db.tenant_id))
+    let base_query = tenant_db.find::<provider_config::Entity>()
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .order_by_asc(provider_config::Column::Name);
 
@@ -204,7 +201,7 @@ pub async fn get_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match find_active_config(tenant_db.db(), tenant_db.tenant_id, config_id).await {
+    match find_active_config(&tenant_db, config_id).await {
         Some(config) => match provider_config_response_from(config) {
             Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
             None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
@@ -241,7 +238,7 @@ pub async fn update_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let existing = match find_active_config(tenant_db.db(), tenant_db.tenant_id, config_id).await {
+    let existing = match find_active_config(&tenant_db, config_id).await {
         Some(c) => c,
         None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     };
@@ -324,7 +321,7 @@ pub async fn delete_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let config = match find_active_config(tenant_db.db(), tenant_db.tenant_id, config_id).await {
+    let config = match find_active_config(&tenant_db, config_id).await {
         Some(c) => c,
         None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
     };
@@ -346,14 +343,12 @@ pub async fn delete_provider_config(
 
 /// Find a non-deactivated provider config by ID, scoped to a tenant.
 async fn find_active_config(
-    db: &sea_orm::DatabaseConnection,
-    tenant_id: uuid::Uuid,
+    tenant_db: &TenantDb,
     id: uuid::Uuid,
 ) -> Option<provider_config::Model> {
-    ProviderConfig::find_by_id(id)
-        .filter(provider_config::Column::TenantId.eq(tenant_id))
+    tenant_db.find_by_id::<provider_config::Entity, _>(id)
         .filter(provider_config::Column::DeactivatedAt.is_null())
-        .one(db)
+        .one(tenant_db.db())
         .await
         .ok()
         .flatten()

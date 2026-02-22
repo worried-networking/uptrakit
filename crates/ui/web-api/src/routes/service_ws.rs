@@ -932,7 +932,7 @@ async fn enroll_agent(
 
     match result {
         Ok(enroll_result) => {
-            let service_id = enroll_result.agent.id;
+            let service_id = enroll_result.service.id;
             let wire_status = match enroll_result.status {
                 ServiceStatus::Approved => uptrakit_internal_wire::EnrollmentStatus::Approved,
                 _ => uptrakit_internal_wire::EnrollmentStatus::Pending,

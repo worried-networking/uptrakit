@@ -42,12 +42,17 @@ pub async fn load_mqtt_clients(
         .context_to()
 }
 
-/// Load a specific MQTT client by its ID.
+/// Load a specific MQTT client by its ID, scoped to the given tenant.
 pub async fn load_mqtt_client_by_id(
     db: &DatabaseConnection,
     id: Uuid,
+    tenant_id: Uuid,
 ) -> Result<Option<mqtt_client::Model>> {
-    MqttClient::find_by_id(id).one(db).await.context_to()
+    MqttClient::find_by_id(id)
+        .filter(mqtt_client::Column::TenantId.eq(tenant_id))
+        .one(db)
+        .await
+        .context_to()
 }
 
 /// Count the number of MQTT clients for a given tenant.

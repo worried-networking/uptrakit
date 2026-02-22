@@ -14,11 +14,7 @@ use sea_orm::{
     QuerySelect, Set,
 };
 use time::OffsetDateTime;
-use uptrakit_shared_db::entity::{
-    host,
-    prelude::{Host, Service as Agent, ServiceHost as AgentHost},
-    service as agent, service_host as agent_host,
-};
+use uptrakit_shared_db::entity::{host, prelude::ServiceHost, service, service_host};
 
 pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
@@ -54,8 +50,7 @@ pub async fn list_hosts(
 
     let pagination = params.resolve();
 
-    let base_query = Host::find()
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+    let base_query = tenant_db.find::<host::Entity>()
         .filter(host::Column::DeactivatedAt.is_null())
         .order_by_desc(host::Column::CreatedAt);
 
@@ -82,7 +77,7 @@ pub async fn list_hosts(
 
     let mut items = Vec::with_capacity(hosts.len());
     for h in hosts {
-        let agents = load_host_agents(tenant_db.db(), h.id, tenant_db.tenant_id).await;
+        let agents = load_host_agents(&tenant_db, h.id).await;
         items.push(host_to_response(h, agents));
     }
 
@@ -123,8 +118,7 @@ pub async fn get_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
-    let host_model = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+    let host_model = match tenant_db.find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -137,7 +131,7 @@ pub async fn get_host(
         }
     };
 
-    let agents = load_host_agents(tenant_db.db(), host_id, tenant_db.tenant_id).await;
+    let agents = load_host_agents(&tenant_db, host_id).await;
     (StatusCode::OK, Json(host_to_response(host_model, agents))).into_response()
 }
 
@@ -173,8 +167,7 @@ pub async fn update_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
-    let host_model = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+    let host_model = match tenant_db.find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -201,7 +194,7 @@ pub async fn update_host(
         }
     };
 
-    let agents = load_host_agents(tenant_db.db(), host_id, tenant_db.tenant_id).await;
+    let agents = load_host_agents(&tenant_db, host_id).await;
     (StatusCode::OK, Json(host_to_response(updated, agents))).into_response()
 }
 
@@ -235,8 +228,7 @@ pub async fn deactivate_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
-    let host_model = match Host::find_by_id(host_id)
-        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+    let host_model = match tenant_db.find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -288,13 +280,12 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
 }
 
 async fn load_host_agents(
-    db: &sea_orm::DatabaseConnection,
+    tenant_db: &TenantDb,
     host_id: uuid::Uuid,
-    tenant_id: uuid::Uuid,
 ) -> Vec<HostAgentSummary> {
-    let links = match AgentHost::find()
-        .filter(agent_host::Column::HostId.eq(host_id))
-        .all(db)
+    let links = match ServiceHost::find()
+        .filter(service_host::Column::HostId.eq(host_id))
+        .all(tenant_db.db())
         .await
     {
         Ok(links) => links,
@@ -309,11 +300,10 @@ async fn load_host_agents(
         return Vec::new();
     }
 
-    let agents = match Agent::find()
-        .filter(agent::Column::Id.is_in(service_ids))
-        .filter(agent::Column::TenantId.eq(tenant_id))
-        .filter(agent::Column::DeactivatedAt.is_null())
-        .all(db)
+    let agents = match tenant_db.find::<service::Entity>()
+        .filter(service::Column::Id.is_in(service_ids))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
         .await
     {
         Ok(agents) => agents,
@@ -325,14 +315,14 @@ async fn load_host_agents(
 
     agents
         .into_iter()
-        .map(|agent| HostAgentSummary {
-            id: agent.id,
-            friendly_name: agent.friendly_name,
-            status: match agent.status {
-                agent::ServiceStatus::Pending => ServiceStatus::Pending,
-                agent::ServiceStatus::Approved => ServiceStatus::Approved,
-                agent::ServiceStatus::Rejected => ServiceStatus::Rejected,
-                agent::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
+        .map(|svc| HostAgentSummary {
+            id: svc.id,
+            friendly_name: svc.friendly_name,
+            status: match svc.status {
+                service::ServiceStatus::Pending => ServiceStatus::Pending,
+                service::ServiceStatus::Approved => ServiceStatus::Approved,
+                service::ServiceStatus::Rejected => ServiceStatus::Rejected,
+                service::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
             },
         })
         .collect()
@@ -445,7 +435,8 @@ mod tests {
         };
         link_b.insert(&db).await.unwrap();
 
-        let agents = load_host_agents(&db, host_id, tenant_a).await;
+        let tenant_db = TenantDb::new_for_test(db.clone(), tenant_a);
+        let agents = load_host_agents(&tenant_db, host_id).await;
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].friendly_name, "Agent A");
     }

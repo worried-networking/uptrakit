@@ -3,8 +3,11 @@ use crate::middleware::tenant_context::TenantContext;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
-use sea_orm::DatabaseConnection;
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, DeleteMany, PrimaryKeyTrait, QueryFilter, Select, UpdateMany,
+};
 use std::sync::Arc;
+use uptrakit_shared_db::entity::TenantScoped;
 use uuid::Uuid;
 
 /// Combined database connection + tenant identity extractor.
@@ -21,6 +24,30 @@ impl TenantDb {
     /// Returns a reference to the underlying database connection.
     pub fn db(&self) -> &DatabaseConnection {
         &self.db
+    }
+
+    /// Return a `SELECT` query pre-filtered to the current tenant.
+    pub fn find<E: TenantScoped>(&self) -> Select<E> {
+        E::find().filter(E::tenant_id_column().eq(self.tenant_id))
+    }
+
+    /// Return a `SELECT … WHERE id = ? AND tenant_id = ?` query.
+    pub fn find_by_id<E, V>(&self, id: V) -> Select<E>
+    where
+        E: TenantScoped,
+        V: Into<<E::PrimaryKey as PrimaryKeyTrait>::ValueType>,
+    {
+        E::find_by_id(id).filter(E::tenant_id_column().eq(self.tenant_id))
+    }
+
+    /// Return an `UPDATE` query pre-filtered to the current tenant.
+    pub fn update_many<E: TenantScoped>(&self) -> UpdateMany<E> {
+        E::update_many().filter(E::tenant_id_column().eq(self.tenant_id))
+    }
+
+    /// Return a `DELETE` query pre-filtered to the current tenant.
+    pub fn delete_many<E: TenantScoped>(&self) -> DeleteMany<E> {
+        E::delete_many().filter(E::tenant_id_column().eq(self.tenant_id))
     }
 
     /// Construct a `TenantDb` directly from its components, for use in unit tests

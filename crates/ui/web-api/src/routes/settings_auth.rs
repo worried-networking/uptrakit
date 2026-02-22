@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
+use crate::tenant_db::TenantDb;
 use axum::{
     Json,
     extract::State,
@@ -12,9 +13,8 @@ use std::sync::Arc;
 use uptrakit_shared_db::entity::prelude::AuthMethod;
 #[cfg(feature = "oidc")]
 use {
-    sea_orm::{ColumnTrait, EntityTrait, QueryFilter},
+    sea_orm::{ColumnTrait, QueryFilter},
     uptrakit_shared_db::entity::oidc_provider,
-    uptrakit_shared_db::entity::prelude::OidcProvider,
 };
 
 pub use uptrakit_web_api_types::settings_auth::{
@@ -63,6 +63,7 @@ pub async fn get_authentication_settings(
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    tenant_db: TenantDb,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
@@ -82,11 +83,10 @@ pub async fn update_authentication_settings(
             // Safety: at least one auth method must remain
             #[cfg(feature = "oidc")]
             {
-                let active_providers = OidcProvider::find()
-                    .filter(oidc_provider::Column::TenantId.eq(state.default_tenant_id))
+                let active_providers = tenant_db.find::<oidc_provider::Entity>()
                     .filter(oidc_provider::Column::IsActive.eq(true))
                     .filter(oidc_provider::Column::DeletedAt.is_null())
-                    .all(state.db())
+                    .all(tenant_db.db())
                     .await
                     .unwrap_or_default();
 

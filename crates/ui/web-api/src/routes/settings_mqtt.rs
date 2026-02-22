@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::middleware::tenant_context::TenantContext;
+use crate::tenant_db::TenantDb;
 use crate::mqtt_client_store;
 use crate::mqtt_lease_coordinator::{LeaseOutcome, MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use axum::{
@@ -90,14 +90,13 @@ fn resolve_connection_status(
 pub async fn list_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let tenant_id = tenant.tenant_id;
-    match mqtt_client_store::load_mqtt_clients(state.db(), tenant_id).await {
+    match mqtt_client_store::load_mqtt_clients(tenant_db.db(), tenant_db.tenant_id).await {
         Ok(models) => {
             let mqtt_client_ids: Vec<uuid::Uuid> = models.iter().map(|m| m.id).collect();
             let leases: Vec<mqtt_lease::Model> = if mqtt_client_ids.is_empty() {
@@ -159,14 +158,14 @@ pub async fn list_mqtt_settings(
 pub async fn create_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Json(req): Json<CreateMqttClientRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let tenant_id = tenant.tenant_id;
+    let tenant_id = tenant_db.tenant_id;
     let max_clients = state.settings.mqtt_max_clients_per_tenant();
 
     // Resolve connection parameters from URL or individual fields
@@ -204,7 +203,7 @@ pub async fn create_mqtt_settings(
     }
 
     match mqtt_client_store::create_mqtt_client(mqtt_client_store::CreateMqttClientParams {
-        db: state.db(),
+        db: tenant_db.db(),
         tenant_id,
         max_clients,
         enabled,
@@ -382,7 +381,7 @@ pub async fn update_mqtt_limit(
 pub async fn get_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ViewSettings) {
@@ -394,8 +393,8 @@ pub async fn get_mqtt_settings(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
-    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id).await {
-        Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {
+    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id).await {
+        Ok(Some(model)) => {
             let heartbeat_at = match mqtt_lease::Entity::find()
                 .filter(mqtt_lease::Column::MqttClientId.eq(model.id))
                 .one(state.db())
@@ -413,7 +412,6 @@ pub async fn get_mqtt_settings(
             let status = resolve_connection_status(&model, heartbeat_at);
             (StatusCode::OK, Json(model_to_response(&model, status))).into_response()
         }
-        Ok(Some(_)) => error_response(StatusCode::NOT_FOUND, "Not found"),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
@@ -443,7 +441,7 @@ pub async fn get_mqtt_settings(
 pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Path(id): Path<String>,
     Json(req): Json<UpdateMqttClientRequest>,
 ) -> Response {
@@ -456,10 +454,10 @@ pub async fn update_mqtt_settings(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
-    let existing = match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id).await
+    let existing = match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id).await
     {
-        Ok(Some(model)) if model.tenant_id == tenant.tenant_id => model,
-        Ok(Some(_)) | Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
+        Ok(Some(model)) => model,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
@@ -613,7 +611,7 @@ pub async fn update_mqtt_settings(
 pub async fn delete_mqtt_settings(
     State(state): State<Arc<AppState>>,
     Extension(user): Extension<AuthenticatedUser>,
-    tenant: TenantContext,
+    tenant_db: TenantDb,
     Path(id): Path<String>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
@@ -626,9 +624,9 @@ pub async fn delete_mqtt_settings(
     };
 
     // Verify tenant ownership
-    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id).await {
-        Ok(Some(model)) if model.tenant_id == tenant.tenant_id => {}
-        Ok(Some(_)) | Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
+    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {
             tracing::error!("Failed to load MQTT client: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
