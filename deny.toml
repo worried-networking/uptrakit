@@ -39,6 +39,11 @@ targets = [
 # so it should be used with care. The identifiers are [Package ID Specifications]
 # (https://doc.rust-lang.org/cargo/reference/pkgid-spec.html)
 #exclude = []
+exclude = [
+    # stringmetrics has no SPDX `license` field (only license-file) and triggers a non-actionable warning.
+    # It is used only through `httpmock` in CLI test support (`uptrakit-openapi-client/mock`).
+    "stringmetrics@2.2.2",
+]
 # If true, metadata will be collected with `--all-features`. Note that this can't
 # be toggled off if true, if you want to conditionally enable `--all-features` it
 # is recommended to pass `--all-features` on the cmd line instead
