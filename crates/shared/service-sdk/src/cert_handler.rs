@@ -382,9 +382,8 @@ mod tests {
 
     // ── create_renewal_sleep / update_renewal_schedule ──────────────────
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn create_renewal_sleep_initializes_to_far_future() {
-        tokio::time::pause();
         let mut sleep = create_renewal_sleep();
         // Advance time by 1 hour — should still be pending (FAR_FUTURE is 30 days).
         tokio::time::advance(Duration::from_secs(3600)).await;
@@ -395,9 +394,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn update_renewal_schedule_resets_to_zero_when_expired() {
-        tokio::time::pause();
         let mut sleep = create_renewal_sleep();
         // Certificate already expired: delay should be zero, so sleep resolves immediately.
         let not_after = now_millis() - 1000;
@@ -410,9 +408,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn update_renewal_schedule_far_future_when_no_cert() {
-        tokio::time::pause();
         let mut sleep = create_renewal_sleep();
         update_renewal_schedule(&mut sleep, None, 168);
 

@@ -41,24 +41,39 @@ tests and are kept as-is.
 
 ### Tests must never sleep on real wall-clock time
 
-Use `tokio::time::pause()` with `tokio::time::advance()` for deterministic,
-fast time-dependent tests. Paused time makes `tokio::time::sleep` and
-`tokio::time::timeout` resolve via virtual time advancement instead of
-wall-clock waiting.
+Use `#[tokio::test(start_paused = true)]` with `tokio::time::advance()` for
+deterministic, fast time-dependent tests. Starting with paused time makes
+`tokio::time::sleep` and `tokio::time::timeout` resolve via virtual time
+advancement instead of wall-clock waiting, and eliminates the small window
+between runtime startup and an explicit `tokio::time::pause()` call.
+
+```rust
+#[tokio::test(start_paused = true)]
+async fn renewal_sleep_does_not_fire_after_one_hour() {
+    let mut sleep = create_renewal_sleep(); // 30-day far-future timer
+    tokio::time::advance(Duration::from_secs(3600)).await;
+    assert!(tokio::time::timeout(Duration::ZERO, &mut sleep).await.is_err());
+}
+```
+
+Do **not** call `tokio::time::pause()` explicitly inside the test body —
+use the `start_paused = true` attribute instead so the runtime starts in
+the paused state.
 
 **Exceptions:**
 
 - Docker integration tests (`#[ignore]`) that wait for real external
   processes (e.g., reverse proxy containers) use real delays out of
   necessity.
-- Tests that use SQLx database connections (via SeaORM) must call
-  `tokio::time::pause()` **after** establishing the pool. SQLx's
-  connection pool uses internal tokio timers for acquire and idle
-  timeouts; pausing time before `Database::connect()` causes
-  `PoolTimedOut` because auto-advance expires the timers instantly.
-  If the test loop itself performs DB queries (e.g., a scheduler poll
-  loop), `tokio::time::pause()` cannot be used at all — keep real-time
-  delays minimal (under 200 ms) instead.
+- Tests that use SQLx database connections (via SeaORM) must **not** use
+  `start_paused = true` (or any explicit `tokio::time::pause()` call).
+  SQLx's connection pool uses internal Tokio timers for acquire and idle
+  timeouts. When time is paused, the Tokio runtime auto-advances to the
+  next pending timer, which can fire those pool timers prematurely and
+  produce a spurious `ConnectionAcquire(Timeout)` error — especially
+  under stress testing (nextest `--stress-count`). Keep DB-backed tests
+  on real time and use only short real-time delays (under 200 ms) where
+  needed.
 
 ## Testing Expectations -- Overview
 

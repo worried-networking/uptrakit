@@ -213,9 +213,13 @@ These are non-negotiable design constraints. Do not violate them.
 1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
    like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
    table in [Testing Expectations](docs/development/testing.md).
-1. **Tests must use `tokio::time::pause()` -- never real sleeps.** All time-dependent tests must use virtual time via
-   `tokio::time::pause()` and `tokio::time::advance()` for deterministic, fast execution. The only exception is
-   Docker-based integration tests (`#[ignore]`) that wait for real external processes.
+1. **Tests must use `start_paused = true` -- never real sleeps.** All time-dependent tests must use virtual time via
+   `#[tokio::test(start_paused = true)]` and `tokio::time::advance()` for deterministic, fast execution. Do not call
+   `tokio::time::pause()` explicitly inside the test body; the attribute starts the runtime paused from the very
+   beginning. **Exception 1:** Docker-based integration tests (`#[ignore]`) that wait for real external processes.
+   **Exception 2:** Tests that use SQLx/SeaORM database connections must NOT use `start_paused = true` — Tokio's
+   auto-advance fires pool-internal timers prematurely, causing spurious `ConnectionAcquire(Timeout)` failures under
+   stress (nextest `--stress-count`). See [Testing](docs/development/testing.md).
 
 ### Service ping interval
 

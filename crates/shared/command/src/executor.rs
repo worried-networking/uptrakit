@@ -320,9 +320,8 @@ mod tests {
         assert_eq!(spec.timeout, Some(Duration::from_secs(5)));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn execute_quiet_timeout_fires() {
-        tokio::time::pause();
         let spec = CommandSpec::exec("sleep", ["100".to_string()])
             .with_timeout(Duration::from_secs(5));
         let executor = LocalCommandExecutor;
@@ -336,9 +335,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn execute_timeout_fires() {
-        tokio::time::pause();
         let spec = CommandSpec::exec("sleep", ["100".to_string()])
             .with_timeout(Duration::from_secs(5));
         let executor = LocalCommandExecutor;
