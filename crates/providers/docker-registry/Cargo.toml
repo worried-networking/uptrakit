@@ -9,6 +9,8 @@ publish = false
 
 [dependencies]
 uptrakit-provider-core = { path = "../core" }
+bollard      = { workspace = true }
+futures-util = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -21,4 +23,4 @@ semver = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "process"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -216,7 +216,7 @@ controller-side only; agent-side container discovery is not implemented.
 `tag_patterns` | `Vec<String>` | No | `[]` | Regex patterns to filter tags (semver mode, OR logic). | | `tag_strip_prefix` | String | No | `"v"` |
 Prefix to strip before semver parsing. | | `include_prereleases` | bool | No | `false` | Include pre-release versions. | | `tracked_tag` |
 `Option<String>` | No | `"latest"` | Tag to track (digest mode). | | `page_size` | u32 | No | `1000` | Max tags per API request. | | `restart_command`
-| `Option<String>` | No | `null` | Custom shell command to run after `docker pull` (e.g. `docker compose up -d`). Supports `{image}`, `{tag}`,
+| `Option<String>` | No | `null` | Custom shell command to run after pulling the image (e.g. `docker compose up -d`). Supports `{image}`, `{tag}`,
 `{version}` placeholders (shell-escaped). |
 
 **DockerAuth** (tagged enum with `#[serde(tag = "type")]`):
@@ -231,6 +231,33 @@ Prefix to strip before semver parsing. | | `include_prereleases` | bool | No | `
   `UpstreamRelease` (no `release_notes`, no `published_at`, no `assets`).
 - **DigestTracking**: Gets the manifest digest for `tracked_tag` (default `"latest"`). Returns a single `UpstreamRelease` with the digest as the
   version string. Useful for detecting when a mutable tag has been updated.
+
+**Image pulling via bollard (`execute_update`):**
+
+The `execute_update` step pulls the image directly through the Docker daemon API using the
+[bollard](https://github.com/fussybeaver/bollard) crate — no `docker` CLI binary is required. The daemon
+is reached via its Unix socket (or Windows named pipe), using `bollard::Docker::connect_with_defaults()`
+which respects the `DOCKER_HOST` environment variable and falls back to the platform default.
+
+Progress events from the daemon are streamed to the caller via `output_tx`. Errors surfaced in the daemon
+response (the `error_detail` field of `CreateImageInfo`) are converted to `DockerRegistryError::PullFailed`
+and fail the update immediately.
+
+The internal `DockerPuller` trait abstracts image pulling so that tests can inject a `MockDockerPuller`
+without a live Docker daemon:
+
+```rust
+// Production: BollardDockerPuller (created by DockerRegistryProvider::new)
+// Tests:      MockDockerPuller (injected via DockerRegistryProvider::new_for_test)
+```
+
+Auth credentials from `DockerAuth` are forwarded to bollard's `DockerCredentials`:
+
+- `basic` auth → `DockerCredentials { username, password, serveraddress }` (serveraddress inferred from
+  the image reference).
+- `bearer` auth → `DockerCredentials { registrytoken }`.
+
+After a successful pull, `restart_command` (if configured) is executed via the injected `CommandExecutor`.
 
 ### Proxmox Helper Scripts provider (`uptrakit-provider-proxmox-helper-scripts`)
 

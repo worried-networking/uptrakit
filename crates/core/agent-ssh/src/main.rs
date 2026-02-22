@@ -6,6 +6,7 @@ mod error;
 mod host_info;
 mod host_ops;
 mod ssh_config;
+mod ssh_executor;
 mod ssh_key;
 mod ssh_target;
 mod ssh_transport;

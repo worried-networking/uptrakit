@@ -6118,6 +6118,8 @@ name = "uptrakit-provider-docker-registry"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "bollard",
+ "futures-util",
  "regex",
  "reqwest 0.13.2",
  "rootcause",

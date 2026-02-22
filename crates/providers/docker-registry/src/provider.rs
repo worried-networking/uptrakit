@@ -12,6 +12,7 @@ use uptrakit_provider_core::{
 };
 
 use crate::config::{DockerRegistryConfig, TrackingMode};
+use crate::docker_puller::{BollardDockerPuller, DockerPuller};
 use crate::error::{DockerRegistryError, Result};
 use crate::registry::RegistryClient;
 use crate::tag::filter_and_sort_tags;
@@ -22,21 +23,34 @@ use crate::tag::filter_and_sort_tags;
 /// Supports two tracking modes:
 /// - **SemverTags**: filter tags by pattern, parse as semver, sort descending
 /// - **DigestTracking**: track digest changes of a specific tag
+///
+/// Image pulls communicate with the Docker daemon directly via bollard,
+/// without requiring the `docker` CLI binary.
 pub struct DockerRegistryProvider {
     config: DockerRegistryConfig,
     registry_client: RegistryClient,
     tag_filters: Vec<Regex>,
+    docker_puller: Arc<dyn DockerPuller>,
     executor: Arc<dyn CommandExecutor>,
 }
 
 impl DockerRegistryProvider {
     /// Create a new `DockerRegistryProvider` from the given configuration.
     ///
-    /// Validates the configuration and pre-compiles tag filter regexes.
+    /// Validates the configuration, pre-compiles tag filter regexes, and
+    /// connects the bollard Docker client to the local daemon socket.
     pub fn new(config: DockerRegistryConfig, executor: Arc<dyn CommandExecutor>) -> Result<Self> {
-        config
-            .validate()
-            .map_err(|e| report!(DockerRegistryError::Configuration(e.to_string())))?;
+        let docker_puller = Arc::new(BollardDockerPuller::new()?);
+        Self::init(config, executor, docker_puller)
+    }
+
+    /// Internal constructor that accepts any [`DockerPuller`] implementation.
+    fn init(
+        config: DockerRegistryConfig,
+        executor: Arc<dyn CommandExecutor>,
+        docker_puller: Arc<dyn DockerPuller>,
+    ) -> Result<Self> {
+        config.validate()?;
 
         let registry_client = RegistryClient::new(&config)?;
 
@@ -44,10 +58,8 @@ impl DockerRegistryProvider {
             .tag_patterns
             .iter()
             .map(|p| {
-                Regex::new(p).map_err(|e| {
-                    report!(DockerRegistryError::InvalidPattern(format!(
-                        "invalid regex '{p}': {e}"
-                    )))
+                Regex::new(p).context_transform(|e| {
+                    DockerRegistryError::InvalidPattern(format!("invalid regex '{p}': {e}"))
                 })
             })
             .collect::<Result<_>>()?;
@@ -56,8 +68,19 @@ impl DockerRegistryProvider {
             config,
             registry_client,
             tag_filters,
+            docker_puller,
             executor,
         })
+    }
+
+    /// Test constructor that injects a custom [`DockerPuller`].
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        config: DockerRegistryConfig,
+        executor: Arc<dyn CommandExecutor>,
+        docker_puller: Arc<dyn DockerPuller>,
+    ) -> Result<Self> {
+        Self::init(config, executor, docker_puller)
     }
 
     /// Convert filtered tags to upstream releases (semver mode).
@@ -100,11 +123,7 @@ impl Provider for DockerRegistryProvider {
     ) -> uptrakit_provider_core::Result<Vec<UpstreamRelease>> {
         match self.config.tracking_mode {
             TrackingMode::SemverTags => {
-                let tags = self.registry_client.list_tags().await.map_err(|e| {
-                    report!(ProviderError::Configuration(format!(
-                        "failed to list tags: {e}"
-                    )))
-                })?;
+                let tags = self.registry_client.list_tags().await.context_to()?;
 
                 let releases = self.tags_to_releases(tags);
                 tracing::debug!(
@@ -120,11 +139,7 @@ impl Provider for DockerRegistryProvider {
                     .registry_client
                     .get_manifest_digest(tag)
                     .await
-                    .map_err(|e| {
-                        report!(ProviderError::Configuration(format!(
-                            "failed to get manifest digest: {e}"
-                        )))
-                    })?;
+                    .context_to()?;
 
                 let release_url = self.config.image_web_url(tag);
                 let release = UpstreamRelease {
@@ -175,18 +190,13 @@ impl Provider for DockerRegistryProvider {
         .await;
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
-        // Pull the new image using direct exec (no shell) to prevent injection
-        // via crafted image names or tag values.
-        let image_ref = format!("{image}:{tag}");
-        let cmd_output = self
-            .executor
-            .execute(
-                &CommandSpec::exec("docker", ["pull".to_string(), image_ref]),
-                output_tx,
-            )
+        // Pull the image via bollard (direct daemon API — no `docker` CLI required).
+        let pull_output = self
+            .docker_puller
+            .pull_image(image, tag, self.config.auth.as_ref(), output_tx)
             .await
-            .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
-        output.push_str(&cmd_output.output);
+            .context_transform(|e| ProviderError::InstallFailed(e.to_string()))?;
+        output.push_str(&pull_output);
 
         if let Some(ref cmd_str) = self.config.restart_command {
             let cmd = cmd_str
@@ -201,18 +211,12 @@ impl Provider for DockerRegistryProvider {
             )
             .await;
 
-            match self
+            let cmd_output = self
                 .executor
                 .execute(&CommandSpec::shell(&cmd), output_tx)
                 .await
-            {
-                Ok(cmd_output) => {
-                    output.push_str(&cmd_output.output);
-                }
-                Err(e) => {
-                    bail!(ProviderError::InstallFailed(e.to_string()));
-                }
-            }
+                .context_transform(|e| ProviderError::InstallFailed(e.to_string()))?;
+            output.push_str(&cmd_output.output);
         }
 
         Ok(output)
@@ -223,6 +227,7 @@ impl Provider for DockerRegistryProvider {
 mod tests {
     use super::*;
     use crate::config::TrackingMode;
+    use crate::docker_puller::MockDockerPuller;
     use uptrakit_provider_core::LocalCommandExecutor;
     use uptrakit_provider_core::mpsc;
 
@@ -245,10 +250,23 @@ mod tests {
         }
     }
 
+    fn test_provider() -> DockerRegistryProvider {
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
+        DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
+            .expect("valid config")
+    }
+
     #[test]
     fn provider_creation_succeeds() {
         let config = test_config();
-        assert!(DockerRegistryProvider::new(config, test_executor()).is_ok());
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
+        assert!(DockerRegistryProvider::new_for_test(config, test_executor(), puller).is_ok());
     }
 
     #[test]
@@ -265,7 +283,11 @@ mod tests {
             page_size: 100,
             restart_command: None,
         };
-        assert!(DockerRegistryProvider::new(config, test_executor()).is_err());
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
+        assert!(DockerRegistryProvider::new_for_test(config, test_executor(), puller).is_err());
     }
 
     #[test]
@@ -282,13 +304,16 @@ mod tests {
             page_size: 100,
             restart_command: None,
         };
-        assert!(DockerRegistryProvider::new(config, test_executor()).is_err());
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
+        assert!(DockerRegistryProvider::new_for_test(config, test_executor(), puller).is_err());
     }
 
     #[test]
     fn tags_to_releases_basic() {
-        let config = test_config();
-        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
+        let provider = test_provider();
         let tags = vec![
             "1.25.0".to_string(),
             "1.24.0".to_string(),
@@ -305,9 +330,14 @@ mod tests {
 
     #[test]
     fn tags_to_releases_with_prefix() {
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
         let mut config = test_config();
         config.tag_strip_prefix = "v".to_string();
-        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
+        let provider =
+            DockerRegistryProvider::new_for_test(config, test_executor(), puller).expect("valid");
         let tags = vec!["v1.0.0".to_string(), "v2.0.0".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert_eq!(releases.len(), 2);
@@ -317,8 +347,7 @@ mod tests {
 
     #[test]
     fn tags_to_releases_no_semver_tags() {
-        let config = test_config();
-        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
+        let provider = test_provider();
         let tags = vec!["latest".to_string(), "alpine".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert!(releases.is_empty());
@@ -326,8 +355,7 @@ mod tests {
 
     #[test]
     fn tags_to_releases_release_url() {
-        let config = test_config();
-        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
+        let provider = test_provider();
         let tags = vec!["1.25.0".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert_eq!(releases.len(), 1);
@@ -337,9 +365,14 @@ mod tests {
 
     #[test]
     fn tags_to_releases_prerelease_detection() {
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
         let mut config = test_config();
         config.include_prereleases = true;
-        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
+        let provider =
+            DockerRegistryProvider::new_for_test(config, test_executor(), puller).expect("valid");
         let tags = vec!["1.0.0".to_string(), "2.0.0-beta.1".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert_eq!(releases.len(), 2);
@@ -349,8 +382,7 @@ mod tests {
 
     #[test]
     fn tags_to_releases_no_release_notes_or_published_at() {
-        let config = test_config();
-        let provider = DockerRegistryProvider::new(config, test_executor()).expect("valid config");
+        let provider = test_provider();
         let tags = vec!["1.0.0".to_string()];
         let releases = provider.tags_to_releases(tags);
         assert!(releases[0].release_notes.is_none());
@@ -360,28 +392,75 @@ mod tests {
 
     #[tokio::test]
     async fn detect_installed_version_returns_none() {
-        let provider =
-            DockerRegistryProvider::new(test_config(), test_executor()).expect("valid config");
+        let provider = test_provider();
         let result = provider.detect_installed_version("example").await.unwrap();
         assert!(result.is_none());
     }
 
     #[tokio::test]
-    async fn execute_update_no_restart_command_succeeds_if_docker_available() {
-        let docker_check = tokio::process::Command::new("docker")
-            .arg("--version")
-            .output()
-            .await;
-        if docker_check.is_err() {
-            return;
-        }
-
+    async fn execute_update_calls_docker_puller() {
+        let pull_output = "mock pull output".to_string();
+        let puller = Arc::new(MockDockerPuller {
+            output: pull_output.clone(),
+            should_fail: false,
+        });
         let provider =
-            DockerRegistryProvider::new(test_config(), test_executor()).expect("valid config");
+            DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
+                .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let _result = provider
-            .execute_update("hello-world", "latest", None, &tx)
+        let result = provider
+            .execute_update("nginx", "1.25.0", None, &tx)
+            .await
+            .expect("execute_update should succeed");
+
+        // Accumulated output contains the status prefix and the mock pull output.
+        assert!(result.contains("Pulling Docker image nginx:1.25.0"));
+        assert!(result.contains(&pull_output));
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_pull_failure_propagates_error() {
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: true,
+        });
+        let provider =
+            DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
+                .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = provider
+            .execute_update("nginx", "1.25.0", None, &tx)
             .await;
+
+        assert!(result.is_err(), "pull failure should be propagated");
+
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_update_with_restart_command() {
+        let puller = Arc::new(MockDockerPuller {
+            output: String::new(),
+            should_fail: false,
+        });
+        let mut config = test_config();
+        config.restart_command = Some("echo restarting {image}:{tag}".to_string());
+        let provider =
+            DockerRegistryProvider::new_for_test(config, test_executor(), puller)
+                .expect("valid config");
+        let (tx, mut rx) = mpsc::channel(100);
+        let result = provider
+            .execute_update("nginx", "1.25.0", None, &tx)
+            .await
+            .expect("execute_update with restart command should succeed");
+
+        assert!(result.contains("Pulling Docker image nginx:1.25.0"));
+        assert!(result.contains("restarting"));
+
         rx.close();
         while rx.recv().await.is_some() {}
     }

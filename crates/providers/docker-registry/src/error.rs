@@ -35,6 +35,12 @@ pub enum DockerRegistryError {
 
     #[error("unsupported registry: {0}")]
     UnsupportedRegistry(String),
+
+    #[error("docker daemon connection failed: {0}")]
+    DaemonConnection(String),
+
+    #[error("docker pull failed: {0}")]
+    PullFailed(String),
 }
 
 /// Result type alias for Docker Registry provider operations.
@@ -43,6 +49,7 @@ pub type Result<T> = std::result::Result<T, Report<DockerRegistryError>>;
 impl_report_conversion!(reqwest::Error => DockerRegistryError, |e| DockerRegistryError::Request(e.to_string()));
 impl_report_conversion!(ProviderError => DockerRegistryError, |e| DockerRegistryError::Configuration(e.to_string()));
 impl_report_conversion!(DockerRegistryError => ProviderError, |e| ProviderError::ProviderInternal(e.to_string()));
+impl_report_conversion!(bollard::errors::Error => DockerRegistryError, |e| DockerRegistryError::DaemonConnection(e.to_string()));
 
 #[cfg(test)]
 mod tests {
@@ -112,5 +119,20 @@ mod tests {
     fn display_unsupported_registry() {
         let err = DockerRegistryError::UnsupportedRegistry("custom.io".to_string());
         assert_eq!(err.to_string(), "unsupported registry: custom.io");
+    }
+
+    #[test]
+    fn display_daemon_connection() {
+        let err = DockerRegistryError::DaemonConnection("no such socket".to_string());
+        assert_eq!(
+            err.to_string(),
+            "docker daemon connection failed: no such socket"
+        );
+    }
+
+    #[test]
+    fn display_pull_failed() {
+        let err = DockerRegistryError::PullFailed("manifest not found".to_string());
+        assert_eq!(err.to_string(), "docker pull failed: manifest not found");
     }
 }

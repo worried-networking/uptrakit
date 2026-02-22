@@ -1,10 +1,13 @@
+use std::sync::Arc;
 use std::time::Duration;
 
+use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_internal_wire::{HostInfo, ReportHostsPayload, ServiceMessage};
 use uptrakit_service_sdk::ControllerConnection;
 
 use crate::host_info::collect_remote_host_info;
 use crate::host_ops::list_hosts;
+use crate::ssh_executor::SshCommandExecutor;
 use crate::ssh_transport::{AuthMethod, SshConnectionConfig};
 
 /// Connect to each enrolled SSH host, collect system info, and send a
@@ -57,11 +60,38 @@ pub(crate) async fn report_enrolled_hosts(
             }
         };
 
+        // Wrap the session in Arc so it can be shared with the SshCommandExecutor.
+        // The executor is dropped at end of the verification block so that
+        // Arc::try_unwrap succeeds later for the disconnect call.
+        let session = Arc::new(session);
+
+        // Verify that command execution is available via the CommandExecutor
+        // interface before proceeding with host information collection.
+        let executor_ok = {
+            let executor = SshCommandExecutor::new(Arc::clone(&session));
+            executor
+                .execute_quiet(&CommandSpec::exec("true", Vec::<String>::new()))
+                .await
+                .is_ok()
+        };
+        if !executor_ok {
+            tracing::warn!(
+                host_name = %host.name,
+                hostname = %host.hostname,
+                "SSH command executor check failed, skipping host"
+            );
+            continue;
+        }
+
         let mut info = collect_remote_host_info(&session).await;
         // Set the SSH target address as the host's ip_address.
         info.ip_address = Some(host.hostname.clone());
 
-        session.disconnect().await;
+        // executor was dropped above so the Arc has exactly one strong
+        // reference; try_unwrap gives us ownership for the disconnect call.
+        if let Ok(owned) = Arc::try_unwrap(session) {
+            owned.disconnect().await;
+        }
 
         tracing::debug!(
             host_name = %host.name,

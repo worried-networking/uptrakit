@@ -3,6 +3,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 
+mod docker_puller;
 pub mod provider;
 pub mod registry;
 pub mod tag;

@@ -126,7 +126,7 @@ let cmd_output = self
     .executor
     .execute(&CommandSpec::shell(&install_cmd), output_tx)
     .await
-    .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
+    .context_transform(|e| ProviderError::InstallFailed(e.to_string()))?;
 ```
 
 ### Quiet execution (e.g., `detect_installed_version`)
@@ -153,8 +153,9 @@ on remote hosts via an `SshSession` from the SSH transport layer.
 use std::sync::Arc;
 use uptrakit_command::{CommandExecutor, CommandSpec};
 
-// Create from an authenticated SSH session.
-let executor: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(session));
+// Wrap an authenticated SSH session in Arc and pass it to the executor.
+let session = Arc::new(session);
+let executor: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
 
 // Use exactly like LocalCommandExecutor — providers are transport-agnostic.
 let output = executor
