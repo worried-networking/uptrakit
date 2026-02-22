@@ -69,18 +69,20 @@ All `unwrap()` and `expect()` calls are exclusively in `#[cfg(test)]` blocks. Th
 
 All public items exported from `lib.rs` are used by downstream crates.
 
-### INFORMATIONAL: No command timeout mechanism
+### ~~INFORMATIONAL: No command timeout mechanism~~ RESOLVED
 
-The crate has no built-in timeout for command execution. A hung process will block indefinitely. The caller is
-responsible for wrapping calls in `tokio::time::timeout`. This is not a bug -- timeouts are a policy decision best left
-to callers -- but a convenience parameter on `CommandSpec` would be a natural addition.
+`CommandSpec` now has a `timeout: Option<std::time::Duration>` field and a `with_timeout()` builder method.
+`LocalCommandExecutor` applies `tokio::time::timeout` when the field is set, returning
+`CommandError::TimedOut` on expiry. `ProviderError::TimedOut` was added to `uptrakit-provider-core` to
+cover the new variant in its conversion match. Tests use `tokio::time::pause()` / `advance()` per project
+conventions.
 
-### INFORMATIONAL: PowerShell executable name
+### ~~INFORMATIONAL: PowerShell executable name~~ RESOLVED
 
-**File:** `src/command.rs`, line 198
-
-The `ShellType::PowerShell` branch uses `"powershell"` (Windows PowerShell 5.1). On modern Linux/macOS, PowerShell Core
-uses `pwsh`. Consider making this configurable or trying `pwsh` first with a fallback.
+`HookShell` in `uptrakit-shared-types` now exposes `local_executable()`, `remote_executable(is_windows)`,
+and `flag()` methods. `local_executable()` returns `"pwsh"` on non-Windows platforms and `"powershell"` on
+Windows. `get_shell_args` in `src/command.rs` delegates to these methods. SSH executors targeting remote
+hosts should call `remote_executable(target_is_windows)` instead.
 
 ### INFORMATIONAL: Output concatenation order
 

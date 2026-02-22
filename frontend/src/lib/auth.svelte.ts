@@ -31,6 +31,17 @@ export function setAccessToken(token: string | null): void {
 	accessToken = token;
 }
 
+/** Reactive flag set when a token refresh fails with a 4xx (session truly expired). */
+let sessionExpired = $state(false);
+
+export function getSessionExpired(): boolean {
+	return sessionExpired;
+}
+
+export function setSessionExpired(v: boolean): void {
+	sessionExpired = v;
+}
+
 export async function initialize() {
 	try {
 		if (!accessToken) {
@@ -44,6 +55,8 @@ export async function initialize() {
 		}
 		const u = await api.me();
 		user = u;
+		// Clear any prior session-expired banner on successful auth
+		sessionExpired = false;
 	} catch {
 		accessToken = null;
 		user = null;

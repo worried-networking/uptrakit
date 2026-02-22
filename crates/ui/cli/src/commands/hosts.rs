@@ -12,6 +12,7 @@ pub struct ListParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub page: Option<u64>,
     pub per_page: Option<u64>,
 }
@@ -23,11 +24,12 @@ pub struct ShowParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// List all hosts (paginated).
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let pagination = PaginationParams {
         page: params.page,
         per_page: params.per_page,
@@ -62,7 +64,7 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single host.
 pub async fn show(params: ShowParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let resp = client.get_host(params.id).await.context_to()?;
 
     let mut human = String::new();

@@ -78,19 +78,16 @@ and passes them as props to each component. Components accept a typed `settings`
 initialize their own local state via `$effect`. All `bind:this` refs, `export function load()` methods,
 `$state(undefined!)` assertions, and the `refsReady` coordination flag have been removed.
 
-#### ARC-04: Single API base path with no configuration
+#### ~~ARC-04: Single API base path with no configuration~~ RESOLVED
 
-**Severity:** Low
-**Location:** `lib/api.ts:41`
+`BASE` in `lib/api.ts` now reads from `import.meta.env.VITE_API_BASE` with `/api/v1` as the fallback:
 
 ```typescript
-const BASE = '/api/v1';
+const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
 ```
 
-The API base path is hardcoded. In deployments where the frontend is served from a different origin or sub-path
-than the API (e.g., split deployment with a CDN), this would require a code change.
-
-**Recommendation:** Read from an environment variable or a runtime configuration endpoint.
+`src/vite-env.d.ts` was created to declare the `ImportMetaEnv` interface with `VITE_API_BASE?: string`.
+The variable is documented in `docs/end-user/deployment/reverse-proxy.md`.
 
 ---
 
@@ -220,24 +217,15 @@ use different naming conventions due to the underlying backend types.
 
 ### 4.2 Issues
 
-#### HA-05: Auth redirect on refresh failure loses context
+#### ~~HA-05: Auth redirect on refresh failure loses context~~ RESOLVED
 
-**Severity:** Low
-**Location:** `lib/api.ts:162-165`
-
-```typescript
-setAccessToken(null);
-window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
-```
-
-When the refresh token is rejected (4xx), the user is immediately redirected to login. This loses any
-unsaved form state. In an HA scenario with multiple controllers, a refresh token might be temporarily
-invalid (e.g., during a rolling restart where the token was issued by a different instance).
-
-The `redirect` parameter preserves the URL but not the form state.
-
-**Recommendation:** Consider showing a modal ("Your session has expired. Please log in again.") instead
-of an immediate redirect, giving the user a chance to copy their unsaved work.
+A non-blocking session-expired banner is now shown instead of an immediate hard redirect. On 4xx refresh
+failure, `setAccessToken(null)` and `setSessionExpired(true)` are called. A dismissable `role="alert"`
+`aria-live="assertive"` banner appears in `+layout.svelte` above page content, allowing the user to copy
+unsaved work before following the login link. `window.location.href` is no longer assigned.
+`lib/auth.svelte.ts` exposes `getSessionExpired()` / `setSessionExpired()` reactive state; `initialize()`
+clears it on successful auth. The `api.test.ts` 4xx test asserts `setSessionExpired(true)` is called and
+that `window.location.href` is not assigned.
 
 #### HA-06: No WebSocket or SSE for real-time updates
 
@@ -306,54 +294,55 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 
 ### Issues by Severity
 
-| Severity | Count | IDs                                                                       |
-| -------- | ----- | ------------------------------------------------------------------------- |
-| Low      | 6     | ARC-04, SEC-04, SEC-05, CQ-08, HA-05, HA-06 (ARC-01, ARC-03, CQ-05, CQ-06 resolved) |
+| Severity | Count | IDs                                                                                 |
+| -------- | ----- | ----------------------------------------------------------------------------------- |
+| Low      | 4     | SEC-04, SEC-05, CQ-08, HA-06 (ARC-01, ARC-03, ARC-04, CQ-05, CQ-06, HA-05 resolved) |
 
 ### Issues by Category
 
 | Category      | Count |
 | ------------- | ----- |
-| Architecture  | 3     |
+| Architecture  | 1     |
 | Security      | 2     |
-| Code Quality  | 3     |
-| Backend HA    | 2     |
+| Code Quality  | 1     |
+| Backend HA    | 1     |
 | Accessibility | 0     |
 
 ### File-Level Summary
 
-| File                                       | Issues        | Notes                                                                      |
-| ------------------------------------------ | ------------- | -------------------------------------------------------------------------- |
-| `app.html`                                 | SEC-05        | CSP script-src tightened with SHA-256 hash                                 |
-| `lib/api.ts`                               | —             | Core API client; error length now capped; path params encoded              |
-| `lib/auth.svelte.ts`                       | ~~ARC-01~~    | Migrated to Svelte 5 runes (renamed from `auth.ts`)                        |
-| `lib/theme.svelte.ts`                      | ~~ARC-01, CQ-06~~ | Migrated to runes; cleanup documented (renamed from `theme.ts`)        |
-| `lib/stores/network.svelte.ts`             | ~~ARC-01, CQ-05~~ | Migrated to runes; cleanup documented (renamed from `network.ts`)      |
-| `lib/notifications.svelte.ts`              | —             | Clean implementation                                                       |
-| `lib/utils.ts`                             | —             | Clean implementation                                                       |
-| `lib/types.ts`                             | —             | Comprehensive type coverage                                                |
-| `lib/auth.test.ts`                         | —             | 9 tests covering initialize, handleLogin, handleLogout, handleOidcCallback |
-| `+layout.svelte`                           | —             | Skip link and main-content id added; offline guard in layout               |
-| `+layout.ts`                               | —             | Clean                                                                      |
-| `login/+page.svelte`                       | SEC-04        | Offline disabling added; hasRedirected guard added                         |
-| `register/+page.svelte`                    | —             | Offline disabling and hasRedirected guard added                            |
-| `device/+page.svelte`                      | —             | Good device code validation                                                |
-| `services/+page.svelte`                    | —             | Double load + fragile effect fixed                                         |
-| `hosts/+page.svelte`                       | —             | Retry button added                                                         |
-| `software/+page.svelte`                    | —             | Clean implementation                                                       |
-| `settings/+page.svelte`                    | —             | Component refs now properly typed; jitter added to backoff                 |
-| `settings/EnrollmentTokenSettings.svelte`  | —             | Refactored to data-driven approach                                         |
-| `settings/RegistrationSettings.svelte`     | —             | Clean                                                                      |
-| `settings/AuthenticationSettings.svelte`   | —             | Clean                                                                      |
-| `settings/AgentCertificateSettings.svelte` | —             | Clean                                                                      |
-| `settings/MqttClientsSettings.svelte`      | CQ-08         | Minor naming inconsistency                                                 |
-| `settings/OidcProvidersSettings.svelte`    | —             | Clean                                                                      |
-| `settings/global/+page.svelte`             | —             | Clean                                                                      |
-| `components/ToastNotifications.svelte`     | —             | ARIA live regions added                                                    |
-| `components/ContextMenu.svelte`            | —             | Keyboard navigation added                                                  |
-| `components/ConfirmDialog.svelte`          | —             | Clean                                                                      |
-| `components/ModalBackdrop.svelte`          | —             | Excellent focus management                                                 |
-| `components/Pagination.svelte`             | —             | Clean and minimal                                                          |
+| File                                       | Issues            | Notes                                                                                |
+| ------------------------------------------ | ----------------- | ------------------------------------------------------------------------------------ |
+| `app.html`                                 | SEC-05            | CSP script-src tightened with SHA-256 hash                                           |
+| `lib/api.ts`                               | ~~ARC-04, HA-05~~ | BASE reads from `VITE_API_BASE`; hard redirect replaced by `setSessionExpired(true)` |
+| `lib/auth.svelte.ts`                       | ~~ARC-01~~        | Migrated to Svelte 5 runes; `sessionExpired` state added                             |
+| `lib/vite-env.d.ts`                        | —                 | New: `VITE_API_BASE` env declaration                                                 |
+| `lib/theme.svelte.ts`                      | ~~ARC-01, CQ-06~~ | Migrated to runes; cleanup documented (renamed from `theme.ts`)                      |
+| `lib/stores/network.svelte.ts`             | ~~ARC-01, CQ-05~~ | Migrated to runes; cleanup documented (renamed from `network.ts`)                    |
+| `lib/notifications.svelte.ts`              | —                 | Clean implementation                                                                 |
+| `lib/utils.ts`                             | —                 | Clean implementation                                                                 |
+| `lib/types.ts`                             | —                 | Comprehensive type coverage                                                          |
+| `lib/auth.test.ts`                         | —                 | 9 tests covering initialize, handleLogin, handleLogout, handleOidcCallback           |
+| `+layout.svelte`                           | ~~HA-05~~         | Session-expired banner added (dismissable, non-blocking)                             |
+| `+layout.ts`                               | —                 | Clean                                                                                |
+| `login/+page.svelte`                       | SEC-04            | Offline disabling added; hasRedirected guard added                                   |
+| `register/+page.svelte`                    | —                 | Offline disabling and hasRedirected guard added                                      |
+| `device/+page.svelte`                      | —                 | Good device code validation                                                          |
+| `services/+page.svelte`                    | —                 | Double load + fragile effect fixed                                                   |
+| `hosts/+page.svelte`                       | —                 | Retry button added                                                                   |
+| `software/+page.svelte`                    | —                 | Clean implementation                                                                 |
+| `settings/+page.svelte`                    | —                 | Component refs now properly typed; jitter added to backoff                           |
+| `settings/EnrollmentTokenSettings.svelte`  | —                 | Refactored to data-driven approach                                                   |
+| `settings/RegistrationSettings.svelte`     | —                 | Clean                                                                                |
+| `settings/AuthenticationSettings.svelte`   | —                 | Clean                                                                                |
+| `settings/AgentCertificateSettings.svelte` | —                 | Clean                                                                                |
+| `settings/MqttClientsSettings.svelte`      | CQ-08             | Minor naming inconsistency                                                           |
+| `settings/OidcProvidersSettings.svelte`    | —                 | Clean                                                                                |
+| `settings/global/+page.svelte`             | —                 | Clean                                                                                |
+| `components/ToastNotifications.svelte`     | —                 | ARIA live regions added                                                              |
+| `components/ContextMenu.svelte`            | —                 | Keyboard navigation added                                                            |
+| `components/ConfirmDialog.svelte`          | —                 | Clean                                                                                |
+| `components/ModalBackdrop.svelte`          | —                 | Excellent focus management                                                           |
+| `components/Pagination.svelte`             | —                 | Clean and minimal                                                                    |
 
 ---
 
@@ -364,12 +353,15 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 - ~~**Refactor settings to use props instead of imperative refs** (ARC-03)~~ — Done.
 - ~~**Standardize state management** (ARC-01)~~ — Done. CQ-05/CQ-06 also resolved.
 
+### Resolved in this PR (continued)
+
+- ~~**Show session-expired banner instead of hard redirect** (HA-05)~~ — Done.
+- ~~**Configurable API base path via `VITE_API_BASE`** (ARC-04)~~ — Done.
+
 ### Priority 1 (Should consider)
 
-1. **Show session-expired modal instead of hard redirect** (HA-05).
-2. **Configure Vitest code coverage** and set a minimum threshold.
+1. **Configure Vitest code coverage** and set a minimum threshold.
 
 ### Priority 2 (Nice to have)
 
-3. **Add Playwright E2E tests** covering auth flows and settings management.
-4. **Configurable API base path** (ARC-04): Read `BASE` from an environment variable.
+2. **Add Playwright E2E tests** covering auth flows and settings management.

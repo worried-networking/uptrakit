@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::command::{get_shell_args, run_command_exec_impl, wrap_command_for_shell};
+use crate::error::CommandError;
 use uptrakit_shared_types::HookShell;
+use rootcause::prelude::*;
 
 use crate::types::UpdateOutputLine;
 
@@ -21,6 +23,8 @@ pub struct CommandSpec {
     pub mode: CommandMode,
     /// Optional working directory for the command.
     pub working_dir: Option<String>,
+    /// Maximum time to wait for the command. `None` means no timeout is applied.
+    pub timeout: Option<std::time::Duration>,
 }
 
 /// How a command is invoked.
@@ -60,6 +64,7 @@ impl CommandSpec {
                 args: args.into_iter().collect(),
             },
             working_dir: None,
+            timeout: None,
         }
     }
 
@@ -71,6 +76,7 @@ impl CommandSpec {
                 shell: HookShell::Bash,
             },
             working_dir: None,
+            timeout: None,
         }
     }
 
@@ -82,6 +88,7 @@ impl CommandSpec {
                 shell,
             },
             working_dir: None,
+            timeout: None,
         }
     }
 
@@ -89,6 +96,19 @@ impl CommandSpec {
     #[must_use]
     pub fn with_working_dir(mut self, dir: impl Into<String>) -> Self {
         self.working_dir = Some(dir.into());
+        self
+    }
+
+    /// Set a maximum execution time for the command (builder pattern).
+    ///
+    /// When the deadline is reached, the executor returns
+    /// [`CommandError::TimedOut`]. The child process's stdio pipes are closed,
+    /// but the orphaned process is not killed; a follow-up task can add
+    /// `child.start_kill()` once the executor is restructured to retain the
+    /// child handle outside the completion future.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
         self
     }
 
@@ -142,20 +162,32 @@ impl CommandExecutor for LocalCommandExecutor {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> crate::Result<CommandOutput> {
         let (program, args) = spec.resolve();
-        let (output, exit_code) = run_command_exec_impl(
+        let fut = run_command_exec_impl(
             &program,
             &args,
             spec.working_dir.as_deref(),
             Some(output_tx),
-        )
-        .await?;
+        );
+        let (output, exit_code) = if let Some(dur) = spec.timeout {
+            tokio::time::timeout(dur, fut)
+                .await
+                .map_err(|_| report!(CommandError::TimedOut))??
+        } else {
+            fut.await?
+        };
         Ok(CommandOutput { output, exit_code })
     }
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
         let (program, args) = spec.resolve();
-        let (output, exit_code) =
-            run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), None).await?;
+        let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), None);
+        let (output, exit_code) = if let Some(dur) = spec.timeout {
+            tokio::time::timeout(dur, fut)
+                .await
+                .map_err(|_| report!(CommandError::TimedOut))??
+        } else {
+            fut.await?
+        };
         Ok(CommandOutput { output, exit_code })
     }
 }
@@ -163,6 +195,7 @@ impl CommandExecutor for LocalCommandExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     // ── CommandSpec constructor tests ──────────────────────────────────
 
@@ -172,6 +205,7 @@ mod tests {
         assert!(matches!(&spec.mode, CommandMode::Exec { program, args }
             if program == "echo" && args == &["hello".to_string()]));
         assert!(spec.working_dir.is_none());
+        assert!(spec.timeout.is_none());
     }
 
     #[test]
@@ -269,5 +303,64 @@ mod tests {
         let spec = CommandSpec::exec("false", Vec::<String>::new());
         let result = executor.execute_quiet(&spec).await;
         assert!(result.is_err());
+    }
+
+    // ── Timeout tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn command_spec_no_timeout_by_default() {
+        let spec = CommandSpec::exec("echo", Vec::<String>::new());
+        assert!(spec.timeout.is_none());
+    }
+
+    #[test]
+    fn command_spec_with_timeout_builder() {
+        let spec = CommandSpec::exec("echo", Vec::<String>::new())
+            .with_timeout(Duration::from_secs(5));
+        assert_eq!(spec.timeout, Some(Duration::from_secs(5)));
+    }
+
+    #[tokio::test]
+    async fn execute_quiet_timeout_fires() {
+        tokio::time::pause();
+        let spec = CommandSpec::exec("sleep", ["100".to_string()])
+            .with_timeout(Duration::from_secs(5));
+        let executor = LocalCommandExecutor;
+        let handle = tokio::spawn(async move { executor.execute_quiet(&spec).await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let result = handle.await.expect("join");
+        assert!(
+            matches!(result.unwrap_err().current_context(), CommandError::TimedOut),
+            "expected TimedOut error"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_timeout_fires() {
+        tokio::time::pause();
+        let spec = CommandSpec::exec("sleep", ["100".to_string()])
+            .with_timeout(Duration::from_secs(5));
+        let executor = LocalCommandExecutor;
+        let (tx, mut rx) = mpsc::channel(100);
+        let handle = tokio::spawn(async move { executor.execute(&spec, &tx).await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let result = handle.await.expect("join");
+        assert!(
+            matches!(result.unwrap_err().current_context(), CommandError::TimedOut),
+            "expected TimedOut error"
+        );
+        rx.close();
+        while rx.recv().await.is_some() {}
+    }
+
+    #[tokio::test]
+    async fn execute_quiet_no_timeout_succeeds() {
+        let spec = CommandSpec::exec("echo", ["no timeout".to_string()]);
+        let executor = LocalCommandExecutor;
+        let result = executor.execute_quiet(&spec).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().output.contains("no timeout"));
     }
 }

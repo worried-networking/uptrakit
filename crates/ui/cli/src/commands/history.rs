@@ -12,6 +12,7 @@ pub struct ListParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub host_id: Option<Uuid>,
     pub software_item_id: Option<Uuid>,
     pub status: Option<&'a str>,
@@ -21,7 +22,7 @@ pub struct ListParams<'a> {
 
 /// List update history (paginated, with optional filters).
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
 
     let query = UpdateHistoryQuery {
         host_id: params.host_id,
@@ -71,8 +72,9 @@ pub async fn show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_update_history(id).await.context_to()?;
 
     let mut human = String::new();

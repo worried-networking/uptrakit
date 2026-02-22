@@ -122,6 +122,7 @@ async fn hosts_list_success() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -147,6 +148,7 @@ async fn hosts_list_empty() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -165,6 +167,7 @@ async fn hosts_show_success() {
         token: Some("test-token"),
         format: OutputFormat::Human,
         insecure: false,
+        request_timeout: None,
     })
     .await;
 
@@ -183,6 +186,7 @@ async fn hosts_show_not_found() {
         token: Some("test-token"),
         format: OutputFormat::Human,
         insecure: false,
+        request_timeout: None,
     })
     .await;
 
@@ -207,6 +211,7 @@ async fn hosts_list_json_format() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -229,6 +234,7 @@ async fn services_list_success() {
         status: None,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -247,6 +253,7 @@ async fn services_approve_success() {
         Some("test-token"),
         OutputFormat::Human,
         false,
+        None,
     )
     .await;
 
@@ -268,6 +275,7 @@ async fn services_approve_not_found() {
         Some("test-token"),
         OutputFormat::Human,
         false,
+        None,
     )
     .await;
 
@@ -291,6 +299,7 @@ async fn software_items_list_success() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -311,6 +320,7 @@ async fn api_401_returns_not_authenticated() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -337,6 +347,7 @@ async fn api_429_returns_rate_limited() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -364,6 +375,7 @@ async fn api_500_returns_server_error() {
         insecure: false,
         page: None,
         per_page: None,
+        request_timeout: None,
     })
     .await;
 
@@ -394,6 +406,7 @@ async fn services_remove_success() {
         Some("test-token"),
         OutputFormat::Human,
         false,
+        None,
     )
     .await;
 
@@ -420,6 +433,7 @@ async fn hosts_show_with_agents() {
         token: Some("test-token"),
         format: OutputFormat::Human,
         insecure: false,
+        request_timeout: None,
     })
     .await;
 

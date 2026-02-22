@@ -360,6 +360,7 @@ The `uptrakit` CLI binary also supports:
 | --- | --- |
 | `UPTRAKIT_SERVER` | Controller URL (equivalent to `--server`) |
 | `UPTRAKIT_TOKEN` | API token (equivalent to `--token`) |
+| `UPTRAKIT_TIMEOUT` | API request timeout in seconds (equivalent to `--timeout`; default: 30). Useful for CI pipelines or operations that may take longer than 30 s. |
 
 **Priority:** CLI flag > environment variable > stored credentials file. Using `UPTRAKIT_TOKEN` is preferred over
 `--token` in automation to avoid exposing tokens in process listings.

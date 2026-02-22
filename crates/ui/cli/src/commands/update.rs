@@ -16,11 +16,12 @@ pub struct TriggerParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// Trigger an update for a software item on a specific host.
 pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
 
     let release_info = if params.release_tag.is_some() || params.release_url.is_some() {
         Some(ReleaseInfoRequest {

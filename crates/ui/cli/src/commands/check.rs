@@ -11,6 +11,7 @@ pub struct AllParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// Parameters for triggering a version check on a specific software item.
@@ -21,11 +22,12 @@ pub struct ItemParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// Trigger a bulk version check by finding and triggering the `version_check` scheduler task.
 pub async fn all(params: AllParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
 
     // Find the version_check scheduler task
     let tasks = client.list_scheduled_tasks().await.context_to()?;
@@ -56,7 +58,7 @@ pub async fn all(params: AllParams<'_>) -> Result<()> {
 
 /// Trigger a version check for a specific software item.
 pub async fn item(params: ItemParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
 
     let resp = match params.host_id {
         Some(hid) => client

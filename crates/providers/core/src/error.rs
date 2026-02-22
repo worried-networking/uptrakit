@@ -31,6 +31,9 @@ pub enum ProviderError {
     #[error("command execution failed: {0}")]
     CommandWait(#[source] std::io::Error),
 
+    #[error("command timed out")]
+    TimedOut,
+
     #[error("install command failed: {0}")]
     InstallFailed(String),
 

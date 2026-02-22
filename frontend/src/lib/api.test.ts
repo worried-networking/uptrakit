@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { extractErrorMessage, me } from './api';
-import { getAccessToken, setAccessToken } from './auth.svelte';
+import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
 import type { RefreshResponse, User } from './types';
 
 // Mock ./auth.svelte to avoid Svelte rune initialization in test environment
 vi.mock('./auth.svelte', () => ({
 	getAccessToken: vi.fn().mockReturnValue(null),
-	setAccessToken: vi.fn()
+	setAccessToken: vi.fn(),
+	setSessionExpired: vi.fn()
 }));
 
 const sampleUser: User = {
@@ -102,6 +103,7 @@ describe('authenticatedFetch', () => {
 	beforeEach(() => {
 		vi.mocked(getAccessToken).mockReturnValue(null);
 		vi.mocked(setAccessToken).mockReset();
+		vi.mocked(setSessionExpired).mockReset();
 	});
 
 	afterEach(() => {
@@ -178,7 +180,7 @@ describe('authenticatedFetch', () => {
 		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith('new-token');
 	});
 
-	it('clears token and redirects on 401 with 4xx refresh failure', async () => {
+	it('clears token and sets sessionExpired on 401 with 4xx refresh failure (no hard redirect)', async () => {
 		vi.mocked(getAccessToken).mockReturnValue('old-token');
 		const mockFetch = vi
 			.fn()
@@ -186,23 +188,31 @@ describe('authenticatedFetch', () => {
 			.mockResolvedValueOnce(new Response('Forbidden', { status: 403, statusText: 'Forbidden' }));
 		vi.stubGlobal('fetch', mockFetch);
 
-		// Stub window.location.href to capture the redirect
-		let capturedHref = '';
+		// Track whether window.location.href is assigned
+		const locationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
+		let hrefAssigned = false;
 		Object.defineProperty(window, 'location', {
 			value: {
 				...window.location,
-				set href(v: string) {
-					capturedHref = v;
+				set href(_v: string) {
+					hrefAssigned = true;
 				}
 			},
 			writable: true,
 			configurable: true
 		});
 
-		await expect(me()).rejects.toThrow('Session expired');
+		await expect(me()).rejects.toThrow('Session expired. Please log in again.');
 
 		expect(vi.mocked(setAccessToken)).toHaveBeenCalledWith(null);
-		expect(capturedHref).toMatch(/^\/login\?redirect=/);
+		expect(vi.mocked(setSessionExpired)).toHaveBeenCalledWith(true);
+		// No hard redirect — the banner handles navigation
+		expect(hrefAssigned).toBe(false);
+
+		// Restore location descriptor
+		if (locationDescriptor) {
+			Object.defineProperty(window, 'location', locationDescriptor);
+		}
 	});
 
 	it('preserves token and throws on 401 with 5xx refresh failure', async () => {

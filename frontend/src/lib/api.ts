@@ -1,4 +1,4 @@
-import { getAccessToken, setAccessToken } from './auth.svelte';
+import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
 import type {
 	AgentCertificateSettings,
 	AuthenticationSettings,
@@ -39,7 +39,7 @@ import type {
 	User
 } from './types';
 
-const BASE = '/api/v1';
+const BASE: string = import.meta.env.VITE_API_BASE || '/api/v1';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const REFRESH_TIMEOUT_MS = 10_000;
 const MAX_ERROR_LENGTH = 500;
@@ -170,10 +170,12 @@ async function authenticatedFetch(path: string, options: RequestInit = {}): Prom
 			if (refreshErr instanceof RefreshError && refreshErr.status >= 500) {
 				throw new Error('Server error during token refresh. Please try again later.');
 			}
-			// Real auth failures (4xx) — session is truly invalid
+			// Real auth failures (4xx) — session is truly invalid.
+			// Show a non-blocking banner instead of hard-redirecting so the
+			// user can copy any unsaved form state before logging in again.
 			setAccessToken(null);
-			window.location.href = '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search);
-			throw new Error('Session expired');
+			setSessionExpired(true);
+			throw new Error('Session expired. Please log in again.');
 		}
 	}
 

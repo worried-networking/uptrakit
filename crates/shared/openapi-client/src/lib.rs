@@ -85,10 +85,20 @@ impl UptrakitClient {
 
     /// Create a new client. Pass `token: None` for unauthenticated endpoints
     /// (e.g. device auth start/poll).
-    pub fn new(base_url: &str, token: Option<&str>, insecure: bool) -> Result<Self> {
+    ///
+    /// `request_timeout` overrides [`DEFAULT_REQUEST_TIMEOUT`] when `Some`.
+    ///
+    /// [`DEFAULT_REQUEST_TIMEOUT`]: Self::DEFAULT_REQUEST_TIMEOUT
+    pub fn new(
+        base_url: &str,
+        token: Option<&str>,
+        insecure: bool,
+        request_timeout: Option<std::time::Duration>,
+    ) -> Result<Self> {
+        let timeout = request_timeout.unwrap_or(Self::DEFAULT_REQUEST_TIMEOUT);
         let mut builder = reqwest::Client::builder()
             .connect_timeout(Self::DEFAULT_CONNECT_TIMEOUT)
-            .timeout(Self::DEFAULT_REQUEST_TIMEOUT);
+            .timeout(timeout);
         if insecure {
             builder = builder.tls_danger_accept_invalid_certs(true);
         }
@@ -103,7 +113,7 @@ impl UptrakitClient {
 
     /// Create a client with a required bearer token.
     pub fn with_token(base_url: &str, token: &str, insecure: bool) -> Result<Self> {
-        Self::new(base_url, Some(token), insecure)
+        Self::new(base_url, Some(token), insecure, None)
     }
 
     /// Execute a raw (untyped) API request. Used by the CLI `api` escape-hatch command.
@@ -437,14 +447,14 @@ mod tests {
     #[test]
     fn base_url_trailing_slash_is_trimmed() {
         let client =
-            UptrakitClient::new("https://example.com/", None, false).expect("client creation");
+            UptrakitClient::new("https://example.com/", None, false, None).expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 
     #[test]
     fn base_url_without_trailing_slash_is_unchanged() {
         let client =
-            UptrakitClient::new("https://example.com", None, false).expect("client creation");
+            UptrakitClient::new("https://example.com", None, false, None).expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 
@@ -458,7 +468,7 @@ mod tests {
     #[test]
     fn new_without_token_stores_none() {
         let client =
-            UptrakitClient::new("https://example.com", None, false).expect("client creation");
+            UptrakitClient::new("https://example.com", None, false, None).expect("client creation");
         assert!(client.token.is_none());
     }
 
@@ -472,7 +482,7 @@ mod tests {
     #[test]
     fn token_or_err_returns_error_when_absent() {
         let client =
-            UptrakitClient::new("https://example.com", None, false).expect("client creation");
+            UptrakitClient::new("https://example.com", None, false, None).expect("client creation");
         let err = client.token_or_err().unwrap_err();
         assert!(
             matches!(err.current_context(), ClientError::NotAuthenticated),

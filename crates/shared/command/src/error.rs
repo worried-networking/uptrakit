@@ -15,6 +15,9 @@ pub enum CommandError {
 
     #[error("command execution failed: {0}")]
     CommandWait(#[source] std::io::Error),
+
+    #[error("command timed out")]
+    TimedOut,
 }
 
 /// Result type alias for command operations.

@@ -4,7 +4,14 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { getUser, getLoading, initialize, handleLogout } from '$lib/auth.svelte';
+	import {
+		getUser,
+		getLoading,
+		initialize,
+		handleLogout,
+		getSessionExpired,
+		setSessionExpired
+	} from '$lib/auth.svelte';
 	import { getThemeMode, setThemeMode, initTheme, type ThemeMode } from '$lib/theme.svelte';
 	import { getSystemAlerts } from '$lib/api';
 	import { getIsOnline } from '$lib/stores/network.svelte';
@@ -137,6 +144,25 @@
 		{#if !getIsOnline()}
 			<div class="preset-filled-warning-500 text-center p-2">
 				You are currently offline. Some features may not be available.
+			</div>
+		{/if}
+
+		{#if getSessionExpired()}
+			<div
+				role="alert"
+				aria-live="assertive"
+				class="flex items-center justify-center gap-3 bg-error-500 px-4 py-2 text-sm text-white"
+			>
+				<span>Your session has expired.</span>
+				<a
+					href="/login?redirect={encodeURIComponent($page.url.pathname + $page.url.search)}"
+					class="underline font-semibold hover:no-underline">Log in</a
+				>
+				<button
+					onclick={() => setSessionExpired(false)}
+					class="ml-2 rounded border border-white px-2 py-0.5 text-xs hover:bg-white hover:text-error-500"
+					aria-label="Dismiss session expired notification">Dismiss</button
+				>
 			</div>
 		{/if}
 

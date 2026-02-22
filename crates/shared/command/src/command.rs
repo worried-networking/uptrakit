@@ -207,12 +207,12 @@ pub(crate) fn wrap_command_for_shell(cmd: &str, shell: HookShell) -> String {
 }
 
 /// Get the shell executable and arguments for a given shell type.
+///
+/// Uses [`HookShell::local_executable`] to select the correct binary for the
+/// local machine's OS. On Linux/macOS, PowerShell Core (`pwsh`) is used instead
+/// of the Windows-only `powershell` binary.
 pub(crate) fn get_shell_args(shell: HookShell) -> (&'static str, &'static str) {
-    match shell {
-        HookShell::Bash => ("bash", "-c"),
-        HookShell::Sh => ("sh", "-c"),
-        HookShell::PowerShell => ("powershell", "-Command"),
-    }
+    (shell.local_executable(), shell.flag())
 }
 
 /// Run a command with the specified shell and fail-early settings.
@@ -353,6 +353,16 @@ mod tests {
         let (exec, arg) = get_shell_args(HookShell::Sh);
         assert_eq!(exec, "sh");
         assert_eq!(arg, "-c");
+    }
+
+    #[test]
+    fn get_shell_args_powershell_local() {
+        let (exec, flag) = get_shell_args(HookShell::PowerShell);
+        #[cfg(target_os = "windows")]
+        assert_eq!(exec, "powershell");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(exec, "pwsh");
+        assert_eq!(flag, "-Command");
     }
 
     // -- Run command tests --

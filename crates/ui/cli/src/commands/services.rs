@@ -15,6 +15,7 @@ pub struct ListParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub service_type: Option<&'a str>,
     pub status: Option<&'a str>,
     pub page: Option<u64>,
@@ -23,7 +24,7 @@ pub struct ListParams<'a> {
 
 /// List services with optional filters and pagination.
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let query =
         ListServicesQuery {
             r#type: params
@@ -78,8 +79,9 @@ pub async fn show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_service(id).await.context_to()?;
 
     let mut human = String::new();
@@ -123,8 +125,9 @@ pub async fn update(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateServiceRequest {
         ping_interval_seconds: ping_interval,
     };
@@ -150,8 +153,9 @@ pub async fn approve(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.approve_service(id).await.context_to()?;
 
     let human = format!(
@@ -169,8 +173,9 @@ pub async fn reject(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.reject_service(id).await.context_to()?;
 
     let human = format!(
@@ -188,8 +193,9 @@ pub async fn remove(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.remove_service(id).await.context_to()?;
 
     let human = format!("{}\n", resp.message);
@@ -205,8 +211,9 @@ pub async fn merge(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = MergeAgentRequest {
         source_id: *source_id,
     };

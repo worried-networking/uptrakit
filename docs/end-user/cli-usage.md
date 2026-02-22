@@ -13,6 +13,7 @@ Every command accepts these global flags:
 | `--server <URL>` | Controller URL (overrides stored config and `UPTRAKIT_SERVER` env var) |
 | `--token <TOKEN>` | API token (overrides stored credentials and `UPTRAKIT_TOKEN` env var) |
 | `--insecure` | Skip TLS certificate verification (development only; prints a warning to stderr) |
+| `--timeout <SECONDS>` | API request timeout in seconds (overrides `UPTRAKIT_TIMEOUT`; default: 30) |
 | `-o`, `--output <FORMAT>` | Output format: `human` (default), `json`, `yaml` |
 | `--version` | Show version and build metadata |
 
@@ -31,6 +32,7 @@ variables, which take precedence over stored configuration.
 | --- | --- |
 | `UPTRAKIT_SERVER` | Controller URL (equivalent to `--server`) |
 | `UPTRAKIT_TOKEN` | API token (equivalent to `--token`; preferred over `--token` for automation to avoid exposing tokens in process listings) |
+| `UPTRAKIT_TIMEOUT` | API request timeout in seconds (equivalent to `--timeout`; default: 30). Useful for CI pipelines or long-running controller operations. |
 
 **Priority order:** CLI flag > environment variable > stored credentials file.
 

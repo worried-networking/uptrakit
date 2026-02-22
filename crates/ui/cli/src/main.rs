@@ -25,6 +25,10 @@ struct Cli {
     #[arg(long, global = true)]
     insecure: bool,
 
+    /// API request timeout in seconds (default: 30)
+    #[arg(long, global = true, value_name = "SECONDS", env = "UPTRAKIT_TIMEOUT")]
+    timeout: Option<u64>,
+
     /// Output format
     #[arg(long, short, global = true, default_value_t, value_enum)]
     output: OutputFormat,
@@ -662,6 +666,7 @@ async fn main() {
     };
 
     let insecure = cli.insecure;
+    let request_timeout = cli.timeout.map(std::time::Duration::from_secs);
     let result = match command {
         Commands::Auth { command } => match command {
             AuthCommands::Login => commands::auth::login(cli.server.as_deref(), insecure).await,
@@ -671,6 +676,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -682,6 +688,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -691,6 +698,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -701,21 +709,23 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
             },
         },
         Commands::Api { method, path, data } => {
-            commands::api::execute(
-                &method,
-                &path,
-                data.as_deref(),
-                cli.server.as_deref(),
-                cli.token.as_deref(),
-                cli.output,
+            commands::api::execute(commands::api::ExecuteParams {
+                method: &method,
+                path: &path,
+                data: data.as_deref(),
+                server: cli.server.as_deref(),
+                token: cli.token.as_deref(),
+                format: cli.output,
                 insecure,
-            )
+                request_timeout,
+            })
             .await
         }
         Commands::Services { command } => match command {
@@ -734,6 +744,7 @@ async fn main() {
                     status: status.as_deref(),
                     page,
                     per_page,
+                    request_timeout,
                 })
                 .await
             }
@@ -744,6 +755,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -754,6 +766,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -764,6 +777,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -774,6 +788,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -785,6 +800,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -799,6 +815,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -812,6 +829,7 @@ async fn main() {
                     insecure,
                     page,
                     per_page,
+                    request_timeout,
                 })
                 .await
             }
@@ -822,6 +840,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -835,6 +854,7 @@ async fn main() {
                     insecure,
                     page,
                     per_page,
+                    request_timeout,
                 })
                 .await
             }
@@ -845,6 +865,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -856,6 +877,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -867,6 +889,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -889,6 +912,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -911,6 +935,7 @@ async fn main() {
                     status: status.as_deref(),
                     page,
                     per_page,
+                    request_timeout,
                 })
                 .await
             }
@@ -921,6 +946,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -932,6 +958,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -942,6 +969,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -952,6 +980,7 @@ async fn main() {
                     token: cli.token.as_deref(),
                     format: cli.output,
                     insecure,
+                    request_timeout,
                 })
                 .await
             }
@@ -963,6 +992,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -973,6 +1003,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -990,6 +1021,7 @@ async fn main() {
                             mode,
                             reg_token: token,
                             require_token_for_oidc,
+                            request_timeout,
                         },
                     )
                     .await
@@ -1002,6 +1034,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1014,6 +1047,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1025,6 +1059,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1039,6 +1074,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1050,6 +1086,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1076,6 +1113,7 @@ async fn main() {
                         fwd_cert_info_header,
                         fwd_cert_pem_header,
                         pki_addr,
+                        request_timeout,
                     })
                     .await
                 }
@@ -1086,6 +1124,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -1095,6 +1134,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -1105,6 +1145,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1115,6 +1156,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1148,6 +1190,7 @@ async fn main() {
                             password,
                             ca_pem,
                             topic_prefix,
+                            request_timeout,
                         })
                         .await
                     }
@@ -1184,6 +1227,7 @@ async fn main() {
                             password,
                             ca_pem,
                             topic_prefix,
+                            request_timeout,
                         })
                         .await
                     }
@@ -1195,6 +1239,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1205,6 +1250,7 @@ async fn main() {
                             cli.token.as_deref(),
                             cli.output,
                             insecure,
+                            request_timeout,
                         )
                         .await
                     }
@@ -1215,6 +1261,7 @@ async fn main() {
                             cli.token.as_deref(),
                             cli.output,
                             insecure,
+                            request_timeout,
                         )
                         .await
                     }
@@ -1227,6 +1274,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1237,6 +1285,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1265,6 +1314,7 @@ async fn main() {
                         scopes,
                         auto_create_users,
                         role_claim_path,
+                        request_timeout,
                     })
                     .await
                 }
@@ -1295,6 +1345,7 @@ async fn main() {
                         scopes,
                         auto_create_users,
                         role_claim_path,
+                        request_timeout,
                     })
                     .await
                 }
@@ -1305,6 +1356,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1315,6 +1367,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1325,6 +1378,7 @@ async fn main() {
                         cli.token.as_deref(),
                         cli.output,
                         insecure,
+                        request_timeout,
                     )
                     .await
                 }
@@ -1335,6 +1389,7 @@ async fn main() {
                     cli.token.as_deref(),
                     cli.output,
                     insecure,
+                    request_timeout,
                 )
                 .await
             }
@@ -2361,5 +2416,18 @@ mod tests {
     fn rejects_invalid_uuid_for_id_arguments() {
         let result = Cli::try_parse_from(["uptrakit", "hosts", "show", "not-a-uuid"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn global_timeout_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "--timeout", "60", "hosts", "list"])
+            .expect("should parse");
+        assert_eq!(args.timeout, Some(60));
+    }
+
+    #[test]
+    fn global_timeout_defaults_to_none() {
+        let args = Cli::try_parse_from(["uptrakit", "hosts", "list"]).expect("should parse");
+        assert!(args.timeout.is_none());
     }
 }

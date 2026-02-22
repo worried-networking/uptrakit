@@ -55,7 +55,7 @@ impl MockApiServer {
 
     /// Return an unauthenticated client pointing at the mock server.
     pub fn client_unauth(&self) -> UptrakitClient {
-        UptrakitClient::new(&self.server.base_url(), None, false).expect("mock client creation")
+        UptrakitClient::new(&self.server.base_url(), None, false, None).expect("mock client creation")
     }
 
     /// Raw access to the underlying [`MockServer`] for custom scenarios.

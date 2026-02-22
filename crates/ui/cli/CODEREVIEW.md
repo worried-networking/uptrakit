@@ -49,9 +49,13 @@ The CLI depends only on `uptrakit-openapi-client`, `uptrakit-build-info`, and
 
 ## 4. High Availability
 
-### H-1: No timeout configuration for API calls [LOW]
+### ~~H-1: No timeout configuration for API calls~~ RESOLVED
 
-The CLI inherits reqwest's default timeouts. Consider adding a `--timeout` global flag.
+A `--timeout <SECONDS>` global flag (env: `UPTRAKIT_TIMEOUT`) has been added to the `Cli` struct.
+`authenticated_client()` now accepts and forwards an `Option<Duration>` to `UptrakitClient::new()`, which
+uses the value instead of its 30-second default when provided. All command params structs carry
+`request_timeout: Option<std::time::Duration>` and pass it through. Parse tests verify the flag and the
+default-to-none behaviour.
 
 ### H-2: No retry logic for transient API failures [INFO]
 

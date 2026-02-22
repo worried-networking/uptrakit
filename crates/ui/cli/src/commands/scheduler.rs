@@ -11,6 +11,7 @@ pub struct ListParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// Parameters for showing a single scheduled task.
@@ -20,6 +21,7 @@ pub struct ShowParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// Parameters for triggering a scheduled task.
@@ -29,11 +31,12 @@ pub struct TriggerParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
 }
 
 /// List all scheduled tasks.
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
 
     let resp = client.list_scheduled_tasks().await.context_to()?;
 
@@ -59,7 +62,7 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single scheduled task.
 pub async fn show(params: ShowParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let resp = client.get_scheduled_task(params.id).await.context_to()?;
 
     let mut human = String::new();
@@ -97,7 +100,7 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
 
 /// Trigger immediate execution of a scheduled task.
 pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let resp = client
         .trigger_scheduled_task(params.id)
         .await

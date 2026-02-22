@@ -24,8 +24,9 @@ pub async fn show_combined(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_combined_settings().await.context_to()?;
 
     let mut human = String::new();
@@ -71,8 +72,9 @@ pub async fn registration_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_registration_settings().await.context_to()?;
 
     let mut human = String::new();
@@ -94,6 +96,7 @@ pub struct RegistrationUpdateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub mode: RegistrationMode,
     pub reg_token: Option<String>,
     pub require_token_for_oidc: Option<bool>,
@@ -101,7 +104,7 @@ pub struct RegistrationUpdateParams<'a> {
 
 /// Update registration settings.
 pub async fn registration_update(params: RegistrationUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let req = UpdateRegistrationSettingsRequest {
         mode: params.mode,
         token: params.reg_token.map(SecretString::new),
@@ -132,8 +135,9 @@ pub async fn authentication_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_authentication_settings().await.context_to()?;
 
     let human = format!("Password Auth Enabled:  {}\n", resp.password_auth_enabled);
@@ -148,8 +152,9 @@ pub async fn authentication_update(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateAuthenticationSettingsRequest {
         password_auth_enabled,
     };
@@ -174,8 +179,9 @@ pub async fn certificates_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_agent_certificate_settings().await.context_to()?;
 
     let mut human = String::new();
@@ -199,8 +205,9 @@ pub async fn certificates_update(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateAgentCertificateSettingsRequest {
         lifetime_days,
         renewal_window_hours,
@@ -230,8 +237,9 @@ pub async fn network_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_network_settings().await.context_to()?;
 
     let mut human = String::new();
@@ -271,6 +279,7 @@ pub struct NetworkUpdateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub trusted_proxies: Option<Vec<String>>,
     pub real_ip_header: Option<String>,
     pub extra_sans: Option<Vec<String>>,
@@ -282,7 +291,7 @@ pub struct NetworkUpdateParams<'a> {
 
 /// Update network settings.
 pub async fn network_update(params: NetworkUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let req = UpdateNetworkSettingsRequest {
         trusted_proxies: params.trusted_proxies,
         real_ip_header: params.real_ip_header,
@@ -335,8 +344,9 @@ pub async fn rotate_ca(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.rotate_ca().await.context_to()?;
 
     let human = format!("{}\n", resp.message);
@@ -350,8 +360,9 @@ pub async fn renew_server_cert(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.renew_server_certificate().await.context_to()?;
 
     let human = format!("{}\n", resp.message);
@@ -365,8 +376,9 @@ pub async fn mqtt_list(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.list_mqtt_settings().await.context_to()?;
 
     let mut human = String::new();
@@ -395,8 +407,9 @@ pub async fn mqtt_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_mqtt_settings(id).await.context_to()?;
 
     let mut human = String::new();
@@ -424,6 +437,7 @@ pub struct MqttCreateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub url: Option<String>,
     pub transport: Option<String>,
     pub host: Option<String>,
@@ -438,7 +452,7 @@ pub struct MqttCreateParams<'a> {
 
 /// Create a new MQTT client configuration.
 pub async fn mqtt_create(params: MqttCreateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let transport = params
         .transport
         .map(|t| t.parse())
@@ -474,6 +488,7 @@ pub struct MqttUpdateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub id: Uuid,
     pub url: Option<String>,
     pub transport: Option<String>,
@@ -489,7 +504,7 @@ pub struct MqttUpdateParams<'a> {
 
 /// Update an existing MQTT client configuration.
 pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let transport = params
         .transport
         .map(|t| t.parse())
@@ -532,8 +547,9 @@ pub async fn mqtt_delete(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     client.delete_mqtt_settings(id).await.context_to()?;
 
     let value = serde_json::json!({"message": format!("MQTT configuration {id} deleted.")});
@@ -548,8 +564,9 @@ pub async fn mqtt_limit_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_mqtt_limit().await.context_to()?;
 
     let human = format!("Max Clients Per Tenant:  {}\n", resp.max_clients_per_tenant);
@@ -564,8 +581,9 @@ pub async fn mqtt_limit_update(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateMqttLimitRequest {
         max_clients_per_tenant: max,
     };
@@ -587,8 +605,9 @@ pub async fn oidc_list(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.list_oidc_providers().await.context_to()?;
 
     let mut human = String::new();
@@ -617,8 +636,9 @@ pub async fn oidc_show(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_oidc_provider(id).await.context_to()?;
 
     let mut human = String::new();
@@ -657,6 +677,7 @@ pub struct OidcCreateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub name: String,
     pub slug: String,
     pub logo_url: Option<String>,
@@ -670,7 +691,7 @@ pub struct OidcCreateParams<'a> {
 
 /// Create a new OIDC provider.
 pub async fn oidc_create(params: OidcCreateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let req = CreateOidcProviderRequest {
         name: params.name,
         slug: params.slug,
@@ -703,6 +724,7 @@ pub struct OidcUpdateParams<'a> {
     pub token: Option<&'a str>,
     pub format: OutputFormat,
     pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
     pub id: Uuid,
     pub name: Option<String>,
     pub slug: Option<String>,
@@ -717,7 +739,7 @@ pub struct OidcUpdateParams<'a> {
 
 /// Update an existing OIDC provider.
 pub async fn oidc_update(params: OidcUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure)?;
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
     let req = UpdateOidcProviderRequest {
         name: params.name,
         slug: params.slug,
@@ -752,8 +774,9 @@ pub async fn oidc_delete(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     client.delete_oidc_provider(id).await.context_to()?;
 
     let value = serde_json::json!({"message": format!("OIDC provider {id} deleted.")});
@@ -769,8 +792,9 @@ pub async fn oidc_activate(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.activate_oidc_provider(id).await.context_to()?;
 
     let mut human = String::new();
@@ -788,8 +812,9 @@ pub async fn oidc_deactivate(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.deactivate_oidc_provider(id).await.context_to()?;
 
     let mut human = String::new();
@@ -806,8 +831,9 @@ pub async fn alerts(
     token: Option<&str>,
     format: OutputFormat,
     insecure: bool,
+    request_timeout: Option<std::time::Duration>,
 ) -> Result<()> {
-    let client = authenticated_client(server, token, insecure)?;
+    let client = authenticated_client(server, token, insecure, request_timeout)?;
     let resp = client.get_system_alerts().await.context_to()?;
 
     let mut human = String::new();

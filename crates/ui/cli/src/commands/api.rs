@@ -5,17 +5,24 @@ use rootcause::prelude::*;
 use serde::Serialize;
 use uptrakit_openapi_client::StatusCode;
 
+/// Parameters for executing a raw API call.
+pub struct ExecuteParams<'a> {
+    pub method: &'a str,
+    pub path: &'a str,
+    pub data: Option<&'a str>,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub format: OutputFormat,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
 /// Execute a raw API call and print the response in the requested format.
-pub async fn execute(
-    method: &str,
-    path: &str,
-    data: Option<&str>,
-    server_override: Option<&str>,
-    token_override: Option<&str>,
-    format: OutputFormat,
-    insecure: bool,
-) -> Result<()> {
-    let client = authenticated_client(server_override, token_override, insecure)?;
+pub async fn execute(params: ExecuteParams<'_>) -> Result<()> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let method = params.method;
+    let data = params.data;
+    let format = params.format;
 
     let body = match data {
         Some(json_str) => Some(serde_json::from_str(json_str).context_to()?),
@@ -23,10 +30,10 @@ pub async fn execute(
     };
 
     // Ensure path starts with /
-    let path = if path.starts_with('/') {
-        path.to_string()
+    let path = if params.path.starts_with('/') {
+        params.path.to_string()
     } else {
-        format!("/{path}")
+        format!("/{}", params.path)
     };
 
     let resp = client.raw_request(method, &path, body).await.context_to()?;

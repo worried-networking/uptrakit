@@ -34,6 +34,47 @@ impl HookShell {
             Self::PowerShell => "powershell",
         }
     }
+
+    /// Shell executable for the **local** machine (auto-detects platform).
+    ///
+    /// PowerShell uses `pwsh` (PowerShell Core) on Linux/macOS because
+    /// `powershell` (Windows PowerShell 5.1) does not exist there.
+    pub fn local_executable(self) -> &'static str {
+        self.executable_for_platform(cfg!(target_os = "windows"))
+    }
+
+    /// Shell executable for a **remote** host.
+    ///
+    /// Pass `true` when the remote host is Windows; `false` for Linux, macOS,
+    /// or any other non-Windows OS. SSH executors use this method because
+    /// `local_executable()` reflects the agent machine's OS, not the target's.
+    ///
+    /// PowerShell: Windows → `powershell`, non-Windows → `pwsh`.
+    pub fn remote_executable(self, remote_is_windows: bool) -> &'static str {
+        self.executable_for_platform(remote_is_windows)
+    }
+
+    /// The argument flag for this shell (e.g., `-c` or `-Command`).
+    pub fn flag(self) -> &'static str {
+        match self {
+            Self::Bash | Self::Sh => "-c",
+            Self::PowerShell => "-Command",
+        }
+    }
+
+    fn executable_for_platform(self, is_windows: bool) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Sh => "sh",
+            Self::PowerShell => {
+                if is_windows {
+                    "powershell"
+                } else {
+                    "pwsh"
+                }
+            }
+        }
+    }
 }
 
 /// Error returned when parsing an invalid hook shell string.
@@ -99,5 +140,40 @@ mod tests {
     #[test]
     fn default_is_bash() {
         assert_eq!(HookShell::default(), HookShell::Bash);
+    }
+
+    #[test]
+    fn hook_shell_local_executable_powershell() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(HookShell::PowerShell.local_executable(), "powershell");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(HookShell::PowerShell.local_executable(), "pwsh");
+    }
+
+    #[test]
+    fn hook_shell_local_executable_bash_sh() {
+        assert_eq!(HookShell::Bash.local_executable(), "bash");
+        assert_eq!(HookShell::Sh.local_executable(), "sh");
+    }
+
+    #[test]
+    fn hook_shell_remote_executable_windows() {
+        assert_eq!(HookShell::PowerShell.remote_executable(true), "powershell");
+        assert_eq!(HookShell::Bash.remote_executable(true), "bash");
+        assert_eq!(HookShell::Sh.remote_executable(true), "sh");
+    }
+
+    #[test]
+    fn hook_shell_remote_executable_non_windows() {
+        assert_eq!(HookShell::PowerShell.remote_executable(false), "pwsh");
+        assert_eq!(HookShell::Bash.remote_executable(false), "bash");
+        assert_eq!(HookShell::Sh.remote_executable(false), "sh");
+    }
+
+    #[test]
+    fn hook_shell_flag() {
+        assert_eq!(HookShell::Bash.flag(), "-c");
+        assert_eq!(HookShell::Sh.flag(), "-c");
+        assert_eq!(HookShell::PowerShell.flag(), "-Command");
     }
 }

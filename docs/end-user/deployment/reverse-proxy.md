@@ -105,6 +105,21 @@ The PKI address is embedded into every managed CA certificate; changing it trigg
 1. Connected agents receive a `CaBundleUpdated` + `RequestCertRenewal` message and refresh certificates automatically.
 1. Offline agents detect the updated `ca_bundle_hash` and fetch the new bundle over HTTPS.
 
+## Frontend Sub-Path Deployment
+
+When the frontend SPA is served from a sub-path (e.g., `https://example.com/uptrakit/`) via a reverse proxy
+and the API is available at a different prefix, set the `VITE_API_BASE` environment variable **at build time**:
+
+```sh
+VITE_API_BASE=/uptrakit/api/v1 npm run build
+```
+
+The default value is `/api/v1`, which is correct when both the SPA and the API are served from the same
+origin root. Most reverse proxy deployments do not need this setting.
+
+> **Note:** `VITE_API_BASE` is a Vite build-time variable. It is compiled into the static bundle and cannot
+> be changed at runtime without rebuilding.
+
 ## Proxy-Specific Guides
 
 - [Traefik](traefik.md)
