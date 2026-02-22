@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
+#[cfg(feature = "oidc")]
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -63,7 +64,7 @@ pub async fn get_authentication_settings(
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
-    _tenant_db: TenantDb,
+    #[cfg(feature = "oidc")] tenant_db: TenantDb,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
@@ -83,11 +84,11 @@ pub async fn update_authentication_settings(
             // Safety: at least one auth method must remain
             #[cfg(feature = "oidc")]
             {
-                let active_providers = _tenant_db
+                let active_providers = tenant_db
                     .find::<oidc_provider::Entity>()
                     .filter(oidc_provider::Column::IsActive.eq(true))
                     .filter(oidc_provider::Column::DeletedAt.is_null())
-                    .all(_tenant_db.db())
+                    .all(tenant_db.db())
                     .await
                     .unwrap_or_default();
 
