@@ -10,7 +10,7 @@ use crate::error_response::error_response;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
 use openidconnect::{
@@ -557,10 +557,20 @@ pub async fn oidc_callback(
             };
             let encoded_email =
                 percent_encoding::utf8_percent_encode(&email, percent_encoding::NON_ALPHANUMERIC);
-            Redirect::to(&format!(
-                "/login?link_required=true&link_token={link_token}&email={encoded_email}"
-            ))
-            .into_response()
+            // Suppress Referer on the link-token redirect so the token URL is not
+            // forwarded to any third-party resource loaded by the login page.
+            let mut link_headers = HeaderMap::new();
+            link_headers.insert(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            );
+            (
+                link_headers,
+                Redirect::to(&format!(
+                    "/login?link_required=true&link_token={link_token}&email={encoded_email}"
+                )),
+            )
+                .into_response()
         }
         OidcUserResolution::LinkViaOidcRequired {
             user_id,
@@ -596,10 +606,20 @@ pub async fn oidc_callback(
             };
             let encoded_email =
                 percent_encoding::utf8_percent_encode(&email, percent_encoding::NON_ALPHANUMERIC);
-            Redirect::to(&format!(
-                "/login?link_required=true&link_token={link_token}&email={encoded_email}&link_provider_id={existing_provider_id}"
-            ))
-            .into_response()
+            // Suppress Referer on the link-token redirect so the token URL is not
+            // forwarded to any third-party resource loaded by the login page.
+            let mut link_headers = HeaderMap::new();
+            link_headers.insert(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            );
+            (
+                link_headers,
+                Redirect::to(&format!(
+                    "/login?link_required=true&link_token={link_token}&email={encoded_email}&link_provider_id={existing_provider_id}"
+                )),
+            )
+                .into_response()
         }
         OidcUserResolution::NotAllowed => {
             drop(txn);

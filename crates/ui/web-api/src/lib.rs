@@ -9,6 +9,7 @@ pub mod mqtt_lease_coordinator;
 pub mod notification_service;
 pub mod ocsp;
 pub mod pki_utils;
+pub mod queries;
 pub mod routes;
 pub mod service_connections;
 pub mod setting_key;

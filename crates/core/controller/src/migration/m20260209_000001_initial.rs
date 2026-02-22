@@ -1755,7 +1755,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(ControllerEvents::TargetServiceType).text())
                     .col(
                         ColumnDef::new(ControllerEvents::MessageJson)
-                            .text()
+                            .json()
                             .not_null(),
                     )
                     .col(

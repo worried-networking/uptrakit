@@ -3,6 +3,7 @@ use crate::SettingKey;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageAgents, CanViewAgents};
+use crate::queries::services::{self as svc_queries, ServiceQueryError};
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -11,16 +12,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect, Set, TransactionTrait,
-    sea_query::{Expr, OnConflict},
-};
 use std::sync::Arc;
-use time::OffsetDateTime;
 use uptrakit_internal_wire::{ApprovedPayload, ControllerMessage, RejectedPayload};
-use uptrakit_shared_db::entity::prelude::{RevocationReason, ServiceCertificate, ServiceHost};
-use uptrakit_shared_db::entity::{service, service_certificate, service_host};
 
 pub use uptrakit_web_api_types::pagination::PaginatedResponse;
 pub use uptrakit_web_api_types::services::{
@@ -31,22 +24,6 @@ pub use uptrakit_web_api_types::services::{
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn model_to_response(m: service::Model) -> ServiceResponse {
-    ServiceResponse {
-        id: m.id,
-        service_type: m.service_type,
-        hostname: m.hostname,
-        friendly_name: m.friendly_name,
-        ip_address: m.ip_address,
-        status: m.status,
-        client_version: m.client_version,
-        last_seen_at: m.last_seen_at,
-        created_at: m.created_at,
-        updated_at: m.updated_at,
-        ping_interval_seconds: m.ping_interval_seconds.map(|v| v as u32),
-    }
-}
 
 /// Determine the correct `SettingKey` for the enrollment token hash based on
 /// the `type` query parameter.
@@ -86,49 +63,13 @@ pub async fn list_services(
     CanViewAgents(_user): CanViewAgents,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    let pagination = query.pagination().resolve();
-
-    let mut q = tenant_db
-        .find::<service::Entity>()
-        .filter(service::Column::DeactivatedAt.is_null());
-
-    if let Some(ref type_filter) = query.r#type {
-        q = q.filter(service::Column::ServiceType.eq(*type_filter));
-    }
-
-    if let Some(ref status_filter) = query.status {
-        q = q.filter(service::Column::Status.eq(*status_filter));
-    }
-
-    let base_query = q.order_by_desc(service::Column::CreatedAt);
-
-    let total = match base_query.clone().count(tenant_db.db()).await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to count services: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let services = match base_query
-        .offset(Some(pagination.offset()))
-        .limit(Some(pagination.per_page))
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(s) => s,
+    match svc_queries::list_services(&tenant_db, &query).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to list services: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
-    };
-
-    let items: Vec<ServiceResponse> = services.into_iter().map(model_to_response).collect();
-    (
-        StatusCode::OK,
-        Json(PaginatedResponse::new(items, total, pagination)),
-    )
-        .into_response()
+    }
 }
 
 /// Get a single service by ID
@@ -158,21 +99,14 @@ pub async fn get_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db
-        .find_by_id::<service::Entity, _>(service_id)
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
+    match svc_queries::get_active_service(&tenant_db, service_id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(e) => {
             tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
-    };
-
-    (StatusCode::OK, Json(model_to_response(svc))).into_response()
+    }
 }
 
 /// Update a service's configurable settings (e.g. ping interval)
@@ -205,42 +139,16 @@ pub async fn update_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db
-        .find_by_id::<service::Entity, _>(service_id)
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
+    match svc_queries::update_service_settings(&tenant_db, service_id, body.ping_interval_seconds)
         .await
     {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(e) => {
-            tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    let mut active: service::ActiveModel = svc.into();
-
-    if let Some(ping) = body.ping_interval_seconds {
-        if ping == 0 {
-            // Clear override — revert to service-type default
-            active.ping_interval_seconds = Set(None);
-        } else {
-            active.ping_interval_seconds = Set(Some(ping as i32));
-        }
-    }
-
-    active.updated_at = Set(OffsetDateTime::now_utc());
-
-    let updated = match active.update(tenant_db.db()).await {
-        Ok(s) => s,
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "Service not found"),
         Err(e) => {
             tracing::error!("Failed to update service: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
-    };
-
-    (StatusCode::OK, Json(model_to_response(updated))).into_response()
+    }
 }
 
 /// Approve a pending service
@@ -271,38 +179,25 @@ pub async fn approve_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db
-        .find_by_id::<service::Entity, _>(service_id)
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(e) => {
-            tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    let resp = match svc_queries::approve_service(&tenant_db, service_id).await {
+        Ok(r) => r,
+        Err(ServiceQueryError::NotFound) => {
+            return error_response(StatusCode::NOT_FOUND, "Service not found")
         }
-    };
-
-    if svc.status != service::ServiceStatus::Pending {
-        return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
-    }
-
-    let now = OffsetDateTime::now_utc();
-    let mut active: service::ActiveModel = svc.into();
-    active.status = Set(service::ServiceStatus::Approved);
-    active.updated_at = Set(now);
-
-    let updated = match active.update(tenant_db.db()).await {
-        Ok(s) => s,
-        Err(e) => {
+        Err(ServiceQueryError::NotPending) => {
+            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
+        }
+        Err(ServiceQueryError::Db(e)) => {
             tracing::error!("Failed to approve service: {}", e);
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+        Err(e) => {
+            tracing::error!("Unexpected error approving service: {:?}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
     };
 
-    // Push approval via WebSocket (local + cross-controller outbox)
+    // Push approval via WebSocket (local + cross-controller outbox).
     let _ = state
         .notification_service
         .send(
@@ -311,7 +206,7 @@ pub async fn approve_service(
         )
         .await;
 
-    (StatusCode::OK, Json(model_to_response(updated))).into_response()
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Reject a pending service
@@ -342,39 +237,25 @@ pub async fn reject_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db
-        .find_by_id::<service::Entity, _>(service_id)
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(e) => {
-            tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    let resp = match svc_queries::reject_service(&tenant_db, service_id).await {
+        Ok(r) => r,
+        Err(ServiceQueryError::NotFound) => {
+            return error_response(StatusCode::NOT_FOUND, "Service not found")
         }
-    };
-
-    if svc.status != service::ServiceStatus::Pending {
-        return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
-    }
-
-    let now = OffsetDateTime::now_utc();
-    let mut active: service::ActiveModel = svc.into();
-    active.status = Set(service::ServiceStatus::Rejected);
-    active.deactivated_at = Set(Some(now));
-    active.updated_at = Set(now);
-
-    let updated = match active.update(tenant_db.db()).await {
-        Ok(s) => s,
-        Err(e) => {
+        Err(ServiceQueryError::NotPending) => {
+            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
+        }
+        Err(ServiceQueryError::Db(e)) => {
             tracing::error!("Failed to reject service: {}", e);
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
+        Err(e) => {
+            tracing::error!("Unexpected error rejecting service: {:?}", e);
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
     };
 
-    // Push rejection via WebSocket (local + cross-controller outbox)
+    // Push rejection via WebSocket (local + cross-controller outbox).
     let _ = state
         .notification_service
         .send(
@@ -383,10 +264,10 @@ pub async fn reject_service(
         )
         .await;
 
-    // Terminate active WebSocket connection
+    // Terminate active WebSocket connection.
     state.service_connections.unregister(&service_id).await;
 
-    (StatusCode::OK, Json(model_to_response(updated))).into_response()
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Deactivate a service (soft-delete)
@@ -417,66 +298,24 @@ pub async fn deactivate_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db
-        .find_by_id::<service::Entity, _>(service_id)
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Service not found"),
-        Err(e) => {
-            tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    match svc_queries::deactivate_service(&tenant_db, service_id, state.default_tenant_id).await {
+        Ok(true) => {
+            state.revocation_notify.notify_one();
+            state.service_connections.unregister(&service_id).await;
+            (
+                StatusCode::OK,
+                Json(MessageResponse {
+                    message: "Service deactivated".to_string(),
+                }),
+            )
+                .into_response()
         }
-    };
-
-    let now = OffsetDateTime::now_utc();
-    let mut active: service::ActiveModel = svc.into();
-    active.deactivated_at = Set(Some(now));
-    active.updated_at = Set(now);
-
-    if let Err(e) = active.update(tenant_db.db()).await {
-        tracing::error!("Failed to deactivate service: {}", e);
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        Ok(false) => error_response(StatusCode::NOT_FOUND, "Service not found"),
+        Err(e) => {
+            tracing::error!("Failed to deactivate service: {}", e);
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
     }
-
-    // Revoke all non-revoked certificates for this service
-    if let Err(e) = ServiceCertificate::update_many()
-        .col_expr(
-            service_certificate::Column::RevokedAt,
-            Expr::value(Some(now)),
-        )
-        .col_expr(
-            service_certificate::Column::RevocationReason,
-            Expr::value(Some(RevocationReason::ServiceDeactivated)),
-        )
-        .filter(service_certificate::Column::ServiceId.eq(service_id))
-        .filter(service_certificate::Column::RevokedAt.is_null())
-        .exec(tenant_db.db())
-        .await
-    {
-        tracing::error!("Failed to revoke certificates: {}", e);
-    }
-
-    if let Err(e) =
-        crate::settings_store::bump_revocation_version(tenant_db.db(), state.default_tenant_id)
-            .await
-    {
-        tracing::warn!(error = ?e, "failed to bump revocation version counter");
-    }
-    state.revocation_notify.notify_one();
-
-    // Terminate active WebSocket connection
-    state.service_connections.unregister(&service_id).await;
-
-    (
-        StatusCode::OK,
-        Json(MessageResponse {
-            message: "Service deactivated".to_string(),
-        }),
-    )
-        .into_response()
 }
 
 /// Merge a pending (source) agent into an existing approved (target) agent.
@@ -518,183 +357,49 @@ pub async fn merge_service(
         return error_response(StatusCode::BAD_REQUEST, "Cannot merge service into itself");
     }
 
-    let txn = match tenant_db.db().begin().await {
-        Ok(txn) => txn,
-        Err(e) => {
-            tracing::error!("Failed to begin transaction: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
+    let target_connected = state.service_connections.is_connected(&target_uuid).await;
 
-    // Find target service (must be approved, not deactivated, agent type)
-    let target = match tenant_db
-        .find_by_id::<service::Entity, _>(target_uuid)
-        .lock_exclusive()
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(&txn)
-        .await
+    let resp = match svc_queries::merge_service(
+        &tenant_db,
+        target_uuid,
+        source_uuid,
+        target_connected,
+        state.default_tenant_id,
+    )
+    .await
     {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Target service not found"),
-        Err(e) => {
-            tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        Ok(r) => r,
+        Err(ServiceQueryError::NotFound) => {
+            return error_response(StatusCode::NOT_FOUND, "Target service not found")
         }
-    };
-
-    if target.service_type != service::ServiceType::Agent {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "Merge is only supported for agent services",
-        );
-    }
-
-    if target.status != service::ServiceStatus::Approved {
-        return error_response(StatusCode::BAD_REQUEST, "Target service must be approved");
-    }
-
-    if state.service_connections.is_connected(&target_uuid).await {
-        return error_response(
-            StatusCode::CONFLICT,
-            "Target service is currently connected",
-        );
-    }
-
-    // Find source service (must be pending, not deactivated, agent type)
-    let source = match tenant_db
-        .find_by_id::<service::Entity, _>(source_uuid)
-        .lock_exclusive()
-        .filter(service::Column::DeactivatedAt.is_null())
-        .one(&txn)
-        .await
-    {
-        Ok(Some(s)) => s,
-        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Source service not found"),
-        Err(e) => {
-            tracing::error!("DB error: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        Err(ServiceQueryError::SourceNotFound) => {
+            return error_response(StatusCode::NOT_FOUND, "Source service not found")
         }
-    };
-
-    if source.service_type != service::ServiceType::Agent {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "Merge is only supported for agent services",
-        );
-    }
-
-    if source.status != service::ServiceStatus::Pending {
-        return error_response(StatusCode::BAD_REQUEST, "Source service must be pending");
-    }
-
-    let now = OffsetDateTime::now_utc();
-
-    // Save the hash before deactivating the source
-    let source_secret_hash = source.enrollment_secret_hash.clone();
-    let source_hostname = source.hostname.clone();
-    let source_friendly_name = source.friendly_name.clone();
-    let source_ip_address = source.ip_address.clone();
-
-    // Deactivate source first -- invalidate its hash to free the unique constraint
-    let invalidated_hash = token::hash_token(&token::generate_uuid().to_string());
-    let mut source_active: service::ActiveModel = source.into();
-    source_active.enrollment_secret_hash = Set(invalidated_hash);
-    source_active.deactivated_at = Set(Some(now));
-    source_active.updated_at = Set(now);
-
-    if let Err(e) = source_active.update(&txn).await {
-        tracing::error!("Failed to deactivate source service: {}", e);
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-    }
-
-    // Revoke all non-revoked certificates for both services
-    for (svc_uuid, label) in [(source_uuid, "source"), (target_uuid, "target")] {
-        if let Err(e) = ServiceCertificate::update_many()
-            .col_expr(
-                service_certificate::Column::RevokedAt,
-                Expr::value(Some(now)),
+        Err(ServiceQueryError::TargetConnected) => {
+            return error_response(
+                StatusCode::CONFLICT,
+                "Target service is currently connected",
             )
-            .col_expr(
-                service_certificate::Column::RevocationReason,
-                Expr::value(Some(RevocationReason::ServiceMerged)),
-            )
-            .filter(service_certificate::Column::ServiceId.eq(svc_uuid))
-            .filter(service_certificate::Column::RevokedAt.is_null())
-            .exec(&txn)
-            .await
-        {
-            tracing::error!("Failed to revoke {label} service certificates: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-    }
-
-    if let Err(e) =
-        crate::settings_store::bump_revocation_version(&txn, state.default_tenant_id).await
-    {
-        tracing::error!(error = ?e, "failed to bump revocation version counter");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-    }
-
-    // Copy source's enrollment_secret_hash to target
-    let mut target_active: service::ActiveModel = target.into();
-    target_active.enrollment_secret_hash = Set(source_secret_hash);
-    target_active.hostname = Set(source_hostname);
-    target_active.friendly_name = Set(source_friendly_name);
-    target_active.ip_address = Set(source_ip_address);
-    target_active.updated_at = Set(now);
-
-    let updated_target = match target_active.update(&txn).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to update target service: {}", e);
+        Err(ServiceQueryError::NotAgentType) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "Merge is only supported for agent services",
+            )
+        }
+        Err(ServiceQueryError::NotApproved) => {
+            return error_response(StatusCode::BAD_REQUEST, "Target service must be approved")
+        }
+        Err(ServiceQueryError::NotPending) => {
+            return error_response(StatusCode::BAD_REQUEST, "Source service must be pending")
+        }
+        Err(ServiceQueryError::Db(e)) => {
+            tracing::error!("Failed to merge services: {}", e);
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
-
-    // Copy source service's host links to target (INSERT ON CONFLICT DO NOTHING)
-    let source_links = match ServiceHost::find()
-        .filter(service_host::Column::ServiceId.eq(source_uuid))
-        .all(&txn)
-        .await
-    {
-        Ok(links) => links,
-        Err(e) => {
-            tracing::error!("Failed to load source host links: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    for link in source_links {
-        let new_link = service_host::ActiveModel {
-            service_id: Set(target_uuid),
-            host_id: Set(link.host_id),
-            linked_at: Set(now),
-        };
-        if let Err(e) = ServiceHost::insert(new_link)
-            .on_conflict(
-                OnConflict::columns([
-                    service_host::Column::ServiceId,
-                    service_host::Column::HostId,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .exec(&txn)
-            .await
-        {
-            tracing::error!("Failed to copy host link during merge: {}", e);
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    }
-
-    if let Err(e) = txn.commit().await {
-        tracing::error!("Failed to commit merge transaction: {e}");
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-    }
 
     state.revocation_notify.notify_one();
-
-    // Terminate source's WebSocket connection
     state.service_connections.unregister(&source_uuid).await;
 
     tracing::info!(
@@ -703,7 +408,7 @@ pub async fn merge_service(
         "services merged: source deactivated, target updated"
     );
 
-    (StatusCode::OK, Json(model_to_response(updated_target))).into_response()
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// Generate a new enrollment token
@@ -803,6 +508,41 @@ pub async fn revoke_enrollment_token(
         .into_response()
 }
 
+/// Check if an enrollment token is configured
+#[utoipa::path(
+    get,
+    path = "/api/v1/services/enrollment-token/status",
+    params(
+        ("type" = Option<String>, Query, description = "Service type (agent, mqtt). Defaults to agent.")
+    ),
+    responses(
+        (status = 200, description = "Enrollment token status", body = EnrollmentTokenStatusResponse),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Not authorized")
+    ),
+    tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
+    security(("bearer_token" = []))
+)]
+pub async fn enrollment_token_status(
+    State(state): State<Arc<AppState>>,
+    CanManageAgents(_user): CanManageAgents,
+    Query(query): Query<ListServicesQuery>,
+) -> Response {
+    let setting_key = enrollment_setting_key(query.r#type.as_ref());
+
+    let configured = matches!(
+        load_setting(state.db(), state.default_tenant_id, setting_key).await,
+        Ok(Some(_))
+    );
+
+    (
+        StatusCode::OK,
+        Json(EnrollmentTokenStatusResponse { configured }),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,8 +556,12 @@ mod tests {
     use axum::Json;
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
-    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
-    use uptrakit_shared_db::entity::prelude::{AuthMethod, Service};
+    use sea_orm::{
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait,
+        Set,
+    };
+    use time::OffsetDateTime;
+    use uptrakit_shared_db::entity::{service, prelude::{AuthMethod, Service}};
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());
@@ -1058,39 +802,4 @@ mod tests {
         assert!(source_after.deactivated_at.is_none());
         assert_eq!(source_after.enrollment_secret_hash, "source-hash");
     }
-}
-
-/// Check if an enrollment token is configured
-#[utoipa::path(
-    get,
-    path = "/api/v1/services/enrollment-token/status",
-    params(
-        ("type" = Option<String>, Query, description = "Service type (agent, mqtt). Defaults to agent.")
-    ),
-    responses(
-        (status = 200, description = "Enrollment token status", body = EnrollmentTokenStatusResponse),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Not authorized")
-    ),
-    tag = "Services",
-    extensions(("x-required-permission" = json!("manage_agents"))),
-    security(("bearer_token" = []))
-)]
-pub async fn enrollment_token_status(
-    State(state): State<Arc<AppState>>,
-    CanManageAgents(_user): CanManageAgents,
-    Query(query): Query<ListServicesQuery>,
-) -> Response {
-    let setting_key = enrollment_setting_key(query.r#type.as_ref());
-
-    let configured = matches!(
-        load_setting(state.db(), state.default_tenant_id, setting_key).await,
-        Ok(Some(_))
-    );
-
-    (
-        StatusCode::OK,
-        Json(EnrollmentTokenStatusResponse { configured }),
-    )
-        .into_response()
 }

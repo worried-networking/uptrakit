@@ -25,6 +25,19 @@ impl UptrakitClient {
             .await
     }
 
+    /// Fetch all provider configurations across all pages.
+    ///
+    /// Automatically iterates through every page at [`MAX_PER_PAGE`] items per
+    /// request. Use [`list_provider_configs`] for manual pagination control.
+    ///
+    /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
+    /// [`list_provider_configs`]: Self::list_provider_configs
+    pub async fn list_all_provider_configs(&self) -> Result<Vec<ProviderConfigResponse>> {
+        let base = PaginationParams { page: None, per_page: None };
+        self.fetch_all_pages(crate::paths::provider_configs::BASE, &base)
+            .await
+    }
+
     /// Get a single provider configuration by ID.
     pub async fn get_provider_config(&self, id: &Uuid) -> Result<ProviderConfigResponse> {
         self.get(&crate::paths::provider_configs::by_id(id)).await

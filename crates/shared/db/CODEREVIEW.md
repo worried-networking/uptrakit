@@ -88,11 +88,6 @@ All many-to-many relationships use proper junction tables with `via()`. All one-
 None of the entities implement validation in `ActiveModelBehavior`. All use empty impls. Acceptable if validation is
 handled in the service layer.
 
-### INFORMATIONAL: `controller_event.message_json` as `String`
-
-The field stores JSON but uses `column_type = "Text"`. Using `serde_json::Value` with `column_type = "Json"` would
-enable database-level JSON validation and query capabilities. May be intentional for SQLite compatibility.
-
 ---
 
 ## Summary

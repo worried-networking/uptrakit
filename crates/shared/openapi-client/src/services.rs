@@ -34,6 +34,22 @@ impl UptrakitClient {
             .await
     }
 
+    /// Fetch all services matching the given filters across all pages.
+    ///
+    /// Automatically iterates through every page at [`MAX_PER_PAGE`] items per
+    /// request. The `page` and `per_page` fields of `query` are ignored; use
+    /// [`list_services`] for manual pagination control.
+    ///
+    /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
+    /// [`list_services`]: Self::list_services
+    pub async fn list_all_services(
+        &self,
+        query: &ListServicesQuery,
+    ) -> Result<Vec<ServiceResponse>> {
+        self.fetch_all_pages(crate::paths::services::BASE, query)
+            .await
+    }
+
     /// Get a single service by ID.
     pub async fn get_service(&self, id: &Uuid) -> Result<ServiceResponse> {
         self.get(&crate::paths::services::by_id(id)).await

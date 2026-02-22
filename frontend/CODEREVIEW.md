@@ -111,22 +111,14 @@ The variable is documented in `docs/end-user/deployment/reverse-proxy.md`.
 
 ### 2.2 Issues
 
-#### SEC-04: OIDC link token readable from URL parameters
+#### ~~SEC-04: OIDC link token readable from URL parameters~~ RESOLVED — documented as accepted risk
 
-**Severity:** Low
-**Location:** `login/+page.svelte:69-74`
+**Location:** `login/+page.svelte:69-74` / `crates/ui/web-api/src/routes/oidc_auth.rs`
 
-When OIDC account linking is required, the backend redirects to
-`/login?link_required=true&link_token=...&email=...`. The `link_token` is visible in the browser address
-bar and history. This is the intended OAuth flow (the backend generates these URLs), but the token in the
-URL could be captured in:
-
-- Browser history
-- Referrer headers (mitigated by `referrerpolicy`)
-- Server access logs
-
-**Recommendation:** Document this as an accepted risk, or consider using a session-based approach where the
-link token is stored server-side and referenced by an opaque session ID.
+The OIDC callback now sets `Referrer-Policy: no-referrer` on both link-token redirect responses so the
+token URL is not forwarded in `Referer` headers. The remaining risk (browser history, server access logs)
+is documented as accepted in `docs/security/auth-and-authorization.md` with the full list of mitigations:
+single-use + short-lived token, same-origin redirect, user already authenticated via OIDC at this point.
 
 #### SEC-05: CSP `img-src 'self' https:` allows any HTTPS image
 
@@ -296,14 +288,14 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 
 | Severity | Count | IDs                                                                                 |
 | -------- | ----- | ----------------------------------------------------------------------------------- |
-| Low      | 4     | SEC-04, SEC-05, CQ-08, HA-06 (ARC-01, ARC-03, ARC-04, CQ-05, CQ-06, HA-05 resolved) |
+| Low      | 3     | SEC-05, CQ-08, HA-06 (ARC-01, ARC-03, ARC-04, CQ-05, CQ-06, HA-05, SEC-04 resolved) |
 
 ### Issues by Category
 
 | Category      | Count |
 | ------------- | ----- |
 | Architecture  | 1     |
-| Security      | 2     |
+| Security      | 1     |
 | Code Quality  | 1     |
 | Backend HA    | 1     |
 | Accessibility | 0     |
@@ -324,7 +316,7 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 | `lib/auth.test.ts`                         | —                 | 9 tests covering initialize, handleLogin, handleLogout, handleOidcCallback           |
 | `+layout.svelte`                           | ~~HA-05~~         | Session-expired banner added (dismissable, non-blocking)                             |
 | `+layout.ts`                               | —                 | Clean                                                                                |
-| `login/+page.svelte`                       | SEC-04            | Offline disabling added; hasRedirected guard added                                   |
+| `login/+page.svelte`                       | ~~SEC-04~~        | Offline disabling added; hasRedirected guard added; SEC-04 documented accepted risk  |
 | `register/+page.svelte`                    | —                 | Offline disabling and hasRedirected guard added                                      |
 | `device/+page.svelte`                      | —                 | Good device code validation                                                          |
 | `services/+page.svelte`                    | —                 | Double load + fragile effect fixed                                                   |

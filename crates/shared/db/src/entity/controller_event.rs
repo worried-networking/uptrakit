@@ -10,8 +10,8 @@ pub struct Model {
     pub target_service_id: Option<Uuid>,
     #[sea_orm(column_type = "Text", nullable)]
     pub target_service_type: Option<String>,
-    #[sea_orm(column_type = "Text")]
-    pub message_json: String,
+    #[sea_orm(column_type = "Json")]
+    pub message_json: serde_json::Value,
     pub created_at: OffsetDateTime,
 }
 

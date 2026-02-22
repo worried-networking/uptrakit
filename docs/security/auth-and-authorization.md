@@ -29,6 +29,36 @@ Refresh token verification and rotation validate session data integrity before p
 
 See also: [Secrets Handling and Encryption](secrets-and-encryption.md) for encryption-at-rest details.
 
+## OIDC Link Token URL Exposure
+
+**Risk level:** Low (accepted)
+
+When OIDC account linking is required the backend redirects to
+`/login?link_required=true&link_token=<token>&email=<email>`. The `link_token` is therefore
+visible in:
+
+- The browser address bar
+- Browser history
+- Server access logs
+
+### Mitigations in place
+
+1. **Single-use, short-lived**: the token is consumed atomically from
+   `pending_account_links` on first use and expires server-side within a short window.
+2. **Same-origin redirect**: the redirect is to the same origin (`/login`), so there
+   is no cross-origin referrer leakage.
+3. **`Referrer-Policy: no-referrer`** is set on the redirect response in
+   `crates/ui/web-api/src/routes/oidc_auth.rs` so the token URL is not forwarded in
+   `Referer` headers when the browser subsequently loads third-party resources.
+4. **User already authenticated**: the token only exists after the user has successfully
+   completed OIDC authentication; it does not grant initial access.
+
+### Residual risk
+
+The token remains in browser history and server access logs for the lifetime of those
+logs. Operators should ensure access-log retention policies are appropriate for their
+environment.
+
 ## Permissions Model - Detailed
 
 Authorization uses a typed `Permission` enum (defined in `crates/shared/web-api-types/src/permissions.rs`, re-exported

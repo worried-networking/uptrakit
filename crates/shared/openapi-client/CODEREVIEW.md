@@ -8,8 +8,8 @@
 ## Executive Summary
 
 The crate provides a typed HTTP client around the Uptrakit web API with strong
-error handling and solid type safety. No critical issues were found. The main
-improvement area is resiliency (pagination iterator and optional retry strategy).
+error handling and solid type safety. No critical issues were found. Resiliency
+improvements (pagination iterator and optional retry strategy) have been implemented.
 
 ## Code Quality Findings
 
@@ -68,18 +68,6 @@ External developers get a single dependency (`uptrakit-openapi-client`) with acc
 request/response types via `client::types::*`. No need to add `uuid` or `reqwest` as direct
 dependencies.
 
-### Missing: pagination iterator helper
-
-List endpoints return `PaginatedResponse<T>` but there is no convenience method for iterating
-over all pages. External developers must implement manual pagination loops.
-
-**Recommendation:** Consider adding an async iterator helper.
-
-### Missing: built-in retry support
-
-No retry logic for transient failures (network errors, 429 rate limiting, 5xx server errors).
-The `ClientError::RateLimited` variant is detected but not automatically retried.
-
 ### Missing: batch operations
 
 All operations are single-item. No bulk update, bulk delete, or batch check endpoints.
@@ -96,6 +84,11 @@ All operations are single-item. No bulk update, bulk delete, or batch check endp
 - **`raw_request` escape hatch** for unmapped or custom endpoints.
 - **Device flow support** for CLI/headless authentication.
 - **Insecure mode** for development (TLS verification bypass).
+- **`list_all_*` pagination helpers**: `list_all_hosts`, `list_all_services`, `list_all_software_items`,
+  `list_all_provider_configs`, `list_all_update_history` automatically iterate all pages using
+  `MAX_PER_PAGE = 1000` per request.
+- **Optional retry strategy** (`RetryConfig` + `with_retry`): exponential backoff for 5xx, respects
+  `Retry-After` for 429, no retry for 4xx or auth failures. Opt-in, disabled by default.
 
 ## Mock Testing Feature
 

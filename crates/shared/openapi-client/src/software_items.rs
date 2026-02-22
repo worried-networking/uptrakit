@@ -18,6 +18,19 @@ impl UptrakitClient {
             .await
     }
 
+    /// Fetch all software items across all pages.
+    ///
+    /// Automatically iterates through every page at [`MAX_PER_PAGE`] items per
+    /// request. Use [`list_software_items`] for manual pagination control.
+    ///
+    /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
+    /// [`list_software_items`]: Self::list_software_items
+    pub async fn list_all_software_items(&self) -> Result<Vec<SoftwareItemResponse>> {
+        let base = PaginationParams { page: None, per_page: None };
+        self.fetch_all_pages(crate::paths::software_items::BASE, &base)
+            .await
+    }
+
     /// Get a single software item by ID (detailed view with host info).
     pub async fn get_software_item(&self, id: &Uuid) -> Result<SoftwareItemDetailResponse> {
         self.get(&crate::paths::software_items::by_id(id)).await

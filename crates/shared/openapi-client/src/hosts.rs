@@ -13,6 +13,19 @@ impl UptrakitClient {
         self.get_with_query(crate::paths::hosts::BASE, params).await
     }
 
+    /// Fetch all hosts across all pages.
+    ///
+    /// Automatically iterates through every page at [`MAX_PER_PAGE`] items per
+    /// request and returns the concatenated list. Use [`list_hosts`] when
+    /// manual pagination control is needed.
+    ///
+    /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
+    /// [`list_hosts`]: Self::list_hosts
+    pub async fn list_all_hosts(&self) -> Result<Vec<HostResponse>> {
+        let base = PaginationParams { page: None, per_page: None };
+        self.fetch_all_pages(crate::paths::hosts::BASE, &base).await
+    }
+
     /// Get a single host by ID.
     pub async fn get_host(&self, id: &Uuid) -> Result<HostResponse> {
         self.get(&crate::paths::hosts::by_id(id)).await

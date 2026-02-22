@@ -133,7 +133,7 @@ impl EventPoller {
                 continue;
             }
 
-            let msg: ControllerMessage = match serde_json::from_str(&event.message_json) {
+            let msg: ControllerMessage = match serde_json::from_value(event.message_json.clone()) {
                 Ok(m) => m,
                 Err(e) => {
                     tracing::warn!(
@@ -385,7 +385,7 @@ mod tests {
                 source_controller_id: Set(Uuid::now_v7()),
                 target_service_id: Set(None),
                 target_service_type: Set(Some("agent".to_string())),
-                message_json: Set("{\"type\":\"ping\"}".to_string()),
+                message_json: Set(serde_json::json!({"type": "ping"})),
                 created_at: Set(now),
                 ..Default::default()
             };
@@ -409,7 +409,7 @@ mod tests {
             source_controller_id: Set(Uuid::now_v7()),
             target_service_id: Set(Some(service_id)),
             target_service_type: Set(Some("agent".to_string())),
-            message_json: Set("{\"type\":\"ping\"}".to_string()),
+            message_json: Set(serde_json::json!({"type": "ping"})),
             created_at: Set(old_time),
             ..Default::default()
         };

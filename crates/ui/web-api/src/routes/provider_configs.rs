@@ -1,6 +1,6 @@
-use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::queries::provider_configs::{self as pc_queries, UpdateProviderConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -8,60 +8,12 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
-};
-use time::OffsetDateTime;
-use uptrakit_provider_registry::ProviderRegistry;
-use uptrakit_shared_db::entity::provider_config;
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
 };
-
-pub(crate) fn validate_provider_config_request(
-    req: &CreateProviderConfigRequest,
-) -> Result<(), String> {
-    if req.name.is_empty() {
-        return Err("name must not be empty".to_string());
-    }
-
-    if let Err(e) = ProviderRegistry::validate_config(req.provider_type.clone(), &req.config) {
-        return Err(e.to_string());
-    }
-
-    if let Err(e) = validate_hooks_in_config(&req.config) {
-        return Err(e.to_string());
-    }
-
-    Ok(())
-}
-
-fn provider_config_response_from(m: provider_config::Model) -> Option<ProviderConfigResponse> {
-    let provider_type: uptrakit_provider_registry::ProviderType = match m.provider_type.parse() {
-        Ok(pt) => pt,
-        Err(_) => {
-            tracing::error!(
-                id = %m.id,
-                provider_type = %m.provider_type,
-                "provider config has invalid provider_type in database, skipping"
-            );
-            return None;
-        }
-    };
-    let config = ProviderRegistry::mask_config_secrets_str(provider_type.as_str(), &m.config);
-    Some(ProviderConfigResponse {
-        id: m.id,
-        name: m.name,
-        provider_type,
-        config,
-        enabled: m.enabled,
-        created_at: m.created_at,
-        updated_at: m.updated_at,
-    })
-}
 
 /// Create a new provider configuration.
 #[utoipa::path(
@@ -85,24 +37,8 @@ pub async fn create_provider_config(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    let now = OffsetDateTime::now_utc();
-    let model = provider_config::ActiveModel {
-        id: Set(generate_uuid()),
-        tenant_id: Set(tenant_db.tenant_id),
-        name: Set(req.name),
-        provider_type: Set(req.provider_type.to_string()),
-        config: Set(req.config),
-        enabled: Set(req.enabled),
-        created_at: Set(now),
-        updated_at: Set(now),
-        deactivated_at: Set(None),
-    };
-
-    match model.insert(tenant_db.db()).await {
-        Ok(inserted) => match provider_config_response_from(inserted) {
-            Some(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-        },
+    match pc_queries::create_provider_config(&tenant_db, req).await {
+        Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to create provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -130,38 +66,8 @@ pub async fn list_provider_configs(
     CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    let pagination = params.resolve();
-
-    let base_query = tenant_db
-        .find::<provider_config::Entity>()
-        .filter(provider_config::Column::DeactivatedAt.is_null())
-        .order_by_asc(provider_config::Column::Name);
-
-    let total = match base_query.clone().count(tenant_db.db()).await {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to count provider configs: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    };
-
-    match base_query
-        .offset(Some(pagination.offset()))
-        .limit(Some(pagination.per_page))
-        .all(tenant_db.db())
-        .await
-    {
-        Ok(configs) => {
-            let items: Vec<ProviderConfigResponse> = configs
-                .into_iter()
-                .filter_map(provider_config_response_from)
-                .collect();
-            (
-                StatusCode::OK,
-                Json(PaginatedResponse::new(items, total, pagination)),
-            )
-                .into_response()
-        }
+    match pc_queries::list_provider_configs(&tenant_db, &params).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to list provider configs: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -192,12 +98,13 @@ pub async fn get_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match find_active_config(&tenant_db, config_id).await {
-        Some(config) => match provider_config_response_from(config) {
-            Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
-            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-        },
-        None => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
+    match pc_queries::get_provider_config(&tenant_db, config_id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
+        Err(e) => {
+            tracing::error!("Failed to get provider config: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
     }
 }
 
@@ -226,57 +133,21 @@ pub async fn update_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let existing = match find_active_config(&tenant_db, config_id).await {
-        Some(c) => c,
-        None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
-    };
-
-    let provider_type = existing.provider_type.clone();
-
-    // Validate new config if provided
-    if let Some(ref mut new_config) = req.config.clone() {
-        // Restore masked secrets from existing config
-        ProviderRegistry::restore_config_secrets_str(&provider_type, new_config, &existing.config);
-
-        if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
-            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+    match pc_queries::update_provider_config(&tenant_db, config_id, req).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(UpdateProviderConfigError::NotFound) => {
+            error_response(StatusCode::NOT_FOUND, "Provider config not found")
         }
-
-        // Validate hook parameters to prevent command injection
-        if let Err(e) = validate_hooks_in_config(new_config) {
-            return error_response(StatusCode::BAD_REQUEST, e.to_string());
+        Err(UpdateProviderConfigError::EmptyName) => {
+            error_response(StatusCode::BAD_REQUEST, "name must not be empty")
         }
-    }
-
-    let now = OffsetDateTime::now_utc();
-    let mut model: provider_config::ActiveModel = existing.into();
-
-    if let Some(name) = req.name {
-        if name.is_empty() {
-            return error_response(StatusCode::BAD_REQUEST, "name must not be empty");
+        Err(UpdateProviderConfigError::ConfigValidation(msg)) => {
+            error_response(StatusCode::BAD_REQUEST, msg)
         }
-        model.name = Set(name);
-    }
-    if let Some(mut config) = req.config {
-        // Re-apply secret restoration on the actual value being saved
-        ProviderRegistry::restore_config_secrets_str(
-            &provider_type,
-            &mut config,
-            model.config.as_ref(),
-        );
-        model.config = Set(config);
-    }
-    if let Some(enabled) = req.enabled {
-        model.enabled = Set(enabled);
-    }
-    model.updated_at = Set(now);
-
-    match model.update(tenant_db.db()).await {
-        Ok(updated) => match provider_config_response_from(updated) {
-            Some(resp) => (StatusCode::OK, Json(resp)).into_response(),
-            None => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"),
-        },
-        Err(e) => {
+        Err(UpdateProviderConfigError::HookValidation(msg)) => {
+            error_response(StatusCode::BAD_REQUEST, msg)
+        }
+        Err(UpdateProviderConfigError::Db(e)) => {
             tracing::error!("Failed to update provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
@@ -306,60 +177,19 @@ pub async fn delete_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let config = match find_active_config(&tenant_db, config_id).await {
-        Some(c) => c,
-        None => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
-    };
-
-    let now = OffsetDateTime::now_utc();
-    let mut model: provider_config::ActiveModel = config.into();
-    model.deactivated_at = Set(Some(now));
-    model.enabled = Set(false);
-    model.updated_at = Set(now);
-
-    match model.update(tenant_db.db()).await {
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+    match pc_queries::delete_provider_config(&tenant_db, config_id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
         Err(e) => {
-            tracing::error!("Failed to soft-delete provider config: {e}");
+            tracing::error!("Failed to delete provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
 }
 
-/// Find a non-deactivated provider config by ID, scoped to a tenant.
-async fn find_active_config(
-    tenant_db: &TenantDb,
-    id: uuid::Uuid,
-) -> Option<provider_config::Model> {
-    tenant_db
-        .find_by_id::<provider_config::Entity, _>(id)
-        .filter(provider_config::Column::DeactivatedAt.is_null())
-        .one(tenant_db.db())
-        .await
-        .ok()
-        .flatten()
-}
-
-/// Validate hooks configuration embedded in a provider config or config_override JSON.
-///
-/// Parses the `"hooks"` key and validates all predefined hook parameters
-/// to reject shell metacharacters.
-pub(crate) fn validate_hooks_in_config(
-    config: &serde_json::Value,
-) -> std::result::Result<(), uptrakit_web_api_types::update_hooks::HookValidationError> {
-    if let Some(hooks_val) = config.get("hooks")
-        && let Ok(hooks_config) = serde_json::from_value::<
-            uptrakit_web_api_types::update_hooks::HooksConfig,
-        >(hooks_val.clone())
-    {
-        hooks_config.validate()?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use uptrakit_provider_registry::ProviderRegistry;
 
     /// Sentinel value used to indicate a masked secret in API responses.
     const SECRET_MASK: &str = "***";

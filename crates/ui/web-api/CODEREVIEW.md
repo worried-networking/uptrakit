@@ -26,24 +26,25 @@ non-standard lock-poisoning pattern. No critical issues.
 
 ## Extensibility Findings
 
-### Significant: routes directly import DB entities
+### ~~Significant: routes directly import DB entities~~ RESOLVED
 
 **Location:** Route handlers throughout `src/routes/`
 
-Route handlers directly import and query SeaORM entity models:
+A `src/queries/` module has been introduced with typed `async fn` helpers encapsulating all
+SeaORM entity access. Route handlers now delegate CRUD operations to:
 
-```rust
-use uptrakit_shared_db::entity::prelude::*;
-use uptrakit_shared_db::entity::provider_config;
-```
+- `queries/hosts.rs` — host queries
+- `queries/provider_configs.rs` — provider config queries (with `validate_hooks_internal` shared helper)
+- `queries/scheduled_tasks.rs` — scheduler queries
+- `queries/services.rs` — service queries (approve/reject/deactivate/merge)
+- `queries/software_items.rs` — software item queries (with validation helpers)
+- `queries/update_history.rs` — update history queries
 
-For example, `routes/provider_configs.rs` constructs `provider_config::ActiveModel` directly in
-request handlers, and `routes/hosts.rs` imports `host`, `service`, and `service_host` entities
-for multi-table queries.
-
-**Impact:** Database schema changes directly break API handlers. There is no data access layer
-to absorb schema evolution. This makes it harder for external developers to understand the API
-layer without also understanding the database schema.
+Handlers retain Axum concerns (extractors, response mapping, AppState side-effects for
+notifications and WebSocket connections) but no longer construct `ActiveModel` instances or
+import entity modules for CRUD. Dispatch operations (`trigger_update`, `check_versions`,
+`check_versions_host`) still query entities directly because they are tightly coupled to
+`AppState` and cannot be cleanly separated without injecting the state.
 
 ### ~~Significant: AppState exposes raw DatabaseConnection~~ RESOLVED
 
@@ -79,25 +80,6 @@ The `ProviderRegistry` is called directly in route handlers for `validate_config
 `mask_config_secrets_str()`, and `restore_config_secrets_str()`. It is not injected via `AppState`.
 
 **Impact:** Acceptable for current architecture but limits future flexibility.
-
-### Extensibility recommendation: data access layer
-
-Consider introducing a repository or data-access pattern:
-
-```rust
-pub trait ProviderConfigRepository: Send + Sync {
-    async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<ProviderConfigResponse>;
-    async fn create(&self, tenant_id: Uuid, req: CreateProviderConfigRequest) -> Result<ProviderConfigResponse>;
-    // ...
-}
-```
-
-This would:
-
-1. Decouple route handlers from the database schema.
-2. Centralize tenant isolation logic.
-3. Make it easier for external developers to understand the API without studying SeaORM entities.
-4. Enable testing routes with mock repositories.
 
 ## Strengths
 

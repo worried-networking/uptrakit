@@ -71,7 +71,7 @@ impl NotificationService {
         target_service_type: Option<&str>,
         msg: &ControllerMessage,
     ) {
-        let json = match serde_json::to_string(msg) {
+        let json = match serde_json::to_value(msg) {
             Ok(j) => j,
             Err(e) => {
                 tracing::error!(error = %e, "failed to serialize outbox event");
@@ -149,7 +149,7 @@ impl NotificationService {
 
         let mut delivered = 0usize;
         for event in events {
-            let msg: ControllerMessage = match serde_json::from_str(&event.message_json) {
+            let msg: ControllerMessage = match serde_json::from_value(event.message_json.clone()) {
                 Ok(msg) => msg,
                 Err(e) => {
                     tracing::warn!(
@@ -329,8 +329,8 @@ mod tests {
             source_controller_id: ActiveValue::Set(controller_id),
             target_service_id: ActiveValue::Set(None),
             target_service_type: ActiveValue::Set(None),
-            message_json: ActiveValue::Set(serde_json::to_string(
-                &ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
+            message_json: ActiveValue::Set(serde_json::to_value(
+                ControllerMessage::CaBundleUpdated(CaBundleUpdatedPayload {
                     ca_bundle_pem: "pem".to_string(),
                 }),
             )?),
@@ -358,8 +358,8 @@ mod tests {
             source_controller_id: ActiveValue::Set(controller_id),
             target_service_id: ActiveValue::Set(None),
             target_service_type: ActiveValue::Set(None),
-            message_json: ActiveValue::Set(serde_json::to_string(
-                &ControllerMessage::ExecuteUpdate(Box::new(
+            message_json: ActiveValue::Set(serde_json::to_value(
+                ControllerMessage::ExecuteUpdate(Box::new(
                     uptrakit_internal_wire::ExecuteUpdatePayload {
                         host_machine_id: "test-machine-id".to_string(),
                         update_history_id: Uuid::now_v7(),
@@ -414,8 +414,8 @@ mod tests {
             source_controller_id: ActiveValue::Set(controller_id),
             target_service_id: ActiveValue::Set(None),
             target_service_type: ActiveValue::Set(Some("agent".to_string())),
-            message_json: ActiveValue::Set(serde_json::to_string(
-                &ControllerMessage::RequestCertRenewal(RequestCertRenewalPayload {
+            message_json: ActiveValue::Set(serde_json::to_value(
+                ControllerMessage::RequestCertRenewal(RequestCertRenewalPayload {
                     reason: "test".to_string(),
                 }),
             )?),
