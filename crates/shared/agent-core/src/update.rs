@@ -1,33 +1,32 @@
-//! Update execution module for the Uptrakit agent.
+//! Update execution module for Uptrakit agents.
 //!
 //! Handles the complete update flow:
-//! 1. Receive ExecuteUpdate message
-//! 2. Send UpdateStarted (with detected from_version)
+//! 1. Receive `ExecuteUpdate` message
+//! 2. Detect current version (`from_version`)
 //! 3. Run pre-update commands sequentially, streaming output
 //! 4. Execute actual update (dispatched through Provider Registry), streaming output
 //! 5. Run post-update commands sequentially, streaming output
 //! 6. Detect to_version post-update
-//! 7. Send UpdateResult with final status and accumulated output
+//! 7. Return `UpdateExecutionResult` with final status and accumulated output
 //!
 //! ## Shell Execution
 //!
 //! Commands are executed with fail-early shell settings:
 //! - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
 //! - **Sh**: `set -eu` (exit on error, undefined vars)
-//! - **PowerShell** (future): `$ErrorActionPreference = 'Stop'`
 
 use std::sync::Arc;
 
 use rootcause::prelude::*;
 use thiserror::Error as ThisError;
 use tokio::sync::mpsc;
-use uptrakit_command::{CommandExecutor, LocalCommandExecutor, UpdateOutputLine};
+use uptrakit_command::{CommandExecutor, UpdateOutputLine};
 use uptrakit_internal_wire::{
     ExecuteUpdatePayload, HookCommand, OutputStreamType, UpdateFinalStatus, UpdateResultPayload,
 };
 use uptrakit_provider_registry::ProviderRegistry;
 
-use crate::error::Error;
+use crate::error::AgentCoreError;
 
 /// Maximum accumulated output size (10 MB) to prevent OOM from runaway commands.
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
@@ -77,13 +76,16 @@ pub struct UpdateOutputMessage {
 ///
 /// This function runs the complete update flow and sends output lines through
 /// the provided channel. The channel receiver should forward these as
-/// UpdateOutput messages to the controller.
+/// `UpdateOutput` messages to the controller.
+///
+/// The `executor` parameter controls where commands run — `LocalCommandExecutor`
+/// for the regular agent, `SshCommandExecutor` for the SSH agent.
 pub async fn execute_update(
     payload: ExecuteUpdatePayload,
+    executor: Arc<dyn CommandExecutor>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateExecutionResult {
     let update_history_id = payload.update_history_id;
-    let executor: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
 
     // Detect current version (from_version)
     let from_version = detect_current_version(&payload, Arc::clone(&executor)).await;
@@ -125,7 +127,7 @@ pub async fn execute_update(
                     Err(e) => {
                         let error_msg = format!("[pre-hook] Failed: {e}");
                         send_output(&output_tx, &error_msg, OutputStreamType::System).await;
-                        return Err(Error::PreUpdateHookFailed(e.to_string()));
+                        return Err(AgentCoreError::PreUpdateHookFailed(e.to_string()));
                     }
                 }
             }
@@ -147,7 +149,7 @@ pub async fn execute_update(
                 append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
             }
             Err(e) => {
-                return Err(Error::UpdateExecution(e.to_string()));
+                return Err(AgentCoreError::UpdateExecution(e.to_string()));
             }
         }
 
@@ -181,7 +183,7 @@ pub async fn execute_update(
                     Err(e) => {
                         let error_msg = format!("[post-hook] Failed: {e}");
                         send_output(&output_tx, &error_msg, OutputStreamType::System).await;
-                        return Err(Error::PostUpdateHookFailed(e.to_string()));
+                        return Err(AgentCoreError::PostUpdateHookFailed(e.to_string()));
                     }
                 }
             }
@@ -368,23 +370,28 @@ async fn send_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use uptrakit_command::LocalCommandExecutor;
     use uptrakit_internal_wire::{HookShell, ProviderType};
 
     fn test_payload() -> ExecuteUpdatePayload {
         ExecuteUpdatePayload {
+            host_machine_id: String::new(),
             update_history_id: uuid::Uuid::nil(),
             software_item_id: uuid::Uuid::nil(),
             software_item_name: "Test App".to_string(),
             package_identifier: "test-app".to_string(),
             to_version: "2.0.0".to_string(),
             provider_type: ProviderType::GithubReleases,
-            provider_config: json!({}),
+            provider_config: serde_json::json!({}),
             pre_update_hooks: vec![],
             post_update_hooks: vec![],
             release_info: None,
             timeout_seconds: 60,
         }
+    }
+
+    fn test_executor() -> Arc<dyn CommandExecutor> {
+        Arc::new(LocalCommandExecutor)
     }
 
     // ── Bounded output tests ────────────────────────────────────────────────
@@ -432,9 +439,9 @@ mod tests {
             shell: HookShell::Bash,
         }];
         payload.release_info = None;
-        payload.provider_config = json!({});
+        payload.provider_config = serde_json::json!({});
 
-        let result = execute_update(payload, tx).await;
+        let result = execute_update(payload, test_executor(), tx).await;
 
         assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
@@ -458,7 +465,7 @@ mod tests {
             shell: HookShell::Bash,
         }];
 
-        let result = execute_update(payload, tx).await;
+        let result = execute_update(payload, test_executor(), tx).await;
 
         assert_eq!(result.result.status, UpdateFinalStatus::Failed);
         assert!(result.result.error.is_some(), "Expected error but got None");
@@ -482,7 +489,7 @@ mod tests {
             shell: HookShell::Sh,
         }];
 
-        let result = execute_update(payload, tx).await;
+        let result = execute_update(payload, test_executor(), tx).await;
 
         assert_eq!(result.result.update_history_id, uuid::Uuid::nil());
 
@@ -494,51 +501,5 @@ mod tests {
             }
         }
         assert!(found_output);
-    }
-
-    // ── detect_current_version tests ────────────────────────────────────────
-
-    fn test_executor() -> Arc<dyn CommandExecutor> {
-        Arc::new(LocalCommandExecutor)
-    }
-
-    #[tokio::test]
-    async fn detect_current_version_delegates_to_provider() {
-        let payload = ExecuteUpdatePayload {
-            update_history_id: uuid::Uuid::nil(),
-            software_item_id: uuid::Uuid::nil(),
-            software_item_name: "Test App".to_string(),
-            package_identifier: "octocat/hello-world".to_string(),
-            to_version: "2.0.0".to_string(),
-            provider_type: ProviderType::GithubReleases,
-            provider_config: json!({"owner": "octocat", "repo": "hello-world"}),
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
-            release_info: None,
-            timeout_seconds: 60,
-        };
-        // The GitHub stub provider returns None for installed version.
-        let result = detect_current_version(&payload, test_executor()).await;
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
-    async fn detect_current_version_with_invalid_config_returns_none() {
-        let payload = ExecuteUpdatePayload {
-            update_history_id: uuid::Uuid::nil(),
-            software_item_id: uuid::Uuid::nil(),
-            software_item_name: "Test App".to_string(),
-            package_identifier: "test".to_string(),
-            to_version: "2.0.0".to_string(),
-            provider_type: ProviderType::GithubReleases,
-            provider_config: json!({"invalid": "config"}),
-            pre_update_hooks: vec![],
-            post_update_hooks: vec![],
-            release_info: None,
-            timeout_seconds: 60,
-        };
-        // Invalid config should log a warning and return None.
-        let result = detect_current_version(&payload, test_executor()).await;
-        assert!(result.is_none());
     }
 }

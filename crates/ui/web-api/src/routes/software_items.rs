@@ -1091,6 +1091,7 @@ pub async fn trigger_update(
 
     // 11. Build ExecuteUpdatePayload
     let execute_payload = uptrakit_internal_wire::ExecuteUpdatePayload {
+        host_machine_id: host_record.machine_id.clone(),
         update_history_id,
         software_item_id: item_id,
         software_item_name: item.name.clone(),
@@ -1253,10 +1254,20 @@ pub async fn check_versions(
     };
 
     let mut agents_notified: u32 = 0;
-    // Deduplicate agents (multiple hosts may share the same agent)
-    let mut seen_agents = std::collections::HashSet::new();
+    // Deduplicate by (agent, host) — each pair gets exactly one CheckVersions message.
+    let mut seen = std::collections::HashSet::new();
 
     for link in &links {
+        // Load the host to obtain its machine_id for routing.
+        let host_record = match Host::find_by_id(link.host_id)
+            .filter(host::Column::DeactivatedAt.is_null())
+            .one(tenant_db.db())
+            .await
+        {
+            Ok(Some(h)) => h,
+            _ => continue,
+        };
+
         // Find agent linked to this host
         let agent_link = match ServiceHost::find()
             .filter(service_host::Column::HostId.eq(link.host_id))
@@ -1267,7 +1278,7 @@ pub async fn check_versions(
             _ => continue,
         };
 
-        if !seen_agents.insert(agent_link.service_id) {
+        if !seen.insert((agent_link.service_id, link.host_id)) {
             continue;
         }
 
@@ -1283,6 +1294,7 @@ pub async fn check_versions(
 
         let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
             uptrakit_internal_wire::CheckVersionsPayload {
+                host_machine_id: host_record.machine_id.clone(),
                 assignments: vec![assignment.clone()],
             },
         );
@@ -1346,20 +1358,20 @@ pub async fn check_versions_host(
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
-    // Verify host exists and belongs to tenant
-    match Host::find_by_id(host_id)
+    // Verify host exists and belongs to tenant; keep the record for machine_id.
+    let host_record = match Host::find_by_id(host_id)
         .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
     {
-        Ok(Some(_)) => {}
+        Ok(Some(h)) => h,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
         Err(e) => {
             tracing::error!("Failed to lookup host: {e}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
-    }
+    };
 
     // Verify host is assigned to software item
     match HostSoftwareItem::find_by_id((host_id, item_id))
@@ -1458,6 +1470,7 @@ pub async fn check_versions_host(
 
     let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
         uptrakit_internal_wire::CheckVersionsPayload {
+            host_machine_id: host_record.machine_id.clone(),
             assignments: vec![assignment],
         },
     );

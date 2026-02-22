@@ -217,9 +217,28 @@ The detected key type is stored alongside the encrypted private key and displaye
 
 For details on how the CLI host management subcommands work, see [SSH Agent Host Management](../end-user/ssh-agent-host-management.md).
 
+## SSH Session Lifecycle
+
+Each version check and update operation opens a **dedicated SSH session** — there is no persistent SSH connection
+pool.
+
+- The session is created when the controller sends a `CheckVersions` or `ExecuteUpdate` message to the SSH agent.
+- For version checks, the session is dropped immediately when `handle_check_versions()` returns.
+- For updates, the `SshCommandExecutor` holds the session via `Arc<SshSession>` for the duration of the update task.
+  The connection remains open until the task completes (streaming all output lines), after which the `Arc` is dropped
+  and the session is closed.
+- The SSH private key is decrypted from the local `ssh_hosts` database only when establishing a session. Plaintext key
+  material exists only in process memory during active operations and is never written to disk or logged.
+
+This design minimises the window during which a live SSH connection and plaintext key material are present in memory,
+reducing the impact of a process-level compromise.
+
+See [SSH Agent Architecture — Version Check and Update Execution](../architecture/ssh-agent.md#version-check-and-update-execution)
+for the full dispatch flow.
+
 ## Related Documentation
 
-- [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture, database schema, and CLI subcommands
+- [SSH Agent Architecture](../architecture/ssh-agent.md) — overall architecture, database schema, CLI subcommands, and version check/update execution
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for managing SSH hosts
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — automated remote host setup and troubleshooting
 - [Secrets and Encryption](secrets-and-encryption.md) — controller's encryption model

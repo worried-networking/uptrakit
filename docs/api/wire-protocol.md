@@ -45,7 +45,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### SSH agent-specific (service -> controller)
 
-`report_hosts`
+`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`
 
 ### MQTT-specific (service -> controller)
 
@@ -60,9 +60,34 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 `check_versions`, `execute_update`
 
+Both the regular agent and the SSH agent receive `check_versions` and `execute_update` messages. The `host_machine_id`
+field in each payload determines which host the operation targets (see [`host_machine_id` Field](#host_machine_id-field)).
+
 ### MQTT-specific (controller -> service)
 
 `registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`
+
+## `host_machine_id` Field
+
+`CheckVersionsPayload` and `ExecuteUpdatePayload` both carry a required `host_machine_id: String` field as their first
+field. The controller groups package assignments by `(service_id, host_machine_id)` and sends one message per host so
+that each agent instance receives only the checks and updates relevant to its managed hosts.
+
+### Regular agent behavior
+
+The regular agent validates that the received `host_machine_id` matches the local machine ID collected at startup. A
+mismatch is logged as a warning and the message is silently ignored (returns `Ok(None)`). This is a defensive sanity
+check; under normal operation the controller only routes messages to the correct agent.
+
+### SSH agent behavior
+
+The SSH agent uses `host_machine_id` to look up which SSH host to connect to by calling `find_host_by_machine_id()`
+against its local `ssh_hosts` database. If no matching host is found the message is rejected with an error. When
+`ReportHosts` completes, `update_host_machine_id()` persists each remote host's `machine_id` so that subsequent
+routing lookups succeed.
+
+See [SSH Agent Architecture — Version Check and Update Execution](../architecture/ssh-agent.md#version-check-and-update-execution)
+for the full dispatch flow.
 
 ## Replay Protection
 

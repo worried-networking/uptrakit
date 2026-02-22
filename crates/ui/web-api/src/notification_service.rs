@@ -361,6 +361,7 @@ mod tests {
             message_json: ActiveValue::Set(serde_json::to_string(
                 &ControllerMessage::ExecuteUpdate(Box::new(
                     uptrakit_internal_wire::ExecuteUpdatePayload {
+                        host_machine_id: "test-machine-id".to_string(),
                         update_history_id: Uuid::now_v7(),
                         software_item_id: Uuid::now_v7(),
                         software_item_name: "item".to_string(),

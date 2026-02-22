@@ -51,7 +51,7 @@ regex = "1"
 semver = "1"
 tokio-util = "0.7"
 async-trait = "0.1"
-bollard = { version = "0.20", default-features = false }
+bollard = { version = "0.20", default-features = false, features = ["http", "pipe"] }
 tempfile = "3"
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
 zeroize = { version = "1", features = ["derive"] }

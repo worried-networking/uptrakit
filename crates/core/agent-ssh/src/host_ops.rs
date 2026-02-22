@@ -1,5 +1,7 @@
 use rootcause::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
+};
 
 use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
 use crate::error::{Error, Result};
@@ -50,6 +52,7 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         private_key: Set(params.encrypted_key),
         key_type: Set(params.key_type),
         host_key_fingerprint: Set(params.host_key_fingerprint),
+        machine_id: Set(String::new()),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -148,6 +151,47 @@ pub async fn update_host(
     model.updated_at = Set(now_unix_timestamp());
 
     model.update(db).await.context_to::<Error>()
+}
+
+/// Update the `machine_id` for an SSH host identified by its UUID.
+///
+/// Called from `report_enrolled_hosts()` after the remote host's machine_id
+/// is read, so that incoming `CheckVersions` / `ExecuteUpdate` messages can
+/// be routed to the correct host via `find_host_by_machine_id()`.
+pub async fn update_host_machine_id(
+    db: &DatabaseConnection,
+    host_id: &str,
+    machine_id: &str,
+) -> Result<()> {
+    let host = Entity::find_by_id(host_id)
+        .one(db)
+        .await
+        .context_to::<Error>()?
+        .ok_or_else(|| report!(Error::HostNotFound(host_id.to_string())))?;
+
+    let mut model: ActiveModel = host.into();
+    model.machine_id = Set(machine_id.to_string());
+    model.updated_at = Set(now_unix_timestamp());
+    model.update(db).await.context_to::<Error>()?;
+    Ok(())
+}
+
+/// Find an SSH host by its `machine_id`.
+///
+/// Returns `None` if no host with the given `machine_id` exists (including
+/// hosts that have not yet had their machine_id populated).
+pub async fn find_host_by_machine_id(
+    db: &DatabaseConnection,
+    machine_id: &str,
+) -> Result<Option<Model>> {
+    if machine_id.is_empty() {
+        return Ok(None);
+    }
+    Entity::find()
+        .filter(Column::MachineId.eq(machine_id))
+        .one(db)
+        .await
+        .context_to::<Error>()
 }
 
 fn now_unix_timestamp() -> i64 {
@@ -417,5 +461,56 @@ mod tests {
         .expect("rename to self should succeed");
 
         assert_eq!(updated.name, "same-name");
+    }
+
+    // ── machine_id tests ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_host_machine_id_sets_and_find_by_machine_id_returns_host() {
+        let (_dir, db) = setup_db().await;
+
+        let host = add_host(
+            &db,
+            add_params("target", "192.168.1.10", 22, "root", SshKeyType::Ed25519),
+        )
+        .await
+        .expect("add_host");
+
+        // Initially machine_id is empty, so find_host_by_machine_id returns None.
+        let not_found = find_host_by_machine_id(&db, "abc123")
+            .await
+            .expect("find_host_by_machine_id");
+        assert!(not_found.is_none());
+
+        // Set the machine_id.
+        update_host_machine_id(&db, &host.id, "abc123")
+            .await
+            .expect("update_host_machine_id");
+
+        // Now find_host_by_machine_id should return the host.
+        let found = find_host_by_machine_id(&db, "abc123")
+            .await
+            .expect("find_host_by_machine_id")
+            .expect("host should be found");
+        assert_eq!(found.id, host.id);
+        assert_eq!(found.machine_id, "abc123");
+    }
+
+    #[tokio::test]
+    async fn find_host_by_machine_id_empty_string_returns_none() {
+        let (_dir, db) = setup_db().await;
+        // Searching for empty machine_id should always return None.
+        let result = find_host_by_machine_id(&db, "")
+            .await
+            .expect("find_host_by_machine_id");
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_host_machine_id_nonexistent_id_fails() {
+        let (_dir, db) = setup_db().await;
+        let result = update_host_machine_id(&db, "00000000-0000-0000-0000-000000000000", "mid").await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err().current_context(), Error::HostNotFound(_)));
     }
 }

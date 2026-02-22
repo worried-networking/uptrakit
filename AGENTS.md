@@ -53,7 +53,7 @@ uptrakit/
 ├── crates/
 │   ├── core/
 │   │   ├── agent/                      # uptrakit-agent                         (bin)  — agent daemon
-│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
+│   │   ├── agent-ssh/                  # uptrakit-agent-ssh                     (bin)  — SSH-backed agent; version checks and updates over SSH; host management CLI, SSH transport (russh), SshTarget parser, ~/.ssh/config resolution, remote host info collection & ReportHosts
 │   │   ├── controller/                 # uptrakit-controller                    (bin)  — central server
 │   │   │   ├── src/scheduler/          #   DB-backed task scheduler (HA-safe optimistic locking)
 │   │   │   └── src/embedded_frontend.rs #  (cfg: embed-frontend) Serves frontend from binary via rust-embed
@@ -66,6 +66,7 @@ uptrakit/
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery, version detection, updates, optional GitHub-based upstream version detection)
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
+│   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown
 │   │   ├── command/                    # uptrakit-command                       (lib)  — CommandExecutor trait + LocalCommandExecutor
 │   │   ├── core/                       # uptrakit-core                          (lib)  — shared domain models
 │   │   ├── crypto/                     # uptrakit-crypto                        (lib)  — AES-256-GCM at-rest encryption (EncryptedString, init_master_key)
@@ -356,6 +357,8 @@ Where `{app}` is one of: `controller`, `agent`, `agent-ssh`, `mqtt`.
 
 - Config: Controller's CA certificate
 - State: Service ID, private key, issued certificate, local SQLite DB (`agent-ssh.db` with encrypted SSH credentials)
+- Runtime: `SshAgentHandler` holds `in_flight_update: Option<InFlightUpdate>` to enforce one-update-at-a-time; the SSH
+  agent is feature-complete for version checks and updates over SSH (delegates to `uptrakit-agent-core`)
 
 #### CLI directory flags
 

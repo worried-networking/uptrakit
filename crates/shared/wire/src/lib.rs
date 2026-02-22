@@ -366,6 +366,14 @@ pub struct ServerRestartingPayload {
 /// Payload for requesting version checks from the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckVersionsPayload {
+    /// The machine_id of the host to check versions on.
+    ///
+    /// For the regular agent (one service = one host), the agent validates that
+    /// this matches its own machine_id as a defensive sanity check.
+    /// For the SSH agent (one service = N remote hosts), the agent uses this
+    /// field to look up the correct SSH credentials and route the operation to
+    /// the right remote host.
+    pub host_machine_id: String,
     /// List of software items to check.
     pub assignments: Vec<VersionCheckAssignment>,
 }
@@ -429,6 +437,14 @@ fn default_update_timeout() -> u32 {
 /// Controller -> Agent: Trigger an update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecuteUpdatePayload {
+    /// The machine_id of the host to run the update on.
+    ///
+    /// For the regular agent (one service = one host), the agent validates that
+    /// this matches its own machine_id as a defensive sanity check.
+    /// For the SSH agent (one service = N remote hosts), the agent uses this
+    /// field to look up the correct SSH credentials and route the operation to
+    /// the right remote host.
+    pub host_machine_id: String,
     pub update_history_id: Uuid,
     pub software_item_id: Uuid,
     pub software_item_name: String,
@@ -1393,6 +1409,7 @@ mod tests {
     #[test]
     fn check_versions_serialization_roundtrip() {
         let msg = ControllerMessage::CheckVersions(CheckVersionsPayload {
+            host_machine_id: "test-machine-id".to_string(),
             assignments: vec![VersionCheckAssignment {
                 software_item_id: TEST_UUID_1,
                 name: "Test Software".to_string(),
@@ -1412,6 +1429,7 @@ mod tests {
     #[test]
     fn execute_update_serialization_roundtrip() {
         let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            host_machine_id: "test-machine-id".to_string(),
             update_history_id: Uuid::parse_str("01936a1e-7e8c-7f00-8000-000000000001").unwrap(),
             software_item_id: Uuid::parse_str("01936a1e-7e8c-7f00-8000-000000000002").unwrap(),
             software_item_name: "Node.js".to_string(),
@@ -1452,6 +1470,7 @@ mod tests {
     #[test]
     fn execute_update_minimal_serialization() {
         let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            host_machine_id: "test-machine-id".to_string(),
             update_history_id: TEST_UUID_1,
             software_item_id: TEST_UUID_2,
             software_item_name: "Redis".to_string(),
@@ -1477,6 +1496,7 @@ mod tests {
     fn execute_update_default_timeout() {
         let json = r#"{
             "type": "execute_update",
+            "host_machine_id": "test-machine-id",
             "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
             "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
@@ -1498,6 +1518,7 @@ mod tests {
     #[test]
     fn execute_update_with_shell_hook_command() {
         let msg = ControllerMessage::ExecuteUpdate(Box::new(ExecuteUpdatePayload {
+            host_machine_id: "test-machine-id".to_string(),
             update_history_id: TEST_UUID_1,
             software_item_id: TEST_UUID_2,
             software_item_name: "Test".to_string(),
@@ -1539,6 +1560,7 @@ mod tests {
     fn execute_update_backward_compat_extra_fields() {
         let json = r#"{
             "type": "execute_update",
+            "host_machine_id": "test-machine-id",
             "update_history_id": "550e8400-e29b-41d4-a716-446655440000",
             "software_item_id": "550e8400-e29b-41d4-a716-446655440001",
             "software_item_name": "Test",
@@ -2566,6 +2588,7 @@ mod tests {
         let spec = AsyncApiSpec::load();
         let json =
             controller_envelope_json(ControllerMessage::CheckVersions(CheckVersionsPayload {
+                host_machine_id: "test-machine-id".to_string(),
                 assignments: vec![VersionCheckAssignment {
                     software_item_id: TEST_UUID_1,
                     name: "Test Software".to_string(),
@@ -2582,6 +2605,7 @@ mod tests {
         let spec = AsyncApiSpec::load();
         let json = controller_envelope_json(ControllerMessage::ExecuteUpdate(Box::new(
             ExecuteUpdatePayload {
+                host_machine_id: "test-machine-id".to_string(),
                 update_history_id: TEST_UUID_1,
                 software_item_id: TEST_UUID_2,
                 software_item_name: "Node.js".to_string(),

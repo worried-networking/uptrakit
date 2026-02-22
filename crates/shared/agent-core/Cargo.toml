@@ -1,0 +1,28 @@
+[package]
+name = "uptrakit-agent-core"
+edition = "2024"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+rootcause = { workspace = true }
+uptrakit-shared-macros = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }
+uptrakit-command = { path = "../command" }
+uptrakit-internal-wire = { path = "../wire" }
+uptrakit-provider-registry = { path = "../../providers/registry" }
+uptrakit-service-sdk = { path = "../service-sdk" }
+uptrakit-directories = { path = "../directories" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

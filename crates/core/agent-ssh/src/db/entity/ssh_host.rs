@@ -65,6 +65,9 @@ pub struct Model {
     pub private_key: EncryptedString,
     pub key_type: SshKeyType,
     pub host_key_fingerprint: Option<String>,
+    /// Machine ID of the remote host, populated from `ReportHosts` data.
+    /// Empty string until the host has been connected to at least once.
+    pub machine_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }

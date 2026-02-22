@@ -9,22 +9,17 @@ version.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 clap = { workspace = true }
-futures-util = { workspace = true }
 rootcause = { workspace = true }
-uptrakit-shared-macros = { workspace = true }
 rustls = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs", "sync", "time", "net"] }
 tokio-rustls = { workspace = true }
 tracing = { workspace = true }
+uptrakit-agent-core = { path = "../../shared/agent-core" }
+uptrakit-command = { path = "../../shared/command" }
 uptrakit-directories = { path = "../../shared/directories" }
+uptrakit-internal-wire = { path = "../../shared/wire" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
-uptrakit-internal-wire = { path = "../../shared/wire" }
-uuid = { workspace = true, features = ["v7", "serde"] }
-uptrakit-command = { path = "../../shared/command" }
-uptrakit-provider-registry = { path = "../../providers/registry" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

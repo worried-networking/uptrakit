@@ -14,9 +14,7 @@ mod ssh_transport;
 use clap::Parser;
 use rootcause::prelude::*;
 use tracing_subscriber::EnvFilter;
-use uptrakit_internal_wire::{
-    ControllerMessage, DisconnectReason, DisconnectingPayload, ServiceMessage, ServiceType,
-};
+use uptrakit_internal_wire::{ControllerMessage, DisconnectReason, ServiceType};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     Signal,
@@ -45,6 +43,7 @@ type InitResult<T> = std::result::Result<T, rootcause::Report<InitError>>;
 struct SshAgentHandler {
     state_dir: std::path::PathBuf,
     local_db: Option<sea_orm::DatabaseConnection>,
+    in_flight_update: Option<client::InFlightUpdate>,
 }
 
 #[async_trait::async_trait]
@@ -53,7 +52,7 @@ impl ServiceHandler for SshAgentHandler {
     const SERVICE_LABEL: &'static str = "uptrakit-agent-ssh service";
     const SERVICE_TYPE: ServiceType = ServiceType::SshAgent;
 
-    type ServiceEvent = std::convert::Infallible;
+    type ServiceEvent = client::UpdateEvent;
 
     async fn on_connected(
         &mut self,
@@ -77,39 +76,90 @@ impl ServiceHandler for SshAgentHandler {
 
     async fn on_message(
         &mut self,
-        _msg: ControllerMessage,
-        _conn: &mut ControllerConnection,
+        msg: ControllerMessage,
+        conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
-        tracing::debug!("ignoring unrecognized message in authenticated loop");
-        Ok(None)
+        let db = self.local_db.as_ref().expect(
+            "local_db must be initialized in on_connected before on_message is called",
+        );
+        match msg {
+            ControllerMessage::CheckVersions(payload) => {
+                Ok(client::handle_check_versions_ssh(payload, db, conn).await)
+            }
+            ControllerMessage::ExecuteUpdate(payload) => {
+                client::handle_execute_update_ssh(
+                    *payload,
+                    db,
+                    &mut self.in_flight_update,
+                    conn,
+                )
+                .await;
+                Ok(None)
+            }
+            _ => {
+                tracing::debug!("ignoring unrecognized message in authenticated loop");
+                Ok(None)
+            }
+        }
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
-        std::future::pending().await
+        if let Some(ref mut update) = self.in_flight_update {
+            tokio::select! {
+                biased;
+                Some(output_msg) = update.output_rx.recv() => {
+                    client::UpdateEvent::Output(output_msg)
+                }
+                result = &mut update.handle => {
+                    client::UpdateEvent::Completed(result)
+                }
+            }
+        } else {
+            std::future::pending::<Self::ServiceEvent>().await
+        }
     }
 
     async fn on_service_event(
         &mut self,
         event: Self::ServiceEvent,
-        _conn: &mut ControllerConnection,
+        conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
-        match event {}
+        let Some(ref update) = self.in_flight_update else {
+            tracing::error!("received update event but no in-flight update exists");
+            return Ok(None);
+        };
+        let update_history_id = update.update_history_id;
+
+        match event {
+            client::UpdateEvent::Output(output_msg) => {
+                client::send_update_output(conn, update_history_id, output_msg).await;
+            }
+            client::UpdateEvent::Completed(result) => {
+                client::send_update_result(conn, update_history_id, result).await;
+                self.in_flight_update = None;
+            }
+        }
+        Ok(None)
     }
 
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
-        _signal: Signal,
-        _shutdown_timeout_seconds: u32,
+        signal: Signal,
+        shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
-        let disconnecting_msg =
-            ServiceMessage::Disconnecting(DisconnectingPayload::new(DisconnectReason::Shutdown));
-        if let Err(e) = conn.send(disconnecting_msg).await {
-            tracing::debug!(error = %e, "failed to send Disconnecting message");
-        } else {
-            tracing::debug!("sent Disconnecting message to controller");
-        }
-        LoopOutcome::Shutdown
+        let (disconnect_reason, outcome) = match signal {
+            Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
+            _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+        };
+        client::handle_graceful_shutdown(
+            conn,
+            self.in_flight_update.take(),
+            shutdown_timeout_seconds,
+            disconnect_reason,
+            outcome,
+        )
+        .await
     }
 }
 
@@ -179,6 +229,7 @@ async fn main() {
     let mut handler = SshAgentHandler {
         state_dir,
         local_db: None,
+        in_flight_update: None,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
         "uptrakit-agent-ssh",

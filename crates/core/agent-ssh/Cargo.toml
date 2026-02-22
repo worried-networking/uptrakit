@@ -26,6 +26,7 @@ tokio-rustls = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
+uptrakit-agent-core = { path = "../../shared/agent-core" }
 uptrakit-command = { path = "../../shared/command" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }

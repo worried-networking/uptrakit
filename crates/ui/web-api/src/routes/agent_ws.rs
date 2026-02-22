@@ -11,7 +11,7 @@ use uptrakit_internal_wire::{
     ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host_software_item, provider_config, service_host, software_item,
+    available_version, host, host_software_item, provider_config, service_host, software_item,
     update_history,
 };
 
@@ -974,7 +974,28 @@ async fn deliver_pending_updates(
         let merged_config =
             crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
 
+        // Look up the host's machine_id so the agent can route correctly.
+        let host_machine_id = match host::Entity::find_by_id(update_record.host_id)
+            .one(state.db())
+            .await
+        {
+            Ok(Some(h)) => h.machine_id,
+            Ok(None) => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    host_id = %update_record.host_id,
+                    "host not found for pending update, skipping"
+                );
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load host for pending update");
+                continue;
+            }
+        };
+
         let execute_payload = ExecuteUpdatePayload {
+            host_machine_id,
             update_history_id: update_record.id,
             software_item_id: item.id,
             software_item_name: item.name.clone(),

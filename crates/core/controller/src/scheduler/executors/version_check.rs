@@ -7,7 +7,7 @@ use sea_orm::{
 };
 use uptrakit_internal_wire::{CheckVersionsPayload, ControllerMessage, VersionCheckAssignment};
 use uptrakit_shared_db::entity::{
-    host_software_item, provider_config, scheduled_task, service, service_host, software_item,
+    host, host_software_item, provider_config, scheduled_task, service, service_host, software_item,
 };
 use uptrakit_shared_types::ProviderType;
 use uptrakit_web_api::notification_service::NotificationService;
@@ -18,8 +18,10 @@ use crate::scheduler::executor::TaskExecutor;
 
 /// Sends `CheckVersions` messages to connected agents for installed-version detection.
 ///
-/// Groups software items by the agent (service) responsible for the host they are
-/// assigned to, then sends one `CheckVersions` message per agent.
+/// Groups software items by `(service_id, host_machine_id)` so that each
+/// message targets exactly one host. The SSH agent uses `host_machine_id` to
+/// route the request to the correct remote host; the regular agent uses it for
+/// a defensive sanity check.
 pub struct VersionCheckExecutor {
     db: DatabaseConnection,
     notification_service: NotificationService,
@@ -38,6 +40,7 @@ impl VersionCheckExecutor {
 #[derive(Debug)]
 struct AssignmentRow {
     service_id: Uuid,
+    host_machine_id: String,
     software_item_id: Uuid,
     name: String,
     provider_type: String,
@@ -58,8 +61,9 @@ impl TaskExecutor for VersionCheckExecutor {
             return Ok(());
         }
 
-        // Group by agent (service_id)
-        let mut by_agent: HashMap<Uuid, Vec<VersionCheckAssignment>> = HashMap::new();
+        // Group by (service_id, host_machine_id) — each message targets one host.
+        let mut by_agent_host: HashMap<(Uuid, String), Vec<VersionCheckAssignment>> =
+            HashMap::new();
         for row in rows {
             let provider_type = ProviderType::from_str(&row.provider_type).map_err(|_| {
                 report!(SchedulerError::Execution(format!(
@@ -71,8 +75,8 @@ impl TaskExecutor for VersionCheckExecutor {
                 Some(ovr) => merge_config(&row.config, &ovr),
                 None => row.config,
             };
-            by_agent
-                .entry(row.service_id)
+            by_agent_host
+                .entry((row.service_id, row.host_machine_id))
                 .or_default()
                 .push(VersionCheckAssignment {
                     software_item_id: row.software_item_id,
@@ -83,16 +87,19 @@ impl TaskExecutor for VersionCheckExecutor {
                 });
         }
 
-        let agent_count = by_agent.len();
-        let item_count: usize = by_agent.values().map(|v| v.len()).sum();
+        let msg_count = by_agent_host.len();
+        let item_count: usize = by_agent_host.values().map(|v| v.len()).sum();
 
-        for (service_id, assignments) in by_agent {
-            let msg = ControllerMessage::CheckVersions(CheckVersionsPayload { assignments });
+        for ((service_id, host_machine_id), assignments) in by_agent_host {
+            let msg = ControllerMessage::CheckVersions(CheckVersionsPayload {
+                host_machine_id,
+                assignments,
+            });
             self.notification_service.send(&service_id, msg).await;
         }
 
         tracing::debug!(
-            agents = agent_count,
+            messages = msg_count,
             items = item_count,
             "sent version check requests"
         );
@@ -103,7 +110,7 @@ impl TaskExecutor for VersionCheckExecutor {
 impl VersionCheckExecutor {
     /// Query enabled software items with their host-to-agent mapping.
     ///
-    /// Returns one row per (agent_service_id, software_item) pair.
+    /// Returns one row per (agent_service_id, host, software_item) tuple.
     async fn fetch_assignments(
         &self,
         tenant_id: Uuid,
@@ -111,11 +118,12 @@ impl VersionCheckExecutor {
         // software_item -> provider_config (for provider_type + config)
         // software_item -> host_software_item -> host -> service_host -> service (agent)
         //
-        // We use a raw-ish select with joins since SeaORM's relation chaining
-        // doesn't easily produce a flat tuple across 5 tables.
+        // We also select host.machine_id so we can set host_machine_id on
+        // CheckVersionsPayload for correct routing at the agent.
         #[derive(Debug, sea_orm::FromQueryResult)]
         struct Row {
             service_id: Uuid,
+            host_machine_id: String,
             software_item_id: Uuid,
             name: String,
             provider_type: String,
@@ -127,6 +135,7 @@ impl VersionCheckExecutor {
         let rows: Vec<Row> = software_item::Entity::find()
             .select_only()
             .column_as(service::Column::Id, "service_id")
+            .column_as(host::Column::MachineId, "host_machine_id")
             .column_as(software_item::Column::Id, "software_item_id")
             .column_as(software_item::Column::Name, "name")
             .column_as(provider_config::Column::ProviderType, "provider_type")
@@ -158,7 +167,6 @@ impl VersionCheckExecutor {
             .filter(software_item::Column::DeactivatedAt.is_null())
             .filter(provider_config::Column::Enabled.eq(true))
             .filter(provider_config::Column::DeactivatedAt.is_null())
-            .filter(service::Column::ServiceType.eq(uptrakit_shared_types::ServiceType::Agent))
             .filter(service::Column::DeactivatedAt.is_null())
             .into_model::<Row>()
             .all(&self.db)
@@ -169,6 +177,7 @@ impl VersionCheckExecutor {
             .into_iter()
             .map(|r| AssignmentRow {
                 service_id: r.service_id,
+                host_machine_id: r.host_machine_id,
                 software_item_id: r.software_item_id,
                 name: r.name,
                 provider_type: r.provider_type,

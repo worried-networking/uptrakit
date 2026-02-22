@@ -5,7 +5,7 @@ execute version detection and updates on remote hosts over SSH instead of locall
 
 ## Current Scope
 
-The current implementation provides:
+The SSH agent is feature-complete for version checks and updates. The implementation provides:
 
 - A new `ServiceType::SshAgent` variant in the shared type system
 - Controller-side enrollment and WebSocket dispatch for SSH agents
@@ -17,6 +17,7 @@ The current implementation provides:
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
 - Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info
   from each enrolled host over SSH and reports it to the controller
+- Full version check and update execution over SSH, with in-flight update tracking and graceful shutdown (see [Version Check and Update Execution](#version-check-and-update-execution))
 
 UI configuration beyond the existing services API is not yet implemented.
 
@@ -73,6 +74,7 @@ The SSH agent uses a local SQLite database (`agent-ssh.db` in the state director
 | `private_key` | TEXT | `EncryptedString` — SSH private key (AES-256-GCM) |
 | `key_type` | TEXT | Key algorithm: `ed25519`, `rsa`, or `ecdsa` |
 | `host_key_fingerprint` | TEXT | Known host key (SHA-256), nullable |
+| `machine_id` | TEXT | Remote host machine ID (populated by `ReportHosts`; used for routing `CheckVersions` and `ExecuteUpdate`) |
 | `created_at` | INTEGER | Unix timestamp |
 | `updated_at` | INTEGER | Unix timestamp |
 
@@ -233,6 +235,63 @@ transparently.
 
 For usage details, see [Command Executor](../development/command-executor.md).
 
+## Version Check and Update Execution
+
+The SSH agent handles `CheckVersions` and `ExecuteUpdate` messages from the controller using the shared
+`uptrakit-agent-core` crate. The core crate provides `handle_check_versions()`, `handle_execute_update()`, and
+`handle_graceful_shutdown()`, which contain the logic common to both the regular agent and the SSH agent.
+
+### SSH Session Model
+
+SSH sessions are **stateless and per-operation** — there is no persistent SSH connection pool. A dedicated session is
+opened when the controller sends a `CheckVersions` or `ExecuteUpdate` message and is dropped when the operation
+completes. For updates, the `SshCommandExecutor` holds the session via `Arc<SshSession>` for the duration of the
+update task so the connection is not closed while streaming output lines.
+
+See [SSH Agent Secrets — SSH Session Lifecycle](../security/ssh-agent-secrets.md#ssh-session-lifecycle) for the
+security implications of this design.
+
+### Host Routing via `host_machine_id`
+
+Both `CheckVersionsPayload` and `ExecuteUpdatePayload` carry a required `host_machine_id` field. The SSH agent uses
+this field to look up which SSH host to connect to from its local `ssh_hosts` database
+(`find_host_by_machine_id()`). When `ReportHosts` completes, `update_host_machine_id()` persists each remote host's
+`machine_id` so the lookup is available for future operations.
+
+See [Wire Protocol — host_machine_id Field](../api/wire-protocol.md#host_machine_id-field) for the full routing
+specification.
+
+### Version Checks
+
+1. Controller sends `CheckVersions` with `host_machine_id`.
+2. SSH agent looks up the matching host in `ssh_hosts`.
+3. An SSH session is opened to that host and an `SshCommandExecutor` is constructed.
+4. `uptrakit_agent_core::handle_check_versions()` is called with the executor; it refreshes the package index,
+   runs version checks for each package assignment, and sends `version_check_results` back to the controller.
+5. The SSH session is dropped when the function returns.
+
+### Updates
+
+1. Controller sends `ExecuteUpdate` with `host_machine_id`.
+2. SSH agent looks up the matching host and rejects the message if an update is already in flight.
+3. An SSH session is opened, wrapped in `Arc<SshSession>`, and passed to `SshCommandExecutor`.
+4. `uptrakit_agent_core::handle_execute_update()` spawns an async task that streams `update_output` lines and
+   sends a final `update_result` to the controller.
+5. The `Arc<SshSession>` keeps the SSH connection alive until the update task completes and is then dropped.
+
+### In-Flight Update Tracking
+
+Only one update may execute at a time per SSH agent instance (the same constraint as the regular agent).
+`SshAgentHandler` stores an `Option<InFlightUpdate>` field. While a task is running, new `ExecuteUpdate` messages
+are rejected with an appropriate error response. The `poll_service_event()` loop drives in-flight update output
+delivery over the WebSocket.
+
+### Graceful Shutdown
+
+On shutdown, the SSH agent delegates to `uptrakit_agent_core::handle_graceful_shutdown()`, which waits for any
+in-flight update to complete before disconnecting, respecting the controller-provided `shutdown_timeout_seconds`.
+A SIGHUP signal triggers a graceful restart (drain + reconnect) rather than a hard stop.
+
 ## Host Reporting
 
 On authenticated WebSocket connect, the SSH agent reports host information for all enrolled SSH hosts to the controller via the `ReportHosts` message.
@@ -263,14 +322,17 @@ sends a `ReportHosts` message with an empty host list.
 
 ## Crate Structure
 
+The SSH agent depends on `uptrakit-agent-core` (`crates/shared/agent-core/`) for shared version check and update
+execution logic. See the [agent-core shared crate](#shared-uptrakit-agent-core-crate) section below.
+
 ```text
 crates/core/agent-ssh/
 ├── Cargo.toml
 ├── build.rs
 └── src/
-    ├── main.rs          # SshAgentHandler (ServiceHandler impl), entry point, master key init
+    ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_update field), entry point, master key init
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
-    ├── client.rs        # Authenticated loop (ping/pong, cert renewal, local DB init)
+    ├── client.rs        # Authenticated loop (ping/pong, cert renewal, local DB init); handle_check_versions_ssh(), handle_execute_update_ssh()
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH)
@@ -278,7 +340,7 @@ crates/core/agent-ssh/
     ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs, validates hostname syntax)
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
     ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, os_version, architecture, hostname)
-    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove)
+    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove, find_host_by_machine_id, update_host_machine_id)
     ├── commands/
     │   ├── mod.rs       # Command module declarations
     │   ├── host.rs      # Host subcommand handlers (dispatch, SSH config resolution, formatting)
@@ -290,14 +352,33 @@ crates/core/agent-ssh/
         │   └── ssh_host.rs  # SeaORM entity (Model, SshKeyType enum with FromStr/Display)
         └── migration/
             ├── mod.rs   # Migration runner
-            └── m20260215_000001_initial.rs  # ssh_hosts table (with UNIQUE index on name)
+            ├── m20260215_000001_initial.rs  # ssh_hosts table (with UNIQUE index on name)
+            └── m20260222_000002_add_machine_id.rs  # Adds machine_id TEXT NOT NULL DEFAULT '' column to ssh_hosts
 ```
+
+## Shared `uptrakit-agent-core` Crate
+
+Version check and update execution logic shared between `uptrakit-agent` and `uptrakit-agent-ssh` lives in
+`crates/shared/agent-core/` (`uptrakit-agent-core`). Public API:
+
+| Function / Type | Description |
+| --- | --- |
+| `check_version(provider_type, config, package_identifier, executor)` | Runs a single version check for a package using the given executor |
+| `execute_update(payload, executor, output_tx)` | Executes an update and streams output lines |
+| `handle_check_versions(payload, executor, conn)` | Refreshes package indexes, runs version checks, sends `version_check_results` |
+| `handle_execute_update(payload, executor, in_flight, conn)` | Rejects if update already in flight; spawns update task |
+| `handle_graceful_shutdown(conn, in_flight, timeout, reason, outcome)` | Drains in-flight update before disconnecting |
+| `InFlightUpdate` | Handle for a running update task |
+| `UpdateEvent` | Enum of events emitted by an in-flight update (output line, completion) |
+| `send_update_output()` | Sends an `update_output` message to the controller |
+| `send_update_result()` | Sends an `update_result` message to the controller |
 
 ## Related Documentation
 
 - [SSH Agent Host Management](../end-user/ssh-agent-host-management.md) — end-user guide for CLI host management
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — detailed bootstrap workflow and troubleshooting
 - [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait
-- [SSH Agent Secrets](../security/ssh-agent-secrets.md) — secret storage and threat model
-- [Wire Protocol](../api/wire-protocol.md) — `SshAgent` service type in enrollment
+- [SSH Agent Secrets](../security/ssh-agent-secrets.md) — secret storage, SSH session lifecycle, and threat model
+- [Wire Protocol](../api/wire-protocol.md) — `SshAgent` service type in enrollment; `host_machine_id` routing field
 - [Services and Operations](../api/services-operations.md) — shared service management API
+- [Command Executor](../development/command-executor.md) — `CommandExecutor` trait implemented by `SshCommandExecutor`

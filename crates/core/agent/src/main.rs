@@ -1,9 +1,6 @@
 mod cli;
 mod client;
-mod error;
 mod host_info;
-mod update;
-mod version_check;
 
 use clap::Parser;
 use rootcause::prelude::*;
@@ -18,6 +15,9 @@ use uptrakit_service_sdk::{
 use cli::Args;
 
 struct AgentHandler {
+    /// Local machine ID, collected once on connect and used to validate
+    /// incoming `host_machine_id` fields as a defensive sanity check.
+    machine_id: String,
     in_flight_update: Option<client::InFlightUpdate>,
 }
 
@@ -35,6 +35,8 @@ impl ServiceHandler for AgentHandler {
         _identity: &ServiceIdentityState,
     ) -> LoopResult<()> {
         let host_info = crate::host_info::collect_host_info();
+        // Capture and store the machine_id for use in on_message() validation.
+        self.machine_id = host_info.machine_id.clone();
         conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
             hosts: vec![host_info],
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -56,9 +58,25 @@ impl ServiceHandler for AgentHandler {
     ) -> LoopResult<Option<LoopOutcome>> {
         match msg {
             ControllerMessage::CheckVersions(payload) => {
+                if payload.host_machine_id != self.machine_id {
+                    tracing::warn!(
+                        expected = %self.machine_id,
+                        received = %payload.host_machine_id,
+                        "host_machine_id mismatch on CheckVersions; ignoring message"
+                    );
+                    return Ok(None);
+                }
                 Ok(client::handle_check_versions(payload, conn).await)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
+                if payload.host_machine_id != self.machine_id {
+                    tracing::warn!(
+                        expected = %self.machine_id,
+                        received = %payload.host_machine_id,
+                        "host_machine_id mismatch on ExecuteUpdate; ignoring message"
+                    );
+                    return Ok(None);
+                }
                 client::handle_execute_update(*payload, &mut self.in_flight_update, conn).await;
                 Ok(None)
             }
@@ -145,6 +163,7 @@ async fn main() {
     uptrakit_service_sdk::init_crypto();
 
     let mut handler = AgentHandler {
+        machine_id: String::new(),
         in_flight_update: None,
     };
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(
