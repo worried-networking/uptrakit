@@ -76,11 +76,6 @@ input, leading zeros, uppercase, invalid chars, and round-trips.
 
 These types have `openapi` and/or no feature gates. If intentionally not database-backed, a brief comment would clarify.
 
-### INFORMATIONAL: Inconsistent `#[non_exhaustive]`
-
-Only `ProviderType` and `SessionTokenType` are `#[non_exhaustive]`. If intentional (expected to grow), a doc-comment
-explaining the reasoning would help.
-
 ---
 
 ## Summary

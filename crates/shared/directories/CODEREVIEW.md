@@ -28,16 +28,6 @@ window. Correctly documented.
 
 Zero instances in non-test code. All fallible operations return `Result`.
 
-### LOW: Non-Unix platforms get no permission hardening
-
-On `#[cfg(not(unix))]`, files and directories are created with default permissions. `set_dir_permissions` and
-`set_file_permissions` are complete no-ops. Acceptable if the project targets Unix only, but the code comments say
-"cross-platform."
-
-### LOW: `~user` syntax not handled
-
-The function only handles `~` and `~/...`, not `~otheruser/...`. Should be documented explicitly.
-
 ---
 
 ## Summary
@@ -49,5 +39,5 @@ The function only handles `~` and `~/...`, not `~otheruser/...`. Should be docum
 | Path traversal          | PASS       | `config_path`/`state_path` validate names via `validate_path_name()` |
 | Error handling          | PASS       | rootcause/thiserror with contextual path information       |
 | `unwrap`/`panic`        | PASS       | Zero in production code                                    |
-| Cross-platform          | FAIR       | Permission hardening is Unix-only; docs say "cross-platform" |
+| Cross-platform          | GOOD       | Permission hardening is Unix-only; documented in module and function docs |
 | Test coverage           | GOOD       | 32 tests covering core paths, edge cases, and error paths    |

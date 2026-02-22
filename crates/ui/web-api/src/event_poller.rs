@@ -247,6 +247,11 @@ impl EventPoller {
                 self.registry.broadcast(msg).await;
                 true
             }
+            // Unknown future service type — treat as broadcast.
+            (None, Some(_)) => {
+                self.registry.broadcast(msg).await;
+                true
+            }
         }
     }
 

@@ -1,13 +1,15 @@
+use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::queries::provider_configs::{self as pc_queries, UpdateProviderConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use std::sync::Arc;
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -29,6 +31,7 @@ pub use uptrakit_web_api_types::provider_configs::{
     security(("bearer_token" = []))
 )]
 pub async fn create_provider_config(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Json(req): Json<CreateProviderConfigRequest>,
@@ -37,7 +40,7 @@ pub async fn create_provider_config(
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
 
-    match pc_queries::create_provider_config(&tenant_db, req).await {
+    match pc_queries::create_provider_config(state.provider_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to create provider config: {e}");
@@ -62,11 +65,12 @@ pub async fn create_provider_config(
     security(("bearer_token" = []))
 )]
 pub async fn list_provider_configs(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match pc_queries::list_provider_configs(&tenant_db, &params).await {
+    match pc_queries::list_provider_configs(state.provider_ops.as_ref(), &tenant_db, &params).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to list provider configs: {e}");
@@ -89,6 +93,7 @@ pub async fn list_provider_configs(
     security(("bearer_token" = []))
 )]
 pub async fn get_provider_config(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(id): Path<String>,
     CanViewSoftware(_user): CanViewSoftware,
@@ -98,7 +103,7 @@ pub async fn get_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::get_provider_config(&tenant_db, config_id).await {
+    match pc_queries::get_provider_config(state.provider_ops.as_ref(), &tenant_db, config_id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
         Err(e) => {
@@ -123,6 +128,7 @@ pub async fn get_provider_config(
     security(("bearer_token" = []))
 )]
 pub async fn update_provider_config(
+    State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
     Path(id): Path<String>,
     CanManageSoftware(_user): CanManageSoftware,
@@ -133,7 +139,7 @@ pub async fn update_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::update_provider_config(&tenant_db, config_id, req).await {
+    match pc_queries::update_provider_config(state.provider_ops.as_ref(), &tenant_db, config_id, req).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(UpdateProviderConfigError::NotFound) => {
             error_response(StatusCode::NOT_FOUND, "Provider config not found")

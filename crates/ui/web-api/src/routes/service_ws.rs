@@ -567,11 +567,13 @@ async fn handle_authenticated(
         service_entity::ServiceType::Agent => Some(120),
         service_entity::ServiceType::Mqtt => None,
         service_entity::ServiceType::SshAgent => Some(120),
+        _ => Some(120),
     };
     let ping_secs = service.ping_interval_seconds.map_or_else(
         || match service.service_type {
             service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => 300u32,
             service_entity::ServiceType::Mqtt => 15u32,
+            _ => 300u32,
         },
         |v| v as u32,
     );
@@ -627,6 +629,9 @@ async fn handle_authenticated(
                 ctx,
             )
             .await;
+        }
+        _ => {
+            tracing::error!(%service_id, "unsupported service type in authenticated handler");
         }
     }
 }
@@ -727,6 +732,9 @@ async fn handle_enrolled(
                 in_seq,
             )
             .await;
+        }
+        _ => {
+            tracing::error!(%service_id, "unsupported service type in enrolled handler");
         }
     }
 
@@ -836,6 +844,10 @@ async fn handle_anonymous(
                                     None => return,
                                 }
                             }
+                            _ => {
+                                tracing::warn!("unsupported service type in enroll payload");
+                                return;
+                            }
                         }
                     }
                     _ => {
@@ -898,6 +910,9 @@ async fn handle_anonymous(
                 in_seq,
             )
             .await;
+        }
+        _ => {
+            tracing::error!(%service_id, "unsupported service type after enrollment");
         }
     }
 

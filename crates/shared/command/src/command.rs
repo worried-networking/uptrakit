@@ -203,6 +203,7 @@ pub(crate) fn wrap_command_for_shell(cmd: &str, shell: HookShell) -> String {
         HookShell::Bash => format!("set -euo pipefail\n{cmd}"),
         HookShell::Sh => format!("set -eu\n{cmd}"),
         HookShell::PowerShell => format!("$ErrorActionPreference = 'Stop'\n{cmd}"),
+        _ => unimplemented!("wrap_command_for_shell: unsupported HookShell variant"),
     }
 }
 

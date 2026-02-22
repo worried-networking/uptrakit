@@ -3,7 +3,7 @@ use sea_orm::{
     QuerySelect, Set,
 };
 use time::OffsetDateTime;
-use uptrakit_provider_registry::ProviderRegistry;
+use uptrakit_provider_registry::ProviderOps;
 use uptrakit_shared_db::entity::provider_config;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::provider_configs::{
@@ -31,7 +31,10 @@ pub enum UpdateProviderConfigError {
 
 // --- Private helpers ---
 
-fn provider_config_to_response(m: provider_config::Model) -> Option<ProviderConfigResponse> {
+fn provider_config_to_response(
+    ops: &dyn ProviderOps,
+    m: provider_config::Model,
+) -> Option<ProviderConfigResponse> {
     let provider_type: uptrakit_provider_registry::ProviderType = match m.provider_type.parse() {
         Ok(pt) => pt,
         Err(_) => {
@@ -43,7 +46,7 @@ fn provider_config_to_response(m: provider_config::Model) -> Option<ProviderConf
             return None;
         }
     };
-    let config = ProviderRegistry::mask_config_secrets_str(provider_type.as_str(), &m.config);
+    let config = ops.mask_config_secrets_str(provider_type.as_str(), &m.config);
     Some(ProviderConfigResponse {
         id: m.id,
         name: m.name,
@@ -112,6 +115,7 @@ pub(crate) async fn find_raw_active_config_txn(
 /// Create a new provider configuration and return the masked response.
 /// Validation (name, provider-specific config, hooks) is the caller's responsibility.
 pub async fn create_provider_config(
+    ops: &dyn ProviderOps,
     tenant_db: &TenantDb,
     req: CreateProviderConfigRequest,
 ) -> Result<ProviderConfigResponse, sea_orm::DbErr> {
@@ -129,11 +133,12 @@ pub async fn create_provider_config(
     };
 
     let inserted = model.insert(tenant_db.db()).await?;
-    Ok(provider_config_to_response(inserted)
+    Ok(provider_config_to_response(ops, inserted)
         .unwrap_or_else(|| unreachable!("provider_type was just validated by the caller")))
 }
 
 pub async fn list_provider_configs(
+    ops: &dyn ProviderOps,
     tenant_db: &TenantDb,
     params: &PaginationParams,
 ) -> Result<PaginatedResponse<ProviderConfigResponse>, sea_orm::DbErr> {
@@ -154,7 +159,7 @@ pub async fn list_provider_configs(
 
     let items: Vec<ProviderConfigResponse> = configs
         .into_iter()
-        .filter_map(provider_config_to_response)
+        .filter_map(|m| provider_config_to_response(ops, m))
         .collect();
 
     Ok(PaginatedResponse::new(items, total, pagination))
@@ -162,6 +167,7 @@ pub async fn list_provider_configs(
 
 /// Returns `None` if the config is not found or is deactivated.
 pub async fn get_provider_config(
+    ops: &dyn ProviderOps,
     tenant_db: &TenantDb,
     id: Uuid,
 ) -> Result<Option<ProviderConfigResponse>, sea_orm::DbErr> {
@@ -169,12 +175,13 @@ pub async fn get_provider_config(
         Some(c) => c,
         None => return Ok(None),
     };
-    Ok(provider_config_to_response(config))
+    Ok(provider_config_to_response(ops, config))
 }
 
 /// Partial update. Handles secret restoration and provider-specific validation internally.
 /// Returns the updated response, or an error describing what went wrong.
 pub async fn update_provider_config(
+    ops: &dyn ProviderOps,
     tenant_db: &TenantDb,
     id: Uuid,
     req: UpdateProviderConfigRequest,
@@ -195,9 +202,9 @@ pub async fn update_provider_config(
 
     // Validate new config if provided; restore masked secrets from the existing value.
     if let Some(ref mut new_config) = req.config.clone() {
-        ProviderRegistry::restore_config_secrets_str(&provider_type, new_config, &existing.config);
+        ops.restore_config_secrets_str(&provider_type, new_config, &existing.config);
 
-        if let Err(e) = ProviderRegistry::validate_config_str(&provider_type, new_config) {
+        if let Err(e) = ops.validate_config_str(&provider_type, new_config) {
             return Err(UpdateProviderConfigError::ConfigValidation(e.to_string()));
         }
 
@@ -214,7 +221,7 @@ pub async fn update_provider_config(
     }
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being persisted.
-        ProviderRegistry::restore_config_secrets_str(
+        ops.restore_config_secrets_str(
             &provider_type,
             &mut config,
             model.config.as_ref(),
@@ -231,7 +238,7 @@ pub async fn update_provider_config(
         .await
         .map_err(UpdateProviderConfigError::Db)?;
 
-    provider_config_to_response(updated)
+    provider_config_to_response(ops, updated)
         .ok_or_else(|| UpdateProviderConfigError::ConfigValidation(
             "updated record has unrecognised provider_type".to_string(),
         ))

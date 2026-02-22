@@ -33,6 +33,8 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use uptrakit_provider_registry::ProviderOps;
+
 use auth::device_flow::DeviceFlowStore;
 use auth::jwt::JwtManager;
 #[cfg(feature = "oidc")]
@@ -205,6 +207,12 @@ pub struct AppState {
     pub notification_service: NotificationService,
     /// In-memory denylist for immediate JWT access token revocation.
     pub token_denylist: Arc<auth::token_denylist::TokenDenylist>,
+    /// Provider operations abstraction used by provider-config route handlers.
+    ///
+    /// Injected via `Arc<dyn ProviderOps>` so that route handlers and query
+    /// helpers are decoupled from the concrete [`uptrakit_provider_registry::ProviderRegistry`]
+    /// and can be tested with a mock implementation.
+    pub provider_ops: Arc<dyn ProviderOps>,
 }
 
 /// Error returned when [`AppStateBuilder::build`] is called with a missing required field.
@@ -250,6 +258,7 @@ pub struct AppStateBuilder {
     controller_id: Option<uuid::Uuid>,
     notification_service: Option<NotificationService>,
     token_denylist: Option<Arc<auth::token_denylist::TokenDenylist>>,
+    provider_ops: Option<Arc<dyn ProviderOps>>,
 }
 
 impl AppStateBuilder {
@@ -281,6 +290,7 @@ impl AppStateBuilder {
             controller_id: None,
             notification_service: None,
             token_denylist: None,
+            provider_ops: None,
         }
     }
 
@@ -399,6 +409,15 @@ impl AppStateBuilder {
         self
     }
 
+    /// Override the provider operations implementation.
+    ///
+    /// Defaults to [`uptrakit_provider_registry::ProviderRegistry`] when not set.
+    /// Use this in tests to inject a mock implementation.
+    pub fn provider_ops(mut self, v: Arc<dyn ProviderOps>) -> Self {
+        self.provider_ops = Some(v);
+        self
+    }
+
     /// Consume the builder and produce an [`AppState`].
     ///
     /// Returns [`AppStateBuildError`] naming the first field that was not set.
@@ -466,6 +485,9 @@ impl AppStateBuilder {
             token_denylist: self
                 .token_denylist
                 .ok_or(AppStateBuildError("token_denylist"))?,
+            provider_ops: self.provider_ops.unwrap_or_else(|| {
+                Arc::new(uptrakit_provider_registry::ProviderRegistry)
+            }),
         })
     }
 }
@@ -1070,6 +1092,7 @@ mod tests {
             controller_id,
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            provider_ops: Arc::new(uptrakit_provider_registry::ProviderRegistry),
             db,
         })
     }

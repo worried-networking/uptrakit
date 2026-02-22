@@ -32,6 +32,7 @@ fn enrollment_setting_key(type_param: Option<&ServiceType>) -> SettingKey {
         Some(ServiceType::Mqtt) => SettingKey::MqttEnrollmentTokenHash,
         Some(ServiceType::SshAgent) => SettingKey::SshAgentEnrollmentTokenHash,
         Some(ServiceType::Agent) | None => SettingKey::EnrollmentTokenHash,
+        Some(_) => SettingKey::EnrollmentTokenHash,
     }
 }
 
@@ -727,6 +728,7 @@ mod tests {
             controller_id: uuid::Uuid::nil(),
             notification_service,
             token_denylist: Arc::new(crate::auth::token_denylist::TokenDenylist::new()),
+            provider_ops: Arc::new(uptrakit_provider_registry::ProviderRegistry),
         })
     }
 

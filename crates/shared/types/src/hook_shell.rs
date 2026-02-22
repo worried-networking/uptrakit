@@ -5,6 +5,11 @@ use std::str::FromStr;
 /// Shell type for hook execution in update payloads.
 ///
 /// Determines which shell interpreter and fail-early settings are used.
+///
+/// Marked `#[non_exhaustive]` because additional shell types (e.g. `fish`, `zsh`)
+/// may be added in future releases. Downstream code must include a wildcard arm
+/// when matching on this enum.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]

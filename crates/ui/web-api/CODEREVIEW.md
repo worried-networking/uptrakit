@@ -72,14 +72,15 @@ Tenant-agnostic routes (PKI, authentication, WebSocket handlers) continue to use
 `State(state)` and call `state.db()`. All handler code passes `cargo check` and
 `cargo clippy --deny warnings` cleanly.
 
-### Minor: provider registry used directly in handlers
+### ~~Minor: provider registry used directly in handlers~~ RESOLVED
 
-**Location:** `src/routes/provider_configs.rs`
+**Location:** `src/queries/provider_configs.rs`, `src/routes/provider_configs.rs`
 
-The `ProviderRegistry` is called directly in route handlers for `validate_config()`,
-`mask_config_secrets_str()`, and `restore_config_secrets_str()`. It is not injected via `AppState`.
-
-**Impact:** Acceptable for current architecture but limits future flexibility.
+The `ProviderOps` trait (`uptrakit_provider_registry::ProviderOps`) is now injected via
+`AppState.provider_ops: Arc<dyn ProviderOps>`. Query functions accept `ops: &dyn ProviderOps`
+and call through the trait. Route handlers extract `State(state)` and pass
+`state.provider_ops.as_ref()`. The `AppStateBuilder` defaults to `Arc::new(ProviderRegistry)`,
+so no call sites need to change. Tests pass an `Arc<ProviderRegistry>` directly.
 
 ## Strengths
 

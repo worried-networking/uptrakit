@@ -36,12 +36,34 @@
 /// }
 /// ```
 ///
+/// ## Target identifier constraint
+///
+/// The `$target` fragment accepts a **single identifier** (e.g. `MyError`), not a
+/// multi-segment path (e.g. `module::MyError`). This is intentional and acceptable
+/// because `impl_report_conversion!` is always invoked in the same module where the
+/// target error type is defined, so the single-identifier form is always sufficient.
+///
 /// # Closure-based transform
 ///
 /// When extra wrapping is needed (e.g. `Box::new`, `to_string`, or pattern matching):
 ///
 /// ```ignore
 /// impl_report_conversion!(tungstenite::Error => ControllerError, |e| ControllerError::WebSocket(Box::new(e)));
+/// ```
+///
+/// Expands to:
+///
+/// ```ignore
+/// impl<T> ReportConversion<tungstenite::Error, markers::Mutable, T> for ControllerError
+/// where
+///     ControllerError: markers::ObjectMarkerFor<T>,
+/// {
+///     fn convert_report(
+///         report: Report<tungstenite::Error, markers::Mutable, T>,
+///     ) -> Report<Self, markers::Mutable, T> {
+///         report.context_transform(|e| ControllerError::WebSocket(Box::new(e)))
+///     }
+/// }
 /// ```
 ///
 /// # Multiple conversions
@@ -56,6 +78,13 @@
 ///     serde_json::Error => MyError::Json,
 /// }
 /// ```
+///
+/// # Dependency requirement
+///
+/// This macro hard-codes the crate name `rootcause`. The macro will fail to
+/// expand if the downstream crate has renamed the dependency in its `Cargo.toml`
+/// (e.g. `rootcause = { package = "rootcause", rename = "rc" }`). All workspace
+/// crates must keep `rootcause` under its canonical name.
 #[macro_export]
 macro_rules! impl_report_conversion {
     // Single: simple variant mapping

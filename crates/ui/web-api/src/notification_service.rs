@@ -118,6 +118,7 @@ impl NotificationService {
             ServiceType::Agent => "agent",
             ServiceType::Mqtt => "mqtt",
             ServiceType::SshAgent => "ssh_agent",
+            _ => unreachable!("unknown ServiceType variant"),
         };
 
         let broadcast_condition = Condition::all()
@@ -213,6 +214,7 @@ fn should_deliver_backlog_message(service_type: ServiceType, msg: &ControllerMes
             msg,
             ControllerMessage::CaBundleUpdated(_) | ControllerMessage::RequestCertRenewal(_)
         ),
+        _ => false,
     }
 }
 

@@ -40,21 +40,6 @@ implementations.
 The `$source:ty` fragment specifier correctly handles paths like `tokio_tungstenite::tungstenite::Error`. Confirmed by
 widespread usage.
 
-### LOW: `$target:ident` prevents multi-segment target paths
-
-The fragment specifier only accepts a single identifier (e.g., `MyError`), not paths like `module::MyError`. Acceptable
-given that `ReportConversion` impls are always written where the target type is defined.
-
-### LOW: Closure-based arm lacks "Expands to" example
-
-The simple variant arm has an "Expands to" section in the doc comment. The closure arm does not. Adding one would help
-readability.
-
-### LOW: Implicit requirement on `rootcause` dependency name
-
-The macro requires downstream crates have `rootcause` under that exact name. If a crate renames the dependency, the
-macro fails. Acceptable given workspace conventions, but worth a brief doc note.
-
 ### INFORMATIONAL: All doc examples use `/// ```ignore`
 
 Doc examples are not compiled or tested. Understandable since the macro depends on `rootcause` types unavailable in

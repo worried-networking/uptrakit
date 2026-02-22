@@ -17,6 +17,21 @@
 //! All public I/O functions are async (backed by `tokio::fs`), eliminating
 //! the TOCTOU risk of calling sync filesystem operations from an async
 //! runtime.
+//!
+//! # Platform support
+//!
+//! **Permission hardening (0700 directories, 0600 files) is Unix-only.**
+//! On non-Unix platforms (Windows), directories and files are created with
+//! default OS permissions. Uptrakit's production deployments target Linux;
+//! the non-Unix code paths are provided only for developer convenience and
+//! are not security-hardened.
+//!
+//! # Tilde expansion
+//!
+//! The [`expand_tilde`] function expands `~` and `~/…` to the current user's
+//! home directory. The `~username/…` syntax (tilde-prefixed username) is
+//! **not supported** and is passed through unchanged. Users relying on this
+//! syntax must resolve it before passing paths to this crate.
 
 use std::path::{Path, PathBuf};
 
@@ -200,7 +215,12 @@ fn validate_path_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Expand `~` prefix to the user's home directory.
+/// Expand `~` prefix to the current user's home directory.
+///
+/// Handles `~` (alone) and `~/…` (followed by a sub-path). The
+/// `~username/…` syntax is **not supported** and is passed through
+/// unchanged; callers that need to expand other users' home directories must
+/// resolve the path beforehand.
 ///
 /// Uses `std::path::Component`-based matching to avoid lossy string
 /// conversion, preserving non-UTF-8 path components on Unix.
@@ -397,6 +417,10 @@ async fn write_with_mode(path: &Path, data: &[u8]) -> Result<()> {
 }
 
 /// Set directory permissions to 700 (owner rwx only).
+///
+/// **Unix only.** On non-Unix platforms this function is a no-op and the
+/// directory retains its default OS permissions. See the [platform support]
+/// section in the crate documentation.
 pub async fn set_dir_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -412,12 +436,18 @@ pub async fn set_dir_permissions(path: &Path) -> Result<()> {
     }
     #[cfg(not(unix))]
     {
+        // Permission hardening is Unix-only. On non-Unix (Windows) the directory
+        // is created with default OS permissions and this function has no effect.
         let _ = path;
     }
     Ok(())
 }
 
 /// Set file permissions to 600 (owner rw only).
+///
+/// **Unix only.** On non-Unix platforms this function is a no-op and the file
+/// retains its default OS permissions. See the [platform support] section in
+/// the crate documentation.
 pub async fn set_file_permissions(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -433,6 +463,8 @@ pub async fn set_file_permissions(path: &Path) -> Result<()> {
     }
     #[cfg(not(unix))]
     {
+        // Permission hardening is Unix-only. On non-Unix (Windows) the file
+        // is created with default OS permissions and this function has no effect.
         let _ = path;
     }
     Ok(())

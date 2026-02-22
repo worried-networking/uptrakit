@@ -4,6 +4,11 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 /// Type of service enrolling with the controller.
+///
+/// Marked `#[non_exhaustive]` because new service types may be added in future
+/// releases. All service types are first-party and compiled together; the
+/// exhaustive enum enables compile-time dispatch and DB/OpenAPI schema generation.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(
     feature = "sea-orm",
