@@ -407,17 +407,13 @@ impl AppStateBuilder {
     /// Returns an error if any required field was not set before calling `build`.
     pub fn build(self) -> Result<AppState, AppStateBuildError> {
         Ok(AppState {
-            ca_snapshot: self
-                .ca_snapshot
-                .ok_or(AppStateBuildError("ca_snapshot"))?,
+            ca_snapshot: self.ca_snapshot.ok_or(AppStateBuildError("ca_snapshot"))?,
             ca_key_store: self
                 .ca_key_store
                 .ok_or(AppStateBuildError("ca_key_store"))?,
             db: self.db.ok_or(AppStateBuildError("db"))?,
             settings: self.settings.ok_or(AppStateBuildError("settings"))?,
-            cert_signer: self
-                .cert_signer
-                .ok_or(AppStateBuildError("cert_signer"))?,
+            cert_signer: self.cert_signer.ok_or(AppStateBuildError("cert_signer"))?,
             service_connections: self
                 .service_connections
                 .ok_or(AppStateBuildError("service_connections"))?,

@@ -50,7 +50,8 @@ pub async fn list_hosts(
 
     let pagination = params.resolve();
 
-    let base_query = tenant_db.find::<host::Entity>()
+    let base_query = tenant_db
+        .find::<host::Entity>()
         .filter(host::Column::DeactivatedAt.is_null())
         .order_by_desc(host::Column::CreatedAt);
 
@@ -118,7 +119,8 @@ pub async fn get_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
-    let host_model = match tenant_db.find_by_id::<host::Entity, _>(host_id)
+    let host_model = match tenant_db
+        .find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -167,7 +169,8 @@ pub async fn update_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
-    let host_model = match tenant_db.find_by_id::<host::Entity, _>(host_id)
+    let host_model = match tenant_db
+        .find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -228,7 +231,8 @@ pub async fn deactivate_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
     };
 
-    let host_model = match tenant_db.find_by_id::<host::Entity, _>(host_id)
+    let host_model = match tenant_db
+        .find_by_id::<host::Entity, _>(host_id)
         .filter(host::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -279,10 +283,7 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
     }
 }
 
-async fn load_host_agents(
-    tenant_db: &TenantDb,
-    host_id: uuid::Uuid,
-) -> Vec<HostAgentSummary> {
+async fn load_host_agents(tenant_db: &TenantDb, host_id: uuid::Uuid) -> Vec<HostAgentSummary> {
     let links = match ServiceHost::find()
         .filter(service_host::Column::HostId.eq(host_id))
         .all(tenant_db.db())
@@ -300,7 +301,8 @@ async fn load_host_agents(
         return Vec::new();
     }
 
-    let agents = match tenant_db.find::<service::Entity>()
+    let agents = match tenant_db
+        .find::<service::Entity>()
         .filter(service::Column::Id.is_in(service_ids))
         .filter(service::Column::DeactivatedAt.is_null())
         .all(tenant_db.db())

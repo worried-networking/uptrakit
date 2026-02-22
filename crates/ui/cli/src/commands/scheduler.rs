@@ -36,7 +36,12 @@ pub struct TriggerParams<'a> {
 
 /// List all scheduled tasks.
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
 
     let resp = client.list_scheduled_tasks().await.context_to()?;
 
@@ -49,7 +54,10 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
             "ID", "TYPE", "CRON", "ENABLED"
         ));
         for task in &resp {
-            let next_run = task.next_run_at.format(&Rfc3339).unwrap_or_else(|_| task.next_run_at.to_string());
+            let next_run = task
+                .next_run_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| task.next_run_at.to_string());
             human.push_str(&format!(
                 "{:<38} {:<25} {:<15} {:<8} {}\n",
                 task.id, task.task_type, task.cron_expression, task.enabled, next_run
@@ -62,7 +70,12 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single scheduled task.
 pub async fn show(params: ShowParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let resp = client.get_scheduled_task(params.id).await.context_to()?;
 
     let mut human = String::new();
@@ -81,18 +94,24 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     }
     human.push_str(&format!(
         "Next Run:   {}\n",
-        resp.next_run_at.format(&Rfc3339).unwrap_or_else(|_| resp.next_run_at.to_string())
+        resp.next_run_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.next_run_at.to_string())
     ));
     if let Some(ref err) = resp.last_error {
         human.push_str(&format!("Last Error: {}\n", err));
     }
     human.push_str(&format!(
         "Created:    {}\n",
-        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+        resp.created_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.created_at.to_string())
     ));
     human.push_str(&format!(
         "Updated:    {}\n",
-        resp.updated_at.format(&Rfc3339).unwrap_or_else(|_| resp.updated_at.to_string())
+        resp.updated_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.updated_at.to_string())
     ));
 
     print_output(params.format, &human, &resp)
@@ -100,7 +119,12 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
 
 /// Trigger immediate execution of a scheduled task.
 pub async fn trigger(params: TriggerParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let resp = client
         .trigger_scheduled_task(params.id)
         .await

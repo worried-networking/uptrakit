@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 
 use crate::command::{get_shell_args, run_command_exec_impl, wrap_command_for_shell};
 use crate::error::CommandError;
-use uptrakit_shared_types::HookShell;
 use rootcause::prelude::*;
+use uptrakit_shared_types::HookShell;
 
 use crate::types::UpdateOutputLine;
 
@@ -315,30 +315,33 @@ mod tests {
 
     #[test]
     fn command_spec_with_timeout_builder() {
-        let spec = CommandSpec::exec("echo", Vec::<String>::new())
-            .with_timeout(Duration::from_secs(5));
+        let spec =
+            CommandSpec::exec("echo", Vec::<String>::new()).with_timeout(Duration::from_secs(5));
         assert_eq!(spec.timeout, Some(Duration::from_secs(5)));
     }
 
     #[tokio::test(start_paused = true)]
     async fn execute_quiet_timeout_fires() {
-        let spec = CommandSpec::exec("sleep", ["100".to_string()])
-            .with_timeout(Duration::from_secs(5));
+        let spec =
+            CommandSpec::exec("sleep", ["100".to_string()]).with_timeout(Duration::from_secs(5));
         let executor = LocalCommandExecutor;
         let handle = tokio::spawn(async move { executor.execute_quiet(&spec).await });
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(10)).await;
         let result = handle.await.expect("join");
         assert!(
-            matches!(result.unwrap_err().current_context(), CommandError::TimedOut),
+            matches!(
+                result.unwrap_err().current_context(),
+                CommandError::TimedOut
+            ),
             "expected TimedOut error"
         );
     }
 
     #[tokio::test(start_paused = true)]
     async fn execute_timeout_fires() {
-        let spec = CommandSpec::exec("sleep", ["100".to_string()])
-            .with_timeout(Duration::from_secs(5));
+        let spec =
+            CommandSpec::exec("sleep", ["100".to_string()]).with_timeout(Duration::from_secs(5));
         let executor = LocalCommandExecutor;
         let (tx, mut rx) = mpsc::channel(100);
         let handle = tokio::spawn(async move { executor.execute(&spec, &tx).await });
@@ -346,7 +349,10 @@ mod tests {
         tokio::time::advance(Duration::from_secs(10)).await;
         let result = handle.await.expect("join");
         assert!(
-            matches!(result.unwrap_err().current_context(), CommandError::TimedOut),
+            matches!(
+                result.unwrap_err().current_context(),
+                CommandError::TimedOut
+            ),
             "expected TimedOut error"
         );
         rx.close();

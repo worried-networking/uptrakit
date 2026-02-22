@@ -29,7 +29,12 @@ pub struct ShowParams<'a> {
 
 /// List all hosts (paginated).
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let pagination = PaginationParams {
         page: params.page,
         per_page: params.per_page,
@@ -64,7 +69,12 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single host.
 pub async fn show(params: ShowParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let resp = client.get_host(params.id).await.context_to()?;
 
     let mut human = String::new();
@@ -92,7 +102,9 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     }
     human.push_str(&format!(
         "Created:      {}\n",
-        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+        resp.created_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.created_at.to_string())
     ));
     if !resp.agents.is_empty() {
         human.push_str("Agents:\n");

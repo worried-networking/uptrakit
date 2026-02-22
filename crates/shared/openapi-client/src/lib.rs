@@ -446,8 +446,8 @@ mod tests {
 
     #[test]
     fn base_url_trailing_slash_is_trimmed() {
-        let client =
-            UptrakitClient::new("https://example.com/", None, false, None).expect("client creation");
+        let client = UptrakitClient::new("https://example.com/", None, false, None)
+            .expect("client creation");
         assert_eq!(client.base_url, "https://example.com");
     }
 

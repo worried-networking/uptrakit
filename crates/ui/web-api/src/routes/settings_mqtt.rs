@@ -2,9 +2,9 @@ use crate::AppState;
 use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
 use crate::middleware::require_auth::AuthenticatedUser;
-use crate::tenant_db::TenantDb;
 use crate::mqtt_client_store;
 use crate::mqtt_lease_coordinator::{LeaseOutcome, MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
+use crate::tenant_db::TenantDb;
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -393,7 +393,9 @@ pub async fn get_mqtt_settings(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
-    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id).await {
+    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id)
+        .await
+    {
         Ok(Some(model)) => {
             let heartbeat_at = match mqtt_lease::Entity::find()
                 .filter(mqtt_lease::Column::MqttClientId.eq(model.id))
@@ -454,7 +456,12 @@ pub async fn update_mqtt_settings(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
     };
 
-    let existing = match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id).await
+    let existing = match mqtt_client_store::load_mqtt_client_by_id(
+        state.db(),
+        mqtt_client_id,
+        tenant_db.tenant_id,
+    )
+    .await
     {
         Ok(Some(model)) => model,
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
@@ -624,7 +631,9 @@ pub async fn delete_mqtt_settings(
     };
 
     // Verify tenant ownership
-    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id).await {
+    match mqtt_client_store::load_mqtt_client_by_id(state.db(), mqtt_client_id, tenant_db.tenant_id)
+        .await
+    {
         Ok(Some(_)) => {}
         Ok(None) => return error_response(StatusCode::NOT_FOUND, "Not found"),
         Err(e) => {

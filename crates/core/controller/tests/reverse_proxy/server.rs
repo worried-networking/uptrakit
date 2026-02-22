@@ -200,7 +200,9 @@ async fn build_state(
         .cert_signer(Arc::new(NoopCertSigner))
         .service_connections(service_connections)
         .revocation_notify(Arc::new(tokio::sync::Notify::const_new()))
-        .jwt(Arc::new(JwtManager::from_secret(b"test-secret-reverse-proxy")))
+        .jwt(Arc::new(JwtManager::from_secret(
+            b"test-secret-reverse-proxy",
+        )))
         .device_flow_store(DeviceFlowStore::new(db.clone()))
         .rate_limit_store(RateLimitStore::new(db.clone()))
         .pki_path(std::path::PathBuf::from("/tmp/test-pki-reverse-proxy"))
@@ -221,7 +223,11 @@ async fn build_state(
         .oidc_token_exchange_store(OidcTokenExchangeStore::new(db.clone()))
         .oidc_registration_store(OidcRegistrationStore::new(db.clone()));
 
-    Arc::new(builder.build().expect("all AppState fields set in test builder"))
+    Arc::new(
+        builder
+            .build()
+            .expect("all AppState fields set in test builder"),
+    )
 }
 
 fn build_router(state: Arc<AppState>) -> Router {

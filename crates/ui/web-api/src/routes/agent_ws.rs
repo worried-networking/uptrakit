@@ -11,8 +11,8 @@ use uptrakit_internal_wire::{
     ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
-    available_version, host_software_item, provider_config, service_host,
-    software_item, update_history,
+    available_version, host_software_item, provider_config, service_host, software_item,
+    update_history,
 };
 
 use rootcause::prelude::*;

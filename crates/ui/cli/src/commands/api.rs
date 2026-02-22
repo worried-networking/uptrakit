@@ -19,7 +19,12 @@ pub struct ExecuteParams<'a> {
 
 /// Execute a raw API call and print the response in the requested format.
 pub async fn execute(params: ExecuteParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let method = params.method;
     let data = params.data;
     let format = params.format;

@@ -63,7 +63,7 @@ pub async fn get_authentication_settings(
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
     axum::Extension(user): axum::Extension<AuthenticatedUser>,
-    tenant_db: TenantDb,
+    _tenant_db: TenantDb,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
     if !user.has_permission(Permission::ManageSettings) {
@@ -83,10 +83,11 @@ pub async fn update_authentication_settings(
             // Safety: at least one auth method must remain
             #[cfg(feature = "oidc")]
             {
-                let active_providers = tenant_db.find::<oidc_provider::Entity>()
+                let active_providers = _tenant_db
+                    .find::<oidc_provider::Entity>()
                     .filter(oidc_provider::Column::IsActive.eq(true))
                     .filter(oidc_provider::Column::DeletedAt.is_null())
-                    .all(tenant_db.db())
+                    .all(_tenant_db.db())
                     .await
                     .unwrap_or_default();
 
@@ -109,7 +110,10 @@ pub async fn update_authentication_settings(
 
         let mut auth_settings = state.settings.authentication();
         auth_settings.password_auth_enabled = password_enabled;
-        if let Err(e) = auth_settings.save(state.db(), state.default_tenant_id).await {
+        if let Err(e) = auth_settings
+            .save(state.db(), state.default_tenant_id)
+            .await
+        {
             tracing::error!("Failed to save authentication settings: {e:?}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }

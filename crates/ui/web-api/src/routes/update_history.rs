@@ -81,12 +81,8 @@ async fn load_output_lines(
 }
 
 /// Collect all host IDs belonging to a tenant (for tenant scoping).
-async fn tenant_host_ids(
-    tenant_db: &TenantDb,
-) -> Result<Vec<uuid::Uuid>, sea_orm::DbErr> {
-    let hosts = tenant_db.find::<host::Entity>()
-        .all(tenant_db.db())
-        .await?;
+async fn tenant_host_ids(tenant_db: &TenantDb) -> Result<Vec<uuid::Uuid>, sea_orm::DbErr> {
+    let hosts = tenant_db.find::<host::Entity>().all(tenant_db.db()).await?;
     Ok(hosts.into_iter().map(|h| h.id).collect())
 }
 
@@ -246,7 +242,10 @@ pub async fn get_update_history(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let record = match UpdateHistory::find_by_id(record_id).one(tenant_db.db()).await {
+    let record = match UpdateHistory::find_by_id(record_id)
+        .one(tenant_db.db())
+        .await
+    {
         Ok(Some(r)) => r,
         Ok(None) => {
             return error_response(StatusCode::NOT_FOUND, "Update history record not found");
@@ -258,7 +257,8 @@ pub async fn get_update_history(
     };
 
     // Tenant scoping: verify the record's host belongs to this tenant
-    let host = match tenant_db.find_by_id::<host::Entity, _>(record.host_id)
+    let host = match tenant_db
+        .find_by_id::<host::Entity, _>(record.host_id)
         .one(tenant_db.db())
         .await
     {

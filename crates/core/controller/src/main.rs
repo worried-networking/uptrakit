@@ -230,9 +230,11 @@ async fn run(args: cli::Args) -> Result<()> {
         .oidc_token_exchange_store(oidc_token_exchange_store)
         .oidc_registration_store(oidc_registration_store);
 
-    let app_state = Arc::new(builder.build().map_err(|e| {
-        report!(AppError::Config(format!("failed to build AppState: {e}")))
-    })?);
+    let app_state = Arc::new(
+        builder
+            .build()
+            .map_err(|e| report!(AppError::Config(format!("failed to build AppState: {e}"))))?,
+    );
 
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(CancellationToken::new());

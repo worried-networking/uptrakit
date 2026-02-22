@@ -104,7 +104,12 @@ pub struct RegistrationUpdateParams<'a> {
 
 /// Update registration settings.
 pub async fn registration_update(params: RegistrationUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = UpdateRegistrationSettingsRequest {
         mode: params.mode,
         token: params.reg_token.map(SecretString::new),
@@ -291,7 +296,12 @@ pub struct NetworkUpdateParams<'a> {
 
 /// Update network settings.
 pub async fn network_update(params: NetworkUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = UpdateNetworkSettingsRequest {
         trusted_proxies: params.trusted_proxies,
         real_ip_header: params.real_ip_header,
@@ -452,7 +462,12 @@ pub struct MqttCreateParams<'a> {
 
 /// Create a new MQTT client configuration.
 pub async fn mqtt_create(params: MqttCreateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let transport = params
         .transport
         .map(|t| t.parse())
@@ -504,7 +519,12 @@ pub struct MqttUpdateParams<'a> {
 
 /// Update an existing MQTT client configuration.
 pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let transport = params
         .transport
         .map(|t| t.parse())
@@ -691,7 +711,12 @@ pub struct OidcCreateParams<'a> {
 
 /// Create a new OIDC provider.
 pub async fn oidc_create(params: OidcCreateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = CreateOidcProviderRequest {
         name: params.name,
         slug: params.slug,
@@ -739,7 +764,12 @@ pub struct OidcUpdateParams<'a> {
 
 /// Update an existing OIDC provider.
 pub async fn oidc_update(params: OidcUpdateParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = UpdateOidcProviderRequest {
         name: params.name,
         slug: params.slug,

@@ -54,7 +54,8 @@ pub async fn list_scheduled_tasks(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let tasks = match tenant_db.find::<scheduled_task::Entity>()
+    let tasks = match tenant_db
+        .find::<scheduled_task::Entity>()
         .all(tenant_db.db())
         .await
     {
@@ -98,7 +99,8 @@ pub async fn get_scheduled_task(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
     };
 
-    let task = match tenant_db.find_by_id::<scheduled_task::Entity, _>(task_id)
+    let task = match tenant_db
+        .find_by_id::<scheduled_task::Entity, _>(task_id)
         .one(tenant_db.db())
         .await
     {
@@ -149,7 +151,8 @@ pub async fn update_scheduled_task(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
     };
 
-    let task = match tenant_db.find_by_id::<scheduled_task::Entity, _>(task_id)
+    let task = match tenant_db
+        .find_by_id::<scheduled_task::Entity, _>(task_id)
         .one(tenant_db.db())
         .await
     {
@@ -233,7 +236,8 @@ pub async fn trigger_scheduled_task(
     };
 
     // Verify task exists for this tenant
-    match tenant_db.find_by_id::<scheduled_task::Entity, _>(task_id)
+    match tenant_db
+        .find_by_id::<scheduled_task::Entity, _>(task_id)
         .one(tenant_db.db())
         .await
     {

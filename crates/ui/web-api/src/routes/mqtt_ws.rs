@@ -123,7 +123,8 @@ pub(crate) async fn handle_mqtt_authenticated(
                         if send_pong(sink, out_seq, service_ts).await.is_err() {
                             return;
                         }
-                        if let Err(e) = record_service_activity(state.db(), service_id, None).await {
+                        if let Err(e) = record_service_activity(state.db(), service_id, None).await
+                        {
                             tracing::warn!(error = %e, %service_id, "failed to record service activity");
                         }
                     }

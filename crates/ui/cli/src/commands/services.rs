@@ -24,7 +24,12 @@ pub struct ListParams<'a> {
 
 /// List services with optional filters and pagination.
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let query =
         ListServicesQuery {
             r#type: params
@@ -107,11 +112,15 @@ pub async fn show(
     }
     human.push_str(&format!(
         "Created:       {}\n",
-        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+        resp.created_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.created_at.to_string())
     ));
     human.push_str(&format!(
         "Updated:       {}\n",
-        resp.updated_at.format(&Rfc3339).unwrap_or_else(|_| resp.updated_at.to_string())
+        resp.updated_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.updated_at.to_string())
     ));
 
     print_output(format, &human, &resp)

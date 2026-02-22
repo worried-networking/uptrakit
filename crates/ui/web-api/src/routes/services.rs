@@ -92,7 +92,8 @@ pub async fn list_services(
 
     let pagination = query.pagination().resolve();
 
-    let mut q = tenant_db.find::<service::Entity>()
+    let mut q = tenant_db
+        .find::<service::Entity>()
         .filter(service::Column::DeactivatedAt.is_null());
 
     if let Some(ref type_filter) = query.r#type {
@@ -164,7 +165,8 @@ pub async fn get_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
+    let svc = match tenant_db
+        .find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -213,7 +215,8 @@ pub async fn update_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
+    let svc = match tenant_db
+        .find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -281,7 +284,8 @@ pub async fn approve_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
+    let svc = match tenant_db
+        .find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -354,7 +358,8 @@ pub async fn reject_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
+    let svc = match tenant_db
+        .find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -431,7 +436,8 @@ pub async fn deactivate_service(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
     };
 
-    let svc = match tenant_db.find_by_id::<service::Entity, _>(service_id)
+    let svc = match tenant_db
+        .find_by_id::<service::Entity, _>(service_id)
         .filter(service::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await
@@ -543,7 +549,8 @@ pub async fn merge_service(
     };
 
     // Find target service (must be approved, not deactivated, agent type)
-    let target = match tenant_db.find_by_id::<service::Entity, _>(target_uuid)
+    let target = match tenant_db
+        .find_by_id::<service::Entity, _>(target_uuid)
         .lock_exclusive()
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)
@@ -576,7 +583,8 @@ pub async fn merge_service(
     }
 
     // Find source service (must be pending, not deactivated, agent type)
-    let source = match tenant_db.find_by_id::<service::Entity, _>(source_uuid)
+    let source = match tenant_db
+        .find_by_id::<service::Entity, _>(source_uuid)
         .lock_exclusive()
         .filter(service::Column::DeactivatedAt.is_null())
         .one(&txn)

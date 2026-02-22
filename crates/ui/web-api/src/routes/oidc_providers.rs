@@ -65,7 +65,8 @@ pub async fn create_provider(
     }
 
     // Check slug uniqueness among non-deleted providers within tenant
-    let existing = tenant_db.find::<oidc_provider::Entity>()
+    let existing = tenant_db
+        .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::Slug.eq(&req.slug))
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .one(tenant_db.db())
@@ -136,7 +137,8 @@ pub async fn list_providers(
         return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    match tenant_db.find::<oidc_provider::Entity>()
+    match tenant_db
+        .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .order_by_asc(oidc_provider::Column::Name)
         .all(tenant_db.db())
@@ -218,17 +220,17 @@ pub async fn update_provider(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let provider =
-        match find_non_deleted_provider(&tenant_db, provider_id).await {
-            Some(p) => p,
-            None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
-        };
+    let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
+        Some(p) => p,
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+    };
 
     // Check slug uniqueness if changing
     if let Some(ref new_slug) = req.slug
         && *new_slug != provider.slug
     {
-        let existing = tenant_db.find::<oidc_provider::Entity>()
+        let existing = tenant_db
+            .find::<oidc_provider::Entity>()
             .filter(oidc_provider::Column::Slug.eq(new_slug.as_str()))
             .filter(oidc_provider::Column::DeletedAt.is_null())
             .filter(oidc_provider::Column::Id.ne(provider_id))
@@ -319,11 +321,10 @@ pub async fn delete_provider(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let provider =
-        match find_non_deleted_provider(&tenant_db, provider_id).await {
-            Some(p) => p,
-            None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
-        };
+    let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
+        Some(p) => p,
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+    };
 
     // Safety: cannot soft-delete if admin is logged in via this provider
     if let AuthMethod::Oidc {
@@ -380,11 +381,10 @@ pub async fn activate_provider(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let provider =
-        match find_non_deleted_provider(&tenant_db, provider_id).await {
-            Some(p) => p,
-            None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
-        };
+    let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
+        Some(p) => p,
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+    };
 
     // Validate config completeness
     if provider.issuer_url.is_empty()
@@ -397,7 +397,8 @@ pub async fn activate_provider(
     let now = OffsetDateTime::now_utc();
 
     // Deactivate all other providers within the tenant
-    let all_active = tenant_db.find::<oidc_provider::Entity>()
+    let all_active = tenant_db
+        .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::IsActive.eq(true))
         .filter(oidc_provider::Column::Id.ne(provider_id))
         .filter(oidc_provider::Column::DeletedAt.is_null())
@@ -454,11 +455,10 @@ pub async fn deactivate_provider(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    let provider =
-        match find_non_deleted_provider(&tenant_db, provider_id).await {
-            Some(p) => p,
-            None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
-        };
+    let provider = match find_non_deleted_provider(&tenant_db, provider_id).await {
+        Some(p) => p,
+        None => return error_response(StatusCode::NOT_FOUND, "Provider not found"),
+    };
 
     // Safety: cannot deactivate if admin's session is via this provider
     if let AuthMethod::Oidc {
@@ -490,7 +490,8 @@ async fn find_non_deleted_provider(
     tenant_db: &TenantDb,
     id: uuid::Uuid,
 ) -> Option<oidc_provider::Model> {
-    tenant_db.find_by_id::<oidc_provider::Entity, _>(id)
+    tenant_db
+        .find_by_id::<oidc_provider::Entity, _>(id)
         .filter(oidc_provider::Column::DeletedAt.is_null())
         .one(tenant_db.db())
         .await

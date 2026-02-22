@@ -22,7 +22,12 @@ pub struct ListParams<'a> {
 
 /// List update history (paginated, with optional filters).
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
 
     let query = UpdateHistoryQuery {
         host_id: params.host_id,
@@ -95,12 +100,16 @@ pub async fn show(
     human.push_str(&format!("Initiated By:  {}\n", resp.initiated_by));
     human.push_str(&format!(
         "Started At:    {}\n",
-        resp.started_at.format(&Rfc3339).unwrap_or_else(|_| resp.started_at.to_string())
+        resp.started_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.started_at.to_string())
     ));
     if let Some(completed) = resp.completed_at {
         human.push_str(&format!(
             "Completed At:  {}\n",
-            completed.format(&Rfc3339).unwrap_or_else(|_| completed.to_string())
+            completed
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| completed.to_string())
         ));
     }
     if !resp.output.is_empty() {

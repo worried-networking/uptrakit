@@ -114,7 +114,10 @@ mod tests {
         assert_eq!(deserialized.cron_expression, "0 0 * * *");
         assert!(deserialized.enabled);
         assert!(deserialized.task_config.is_some());
-        assert_eq!(deserialized.last_run_at, Some(datetime!(2025-06-01 00:00:00 UTC)));
+        assert_eq!(
+            deserialized.last_run_at,
+            Some(datetime!(2025-06-01 00:00:00 UTC))
+        );
         assert_eq!(deserialized.next_run_at, datetime!(2025-06-02 00:00:00 UTC));
         assert!(!deserialized.is_running);
         assert_eq!(deserialized.last_error.as_deref(), Some("timeout exceeded"));

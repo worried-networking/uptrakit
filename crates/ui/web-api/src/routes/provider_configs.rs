@@ -139,7 +139,8 @@ pub async fn list_provider_configs(
 
     let pagination = params.resolve();
 
-    let base_query = tenant_db.find::<provider_config::Entity>()
+    let base_query = tenant_db
+        .find::<provider_config::Entity>()
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .order_by_asc(provider_config::Column::Name);
 
@@ -346,7 +347,8 @@ async fn find_active_config(
     tenant_db: &TenantDb,
     id: uuid::Uuid,
 ) -> Option<provider_config::Model> {
-    tenant_db.find_by_id::<provider_config::Entity, _>(id)
+    tenant_db
+        .find_by_id::<provider_config::Entity, _>(id)
         .filter(provider_config::Column::DeactivatedAt.is_null())
         .one(tenant_db.db())
         .await

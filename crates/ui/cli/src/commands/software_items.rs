@@ -29,7 +29,12 @@ pub struct ShowParams<'a> {
 
 /// List all software items (paginated).
 pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let pagination = PaginationParams {
         page: params.page,
         per_page: params.per_page,
@@ -61,7 +66,12 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
 
 /// Show details for a single software item.
 pub async fn show(params: ShowParams<'_>) -> Result<()> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let resp = client.get_software_item(params.id).await.context_to()?;
 
     let mut human = String::new();
@@ -79,17 +89,23 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     if let Some(checked) = resp.last_checked_at {
         human.push_str(&format!(
             "Last Checked:    {}\n",
-            checked.format(&Rfc3339).unwrap_or_else(|_| checked.to_string())
+            checked
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| checked.to_string())
         ));
     }
     human.push_str(&format!("Host Count:      {}\n", resp.host_count));
     human.push_str(&format!(
         "Created:         {}\n",
-        resp.created_at.format(&Rfc3339).unwrap_or_else(|_| resp.created_at.to_string())
+        resp.created_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.created_at.to_string())
     ));
     human.push_str(&format!(
         "Updated:         {}\n",
-        resp.updated_at.format(&Rfc3339).unwrap_or_else(|_| resp.updated_at.to_string())
+        resp.updated_at
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| resp.updated_at.to_string())
     ));
 
     if !resp.hosts.is_empty() {
@@ -99,7 +115,10 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
             "HOST ID", "HOSTNAME", "INSTALLED"
         ));
         for h in &resp.hosts {
-            let linked = h.linked_at.format(&Rfc3339).unwrap_or_else(|_| h.linked_at.to_string());
+            let linked = h
+                .linked_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| h.linked_at.to_string());
             human.push_str(&format!(
                 "  {:<38} {:<20} {:<15} {}\n",
                 h.host_id,
