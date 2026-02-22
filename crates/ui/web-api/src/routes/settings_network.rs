@@ -1,11 +1,10 @@
 use crate::AppState;
 use crate::SettingKey;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::CanManageGlobalSettings;
 use crate::settings_store::upsert_setting;
 use axum::{
-    Extension, Json,
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -29,16 +28,13 @@ use uptrakit_web_api_types::validation::Validate;
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_network_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ManageGlobalSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let network = state.settings.network();
     let response = NetworkSettingsResponse {
         trusted_proxies: network
@@ -69,17 +65,14 @@ pub async fn get_network_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_network_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Json(req): Json<UpdateNetworkSettingsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageGlobalSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }

@@ -1,6 +1,6 @@
 use axum::extract::Path;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, Json};
+use axum::Json;
 use http::StatusCode;
 use sea_orm::{ActiveEnum, ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
@@ -8,9 +8,8 @@ use uuid::Uuid;
 use uptrakit_shared_db::entity::scheduled_task;
 use uptrakit_web_api_types::validation::Validate;
 
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::CanManageSoftware;
 use crate::tenant_db::TenantDb;
 
 pub use uptrakit_web_api_types::scheduler::{
@@ -44,16 +43,13 @@ fn model_to_response(m: &scheduled_task::Model) -> ScheduledTaskResponse {
         (status = 200, description = "Scheduled tasks", body = Vec<ScheduledTaskResponse>),
         (status = 403, description = "Not authorized")
     ),
+    extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
 pub async fn list_scheduled_tasks(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let tasks = match tenant_db
         .find::<scheduled_task::Entity>()
         .all(tenant_db.db())
@@ -83,17 +79,14 @@ pub async fn list_scheduled_tasks(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
+    extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_scheduled_task(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let task_id = match Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),
@@ -130,18 +123,15 @@ pub async fn get_scheduled_task(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
+    extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_scheduled_task(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
     Json(req): Json<UpdateScheduledTaskRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
@@ -219,17 +209,14 @@ pub async fn update_scheduled_task(
         (status = 404, description = "Task not found"),
         (status = 403, description = "Not authorized")
     ),
+    extensions(("x-required-permission" = json!("manage_software"))),
     security(("bearer_token" = []))
 )]
 pub async fn trigger_scheduled_task(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let task_id = match Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid task ID"),

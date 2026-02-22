@@ -69,14 +69,43 @@ OIDC auto-created) get the `user` role by default. OIDC role mapping can overrid
 1. The resolved `Vec<Permission>` is embedded in the JWT access token (`permissions` claim) and returned in
    `UserResponse.permissions`.
 1. The `require_auth` middleware injects `AuthenticatedUser` with the `permissions` field decoded from the JWT.
-1. Route handlers call `user.has_permission(Permission::...)` — no DB round-trip needed.
+1. Route handlers declare their permission requirement via a **typed Axum extractor** (e.g.
+   `CanViewHosts(_user): CanViewHosts`). The extractor is defined in
+   `crates/ui/web-api/src/middleware/permission.rs` using a macro that generates one concrete struct per permission.
+   If the user lacks the permission the extractor short-circuits with `403 Forbidden` before the handler body runs.
+   No DB round-trip is needed.
+1. Every protected endpoint also carries an `x-required-permission` OpenAPI extension (set in the `#[utoipa::path]`
+   annotation, e.g. `extensions(("x-required-permission" = json!("view_hosts")))`). This makes the required
+   permission machine-readable in the generated OpenAPI spec.
 1. The frontend receives permissions as `string[]` (e.g. `["view_settings", "manage_agents"]`) and uses the `Permission`
    TypeScript enum for checks.
+
+### Permission extractor reference
+
+| Extractor | Permission checked |
+| --- | --- |
+| `CanViewSettings` | `Permission::ViewSettings` |
+| `CanManageSettings` | `Permission::ManageSettings` |
+| `CanViewAgents` | `Permission::ViewAgents` |
+| `CanManageAgents` | `Permission::ManageAgents` |
+| `CanManageGlobalSettings` | `Permission::ManageGlobalSettings` |
+| `CanViewSoftware` | `Permission::ViewSoftware` |
+| `CanManageSoftware` | `Permission::ManageSoftware` |
+| `CanViewHosts` | `Permission::ViewHosts` |
+| `CanManageHosts` | `Permission::ManageHosts` |
+
+All extractors derive `Debug`, expose `pub AuthenticatedUser` as field 0 for handler use, and provide a
+`::new(user)` constructor for use in unit tests that call handlers directly (bypassing the HTTP layer).
+
+See also: [`docs/development/coding-standards.md`](../development/coding-standards.md) for the permission pattern conventions.
 
 ### Adding a new permission
 
 1. Add a variant to the `Permission` enum in `crates/shared/web-api-types/src/permissions.rs` (with `as_str` / `parse`
    arms).
 1. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate roles.
-1. Add the check in the relevant route handler(s).
+1. Add a `CanXxx => Permission::Xxx` entry to the `permission_extractor!` macro call in
+   `crates/ui/web-api/src/middleware/permission.rs`.
+1. Use `CanXxx(_user): CanXxx` (or `CanXxx(user): CanXxx` if you need the user) in the relevant route handler(s),
+   and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
 1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.

@@ -1,11 +1,10 @@
 use crate::AppState;
 use crate::SettingKey;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageSettings, CanViewSettings};
 use crate::settings_store::upsert_setting;
 use axum::{
-    Extension, Json,
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -28,16 +27,13 @@ const MAX_AGENT_CERT_LIFETIME_DAYS: u16 = 730;
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let response = AgentCertificateSettingsResponse {
         lifetime_days: state.settings.agent_cert_lifetime_days(),
         renewal_window_hours: state.settings.renewal_window_hours(),
@@ -57,17 +53,14 @@ pub async fn get_agent_certificate_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("manage_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_agent_certificate_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     Json(req): Json<UpdateAgentCertificateSettingsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Some(days) = req.lifetime_days {
         if days < 1 {
             return error_response(

@@ -1,3 +1,4 @@
+pub mod permission;
 pub mod rate_limit;
 pub mod request_log;
 pub mod require_auth;

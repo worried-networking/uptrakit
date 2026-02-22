@@ -1,12 +1,13 @@
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{
+    CanManageSoftware, CanViewSoftware,
+};
 use crate::routes::provider_configs::{validate_hooks_in_config, validate_provider_config_request};
 use crate::tenant_db::TenantDb;
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -237,6 +238,7 @@ fn validate_config_override(
     post,
     path = "/api/v1/software-items",
     request_body = CreateSoftwareItemRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 201, description = "Software item created", body = SoftwareItemResponse),
         (status = 400, description = "Invalid input"),
@@ -247,13 +249,9 @@ fn validate_config_override(
 )]
 pub async fn create_software_item(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Json(req): Json<CreateSoftwareItemRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
@@ -410,6 +408,7 @@ pub async fn create_software_item(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
     ),
+    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of software items", body = PaginatedResponse<SoftwareItemResponse>),
     ),
@@ -418,13 +417,9 @@ pub async fn create_software_item(
 )]
 pub async fn list_software_items(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let pagination = params.resolve();
 
     let base_query = SoftwareItem::find()
@@ -488,6 +483,7 @@ pub async fn list_software_items(
     get,
     path = "/api/v1/software-items/{id}",
     params(("id" = String, Path, description = "Software item UUID")),
+    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Software item details", body = SoftwareItemDetailResponse),
         (status = 404, description = "Software item not found")
@@ -497,13 +493,9 @@ pub async fn list_software_items(
 )]
 pub async fn get_software_item(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSoftware(_user): CanViewSoftware,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -544,6 +536,7 @@ pub async fn get_software_item(
     path = "/api/v1/software-items/{id}",
     params(("id" = String, Path, description = "Software item UUID")),
     request_body = UpdateSoftwareItemRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Software item updated", body = SoftwareItemResponse),
         (status = 404, description = "Software item not found"),
@@ -554,14 +547,10 @@ pub async fn get_software_item(
 )]
 pub async fn update_software_item(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
     Json(req): Json<UpdateSoftwareItemRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -683,6 +672,7 @@ pub async fn update_software_item(
     delete,
     path = "/api/v1/software-items/{id}",
     params(("id" = String, Path, description = "Software item UUID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 204, description = "Software item deleted"),
         (status = 404, description = "Software item not found")
@@ -692,13 +682,9 @@ pub async fn update_software_item(
 )]
 pub async fn delete_software_item(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -730,6 +716,7 @@ pub async fn delete_software_item(
     path = "/api/v1/software-items/{id}/hosts",
     params(("id" = String, Path, description = "Software item UUID")),
     request_body = AssignHostsRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Hosts assigned", body = SoftwareItemDetailResponse),
         (status = 400, description = "Invalid input"),
@@ -740,14 +727,10 @@ pub async fn delete_software_item(
 )]
 pub async fn assign_hosts(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
     Json(req): Json<AssignHostsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -852,6 +835,7 @@ pub async fn assign_hosts(
         ("id" = String, Path, description = "Software item UUID"),
         ("host_id" = String, Path, description = "Host UUID")
     ),
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 204, description = "Host unassigned"),
         (status = 404, description = "Software item or link not found")
@@ -861,13 +845,9 @@ pub async fn assign_hosts(
 )]
 pub async fn unassign_host(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
@@ -922,6 +902,7 @@ pub async fn unassign_host(
         ("host_id" = String, Path, description = "Host UUID")
     ),
     request_body = TriggerUpdateRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Update triggered", body = TriggerUpdateResponse),
         (status = 400, description = "Invalid input or validation failed"),
@@ -934,14 +915,10 @@ pub async fn unassign_host(
 pub async fn trigger_update(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(user): CanManageSoftware,
     Path((id, host_id_str)): Path<(String, String)>,
     Json(req): Json<TriggerUpdateRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
@@ -1189,6 +1166,7 @@ pub async fn trigger_update(
     post,
     path = "/api/v1/software-items/{id}/check-versions",
     params(("id" = String, Path, description = "Software item UUID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
         (status = 400, description = "Invalid input"),
@@ -1200,13 +1178,9 @@ pub async fn trigger_update(
 pub async fn check_versions(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -1341,6 +1315,7 @@ pub async fn check_versions(
         ("id" = String, Path, description = "Software item UUID"),
         ("host_id" = String, Path, description = "Host UUID")
     ),
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Version check triggered", body = TriggerVersionCheckResponse),
         (status = 400, description = "Invalid input"),
@@ -1352,13 +1327,9 @@ pub async fn check_versions(
 pub async fn check_versions_host(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Path((id, host_id_str)): Path<(String, String)>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),

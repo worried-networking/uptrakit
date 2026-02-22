@@ -1,7 +1,6 @@
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageSettings, CanViewSettings};
 #[cfg(feature = "oidc")]
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -32,16 +31,13 @@ pub use uptrakit_web_api_types::settings_auth::{
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_authentication_settings(
     State(state): State<Arc<AppState>>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let auth_settings = state.settings.authentication();
     let response = AuthenticationSettingsResponse {
         password_auth_enabled: auth_settings.password_auth_enabled,
@@ -59,18 +55,15 @@ pub async fn get_authentication_settings(
         (status = 409, description = "Safety check failed")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("manage_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_authentication_settings(
     State(state): State<Arc<AppState>>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSettings(user): CanManageSettings,
     #[cfg(feature = "oidc")] tenant_db: TenantDb,
     Json(req): Json<UpdateAuthenticationSettingsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Some(password_enabled) = req.password_auth_enabled {
         if !password_enabled {
             // Safety: cannot disable password auth if current session uses password

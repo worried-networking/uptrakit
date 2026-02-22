@@ -1,13 +1,12 @@
 use crate::AppState;
 use crate::SettingKey;
-use crate::auth::permissions::Permission;
 use crate::auth::{password, token};
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageAgents, CanViewAgents};
 use crate::settings_store::{delete_setting, load_setting, upsert_setting};
 use crate::tenant_db::TenantDb;
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -79,17 +78,14 @@ fn enrollment_setting_key(type_param: Option<&ServiceType>) -> SettingKey {
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("view_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn list_services(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewAgents(_user): CanViewAgents,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let pagination = query.pagination().resolve();
 
     let mut q = tenant_db
@@ -149,17 +145,14 @@ pub async fn list_services(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("view_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_service(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewAgents(_user): CanViewAgents,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
@@ -198,18 +191,15 @@ pub async fn get_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_service(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Path(id): Path<String>,
     Json(body): Json<UpdateServiceRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
@@ -267,18 +257,15 @@ pub async fn update_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn approve_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
@@ -341,18 +328,15 @@ pub async fn approve_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn reject_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
@@ -419,18 +403,15 @@ pub async fn reject_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn deactivate_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let service_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid service ID"),
@@ -516,19 +497,16 @@ pub async fn deactivate_service(
         (status = 404, description = "Service not found")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn merge_service(
     State(state): State<Arc<AppState>>,
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Path(target_id): Path<String>,
     Json(body): Json<MergeAgentRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let target_uuid = match uuid::Uuid::parse_str(&target_id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid target service ID"),
@@ -741,17 +719,14 @@ pub async fn merge_service(
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn create_enrollment_token(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     let plaintext = match token::generate_secure_token() {
@@ -804,17 +779,14 @@ pub async fn create_enrollment_token(
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn revoke_enrollment_token(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     if let Err(e) = delete_setting(state.db(), state.default_tenant_id, setting_key).await {
@@ -834,8 +806,11 @@ pub async fn revoke_enrollment_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::permissions::Permission;
     use crate::auth::registration::{RegistrationMode, RegistrationSettings};
     use crate::cert_signer::{AgentCertSigner, CertSignerError, SignedCertBundle};
+    use crate::middleware::permission::CanManageAgents;
+    use crate::middleware::require_auth::AuthenticatedUser;
     use crate::settings::Settings;
     use crate::tenant_db::TenantDb;
     use axum::Json;
@@ -1065,7 +1040,7 @@ mod tests {
         let response = merge_service(
             State(Arc::clone(&state)),
             tenant_db,
-            axum::Extension(auth_user),
+            CanManageAgents::new(auth_user),
             Path(target.id.to_string()),
             Json(MergeAgentRequest {
                 source_id: source.id,
@@ -1098,17 +1073,14 @@ mod tests {
         (status = 403, description = "Not authorized")
     ),
     tag = "Services",
+    extensions(("x-required-permission" = json!("manage_agents"))),
     security(("bearer_token" = []))
 )]
 pub async fn enrollment_token_status(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageAgents(_user): CanManageAgents,
     Query(query): Query<ListServicesQuery>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageAgents) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let setting_key = enrollment_setting_key(query.r#type.as_ref());
 
     let configured = matches!(

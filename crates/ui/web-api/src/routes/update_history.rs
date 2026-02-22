@@ -1,9 +1,8 @@
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::CanViewSoftware;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -124,17 +123,14 @@ async fn resolve_software_item_name(
         (status = 403, description = "Not authorized")
     ),
     tag = "Update History",
+    extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
 pub async fn list_update_history(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSoftware(_user): CanViewSoftware,
     Query(query): Query<UpdateHistoryQuery>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let pagination = query.pagination().resolve();
 
     // Tenant scoping: get all host IDs belonging to this tenant
@@ -226,17 +222,14 @@ pub async fn list_update_history(
         (status = 404, description = "Record not found")
     ),
     tag = "Update History",
+    extensions(("x-required-permission" = json!("view_software"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_update_history(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSoftware(_user): CanViewSoftware,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let record_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),

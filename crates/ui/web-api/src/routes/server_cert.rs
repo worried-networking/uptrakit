@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, Json};
+use axum::Json;
 use http::StatusCode;
 
 use rootcause::prelude::*;
@@ -10,9 +10,8 @@ use thiserror::Error;
 use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::CanManageGlobalSettings;
 use crate::pki_utils::{self, SanCollection};
 
 #[derive(Debug, Error)]
@@ -72,16 +71,13 @@ pub use uptrakit_web_api_types::server_cert::RenewServerCertResponse;
         (status = 403, description = "Not authorized"),
         (status = 500, description = "Renewal failed")
     ),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn renew_server_certificate(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ManageGlobalSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Forbidden");
-    }
-
     match renew_server_certificate_inner(&state).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {

@@ -1,12 +1,13 @@
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{
+    CanManageGlobalSettings, CanManageSettings, CanViewSettings,
+};
 use crate::mqtt_client_store;
 use crate::mqtt_lease_coordinator::{LeaseOutcome, MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use crate::tenant_db::TenantDb;
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -79,6 +80,7 @@ fn resolve_connection_status(
 #[utoipa::path(
     get,
     path = "/api/v1/settings/mqtt",
+    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "MQTT client configurations", body = Vec<MqttClientResponse>),
         (status = 401, description = "Not authenticated"),
@@ -89,13 +91,9 @@ fn resolve_connection_status(
 )]
 pub async fn list_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
     tenant_db: TenantDb,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     match mqtt_client_store::load_mqtt_clients(tenant_db.db(), tenant_db.tenant_id).await {
         Ok(models) => {
             let mqtt_client_ids: Vec<uuid::Uuid> = models.iter().map(|m| m.id).collect();
@@ -145,6 +143,7 @@ pub async fn list_mqtt_settings(
     post,
     path = "/api/v1/settings/mqtt",
     request_body = CreateMqttClientRequest,
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 201, description = "MQTT client created", body = MqttClientResponse),
         (status = 400, description = "Invalid values"),
@@ -157,14 +156,10 @@ pub async fn list_mqtt_settings(
 )]
 pub async fn create_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     tenant_db: TenantDb,
     Json(req): Json<CreateMqttClientRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let tenant_id = tenant_db.tenant_id;
     let max_clients = state.settings.mqtt_max_clients_per_tenant();
 
@@ -279,6 +274,7 @@ pub async fn create_mqtt_settings(
 #[utoipa::path(
     get,
     path = "/api/v1/settings/mqtt/limit",
+    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "MQTT client limit", body = MqttLimitResponse),
         (status = 401, description = "Not authenticated"),
@@ -289,12 +285,8 @@ pub async fn create_mqtt_settings(
 )]
 pub async fn get_mqtt_limit(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let max = state.settings.mqtt_max_clients_per_tenant();
     (
         StatusCode::OK,
@@ -310,6 +302,7 @@ pub async fn get_mqtt_limit(
     put,
     path = "/api/v1/settings/mqtt/limit",
     request_body = UpdateMqttLimitRequest,
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     responses(
         (status = 200, description = "MQTT client limit updated", body = MqttLimitResponse),
         (status = 400, description = "Invalid value"),
@@ -321,13 +314,9 @@ pub async fn get_mqtt_limit(
 )]
 pub async fn update_mqtt_limit(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
     Json(req): Json<UpdateMqttLimitRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageGlobalSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if req.max_clients_per_tenant < 1 {
         return error_response(
             StatusCode::BAD_REQUEST,
@@ -369,6 +358,7 @@ pub async fn update_mqtt_limit(
     params(
         ("id" = String, Path, description = "MQTT client ID")
     ),
+    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "MQTT client configuration", body = MqttClientResponse),
         (status = 401, description = "Not authenticated"),
@@ -380,14 +370,10 @@ pub async fn update_mqtt_limit(
 )]
 pub async fn get_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
     tenant_db: TenantDb,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
@@ -430,6 +416,7 @@ pub async fn get_mqtt_settings(
         ("id" = String, Path, description = "MQTT client ID")
     ),
     request_body = UpdateMqttClientRequest,
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 200, description = "Settings updated", body = MqttClientResponse),
         (status = 400, description = "Invalid values"),
@@ -442,15 +429,11 @@ pub async fn get_mqtt_settings(
 )]
 pub async fn update_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     tenant_db: TenantDb,
     Path(id): Path<String>,
     Json(req): Json<UpdateMqttClientRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),
@@ -606,6 +589,7 @@ pub async fn update_mqtt_settings(
     params(
         ("id" = String, Path, description = "MQTT client ID")
     ),
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 204, description = "MQTT client deleted"),
         (status = 401, description = "Not authenticated"),
@@ -617,14 +601,10 @@ pub async fn update_mqtt_settings(
 )]
 pub async fn delete_mqtt_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     tenant_db: TenantDb,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let mqtt_client_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid id"),

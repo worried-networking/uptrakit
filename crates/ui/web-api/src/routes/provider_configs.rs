@@ -1,7 +1,6 @@
-use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -69,6 +68,7 @@ fn provider_config_response_from(m: provider_config::Model) -> Option<ProviderCo
     post,
     path = "/api/v1/provider-configs",
     request_body = CreateProviderConfigRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 201, description = "Provider config created", body = ProviderConfigResponse),
         (status = 400, description = "Invalid input")
@@ -78,13 +78,9 @@ fn provider_config_response_from(m: provider_config::Model) -> Option<ProviderCo
 )]
 pub async fn create_provider_config(
     tenant_db: TenantDb,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Json(req): Json<CreateProviderConfigRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
@@ -122,6 +118,7 @@ pub async fn create_provider_config(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
         ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
     ),
+    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Paginated list of provider configs", body = PaginatedResponse<ProviderConfigResponse>),
     ),
@@ -130,13 +127,9 @@ pub async fn create_provider_config(
 )]
 pub async fn list_provider_configs(
     tenant_db: TenantDb,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let pagination = params.resolve();
 
     let base_query = tenant_db
@@ -181,6 +174,7 @@ pub async fn list_provider_configs(
     get,
     path = "/api/v1/provider-configs/{id}",
     params(("id" = String, Path, description = "Provider config ID")),
+    extensions(("x-required-permission" = json!("view_software"))),
     responses(
         (status = 200, description = "Provider config details", body = ProviderConfigResponse),
         (status = 404, description = "Provider config not found")
@@ -191,12 +185,8 @@ pub async fn list_provider_configs(
 pub async fn get_provider_config(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanViewSoftware(_user): CanViewSoftware,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -217,6 +207,7 @@ pub async fn get_provider_config(
     path = "/api/v1/provider-configs/{id}",
     params(("id" = String, Path, description = "Provider config ID")),
     request_body = UpdateProviderConfigRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 200, description = "Provider config updated", body = ProviderConfigResponse),
         (status = 404, description = "Provider config not found")
@@ -227,13 +218,9 @@ pub async fn get_provider_config(
 pub async fn update_provider_config(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
     Json(req): Json<UpdateProviderConfigRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -301,6 +288,7 @@ pub async fn update_provider_config(
     delete,
     path = "/api/v1/provider-configs/{id}",
     params(("id" = String, Path, description = "Provider config ID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 204, description = "Provider config deleted"),
         (status = 404, description = "Provider config not found")
@@ -311,12 +299,8 @@ pub async fn update_provider_config(
 pub async fn delete_provider_config(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSoftware(_user): CanManageSoftware,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSoftware) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let config_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),

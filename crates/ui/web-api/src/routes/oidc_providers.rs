@@ -1,7 +1,6 @@
-use crate::auth::permissions::Permission;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageSettings, CanViewSettings};
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
@@ -43,6 +42,7 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
     post,
     path = "/api/v1/settings/oidc-providers",
     request_body = CreateOidcProviderRequest,
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 201, description = "Provider created", body = OidcProviderResponse),
         (status = 400, description = "Invalid input"),
@@ -53,13 +53,9 @@ fn oidc_provider_response_from(m: oidc_provider::Model) -> OidcProviderResponse 
 )]
 pub async fn create_provider(
     tenant_db: TenantDb,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     Json(req): Json<CreateOidcProviderRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     if let Err(e) = req.validate() {
         return error_response(StatusCode::BAD_REQUEST, e.to_string());
     }
@@ -123,6 +119,7 @@ pub async fn create_provider(
 #[utoipa::path(
     get,
     path = "/api/v1/settings/oidc-providers",
+    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "List of OIDC providers", body = Vec<OidcProviderResponse>),
     ),
@@ -131,12 +128,8 @@ pub async fn create_provider(
 )]
 pub async fn list_providers(
     tenant_db: TenantDb,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     match tenant_db
         .find::<oidc_provider::Entity>()
         .filter(oidc_provider::Column::DeletedAt.is_null())
@@ -163,6 +156,7 @@ pub async fn list_providers(
     get,
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = String, Path, description = "Provider ID")),
+    extensions(("x-required-permission" = json!("view_settings"))),
     responses(
         (status = 200, description = "Provider details", body = OidcProviderResponse),
         (status = 404, description = "Provider not found")
@@ -173,12 +167,8 @@ pub async fn list_providers(
 pub async fn get_provider(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -198,6 +188,7 @@ pub async fn get_provider(
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = String, Path, description = "Provider ID")),
     request_body = UpdateOidcProviderRequest,
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 200, description = "Provider updated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found")
@@ -208,13 +199,9 @@ pub async fn get_provider(
 pub async fn update_provider(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     Json(req): Json<UpdateOidcProviderRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -299,6 +286,7 @@ pub async fn update_provider(
     delete,
     path = "/api/v1/settings/oidc-providers/{id}",
     params(("id" = String, Path, description = "Provider ID")),
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 204, description = "Provider deleted"),
         (status = 404, description = "Provider not found"),
@@ -310,12 +298,8 @@ pub async fn update_provider(
 pub async fn delete_provider(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSettings(user): CanManageSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -359,6 +343,7 @@ pub async fn delete_provider(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/activate",
     params(("id" = String, Path, description = "Provider ID")),
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 200, description = "Provider activated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found"),
@@ -370,12 +355,8 @@ pub async fn delete_provider(
 pub async fn activate_provider(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
@@ -433,6 +414,7 @@ pub async fn activate_provider(
     post,
     path = "/api/v1/settings/oidc-providers/{id}/deactivate",
     params(("id" = String, Path, description = "Provider ID")),
+    extensions(("x-required-permission" = json!("manage_settings"))),
     responses(
         (status = 200, description = "Provider deactivated", body = OidcProviderResponse),
         (status = 404, description = "Provider not found"),
@@ -444,12 +426,8 @@ pub async fn activate_provider(
 pub async fn deactivate_provider(
     tenant_db: TenantDb,
     Path(id): Path<String>,
-    axum::Extension(user): axum::Extension<AuthenticatedUser>,
+    CanManageSettings(user): CanManageSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let provider_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),

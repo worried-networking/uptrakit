@@ -210,6 +210,13 @@ These are non-negotiable design constraints. Do not violate them.
    `reqwest::StatusCode` variants (`StatusCode::NOT_FOUND`, `StatusCode::FORBIDDEN`) and helper methods
    (`.is_client_error()`, `.is_success()`). Store status codes as `StatusCode`, not `u16`, in error enums and structs.
    See [Coding Standards](docs/development/coding-standards.md).
+1. **Use typed permission extractors for route authorization.** Never call `user.has_permission(...)` directly in
+   handler bodies. Instead, declare the required permission via an Axum extractor in the handler signature (e.g.
+   `CanViewHosts(_user): CanViewHosts`). The extractors are defined in
+   `crates/ui/web-api/src/middleware/permission.rs` via the `permission_extractor!` macro. Each protected endpoint
+   must also carry the matching `x-required-permission` OpenAPI extension in its `#[utoipa::path]` annotation (e.g.
+   `extensions(("x-required-permission" = json!("view_hosts")))`). See
+   [Authentication and Authorization](docs/security/auth-and-authorization.md).
 1. **Do not test upstream crate behavior.** Tests must verify internal logic only -- not the behavior of dependencies
    like `thiserror` formatting, `serde` roundtrips on plain derives, or `argon2` salt randomness. See the decision
    table in [Testing Expectations](docs/development/testing.md).

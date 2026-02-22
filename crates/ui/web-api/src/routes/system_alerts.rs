@@ -2,13 +2,11 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
-use axum::{Extension, Json};
+use axum::Json;
 use http::StatusCode;
 
 use crate::AppState;
-use crate::auth::permissions::Permission;
-use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::CanManageGlobalSettings;
 
 pub use uptrakit_web_api_types::system_alerts::{AlertSeverity, SystemAlert, SystemAlertsResponse};
 
@@ -21,16 +19,13 @@ pub use uptrakit_web_api_types::system_alerts::{AlertSeverity, SystemAlert, Syst
         (status = 200, description = "System alerts", body = SystemAlertsResponse),
         (status = 403, description = "Not authorized")
     ),
+    extensions(("x-required-permission" = json!("manage_global_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_system_alerts(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageGlobalSettings(_user): CanManageGlobalSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ManageGlobalSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let snapshot = state.ca_snapshot.borrow().clone();
     let mut alerts = Vec::new();
 

@@ -140,6 +140,74 @@ non-empty, exactly one of provider_config_id/provider_config | | `CreateProvider
 
 See also: the `update_hooks.rs` module provides a similar validation pattern (`HookValidationError`) for hook configuration types.
 
+## Route Authorization Pattern
+
+All protected web-API route handlers enforce authorization via typed Axum extractors. Never call
+`user.has_permission(...)` inline in a handler body.
+
+### Required pattern
+
+```rust
+use crate::middleware::permission::CanViewHosts;
+
+pub async fn list_hosts(
+    tenant_db: TenantDb,
+    CanViewHosts(_user): CanViewHosts,   // permission enforced here
+) -> Response {
+    // handler body — 401/403 already handled by the extractor
+}
+```
+
+Use the bound variable name `_user` when the `AuthenticatedUser` value is not used in the body, and `user`
+when it is (e.g. `user.user_id` for an `initiated_by` field).
+
+### Required utoipa extension
+
+Every protected endpoint must declare its required permission as an OpenAPI extension:
+
+```rust
+#[utoipa::path(
+    get,
+    path = "/api/v1/hosts",
+    extensions(("x-required-permission" = json!("view_hosts"))),
+    security(("bearer_token" = [])),
+    ...
+)]
+```
+
+The `json!` value must match the `as_str()` serialization of the corresponding `Permission` variant.
+
+### Adding a new extractor
+
+Add one line to the `permission_extractor!` macro call in
+`crates/ui/web-api/src/middleware/permission.rs`:
+
+```rust
+permission_extractor! {
+    ...
+    CanNewThing => Permission::NewThing,
+}
+```
+
+The macro generates a `#[derive(Debug)]` struct `CanNewThing(pub AuthenticatedUser)` with a `FromRequestParts`
+impl and a `::new(user)` test constructor.
+
+### Anti-pattern
+
+```rust
+// WRONG — do not call has_permission in handlers
+pub async fn list_hosts(
+    Extension(user): Extension<AuthenticatedUser>,
+) -> Response {
+    if !user.has_permission(Permission::ViewHosts) {
+        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    ...
+}
+```
+
+See also: [Authentication and Authorization](../security/auth-and-authorization.md).
+
 ## HTTP Status Codes
 
 Always use `reqwest::StatusCode` (re-exported as `uptrakit_openapi_client::StatusCode` for CLI code) instead of raw `u16` for HTTP status codes.

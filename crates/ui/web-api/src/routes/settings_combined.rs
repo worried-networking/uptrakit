@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    Extension, Json,
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -9,9 +9,7 @@ use axum::{
 
 use crate::AppState;
 use crate::SettingKey;
-use crate::auth::permissions::Permission;
-use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::CanViewSettings;
 use crate::settings_store::load_setting;
 use uptrakit_web_api_types::agents::EnrollmentTokenStatusResponse;
 use uptrakit_web_api_types::settings::RegistrationSettingsResponse;
@@ -35,10 +33,6 @@ fn build_combined_settings_response(
     }
 }
 
-fn has_settings_access(user: &AuthenticatedUser) -> bool {
-    user.has_permission(Permission::ViewSettings) || user.has_permission(Permission::ManageSettings)
-}
-
 /// Get core settings for the settings page (OIDC and MQTT remain separate).
 #[utoipa::path(
     get,
@@ -49,16 +43,13 @@ fn has_settings_access(user: &AuthenticatedUser) -> bool {
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_combined_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !has_settings_access(&user) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let reg = state.settings.registration();
     let registration = RegistrationSettingsResponse {
         mode: reg.mode,

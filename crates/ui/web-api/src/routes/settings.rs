@@ -1,10 +1,9 @@
 use crate::AppState;
-use crate::auth::permissions::Permission;
 use crate::auth::registration::RegistrationMode;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageSettings, CanViewSettings};
 use axum::{
-    Extension, Json,
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -25,16 +24,13 @@ pub use uptrakit_web_api_types::settings::{
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("view_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_registration_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewSettings(_user): CanViewSettings,
 ) -> Response {
-    if !user.has_permission(Permission::ViewSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let reg = state.settings.registration();
     let response = RegistrationSettingsResponse {
         mode: reg.mode,
@@ -56,17 +52,14 @@ pub async fn get_registration_settings(
         (status = 403, description = "Not authorized")
     ),
     tag = "Settings",
+    extensions(("x-required-permission" = json!("manage_settings"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_registration_settings(
     State(state): State<Arc<AppState>>,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageSettings(_user): CanManageSettings,
     Json(req): Json<UpdateRegistrationSettingsRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageSettings) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     // Validate: invite mode requires a token
     if req.mode == RegistrationMode::Invite && req.token.is_none() {
         return error_response(

@@ -16,7 +16,10 @@ Types are imported via `uptrakit_openapi_client::types::*` (re-exported from `up
   hardcoded string identifiers. This ensures UUID validation at the serialization boundary.
 - Rate limiting applies per-IP via the `api_rate_limits` table (see `crates/ui/web-api/src/auth/rate_limit.rs`). Rate limited endpoints return `429`
   with a message describing the limit window.
-- Route handlers require permissions (typed `Permission` enum) obtained from the JWT; never rely on raw role strings.
+- Route handlers enforce permissions via typed Axum extractors (e.g. `CanViewHosts`, `CanManageAgents`) defined in
+  `crates/ui/web-api/src/middleware/permission.rs`. The required permission is declared once in the extractor and
+  reflected in the OpenAPI spec via the `x-required-permission` extension on every protected endpoint.
+  See [Authentication and Authorization](../security/auth-and-authorization.md) for the full permission model.
 
 ## Authentication Endpoints
 

@@ -1,10 +1,9 @@
-use crate::auth::permissions::Permission;
 use crate::error_response::error_response;
-use crate::middleware::require_auth::AuthenticatedUser;
+use crate::middleware::permission::{CanManageHosts, CanViewHosts};
 use crate::routes::services::ServiceStatus;
 use crate::tenant_db::TenantDb;
 use axum::{
-    Extension, Json,
+    Json,
     extract::{Path, Query},
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -37,17 +36,14 @@ pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams
         (status = 403, description = "Not authorized")
     ),
     tag = "Hosts",
+    extensions(("x-required-permission" = json!("view_hosts"))),
     security(("bearer_token" = []))
 )]
 pub async fn list_hosts(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewHosts(_user): CanViewHosts,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewHosts) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let pagination = params.resolve();
 
     let base_query = tenant_db
@@ -103,17 +99,14 @@ pub async fn list_hosts(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
+    extensions(("x-required-permission" = json!("view_hosts"))),
     security(("bearer_token" = []))
 )]
 pub async fn get_host(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanViewHosts(_user): CanViewHosts,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ViewHosts) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let host_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
@@ -152,18 +145,15 @@ pub async fn get_host(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
+    extensions(("x-required-permission" = json!("manage_hosts"))),
     security(("bearer_token" = []))
 )]
 pub async fn update_host(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageHosts(_user): CanManageHosts,
     Path(id): Path<String>,
     Json(body): Json<UpdateHostRequest>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageHosts) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let host_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
@@ -215,17 +205,14 @@ pub async fn update_host(
         (status = 404, description = "Host not found")
     ),
     tag = "Hosts",
+    extensions(("x-required-permission" = json!("manage_hosts"))),
     security(("bearer_token" = []))
 )]
 pub async fn deactivate_host(
     tenant_db: TenantDb,
-    Extension(user): Extension<AuthenticatedUser>,
+    CanManageHosts(_user): CanManageHosts,
     Path(id): Path<String>,
 ) -> Response {
-    if !user.has_permission(Permission::ManageHosts) {
-        return error_response(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
     let host_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
