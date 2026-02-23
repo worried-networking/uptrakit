@@ -755,7 +755,7 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
 /// Build the application router.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
-    let auth_routes = OpenApiRouter::new()
+    let mut auth_routes = OpenApiRouter::new()
         .routes(routes!(routes::auth::logout))
         .routes(routes!(routes::auth::me))
         .routes(routes!(
@@ -839,11 +839,27 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::scheduler::update_scheduled_task))
         .routes(routes!(routes::scheduler::trigger_scheduled_task))
         .routes(routes!(routes::update_history::list_update_history))
-        .routes(routes!(routes::update_history::get_update_history))
-        .route_layer(axum_mw::from_fn_with_state(
-            Arc::clone(&state),
-            middleware::require_auth::require_auth,
-        ));
+        .routes(routes!(routes::update_history::get_update_history));
+
+    // OIDC provider management routes require authentication and belong inside auth_routes.
+    // The OIDC auth-flow routes (oidc_auth::*) are added to base_router below because
+    // they must remain publicly reachable (browser redirects, token exchange, etc.).
+    #[cfg(feature = "oidc")]
+    {
+        auth_routes = auth_routes
+            .routes(routes!(routes::oidc_providers::create_provider))
+            .routes(routes!(routes::oidc_providers::list_providers))
+            .routes(routes!(routes::oidc_providers::get_provider))
+            .routes(routes!(routes::oidc_providers::update_provider))
+            .routes(routes!(routes::oidc_providers::delete_provider))
+            .routes(routes!(routes::oidc_providers::activate_provider))
+            .routes(routes!(routes::oidc_providers::deactivate_provider));
+    }
+
+    let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
+        Arc::clone(&state),
+        middleware::require_auth::require_auth,
+    ));
 
     // All OpenAPI routes merged into a single router so the spec is complete
     let openapi = ApiDoc::openapi();
@@ -870,14 +886,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::oidc_auth::oidc_callback))
         .routes(routes!(routes::oidc_auth::oidc_link))
         .routes(routes!(routes::oidc_auth::oidc_exchange))
-        .routes(routes!(routes::oidc_auth::oidc_complete_registration))
-        .routes(routes!(routes::oidc_providers::create_provider))
-        .routes(routes!(routes::oidc_providers::list_providers))
-        .routes(routes!(routes::oidc_providers::get_provider))
-        .routes(routes!(routes::oidc_providers::update_provider))
-        .routes(routes!(routes::oidc_providers::delete_provider))
-        .routes(routes!(routes::oidc_providers::activate_provider))
-        .routes(routes!(routes::oidc_providers::deactivate_provider));
+        .routes(routes!(routes::oidc_auth::oidc_complete_registration));
 
     let (api_router, api) = base_router.split_for_parts();
 
