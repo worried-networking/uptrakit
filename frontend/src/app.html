@@ -6,23 +6,11 @@
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
 		<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-		<!-- img-src allows any HTTPS image to support OIDC provider logos configured by admins.
-		     OIDC logo URLs are admin-configured (trusted user) and validated as HTTPS-only via
-		     isValidLogoUrl() before display. This is an accepted risk: see
-		     docs/security/auth-and-authorization.md. -->
-		<meta
-			http-equiv="Content-Security-Policy"
-			content="default-src 'self'; script-src 'self' 'sha256-RgCSpXdTZerbsu0EQDyVU1kcsU52WvTr2LdzVILxPec='; style-src 'self' 'unsafe-inline'; img-src 'self' https:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
-		/>
 		<title>Uptrakit</title>
 		%sveltekit.head%
-		<script>
-			(function () {
-				var m = localStorage.getItem('theme-mode') || 'system';
-				var d = m === 'dark' || (m === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-				if (d) document.documentElement.classList.add('dark');
-			})();
-		</script>
+		<!-- Blocking (no defer/async) so the class is applied before first paint,
+		     avoiding a flash of wrong theme. Covered by script-src 'self'. -->
+		<script src="/theme-init.js"></script>
 	</head>
 	<body class="h-full">
 		<div style="display: contents">%sveltekit.body%</div>
