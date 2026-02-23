@@ -1,16 +1,109 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
-use crate::output::{OutputFormat, print_output};
+use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::software_items::ListSoftwareItemsParams;
+use uptrakit_openapi_client::types::pagination::PaginatedResponse;
+use uptrakit_openapi_client::types::software_items::{
+    ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemResponse,
+};
+
+// ── Human output ────────────────────────────────────────────────────────────
+
+impl HumanOutput for PaginatedResponse<SoftwareItemResponse> {
+    fn to_human_string(&self) -> String {
+        if self.items.is_empty() {
+            return "No software items found.\n".to_string();
+        }
+        let mut out = format!(
+            "{:<38} {:<25} {:<30} {:<8} HOSTS\n",
+            "ID", "NAME", "PROVIDERS", "ENABLED"
+        );
+        for item in &self.items {
+            let providers = if item.provider_types.is_empty() {
+                "-".to_string()
+            } else {
+                item.provider_types.join(", ")
+            };
+            out.push_str(&format!(
+                "{:<38} {:<25} {:<30} {:<8} {}\n",
+                item.id, item.name, providers, item.enabled, item.host_count
+            ));
+        }
+        out.push_str(&format!(
+            "\nPage {} of {} ({} total)\n",
+            self.page, self.total_pages, self.total
+        ));
+        out
+    }
+}
+
+impl HumanOutput for SoftwareItemDetailResponse {
+    fn to_human_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("ID:              {}\n", self.id));
+        out.push_str(&format!("Name:            {}\n", self.name));
+        let providers = if self.provider_types.is_empty() {
+            "-".to_string()
+        } else {
+            self.provider_types.join(", ")
+        };
+        out.push_str(&format!("Providers:       {}\n", providers));
+        out.push_str(&format!("Enabled:         {}\n", self.enabled));
+        if let Some(checked) = self.last_checked_at {
+            out.push_str(&format!(
+                "Last Checked:    {}\n",
+                checked
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| checked.to_string())
+            ));
+        }
+        out.push_str(&format!("Host Count:      {}\n", self.host_count));
+        out.push_str(&format!(
+            "Created:         {}\n",
+            self.created_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| self.created_at.to_string())
+        ));
+        out.push_str(&format!(
+            "Updated:         {}\n",
+            self.updated_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| self.updated_at.to_string())
+        ));
+        if !self.hosts.is_empty() {
+            out.push_str("\nAssigned Hosts:\n");
+            out.push_str(&format!(
+                "  {:<38} {:<20} {:<20} {:<30} {:<15} LINKED AT\n",
+                "HOST ID", "HOSTNAME", "PROVIDER", "PACKAGE", "INSTALLED"
+            ));
+            for h in &self.hosts {
+                let linked = h
+                    .linked_at
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| h.linked_at.to_string());
+                out.push_str(&format!(
+                    "  {:<38} {:<20} {:<20} {:<30} {:<15} {}\n",
+                    h.host_id,
+                    h.hostname,
+                    h.provider_type,
+                    h.package_identifier,
+                    h.installed_version.as_deref().unwrap_or("-"),
+                    linked
+                ));
+            }
+        }
+        out
+    }
+}
+
+// ── Params ───────────────────────────────────────────────────────────────────
 
 /// Parameters for listing software items.
 pub struct ListParams<'a> {
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
-    pub format: OutputFormat,
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
     pub page: Option<u64>,
@@ -22,13 +115,14 @@ pub struct ShowParams<'a> {
     pub id: &'a Uuid,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
-    pub format: OutputFormat,
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
 }
 
+// ── Commands ─────────────────────────────────────────────────────────────────
+
 /// List all software items (paginated).
-pub async fn list(params: ListParams<'_>) -> Result<()> {
+pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<SoftwareItemResponse>> {
     let client = authenticated_client(
         params.server,
         params.token,
@@ -40,100 +134,102 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
         per_page: params.per_page,
         discovery_state: None,
     };
-    let resp = client.list_software_items(&list_params).await.context_to()?;
-
-    let mut human = String::new();
-    if resp.items.is_empty() {
-        human.push_str("No software items found.\n");
-    } else {
-        human.push_str(&format!(
-            "{:<38} {:<25} {:<30} {:<8} HOSTS\n",
-            "ID", "NAME", "PROVIDERS", "ENABLED"
-        ));
-        for item in &resp.items {
-            let providers = if item.provider_types.is_empty() {
-                "-".to_string()
-            } else {
-                item.provider_types.join(", ")
-            };
-            human.push_str(&format!(
-                "{:<38} {:<25} {:<30} {:<8} {}\n",
-                item.id, item.name, providers, item.enabled, item.host_count
-            ));
-        }
-        human.push_str(&format!(
-            "\nPage {} of {} ({} total)\n",
-            resp.page, resp.total_pages, resp.total
-        ));
-    }
-
-    print_output(params.format, &human, &resp)
+    client.list_software_items(&list_params).await.context_to()
 }
 
 /// Show details for a single software item.
-pub async fn show(params: ShowParams<'_>) -> Result<()> {
+pub async fn show(params: ShowParams<'_>) -> Result<SoftwareItemDetailResponse> {
     let client = authenticated_client(
         params.server,
         params.token,
         params.insecure,
         params.request_timeout,
     )?;
-    let resp = client.get_software_item(params.id).await.context_to()?;
+    client.get_software_item(params.id).await.context_to()
+}
 
-    let mut human = String::new();
-    human.push_str(&format!("ID:              {}\n", resp.id));
-    human.push_str(&format!("Name:            {}\n", resp.name));
-    let providers = if resp.provider_types.is_empty() {
-        "-".to_string()
-    } else {
-        resp.provider_types.join(", ")
-    };
-    human.push_str(&format!("Providers:       {}\n", providers));
-    human.push_str(&format!("Enabled:         {}\n", resp.enabled));
-    if let Some(checked) = resp.last_checked_at {
-        human.push_str(&format!(
-            "Last Checked:    {}\n",
-            checked
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| checked.to_string())
-        ));
-    }
-    human.push_str(&format!("Host Count:      {}\n", resp.host_count));
-    human.push_str(&format!(
-        "Created:         {}\n",
-        resp.created_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| resp.created_at.to_string())
-    ));
-    human.push_str(&format!(
-        "Updated:         {}\n",
-        resp.updated_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| resp.updated_at.to_string())
-    ));
+// ── Tests ────────────────────────────────────────────────────────────────────
 
-    if !resp.hosts.is_empty() {
-        human.push_str("\nAssigned Hosts:\n");
-        human.push_str(&format!(
-            "  {:<38} {:<20} {:<20} {:<30} {:<15} LINKED AT\n",
-            "HOST ID", "HOSTNAME", "PROVIDER", "PACKAGE", "INSTALLED"
-        ));
-        for h in &resp.hosts {
-            let linked = h
-                .linked_at
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| h.linked_at.to_string());
-            human.push_str(&format!(
-                "  {:<38} {:<20} {:<20} {:<30} {:<15} {}\n",
-                h.host_id,
-                h.hostname,
-                h.provider_type,
-                h.package_identifier,
-                h.installed_version.as_deref().unwrap_or("-"),
-                linked
-            ));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::macros::datetime;
+    use uptrakit_openapi_client::types::software_items::SoftwareItemHostSummary;
+
+    fn sample_item() -> SoftwareItemResponse {
+        SoftwareItemResponse {
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            name: "Node.js".to_string(),
+            provider_types: vec!["github_releases".to_string()],
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            host_count: 2,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
         }
     }
 
-    print_output(params.format, &human, &resp)
+    #[test]
+    fn paginated_software_items_empty() {
+        let resp: PaginatedResponse<SoftwareItemResponse> = PaginatedResponse {
+            items: vec![],
+            total: 0,
+            page: 1,
+            per_page: 20,
+            total_pages: 0,
+        };
+        assert!(resp.to_human_string().contains("No software items"));
+    }
+
+    #[test]
+    fn paginated_software_items_has_header_and_row() {
+        let resp = PaginatedResponse {
+            items: vec![sample_item()],
+            total: 1,
+            page: 1,
+            per_page: 20,
+            total_pages: 1,
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("Node.js"), "name missing");
+        assert!(s.contains("github_releases"), "provider missing");
+    }
+
+    #[test]
+    fn software_item_detail_human_output() {
+        let detail = SoftwareItemDetailResponse {
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            name: "Node.js".to_string(),
+            provider_types: vec!["github_releases".to_string()],
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            host_count: 1,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            hosts: vec![SoftwareItemHostSummary {
+                host_id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                    .parse::<Uuid>()
+                    .unwrap(),
+                hostname: "server-1.local".to_string(),
+                friendly_name: "Production Server".to_string(),
+                provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                    .parse::<Uuid>()
+                    .unwrap(),
+                provider_config_name: "Default Config".to_string(),
+                provider_type: "github_releases".to_string(),
+                package_identifier: "nodejs/node".to_string(),
+                config_override: None,
+                installed_version: Some("20.0.0".to_string()),
+                installed_version_detected_at: None,
+                last_updated_at: None,
+                linked_at: datetime!(2025-01-01 00:00:00 UTC),
+            }],
+        };
+        let s = detail.to_human_string();
+        assert!(s.contains("Node.js"), "name missing");
+        assert!(s.contains("server-1.local"), "hostname missing");
+        assert!(s.contains("20.0.0"), "installed version missing");
+    }
 }

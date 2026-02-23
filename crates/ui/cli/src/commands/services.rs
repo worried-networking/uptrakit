@@ -1,64 +1,45 @@
 use crate::client::authenticated_client;
 use crate::error::{CliError, Result};
-use crate::output::{OutputFormat, print_output};
+use crate::output::HumanOutput;
 use rootcause::prelude::*;
+use serde::Serialize;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
+use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::services::{
-    ListServicesQuery, MergeAgentRequest, ParseServiceStatusError, ParseServiceTypeError,
-    UpdateServiceRequest,
+    ListServicesQuery, MergeAgentRequest, MessageResponse, ParseServiceStatusError,
+    ParseServiceTypeError, ServiceResponse, UpdateServiceRequest,
 };
 
-/// Parameters for listing services.
-pub struct ListParams<'a> {
-    pub server: Option<&'a str>,
-    pub token: Option<&'a str>,
-    pub format: OutputFormat,
-    pub insecure: bool,
-    pub request_timeout: Option<std::time::Duration>,
-    pub service_type: Option<&'a str>,
-    pub status: Option<&'a str>,
-    pub page: Option<u64>,
-    pub per_page: Option<u64>,
+// ── Local wrapper types ───────────────────────────────────────────────────────
+
+/// Output for `services merge` — carries the source service ID alongside the
+/// merged service response. JSON output includes `source_id` as a top-level
+/// field via `#[serde(flatten)]`.
+#[derive(Debug, Serialize)]
+pub struct MergeServiceOutput {
+    pub source_id: Uuid,
+    #[serde(flatten)]
+    pub inner: ServiceResponse,
 }
 
-/// List services with optional filters and pagination.
-pub async fn list(params: ListParams<'_>) -> Result<()> {
-    let client = authenticated_client(
-        params.server,
-        params.token,
-        params.insecure,
-        params.request_timeout,
-    )?;
-    let query =
-        ListServicesQuery {
-            r#type: params
-                .service_type
-                .map(|s| s.parse())
-                .transpose()
-                .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
-            status: params.status.map(|s| s.parse()).transpose().map_err(
-                |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
-            )?,
-            page: params.page,
-            per_page: params.per_page,
-        };
-    let resp = client.list_services(&query).await.context_to()?;
+// ── Human output ────────────────────────────────────────────────────────────
 
-    let mut human = String::new();
-    if resp.items.is_empty() {
-        human.push_str("No services found.\n");
-    } else {
-        human.push_str(&format!(
+impl HumanOutput for PaginatedResponse<ServiceResponse> {
+    fn to_human_string(&self) -> String {
+        if self.items.is_empty() {
+            return "No services found.\n".to_string();
+        }
+        let mut out = format!(
             "{:<38} {:<12} {:<20} {:<25} {:<12} LAST SEEN\n",
             "ID", "TYPE", "HOSTNAME", "FRIENDLY NAME", "STATUS"
-        ));
-        for s in &resp.items {
+        );
+        for s in &self.items {
             let last_seen = s
                 .last_seen_at
                 .as_ref()
                 .map(|dt| dt.format(&Rfc3339).unwrap_or_else(|_| dt.to_string()));
-            human.push_str(&format!(
+            out.push_str(&format!(
                 "{:<38} {:<12} {:<20} {:<25} {:<12} {}\n",
                 s.id,
                 s.service_type,
@@ -68,13 +49,111 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
                 last_seen.as_deref().unwrap_or("-")
             ));
         }
-        human.push_str(&format!(
+        out.push_str(&format!(
             "\nPage {} of {} ({} total)\n",
-            resp.page, resp.total_pages, resp.total
+            self.page, self.total_pages, self.total
         ));
+        out
     }
+}
 
-    print_output(params.format, &human, &resp)
+impl HumanOutput for ServiceResponse {
+    fn to_human_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("ID:            {}\n", self.id));
+        out.push_str(&format!("Type:          {}\n", self.service_type));
+        out.push_str(&format!("Hostname:      {}\n", self.hostname));
+        out.push_str(&format!("Friendly Name: {}\n", self.friendly_name));
+        if let Some(ref ip) = self.ip_address {
+            out.push_str(&format!("IP Address:    {}\n", ip));
+        }
+        out.push_str(&format!("Status:        {}\n", self.status));
+        if let Some(ref ver) = self.client_version {
+            out.push_str(&format!("Client Version: {}\n", ver));
+        }
+        if let Some(seen) = self.last_seen_at {
+            out.push_str(&format!(
+                "Last Seen:     {}\n",
+                seen.format(&Rfc3339).unwrap_or_else(|_| seen.to_string())
+            ));
+        }
+        if let Some(ping) = self.ping_interval_seconds {
+            out.push_str(&format!("Ping Interval: {}s\n", ping));
+        }
+        out.push_str(&format!(
+            "Created:       {}\n",
+            self.created_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| self.created_at.to_string())
+        ));
+        out.push_str(&format!(
+            "Updated:       {}\n",
+            self.updated_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| self.updated_at.to_string())
+        ));
+        out
+    }
+}
+
+impl HumanOutput for MergeServiceOutput {
+    fn to_human_string(&self) -> String {
+        let mut out = format!(
+            "Service {} merged into {}.\n",
+            self.source_id, self.inner.id
+        );
+        out.push_str(&format!("Type:     {}\n", self.inner.service_type));
+        out.push_str(&format!("Hostname: {}\n", self.inner.hostname));
+        out.push_str(&format!("Status:   {}\n", self.inner.status));
+        out
+    }
+}
+
+impl HumanOutput for MessageResponse {
+    fn to_human_string(&self) -> String {
+        format!("{}\n", self.message)
+    }
+}
+
+// ── Params ───────────────────────────────────────────────────────────────────
+
+/// Parameters for listing services.
+pub struct ListParams<'a> {
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+    pub service_type: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+// ── Commands ─────────────────────────────────────────────────────────────────
+
+/// List services with optional filters and pagination.
+pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<ServiceResponse>> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    let query = ListServicesQuery {
+        r#type: params
+            .service_type
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
+        status: params
+            .status
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())))?,
+        page: params.page,
+        per_page: params.per_page,
+    };
+    client.list_services(&query).await.context_to()
 }
 
 /// Show details for a single service.
@@ -82,48 +161,11 @@ pub async fn show(
     id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
-    format: OutputFormat,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
-) -> Result<()> {
+) -> Result<ServiceResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
-    let resp = client.get_service(id).await.context_to()?;
-
-    let mut human = String::new();
-    human.push_str(&format!("ID:            {}\n", resp.id));
-    human.push_str(&format!("Type:          {}\n", resp.service_type));
-    human.push_str(&format!("Hostname:      {}\n", resp.hostname));
-    human.push_str(&format!("Friendly Name: {}\n", resp.friendly_name));
-    if let Some(ref ip) = resp.ip_address {
-        human.push_str(&format!("IP Address:    {}\n", ip));
-    }
-    human.push_str(&format!("Status:        {}\n", resp.status));
-    if let Some(ref ver) = resp.client_version {
-        human.push_str(&format!("Client Version: {}\n", ver));
-    }
-    if let Some(seen) = resp.last_seen_at {
-        human.push_str(&format!(
-            "Last Seen:     {}\n",
-            seen.format(&Rfc3339).unwrap_or_else(|_| seen.to_string())
-        ));
-    }
-    if let Some(ping) = resp.ping_interval_seconds {
-        human.push_str(&format!("Ping Interval: {}s\n", ping));
-    }
-    human.push_str(&format!(
-        "Created:       {}\n",
-        resp.created_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| resp.created_at.to_string())
-    ));
-    human.push_str(&format!(
-        "Updated:       {}\n",
-        resp.updated_at
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| resp.updated_at.to_string())
-    ));
-
-    print_output(format, &human, &resp)
+    client.get_service(id).await.context_to()
 }
 
 /// Update a service's configurable settings.
@@ -132,27 +174,14 @@ pub async fn update(
     ping_interval: Option<u32>,
     server: Option<&str>,
     token: Option<&str>,
-    format: OutputFormat,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
-) -> Result<()> {
+) -> Result<ServiceResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = UpdateServiceRequest {
         ping_interval_seconds: ping_interval,
     };
-    let resp = client.update_service(id, &req).await.context_to()?;
-
-    let mut human = String::new();
-    human.push_str(&format!("Service {} updated.\n", resp.id));
-    human.push_str(&format!("Type:     {}\n", resp.service_type));
-    human.push_str(&format!("Hostname: {}\n", resp.hostname));
-    if let Some(ping) = resp.ping_interval_seconds {
-        human.push_str(&format!("Ping Interval: {}s\n", ping));
-    } else {
-        human.push_str("Ping Interval: default\n");
-    }
-
-    print_output(format, &human, &resp)
+    client.update_service(id, &req).await.context_to()
 }
 
 /// Approve a pending service.
@@ -160,19 +189,11 @@ pub async fn approve(
     id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
-    format: OutputFormat,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
-) -> Result<()> {
+) -> Result<ServiceResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
-    let resp = client.approve_service(id).await.context_to()?;
-
-    let human = format!(
-        "Service {} approved.\nType:     {}\nHostname: {}\nStatus:   {}\n",
-        resp.id, resp.service_type, resp.hostname, resp.status
-    );
-
-    print_output(format, &human, &resp)
+    client.approve_service(id).await.context_to()
 }
 
 /// Reject a pending service.
@@ -180,19 +201,11 @@ pub async fn reject(
     id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
-    format: OutputFormat,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
-) -> Result<()> {
+) -> Result<ServiceResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
-    let resp = client.reject_service(id).await.context_to()?;
-
-    let human = format!(
-        "Service {} rejected.\nType:     {}\nHostname: {}\nStatus:   {}\n",
-        resp.id, resp.service_type, resp.hostname, resp.status
-    );
-
-    print_output(format, &human, &resp)
+    client.reject_service(id).await.context_to()
 }
 
 /// Remove (deactivate) a service.
@@ -200,16 +213,11 @@ pub async fn remove(
     id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
-    format: OutputFormat,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
-) -> Result<()> {
+) -> Result<MessageResponse> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
-    let resp = client.remove_service(id).await.context_to()?;
-
-    let human = format!("{}\n", resp.message);
-
-    print_output(format, &human, &resp)
+    client.remove_service(id).await.context_to()
 }
 
 /// Merge a source service into a target service.
@@ -218,20 +226,98 @@ pub async fn merge(
     source_id: &Uuid,
     server: Option<&str>,
     token: Option<&str>,
-    format: OutputFormat,
     insecure: bool,
     request_timeout: Option<std::time::Duration>,
-) -> Result<()> {
+) -> Result<MergeServiceOutput> {
     let client = authenticated_client(server, token, insecure, request_timeout)?;
     let req = MergeAgentRequest {
         source_id: *source_id,
     };
-    let resp = client.merge_service(target_id, &req).await.context_to()?;
+    let inner = client.merge_service(target_id, &req).await.context_to()?;
+    Ok(MergeServiceOutput {
+        source_id: *source_id,
+        inner,
+    })
+}
 
-    let human = format!(
-        "Service {} merged into {}.\nType:     {}\nHostname: {}\nStatus:   {}\n",
-        source_id, resp.id, resp.service_type, resp.hostname, resp.status
-    );
+// ── Tests ────────────────────────────────────────────────────────────────────
 
-    print_output(format, &human, &resp)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::macros::datetime;
+
+    fn sample_service() -> ServiceResponse {
+        ServiceResponse {
+            id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6".parse::<Uuid>().unwrap(),
+            service_type: "agent".parse().unwrap(),
+            hostname: "agent-host.local".to_string(),
+            friendly_name: "Test Agent".to_string(),
+            ip_address: None,
+            status: "approved".parse().unwrap(),
+            client_version: Some("1.0.0".to_string()),
+            last_seen_at: Some(datetime!(2025-01-01 00:00:00 UTC)),
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            ping_interval_seconds: None,
+        }
+    }
+
+    #[test]
+    fn service_detail_human_output() {
+        let svc = sample_service();
+        let s = svc.to_human_string();
+        assert!(s.contains("agent-host.local"), "hostname missing");
+        assert!(s.contains("Test Agent"), "friendly name missing");
+        assert!(s.contains("approved"), "status missing");
+        assert!(s.contains("1.0.0"), "client version missing");
+    }
+
+    #[test]
+    fn paginated_services_empty() {
+        let resp: PaginatedResponse<ServiceResponse> = PaginatedResponse {
+            items: vec![],
+            total: 0,
+            page: 1,
+            per_page: 20,
+            total_pages: 0,
+        };
+        assert!(resp.to_human_string().contains("No services found"));
+    }
+
+    #[test]
+    fn paginated_services_has_rows() {
+        let resp = PaginatedResponse {
+            items: vec![sample_service()],
+            total: 1,
+            page: 1,
+            per_page: 20,
+            total_pages: 1,
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("agent-host.local"), "hostname missing");
+    }
+
+    #[test]
+    fn merge_output_human_output() {
+        let source_id: Uuid = "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse().unwrap();
+        let out = MergeServiceOutput {
+            source_id,
+            inner: sample_service(),
+        };
+        let s = out.to_human_string();
+        assert!(
+            s.contains("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"),
+            "source_id missing"
+        );
+        assert!(s.contains("merged"), "merged word missing");
+    }
+
+    #[test]
+    fn message_response_human_output() {
+        let resp = MessageResponse {
+            message: "Service removed.".to_string(),
+        };
+        assert!(resp.to_human_string().contains("Service removed"));
+    }
 }

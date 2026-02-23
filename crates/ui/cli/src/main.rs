@@ -638,21 +638,15 @@ fn resolve_ca_pem(
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let cli = Cli::parse();
+async fn run(cli: Cli) -> error::Result<()> {
     if cli.version {
         let build_info = BuildInfo::current(
             "uptrakit",
             env!("CARGO_PKG_VERSION"),
             option_env!("UPTRAKIT_BUILD_ENABLED_FEATURES"),
         );
-        let human = build_info.render_human();
-        if let Err(e) = output::print_output(cli.output, &human, &build_info) {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
-        return;
+        output::print_output(cli.output, &build_info)?;
+        return Ok(());
     }
 
     if cli.verbose > 4 {
@@ -692,53 +686,57 @@ async fn main() {
         }
     };
 
+    let format = cli.output;
     let insecure = cli.insecure;
     let request_timeout = cli.timeout.map(std::time::Duration::from_secs);
-    let result = match command {
+
+    match command {
         Commands::Auth { command } => match command {
-            AuthCommands::Login => commands::auth::login(cli.server.as_deref(), insecure).await,
+            AuthCommands::Login => {
+                commands::auth::login(cli.server.as_deref(), insecure).await?;
+            }
             AuthCommands::Status => {
-                commands::auth::status(
+                let resp = commands::auth::status(
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             AuthCommands::Token { command } => match command {
                 TokenCommands::Create { name } => {
-                    commands::auth::token_create(
+                    let resp = commands::auth::token_create(
                         &name,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 TokenCommands::List => {
-                    commands::auth::token_list(
+                    let resp = commands::auth::token_list(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 TokenCommands::Revoke { id } => {
-                    commands::auth::token_revoke(
+                    let resp = commands::auth::token_revoke(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
             },
         },
@@ -753,7 +751,7 @@ async fn main() {
                 insecure,
                 request_timeout,
             })
-            .await
+            .await?;
         }
         Commands::Services { command } => match command {
             ServicesCommands::List {
@@ -762,10 +760,9 @@ async fn main() {
                 page,
                 per_page,
             } => {
-                commands::services::list(commands::services::ListParams {
+                let resp = commands::services::list(commands::services::ListParams {
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     service_type: r#type.as_deref(),
                     status: status.as_deref(),
@@ -773,152 +770,155 @@ async fn main() {
                     per_page,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             ServicesCommands::Show { id } => {
-                commands::services::show(
+                let resp = commands::services::show(
                     &id,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             ServicesCommands::Approve { id } => {
-                commands::services::approve(
+                let resp = commands::services::approve(
                     &id,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             ServicesCommands::Reject { id } => {
-                commands::services::reject(
+                let resp = commands::services::reject(
                     &id,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             ServicesCommands::Remove { id } => {
-                commands::services::remove(
+                let resp = commands::services::remove(
                     &id,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             ServicesCommands::Update { id, ping_interval } => {
-                commands::services::update(
+                let resp = commands::services::update(
                     &id,
                     ping_interval,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             ServicesCommands::Merge {
                 target_id,
                 source_id,
             } => {
-                commands::services::merge(
+                let resp = commands::services::merge(
                     &target_id,
                     &source_id,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::Hosts { command } => match command {
             HostsCommands::List { page, per_page } => {
-                commands::hosts::list(commands::hosts::ListParams {
+                let resp = commands::hosts::list(commands::hosts::ListParams {
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     page,
                     per_page,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             HostsCommands::Show { id } => {
-                commands::hosts::show(commands::hosts::ShowParams {
+                let resp = commands::hosts::show(commands::hosts::ShowParams {
                     id: &id,
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::SoftwareItems { command } => match command {
             SoftwareItemsCommands::List { page, per_page } => {
-                commands::software_items::list(commands::software_items::ListParams {
-                    server: cli.server.as_deref(),
-                    token: cli.token.as_deref(),
-                    format: cli.output,
-                    insecure,
-                    page,
-                    per_page,
-                    request_timeout,
-                })
-                .await
+                let resp =
+                    commands::software_items::list(commands::software_items::ListParams {
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        page,
+                        per_page,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
             }
             SoftwareItemsCommands::Show { id } => {
-                commands::software_items::show(commands::software_items::ShowParams {
-                    id: &id,
-                    server: cli.server.as_deref(),
-                    token: cli.token.as_deref(),
-                    format: cli.output,
-                    insecure,
-                    request_timeout,
-                })
-                .await
+                let resp =
+                    commands::software_items::show(commands::software_items::ShowParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    })
+                    .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::Check { command } => match command {
             CheckCommands::All => {
-                commands::check::all(commands::check::AllParams {
+                let resp = commands::check::all(commands::check::AllParams {
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             CheckCommands::Item { item_id, host } => {
-                commands::check::item(commands::check::ItemParams {
+                let resp = commands::check::item(commands::check::ItemParams {
                     item_id: &item_id,
                     host_id: host.as_ref(),
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::Update { command } => match command {
@@ -929,7 +929,7 @@ async fn main() {
                 release_tag,
                 release_url,
             } => {
-                commands::update::trigger(commands::update::TriggerParams {
+                let resp = commands::update::trigger(commands::update::TriggerParams {
                     item_id: &item_id,
                     host_id: &host_id,
                     to_version: &to_version,
@@ -937,11 +937,11 @@ async fn main() {
                     release_url: release_url.as_deref(),
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::History { command } => match command {
@@ -952,10 +952,9 @@ async fn main() {
                 page,
                 per_page,
             } => {
-                commands::history::list(commands::history::ListParams {
+                let resp = commands::history::list(commands::history::ListParams {
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     host_id: host,
                     software_item_id: software_item,
@@ -964,86 +963,86 @@ async fn main() {
                     per_page,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             HistoryCommands::Show { id } => {
-                commands::history::show(
+                let resp = commands::history::show(
                     &id,
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::Scheduler { command } => match command {
             SchedulerCommands::List => {
-                commands::scheduler::list(commands::scheduler::ListParams {
+                let resp = commands::scheduler::list(commands::scheduler::ListParams {
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             SchedulerCommands::Show { id } => {
-                commands::scheduler::show(commands::scheduler::ShowParams {
+                let resp = commands::scheduler::show(commands::scheduler::ShowParams {
                     id: &id,
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             SchedulerCommands::Trigger { id } => {
-                commands::scheduler::trigger(commands::scheduler::TriggerParams {
+                let resp = commands::scheduler::trigger(commands::scheduler::TriggerParams {
                     id: &id,
                     server: cli.server.as_deref(),
                     token: cli.token.as_deref(),
-                    format: cli.output,
                     insecure,
                     request_timeout,
                 })
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
         Commands::Settings { command } => match command {
             SettingsCommands::Show => {
-                commands::settings::show_combined(
+                let resp = commands::settings::show_combined(
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             SettingsCommands::Registration { command } => match command {
                 RegistrationCommands::Show => {
-                    commands::settings::registration_show(
+                    let resp = commands::settings::registration_show(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 RegistrationCommands::Update {
                     mode,
                     token,
                     require_token_for_oidc,
                 } => {
-                    commands::settings::registration_update(
+                    let resp = commands::settings::registration_update(
                         commands::settings::RegistrationUpdateParams {
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
-                            format: cli.output,
                             insecure,
                             mode,
                             reg_token: token,
@@ -1051,71 +1050,72 @@ async fn main() {
                             request_timeout,
                         },
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
             },
             SettingsCommands::Authentication { command } => match command {
                 AuthenticationCommands::Show => {
-                    commands::settings::authentication_show(
+                    let resp = commands::settings::authentication_show(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 AuthenticationCommands::Update {
                     password_auth_enabled,
                 } => {
-                    commands::settings::authentication_update(
+                    let resp = commands::settings::authentication_update(
                         password_auth_enabled,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
             },
             SettingsCommands::Certificates { command } => match command {
                 CertificateCommands::Show => {
-                    commands::settings::certificates_show(
+                    let resp = commands::settings::certificates_show(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 CertificateCommands::Update {
                     lifetime_days,
                     renewal_window_hours,
                 } => {
-                    commands::settings::certificates_update(
+                    let resp = commands::settings::certificates_update(
                         lifetime_days,
                         renewal_window_hours,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
             },
             SettingsCommands::Network { command } => match command {
                 NetworkCommands::Show => {
-                    commands::settings::network_show(
+                    let resp = commands::settings::network_show(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 NetworkCommands::Update {
                     trusted_proxies,
@@ -1126,66 +1126,68 @@ async fn main() {
                     fwd_cert_pem_header,
                     pki_addr,
                 } => {
-                    commands::settings::network_update(commands::settings::NetworkUpdateParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        format: cli.output,
-                        insecure,
-                        trusted_proxies: trusted_proxies
-                            .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
-                        real_ip_header,
-                        extra_sans: extra_sans
-                            .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
-                        https_addr,
-                        fwd_cert_info_header,
-                        fwd_cert_pem_header,
-                        pki_addr,
-                        request_timeout,
-                    })
-                    .await
+                    let resp = commands::settings::network_update(
+                        commands::settings::NetworkUpdateParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            trusted_proxies: trusted_proxies
+                                .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                            real_ip_header,
+                            extra_sans: extra_sans
+                                .map(|s| s.split(',').map(|v| v.trim().to_string()).collect()),
+                            https_addr,
+                            fwd_cert_info_header,
+                            fwd_cert_pem_header,
+                            pki_addr,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
             },
             SettingsCommands::RotateCa => {
-                commands::settings::rotate_ca(
+                let resp = commands::settings::rotate_ca(
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             SettingsCommands::RenewServerCert => {
-                commands::settings::renew_server_cert(
+                let resp = commands::settings::renew_server_cert(
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
             SettingsCommands::Mqtt { command } => match command {
                 MqttCommands::List => {
-                    commands::settings::mqtt_list(
+                    let resp = commands::settings::mqtt_list(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 MqttCommands::Show { id } => {
-                    commands::settings::mqtt_show(
+                    let resp = commands::settings::mqtt_show(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 MqttCommands::Create {
                     url,
@@ -1199,13 +1201,12 @@ async fn main() {
                     ca_pem,
                     ca_pem_file,
                     topic_prefix,
-                } => match resolve_ca_pem(ca_pem, ca_pem_file) {
-                    Err(e) => Err(e),
-                    Ok(ca_pem) => {
+                } => {
+                    let ca_pem = resolve_ca_pem(ca_pem, ca_pem_file)?;
+                    let resp =
                         commands::settings::mqtt_create(commands::settings::MqttCreateParams {
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
-                            format: cli.output,
                             insecure,
                             url,
                             transport,
@@ -1219,9 +1220,9 @@ async fn main() {
                             topic_prefix,
                             request_timeout,
                         })
-                        .await
-                    }
-                },
+                        .await?;
+                    output::print_output(format, &resp)?;
+                }
                 MqttCommands::Update {
                     id,
                     url,
@@ -1235,13 +1236,12 @@ async fn main() {
                     ca_pem,
                     ca_pem_file,
                     topic_prefix,
-                } => match resolve_ca_pem(ca_pem, ca_pem_file) {
-                    Err(e) => Err(e),
-                    Ok(ca_pem) => {
+                } => {
+                    let ca_pem = resolve_ca_pem(ca_pem, ca_pem_file)?;
+                    let resp =
                         commands::settings::mqtt_update(commands::settings::MqttUpdateParams {
                             server: cli.server.as_deref(),
                             token: cli.token.as_deref(),
-                            format: cli.output,
                             insecure,
                             id,
                             url,
@@ -1256,65 +1256,65 @@ async fn main() {
                             topic_prefix,
                             request_timeout,
                         })
-                        .await
-                    }
-                },
+                        .await?;
+                    output::print_output(format, &resp)?;
+                }
                 MqttCommands::Delete { id } => {
-                    commands::settings::mqtt_delete(
+                    let resp = commands::settings::mqtt_delete(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 MqttCommands::Limit { command } => match command {
                     MqttLimitCommands::Show => {
-                        commands::settings::mqtt_limit_show(
+                        let resp = commands::settings::mqtt_limit_show(
                             cli.server.as_deref(),
                             cli.token.as_deref(),
-                            cli.output,
                             insecure,
                             request_timeout,
                         )
-                        .await
+                        .await?;
+                        output::print_output(format, &resp)?;
                     }
                     MqttLimitCommands::Update { max } => {
-                        commands::settings::mqtt_limit_update(
+                        let resp = commands::settings::mqtt_limit_update(
                             max,
                             cli.server.as_deref(),
                             cli.token.as_deref(),
-                            cli.output,
                             insecure,
                             request_timeout,
                         )
-                        .await
+                        .await?;
+                        output::print_output(format, &resp)?;
                     }
                 },
             },
             SettingsCommands::Oidc { command } => match command {
                 OidcCommands::List => {
-                    commands::settings::oidc_list(
+                    let resp = commands::settings::oidc_list(
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 OidcCommands::Show { id } => {
-                    commands::settings::oidc_show(
+                    let resp = commands::settings::oidc_show(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 OidcCommands::Create {
                     name,
@@ -1327,23 +1327,25 @@ async fn main() {
                     auto_create_users,
                     role_claim_path,
                 } => {
-                    commands::settings::oidc_create(commands::settings::OidcCreateParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        format: cli.output,
-                        insecure,
-                        name,
-                        slug,
-                        logo_url,
-                        issuer_url,
-                        client_id,
-                        client_secret,
-                        scopes,
-                        auto_create_users,
-                        role_claim_path,
-                        request_timeout,
-                    })
-                    .await
+                    let resp = commands::settings::oidc_create(
+                        commands::settings::OidcCreateParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            name,
+                            slug,
+                            logo_url,
+                            issuer_url,
+                            client_id,
+                            client_secret,
+                            scopes,
+                            auto_create_users,
+                            role_claim_path,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 OidcCommands::Update {
                     id,
@@ -1357,73 +1359,80 @@ async fn main() {
                     auto_create_users,
                     role_claim_path,
                 } => {
-                    commands::settings::oidc_update(commands::settings::OidcUpdateParams {
-                        server: cli.server.as_deref(),
-                        token: cli.token.as_deref(),
-                        format: cli.output,
-                        insecure,
-                        id,
-                        name,
-                        slug,
-                        logo_url,
-                        issuer_url,
-                        client_id,
-                        client_secret,
-                        scopes,
-                        auto_create_users,
-                        role_claim_path,
-                        request_timeout,
-                    })
-                    .await
+                    let resp = commands::settings::oidc_update(
+                        commands::settings::OidcUpdateParams {
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            id,
+                            name,
+                            slug,
+                            logo_url,
+                            issuer_url,
+                            client_id,
+                            client_secret,
+                            scopes,
+                            auto_create_users,
+                            role_claim_path,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 OidcCommands::Delete { id } => {
-                    commands::settings::oidc_delete(
+                    let resp = commands::settings::oidc_delete(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 OidcCommands::Activate { id } => {
-                    commands::settings::oidc_activate(
+                    let resp = commands::settings::oidc_activate(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
                 OidcCommands::Deactivate { id } => {
-                    commands::settings::oidc_deactivate(
+                    let resp = commands::settings::oidc_deactivate(
                         &id,
                         cli.server.as_deref(),
                         cli.token.as_deref(),
-                        cli.output,
                         insecure,
                         request_timeout,
                     )
-                    .await
+                    .await?;
+                    output::print_output(format, &resp)?;
                 }
             },
             SettingsCommands::Alerts => {
-                commands::settings::alerts(
+                let resp = commands::settings::alerts(
                     cli.server.as_deref(),
                     cli.token.as_deref(),
-                    cli.output,
                     insecure,
                     request_timeout,
                 )
-                .await
+                .await?;
+                output::print_output(format, &resp)?;
             }
         },
-    };
+    }
+    Ok(())
+}
 
-    if let Err(e) = result {
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    if let Err(e) = run(cli).await {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }

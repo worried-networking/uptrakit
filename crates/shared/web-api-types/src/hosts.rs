@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 pub use super::agents::MessageResponse as HostMessageResponse;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostResponse {
     pub id: Uuid,
@@ -37,7 +37,7 @@ pub struct HostResponse {
     pub agents: Vec<HostAgentSummary>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct HostAgentSummary {
     pub id: Uuid,

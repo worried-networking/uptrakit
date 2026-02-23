@@ -1,15 +1,28 @@
 use crate::client::authenticated_client;
 use crate::error::Result;
-use crate::output::{OutputFormat, print_output};
+use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::scheduler::TriggerScheduledTaskResponse;
+use uptrakit_openapi_client::types::software_items::TriggerVersionCheckResponse;
+
+// ── Human output ────────────────────────────────────────────────────────────
+
+impl HumanOutput for TriggerVersionCheckResponse {
+    fn to_human_string(&self) -> String {
+        format!(
+            "Agents notified: {}\n{}\n",
+            self.agents_notified, self.message
+        )
+    }
+}
+
+// ── Params ───────────────────────────────────────────────────────────────────
 
 /// Parameters for triggering a bulk version check.
 pub struct AllParams<'a> {
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
-    pub format: OutputFormat,
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
 }
@@ -20,13 +33,14 @@ pub struct ItemParams<'a> {
     pub host_id: Option<&'a Uuid>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
-    pub format: OutputFormat,
     pub insecure: bool,
     pub request_timeout: Option<std::time::Duration>,
 }
 
+// ── Commands ─────────────────────────────────────────────────────────────────
+
 /// Trigger a bulk version check by finding and triggering the `version_check` scheduler task.
-pub async fn all(params: AllParams<'_>) -> Result<()> {
+pub async fn all(params: AllParams<'_>) -> Result<TriggerScheduledTaskResponse> {
     let client = authenticated_client(
         params.server,
         params.token,
@@ -41,28 +55,21 @@ pub async fn all(params: AllParams<'_>) -> Result<()> {
     let task = match task {
         Some(t) => t,
         None => {
-            let human = "No version_check scheduler task found.\n".to_string();
-            let resp = TriggerScheduledTaskResponse {
+            return Ok(TriggerScheduledTaskResponse {
                 triggered: false,
                 message: "No version_check scheduler task found".to_string(),
-            };
-            return print_output(params.format, &human, &resp);
+            });
         }
     };
 
-    let resp = client.trigger_scheduled_task(&task.id).await.context_to()?;
-
-    let human = if resp.triggered {
-        format!("Version check triggered: {}\n", resp.message)
-    } else {
-        format!("Could not trigger version check: {}\n", resp.message)
-    };
-
-    print_output(params.format, &human, &resp)
+    client
+        .trigger_scheduled_task(&task.id)
+        .await
+        .context_to()
 }
 
 /// Trigger a version check for a specific software item.
-pub async fn item(params: ItemParams<'_>) -> Result<()> {
+pub async fn item(params: ItemParams<'_>) -> Result<TriggerVersionCheckResponse> {
     let client = authenticated_client(
         params.server,
         params.token,
@@ -70,18 +77,29 @@ pub async fn item(params: ItemParams<'_>) -> Result<()> {
         params.request_timeout,
     )?;
 
-    let resp = match params.host_id {
+    match params.host_id {
         Some(hid) => client
             .check_versions_host(params.item_id, hid)
             .await
-            .context_to()?,
-        None => client.check_versions(params.item_id).await.context_to()?,
-    };
+            .context_to(),
+        None => client.check_versions(params.item_id).await.context_to(),
+    }
+}
 
-    let human = format!(
-        "Agents notified: {}\n{}\n",
-        resp.agents_notified, resp.message
-    );
+// ── Tests ────────────────────────────────────────────────────────────────────
 
-    print_output(params.format, &human, &resp)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_version_check_human_output() {
+        let resp = TriggerVersionCheckResponse {
+            agents_notified: 3,
+            message: "Check dispatched".to_string(),
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("3"), "agents_notified missing");
+        assert!(s.contains("Check dispatched"), "message missing");
+    }
 }

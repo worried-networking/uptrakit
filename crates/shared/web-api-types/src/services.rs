@@ -8,7 +8,7 @@ pub use uptrakit_shared_types::{
 };
 
 /// Unified response for any service (agent or MQTT).
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ServiceResponse {
     pub id: Uuid,

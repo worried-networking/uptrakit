@@ -6,7 +6,6 @@
 
 use time::macros::datetime;
 use uptrakit_cli::commands::{hosts, services, software_items};
-use uptrakit_cli::output::OutputFormat;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::mock::MockApiServer;
 use uptrakit_openapi_client::types::hosts::{HostAgentSummary, HostResponse};
@@ -115,7 +114,6 @@ async fn hosts_list_success() {
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         page: None,
         per_page: None,
@@ -141,7 +139,6 @@ async fn hosts_list_empty() {
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         page: None,
         per_page: None,
@@ -162,7 +159,6 @@ async fn hosts_show_success() {
         id: &id,
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         request_timeout: None,
     })
@@ -181,7 +177,6 @@ async fn hosts_show_not_found() {
         id: &id,
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         request_timeout: None,
     })
@@ -204,7 +199,6 @@ async fn hosts_list_json_format() {
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Json,
         insecure: false,
         page: None,
         per_page: None,
@@ -225,7 +219,6 @@ async fn services_list_success() {
     let result = services::list(services::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         service_type: None,
         status: None,
@@ -248,7 +241,6 @@ async fn services_approve_success() {
         &id,
         Some(&server.server().base_url()),
         Some("test-token"),
-        OutputFormat::Human,
         false,
         None,
     )
@@ -270,7 +262,6 @@ async fn services_approve_not_found() {
         &id,
         Some(&server.server().base_url()),
         Some("test-token"),
-        OutputFormat::Human,
         false,
         None,
     )
@@ -292,7 +283,6 @@ async fn software_items_list_success() {
     let result = software_items::list(software_items::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         page: None,
         per_page: None,
@@ -313,7 +303,6 @@ async fn api_401_returns_not_authenticated() {
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("bad-token"),
-        format: OutputFormat::Human,
         insecure: false,
         page: None,
         per_page: None,
@@ -340,7 +329,6 @@ async fn api_429_returns_rate_limited() {
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         page: None,
         per_page: None,
@@ -368,7 +356,6 @@ async fn api_500_returns_server_error() {
     let result = hosts::list(hosts::ListParams {
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         page: None,
         per_page: None,
@@ -401,7 +388,6 @@ async fn services_remove_success() {
         &id,
         Some(&server.server().base_url()),
         Some("test-token"),
-        OutputFormat::Human,
         false,
         None,
     )
@@ -428,7 +414,6 @@ async fn hosts_show_with_agents() {
         id: &id,
         server: Some(&server.server().base_url()),
         token: Some("test-token"),
-        format: OutputFormat::Human,
         insecure: false,
         request_timeout: None,
     })

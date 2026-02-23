@@ -1,6 +1,7 @@
 use crate::error::{CliError, Result};
 use rootcause::prelude::*;
 use serde::Serialize;
+use uptrakit_build_info::BuildInfo;
 
 /// Output format for CLI responses.
 ///
@@ -33,15 +34,30 @@ impl std::fmt::Display for OutputFormat {
     }
 }
 
+/// Implemented by every type that can be formatted as human-readable CLI output.
+///
+/// Command handler functions return typed response objects. `main.rs` calls
+/// [`print_output`] with the response, and the `Human` format branch delegates
+/// to this method. JSON/YAML branches serialise via `serde`.
+pub trait HumanOutput {
+    fn to_human_string(&self) -> String;
+}
+
+impl HumanOutput for BuildInfo {
+    fn to_human_string(&self) -> String {
+        self.render_human()
+    }
+}
+
 /// Print a typed, serializable value in the requested format.
 ///
-/// - `Human`: prints the pre-formatted `human_text` string.
+/// - `Human`: calls `value.to_human_string()`.
 /// - `Json`: compact JSON via `serde_json`.
 /// - `Yaml`: YAML via `serde_yaml_ng`.
-pub fn print_output<T: Serialize>(format: OutputFormat, human_text: &str, value: &T) -> Result<()> {
+pub fn print_output<T: Serialize + HumanOutput>(format: OutputFormat, value: &T) -> Result<()> {
     match format {
         OutputFormat::Human => {
-            print!("{human_text}");
+            print!("{}", value.to_human_string());
         }
         OutputFormat::Json => {
             let json = serde_json::to_string(value).context_to()?;
@@ -96,14 +112,37 @@ mod tests {
         assert_eq!(OutputFormat::Yaml.to_string(), "yaml");
     }
 
+    struct SimpleOutput {
+        text: String,
+    }
+
+    impl serde::Serialize for SimpleOutput {
+        fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+            s.serialize_str(&self.text)
+        }
+    }
+
+    impl HumanOutput for SimpleOutput {
+        fn to_human_string(&self) -> String {
+            self.text.clone()
+        }
+    }
+
     #[test]
-    fn print_output_human_uses_human_text() {
-        // Verify Human format doesn't serialize through serde
-        let sample = serde_json::json!({"name": "test", "count": 42});
-        let human_text = "Custom human output\n";
-        // We can't capture stdout easily, but we verify the function
-        // doesn't error for Human format
-        let result = print_output(OutputFormat::Human, human_text, &sample);
+    fn print_output_human_uses_human_string() {
+        let val = SimpleOutput {
+            text: "Custom human output\n".to_string(),
+        };
+        let result = print_output(OutputFormat::Human, &val);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn print_output_json_serializes_value() {
+        let val = SimpleOutput {
+            text: "hello".to_string(),
+        };
+        let result = print_output(OutputFormat::Json, &val);
         assert!(result.is_ok());
     }
 }
