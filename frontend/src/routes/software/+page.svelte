@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { getSoftwareItems, deleteSoftwareItem } from '$lib/api';
+	import { getSoftwareItems, deleteSoftwareItem, checkSoftwareItemVersions } from '$lib/api';
 	import { formatDate } from '$lib/utils';
-	import { showError } from '$lib/notifications.svelte';
+	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
@@ -23,6 +23,7 @@
 	let confirmDelete: { id: string; name: string } | null = $state(null);
 	let assignItem: { id: string; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
+	let checkingVersionsId: string | null = $state(null);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
@@ -94,6 +95,23 @@
 			loadAll(currentPage);
 		} finally {
 			submitting = false;
+		}
+	}
+
+	async function triggerVersionCheck(item: SoftwareItemResponse) {
+		closeMenu();
+		checkingVersionsId = item.id;
+		try {
+			const result = await checkSoftwareItemVersions(item.id);
+			if (result.agents_notified > 0) {
+				showSuccess(`Version check triggered — ${result.agents_notified} agent(s) notified`);
+			} else {
+				showSuccess('Version check queued — no agents currently connected');
+			}
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to trigger version check.');
+		} finally {
+			checkingVersionsId = null;
 		}
 	}
 
@@ -206,6 +224,17 @@
 			{@const item = items.find((i) => i.id === openMenuId)}
 			{#if item}
 				<ContextMenu top={menuPos.top} left={menuPos.left} onclose={closeMenu}>
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+							role="menuitem"
+							tabindex="-1"
+							disabled={checkingVersionsId === item.id}
+							onclick={() => triggerVersionCheck(item)}
+						>
+							{checkingVersionsId === item.id ? 'Checking…' : 'Check Versions'}
+						</button>
+					</li>
 					<li>
 						<button
 							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"

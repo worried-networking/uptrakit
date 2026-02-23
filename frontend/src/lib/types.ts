@@ -350,6 +350,11 @@ export interface AssignHostsRequest {
 	host_ids: string[];
 }
 
+export interface TriggerVersionCheckResponse {
+	agents_notified: number;
+	message: string;
+}
+
 export interface UpdateOidcProviderRequest {
 	name?: string;
 	slug?: string;

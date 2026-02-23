@@ -29,6 +29,7 @@ import type {
 	SoftwareItemDetailResponse,
 	SoftwareItemResponse,
 	SystemAlertsResponse,
+	TriggerVersionCheckResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
 	UpdateHostRequest,
@@ -529,4 +530,8 @@ export function unassignHostFromSoftwareItem(itemId: string, hostId: string): Pr
 	return requestVoid(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}`, {
 		method: 'DELETE'
 	});
+}
+
+export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersionCheckResponse> {
+	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
 }
