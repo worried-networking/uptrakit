@@ -139,3 +139,14 @@ See also: [`docs/development/coding-standards.md`](../development/coding-standar
 1. Use `CanXxx(_user): CanXxx` (or `CanXxx(user): CanXxx` if you need the user) in the relevant route handler(s),
    and add `extensions(("x-required-permission" = json!("xxx")))` to the corresponding `#[utoipa::path]` annotation.
 1. Add the variant to the `Permission` TypeScript enum in `frontend/src/lib/types.ts`.
+
+## Content Security Policy
+
+The admin UI's Content Security Policy (set in `frontend/src/app.html`) includes
+`img-src 'self' https:`. This allows images from any HTTPS domain, which is required
+to load OIDC provider logos configured by administrators.
+
+**Accepted risk:** The admin who configures the OIDC provider logo URL is a trusted user.
+Logo URLs are validated as HTTPS-only via `isValidLogoUrl()` in `frontend/src/lib/utils.ts`
+before display. `referrerpolicy="no-referrer"` is applied to logo `<img>` elements,
+preventing the Uptrakit URL from leaking to logo hosts via the `Referer` header.

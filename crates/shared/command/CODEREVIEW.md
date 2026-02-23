@@ -84,11 +84,11 @@ and `flag()` methods. `local_executable()` returns `"pwsh"` on non-Windows platf
 Windows. `get_shell_args` in `src/command.rs` delegates to these methods. SSH executors targeting remote
 hosts should call `remote_executable(target_is_windows)` instead.
 
-### INFORMATIONAL: Output concatenation order
+### ~~INFORMATIONAL: Output concatenation order~~ RESOLVED
 
-Stdout is always appended before stderr in the accumulated output. The returned string does not preserve temporal
-interleaving. This is a fundamental limitation of reading from separate pipes and is handled correctly, but is worth
-documenting explicitly.
+The `CommandOutput.output` field docstring now explicitly states: "The accumulated stdout followed by
+stderr output. Stdout content always precedes stderr content, regardless of the actual temporal
+interleaving of the two streams. This is a fundamental limitation of reading from separate pipes."
 
 ---
 

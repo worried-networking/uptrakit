@@ -49,7 +49,11 @@ pub enum CommandMode {
 /// Output captured from a command execution.
 #[derive(Clone, Debug)]
 pub struct CommandOutput {
-    /// The accumulated stdout + stderr output.
+    /// The accumulated stdout followed by stderr output.
+    ///
+    /// Stdout content always precedes stderr content, regardless of the actual
+    /// temporal interleaving of the two streams. This is a fundamental limitation
+    /// of reading from separate pipes.
     pub output: String,
     /// The process exit code.
     pub exit_code: i32,

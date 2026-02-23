@@ -522,6 +522,12 @@ Polish and additional capabilities for production use.
 - [ ] Create batch update UI
 - [ ] Implement canary deployment patterns
 
+### Real-Time Frontend Updates
+
+- [ ] **Real-time frontend updates** — Add a WebSocket or SSE endpoint for the admin UI
+  so service status changes, MQTT connection status, and version check completions are
+  pushed to the browser without manual polling.
+
 ### Notification System
 
 - [ ] Design notification architecture

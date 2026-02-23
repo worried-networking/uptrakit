@@ -120,17 +120,14 @@ token URL is not forwarded in `Referer` headers. The remaining risk (browser his
 is documented as accepted in `docs/security/auth-and-authorization.md` with the full list of mitigations:
 single-use + short-lived token, same-origin redirect, user already authenticated via OIDC at this point.
 
-#### SEC-05: CSP `img-src 'self' https:` allows any HTTPS image
+#### ~~SEC-05: CSP `img-src 'self' https:` allows any HTTPS image~~ RESOLVED — documented as accepted risk
 
-**Severity:** Low
 **Location:** `app.html:9`
 
-Combined with OIDC provider logo URLs (admin-configured), this allows loading images from any HTTPS domain.
-While `referrerpolicy="no-referrer"` prevents URL leakage via Referer, the image request itself is made,
-which could be used for tracking.
-
-**Recommendation:** Accept as necessary for OIDC provider logos. The admin who configures the logo URL is
-trusted.
+`img-src 'self' https:` is required to load OIDC provider logos configured by administrators.
+An HTML comment in `app.html` now explains the rationale and points to the security documentation.
+The accepted risk and its mitigations (`isValidLogoUrl()`, `referrerpolicy="no-referrer"`) are
+documented in `docs/security/auth-and-authorization.md` under "Content Security Policy".
 
 ---
 
@@ -151,46 +148,27 @@ trusted.
 
 ### 3.2 Issues
 
-#### CQ-05: Network store event listeners never cleaned up
+#### ~~CQ-05: Network store event listeners never cleaned up~~ RESOLVED
 
-**Severity:** Low
-**Location:** `lib/stores/network.ts:12-13`
+**Location:** `lib/stores/network.svelte.ts`
 
-```typescript
-window.addEventListener('online', updateOnlineStatus);
-window.addEventListener('offline', updateOnlineStatus);
-```
+A comment was added immediately before the `addEventListener` calls explaining that these are intentional
+module-level singletons that live for the full app lifetime, so no cleanup is needed.
 
-Event listeners are added at module evaluation time but never removed. As a module singleton, this doesn't
-cause a memory leak, but it's not proper resource management.
+#### ~~CQ-06: Theme media query listener never cleaned up~~ RESOLVED
 
-**Recommendation:** Since this is a module-level singleton that lives for the app lifetime, document this
-as intentional. Alternatively, provide a cleanup function for testing.
+**Location:** `lib/theme.svelte.ts`
 
-#### CQ-06: Theme media query listener never cleaned up
+The listener is documented as an intentional module-level singleton in `theme.svelte.ts` (analogous to
+the fix applied to `network.svelte.ts` for CQ-05).
 
-**Severity:** Low
-**Location:** `lib/theme.ts:32-36`
+#### ~~CQ-08: Inconsistent `has_password` indicator for MQTT client secret handling~~ RESOLVED
 
-```typescript
-const mq = window.matchMedia('(prefers-color-scheme: dark)');
-mq.addEventListener('change', () => {
-	const current = getStored();
-	if (current === 'system') applyTheme('system');
-});
-```
+**Location:** `settings/MqttClientsSettings.svelte`
 
-Similar to CQ-05 — the listener lives for the app lifetime, which is appropriate, but undocumented.
-
-#### CQ-08: Inconsistent `has_password` indicator for MQTT client secret handling
-
-**Severity:** Low (cosmetic)
-**Location:** `settings/MqttClientsSettings.svelte:279-281`
-
-The "Password set" badge for MQTT client editing uses `editingMqttClient?.has_password`, which mirrors the
-pattern used for OIDC client secret (`editingProvider`). This is consistent, but the OIDC provider form uses
-`has_client_secret` from the response type, while the MQTT form checks `has_password`. Both are correct but
-use different naming conventions due to the underlying backend types.
+A comment was added near the `has_password` check explaining that this field name follows the
+MQTT-idiomatic backend type (`MqttClientResponse`) rather than the OAuth term `has_client_secret`
+used for OIDC providers.
 
 ---
 
@@ -219,18 +197,13 @@ unsaved work before following the login link. `window.location.href` is no longe
 clears it on successful auth. The `api.test.ts` 4xx test asserts `setSessionExpired(true)` is called and
 that `window.location.href` is not assigned.
 
-#### HA-06: No WebSocket or SSE for real-time updates
+#### ~~HA-06: No WebSocket or SSE for real-time updates~~ RESOLVED — documented as planned enhancement
 
-**Severity:** Low (architectural observation)
 **Location:** N/A
 
-All data is fetch-on-demand or polling-based. The backend has a WebSocket endpoint
-(`/api/v1/ws/service`) for agent-to-controller communication, but no equivalent for the frontend.
-
-For the current scope (admin panel), polling is acceptable. Real-time updates would improve UX for
-service status changes and MQTT connection status.
-
-**Recommendation:** Document this as a future enhancement. Not required for current scope.
+Polling is acceptable for the current admin-panel scope. The gap has been documented in `TODO.md`
+under "Phase 6 – Advanced Features → Real-Time Frontend Updates" as a planned WebSocket/SSE
+enhancement for a future release.
 
 ---
 
@@ -286,30 +259,30 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 
 ### Issues by Severity
 
-| Severity | Count | IDs                                                                                 |
-| -------- | ----- | ----------------------------------------------------------------------------------- |
-| Low      | 3     | SEC-05, CQ-08, HA-06 (ARC-01, ARC-03, ARC-04, CQ-05, CQ-06, HA-05, SEC-04 resolved) |
+| Severity | Count | IDs                                                                                               |
+| -------- | ----- | ------------------------------------------------------------------------------------------------- |
+| Low      | 0     | All resolved (ARC-01, ARC-03, ARC-04, SEC-04, SEC-05, CQ-05, CQ-06, CQ-08, HA-05, HA-06 resolved) |
 
 ### Issues by Category
 
 | Category      | Count |
 | ------------- | ----- |
-| Architecture  | 1     |
-| Security      | 1     |
-| Code Quality  | 1     |
-| Backend HA    | 1     |
+| Architecture  | 0     |
+| Security      | 0     |
+| Code Quality  | 0     |
+| Backend HA    | 0     |
 | Accessibility | 0     |
 
 ### File-Level Summary
 
 | File                                       | Issues            | Notes                                                                                |
 | ------------------------------------------ | ----------------- | ------------------------------------------------------------------------------------ |
-| `app.html`                                 | SEC-05            | CSP script-src tightened with SHA-256 hash                                           |
+| `app.html`                                 | ~~SEC-05~~        | CSP script-src tightened; img-src broadening documented as accepted risk             |
 | `lib/api.ts`                               | ~~ARC-04, HA-05~~ | BASE reads from `VITE_API_BASE`; hard redirect replaced by `setSessionExpired(true)` |
 | `lib/auth.svelte.ts`                       | ~~ARC-01~~        | Migrated to Svelte 5 runes; `sessionExpired` state added                             |
 | `lib/vite-env.d.ts`                        | —                 | New: `VITE_API_BASE` env declaration                                                 |
 | `lib/theme.svelte.ts`                      | ~~ARC-01, CQ-06~~ | Migrated to runes; cleanup documented (renamed from `theme.ts`)                      |
-| `lib/stores/network.svelte.ts`             | ~~ARC-01, CQ-05~~ | Migrated to runes; cleanup documented (renamed from `network.ts`)                    |
+| `lib/stores/network.svelte.ts`             | ~~ARC-01, CQ-05~~ | Migrated to runes; singleton listener comment added (renamed from `network.ts`)      |
 | `lib/notifications.svelte.ts`              | —                 | Clean implementation                                                                 |
 | `lib/utils.ts`                             | —                 | Clean implementation                                                                 |
 | `lib/types.ts`                             | —                 | Comprehensive type coverage                                                          |
@@ -327,7 +300,7 @@ deduplication, 4xx/5xx refresh failure handling, and timeout (api, 16 tests).
 | `settings/RegistrationSettings.svelte`     | —                 | Clean                                                                                |
 | `settings/AuthenticationSettings.svelte`   | —                 | Clean                                                                                |
 | `settings/AgentCertificateSettings.svelte` | —                 | Clean                                                                                |
-| `settings/MqttClientsSettings.svelte`      | CQ-08             | Minor naming inconsistency                                                           |
+| `settings/MqttClientsSettings.svelte`      | ~~CQ-08~~         | Naming convention documented via inline comment                                      |
 | `settings/OidcProvidersSettings.svelte`    | —                 | Clean                                                                                |
 | `settings/global/+page.svelte`             | —                 | Clean                                                                                |
 | `components/ToastNotifications.svelte`     | —                 | ARIA live regions added                                                              |

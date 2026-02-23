@@ -285,6 +285,8 @@
 				<label class="label">
 					<span>
 						Password
+						<!-- has_password (not has_client_secret) matches the backend MqttClientResponse type,
+						     which uses the MQTT-idiomatic term "password" rather than the OAuth term "secret". -->
 						{#if editingMqttClient?.has_password}
 							<span class="badge preset-filled-success-500 ml-2 text-xs">Password set</span>
 						{/if}

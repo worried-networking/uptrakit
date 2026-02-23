@@ -32,7 +32,7 @@ enum in `shared-types`, which is acceptable given the current architecture.
 
 ### Low
 
-#### L1: `build_tofu_client_config` security trade-off is well-documented
+#### ~~L1: `build_tofu_client_config` security trade-off is well-documented~~ RESOLVED
 
 **File:** `src/tls.rs:112-185`
 
@@ -43,9 +43,8 @@ verification, not on certificate chain validation.
 
 This is a reasonable TOFU trade-off. The signature verification prevents
 trivial MITM attacks. The comment at line 131-132 documents the intent.
-
-**Recommendation:** No change needed. Consider adding a log warning when
-TOFU mode is active (if not already present in `ca.rs`).
+`ca.rs` already emits `tracing::warn!` calls when TOFU mode is active
+(lines 163 and 176-178), satisfying the recommendation.
 
 ### Info
 
