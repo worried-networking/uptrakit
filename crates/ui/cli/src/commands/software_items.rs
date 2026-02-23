@@ -1,4 +1,5 @@
 use crate::client::authenticated_client;
+use crate::commands::settings::DeletedOutput;
 use crate::error::Result;
 use crate::output::HumanOutput;
 use rootcause::prelude::*;
@@ -6,7 +7,9 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::software_items::{
+    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
     ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemResponse,
+    UpdateSoftwareItemRequest,
 };
 
 // ── Human output ────────────────────────────────────────────────────────────
@@ -98,6 +101,32 @@ impl HumanOutput for SoftwareItemDetailResponse {
     }
 }
 
+impl HumanOutput for SoftwareItemResponse {
+    fn to_human_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("ID:              {}\n", self.id));
+        out.push_str(&format!("Name:            {}\n", self.name));
+        let providers = if self.provider_types.is_empty() {
+            "-".to_string()
+        } else {
+            self.provider_types.join(", ")
+        };
+        out.push_str(&format!("Providers:       {}\n", providers));
+        out.push_str(&format!("Enabled:         {}\n", self.enabled));
+        if let Some(ds) = &self.discovery_state {
+            out.push_str(&format!("Discovery State: {}\n", ds));
+        }
+        if let Some(checked) = self.last_checked_at {
+            out.push_str(&format!(
+                "Last Checked:    {}\n",
+                checked.format(&Rfc3339).unwrap_or_else(|_| checked.to_string())
+            ));
+        }
+        out.push_str(&format!("Host Count:      {}\n", self.host_count));
+        out
+    }
+}
+
 // ── Params ───────────────────────────────────────────────────────────────────
 
 /// Parameters for listing software items.
@@ -113,6 +142,62 @@ pub struct ListParams<'a> {
 /// Parameters for showing a single software item.
 pub struct ShowParams<'a> {
     pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct CreateParams<'a> {
+    pub name: String,
+    pub enabled: Option<bool>,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct UpdateParams<'a> {
+    pub id: &'a Uuid,
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct DeleteParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct ApproveParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct AssignParams<'a> {
+    pub id: &'a Uuid,
+    pub host_id: &'a Uuid,
+    pub provider_config_id: Option<&'a Uuid>,
+    pub package_identifier: Option<String>,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct UnassignParams<'a> {
+    pub id: &'a Uuid,
+    pub host_id: &'a Uuid,
+    pub ignore: bool,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -148,13 +233,68 @@ pub async fn show(params: ShowParams<'_>) -> Result<SoftwareItemDetailResponse> 
     client.get_software_item(params.id).await.context_to()
 }
 
+pub async fn create(params: CreateParams<'_>) -> Result<SoftwareItemResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let req = CreateSoftwareItemRequest {
+        name: params.name,
+        enabled: params.enabled.unwrap_or(true),
+    };
+    client.create_software_item(&req).await.context_to()
+}
+
+pub async fn update(params: UpdateParams<'_>) -> Result<SoftwareItemResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let req = UpdateSoftwareItemRequest {
+        name: params.name,
+        enabled: params.enabled,
+    };
+    client.update_software_item(params.id, &req).await.context_to()
+}
+
+pub async fn delete(params: DeleteParams<'_>) -> Result<DeletedOutput> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    client.delete_software_item(params.id).await.context_to()?;
+    Ok(DeletedOutput { message: format!("Software item {} deleted.", params.id) })
+}
+
+pub async fn approve(params: ApproveParams<'_>) -> Result<SoftwareItemResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    client.approve_software_item(params.id).await.context_to()
+}
+
+pub async fn assign(params: AssignParams<'_>) -> Result<SoftwareItemDetailResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let req = AssignHostsRequest {
+        host_assignments: vec![HostSoftwareAssignment {
+            host_id: *params.host_id,
+            provider_config_id: params.provider_config_id.copied(),
+            provider_config: None,
+            package_identifier: params.package_identifier,
+            config_override: None,
+        }],
+    };
+    client.assign_hosts(params.id, &req).await.context_to()
+}
+
+pub async fn unassign(params: UnassignParams<'_>) -> Result<DeletedOutput> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    if params.ignore {
+        client.unassign_host_with_ignore(params.id, params.host_id).await.context_to()?;
+    } else {
+        client.unassign_host(params.id, params.host_id).await.context_to()?;
+    }
+    Ok(DeletedOutput {
+        message: format!("Host {} unassigned from software item {}.", params.host_id, params.id),
+    })
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use time::macros::datetime;
-    use uptrakit_openapi_client::types::software_items::SoftwareItemHostSummary;
+    use uptrakit_openapi_client::types::software_items::{SoftwareItemHostSummary, SoftwareItemResponse};
 
     fn sample_item() -> SoftwareItemResponse {
         SoftwareItemResponse {
@@ -231,5 +371,25 @@ mod tests {
         assert!(s.contains("Node.js"), "name missing");
         assert!(s.contains("server-1.local"), "hostname missing");
         assert!(s.contains("20.0.0"), "installed version missing");
+    }
+
+    #[test]
+    fn software_item_response_human_output() {
+        use uptrakit_shared_types::SoftwareDiscoveryState;
+        let item = SoftwareItemResponse {
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            name: "My App".to_string(),
+            provider_types: vec!["homebrew".to_string()],
+            enabled: true,
+            discovery_state: Some(SoftwareDiscoveryState::Approved),
+            last_checked_at: None,
+            host_count: 0,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+        };
+        let s = item.to_human_string();
+        assert!(s.contains("My App"));
+        assert!(s.contains("homebrew"));
+        assert!(s.contains("approved"));
     }
 }

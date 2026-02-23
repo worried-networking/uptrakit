@@ -1,8 +1,10 @@
 pub mod api;
 pub mod auth;
+pub mod autodiscovery;
 pub mod check;
 pub mod history;
 pub mod hosts;
+pub mod provider_configs;
 pub mod scheduler;
 pub mod services;
 pub mod settings;

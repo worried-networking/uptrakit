@@ -5957,6 +5957,7 @@ dependencies = [
  "uptrakit-directories",
  "uptrakit-openapi-client",
  "uptrakit-shared-macros",
+ "uptrakit-shared-types",
  "uuid",
 ]
 

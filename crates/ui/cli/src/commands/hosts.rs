@@ -4,7 +4,8 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::hosts::HostResponse;
+use uptrakit_openapi_client::types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
+use uptrakit_openapi_client::types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 
 // ── Human output ────────────────────────────────────────────────────────────
@@ -79,6 +80,18 @@ impl HumanOutput for HostResponse {
     }
 }
 
+impl HumanOutput for TriggerDiscoveryResponse {
+    fn to_human_string(&self) -> String {
+        format!("{} (providers queued: {})\n", self.message, self.providers_queued)
+    }
+}
+
+impl HumanOutput for DiscardDiscoveredResponse {
+    fn to_human_string(&self) -> String {
+        format!("Discarded {} discovered item(s).\n", self.discarded_count)
+    }
+}
+
 // ── Params ───────────────────────────────────────────────────────────────────
 
 /// Parameters for listing hosts.
@@ -94,6 +107,40 @@ pub struct ListParams<'a> {
 /// Parameters for showing a single host.
 pub struct ShowParams<'a> {
     pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct UpdateParams<'a> {
+    pub id: &'a Uuid,
+    pub friendly_name: Option<String>,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct DeactivateParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct DiscoverParams<'a> {
+    pub id: &'a Uuid,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+pub struct DiscardDiscoveredParams<'a> {
+    pub id: &'a Uuid,
+    pub provider_config_id: Option<&'a Uuid>,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -128,12 +175,34 @@ pub async fn show(params: ShowParams<'_>) -> Result<HostResponse> {
     client.get_host(params.id).await.context_to()
 }
 
+pub async fn update(params: UpdateParams<'_>) -> Result<HostResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let req = UpdateHostRequest { friendly_name: params.friendly_name };
+    client.update_host(params.id, &req).await.context_to()
+}
+
+pub async fn deactivate(params: DeactivateParams<'_>) -> Result<HostMessageResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    client.deactivate_host(params.id).await.context_to()
+}
+
+pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    client.discover_host(params.id).await.context_to()
+}
+
+pub async fn discard_discovered(params: DiscardDiscoveredParams<'_>) -> Result<DiscardDiscoveredResponse> {
+    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    client.discard_host_discovered(params.id, params.provider_config_id).await.context_to()
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use time::macros::datetime;
+    use uptrakit_openapi_client::types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
     use uptrakit_openapi_client::types::hosts::HostAgentSummary;
 
     fn sample_host() -> HostResponse {
@@ -200,5 +269,30 @@ mod tests {
         let s = resp.to_human_string();
         assert!(s.contains("FRIENDLY NAME"), "header missing");
         assert!(s.contains("Production Server"), "host row missing");
+    }
+
+    #[test]
+    fn host_message_response_human_output() {
+        let resp = HostMessageResponse { message: "Host deactivated.".to_string() };
+        let s = resp.to_human_string();
+        assert!(s.contains("Host deactivated"));
+    }
+
+    #[test]
+    fn trigger_discovery_response_human_output() {
+        let resp = TriggerDiscoveryResponse {
+            providers_queued: 3,
+            message: "Discovery queued".to_string(),
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("Discovery queued"));
+        assert!(s.contains("3"));
+    }
+
+    #[test]
+    fn discard_discovered_response_human_output() {
+        let resp = DiscardDiscoveredResponse { discarded_count: 5 };
+        let s = resp.to_human_string();
+        assert!(s.contains("5"));
     }
 }

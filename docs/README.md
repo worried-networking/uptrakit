@@ -22,7 +22,10 @@ This directory holds audience-specific documentation split into five sections, p
 | [Deployment Map](end-user/deployment-map.md) | Deployment navigation map and pointers. See also: [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 | [SSH Agent Host Management](end-user/ssh-agent-host-management.md) | Managing SSH host entries via the `uptrakit-agent-ssh` CLI. See also: [SSH Agent Architecture](architecture/ssh-agent.md), [SSH Agent Secrets](security/ssh-agent-secrets.md). |
 | [SSH Agent Bootstrap](end-user/ssh-agent-bootstrap.md) | Automated remote host setup (user creation, key deployment, sudoers). See also: [SSH Agent Secrets](security/ssh-agent-secrets.md), [SSH Agent Architecture](architecture/ssh-agent.md). |
-| [CLI Usage Guide](end-user/cli-usage.md) | Command reference for the `uptrakit` binary (hosts, software-items, check, update, history, scheduler). See also: [CLI Output](development/cli-output.md), [Auth Flows](api/auth-flows.md). |
+| [CLI Usage Guide](end-user/cli-usage.md) | Command reference for the `uptrakit` binary (all command groups: hosts, software-items, provider-configs, autodiscovery, check, update, history, scheduler, settings). See also: [CLI Output](development/cli-output.md), [Auth Flows](api/auth-flows.md). |
+| [Provider Configurations](end-user/provider-configs.md) | Provider config management, supported provider types, autodiscovery, and ignore rules. See also: [Autodiscovery](end-user/autodiscovery.md), [Software Item Entity](architecture/software-item-entity.md). |
+| [Update History](end-user/update-history.md) | Viewing update history, status reference, filters, and triggering updates. See also: [Update Workflow](end-user/update-workflow.md), [Update History Entity](architecture/update-history-entity.md). |
+| [Profile and API Tokens](end-user/profile-tokens.md) | Account info, API token lifecycle, security best practices. See also: [Auth Flows](api/auth-flows.md), [Auth and Authorization](security/auth-and-authorization.md). |
 | [Reverse Proxy Deployment](end-user/deployment/reverse-proxy.md) | Reverse proxy deployment choices, headers, and API snippets. See also: [PKI and Certificates](security/pki-certificates.md), [Reverse Proxy Security](security/reverse-proxy-security.md). |
 
 ## API and Protocol

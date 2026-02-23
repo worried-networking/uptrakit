@@ -1,12 +1,15 @@
 import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
 import type {
 	AgentCertificateSettings,
+	ApiTokenListResponse,
 	AssignHostsRequest,
 	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
 	AutodiscoveryIgnoreResponse,
 	CombinedSettingsResponse,
+	CreateApiTokenRequest,
+	CreateApiTokenResponse,
 	CreateAutodiscoveryIgnoreRequest,
 	CreateOidcProviderRequest,
 	DiscardDiscoveredResponse,
@@ -17,33 +20,44 @@ import type {
 	MessageResponse,
 	MqttClientResponse,
 	MqttLimitResponse,
+	PaginatedResponse,
 	ProviderConfigResponse,
 	CreateMqttClient,
+	CreateProviderConfigRequest,
 	CreateSoftwareItemRequest,
 	NetworkSettings,
 	OidcLinkRequest,
 	OidcProviderResponse,
-	PaginatedResponse,
 	RefreshResponse,
 	RegisterRequest,
 	RegistrationSettings,
 	RenewServerCertResponse,
+	RotateCaResponse,
+	ScheduledTaskResponse,
+	ScheduledTasksListResponse,
 	ServiceResponse,
 	SoftwareItemDetailResponse,
 	SoftwareItemResponse,
 	SystemAlertsResponse,
 	TriggerDiscoveryResponse,
+	TriggerScheduledTaskResponse,
+	TriggerUpdateRequest,
+	TriggerUpdateResponse,
 	TriggerVersionCheckResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
+	UpdateHistoryResponse,
 	UpdateHostAssignmentRequest,
 	UpdateHostRequest,
 	UpdateMqttClient,
 	UpdateMqttLimitRequest,
 	UpdateNetworkSettings,
 	UpdateOidcProviderRequest,
+	UpdateProviderConfigRequest,
 	UpdateRegistrationSettings,
+	UpdateScheduledTaskRequest,
 	UpdateServiceRequest,
+	UpdateSoftwareItemRequest,
 	User
 } from './types';
 
@@ -599,4 +613,119 @@ export function createAutodiscoveryIgnore(req: CreateAutodiscoveryIgnoreRequest)
 
 export function deleteAutodiscoveryIgnore(id: string): Promise<void> {
 	return requestVoid(`/autodiscovery/ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// Software items - update
+export async function updateSoftwareItem(id: string, data: UpdateSoftwareItemRequest): Promise<SoftwareItemResponse> {
+	return request<SoftwareItemResponse>(`/software-items/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// Software items - trigger update on a specific host
+export async function triggerSoftwareUpdate(
+	itemId: string,
+	hostId: string,
+	req: TriggerUpdateRequest
+): Promise<TriggerUpdateResponse> {
+	return request<TriggerUpdateResponse>(`/software-items/${itemId}/hosts/${hostId}/update`, {
+		method: 'POST',
+		body: JSON.stringify(req)
+	});
+}
+
+// Software items - check versions on a specific host
+export async function checkSoftwareItemVersionsHost(
+	itemId: string,
+	hostId: string
+): Promise<TriggerVersionCheckResponse> {
+	return request<TriggerVersionCheckResponse>(`/software-items/${itemId}/hosts/${hostId}/check-versions`, {
+		method: 'POST'
+	});
+}
+
+// Update history
+export async function listUpdateHistory(opts?: {
+	host_id?: string;
+	software_item_id?: string;
+	status?: string;
+	page?: number;
+	per_page?: number;
+}): Promise<PaginatedResponse<UpdateHistoryResponse>> {
+	const params = new URLSearchParams();
+	if (opts?.host_id) params.set('host_id', opts.host_id);
+	if (opts?.software_item_id) params.set('software_item_id', opts.software_item_id);
+	if (opts?.status) params.set('status', opts.status);
+	if (opts?.page) params.set('page', String(opts.page));
+	if (opts?.per_page) params.set('per_page', String(opts.per_page));
+	const qs = params.toString();
+	return request<PaginatedResponse<UpdateHistoryResponse>>(`/update-history${qs ? '?' + qs : ''}`);
+}
+
+export async function getUpdateHistoryEntry(id: string): Promise<UpdateHistoryResponse> {
+	return request<UpdateHistoryResponse>(`/update-history/${id}`);
+}
+
+// Scheduler tasks
+export async function listSchedulerTasks(): Promise<ScheduledTasksListResponse> {
+	return request<ScheduledTasksListResponse>('/scheduler/tasks');
+}
+
+export async function getSchedulerTask(id: string): Promise<ScheduledTaskResponse> {
+	return request<ScheduledTaskResponse>(`/scheduler/tasks/${id}`);
+}
+
+export async function updateSchedulerTask(
+	id: string,
+	data: UpdateScheduledTaskRequest
+): Promise<ScheduledTaskResponse> {
+	return request<ScheduledTaskResponse>(`/scheduler/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function triggerSchedulerTask(id: string): Promise<TriggerScheduledTaskResponse> {
+	return request<TriggerScheduledTaskResponse>(`/scheduler/tasks/${id}/trigger`, { method: 'POST' });
+}
+
+// Provider configs - additional CRUD (list and getProviderConfigs already exist)
+export async function getProviderConfig(id: string): Promise<ProviderConfigResponse> {
+	return request<ProviderConfigResponse>(`/provider-configs/${id}`);
+}
+
+export async function createProviderConfig(data: CreateProviderConfigRequest): Promise<ProviderConfigResponse> {
+	return request<ProviderConfigResponse>('/provider-configs', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateProviderConfig(
+	id: string,
+	data: UpdateProviderConfigRequest
+): Promise<ProviderConfigResponse> {
+	return request<ProviderConfigResponse>(`/provider-configs/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteProviderConfig(id: string): Promise<void> {
+	return requestVoid(`/provider-configs/${id}`, { method: 'DELETE' });
+}
+
+export async function triggerProviderConfigDiscovery(id: string): Promise<TriggerDiscoveryResponse> {
+	return request<TriggerDiscoveryResponse>(`/provider-configs/${id}/discover`, { method: 'POST' });
+}
+
+export async function discardProviderConfigDiscovered(id: string): Promise<DiscardDiscoveredResponse> {
+	return request<DiscardDiscoveredResponse>(`/provider-configs/${id}/discovered`, { method: 'DELETE' });
+}
+
+// API tokens
+export async function listApiTokens(): Promise<ApiTokenListResponse> {
+	return request<ApiTokenListResponse>('/auth/api-tokens');
+}
+
+export async function createApiToken(data: CreateApiTokenRequest): Promise<CreateApiTokenResponse> {
+	return request<CreateApiTokenResponse>('/auth/api-tokens', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function revokeApiToken(id: string): Promise<void> {
+	return requestVoid(`/auth/api-tokens/${id}`, { method: 'DELETE' });
+}
+
+// CA rotation
+export async function rotateCA(): Promise<RotateCaResponse> {
+	return request<RotateCaResponse>('/settings/ca/rotate', { method: 'POST' });
 }

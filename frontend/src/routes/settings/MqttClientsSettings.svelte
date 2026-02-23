@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createMqttClient, updateMqttClient, deleteMqttClient } from '$lib/api';
+	import { createMqttClient, updateMqttClient, deleteMqttClient, getMqttLimit, updateMqttLimit } from '$lib/api';
 	import {
 		type CreateMqttClient,
 		type MqttClientResponse,
@@ -33,12 +33,41 @@
 		topic_prefix: 'uptrakit'
 	});
 	let mqttDeleteConfirm: { id: string; url: string } | null = $state(null);
+	let mqttLimit: number | null = $state(null);
+	let editingLimit: boolean = $state(false);
+	let limitInput: number = $state(0);
+	let savingLimit: boolean = $state(false);
 
 	$effect(() => {
 		if (clients !== undefined) {
 			mqttClients = clients;
+			loadMqttLimit();
 		}
 	});
+
+	async function loadMqttLimit() {
+		try {
+			const res = await getMqttLimit();
+			mqttLimit = res.max_clients_per_tenant;
+			limitInput = res.max_clients_per_tenant;
+		} catch {
+			// non-critical
+		}
+	}
+
+	async function saveMqttLimit() {
+		savingLimit = true;
+		try {
+			const res = await updateMqttLimit({ max_clients_per_tenant: limitInput });
+			mqttLimit = res.max_clients_per_tenant;
+			editingLimit = false;
+			onSuccess('MQTT client limit updated.');
+		} catch (e) {
+			onError(e instanceof Error ? e.message : 'Failed to update MQTT limit');
+		} finally {
+			savingLimit = false;
+		}
+	}
 
 	function openCreateMqtt() {
 		editingMqttClient = null;
@@ -231,6 +260,28 @@
 				</table>
 			</div>
 		{/if}
+	{/if}
+
+	{#if mqttLimit !== null}
+		<div class="mt-4 flex items-center gap-4 border-t border-surface-200 dark:border-surface-700 pt-4">
+			<span class="text-surface-600 dark:text-surface-400">Max clients per tenant:</span>
+			{#if editingLimit}
+				<input class="input w-24" type="number" min="1" bind:value={limitInput} />
+				<button class="btn btn-sm preset-filled-primary-500" onclick={saveMqttLimit} disabled={savingLimit}>
+					{savingLimit ? 'Saving...' : 'Save'}
+				</button>
+				<button class="btn btn-sm preset-tonal-surface" onclick={() => (editingLimit = false)}>Cancel</button>
+			{:else}
+				<span class="font-medium">{mqttLimit}</span>
+				<button
+					class="btn btn-sm preset-tonal"
+					onclick={() => {
+						limitInput = mqttLimit!;
+						editingLimit = true;
+					}}>Edit</button
+				>
+			{/if}
+		</div>
 	{/if}
 </div>
 

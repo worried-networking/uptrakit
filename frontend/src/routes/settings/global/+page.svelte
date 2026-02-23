@@ -1,9 +1,16 @@
 <script lang="ts">
 	import { getUser } from '$lib/auth.svelte';
 	import { goto } from '$app/navigation';
-	import { getSystemAlerts, renewServerCertificate, getNetworkSettings, updateNetworkSettings } from '$lib/api';
+	import {
+		getSystemAlerts,
+		renewServerCertificate,
+		getNetworkSettings,
+		updateNetworkSettings,
+		rotateCA
+	} from '$lib/api';
 	import { Permission, type SystemAlert } from '$lib/types';
 	import { showSuccess, showError, clearError } from '$lib/notifications.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	// --- Network Settings ---
 	let trustedProxiesText: string = $state('');
@@ -14,6 +21,10 @@
 	// --- TLS Certificate ---
 	let tlsAlerts: SystemAlert[] = $state([]);
 	let renewingCert: boolean = $state(false);
+
+	// --- CA Certificate ---
+	let showRotateCaConfirm: boolean = $state(false);
+	let rotatingCa: boolean = $state(false);
 
 	// --- Loading ---
 	let loading: boolean = $state(true);
@@ -77,6 +88,20 @@
 			showSuccess('Network settings saved.');
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to save network settings');
+		}
+	}
+
+	// --- CA Certificate ---
+	async function handleRotateCa() {
+		showRotateCaConfirm = false;
+		rotatingCa = true;
+		try {
+			await rotateCA();
+			showSuccess('CA certificate rotated. All agents must re-enroll.');
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to rotate CA certificate');
+		} finally {
+			rotatingCa = false;
 		}
 	}
 
@@ -175,5 +200,30 @@
 				{renewingCert ? 'Renewing...' : 'Renew Server Certificate'}
 			</button>
 		</div>
+
+		<!-- Section 3: CA Certificate -->
+		<div class="card mb-6 p-6">
+			<h2 class="h3 mb-4">CA Certificate</h2>
+			<p class="mb-4 text-surface-600 dark:text-surface-400">
+				Rotate the root CA certificate used to sign all agent and server certificates. This will invalidate all
+				currently issued certificates and require all agents to re-enroll.
+			</p>
+			<button class="btn preset-filled-error-500" onclick={() => (showRotateCaConfirm = true)} disabled={rotatingCa}>
+				{rotatingCa ? 'Rotating...' : 'Rotate CA'}
+			</button>
+		</div>
+
+		{#if showRotateCaConfirm}
+			<ConfirmDialog
+				title="Rotate CA Certificate"
+				messagePrefix="This will invalidate all existing agent certificates and require re-enrollment of"
+				entityName="all agents. Are you sure?"
+				confirmLabel={rotatingCa ? 'Rotating...' : 'Rotate CA'}
+				confirmClass="preset-filled-error-500"
+				confirmDisabled={rotatingCa}
+				onconfirm={handleRotateCa}
+				oncancel={() => (showRotateCaConfirm = false)}
+			/>
+		{/if}
 	{/if}
 {/if}

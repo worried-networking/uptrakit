@@ -1,8 +1,8 @@
 # CLI Usage Guide
 
 The `uptrakit` binary provides a command-line interface for interacting with the Uptrakit controller. It
-supports authentication, resource inspection, version checks, update triggering, scheduler management, and
-server settings management.
+supports authentication, resource inspection, version checks, update triggering, scheduler management,
+provider configuration, autodiscovery management, and server settings management.
 
 ## Global Options
 
@@ -97,7 +97,7 @@ See also: [Service Operations](../api/services-operations.md),
 
 ## Hosts
 
-List and inspect hosts registered with the controller.
+List, inspect, and manage hosts registered with the controller.
 
 ```sh
 # List all hosts (paginated)
@@ -106,13 +106,28 @@ uptrakit hosts list --page 2 --per-page 10
 
 # Show host details
 uptrakit hosts show <HOST_ID>
+
+# Update a host's friendly display name
+uptrakit hosts update <HOST_ID> --friendly-name "prod-web-01"
+
+# Deactivate (remove) a host from the controller
+uptrakit hosts deactivate <HOST_ID>
+
+# Trigger autodiscovery on a specific host
+uptrakit hosts discover <HOST_ID>
+
+# Discard all pending discovered items for a host
+uptrakit hosts discard-discovered <HOST_ID>
+
+# Discard pending discovered items for a specific provider config on a host
+uptrakit hosts discard-discovered <HOST_ID> --provider-config <PROVIDER_CONFIG_ID>
 ```
 
-See also: [Host Entity](../architecture/host-entity.md).
+See also: [Host Entity](../architecture/host-entity.md), [Autodiscovery](autodiscovery.md).
 
 ## Software Items
 
-List and inspect software items configured on the controller.
+List, inspect, and manage software items configured on the controller.
 
 ```sh
 # List all software items (paginated)
@@ -121,9 +136,100 @@ uptrakit software-items list --page 1 --per-page 50
 
 # Show software item details (includes host assignments and version info)
 uptrakit software-items show <ITEM_ID>
+
+# Create a new software item
+uptrakit software-items create --name "my-app"
+uptrakit software-items create --name "my-app" --enabled true
+
+# Update a software item's name or enabled state
+uptrakit software-items update <ITEM_ID> --name "my-app-renamed"
+uptrakit software-items update <ITEM_ID> --enabled false
+uptrakit software-items update <ITEM_ID> --name "new-name" --enabled true
+
+# Delete a software item
+uptrakit software-items delete <ITEM_ID>
+
+# Approve a pending discovered software item for version tracking
+uptrakit software-items approve <ITEM_ID>
+
+# Assign a host to a software item
+uptrakit software-items assign <ITEM_ID> --host <HOST_ID>
+uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --provider-config <PROVIDER_CONFIG_ID>
+uptrakit software-items assign <ITEM_ID> --host <HOST_ID> --provider-config <PROVIDER_CONFIG_ID> --package "my-package"
+
+# Unassign a host from a software item
+uptrakit software-items unassign <ITEM_ID> --host <HOST_ID>
+
+# Unassign a host and create an autodiscovery ignore rule for this package
+uptrakit software-items unassign <ITEM_ID> --host <HOST_ID> --ignore
 ```
 
-See also: [Software Item Entity](../architecture/software-item-entity.md).
+See also: [Software Item Entity](../architecture/software-item-entity.md),
+[Autodiscovery](autodiscovery.md), [Provider Configurations](provider-configs.md).
+
+## Provider Configurations
+
+Manage provider configurations that define how software packages are tracked and where upstream
+versions are resolved. See [Provider Configurations](provider-configs.md) for a full explanation
+of provider types and their fields.
+
+```sh
+# List all provider configs (paginated)
+uptrakit provider-configs list
+uptrakit provider-configs list --page 1 --per-page 20
+
+# Show provider config details
+uptrakit provider-configs show <PROVIDER_CONFIG_ID>
+
+# Create a new provider config
+uptrakit provider-configs create --name "My App Releases" --type github_releases \
+  --config '{"owner":"example","repo":"my-app"}'
+
+uptrakit provider-configs create --name "My Docker Image" --type docker_registry \
+  --config '{"image":"example/my-image"}'
+
+uptrakit provider-configs create --name "My Formula" --type homebrew \
+  --config '{"package_type":"formula","formula":"my-formula"}'
+
+# Update a provider config
+uptrakit provider-configs update <PROVIDER_CONFIG_ID> --name "Updated Name"
+uptrakit provider-configs update <PROVIDER_CONFIG_ID> --config '{"owner":"example","repo":"new-repo"}'
+
+# Delete a provider config
+uptrakit provider-configs delete <PROVIDER_CONFIG_ID>
+
+# Trigger autodiscovery for a provider config (discovery-capable providers only)
+uptrakit provider-configs discover <PROVIDER_CONFIG_ID>
+
+# Discard all pending discovered items for a provider config
+uptrakit provider-configs discard-discovered <PROVIDER_CONFIG_ID>
+```
+
+See also: [Provider Configurations](provider-configs.md), [Autodiscovery](autodiscovery.md).
+
+## Autodiscovery
+
+Manage autodiscovery ignore rules. Ignore rules permanently suppress specific packages from
+appearing in future discovery results. See [Autodiscovery](autodiscovery.md) for a full
+description of the discovery workflow.
+
+```sh
+# List all autodiscovery ignore rules
+uptrakit autodiscovery ignores list
+
+# Show a specific ignore rule
+uptrakit autodiscovery ignores show <IGNORE_ID>
+
+# Create an ignore rule directly (pre-suppress a package before discovery)
+uptrakit autodiscovery ignores create \
+  --provider-config <PROVIDER_CONFIG_ID> \
+  --package "unwanted-package"
+
+# Delete an ignore rule (re-enables future discovery of that package)
+uptrakit autodiscovery ignores delete <IGNORE_ID>
+```
+
+See also: [Autodiscovery](autodiscovery.md), [Provider Configurations](provider-configs.md).
 
 ## Version Checks
 

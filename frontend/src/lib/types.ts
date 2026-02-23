@@ -403,3 +403,96 @@ export interface CreateAutodiscoveryIgnoreRequest {
 	provider_config_id: string;
 	package_identifier: string;
 }
+
+export interface UpdateSoftwareItemRequest {
+	name?: string;
+	enabled?: boolean;
+}
+
+export type UpdateHistoryStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface UpdateHistoryResponse {
+	id: string;
+	host_id: string;
+	host_name: string;
+	software_item_id: string;
+	software_item_name: string;
+	from_version: string | null;
+	to_version: string;
+	status: UpdateHistoryStatus;
+	initiated_by: string | null;
+	started_at: string | null;
+	completed_at: string | null;
+	output: string | null;
+	created_at: string;
+}
+
+export interface TriggerUpdateRequest {
+	to_version: string;
+	release_tag?: string;
+	release_url?: string;
+}
+
+export interface TriggerUpdateResponse {
+	update_history_id: string;
+	status: string;
+}
+
+export interface ScheduledTaskResponse {
+	id: string;
+	task_type: string;
+	label: string;
+	cron_expression: string;
+	enabled: boolean;
+	is_running: boolean;
+	run_count: number;
+	last_run_at: string | null;
+	next_run_at: string | null;
+	last_error: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface UpdateScheduledTaskRequest {
+	cron_expression?: string;
+	enabled?: boolean;
+}
+
+export interface TriggerScheduledTaskResponse {
+	triggered: boolean;
+	message: string;
+}
+
+export interface ApiTokenResponse {
+	id: string;
+	name: string;
+	revoked_at: string | null;
+	created_at: string;
+}
+
+export interface ApiTokenListResponse {
+	tokens: ApiTokenResponse[];
+}
+
+export interface CreateApiTokenRequest {
+	name: string;
+}
+
+export interface CreateApiTokenResponse {
+	id: string;
+	token: string;
+}
+
+export interface RotateCaResponse {
+	message: string;
+}
+
+export interface UpdateProviderConfigRequest {
+	name?: string;
+	config?: Record<string, unknown>;
+	enabled?: boolean;
+}
+
+export interface ScheduledTasksListResponse {
+	tasks: ScheduledTaskResponse[];
+}

@@ -1,6 +1,8 @@
 use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
+use rootcause::prelude::*;
+use uptrakit_shared_types::ProviderType;
 use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_cli::output::OutputFormat;
@@ -102,6 +104,16 @@ enum Commands {
         #[command(subcommand)]
         command: SettingsCommands,
     },
+    /// Manage provider configurations
+    ProviderConfigs {
+        #[command(subcommand)]
+        command: ProviderConfigsCommands,
+    },
+    /// Autodiscovery management
+    Autodiscovery {
+        #[command(subcommand)]
+        command: AutodiscoveryCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -150,6 +162,32 @@ enum HostsCommands {
         /// Host UUID
         id: Uuid,
     },
+    /// Update a host's settings
+    Update {
+        /// Host UUID
+        id: Uuid,
+        /// New friendly name
+        #[arg(long)]
+        friendly_name: Option<String>,
+    },
+    /// Deactivate (remove) a host
+    Deactivate {
+        /// Host UUID
+        id: Uuid,
+    },
+    /// Trigger autodiscovery on a host
+    Discover {
+        /// Host UUID
+        id: Uuid,
+    },
+    /// Discard all pending discovered items for a host
+    DiscardDiscovered {
+        /// Host UUID
+        id: Uuid,
+        /// Optionally filter by provider config UUID
+        #[arg(long)]
+        provider_config: Option<Uuid>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -167,6 +205,61 @@ enum SoftwareItemsCommands {
     Show {
         /// Software item UUID
         id: Uuid,
+    },
+    /// Create a new software item
+    Create {
+        /// Item name
+        #[arg(long)]
+        name: String,
+        /// Enable or disable on creation
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Update a software item
+    Update {
+        /// Software item UUID
+        id: Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a software item
+    Delete {
+        /// Software item UUID
+        id: Uuid,
+    },
+    /// Approve a pending discovered software item
+    Approve {
+        /// Software item UUID
+        id: Uuid,
+    },
+    /// Assign a host to a software item
+    Assign {
+        /// Software item UUID
+        id: Uuid,
+        /// Host UUID
+        #[arg(long)]
+        host: Uuid,
+        /// Provider config UUID
+        #[arg(long)]
+        provider_config: Option<Uuid>,
+        /// Package identifier
+        #[arg(long)]
+        package: Option<String>,
+    },
+    /// Unassign a host from a software item
+    Unassign {
+        /// Software item UUID
+        id: Uuid,
+        /// Host UUID
+        #[arg(long)]
+        host: Uuid,
+        /// Also create an autodiscovery ignore rule
+        #[arg(long, default_value_t = false)]
+        ignore: bool,
     },
 }
 
@@ -613,6 +706,107 @@ enum OidcCommands {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum ProviderConfigsCommands {
+    /// List provider configurations
+    List {
+        /// Page number
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Show a provider configuration
+    Show {
+        /// Provider config UUID
+        id: Uuid,
+    },
+    /// Create a new provider configuration
+    Create {
+        /// Config name
+        #[arg(long)]
+        name: String,
+        /// Provider type (github_releases, docker_registry, homebrew, proxmox_helper_scripts)
+        #[arg(long)]
+        provider_type: String,
+        /// Provider-specific config as JSON string
+        #[arg(long)]
+        config: Option<String>,
+        /// Enable on creation
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Update a provider configuration
+    Update {
+        /// Provider config UUID
+        id: Uuid,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// Updated config as JSON string
+        #[arg(long)]
+        config: Option<String>,
+        /// Enable or disable
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+    /// Delete a provider configuration
+    Delete {
+        /// Provider config UUID
+        id: Uuid,
+    },
+    /// Trigger autodiscovery for a provider config
+    Discover {
+        /// Provider config UUID
+        id: Uuid,
+    },
+    /// Discard all pending discovered items for a provider config
+    DiscardDiscovered {
+        /// Provider config UUID
+        id: Uuid,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AutodiscoveryCommands {
+    /// Manage autodiscovery ignore rules
+    Ignores {
+        #[command(subcommand)]
+        command: IgnoresCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IgnoresCommands {
+    /// List autodiscovery ignore rules
+    List {
+        /// Filter by provider config UUID
+        #[arg(long)]
+        provider_config: Option<Uuid>,
+        /// Page number
+        #[arg(long)]
+        page: Option<u64>,
+        /// Items per page
+        #[arg(long)]
+        per_page: Option<u64>,
+    },
+    /// Create an autodiscovery ignore rule
+    Create {
+        /// Provider config UUID
+        #[arg(long)]
+        provider_config: Uuid,
+        /// Package identifier to suppress
+        #[arg(long)]
+        package: String,
+    },
+    /// Delete an autodiscovery ignore rule
+    Delete {
+        /// Ignore rule UUID
+        id: Uuid,
+    },
+}
+
 /// Parse a registration mode string into the typed enum.
 fn parse_registration_mode(
     s: &str,
@@ -627,7 +821,6 @@ fn resolve_ca_pem(
     ca_pem: Option<String>,
     ca_pem_file: Option<std::path::PathBuf>,
 ) -> error::Result<Option<String>> {
-    use rootcause::prelude::*;
     match (ca_pem, ca_pem_file) {
         (Some(pem), None) => Ok(Some(pem)),
         (None, Some(path)) => {
@@ -869,6 +1062,52 @@ async fn run(cli: Cli) -> error::Result<()> {
                 .await?;
                 output::print_output(format, &resp)?;
             }
+            HostsCommands::Update { id, friendly_name } => {
+                let resp = commands::hosts::update(commands::hosts::UpdateParams {
+                    id: &id,
+                    friendly_name,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostsCommands::Deactivate { id } => {
+                let resp = commands::hosts::deactivate(commands::hosts::DeactivateParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostsCommands::Discover { id } => {
+                let resp = commands::hosts::discover(commands::hosts::DiscoverParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            HostsCommands::DiscardDiscovered { id, provider_config } => {
+                let resp = commands::hosts::discard_discovered(commands::hosts::DiscardDiscoveredParams {
+                    id: &id,
+                    provider_config_id: provider_config.as_ref(),
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
         },
         Commands::SoftwareItems { command } => match command {
             SoftwareItemsCommands::List { page, per_page } => {
@@ -894,6 +1133,80 @@ async fn run(cli: Cli) -> error::Result<()> {
                         request_timeout,
                     })
                     .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Create { name, enabled } => {
+                let resp = commands::software_items::create(commands::software_items::CreateParams {
+                    name,
+                    enabled,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Update { id, name, enabled } => {
+                let resp = commands::software_items::update(commands::software_items::UpdateParams {
+                    id: &id,
+                    name,
+                    enabled,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Delete { id } => {
+                let resp = commands::software_items::delete(commands::software_items::DeleteParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Approve { id } => {
+                let resp = commands::software_items::approve(commands::software_items::ApproveParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Assign { id, host, provider_config, package } => {
+                let resp = commands::software_items::assign(commands::software_items::AssignParams {
+                    id: &id,
+                    host_id: &host,
+                    provider_config_id: provider_config.as_ref(),
+                    package_identifier: package,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::Unassign { id, host, ignore } => {
+                let resp = commands::software_items::unassign(commands::software_items::UnassignParams {
+                    id: &id,
+                    host_id: &host,
+                    ignore,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
                 output::print_output(format, &resp)?;
             }
         },
@@ -1425,6 +1738,155 @@ async fn run(cli: Cli) -> error::Result<()> {
                 output::print_output(format, &resp)?;
             }
         },
+        Commands::ProviderConfigs { command } => match command {
+            ProviderConfigsCommands::List { page, per_page } => {
+                let resp = commands::provider_configs::list(commands::provider_configs::ListParams {
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    page,
+                    per_page,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ProviderConfigsCommands::Show { id } => {
+                let resp = commands::provider_configs::show(commands::provider_configs::ShowParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ProviderConfigsCommands::Create { name, provider_type, config, enabled } => {
+                let provider_type: ProviderType = provider_type
+                    .parse()
+                    .map_err(|_| report!(error::CliError::Other(format!("unknown provider type: {provider_type}"))))?;
+                let config_value: serde_json::Value = match config {
+                    Some(s) => serde_json::from_str(&s)
+                        .map_err(|e| report!(error::CliError::Other(format!("invalid JSON for --config: {e}"))))?,
+                    None => serde_json::Value::Object(serde_json::Map::new()),
+                };
+                let resp = commands::provider_configs::create(commands::provider_configs::CreateParams {
+                    name,
+                    provider_type,
+                    config: config_value,
+                    enabled,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ProviderConfigsCommands::Update { id, name, config, enabled } => {
+                let config_value: Option<serde_json::Value> = match config {
+                    Some(s) => Some(
+                        serde_json::from_str(&s)
+                            .map_err(|e| report!(error::CliError::Other(format!("invalid JSON for --config: {e}"))))?,
+                    ),
+                    None => None,
+                };
+                let resp = commands::provider_configs::update(commands::provider_configs::UpdateParams {
+                    id: &id,
+                    name,
+                    config: config_value,
+                    enabled,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ProviderConfigsCommands::Delete { id } => {
+                let resp = commands::provider_configs::delete(commands::provider_configs::DeleteParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ProviderConfigsCommands::Discover { id } => {
+                let resp = commands::provider_configs::discover(commands::provider_configs::DiscoverParams {
+                    id: &id,
+                    server: cli.server.as_deref(),
+                    token: cli.token.as_deref(),
+                    insecure,
+                    request_timeout,
+                })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            ProviderConfigsCommands::DiscardDiscovered { id } => {
+                let resp = commands::provider_configs::discard_discovered(
+                    commands::provider_configs::DiscardDiscoveredParams {
+                        id: &id,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+        },
+        Commands::Autodiscovery { command } => match command {
+            AutodiscoveryCommands::Ignores { command } => match command {
+                IgnoresCommands::List { provider_config, page, per_page } => {
+                    let resp = commands::autodiscovery::ignores_list(
+                        commands::autodiscovery::IgnoresListParams {
+                            provider_config_id: provider_config.as_ref(),
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            page,
+                            per_page,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                IgnoresCommands::Create { provider_config, package } => {
+                    let resp = commands::autodiscovery::ignores_create(
+                        commands::autodiscovery::IgnoresCreateParams {
+                            provider_config_id: &provider_config,
+                            package_identifier: package,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+                IgnoresCommands::Delete { id } => {
+                    let resp = commands::autodiscovery::ignores_delete(
+                        commands::autodiscovery::IgnoresDeleteParams {
+                            id: &id,
+                            server: cli.server.as_deref(),
+                            token: cli.token.as_deref(),
+                            insecure,
+                            request_timeout,
+                        },
+                    )
+                    .await?;
+                    output::print_output(format, &resp)?;
+                }
+            },
+        },
     }
     Ok(())
 }
@@ -1453,6 +1915,8 @@ mod tests {
     const OIDC_UUID: &str = "11121314-1516-1718-191a-1b1c1d1e1f20";
     const TARGET_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000001";
     const SOURCE_UUID: &str = "aa000000-bb00-cc00-dd00-ee0000000002";
+    const PC_UUID: &str = "aa100000-bb00-cc00-dd00-ee0000000001";
+    const IGNORE_UUID: &str = "aa200000-bb00-cc00-dd00-ee0000000001";
 
     /// Parse a UUID constant (safe in tests).
     fn uuid(s: &str) -> Uuid {
@@ -2440,6 +2904,334 @@ mod tests {
                 command: SettingsCommands::Alerts
             })
         ));
+    }
+
+    #[test]
+    fn hosts_update_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "hosts", "update", HOST_UUID, "--friendly-name", "My Server",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Hosts {
+                command: HostsCommands::Update { id, friendly_name },
+            }) => {
+                assert_eq!(id, uuid(HOST_UUID));
+                assert_eq!(friendly_name.as_deref(), Some("My Server"));
+            }
+            _ => panic!("expected Hosts Update"),
+        }
+    }
+
+    #[test]
+    fn hosts_deactivate_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "hosts", "deactivate", HOST_UUID]).expect("should parse");
+        match args.command {
+            Some(Commands::Hosts {
+                command: HostsCommands::Deactivate { id },
+            }) => {
+                assert_eq!(id, uuid(HOST_UUID));
+            }
+            _ => panic!("expected Hosts Deactivate"),
+        }
+    }
+
+    #[test]
+    fn hosts_discover_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "hosts", "discover", HOST_UUID]).expect("should parse");
+        match args.command {
+            Some(Commands::Hosts {
+                command: HostsCommands::Discover { id },
+            }) => {
+                assert_eq!(id, uuid(HOST_UUID));
+            }
+            _ => panic!("expected Hosts Discover"),
+        }
+    }
+
+    #[test]
+    fn hosts_discard_discovered_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "hosts", "discard-discovered", HOST_UUID,
+            "--provider-config", PC_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Hosts {
+                command: HostsCommands::DiscardDiscovered { id, provider_config },
+            }) => {
+                assert_eq!(id, uuid(HOST_UUID));
+                assert_eq!(provider_config, Some(uuid(PC_UUID)));
+            }
+            _ => panic!("expected Hosts DiscardDiscovered"),
+        }
+    }
+
+    #[test]
+    fn software_items_create_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "software-items", "create", "--name", "My App",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Create { name, enabled },
+            }) => {
+                assert_eq!(name, "My App");
+                assert!(enabled.is_none());
+            }
+            _ => panic!("expected SoftwareItems Create"),
+        }
+    }
+
+    #[test]
+    fn software_items_update_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "software-items", "update", ITEM_UUID,
+            "--name", "Updated App", "--enabled", "false",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Update { id, name, enabled },
+            }) => {
+                assert_eq!(id, uuid(ITEM_UUID));
+                assert_eq!(name.as_deref(), Some("Updated App"));
+                assert_eq!(enabled, Some(false));
+            }
+            _ => panic!("expected SoftwareItems Update"),
+        }
+    }
+
+    #[test]
+    fn software_items_delete_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "software-items", "delete", ITEM_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Delete { id },
+            }) => {
+                assert_eq!(id, uuid(ITEM_UUID));
+            }
+            _ => panic!("expected SoftwareItems Delete"),
+        }
+    }
+
+    #[test]
+    fn software_items_approve_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "software-items", "approve", ITEM_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Approve { id },
+            }) => {
+                assert_eq!(id, uuid(ITEM_UUID));
+            }
+            _ => panic!("expected SoftwareItems Approve"),
+        }
+    }
+
+    #[test]
+    fn software_items_assign_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "software-items", "assign", ITEM_UUID,
+            "--host", HOST_UUID,
+            "--provider-config", PC_UUID,
+            "--package", "org/app",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Assign { id, host, provider_config, package },
+            }) => {
+                assert_eq!(id, uuid(ITEM_UUID));
+                assert_eq!(host, uuid(HOST_UUID));
+                assert_eq!(provider_config, Some(uuid(PC_UUID)));
+                assert_eq!(package.as_deref(), Some("org/app"));
+            }
+            _ => panic!("expected SoftwareItems Assign"),
+        }
+    }
+
+    #[test]
+    fn software_items_unassign_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "software-items", "unassign", ITEM_UUID,
+            "--host", HOST_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Unassign { id, host, ignore },
+            }) => {
+                assert_eq!(id, uuid(ITEM_UUID));
+                assert_eq!(host, uuid(HOST_UUID));
+                assert!(!ignore);
+            }
+            _ => panic!("expected SoftwareItems Unassign"),
+        }
+    }
+
+    #[test]
+    fn software_items_unassign_with_ignore_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "software-items", "unassign", ITEM_UUID,
+            "--host", HOST_UUID, "--ignore",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::SoftwareItems {
+                command: SoftwareItemsCommands::Unassign { ignore, .. },
+            }) => {
+                assert!(ignore);
+            }
+            _ => panic!("expected SoftwareItems Unassign"),
+        }
+    }
+
+    #[test]
+    fn provider_configs_list_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "list"])
+            .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::ProviderConfigs {
+                command: ProviderConfigsCommands::List { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn provider_configs_show_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "show", PC_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::ProviderConfigs {
+                command: ProviderConfigsCommands::Show { id },
+            }) => {
+                assert_eq!(id, uuid(PC_UUID));
+            }
+            _ => panic!("expected ProviderConfigs Show"),
+        }
+    }
+
+    #[test]
+    fn provider_configs_create_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "provider-configs", "create",
+            "--name", "My GitHub",
+            "--provider-type", "github_releases",
+            "--config", r#"{"owner":"org","repo":"app"}"#,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::ProviderConfigs {
+                command: ProviderConfigsCommands::Create { name, provider_type, .. },
+            }) => {
+                assert_eq!(name, "My GitHub");
+                assert_eq!(provider_type, "github_releases");
+            }
+            _ => panic!("expected ProviderConfigs Create"),
+        }
+    }
+
+    #[test]
+    fn provider_configs_delete_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "delete", PC_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::ProviderConfigs {
+                command: ProviderConfigsCommands::Delete { id },
+            }) => {
+                assert_eq!(id, uuid(PC_UUID));
+            }
+            _ => panic!("expected ProviderConfigs Delete"),
+        }
+    }
+
+    #[test]
+    fn provider_configs_discover_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "provider-configs", "discover", PC_UUID])
+            .expect("should parse");
+        match args.command {
+            Some(Commands::ProviderConfigs {
+                command: ProviderConfigsCommands::Discover { id },
+            }) => {
+                assert_eq!(id, uuid(PC_UUID));
+            }
+            _ => panic!("expected ProviderConfigs Discover"),
+        }
+    }
+
+    #[test]
+    fn provider_configs_discard_discovered_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "provider-configs", "discard-discovered", PC_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::ProviderConfigs {
+                command: ProviderConfigsCommands::DiscardDiscovered { id },
+            }) => {
+                assert_eq!(id, uuid(PC_UUID));
+            }
+            _ => panic!("expected ProviderConfigs DiscardDiscovered"),
+        }
+    }
+
+    #[test]
+    fn autodiscovery_ignores_list_parses() {
+        let args = Cli::try_parse_from(["uptrakit", "autodiscovery", "ignores", "list"])
+            .expect("should parse");
+        assert!(matches!(
+            args.command,
+            Some(Commands::Autodiscovery {
+                command: AutodiscoveryCommands::Ignores {
+                    command: IgnoresCommands::List { .. }
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn autodiscovery_ignores_create_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "autodiscovery", "ignores", "create",
+            "--provider-config", PC_UUID,
+            "--package", "org/app",
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Autodiscovery {
+                command: AutodiscoveryCommands::Ignores {
+                    command: IgnoresCommands::Create { provider_config, package },
+                },
+            }) => {
+                assert_eq!(provider_config, uuid(PC_UUID));
+                assert_eq!(package, "org/app");
+            }
+            _ => panic!("expected Autodiscovery Ignores Create"),
+        }
+    }
+
+    #[test]
+    fn autodiscovery_ignores_delete_parses() {
+        let args = Cli::try_parse_from([
+            "uptrakit", "autodiscovery", "ignores", "delete", IGNORE_UUID,
+        ])
+        .expect("should parse");
+        match args.command {
+            Some(Commands::Autodiscovery {
+                command: AutodiscoveryCommands::Ignores {
+                    command: IgnoresCommands::Delete { id },
+                },
+            }) => {
+                assert_eq!(id, uuid(IGNORE_UUID));
+            }
+            _ => panic!("expected Autodiscovery Ignores Delete"),
+        }
     }
 
     #[test]

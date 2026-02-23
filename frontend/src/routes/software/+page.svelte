@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { getSoftwareItems, deleteSoftwareItem, approveSoftwareItem, checkSoftwareItemVersions } from '$lib/api';
+	import {
+		getSoftwareItems,
+		deleteSoftwareItem,
+		approveSoftwareItem,
+		checkSoftwareItemVersions,
+		updateSoftwareItem
+	} from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -9,6 +15,7 @@
 	import AssignToHostModal from '$lib/components/AssignToHostModal.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import type { SoftwareItemResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 
@@ -29,6 +36,9 @@
 	let checkingVersionsId: string | null = $state(null);
 	let approvingId: string | null = $state(null);
 	let activeTab: FilterTab = $state('all');
+	let editItem: { id: string; name: string; enabled: boolean } | null = $state(null);
+	let editForm = $state({ name: '', enabled: true });
+	let editSubmitting: boolean = $state(false);
 
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
@@ -105,6 +115,30 @@
 		assignItem = { id: item.id, name: item.name };
 	}
 
+	function openEditModal(item: SoftwareItemResponse) {
+		closeMenu();
+		editItem = { id: item.id, name: item.name, enabled: item.enabled };
+		editForm = { name: item.name, enabled: item.enabled };
+	}
+
+	async function executeEdit() {
+		if (!editItem || editSubmitting) return;
+		editSubmitting = true;
+		try {
+			const updated = await updateSoftwareItem(editItem.id, {
+				name: editForm.name || undefined,
+				enabled: editForm.enabled
+			});
+			items = items.map((i) => (i.id === editItem!.id ? updated : i));
+			showSuccess(`"${updated.name}" updated.`);
+			editItem = null;
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to update software item.');
+		} finally {
+			editSubmitting = false;
+		}
+	}
+
 	async function executeDelete() {
 		if (!confirmDelete || submitting) return;
 		const { id } = confirmDelete;
@@ -166,7 +200,10 @@
 <svelte:window
 	onclick={handleWindowClick}
 	onkeydown={(e) => {
-		if (e.key === 'Escape' && confirmDelete) confirmDelete = null;
+		if (e.key === 'Escape') {
+			if (confirmDelete) confirmDelete = null;
+			else if (editItem) editItem = null;
+		}
 	}}
 />
 
@@ -297,6 +334,16 @@
 					{#if item.discovery_state === 'pending'}
 						<li>
 							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => openEditModal(item)}
+							>
+								Edit
+							</button>
+						</li>
+						<li>
+							<button
 								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
 								role="menuitem"
 								tabindex="-1"
@@ -317,6 +364,16 @@
 							</button>
 						</li>
 					{:else}
+						<li>
+							<button
+								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800"
+								role="menuitem"
+								tabindex="-1"
+								onclick={() => openEditModal(item)}
+							>
+								Edit
+							</button>
+						</li>
 						<li>
 							<button
 								class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -388,4 +445,33 @@
 			/>
 		{/if}
 	{/if}
+{/if}
+
+{#if editItem}
+	<ModalBackdrop onclose={() => (editItem = null)}>
+		<div
+			class="card bg-surface-50 dark:bg-surface-900 w-full max-w-md space-y-4 p-6 shadow-xl"
+			role="dialog"
+			aria-modal="true"
+		>
+			<h3 class="h3">Edit Software Item</h3>
+
+			<label class="label">
+				<span>Name</span>
+				<input class="input" type="text" bind:value={editForm.name} />
+			</label>
+
+			<label class="flex items-center gap-3">
+				<input class="checkbox" type="checkbox" bind:checked={editForm.enabled} />
+				<span>Enabled</span>
+			</label>
+
+			<div class="flex justify-end gap-2">
+				<button class="btn preset-tonal-surface" onclick={() => (editItem = null)}>Cancel</button>
+				<button class="btn preset-filled-primary-500" onclick={executeEdit} disabled={editSubmitting}>
+					{editSubmitting ? 'Saving...' : 'Save'}
+				</button>
+			</div>
+		</div>
+	</ModalBackdrop>
 {/if}

@@ -30,6 +30,7 @@ uuid = { workspace = true }
 serde_yaml_ng = "0.10"
 uptrakit-build-info = { path = "../../shared/build-info" }
 uptrakit-directories = { path = "../../shared/directories" }
+uptrakit-shared-types = { workspace = true }
 
 [dev-dependencies]
 uptrakit-openapi-client = { path = "../../shared/openapi-client", features = ["mock"] }

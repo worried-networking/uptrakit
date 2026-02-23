@@ -26,7 +26,8 @@ details, see [SECURITY.md](SECURITY.md). For the documentation catalogue, see [d
 ## Documentation split
 
 - **End-user docs** ([`docs/end-user/`](docs/end-user/)): overview, manual update workflow, Home Assistant/MQTT
-  integration, and deployment map (including
+  integration, deployment map, CLI usage guide, provider configurations, update history, profile and API
+  tokens, and autodiscovery (including
   [docs/end-user/deployment/reverse-proxy.md](docs/end-user/deployment/reverse-proxy.md)).
 - **API & protocol docs** ([`docs/api/`](docs/api/)): AsyncAPI/wire protocol
   ([wire-protocol.md](docs/api/wire-protocol.md)), REST API endpoints ([http-web-api.md](docs/api/http-web-api.md)),
@@ -79,14 +80,19 @@ uptrakit/
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
 │   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
-│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, checks, updates, history, scheduler, settings); lib target exposes modules for integration tests
+│       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, software-items, provider-configs, autodiscovery, checks, updates, history, scheduler, settings); lib target exposes modules for integration tests
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
 ├── frontend/                           # SvelteKit SPA (Skeleton UI v4 + Tailwind CSS v4)
 │   ├── src/
 │   │   ├── lib/                        # Shared modules: api client, auth store, types, utils, notifications
 │   │   │   └── components/             # Shared UI: ConfirmDialog, ModalBackdrop (focus-trapped), ContextMenu (viewport-aware, keyboard-navigable), Pagination
 │   │   └── routes/                     # SvelteKit file-based routes
-│   │       └── settings/               # Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment)
+│   │       ├── profile/                #   /profile — account info + API token management (create/revoke)
+│   │       ├── history/                #   /history — update history with filters (host, software item, status) + trigger update button
+│   │       ├── scheduler/              #   /scheduler — scheduler task management (edit cron, enable/disable, trigger now)
+│   │       ├── provider-configs/       #   /provider-configs — provider config CRUD + autodiscovery ignore rules management
+│   │       ├── software/               #   /software — software item list; Pending tab for discovered items; Edit action (name/enabled)
+│   │       └── settings/               #   Settings sub-components (Registration, Auth, MQTT, OIDC, Certs, Enrollment); global CA rotation; MQTT client limit
 │   ├── package.json                    # npm scripts: build, check, lint, format, format:check
 │   ├── svelte.config.js                # SvelteKit config (static adapter)
 │   ├── tsconfig.json
@@ -273,7 +279,9 @@ for user review. Key invariants:
 | `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes |
 | `crates/ui/web-api/src/routes/agent_ws.rs` | `trigger_discovery_for_agent_host()` helper |
 | `docs/api/autodiscovery.md` | Full API reference for autodiscovery endpoints |
-| `docs/end-user/autodiscovery.md` | End-user guide |
+| `docs/end-user/autodiscovery.md` | End-user guide (discovery workflow, review, ignore list) |
+| `docs/end-user/provider-configs.md` | End-user guide for provider config CRUD and discovery |
+| `docs/end-user/cli-usage.md` | CLI command reference including `provider-configs` and `autodiscovery` groups |
 
 ### Service ping interval
 
@@ -518,12 +526,20 @@ For more in-depth information on specific topics, refer to the following documen
 - [Reverse Proxy Security](docs/security/reverse-proxy-security.md)
 - [SSH Agent Secrets](docs/security/ssh-agent-secrets.md)
 
+### End-user Guides
+
+- [CLI Usage Guide](docs/end-user/cli-usage.md)
+- [Provider Configurations](docs/end-user/provider-configs.md)
+- [Update History](docs/end-user/update-history.md)
+- [Profile and API Tokens](docs/end-user/profile-tokens.md)
+- [Autodiscovery](docs/end-user/autodiscovery.md)
+- [Update Workflow](docs/end-user/update-workflow.md)
+
 ### Development Guidelines
 
 - [Quality Gates](docs/development/quality-gates.md)
 - [Commit Messages](docs/development/commit-messages.md)
 - [CLI Output Formatting](docs/development/cli-output.md)
-- [CLI Usage Guide](docs/end-user/cli-usage.md)
 - [Graceful Restart](docs/development/graceful-restart.md)
 - [Cross-Controller Communication](docs/development/cross-controller-comm.md)
 - [Coding Standards](docs/development/coding-standards.md)
