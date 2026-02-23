@@ -4,7 +4,7 @@ use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
     SoftwareItemDetailResponse, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
-    TriggerVersionCheckResponse, UpdateSoftwareItemRequest,
+    TriggerVersionCheckResponse, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ impl UptrakitClient {
         self.get(&crate::paths::software_items::by_id(id)).await
     }
 
-    /// Create a new software item.
+    /// Create a new software item (catalog entry — name and enabled flag only).
     pub async fn create_software_item(
         &self,
         req: &CreateSoftwareItemRequest,
@@ -45,7 +45,7 @@ impl UptrakitClient {
             .await
     }
 
-    /// Update an existing software item.
+    /// Update an existing software item (name and/or enabled flag).
     pub async fn update_software_item(
         &self,
         id: &Uuid,
@@ -61,6 +61,9 @@ impl UptrakitClient {
     }
 
     /// Assign hosts to a software item.
+    ///
+    /// Each host assignment carries its own `provider_config_id`, `package_identifier`,
+    /// and optional `config_override`.
     pub async fn assign_hosts(
         &self,
         id: &Uuid,
@@ -74,6 +77,37 @@ impl UptrakitClient {
     pub async fn unassign_host(&self, item_id: &Uuid, host_id: &Uuid) -> Result<()> {
         self.delete(&crate::paths::software_items::host(item_id, host_id))
             .await
+    }
+
+    /// Unassign a host from a software item and create an autodiscovery ignore rule.
+    ///
+    /// Equivalent to `DELETE .../hosts/{host_id}?ignore=true`. The ignore rule is created for
+    /// the `(provider_config_id, package_identifier)` pair stored on the host assignment,
+    /// preventing re-discovery of that package on any host in the future.
+    pub async fn unassign_host_with_ignore(&self, item_id: &Uuid, host_id: &Uuid) -> Result<()> {
+        #[derive(serde::Serialize)]
+        struct IgnoreQuery {
+            ignore: bool,
+        }
+        self.delete_with_query(
+            &crate::paths::software_items::host(item_id, host_id),
+            &IgnoreQuery { ignore: true },
+        )
+        .await
+    }
+
+    /// Update the provider assignment for a specific host–software-item link.
+    pub async fn update_host_assignment(
+        &self,
+        item_id: &Uuid,
+        host_id: &Uuid,
+        req: &UpdateHostAssignmentRequest,
+    ) -> Result<SoftwareItemDetailResponse> {
+        self.put_json(
+            &crate::paths::software_items::host(item_id, host_id),
+            req,
+        )
+        .await
     }
 
     /// Trigger a version check for a software item across all assigned hosts.
@@ -112,58 +146,93 @@ impl UptrakitClient {
 #[cfg(test)]
 mod tests {
     use uptrakit_web_api_types::software_items::{
-        AssignHostsRequest, CreateSoftwareItemRequest, ReleaseInfoRequest, TriggerUpdateRequest,
+        AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
+        ReleaseInfoRequest, TriggerUpdateRequest, UpdateHostAssignmentRequest,
         UpdateSoftwareItemRequest,
     };
     use uuid::Uuid;
 
     #[test]
     fn create_software_item_request_serialization() {
-        let config_id =
-            Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
-            provider_config_id: Some(config_id),
-            provider_config: None,
-            package_identifier: Some("nodejs/node".to_string()),
-            config_override: None,
             enabled: true,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js");
-        assert_eq!(
-            json["provider_config_id"],
-            "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
-        );
-        assert_eq!(json["package_identifier"], "nodejs/node");
         assert_eq!(json["enabled"], true);
+        // provider fields must NOT appear in the serialized form
+        assert!(json.get("provider_config_id").is_none());
+        assert!(json.get("package_identifier").is_none());
     }
 
     #[test]
     fn update_software_item_request_serialization() {
         let req = UpdateSoftwareItemRequest {
             name: Some("Node.js LTS".to_string()),
-            package_identifier: None,
-            config_override: None,
             enabled: Some(false),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["name"], "Node.js LTS");
         assert_eq!(json["enabled"], false);
+        // provider fields must NOT appear
+        assert!(json.get("package_identifier").is_none());
+        assert!(json.get("config_override").is_none());
     }
 
     #[test]
     fn assign_hosts_request_serialization() {
+        let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
         let host1 = Uuid::parse_str("11111111-1111-1111-1111-111111111111").expect("valid uuid");
         let host2 = Uuid::parse_str("22222222-2222-2222-2222-222222222222").expect("valid uuid");
+
         let req = AssignHostsRequest {
-            host_ids: vec![host1, host2],
+            host_assignments: vec![
+                HostSoftwareAssignment {
+                    host_id: host1,
+                    provider_config_id: Some(pc_id),
+                    provider_config: None,
+                    package_identifier: Some("nodejs/node".to_string()),
+                    config_override: None,
+                },
+                HostSoftwareAssignment {
+                    host_id: host2,
+                    provider_config_id: Some(pc_id),
+                    provider_config: None,
+                    package_identifier: Some("nodejs/node".to_string()),
+                    config_override: None,
+                },
+            ],
         };
         let json = serde_json::to_value(&req).expect("serialize");
-        let ids = json["host_ids"].as_array().expect("array");
-        assert_eq!(ids.len(), 2);
-        assert_eq!(ids[0], "11111111-1111-1111-1111-111111111111");
-        assert_eq!(ids[1], "22222222-2222-2222-2222-222222222222");
+        let assignments = json["host_assignments"].as_array().expect("array");
+        assert_eq!(assignments.len(), 2);
+        assert_eq!(
+            assignments[0]["host_id"],
+            "11111111-1111-1111-1111-111111111111"
+        );
+        assert_eq!(
+            assignments[0]["provider_config_id"],
+            "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+        );
+        assert_eq!(assignments[0]["package_identifier"], "nodejs/node");
+    }
+
+    #[test]
+    fn update_host_assignment_request_serialization() {
+        let pc_id = Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").expect("valid uuid");
+        let req = UpdateHostAssignmentRequest {
+            provider_config_id: Some(pc_id),
+            provider_config: None,
+            package_identifier: Some("homebrew/cask/firefox".to_string()),
+            config_override: None,
+        };
+        let json = serde_json::to_value(&req).expect("serialize");
+        assert_eq!(
+            json["provider_config_id"],
+            "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+        );
+        assert_eq!(json["package_identifier"], "homebrew/cask/firefox");
     }
 
     #[test]

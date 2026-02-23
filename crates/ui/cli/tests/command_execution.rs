@@ -85,11 +85,7 @@ fn sample_software_item() -> SoftwareItemResponse {
     SoftwareItemResponse {
         id: software_item_id(),
         name: "Node.js".to_string(),
-        provider_config_id: Uuid::nil(),
-        provider_config_name: "GitHub".to_string(),
-        provider_type: "github".to_string(),
-        package_identifier: "nodejs/node".to_string(),
-        config_override: None,
+        provider_types: vec!["github_releases".to_string()],
         enabled: true,
         discovery_state: None,
         last_checked_at: None,

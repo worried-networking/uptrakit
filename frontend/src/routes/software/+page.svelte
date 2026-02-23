@@ -1,13 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import {
-		getSoftwareItems,
-		deleteSoftwareItem,
-		deleteSoftwareItemWithIgnore,
-		approveSoftwareItem,
-		checkSoftwareItemVersions
-	} from '$lib/api';
+	import { getSoftwareItems, deleteSoftwareItem, approveSoftwareItem, checkSoftwareItemVersions } from '$lib/api';
 	import { formatDate } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -29,7 +23,7 @@
 	let showAddModal: boolean = $state(false);
 	let openMenuId: string | null = $state(null);
 	let menuPos: { top: number; left: number } = $state({ top: 0, left: 0 });
-	let confirmDelete: { id: string; name: string; withIgnore: boolean } | null = $state(null);
+	let confirmDelete: { id: string; name: string } | null = $state(null);
 	let assignItem: { id: string; name: string } | null = $state(null);
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
@@ -101,9 +95,9 @@
 		openMenuId = null;
 	}
 
-	function requestDelete(item: SoftwareItemResponse, withIgnore = false) {
+	function requestDelete(item: SoftwareItemResponse) {
 		closeMenu();
-		confirmDelete = { id: item.id, name: item.name, withIgnore };
+		confirmDelete = { id: item.id, name: item.name };
 	}
 
 	function openAssignModal(item: SoftwareItemResponse) {
@@ -113,16 +107,11 @@
 
 	async function executeDelete() {
 		if (!confirmDelete || submitting) return;
-		const { id, withIgnore } = confirmDelete;
+		const { id } = confirmDelete;
 		confirmDelete = null;
 		submitting = true;
 		try {
-			if (withIgnore) {
-				await deleteSoftwareItemWithIgnore(id);
-				showSuccess('Item deleted and added to ignore list');
-			} else {
-				await deleteSoftwareItem(id);
-			}
+			await deleteSoftwareItem(id);
 			items = items.filter((i) => i.id !== id);
 		} catch (e) {
 			showError(e instanceof Error ? e.message : 'Failed to delete software item.');
@@ -228,8 +217,7 @@
 				<thead>
 					<tr>
 						<th>Name</th>
-						<th>Provider</th>
-						<th>Package</th>
+						<th>Providers</th>
 						<th>Status</th>
 						<th>Hosts</th>
 						<th>Last Checked</th>
@@ -241,16 +229,13 @@
 				<tbody>
 					{#if loading}
 						<tr>
-							<td colspan={canManage ? 7 : 6} class="py-6 text-center">Loading...</td>
+							<td colspan={canManage ? 6 : 5} class="py-6 text-center">Loading...</td>
 						</tr>
 					{:else}
 						{#each items as item (item.id)}
 							<tr>
 								<td>{item.name}</td>
-								<td>
-									<span class="badge preset-tonal">{item.provider_config_name}</span>
-								</td>
-								<td>{item.package_identifier || '\u2014'}</td>
+								<td>{item.provider_types.join(', ') || '\u2014'}</td>
 								<td class="flex flex-wrap items-center gap-1">
 									{#if item.enabled}
 										<span class="badge preset-filled-success-500">Enabled</span>
@@ -284,7 +269,7 @@
 							</tr>
 						{:else}
 							<tr>
-								<td colspan={canManage ? 7 : 6} class="py-8 text-center">
+								<td colspan={canManage ? 6 : 5} class="py-8 text-center">
 									{#if activeTab === 'pending'}
 										<p class="text-lg font-medium">No pending items</p>
 										<p class="mt-1 text-sm text-surface-500">No discovered software awaiting review.</p>
@@ -326,19 +311,9 @@
 								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 								role="menuitem"
 								tabindex="-1"
-								onclick={() => requestDelete(item, false)}
+								onclick={() => requestDelete(item)}
 							>
 								Delete
-							</button>
-						</li>
-						<li>
-							<button
-								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
-								role="menuitem"
-								tabindex="-1"
-								onclick={() => requestDelete(item, true)}
-							>
-								Delete &amp; Ignore
 							</button>
 						</li>
 					{:else}
@@ -368,7 +343,7 @@
 								class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"
 								role="menuitem"
 								tabindex="-1"
-								onclick={() => requestDelete(item, false)}
+								onclick={() => requestDelete(item)}
 							>
 								Delete
 							</button>
@@ -380,12 +355,10 @@
 
 		{#if confirmDelete}
 			<ConfirmDialog
-				title={confirmDelete.withIgnore ? 'Delete & Ignore Software Item' : 'Delete Software Item'}
-				messagePrefix={confirmDelete.withIgnore
-					? 'Delete and permanently suppress from future discovery:'
-					: 'Are you sure you want to delete'}
+				title="Delete Software Item"
+				messagePrefix="Are you sure you want to delete"
 				entityName={confirmDelete.name}
-				confirmLabel={submitting ? 'Deleting...' : confirmDelete.withIgnore ? 'Delete & Ignore' : 'Delete'}
+				confirmLabel={submitting ? 'Deleting...' : 'Delete'}
 				confirmClass="preset-filled-error-500"
 				confirmDisabled={submitting}
 				onconfirm={executeDelete}

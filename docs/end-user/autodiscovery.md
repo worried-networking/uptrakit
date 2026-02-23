@@ -15,6 +15,11 @@ sends a discovery request to that agent. The agent queries each of its discovery
 and returns a list of installed packages. The controller then creates software items in a `pending`
 state for any packages it has not seen before.
 
+Discovery results carry the provider config and package identifier used to detect the package.
+This information is stored on the host assignment — not on the software item itself — so the same
+software item (e.g. "git") can later appear on multiple hosts via different providers, all under
+one catalog entry.
+
 Discovery-capable providers currently supported:
 
 | Provider | What it discovers |
@@ -77,15 +82,17 @@ create a pending item for it.
 
 ### Adding a package to the ignore list
 
-You can add an item to the ignore list in two ways:
+You can add a package to the ignore list in two ways:
 
-**When deleting a discovered item** — Use **Delete & Ignore** in the Web UI context menu, or pass
-`?ignore=true` when deleting a software item via the API. This soft-deletes the item and
-simultaneously creates an ignore rule so it will not be re-discovered.
+**When removing a host assignment** — Use **Delete & Ignore** in the Web UI context menu on a host
+assignment, or pass `?ignore=true` when deleting a host assignment via the API
+(`DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`). This removes the host
+assignment and simultaneously creates an ignore rule so the package will not be re-discovered
+on any host.
 
 **Directly via the API** — Create an ignore rule for any `(provider_config_id,
-package_identifier)` combination without needing to delete an existing item first. This is useful
-for pre-suppressing packages you know you will never want before they appear.
+package_identifier)` combination without needing to remove an existing assignment first. This is
+useful for pre-suppressing packages you know you will never want before they appear.
 
 ### Removing an ignore rule
 

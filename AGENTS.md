@@ -241,10 +241,12 @@ for user review. Key invariants:
    excluded from version checks) → `approved` (reviewed, `enabled = true`, included in version checks). Deleting a
    `pending` item is a plain soft-delete; the item is re-discoverable unless an ignore rule exists.
 
-3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}?ignore=true` both soft-deletes
-   the item and creates an `autodiscovery_ignore` row. Without `?ignore=true`, deletion is a plain soft-delete with no
-   ignore rule. Bulk-discard endpoints (`DELETE /api/v1/hosts/{id}/discovered`,
-   `DELETE /api/v1/provider-configs/{id}/discovered`) always perform plain soft-deletes — no ignore rules created.
+3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true`
+   removes the host assignment and creates an `autodiscovery_ignore` row keyed on the assignment's
+   `(provider_config_id, package_identifier)`. Without `?ignore=true`, unassigning is a plain delete with no ignore
+   rule. Deleting a software item (`DELETE /api/v1/software-items/{id}`) never creates ignore rules. Bulk-discard
+   endpoints (`DELETE /api/v1/hosts/{id}/discovered`, `DELETE /api/v1/provider-configs/{id}/discovered`) also
+   perform plain soft-deletes — no ignore rules created.
 
 4. **Auto-created ProviderConfigs.** When no `ProviderConfig` exists for a discovery-capable type at trigger time,
    the agent receives a default (empty-config) assignment. Results come back with `extra` metadata (e.g.
@@ -254,9 +256,10 @@ for user review. Key invariants:
 5. **`ProviderType::supports_discovery()`** returns `true` only for `Homebrew` and `ProxmoxHelperScripts`. Used to
    filter which providers receive discovery assignments.
 
-6. **Partial unique index.** `software_items` uses a partial unique index
-   `(tenant_id, provider_config_id, package_identifier) WHERE deactivated_at IS NULL` instead of a full unique
-   index. This allows the same package to be re-discovered after a soft-delete.
+6. **Partial unique indexes.** `software_items` uses a partial unique index
+   `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while
+   allowing re-creation after soft-delete. `host_software_items` uses a unique index
+   `(host_id, provider_config_id, package_identifier)` — prevents tracking the same package twice on one host.
 
 #### Key files
 

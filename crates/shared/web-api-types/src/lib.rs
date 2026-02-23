@@ -937,34 +937,24 @@ mod tests {
     }
 
     #[test]
-    fn create_software_item_valid_with_config_id() {
+    fn create_software_item_valid() {
         use crate::validation::Validate;
         let req = CreateSoftwareItemRequest {
             name: "Node.js".to_string(),
-            provider_config_id: Some(
-                Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6").unwrap(),
-            ),
-            provider_config: None,
-            package_identifier: None,
-            config_override: None,
             enabled: true,
         };
         assert!(req.validate().is_ok());
     }
 
     #[test]
-    fn create_software_item_neither_config_provided() {
+    fn create_software_item_empty_name_fails() {
         use crate::validation::Validate;
         let req = CreateSoftwareItemRequest {
-            name: "Node.js".to_string(),
-            provider_config_id: None,
-            provider_config: None,
-            package_identifier: None,
-            config_override: None,
+            name: "".to_string(),
             enabled: true,
         };
         let err = req.validate().unwrap_err();
-        assert_eq!(err.field, "provider_config");
+        assert_eq!(err.field, "name");
     }
 
     #[test]

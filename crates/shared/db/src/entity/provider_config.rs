@@ -19,8 +19,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::software_item::Entity")]
-    SoftwareItem,
+    #[sea_orm(has_many = "super::host_software_item::Entity")]
+    HostSoftwareItem,
     #[sea_orm(
         belongs_to = "super::tenant::Entity",
         from = "Column::TenantId",
@@ -29,9 +29,9 @@ pub enum Relation {
     Tenant,
 }
 
-impl Related<super::software_item::Entity> for Entity {
+impl Related<super::host_software_item::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::SoftwareItem.def()
+        Relation::HostSoftwareItem.def()
     }
 }
 

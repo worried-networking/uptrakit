@@ -2,9 +2,15 @@
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
-	import { getSoftwareItem, getHosts, assignHostsToSoftwareItem, unassignHostFromSoftwareItem } from '$lib/api';
+	import {
+		getSoftwareItem,
+		getHosts,
+		assignHostsToSoftwareItem,
+		unassignHostFromSoftwareItem,
+		getProviderConfigs
+	} from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { HostResponse } from '$lib/types';
+	import type { HostResponse, ProviderConfigResponse } from '$lib/types';
 
 	let {
 		softwareItemId,
@@ -25,18 +31,32 @@
 	let loadError: string | null = $state(null);
 	let submitting: boolean = $state(false);
 
+	let providerConfigs: ProviderConfigResponse[] = $state([]);
+	let selectedProviderConfigId: string = $state('');
+	let packageIdentifier: string = $state('');
+	let configsLoading: boolean = $state(true);
+
+	const toAdd = $derived([...selectedIds].filter((id) => !originalAssignedIds.has(id)));
+
 	onMount(async () => {
 		try {
-			const [detail, hostsResult] = await Promise.all([getSoftwareItem(softwareItemId), getHosts(1, 200)]);
+			const [detail, hostsResult, configsResult] = await Promise.all([
+				getSoftwareItem(softwareItemId),
+				getHosts(1, 200),
+				getProviderConfigs(1, 500)
+			]);
 			allHosts = hostsResult.items;
 			for (const h of detail.hosts) {
 				originalAssignedIds.add(h.host_id);
 				selectedIds.add(h.host_id);
 			}
+			providerConfigs = configsResult.items;
+			selectedProviderConfigId = configsResult.items[0]?.id ?? '';
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to load data.';
 		} finally {
 			loading = false;
+			configsLoading = false;
 		}
 	});
 
@@ -51,7 +71,6 @@
 	async function submit() {
 		if (submitting) return;
 
-		const toAdd = [...selectedIds].filter((id) => !originalAssignedIds.has(id));
 		const toRemove = [...originalAssignedIds].filter((id) => !selectedIds.has(id));
 
 		if (toAdd.length === 0 && toRemove.length === 0) {
@@ -63,7 +82,15 @@
 		try {
 			const tasks: Promise<unknown>[] = [];
 			if (toAdd.length > 0) {
-				tasks.push(assignHostsToSoftwareItem(softwareItemId, { host_ids: toAdd }));
+				tasks.push(
+					assignHostsToSoftwareItem(softwareItemId, {
+						host_assignments: toAdd.map((host_id) => ({
+							host_id,
+							provider_config_id: selectedProviderConfigId || undefined,
+							package_identifier: packageIdentifier.trim() || undefined
+						}))
+					})
+				);
 			}
 			for (const hostId of toRemove) {
 				tasks.push(unassignHostFromSoftwareItem(softwareItemId, hostId));
@@ -124,6 +151,29 @@
 					</li>
 				{/each}
 			</ul>
+
+			{#if toAdd.length > 0}
+				<div class="space-y-3 border-t border-surface-200 dark:border-surface-700 pt-3">
+					<p class="text-sm font-medium">Provider config for new assignments</p>
+					{#if configsLoading}
+						<p class="text-sm text-surface-500">Loading provider configs...</p>
+					{:else}
+						<label class="label">
+							<span>Provider config</span>
+							<select class="select" bind:value={selectedProviderConfigId}>
+								<option value="">None</option>
+								{#each providerConfigs as config (config.id)}
+									<option value={config.id}>{config.name} ({config.provider_type})</option>
+								{/each}
+							</select>
+						</label>
+						<label class="label">
+							<span>Package identifier <span class="text-surface-400">(optional)</span></span>
+							<input class="input" bind:value={packageIdentifier} placeholder="e.g. firefox" />
+						</label>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 
 		<div class="flex justify-end gap-2">

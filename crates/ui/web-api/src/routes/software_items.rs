@@ -26,7 +26,7 @@ pub use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
     SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
     TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus, TriggerVersionCheckResponse,
-    UpdateSoftwareItemRequest,
+    UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 
 // --- Error mapping helper ---
@@ -45,7 +45,11 @@ fn query_error_to_response(e: SoftwareItemQueryError) -> Response {
         ),
         SoftwareItemQueryError::DuplicateItem => error_response(
             StatusCode::CONFLICT,
-            "A software item with this provider_config_id and package_identifier already exists",
+            "A software item with this name already exists",
+        ),
+        SoftwareItemQueryError::DuplicateHostAssignment => error_response(
+            StatusCode::CONFLICT,
+            "This host already has an assignment for the given provider config and package identifier",
         ),
         SoftwareItemQueryError::HostNotFound(id) => error_response(
             StatusCode::BAD_REQUEST,
@@ -187,15 +191,11 @@ pub async fn update_software_item(
 }
 
 /// Soft-delete a software item.
-///
-/// The optional `ignore=true` query parameter also creates an autodiscovery
-/// ignore rule so the item is not re-discovered in future runs.
 #[utoipa::path(
     delete,
     path = "/api/v1/software-items/{id}",
     params(
         ("id" = String, Path, description = "Software item UUID"),
-        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package from future autodiscovery runs")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -209,58 +209,20 @@ pub async fn delete_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
-    Query(params): Query<DeleteSoftwareItemParams>,
 ) -> Response {
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    // If ignore=true, look up the item before deleting to capture provider info.
-    let ignore_info: Option<(uuid::Uuid, String)> = if params.ignore.unwrap_or(false) {
-        match software_item::Entity::find_by_id(item_id)
-            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
-            .filter(software_item::Column::DeactivatedAt.is_null())
-            .one(tenant_db.db())
-            .await
-        {
-            Ok(Some(item)) => Some((item.provider_config_id, item.package_identifier)),
-            Ok(None) => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
-            Err(e) => {
-                tracing::error!("Failed to look up software item for ignore: {e}");
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-            }
-        }
-    } else {
-        None
-    };
-
     match item_queries::delete_software_item(&tenant_db, item_id).await {
-        Ok(true) => {
-            if let Some((provider_config_id, package_identifier)) = ignore_info
-                && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
-                    tenant_db.db(),
-                    tenant_db.tenant_id,
-                    provider_config_id,
-                    &package_identifier,
-                )
-                .await
-            {
-                tracing::warn!("Failed to create autodiscovery ignore rule: {e}");
-            }
-            StatusCode::NO_CONTENT.into_response()
-        }
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Software item not found"),
         Err(e) => {
             tracing::error!("Failed to delete software item: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
-}
-
-#[derive(serde::Deserialize, Default)]
-pub struct DeleteSoftwareItemParams {
-    pub ignore: Option<bool>,
 }
 
 /// Approve a pending discovered software item.
@@ -333,6 +295,9 @@ pub async fn approve_software_item(
 }
 
 /// Assign a software item to additional hosts.
+///
+/// Each host in `host_assignments` carries its own `provider_config_id`,
+/// `package_identifier`, and optional `config_override`.
 #[utoipa::path(
     post,
     path = "/api/v1/software-items/{id}/hosts",
@@ -358,8 +323,8 @@ pub async fn assign_hosts(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    if req.host_ids.is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "host_ids must not be empty");
+    if req.host_assignments.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "host_assignments must not be empty");
     }
 
     match item_queries::assign_hosts(&tenant_db, item_id, req).await {
@@ -368,13 +333,23 @@ pub async fn assign_hosts(
     }
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct DeleteHostAssignmentParams {
+    pub ignore: Option<bool>,
+}
+
 /// Unassign a software item from a host.
+///
+/// The optional `ignore=true` query parameter also creates an autodiscovery
+/// ignore rule based on the host assignment's provider config and package
+/// identifier, so this combination is not re-discovered in future runs.
 #[utoipa::path(
     delete,
     path = "/api/v1/software-items/{id}/hosts/{host_id}",
     params(
         ("id" = String, Path, description = "Software item UUID"),
-        ("host_id" = String, Path, description = "Host UUID")
+        ("host_id" = String, Path, description = "Host UUID"),
+        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package/provider combination from future autodiscovery runs")
     ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
@@ -388,6 +363,7 @@ pub async fn unassign_host(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path((id, host_id_str)): Path<(String, String)>,
+    Query(params): Query<DeleteHostAssignmentParams>,
 ) -> Response {
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
@@ -399,13 +375,84 @@ pub async fn unassign_host(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
     };
 
+    // If ignore=true, load the assignment before deleting to capture provider info.
+    let ignore_info: Option<(uuid::Uuid, String)> = if params.ignore.unwrap_or(false) {
+        match host_software_item::Entity::find_by_id((host_id, item_id))
+            .one(tenant_db.db())
+            .await
+        {
+            Ok(Some(link)) => Some((link.provider_config_id, link.package_identifier)),
+            Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host assignment not found"),
+            Err(e) => {
+                tracing::error!("Failed to look up host assignment for ignore: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        }
+    } else {
+        None
+    };
+
     match item_queries::unassign_host(&tenant_db, item_id, host_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            if let Some((provider_config_id, package_identifier)) = ignore_info
+                && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
+                    tenant_db.db(),
+                    tenant_db.tenant_id,
+                    provider_config_id,
+                    &package_identifier,
+                )
+                .await
+            {
+                tracing::warn!("Failed to create autodiscovery ignore rule: {e}");
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Software item or host assignment not found"),
         Err(e) => {
             tracing::error!("Failed to unassign host from software item: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
+    }
+}
+
+/// Update the provider assignment for a specific host–software-item link.
+#[utoipa::path(
+    put,
+    path = "/api/v1/software-items/{id}/hosts/{host_id}",
+    params(
+        ("id" = String, Path, description = "Software item UUID"),
+        ("host_id" = String, Path, description = "Host UUID")
+    ),
+    request_body = UpdateHostAssignmentRequest,
+    extensions(("x-required-permission" = json!("manage_software"))),
+    responses(
+        (status = 200, description = "Host assignment updated", body = SoftwareItemDetailResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 404, description = "Software item or host assignment not found"),
+        (status = 409, description = "Duplicate host assignment")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn update_host_assignment(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path((id, host_id_str)): Path<(String, String)>,
+    Json(req): Json<UpdateHostAssignmentRequest>,
+) -> Response {
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid software item UUID"),
+    };
+
+    let host_id = match uuid::Uuid::parse_str(&host_id_str) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host UUID"),
+    };
+
+    match item_queries::update_host_assignment(&tenant_db, item_id, host_id, req).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => query_error_to_response(e),
     }
 }
 
@@ -468,21 +515,14 @@ pub async fn trigger_update(
         }
     };
 
-    // 3. Verify host is assigned to software item
-    let _link = match HostSoftwareItem::find_by_id((host_id, item_id))
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(l)) => l,
-        Ok(None) => {
+    // 3. Verify host is assigned to software item and load per-host provider info
+    let link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
+        Some(l) => l,
+        None => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 "Host is not assigned to this software item",
             );
-        }
-        Err(e) => {
-            tracing::error!("Failed to check host-software-item link: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
         }
     };
 
@@ -548,8 +588,8 @@ pub async fn trigger_update(
         Ok(None) => {}
     }
 
-    // 6. Load provider config
-    let provider_config = match find_raw_active_config(&tenant_db, item.provider_config_id).await {
+    // 6. Load provider config from the host-specific assignment
+    let provider_config = match find_raw_active_config(&tenant_db, link.provider_config_id).await {
         Some(c) => c,
         None => {
             return error_response(
@@ -582,13 +622,13 @@ pub async fn trigger_update(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
     }
 
-    // 8. Resolve hooks from provider config + config_override
+    // 8. Resolve hooks from provider config + per-host config_override
     let resolved_hooks =
-        crate::update_hooks::resolve_hooks(&provider_config.config, item.config_override.as_ref());
+        crate::update_hooks::resolve_hooks(&provider_config.config, link.config_override.as_ref());
 
     // 9. Merge config
     let merged_config =
-        crate::update_hooks::merge_config(&provider_config.config, item.config_override.as_ref());
+        crate::update_hooks::merge_config(&provider_config.config, link.config_override.as_ref());
 
     // 10. Convert provider type
     let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
@@ -607,7 +647,7 @@ pub async fn trigger_update(
         update_history_id,
         software_item_id: item_id,
         software_item_name: item.name.clone(),
-        package_identifier: item.package_identifier.clone(),
+        package_identifier: link.package_identifier.clone(),
         to_version: req.to_version,
         provider_type,
         provider_config: merged_config,
@@ -675,6 +715,9 @@ pub async fn trigger_update(
 }
 
 /// Trigger a version check for a specific software item across all assigned hosts.
+///
+/// Each host receives a version-check message using its own per-host provider config
+/// and package identifier.
 #[utoipa::path(
     post,
     path = "/api/v1/software-items/{id}/check-versions",
@@ -707,33 +750,7 @@ pub async fn check_versions(
         None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
     };
 
-    // Load provider config
-    let provider_config = match find_raw_active_config(&tenant_db, item.provider_config_id).await {
-        Some(c) => c,
-        None => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Provider config not found",
-            );
-        }
-    };
-
-    let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
-        serde_json::Value::String(provider_config.provider_type.clone()),
-    ) {
-        Ok(pt) => pt,
-        Err(_) => {
-            tracing::error!("Unknown provider type: {}", provider_config.provider_type);
-            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
-        }
-    };
-
-    let config = match item.config_override.as_ref() {
-        Some(ovr) => crate::update_hooks::merge_config(&provider_config.config, Some(ovr)),
-        None => provider_config.config.clone(),
-    };
-
-    // Find all hosts assigned to this software item that have agents
+    // Find all hosts assigned to this software item
     let links = match HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
         .all(tenant_db.db())
@@ -752,14 +769,6 @@ pub async fn check_versions(
             "No hosts assigned to this software item",
         );
     }
-
-    let assignment = uptrakit_internal_wire::VersionCheckAssignment {
-        software_item_id: item_id,
-        name: item.name.clone(),
-        provider_type,
-        package_identifier: item.package_identifier.clone(),
-        config,
-    };
 
     let mut agents_notified: u32 = 0;
     // Deduplicate by (agent, host) — each pair gets exactly one CheckVersions message.
@@ -800,10 +809,36 @@ pub async fn check_versions(
             _ => continue,
         };
 
+        // Load the per-host provider config
+        let provider_config = match find_raw_active_config(&tenant_db, link.provider_config_id).await {
+            Some(c) => c,
+            None => continue,
+        };
+
+        let provider_type: uptrakit_internal_wire::ProviderType = match serde_json::from_value(
+            serde_json::Value::String(provider_config.provider_type.clone()),
+        ) {
+            Ok(pt) => pt,
+            Err(_) => continue,
+        };
+
+        let config = crate::update_hooks::merge_config(
+            &provider_config.config,
+            link.config_override.as_ref(),
+        );
+
+        let assignment = uptrakit_internal_wire::VersionCheckAssignment {
+            software_item_id: item_id,
+            name: item.name.clone(),
+            provider_type,
+            package_identifier: link.package_identifier.clone(),
+            config,
+        };
+
         let msg = uptrakit_internal_wire::ControllerMessage::CheckVersions(
             uptrakit_internal_wire::CheckVersionsPayload {
                 host_machine_id: host_record.machine_id.clone(),
-                assignments: vec![assignment.clone()],
+                assignments: vec![assignment],
             },
         );
         state.notification_service.send(&agent.id, msg).await;
@@ -883,23 +918,16 @@ pub async fn check_versions_host(
         }
     };
 
-    // Verify host is assigned to software item
-    match HostSoftwareItem::find_by_id((host_id, item_id))
-        .one(tenant_db.db())
-        .await
-    {
-        Ok(Some(_)) => {}
-        Ok(None) => {
+    // Verify host is assigned and load per-host provider info
+    let link = match item_queries::load_host_assignment(tenant_db.db(), host_id, item_id).await {
+        Some(l) => l,
+        None => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 "Host is not assigned to this software item",
             );
         }
-        Err(e) => {
-            tracing::error!("Failed to check host-software-item link: {e}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
-        }
-    }
+    };
 
     // Find agent linked to host
     let agent_link = match ServiceHost::find()
@@ -938,8 +966,8 @@ pub async fn check_versions_host(
         }
     };
 
-    // Load provider config
-    let provider_config = match find_raw_active_config(&tenant_db, item.provider_config_id).await {
+    // Load the per-host provider config
+    let provider_config = match find_raw_active_config(&tenant_db, link.provider_config_id).await {
         Some(c) => c,
         None => {
             return error_response(
@@ -959,16 +987,16 @@ pub async fn check_versions_host(
         }
     };
 
-    let config = match item.config_override.as_ref() {
-        Some(ovr) => crate::update_hooks::merge_config(&provider_config.config, Some(ovr)),
-        None => provider_config.config.clone(),
-    };
+    let config = crate::update_hooks::merge_config(
+        &provider_config.config,
+        link.config_override.as_ref(),
+    );
 
     let assignment = uptrakit_internal_wire::VersionCheckAssignment {
         software_item_id: item_id,
         name: item.name.clone(),
         provider_type,
-        package_identifier: item.package_identifier.clone(),
+        package_identifier: link.package_identifier.clone(),
         config,
     };
 

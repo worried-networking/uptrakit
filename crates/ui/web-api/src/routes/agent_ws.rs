@@ -954,7 +954,28 @@ async fn deliver_pending_updates(
             }
         };
 
-        let provider_cfg = match provider_config::Entity::find_by_id(item.provider_config_id)
+        // Load per-host provider info from the host_software_item link.
+        let link = match host_software_item::Entity::find_by_id((update_record.host_id, item.id))
+            .one(state.db())
+            .await
+        {
+            Ok(Some(l)) => l,
+            Ok(None) => {
+                tracing::warn!(
+                    update_id = %update_record.id,
+                    host_id = %update_record.host_id,
+                    software_item_id = %item.id,
+                    "host-software-item link not found, skipping pending update"
+                );
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to load host-software-item link for pending update");
+                continue;
+            }
+        };
+
+        let provider_cfg = match provider_config::Entity::find_by_id(link.provider_config_id)
             .filter(provider_config::Column::DeactivatedAt.is_null())
             .one(state.db())
             .await
@@ -963,7 +984,7 @@ async fn deliver_pending_updates(
             Ok(None) => {
                 tracing::warn!(
                     update_id = %update_record.id,
-                    provider_config_id = %item.provider_config_id,
+                    provider_config_id = %link.provider_config_id,
                     "provider config not found or deactivated, skipping pending update"
                 );
                 continue;
@@ -989,9 +1010,9 @@ async fn deliver_pending_updates(
         };
 
         let resolved_hooks =
-            crate::update_hooks::resolve_hooks(&provider_cfg.config, item.config_override.as_ref());
+            crate::update_hooks::resolve_hooks(&provider_cfg.config, link.config_override.as_ref());
         let merged_config =
-            crate::update_hooks::merge_config(&provider_cfg.config, item.config_override.as_ref());
+            crate::update_hooks::merge_config(&provider_cfg.config, link.config_override.as_ref());
 
         // Look up the host's machine_id so the agent can route correctly.
         let host_machine_id = match host::Entity::find_by_id(update_record.host_id)
@@ -1018,7 +1039,7 @@ async fn deliver_pending_updates(
             update_history_id: update_record.id,
             software_item_id: item.id,
             software_item_name: item.name.clone(),
-            package_identifier: item.package_identifier.clone(),
+            package_identifier: link.package_identifier.clone(),
             to_version: update_record.to_version.clone(),
             provider_type,
             provider_config: merged_config,

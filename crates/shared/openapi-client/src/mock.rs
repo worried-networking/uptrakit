@@ -769,6 +769,15 @@ impl<'a> MockSoftwareItems<'a> {
         MockEndpoint::new(self.server, "POST", &paths::software_items::hosts(id))
     }
 
+    /// Mock `PUT /api/v1/software-items/{item_id}/hosts/{host_id}`.
+    pub fn on_update_host_assignment(&self, item_id: &Uuid, host_id: &Uuid) -> MockEndpoint<'_> {
+        MockEndpoint::new(
+            self.server,
+            "PUT",
+            &paths::software_items::host(item_id, host_id),
+        )
+    }
+
     /// Mock `DELETE /api/v1/software-items/{item_id}/hosts/{host_id}`.
     pub fn on_unassign_host(&self, item_id: &Uuid, host_id: &Uuid) -> MockEndpoint<'_> {
         MockEndpoint::new(

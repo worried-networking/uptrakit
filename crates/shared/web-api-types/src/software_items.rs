@@ -7,39 +7,58 @@ use crate::pagination::PaginationParams;
 use crate::provider_configs::CreateProviderConfigRequest;
 use crate::validation::{Validate, ValidationError};
 
+/// Create a new software item (catalog entry only — no provider coupling).
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateSoftwareItemRequest {
-    /// Display name (e.g. "Node.js").
+    /// Display name (e.g. "1Password").
     pub name: String,
-    /// UUID of the provider config to use.
-    pub provider_config_id: Option<Uuid>,
-    /// Inline provider config to create (mutually exclusive with provider_config_id).
-    pub provider_config: Option<CreateProviderConfigRequest>,
-    /// Provider-specific identifier within the source. Defaults to "" if omitted.
-    pub package_identifier: Option<String>,
-    /// Provider-specific overrides merged onto the base ProviderConfig at resolution time.
-    pub config_override: Option<serde_json::Value>,
     /// Whether version checking is active. Defaults to true.
     #[serde(default = "crate::default_enabled")]
     pub enabled: bool,
 }
 
+/// Partial update for a software item. Only `name` and `enabled` are updatable.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateSoftwareItemRequest {
     pub name: Option<String>,
-    pub package_identifier: Option<String>,
-    /// Provider-specific overrides. Send null to clear, an object to replace.
-    pub config_override: Option<serde_json::Value>,
     pub enabled: Option<bool>,
 }
 
+/// Per-host provider assignment used when assigning hosts to a software item.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HostSoftwareAssignment {
+    pub host_id: Uuid,
+    /// UUID of an existing provider config to use.
+    pub provider_config_id: Option<Uuid>,
+    /// Inline provider config to create (mutually exclusive with `provider_config_id`).
+    pub provider_config: Option<CreateProviderConfigRequest>,
+    /// Provider-specific package identifier. Defaults to `""` if omitted.
+    pub package_identifier: Option<String>,
+    /// Provider-specific overrides merged onto the base config at resolution time.
+    pub config_override: Option<serde_json::Value>,
+}
+
+/// Assign one or more hosts to a software item, each with its own provider info.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct AssignHostsRequest {
-    /// List of host UUIDs to assign.
-    pub host_ids: Vec<Uuid>,
+    pub host_assignments: Vec<HostSoftwareAssignment>,
+}
+
+/// Update the provider info for an existing host–software-item assignment.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateHostAssignmentRequest {
+    /// UUID of an existing provider config to use.
+    pub provider_config_id: Option<Uuid>,
+    /// Inline provider config to create (mutually exclusive with `provider_config_id`).
+    pub provider_config: Option<CreateProviderConfigRequest>,
+    pub package_identifier: Option<String>,
+    /// Send `null` to clear the override, an object to replace it.
+    pub config_override: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,11 +66,8 @@ pub struct AssignHostsRequest {
 pub struct SoftwareItemResponse {
     pub id: Uuid,
     pub name: String,
-    pub provider_config_id: Uuid,
-    pub provider_config_name: String,
-    pub provider_type: String,
-    pub package_identifier: String,
-    pub config_override: Option<serde_json::Value>,
+    /// Distinct provider type strings from all active host assignments (for display in lists).
+    pub provider_types: Vec<String>,
     pub enabled: bool,
     /// Discovery state for auto-discovered items. `None` means manually created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -73,11 +89,8 @@ pub struct SoftwareItemResponse {
 pub struct SoftwareItemDetailResponse {
     pub id: Uuid,
     pub name: String,
-    pub provider_config_id: Uuid,
-    pub provider_config_name: String,
-    pub provider_type: String,
-    pub package_identifier: String,
-    pub config_override: Option<serde_json::Value>,
+    /// Distinct provider type strings from all active host assignments.
+    pub provider_types: Vec<String>,
     pub enabled: bool,
     /// Discovery state for auto-discovered items. `None` means manually created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -101,6 +114,11 @@ pub struct SoftwareItemHostSummary {
     pub host_id: Uuid,
     pub hostname: String,
     pub friendly_name: String,
+    pub provider_config_id: Uuid,
+    pub provider_config_name: String,
+    pub provider_type: String,
+    pub package_identifier: String,
+    pub config_override: Option<serde_json::Value>,
     pub installed_version: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
@@ -209,25 +227,6 @@ impl Validate for CreateSoftwareItemRequest {
                 message: "name must not be empty".to_string(),
             });
         }
-
-        match (&self.provider_config_id, &self.provider_config) {
-            (Some(_), Some(_)) => {
-                return Err(ValidationError {
-                    field: "provider_config",
-                    message: "exactly one of provider_config_id or provider_config must be provided, not both".to_string(),
-                });
-            }
-            (None, None) => {
-                return Err(ValidationError {
-                    field: "provider_config",
-                    message:
-                        "exactly one of provider_config_id or provider_config must be provided"
-                            .to_string(),
-                });
-            }
-            _ => {}
-        }
-
         Ok(())
     }
 }
@@ -235,36 +234,15 @@ impl Validate for CreateSoftwareItemRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uptrakit_shared_types::ProviderType;
 
     fn sample_uuid() -> Uuid {
         Uuid::parse_str("a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6")
             .expect("hard-coded UUID should be valid")
     }
 
-    fn valid_request_with_config_id() -> CreateSoftwareItemRequest {
+    fn valid_create_request() -> CreateSoftwareItemRequest {
         CreateSoftwareItemRequest {
-            name: "Node.js".to_string(),
-            provider_config_id: Some(sample_uuid()),
-            provider_config: None,
-            package_identifier: None,
-            config_override: None,
-            enabled: true,
-        }
-    }
-
-    fn valid_request_with_inline_config() -> CreateSoftwareItemRequest {
-        CreateSoftwareItemRequest {
-            name: "Node.js".to_string(),
-            provider_config_id: None,
-            provider_config: Some(CreateProviderConfigRequest {
-                name: "GitHub Releases".to_string(),
-                provider_type: ProviderType::GithubReleases,
-                config: serde_json::json!({}),
-                enabled: true,
-            }),
-            package_identifier: Some("nodejs/node".to_string()),
-            config_override: None,
+            name: "1Password".to_string(),
             enabled: true,
         }
     }
@@ -272,40 +250,18 @@ mod tests {
     // ── CreateSoftwareItemRequest serialization ──────────────────────
 
     #[test]
-    fn create_software_item_request_round_trip_with_config_id() {
-        let req = valid_request_with_config_id();
+    fn create_software_item_request_round_trip() {
+        let req = valid_create_request();
         let json = serde_json::to_string(&req).expect("serialization should succeed");
         let deserialized: CreateSoftwareItemRequest =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert_eq!(deserialized.name, "Node.js");
-        assert_eq!(deserialized.provider_config_id, Some(sample_uuid()));
-        assert!(deserialized.provider_config.is_none());
+        assert_eq!(deserialized.name, "1Password");
         assert!(deserialized.enabled);
     }
 
     #[test]
-    fn create_software_item_request_round_trip_with_inline_config() {
-        let req = valid_request_with_inline_config();
-        let json = serde_json::to_string(&req).expect("serialization should succeed");
-        let deserialized: CreateSoftwareItemRequest =
-            serde_json::from_str(&json).expect("deserialization should succeed");
-        assert!(deserialized.provider_config_id.is_none());
-        let config = deserialized
-            .provider_config
-            .expect("inline provider_config should be present");
-        assert_eq!(config.name, "GitHub Releases");
-        assert_eq!(
-            deserialized.package_identifier.as_deref(),
-            Some("nodejs/node")
-        );
-    }
-
-    #[test]
     fn create_software_item_request_default_enabled_from_json() {
-        let json = serde_json::json!({
-            "name": "Test",
-            "provider_config_id": "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
-        });
+        let json = serde_json::json!({ "name": "Test" });
         let req: CreateSoftwareItemRequest =
             serde_json::from_value(json).expect("deserialization should succeed");
         assert!(req.enabled, "enabled should default to true");
@@ -314,72 +270,65 @@ mod tests {
     // ── CreateSoftwareItemRequest validation ─────────────────────────
 
     #[test]
-    fn validate_valid_request_with_config_id_passes() {
-        let req = valid_request_with_config_id();
-        assert!(req.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_valid_request_with_inline_config_passes() {
-        let req = valid_request_with_inline_config();
+    fn validate_valid_request_passes() {
+        let req = valid_create_request();
         assert!(req.validate().is_ok());
     }
 
     #[test]
     fn validate_empty_name_fails() {
-        let mut req = valid_request_with_config_id();
-        req.name = "".to_string();
-        let err = req
-            .validate()
-            .expect_err("empty name should fail validation");
+        let req = CreateSoftwareItemRequest { name: "".to_string(), enabled: true };
+        let err = req.validate().expect_err("empty name should fail validation");
         assert_eq!(err.field, "name");
     }
 
     #[test]
     fn validate_whitespace_only_name_fails() {
-        let mut req = valid_request_with_config_id();
-        req.name = "   ".to_string();
+        let req = CreateSoftwareItemRequest { name: "   ".to_string(), enabled: true };
         let err = req
             .validate()
             .expect_err("whitespace-only name should fail validation");
         assert_eq!(err.field, "name");
     }
 
-    #[test]
-    fn validate_neither_config_provided_fails() {
-        let req = CreateSoftwareItemRequest {
-            name: "Node.js".to_string(),
-            provider_config_id: None,
-            provider_config: None,
-            package_identifier: None,
-            config_override: None,
-            enabled: true,
-        };
-        let err = req
-            .validate()
-            .expect_err("neither config should fail validation");
-        assert_eq!(err.field, "provider_config");
-    }
+    // ── AssignHostsRequest round-trip ──────────────────────────────
 
     #[test]
-    fn validate_both_configs_provided_fails() {
-        let req = CreateSoftwareItemRequest {
-            name: "Node.js".to_string(),
-            provider_config_id: Some(sample_uuid()),
-            provider_config: Some(CreateProviderConfigRequest {
-                name: "GitHub Releases".to_string(),
-                provider_type: ProviderType::GithubReleases,
-                config: serde_json::json!({}),
-                enabled: true,
-            }),
-            package_identifier: None,
-            config_override: None,
-            enabled: true,
+    fn assign_hosts_request_round_trip() {
+        use uptrakit_shared_types::ProviderType;
+        let req = AssignHostsRequest {
+            host_assignments: vec![
+                HostSoftwareAssignment {
+                    host_id: sample_uuid(),
+                    provider_config_id: Some(sample_uuid()),
+                    provider_config: None,
+                    package_identifier: Some("1password".to_string()),
+                    config_override: None,
+                },
+                HostSoftwareAssignment {
+                    host_id: Uuid::nil(),
+                    provider_config_id: None,
+                    provider_config: Some(crate::provider_configs::CreateProviderConfigRequest {
+                        name: "Homebrew Casks".to_string(),
+                        provider_type: ProviderType::Homebrew,
+                        config: serde_json::json!({"package_type": "cask"}),
+                        enabled: true,
+                    }),
+                    package_identifier: Some("1password-cli".to_string()),
+                    config_override: None,
+                },
+            ],
         };
-        let err = req
-            .validate()
-            .expect_err("both configs should fail validation");
-        assert_eq!(err.field, "provider_config");
+        let json = serde_json::to_string(&req).expect("serialization should succeed");
+        let deserialized: AssignHostsRequest =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert_eq!(deserialized.host_assignments.len(), 2);
+        assert_eq!(deserialized.host_assignments[0].host_id, sample_uuid());
+        assert_eq!(
+            deserialized.host_assignments[0].package_identifier.as_deref(),
+            Some("1password")
+        );
+        assert!(deserialized.host_assignments[1].provider_config.is_some());
     }
 
     // ── SoftwareItemResponse ─────────────────────────────────────────
@@ -389,12 +338,8 @@ mod tests {
         use time::macros::datetime;
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
-            name: "Node.js".to_string(),
-            provider_config_id: sample_uuid(),
-            provider_config_name: "GitHub".to_string(),
-            provider_type: "github_releases".to_string(),
-            package_identifier: "nodejs/node".to_string(),
-            config_override: Some(serde_json::json!({"key": "value"})),
+            name: "1Password".to_string(),
+            provider_types: vec!["homebrew".to_string(), "github_releases".to_string()],
             enabled: true,
             discovery_state: None,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
@@ -406,23 +351,19 @@ mod tests {
         let deserialized: SoftwareItemResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
         assert_eq!(deserialized.id, sample_uuid());
-        assert_eq!(deserialized.name, "Node.js");
+        assert_eq!(deserialized.name, "1Password");
         assert_eq!(deserialized.host_count, 5);
-        assert!(deserialized.config_override.is_some());
+        assert_eq!(deserialized.provider_types.len(), 2);
         assert!(deserialized.enabled);
     }
 
     #[test]
-    fn software_item_response_none_optional_fields() {
+    fn software_item_response_empty_provider_types() {
         use time::macros::datetime;
         let resp = SoftwareItemResponse {
             id: sample_uuid(),
             name: "Test".to_string(),
-            provider_config_id: sample_uuid(),
-            provider_config_name: "Config".to_string(),
-            provider_type: "github_releases".to_string(),
-            package_identifier: "".to_string(),
-            config_override: None,
+            provider_types: vec![],
             enabled: false,
             discovery_state: None,
             last_checked_at: None,
@@ -433,7 +374,7 @@ mod tests {
         let json = serde_json::to_string(&resp).expect("serialization should succeed");
         let deserialized: SoftwareItemResponse =
             serde_json::from_str(&json).expect("deserialization should succeed");
-        assert!(deserialized.config_override.is_none());
+        assert!(deserialized.provider_types.is_empty());
         assert!(deserialized.last_checked_at.is_none());
         assert!(!deserialized.enabled);
     }

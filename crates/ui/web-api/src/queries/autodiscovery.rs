@@ -173,7 +173,7 @@ pub async fn discard_pending_items(
 ) -> Result<DiscardDiscoveredResponse, AutodiscoveryError> {
     let now = OffsetDateTime::now_utc();
 
-    // Gather IDs to delete so we can apply host filter via join.
+    // Gather candidate pending software item IDs for this tenant.
     let mut id_query = SoftwareItem::find()
         .select_only()
         .column(software_item::Column::Id)
@@ -181,11 +181,30 @@ pub async fn discard_pending_items(
         .filter(software_item::Column::DeactivatedAt.is_null())
         .filter(software_item::Column::DiscoveryState.eq("pending"));
 
-    if let Some(pc_id) = provider_config_id_filter {
-        id_query = id_query.filter(software_item::Column::ProviderConfigId.eq(pc_id));
+    // If a provider config filter is requested, restrict to items that have at
+    // least one host_software_items row with that provider config ID.
+    let provider_filtered_item_ids: Option<Vec<Uuid>> = if let Some(pc_id) = provider_config_id_filter {
+        let linked: Vec<Uuid> = HostSoftwareItem::find()
+            .filter(host_software_item::Column::ProviderConfigId.eq(pc_id))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|l| l.software_item_id)
+            .collect();
+
+        if linked.is_empty() {
+            return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
+        }
+        Some(linked)
+    } else {
+        None
+    };
+
+    if let Some(ref pfids) = provider_filtered_item_ids {
+        id_query = id_query.filter(software_item::Column::Id.is_in(pfids.clone()));
     }
 
-    // If filtering by host, we need to find items linked to that host.
+    // If filtering by host, find items linked to that host.
     let ids: Vec<Uuid> = if let Some(host_id) = host_id_filter {
         let linked_item_ids: Vec<Uuid> = HostSoftwareItem::find()
             .filter(host_software_item::Column::HostId.eq(host_id))
@@ -524,6 +543,14 @@ async fn process_homebrew_default(
 }
 
 /// Process a single discovered software item: check ignore list, upsert or create.
+///
+/// Two-phase lookup:
+/// 1. If this host already has a `host_software_item` row for
+///    `(provider_config_id, package_identifier)`, update `installed_version` in place.
+/// 2. If *any other* host in the tenant has the same assignment, reuse that software item
+///    and insert a new `host_software_item` link for this host.
+/// 3. Otherwise create a new pending `software_item` (name only) and a new
+///    `host_software_item` with the provider info.
 #[allow(clippy::too_many_arguments)]
 async fn process_one_discovery(
     db: &sea_orm::DatabaseConnection,
@@ -553,27 +580,55 @@ async fn process_one_discovery(
         return Ok(());
     }
 
-    // 2. Find existing active software item.
-    let existing = SoftwareItem::find()
-        .filter(software_item::Column::TenantId.eq(tenant_id))
-        .filter(software_item::Column::ProviderConfigId.eq(provider_config_id))
-        .filter(software_item::Column::PackageIdentifier.eq(package_identifier))
-        .filter(software_item::Column::DeactivatedAt.is_null())
+    // Phase 1: Check if this specific host already tracks (provider_config_id, package_identifier).
+    let existing_host_link = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
         .one(db)
         .await?;
 
-    let software_item_id = if let Some(existing_item) = existing {
-        existing_item.id
+    if let Some(link) = existing_host_link {
+        // Just refresh the installed version — no schema changes needed.
+        let mut active: host_software_item::ActiveModel = link.into();
+        active.installed_version = Set(Some(installed_version.to_string()));
+        active.installed_version_detected_at = Set(Some(now));
+        active.update(db).await?;
+        return Ok(());
+    }
+
+    // Phase 2: Check if any other host in this tenant already has
+    // (provider_config_id, package_identifier). If so, reuse the existing software item
+    // so the global catalog stays unified.
+    let candidate_links: Vec<Uuid> = HostSoftwareItem::find()
+        .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|l| l.software_item_id)
+        .collect();
+
+    let existing_item = if candidate_links.is_empty() {
+        None
     } else {
-        // 3. Create new pending software item.
+        SoftwareItem::find()
+            .filter(software_item::Column::Id.is_in(candidate_links))
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(db)
+            .await?
+    };
+
+    let software_item_id = if let Some(item) = existing_item {
+        item.id
+    } else {
+        // Phase 3: Create a new pending software item — identity only, no provider fields.
         let new_id = Uuid::now_v7();
         let new_item = software_item::ActiveModel {
             id: Set(new_id),
             tenant_id: Set(tenant_id),
             name: Set(name.to_string()),
-            provider_config_id: Set(provider_config_id),
-            package_identifier: Set(package_identifier.to_string()),
-            config_override: Set(None),
             enabled: Set(false),
             discovery_state: Set(Some(SoftwareDiscoveryState::Pending)),
             last_checked_at: Set(None),
@@ -590,30 +645,20 @@ async fn process_one_discovery(
         new_id
     };
 
-    // 4. Upsert host_software_item link.
-    let existing_link = HostSoftwareItem::find_by_id((host_id, software_item_id))
-        .one(db)
-        .await?;
-
-    match existing_link {
-        Some(link) => {
-            let mut active: host_software_item::ActiveModel = link.into();
-            active.installed_version = Set(Some(installed_version.to_string()));
-            active.installed_version_detected_at = Set(Some(now));
-            active.update(db).await?;
-        }
-        None => {
-            let link = host_software_item::ActiveModel {
-                host_id: Set(host_id),
-                software_item_id: Set(software_item_id),
-                installed_version: Set(Some(installed_version.to_string())),
-                installed_version_detected_at: Set(Some(now)),
-                last_updated_at: Set(None),
-                linked_at: Set(now),
-            };
-            HostSoftwareItem::insert(link).exec(db).await?;
-        }
-    }
+    // Insert a new host_software_item link carrying the provider info.
+    // config_override is always NULL for auto-discovered items.
+    let link = host_software_item::ActiveModel {
+        host_id: Set(host_id),
+        software_item_id: Set(software_item_id),
+        provider_config_id: Set(provider_config_id),
+        package_identifier: Set(package_identifier.to_string()),
+        config_override: Set(None),
+        installed_version: Set(Some(installed_version.to_string())),
+        installed_version_detected_at: Set(Some(now)),
+        last_updated_at: Set(None),
+        linked_at: Set(now),
+    };
+    HostSoftwareItem::insert(link).exec(db).await?;
 
     Ok(())
 }

@@ -1,13 +1,17 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
 
-#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "host_software_items")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub host_id: Uuid,
     #[sea_orm(primary_key, auto_increment = false)]
     pub software_item_id: Uuid,
+    pub provider_config_id: Uuid,
+    pub package_identifier: String,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub config_override: Option<serde_json::Value>,
     pub installed_version: Option<String>,
     pub installed_version_detected_at: Option<OffsetDateTime>,
     pub last_updated_at: Option<OffsetDateTime>,
@@ -28,6 +32,12 @@ pub enum Relation {
         to = "super::software_item::Column::Id"
     )]
     SoftwareItem,
+    #[sea_orm(
+        belongs_to = "super::provider_config::Entity",
+        from = "Column::ProviderConfigId",
+        to = "super::provider_config::Column::Id"
+    )]
+    ProviderConfig,
 }
 
 impl Related<super::host::Entity> for Entity {
@@ -39,6 +49,12 @@ impl Related<super::host::Entity> for Entity {
 impl Related<super::software_item::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::SoftwareItem.def()
+    }
+}
+
+impl Related<super::provider_config::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ProviderConfig.def()
     }
 }
 

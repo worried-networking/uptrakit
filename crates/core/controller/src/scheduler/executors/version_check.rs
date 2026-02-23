@@ -132,6 +132,12 @@ impl VersionCheckExecutor {
             config_override: Option<serde_json::Value>,
         }
 
+        // software_item
+        //   <- host_software_item  (carries provider_config_id, package_identifier, config_override)
+        //   -> provider_config     (via host_software_item::Relation::ProviderConfig)
+        //   -> host                (via host_software_item::Relation::Host)
+        //   <- service_host
+        //   -> service (agent)
         let rows: Vec<Row> = software_item::Entity::find()
             .select_only()
             .column_as(service::Column::Id, "service_id")
@@ -140,18 +146,18 @@ impl VersionCheckExecutor {
             .column_as(software_item::Column::Name, "name")
             .column_as(provider_config::Column::ProviderType, "provider_type")
             .column_as(
-                software_item::Column::PackageIdentifier,
+                host_software_item::Column::PackageIdentifier,
                 "package_identifier",
             )
             .column_as(provider_config::Column::Config, "config")
-            .column_as(software_item::Column::ConfigOverride, "config_override")
-            .join(
-                JoinType::InnerJoin,
-                software_item::Relation::ProviderConfig.def(),
-            )
+            .column_as(host_software_item::Column::ConfigOverride, "config_override")
             .join(
                 JoinType::InnerJoin,
                 host_software_item::Relation::SoftwareItem.def().rev(),
+            )
+            .join(
+                JoinType::InnerJoin,
+                host_software_item::Relation::ProviderConfig.def(),
             )
             .join(
                 JoinType::InnerJoin,

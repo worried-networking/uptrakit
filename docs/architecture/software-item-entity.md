@@ -1,24 +1,33 @@
 # Software item entity
 
-A `SoftwareItem` defines what to track: a named piece of software linked to a `ProviderConfig`. Each item can be
-assigned to multiple hosts via the `HostSoftwareItem` junction table, which stores per-host state (installed version,
-detection timestamp).
+A `SoftwareItem` is a named catalog entry that represents a piece of software to track. It carries no
+provider or package information of its own. Each assignment of a software item to a host is recorded in
+the `HostSoftwareItem` junction table, which stores the provider config, package identifier, config
+override, and per-host state (installed version, detection timestamp).
+
+This model allows a single "1Password" software item to be tracked across hosts that install it via
+different providers (e.g. Homebrew on one host, APT via a different provider config on another), without
+creating multiple fragmented software item entries.
 
 ## Database tables
 
-- **`software_items`**: `id` (UUID PK), `name`, `provider_config_id` (FK → `provider_configs.id`, ON DELETE RESTRICT),
-  `package_identifier` (default `""`), `config_override?` (JSON), `enabled` (default `true`), `discovery_state?`
+- **`software_items`**: `id` (UUID PK), `tenant_id`, `name`, `enabled` (default `true`), `discovery_state?`
   (TEXT — `null` for manual items, `'pending'` for discovered-not-yet-reviewed, `'approved'` for reviewed
   discovered items), `last_checked_at?`, `created_at`, `updated_at`, `deactivated_at?`
-  - Partial unique index: `uq_software_items_active ON (tenant_id, provider_config_id, package_identifier)
-    WHERE deactivated_at IS NULL` — prevents duplicate tracking of the same active package; deleted items
-    can be re-discovered
-  - Indexes: `idx_software_items_provider_config_id`, `idx_software_items_deactivated_at`
+  - Partial unique index: `uq_software_items_active_name ON (tenant_id, name) WHERE deactivated_at IS NULL`
+    — prevents two active items with the same name in a tenant
+  - Index: `idx_software_items_deactivated_at`
+- **`host_software_items`**: junction table with composite PK `(host_id, software_item_id)`,
+  `provider_config_id` (FK → `provider_configs.id`, NOT NULL), `package_identifier` (default `""`),
+  `config_override?` (JSON), `installed_version?`, `installed_version_detected_at?`, `last_updated_at?`,
+  `linked_at`. FKs on `host_id` and `software_item_id` cascade on delete; `provider_config_id` uses
+  ON DELETE RESTRICT.
+  - Unique index: `uq_host_software_items_active ON (host_id, provider_config_id, package_identifier)`
+    — prevents the same (provider, package) from being tracked twice on one host
+  - Index: `idx_host_software_items_provider_config_id`
 - **`autodiscovery_ignores`**: `id` (UUID PK), `tenant_id` (FK → `tenants.id`, ON DELETE CASCADE),
   `provider_config_id` (FK → `provider_configs.id`, ON DELETE CASCADE), `package_identifier` (TEXT), `created_at`
   - Unique constraint: `(tenant_id, provider_config_id, package_identifier)` — one rule per package per provider config
-- **`host_software_items`**: junction table with composite PK `(host_id, software_item_id)`, `installed_version?`,
-  `installed_version_detected_at?`, `last_updated_at?`, `linked_at`. FKs cascade on delete.
 - **`available_versions`**: `id` (UUID PK), `software_item_id` (FK → `software_items.id`, ON DELETE CASCADE),
   `version?`, `release_date?`, `release_notes?` (text), `extra?` (JSON — provider-specific metadata such as tag,
   is_prerelease, release_url), `created_at`, `updated_at`
@@ -27,13 +36,14 @@ detection timestamp).
 
 ## Relationships
 
-- `SoftwareItem` belongs_to `ProviderConfig` (many:1 — multiple items can share one config)
-- `ProviderConfig` has_many `SoftwareItem`
-- `SoftwareItem` has_many `AvailableVersion` (one:many — upstream release records per item)
 - `SoftwareItem` ↔ `Host` via `HostSoftwareItem` junction (many:many)
-- `package_identifier` distinguishes items within a shared config (e.g. different assets from the same GitHub repo)
-- `config_override` extends/overrides the base ProviderConfig at resolution time (e.g. different `asset_patterns` or
-  `tag_strip_prefix`)
+- `HostSoftwareItem` belongs_to `ProviderConfig` (many:1 — multiple host assignments can share one config)
+- `ProviderConfig` has_many `HostSoftwareItem`
+- `SoftwareItem` has_many `AvailableVersion` (one:many — upstream release records per item)
+- `package_identifier` distinguishes packages within a provider config (e.g. different formulae from the same
+  Homebrew config)
+- `config_override` on the host assignment extends/overrides the base ProviderConfig at resolution time (e.g.
+  different `asset_patterns` or `tag_strip_prefix` per host)
 
 ## `discovery_state` field
 
@@ -50,20 +60,23 @@ Pending items are created automatically by the autodiscovery subsystem. See
 
 | Method | Path | Permission | Status | Description |
 | :----- | :---------------------------------------------------- | :------------- | :----- | :------------------------------------------------------------------ |
-| POST | `/api/v1/software-items` | ManageSoftware | 201 | Create a new software item |
+| POST | `/api/v1/software-items` | ManageSoftware | 201 | Create a new software item (name + enabled only) |
 | GET | `/api/v1/software-items` | ViewSoftware | 200 | List active software items; supports `?discovery_state=pending\|approved` filter |
-| GET | `/api/v1/software-items/{id}` | ViewSoftware | 200 | Get software item with assigned hosts + installed versions |
-| PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name, enabled, package_identifier, config_override |
-| DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete; add `?ignore=true` to also create an ignore rule |
+| GET | `/api/v1/software-items/{id}` | ViewSoftware | 200 | Get software item with assigned hosts + per-host provider info |
+| PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name and/or enabled flag |
+| DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete the software item |
 | POST | `/api/v1/software-items/{id}/approve` | ManageSoftware | 200 | Approve a pending discovered item (enables version tracking) |
-| POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s) |
-| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host |
+| POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s); each assignment carries its own provider config and package identifier |
+| PUT | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 200 | Update the provider config, package identifier, or config override for a specific host assignment |
+| DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host; add `?ignore=true` to also create an ignore rule |
 
 ## Validation rules
 
 - `name` must not be empty
-- `provider_config_id` must reference an active (non-deactivated) provider config
-- `(provider_config_id, package_identifier)` must be unique among active items
+- `(tenant_id, name)` must be unique among active items
+- Each host assignment must reference an active (non-deactivated) provider config
+- `package_identifier` is validated per provider type (e.g. Homebrew naming rules)
 - `config_override`, if provided, is validated by merging with the base config and running provider-specific validation
+- `(host_id, provider_config_id, package_identifier)` must be unique across all host assignments — the same package
+  cannot be tracked twice on one host via the same provider
 - Host IDs in assignment requests must reference active (non-deactivated) hosts
-- `provider_config_id` cannot be changed after creation

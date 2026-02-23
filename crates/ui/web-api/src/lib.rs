@@ -578,6 +578,7 @@ impl AppState {
         routes::software_items::delete_software_item,
         routes::software_items::assign_hosts,
         routes::software_items::unassign_host,
+        routes::software_items::update_host_assignment,
         routes::software_items::trigger_update,
         routes::software_items::check_versions,
         routes::software_items::check_versions_host,
@@ -653,6 +654,8 @@ impl AppState {
             routes::software_items::CreateSoftwareItemRequest,
             routes::software_items::UpdateSoftwareItemRequest,
             routes::software_items::AssignHostsRequest,
+            routes::software_items::UpdateHostAssignmentRequest,
+            uptrakit_web_api_types::software_items::HostSoftwareAssignment,
             routes::software_items::SoftwareItemResponse,
             routes::software_items::SoftwareItemDetailResponse,
             routes::software_items::SoftwareItemHostSummary,
@@ -844,7 +847,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::software_items::update_software_item))
         .routes(routes!(routes::software_items::delete_software_item))
         .routes(routes!(routes::software_items::assign_hosts))
-        .routes(routes!(routes::software_items::unassign_host))
+        .routes(routes!(
+            routes::software_items::unassign_host,
+            routes::software_items::update_host_assignment
+        ))
         .routes(routes!(routes::software_items::trigger_update))
         .routes(routes!(routes::software_items::check_versions))
         .routes(routes!(routes::software_items::check_versions_host))

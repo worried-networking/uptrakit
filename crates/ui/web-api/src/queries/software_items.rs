@@ -1,21 +1,20 @@
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set, TransactionTrait,
+    QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
 };
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, provider_config, software_item};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams, SoftwareItemDetailResponse,
-    SoftwareItemHostSummary, SoftwareItemResponse, UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
+    ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemHostSummary,
+    SoftwareItemResponse, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
 use crate::auth::token::generate_uuid;
-use crate::queries::provider_configs::{
-    find_raw_active_config, find_raw_active_config_txn, validate_hooks_internal,
-};
+use crate::queries::provider_configs::{find_raw_active_config_txn, validate_hooks_internal};
 use crate::tenant_db::TenantDb;
 
 /// Errors returned by software item mutation queries.
@@ -25,12 +24,14 @@ pub enum SoftwareItemQueryError {
     NotFound,
     /// Name must not be empty (for update).
     EmptyName,
-    /// The referenced provider config does not exist or is inactive.
-    ProviderConfigNotFound,
-    /// A software item with the same (provider_config_id, package_identifier) already exists.
+    /// A software item with the same name already exists.
     DuplicateItem,
     /// A host in the request was not found or is deactivated.
     HostNotFound(Uuid),
+    /// The referenced provider config does not exist or is inactive.
+    ProviderConfigNotFound,
+    /// A (host_id, provider_config_id, package_identifier) combo is already tracked.
+    DuplicateHostAssignment,
     /// Package identifier failed validation (e.g. Homebrew naming rules).
     InvalidPackageIdentifier(String),
     /// `config_override` failed provider-level or hook validation.
@@ -45,17 +46,13 @@ pub enum SoftwareItemQueryError {
 
 fn build_list_response(
     item: &software_item::Model,
-    config: &provider_config::Model,
+    provider_types: Vec<String>,
     host_count: u64,
 ) -> SoftwareItemResponse {
     SoftwareItemResponse {
         id: item.id,
         name: item.name.clone(),
-        provider_config_id: item.provider_config_id,
-        provider_config_name: config.name.clone(),
-        provider_type: config.provider_type.clone(),
-        package_identifier: item.package_identifier.clone(),
-        config_override: item.config_override.clone(),
+        provider_types,
         enabled: item.enabled,
         discovery_state: item.discovery_state.clone(),
         last_checked_at: item.last_checked_at,
@@ -67,18 +64,14 @@ fn build_list_response(
 
 fn build_detail_response(
     item: software_item::Model,
-    config: &provider_config::Model,
+    provider_types: Vec<String>,
     host_count: u64,
     hosts: Vec<SoftwareItemHostSummary>,
 ) -> SoftwareItemDetailResponse {
     SoftwareItemDetailResponse {
         id: item.id,
         name: item.name,
-        provider_config_id: item.provider_config_id,
-        provider_config_name: config.name.clone(),
-        provider_type: config.provider_type.clone(),
-        package_identifier: item.package_identifier,
-        config_override: item.config_override,
+        provider_types,
         enabled: item.enabled,
         discovery_state: item.discovery_state,
         last_checked_at: item.last_checked_at,
@@ -95,6 +88,39 @@ async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> 
         .count(db)
         .await
         .unwrap_or(0)
+}
+
+/// Load the distinct provider types for a software item from its host assignments.
+async fn load_provider_types(
+    db: &sea_orm::DatabaseConnection,
+    item_id: Uuid,
+) -> Vec<String> {
+    use sea_orm::{FromQueryResult, QuerySelect};
+
+    #[derive(Debug, FromQueryResult)]
+    struct PcRow {
+        provider_type: String,
+    }
+
+    // Join host_software_items → provider_configs to collect distinct provider types.
+    let rows: Vec<PcRow> = HostSoftwareItem::find()
+        .select_only()
+        .column(provider_config::Column::ProviderType)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::ProviderConfig.def(),
+        )
+        .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+        .into_model::<PcRow>()
+        .all(db)
+        .await
+        .unwrap_or_default();
+
+    let mut seen = std::collections::HashSet::new();
+    rows.into_iter()
+        .filter(|r| seen.insert(r.provider_type.clone()))
+        .map(|r| r.provider_type)
+        .collect()
 }
 
 async fn load_item_hosts(
@@ -115,21 +141,37 @@ async fn load_item_hosts(
 
     let mut summaries = Vec::with_capacity(links.len());
     for link in links {
-        if let Ok(Some(h)) = Host::find_by_id(link.host_id)
+        let host = match Host::find_by_id(link.host_id)
             .filter(host::Column::DeactivatedAt.is_null())
             .one(db)
             .await
         {
-            summaries.push(SoftwareItemHostSummary {
-                host_id: h.id,
-                hostname: h.hostname,
-                friendly_name: h.friendly_name,
-                installed_version: link.installed_version,
-                installed_version_detected_at: link.installed_version_detected_at,
-                last_updated_at: link.last_updated_at,
-                linked_at: link.linked_at,
-            });
-        }
+            Ok(Some(h)) => h,
+            _ => continue,
+        };
+
+        let pc = match ProviderConfig::find_by_id(link.provider_config_id)
+            .one(db)
+            .await
+        {
+            Ok(Some(c)) => c,
+            _ => continue,
+        };
+
+        summaries.push(SoftwareItemHostSummary {
+            host_id: host.id,
+            hostname: host.hostname,
+            friendly_name: host.friendly_name,
+            provider_config_id: pc.id,
+            provider_config_name: pc.name,
+            provider_type: pc.provider_type,
+            package_identifier: link.package_identifier,
+            config_override: link.config_override,
+            installed_version: link.installed_version,
+            installed_version_detected_at: link.installed_version_detected_at,
+            last_updated_at: link.last_updated_at,
+            linked_at: link.linked_at,
+        });
     }
 
     summaries
@@ -225,10 +267,87 @@ fn validate_homebrew_package_identifier(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve provider config from either an existing ID or an inline create request,
+/// within a transaction. Returns `(provider_config_id, provider_config::Model)`.
+async fn resolve_provider_config_txn(
+    txn: &sea_orm::DatabaseTransaction,
+    tenant_id: Uuid,
+    assignment: &HostSoftwareAssignment,
+) -> Result<(Uuid, provider_config::Model), SoftwareItemQueryError> {
+    match (&assignment.provider_config_id, &assignment.provider_config) {
+        (Some(pcid), None) => {
+            let pcid = *pcid;
+            let c = find_raw_active_config_txn(txn, tenant_id, pcid)
+                .await
+                .ok_or(SoftwareItemQueryError::ProviderConfigNotFound)?;
+            Ok((pcid, c))
+        }
+        (None, Some(inline)) => {
+            if inline.name.is_empty() {
+                return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
+                    "name must not be empty".to_string(),
+                ));
+            }
+            if let Err(e) =
+                ProviderRegistry::validate_config_str(inline.provider_type.as_str(), &inline.config)
+            {
+                return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
+                    e.to_string(),
+                ));
+            }
+            if let Err(e) = validate_hooks_internal(&inline.config) {
+                return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
+                    e.to_string(),
+                ));
+            }
+            let now = OffsetDateTime::now_utc();
+            let pcid = generate_uuid();
+            let model = provider_config::ActiveModel {
+                id: Set(pcid),
+                tenant_id: Set(tenant_id),
+                name: Set(inline.name.clone()),
+                provider_type: Set(inline.provider_type.to_string()),
+                config: Set(inline.config.clone()),
+                enabled: Set(inline.enabled),
+                created_at: Set(now),
+                updated_at: Set(now),
+                deactivated_at: Set(None),
+            };
+            let inserted = model.insert(txn).await.map_err(SoftwareItemQueryError::Db)?;
+            Ok((pcid, inserted))
+        }
+        _ => Err(SoftwareItemQueryError::ProviderConfigNotFound),
+    }
+}
+
+/// Validate provider config, package identifier, and config_override for a host assignment.
+fn validate_assignment(
+    config: &provider_config::Model,
+    package_identifier: &str,
+    config_override: Option<&serde_json::Value>,
+) -> Result<(), SoftwareItemQueryError> {
+    if config.provider_type == "homebrew"
+        && let Err(e) = validate_homebrew_package_identifier(package_identifier)
+    {
+        return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
+    }
+
+    if let Some(override_val) = config_override {
+        if let Err(e) = validate_config_override(&config.provider_type, &config.config, override_val)
+        {
+            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+        }
+        if let Err(e) = validate_hooks_internal(override_val) {
+            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
+        }
+    }
+
+    Ok(())
+}
+
 // --- Public query functions ---
 
-/// Create a new software item, validating the request (inline provider config, package
-/// identifier, and config_override) before persisting.
+/// Create a new software item (catalog entry only). Check unique name constraint.
 pub async fn create_software_item(
     tenant_db: &TenantDb,
     req: CreateSoftwareItemRequest,
@@ -239,75 +358,10 @@ pub async fn create_software_item(
         .await
         .map_err(SoftwareItemQueryError::Db)?;
 
-    let (provider_config_id, config) =
-        match (req.provider_config_id, req.provider_config.as_ref()) {
-            (Some(pcid), None) => {
-                let c = find_raw_active_config_txn(&txn, tenant_db.tenant_id, pcid)
-                    .await
-                    .ok_or(SoftwareItemQueryError::ProviderConfigNotFound)?;
-                (pcid, c)
-            }
-            (None, Some(inline)) => {
-                if inline.name.is_empty() {
-                    return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
-                        "name must not be empty".to_string(),
-                    ));
-                }
-                if let Err(e) =
-                    ProviderRegistry::validate_config_str(inline.provider_type.as_str(), &inline.config)
-                {
-                    return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
-                        e.to_string(),
-                    ));
-                }
-                if let Err(e) = validate_hooks_internal(&inline.config) {
-                    return Err(SoftwareItemQueryError::InvalidInlineProviderConfig(
-                        e.to_string(),
-                    ));
-                }
-                let now = OffsetDateTime::now_utc();
-                let pcid = generate_uuid();
-                let model = provider_config::ActiveModel {
-                    id: Set(pcid),
-                    tenant_id: Set(tenant_db.tenant_id),
-                    name: Set(inline.name.clone()),
-                    provider_type: Set(inline.provider_type.to_string()),
-                    config: Set(inline.config.clone()),
-                    enabled: Set(inline.enabled),
-                    created_at: Set(now),
-                    updated_at: Set(now),
-                    deactivated_at: Set(None),
-                };
-                let inserted = model.insert(&txn).await.map_err(SoftwareItemQueryError::Db)?;
-                (pcid, inserted)
-            }
-            _ => {
-                return Err(SoftwareItemQueryError::ProviderConfigNotFound);
-            }
-        };
-
-    let package_identifier = req.package_identifier.unwrap_or_default();
-
-    if config.provider_type == "homebrew"
-        && let Err(e) = validate_homebrew_package_identifier(&package_identifier)
-    {
-        return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
-    }
-
-    if let Some(ref override_val) = req.config_override {
-        if let Err(e) = validate_config_override(&config.provider_type, &config.config, override_val)
-        {
-            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
-        }
-        if let Err(e) = validate_hooks_internal(override_val) {
-            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
-        }
-    }
-
-    // Check uniqueness: (provider_config_id, package_identifier) among active items.
+    // Check uniqueness: name must be unique among active items for this tenant.
     let duplicate = SoftwareItem::find()
-        .filter(software_item::Column::ProviderConfigId.eq(provider_config_id))
-        .filter(software_item::Column::PackageIdentifier.eq(&package_identifier))
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::Name.eq(&req.name))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .one(&txn)
         .await
@@ -322,9 +376,6 @@ pub async fn create_software_item(
         id: Set(generate_uuid()),
         tenant_id: Set(tenant_db.tenant_id),
         name: Set(req.name),
-        provider_config_id: Set(provider_config_id),
-        package_identifier: Set(package_identifier),
-        config_override: Set(req.config_override),
         enabled: Set(req.enabled),
         discovery_state: Set(None),
         last_checked_at: Set(None),
@@ -337,7 +388,7 @@ pub async fn create_software_item(
 
     txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
 
-    Ok(build_list_response(&inserted, &config, 0))
+    Ok(build_list_response(&inserted, vec![], 0))
 }
 
 pub async fn list_software_items(
@@ -365,19 +416,9 @@ pub async fn list_software_items(
 
     let mut response = Vec::with_capacity(items.len());
     for item in items {
-        let config = match find_raw_active_config(tenant_db, item.provider_config_id).await {
-            Some(c) => c,
-            None => {
-                tracing::warn!(
-                    "Software item {} references missing provider config {}",
-                    item.id,
-                    item.provider_config_id
-                );
-                continue;
-            }
-        };
+        let provider_types = load_provider_types(tenant_db.db(), item.id).await;
         let host_count = count_linked_hosts(tenant_db.db(), item.id).await;
-        response.push(build_list_response(&item, &config, host_count));
+        response.push(build_list_response(&item, provider_types, host_count));
     }
 
     Ok(PaginatedResponse::new(response, total, pagination))
@@ -392,23 +433,13 @@ pub async fn get_software_item(
         return Ok(None);
     };
 
-    let Some(config) = find_raw_active_config(tenant_db, item.provider_config_id).await else {
-        tracing::error!(
-            "Software item {} references missing provider config {}",
-            item.id,
-            item.provider_config_id
-        );
-        return Err(sea_orm::DbErr::Custom(
-            "referenced provider config not found".to_string(),
-        ));
-    };
-
     let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
-    Ok(Some(build_detail_response(item, &config, host_count, hosts)))
+    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    Ok(Some(build_detail_response(item, provider_types, host_count, hosts)))
 }
 
-/// Partial update, validating name, package identifier, and config_override.
+/// Partial update — only `name` and `enabled` are updatable.
 /// Returns `Err(NotFound)` if the item does not exist or is deactivated.
 pub async fn update_software_item(
     tenant_db: &TenantDb,
@@ -419,32 +450,19 @@ pub async fn update_software_item(
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    let config = find_raw_active_config(tenant_db, existing.provider_config_id)
-        .await
-        .ok_or(SoftwareItemQueryError::ProviderConfigNotFound)?;
-
     if let Some(ref name) = req.name
         && name.is_empty()
     {
         return Err(SoftwareItemQueryError::EmptyName);
     }
 
-    if let Some(ref new_pid) = req.package_identifier
-        && config.provider_type == "homebrew"
-        && let Err(e) = validate_homebrew_package_identifier(new_pid)
+    // Check for name collision when renaming.
+    if let Some(ref new_name) = req.name
+        && new_name != &existing.name
     {
-        return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
-    }
-
-    let new_package_id = req
-        .package_identifier
-        .as_deref()
-        .unwrap_or(&existing.package_identifier);
-
-    if new_package_id != existing.package_identifier {
         let duplicate = SoftwareItem::find()
-            .filter(software_item::Column::ProviderConfigId.eq(existing.provider_config_id))
-            .filter(software_item::Column::PackageIdentifier.eq(new_package_id))
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(software_item::Column::Name.eq(new_name))
             .filter(software_item::Column::DeactivatedAt.is_null())
             .filter(software_item::Column::Id.ne(id))
             .one(tenant_db.db())
@@ -456,34 +474,11 @@ pub async fn update_software_item(
         }
     }
 
-    if let Some(ref override_val) = req.config_override
-        && !override_val.is_null()
-    {
-        if let Err(e) =
-            validate_config_override(&config.provider_type, &config.config, override_val)
-        {
-            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
-        }
-        if let Err(e) = validate_hooks_internal(override_val) {
-            return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
-        }
-    }
-
     let now = OffsetDateTime::now_utc();
     let mut model: software_item::ActiveModel = existing.into();
 
     if let Some(name) = req.name {
         model.name = Set(name);
-    }
-    if let Some(package_identifier) = req.package_identifier {
-        model.package_identifier = Set(package_identifier);
-    }
-    if let Some(config_override) = req.config_override {
-        if config_override.is_null() {
-            model.config_override = Set(None);
-        } else {
-            model.config_override = Set(Some(config_override));
-        }
     }
     if let Some(enabled) = req.enabled {
         model.enabled = Set(enabled);
@@ -491,8 +486,9 @@ pub async fn update_software_item(
     model.updated_at = Set(now);
 
     let updated = model.update(tenant_db.db()).await.map_err(SoftwareItemQueryError::Db)?;
+    let provider_types = load_provider_types(tenant_db.db(), id).await;
     let host_count = count_linked_hosts(tenant_db.db(), id).await;
-    Ok(build_list_response(&updated, &config, host_count))
+    Ok(build_list_response(&updated, provider_types, host_count))
 }
 
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
@@ -513,23 +509,31 @@ pub async fn delete_software_item(
     Ok(true)
 }
 
-/// Assign hosts to a software item.
+/// Assign hosts to a software item. Each host carries its own provider info.
 /// Returns the updated detail response, or an error if the item or a host is not found.
 pub async fn assign_hosts(
     tenant_db: &TenantDb,
     id: Uuid,
     req: AssignHostsRequest,
 ) -> Result<SoftwareItemDetailResponse, SoftwareItemQueryError> {
-    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+    find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
+    let txn = tenant_db
+        .db()
+        .begin()
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
+
     let now = OffsetDateTime::now_utc();
 
-    for &host_id in &req.host_ids {
+    for assignment in &req.host_assignments {
+        let host_id = assignment.host_id;
+
         let host_exists = Host::find_by_id(host_id)
             .filter(host::Column::DeactivatedAt.is_null())
-            .one(tenant_db.db())
+            .one(&txn)
             .await
             .map_err(SoftwareItemQueryError::Db)?;
 
@@ -537,33 +541,153 @@ pub async fn assign_hosts(
             return Err(SoftwareItemQueryError::HostNotFound(host_id));
         }
 
-        let existing_link = HostSoftwareItem::find_by_id((host_id, id))
-            .one(tenant_db.db())
+        let (provider_config_id, config) =
+            resolve_provider_config_txn(&txn, tenant_db.tenant_id, assignment).await?;
+
+        let package_identifier = assignment.package_identifier.as_deref().unwrap_or("");
+
+        validate_assignment(
+            &config,
+            package_identifier,
+            assignment.config_override.as_ref(),
+        )?;
+
+        // Check global uniqueness of (host_id, provider_config_id, package_identifier).
+        // This prevents the same provider+package appearing under two different software items.
+        let global_conflict = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
+            .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
+            .filter(host_software_item::Column::SoftwareItemId.ne(id))
+            .one(&txn)
             .await
             .map_err(SoftwareItemQueryError::Db)?;
 
-        if existing_link.is_none() {
-            let link = host_software_item::ActiveModel {
-                host_id: Set(host_id),
-                software_item_id: Set(id),
-                installed_version: Set(None),
-                installed_version_detected_at: Set(None),
-                last_updated_at: Set(None),
-                linked_at: Set(now),
-            };
-            link.insert(tenant_db.db())
-                .await
-                .map_err(SoftwareItemQueryError::Db)?;
+        if global_conflict.is_some() {
+            return Err(SoftwareItemQueryError::DuplicateHostAssignment);
+        }
+
+        let existing_link = HostSoftwareItem::find_by_id((host_id, id))
+            .one(&txn)
+            .await
+            .map_err(SoftwareItemQueryError::Db)?;
+
+        match existing_link {
+            Some(link) => {
+                // Update provider info on existing link.
+                let mut active: host_software_item::ActiveModel = link.into();
+                active.provider_config_id = Set(provider_config_id);
+                active.package_identifier = Set(package_identifier.to_string());
+                active.config_override = Set(assignment.config_override.clone());
+                active.update(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+            }
+            None => {
+                let link = host_software_item::ActiveModel {
+                    host_id: Set(host_id),
+                    software_item_id: Set(id),
+                    provider_config_id: Set(provider_config_id),
+                    package_identifier: Set(package_identifier.to_string()),
+                    config_override: Set(assignment.config_override.clone()),
+                    installed_version: Set(None),
+                    installed_version_detected_at: Set(None),
+                    last_updated_at: Set(None),
+                    linked_at: Set(now),
+                };
+                link.insert(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+            }
         }
     }
 
-    let config = find_raw_active_config(tenant_db, item.provider_config_id)
+    txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
+
+    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
         .await
-        .ok_or(SoftwareItemQueryError::ProviderConfigNotFound)?;
+        .ok_or(SoftwareItemQueryError::NotFound)?;
 
     let hosts = load_item_hosts(tenant_db.db(), id).await;
     let host_count = hosts.len() as u64;
-    Ok(build_detail_response(item, &config, host_count, hosts))
+    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    Ok(build_detail_response(item, provider_types, host_count, hosts))
+}
+
+/// Update the provider info for an existing host–software-item assignment.
+pub async fn update_host_assignment(
+    tenant_db: &TenantDb,
+    id: Uuid,
+    host_id: Uuid,
+    req: UpdateHostAssignmentRequest,
+) -> Result<SoftwareItemDetailResponse, SoftwareItemQueryError> {
+    find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+        .await
+        .ok_or(SoftwareItemQueryError::NotFound)?;
+
+    let link = HostSoftwareItem::find_by_id((host_id, id))
+        .one(tenant_db.db())
+        .await
+        .map_err(SoftwareItemQueryError::Db)?
+        .ok_or(SoftwareItemQueryError::NotFound)?;
+
+    // Build a synthetic assignment struct so we can reuse resolve_provider_config_txn.
+    let synthetic = uptrakit_web_api_types::software_items::HostSoftwareAssignment {
+        host_id,
+        provider_config_id: req.provider_config_id.or(Some(link.provider_config_id)),
+        provider_config: req.provider_config,
+        package_identifier: req.package_identifier.clone().or(Some(link.package_identifier.clone())),
+        config_override: req.config_override.clone().or(link.config_override.clone()),
+    };
+
+    let txn = tenant_db
+        .db()
+        .begin()
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
+
+    let (provider_config_id, config) =
+        resolve_provider_config_txn(&txn, tenant_db.tenant_id, &synthetic).await?;
+
+    let package_identifier = synthetic.package_identifier.as_deref().unwrap_or("");
+
+    validate_assignment(&config, package_identifier, synthetic.config_override.as_ref())?;
+
+    // Check for conflicts in other software items.
+    let global_conflict = HostSoftwareItem::find()
+        .filter(host_software_item::Column::HostId.eq(host_id))
+        .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
+        .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
+        .filter(host_software_item::Column::SoftwareItemId.ne(id))
+        .one(&txn)
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
+
+    if global_conflict.is_some() {
+        return Err(SoftwareItemQueryError::DuplicateHostAssignment);
+    }
+
+    let mut active: host_software_item::ActiveModel = link.into();
+    active.provider_config_id = Set(provider_config_id);
+    active.package_identifier = Set(package_identifier.to_string());
+
+    // Handle config_override: explicit null in request clears it.
+    if let Some(ref override_val) = req.config_override {
+        if override_val.is_null() {
+            active.config_override = Set(None);
+        } else {
+            active.config_override = Set(Some(override_val.clone()));
+        }
+    }
+
+    active.update(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+
+    txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
+
+    let item = find_active_item(tenant_db.db(), tenant_db.tenant_id, id)
+        .await
+        .ok_or(SoftwareItemQueryError::NotFound)?;
+
+    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    let host_count = hosts.len() as u64;
+    let provider_types = load_provider_types(tenant_db.db(), id).await;
+    Ok(build_detail_response(item, provider_types, host_count, hosts))
 }
 
 /// Unassign a host from a software item.
@@ -593,6 +717,20 @@ pub async fn unassign_host(
     }
 }
 
+/// Load the provider config ID and package identifier for a specific host assignment.
+/// Used by route handlers to resolve provider info for version checks and updates.
+pub(crate) async fn load_host_assignment(
+    db: &sea_orm::DatabaseConnection,
+    host_id: Uuid,
+    software_item_id: Uuid,
+) -> Option<host_software_item::Model> {
+    HostSoftwareItem::find_by_id((host_id, software_item_id))
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,9 +743,6 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Node.js".to_string(),
-            provider_config_id: uuid::Uuid::now_v7(),
-            package_identifier: String::new(),
-            config_override: None,
             enabled: true,
             discovery_state: None,
             last_checked_at: Some(now),
@@ -615,26 +750,13 @@ mod tests {
             updated_at: now,
             deactivated_at: None,
         };
-        let config = provider_config::Model {
-            id: item.provider_config_id,
-            tenant_id: uuid::Uuid::nil(),
-            name: "My GitHub Config".to_string(),
-            provider_type: "github_releases".to_string(),
-            config: serde_json::json!({}),
-            enabled: true,
-            created_at: now,
-            updated_at: now,
-            deactivated_at: None,
-        };
 
-        let resp = build_list_response(&item, &config, 3);
+        let resp = build_list_response(&item, vec!["github_releases".to_string()], 3);
 
         assert_eq!(resp.name, "Node.js");
-        assert_eq!(resp.provider_config_name, "My GitHub Config");
-        assert_eq!(resp.provider_type, "github_releases");
+        assert_eq!(resp.provider_types, vec!["github_releases"]);
         assert_eq!(resp.host_count, 3);
         assert!(resp.last_checked_at.is_some());
-        assert!(resp.config_override.is_none());
     }
 
     #[test]
@@ -644,23 +766,9 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Redis".to_string(),
-            provider_config_id: uuid::Uuid::now_v7(),
-            package_identifier: "redis-server".to_string(),
-            config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
             enabled: true,
             discovery_state: None,
             last_checked_at: None,
-            created_at: now,
-            updated_at: now,
-            deactivated_at: None,
-        };
-        let config = provider_config::Model {
-            id: item.provider_config_id,
-            tenant_id: uuid::Uuid::nil(),
-            name: "Redis GitHub".to_string(),
-            provider_type: "github_releases".to_string(),
-            config: serde_json::json!({}),
-            enabled: true,
             created_at: now,
             updated_at: now,
             deactivated_at: None,
@@ -669,19 +777,24 @@ mod tests {
             host_id: uuid::Uuid::now_v7(),
             hostname: "web-01".to_string(),
             friendly_name: "Web Server 1".to_string(),
+            provider_config_id: uuid::Uuid::now_v7(),
+            provider_config_name: "GitHub Releases".to_string(),
+            provider_type: "github_releases".to_string(),
+            package_identifier: "redis/redis".to_string(),
+            config_override: Some(serde_json::json!({"asset_patterns": ["redis.*linux"]})),
             installed_version: Some("7.2.4".to_string()),
             installed_version_detected_at: Some(now),
             last_updated_at: None,
             linked_at: now,
         }];
 
-        let resp = build_detail_response(item, &config, 1, hosts);
+        let resp = build_detail_response(item, vec!["github_releases".to_string()], 1, hosts);
 
         assert_eq!(resp.name, "Redis");
-        assert_eq!(resp.package_identifier, "redis-server");
-        assert!(resp.config_override.is_some());
+        assert_eq!(resp.provider_types, vec!["github_releases"]);
         assert_eq!(resp.hosts.len(), 1);
         assert_eq!(resp.hosts[0].hostname, "web-01");
+        assert_eq!(resp.hosts[0].package_identifier, "redis/redis");
         assert_eq!(resp.hosts[0].installed_version, Some("7.2.4".to_string()));
     }
 
@@ -692,9 +805,6 @@ mod tests {
             id: uuid::Uuid::now_v7(),
             tenant_id: uuid::Uuid::nil(),
             name: "Nginx".to_string(),
-            provider_config_id: uuid::Uuid::now_v7(),
-            package_identifier: String::new(),
-            config_override: None,
             enabled: false,
             discovery_state: None,
             last_checked_at: None,
@@ -702,23 +812,13 @@ mod tests {
             updated_at: now,
             deactivated_at: None,
         };
-        let config = provider_config::Model {
-            id: item.provider_config_id,
-            tenant_id: uuid::Uuid::nil(),
-            name: "Config".to_string(),
-            provider_type: "github_releases".to_string(),
-            config: serde_json::json!({}),
-            enabled: true,
-            created_at: now,
-            updated_at: now,
-            deactivated_at: None,
-        };
 
-        let resp = build_list_response(&item, &config, 0);
+        let resp = build_list_response(&item, vec![], 0);
 
         assert!(!resp.enabled);
         assert!(resp.last_checked_at.is_none());
         assert_eq!(resp.host_count, 0);
+        assert!(resp.provider_types.is_empty());
     }
 
     #[test]

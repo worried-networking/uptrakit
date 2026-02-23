@@ -36,6 +36,7 @@ import type {
 	TriggerVersionCheckResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
+	UpdateHostAssignmentRequest,
 	UpdateHostRequest,
 	UpdateMqttClient,
 	UpdateMqttLimitRequest,
@@ -516,7 +517,7 @@ export function getSoftwareItems(
 export function createSoftwareItem(data: CreateSoftwareItemRequest): Promise<SoftwareItemResponse> {
 	return request('/software-items', {
 		method: 'POST',
-		body: JSON.stringify(data)
+		body: JSON.stringify({ name: data.name, enabled: data.enabled })
 	});
 }
 
@@ -541,16 +542,29 @@ export function unassignHostFromSoftwareItem(itemId: string, hostId: string): Pr
 	});
 }
 
+export function unassignHostFromSoftwareItemWithIgnore(itemId: string, hostId: string): Promise<void> {
+	return requestVoid(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}?ignore=true`, {
+		method: 'DELETE'
+	});
+}
+
+export function updateHostAssignment(
+	itemId: string,
+	hostId: string,
+	data: UpdateHostAssignmentRequest
+): Promise<SoftwareItemDetailResponse> {
+	return request(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
 export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersionCheckResponse> {
 	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
 }
 
 export function approveSoftwareItem(id: string): Promise<SoftwareItemResponse> {
 	return request(`/software-items/${encodeURIComponent(id)}/approve`, { method: 'POST' });
-}
-
-export function deleteSoftwareItemWithIgnore(id: string): Promise<void> {
-	return requestVoid(`/software-items/${encodeURIComponent(id)}?ignore=true`, { method: 'DELETE' });
 }
 
 export function triggerHostDiscovery(hostId: string): Promise<TriggerDiscoveryResponse> {

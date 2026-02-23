@@ -47,10 +47,10 @@ to `true`, activating version tracking for the item.
 {
   "id": "019...",
   "name": "git",
-  "provider_config_id": "019...",
-  "package_identifier": "git",
+  "provider_types": ["homebrew"],
   "enabled": true,
   "discovery_state": "approved",
+  "host_count": 1,
   "created_at": "2026-02-23T10:00:00Z",
   "updated_at": "2026-02-23T10:05:00Z"
 }
@@ -338,41 +338,43 @@ discovery runs.
 
 ---
 
-## The `?ignore=true` Query Parameter on `DELETE /api/v1/software-items/{id}`
+## The `?ignore=true` Query Parameter on `DELETE /api/v1/software-items/{id}/hosts/{host_id}`
 
-The standard software item delete endpoint (`DELETE /api/v1/software-items/{id}`) accepts an
-optional `ignore` query parameter. When set to `true`, the operation soft-deletes the item **and**
-atomically creates an ignore rule for its `(provider_config_id, package_identifier)` pair.
+The host assignment delete endpoint accepts an optional `ignore` query parameter. When set to
+`true`, the operation removes the host assignment **and** atomically creates an ignore rule for the
+`(provider_config_id, package_identifier)` pair recorded on that specific host assignment.
+
+```http
+DELETE /api/v1/software-items/{id}/hosts/{host_id}?ignore=true
+```
 
 **Query parameters:**
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ignore` | boolean | `false` | When `true`, also create an ignore rule for this item |
+| `ignore` | boolean | `false` | When `true`, also create an ignore rule for this host assignment |
 
-This parameter works for any software item regardless of its `discovery_state`. You can use it on
-pending, approved, or manually created items.
+The ignore rule is scoped to the `(provider_config_id, package_identifier)` stored on the
+`host_software_item` row being deleted, and applies tenant-wide — future discovery runs on any host
+will skip that package for that provider config.
 
-### Example: discard a pending item and suppress it from future discovery
+### Example: unassign a host and suppress the package from re-discovery
 
 ```http
-DELETE /api/v1/software-items/019.../019...?ignore=true
+DELETE /api/v1/software-items/019.../hosts/019...?ignore=true
 ```
 
-This is the recommended workflow for items you have decided you will never want to track. The ignore
-rule is created in the same operation, so you do not need a separate API call.
+This is the recommended workflow for packages you want to stop tracking **and** prevent from
+reappearing in future discovery runs. If you only want to unassign the host without suppressing
+rediscovery, omit the `?ignore=true` parameter.
 
-**Behaviour when no `package_identifier` is set:** If the item's `package_identifier` is empty
-(possible for manually created items), the ignore rule is not created and the delete proceeds
-normally.
+**Response:** `204` No content
 
-**Response:** `204` No content (same as a standard delete).
-
-**Error responses:** Same as `DELETE /api/v1/software-items/{id}` plus:
+**Error responses:**
 
 | Status | Condition |
 | --- | --- |
-| `404` | Software item not found or not active |
+| `404` | Software item or host assignment not found |
 
 ---
 

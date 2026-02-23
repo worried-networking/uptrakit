@@ -969,6 +969,8 @@ impl MigrationTrait for Migration {
             .await?;
 
         // --- software_items ---
+        // Provider coupling lives on host_software_items, not here.
+        // Each SoftwareItem is a named catalog entry scoped to a tenant.
         manager
             .create_table(
                 Table::create()
@@ -982,13 +984,6 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(SoftwareItems::TenantId).uuid().not_null())
                     .col(string(SoftwareItems::Name))
-                    .col(
-                        ColumnDef::new(SoftwareItems::ProviderConfigId)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(string(SoftwareItems::PackageIdentifier).default(""))
-                    .col(json_null(SoftwareItems::ConfigOverride))
                     .col(boolean(SoftwareItems::Enabled).default(true))
                     .col(string_null(SoftwareItems::DiscoveryState))
                     .col(timestamp_null(SoftwareItems::LastCheckedAt))
@@ -1002,24 +997,17 @@ impl MigrationTrait for Migration {
                             .to(Tenants::Table, Tenants::Id)
                             .on_delete(ForeignKeyAction::Restrict),
                     )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk_software_items_provider_config")
-                            .from(SoftwareItems::Table, SoftwareItems::ProviderConfigId)
-                            .to(ProviderConfigs::Table, ProviderConfigs::Id)
-                            .on_delete(ForeignKeyAction::Restrict),
-                    )
                     .to_owned(),
             )
             .await?;
 
-        // Partial unique index: allow the same (tenant, provider_config, package) to exist
-        // again after a soft-delete, enabling re-discovery of previously deleted items.
+        // Partial unique index: enforce unique names per tenant among active items.
+        // Soft-deleted items are excluded, enabling re-creation with the same name.
         manager
             .get_connection()
             .execute_unprepared(
-                "CREATE UNIQUE INDEX uq_software_items_active \
-                 ON software_items(tenant_id, provider_config_id, package_identifier) \
+                "CREATE UNIQUE INDEX uq_software_items_active_name \
+                 ON software_items(tenant_id, name) \
                  WHERE deactivated_at IS NULL",
             )
             .await?;
@@ -1037,16 +1025,6 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx_software_items_provider_config_id")
-                    .table(SoftwareItems::Table)
-                    .col(SoftwareItems::ProviderConfigId)
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
                     .name("idx_software_items_deactivated_at")
                     .table(SoftwareItems::Table)
                     .col(SoftwareItems::DeactivatedAt)
@@ -1055,6 +1033,9 @@ impl MigrationTrait for Migration {
             .await?;
 
         // --- host_software_items ---
+        // Provider coupling (provider_config_id, package_identifier, config_override)
+        // lives here so one SoftwareItem can be tracked via different providers/packages
+        // across different hosts.
         manager
             .create_table(
                 Table::create()
@@ -1066,6 +1047,13 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
+                    .col(
+                        ColumnDef::new(HostSoftwareItems::ProviderConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(string(HostSoftwareItems::PackageIdentifier).default(""))
+                    .col(json_null(HostSoftwareItems::ConfigOverride))
                     .col(string_null(HostSoftwareItems::InstalledVersion))
                     .col(timestamp_null(
                         HostSoftwareItems::InstalledVersionDetectedAt,
@@ -1091,6 +1079,33 @@ impl MigrationTrait for Migration {
                             .to(SoftwareItems::Table, SoftwareItems::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_host_software_items_provider_config")
+                            .from(HostSoftwareItems::Table, HostSoftwareItems::ProviderConfigId)
+                            .to(ProviderConfigs::Table, ProviderConfigs::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // Prevent the same (host, provider, package) combo appearing under two different
+        // software items.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE UNIQUE INDEX uq_host_software_items_active \
+                 ON host_software_items(host_id, provider_config_id, package_identifier)",
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_host_software_items_provider_config_id")
+                    .table(HostSoftwareItems::Table)
+                    .col(HostSoftwareItems::ProviderConfigId)
                     .to_owned(),
             )
             .await?;
@@ -2420,9 +2435,6 @@ enum SoftwareItems {
     Id,
     TenantId,
     Name,
-    ProviderConfigId,
-    PackageIdentifier,
-    ConfigOverride,
     Enabled,
     DiscoveryState,
     LastCheckedAt,
@@ -2446,6 +2458,9 @@ enum HostSoftwareItems {
     Table,
     HostId,
     SoftwareItemId,
+    ProviderConfigId,
+    PackageIdentifier,
+    ConfigOverride,
     InstalledVersion,
     InstalledVersionDetectedAt,
     LastUpdatedAt,

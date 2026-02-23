@@ -310,21 +310,13 @@ export interface CreateProviderConfigRequest {
 
 export interface CreateSoftwareItemRequest {
 	name: string;
-	provider_config_id?: string;
-	provider_config?: CreateProviderConfigRequest;
-	package_identifier?: string;
-	config_override?: Record<string, unknown> | null;
 	enabled?: boolean;
 }
 
 export interface SoftwareItemResponse {
 	id: string;
 	name: string;
-	provider_config_id: string;
-	provider_config_name: string;
-	provider_type: string;
-	package_identifier: string;
-	config_override: Record<string, unknown> | null;
+	provider_types: string[];
 	enabled: boolean;
 	discovery_state?: 'pending' | 'approved' | null;
 	last_checked_at: string | null;
@@ -337,6 +329,11 @@ export interface SoftwareItemHostSummary {
 	host_id: string;
 	hostname: string;
 	friendly_name: string;
+	provider_config_id: string;
+	provider_config_name: string;
+	provider_type: string;
+	package_identifier: string;
+	config_override: Record<string, unknown> | null;
 	installed_version: string | null;
 	installed_version_detected_at: string | null;
 	last_updated_at: string | null;
@@ -347,8 +344,23 @@ export interface SoftwareItemDetailResponse extends SoftwareItemResponse {
 	hosts: SoftwareItemHostSummary[];
 }
 
+export interface HostSoftwareAssignment {
+	host_id: string;
+	provider_config_id?: string;
+	provider_config?: CreateProviderConfigRequest;
+	package_identifier?: string;
+	config_override?: Record<string, unknown> | null;
+}
+
 export interface AssignHostsRequest {
-	host_ids: string[];
+	host_assignments: HostSoftwareAssignment[];
+}
+
+export interface UpdateHostAssignmentRequest {
+	provider_config_id?: string;
+	provider_config?: CreateProviderConfigRequest;
+	package_identifier?: string;
+	config_override?: Record<string, unknown> | null;
 }
 
 export interface TriggerVersionCheckResponse {

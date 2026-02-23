@@ -54,16 +54,25 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `DELETE /api/v1/services/{id}`: deactivate (soft-delete) a service.
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `/api/v1/services/enrollment-token`: manage enrollment tokens for agents or MQTT services.
-- `/api/v1/software-items`: CRUD endpoints for software items tied to provider configs.
-- `POST /api/v1/software-items/{id}/approve`: approve a discovered (pending) software item. Requires `manage_software`.
+- `/api/v1/software-items`: CRUD endpoints for software items. A software item is a named catalog
+  entry; provider config and package identifier live on each host assignment (`host_software_items`),
+  not on the item itself.
+- `POST /api/v1/software-items/{id}/approve`: approve a discovered (pending) software item.
+  Requires `manage_software`.
+- `POST /api/v1/software-items/{id}/hosts`: assign a software item to one or more hosts. Each host
+  assignment carries its own `provider_config_id`, `package_identifier`, and optional
+  `config_override`. Requires `manage_software`.
+- `PUT /api/v1/software-items/{id}/hosts/{host_id}`: update the provider config, package
+  identifier, or config override for a specific host assignment. Requires `manage_software`.
+- `DELETE /api/v1/software-items/{id}/hosts/{host_id}[?ignore=true]`: remove a host assignment.
+  Pass `?ignore=true` to also create an autodiscovery ignore rule for the assignment's
+  `(provider_config_id, package_identifier)`. Requires `manage_software`.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
 - `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `manage_software`.
 - `DELETE /api/v1/hosts/{id}/discovered[?provider_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.
 - `POST /api/v1/provider-configs/{id}/discover`: trigger discovery for a specific provider config. Requires `manage_software`.
 - `DELETE /api/v1/provider-configs/{id}/discovered`: bulk-discard pending discovered items for a provider config. Requires `manage_software`.
 - `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
-
-Software items link to `provider_config`s and host associations via `host_software_item`.
 
 `ServiceResponse` includes an optional `ping_interval_seconds` field (`Option<u32>`) that reports the per-service
 ping interval override. When `null`, the service uses its type default (300s for agents/SSH agents, 15s for MQTT).

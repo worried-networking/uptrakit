@@ -47,13 +47,18 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
         human.push_str("No software items found.\n");
     } else {
         human.push_str(&format!(
-            "{:<38} {:<25} {:<20} {:<8} HOSTS\n",
-            "ID", "NAME", "PROVIDER", "ENABLED"
+            "{:<38} {:<25} {:<30} {:<8} HOSTS\n",
+            "ID", "NAME", "PROVIDERS", "ENABLED"
         ));
         for item in &resp.items {
+            let providers = if item.provider_types.is_empty() {
+                "-".to_string()
+            } else {
+                item.provider_types.join(", ")
+            };
             human.push_str(&format!(
-                "{:<38} {:<25} {:<20} {:<8} {}\n",
-                item.id, item.name, item.provider_type, item.enabled, item.host_count
+                "{:<38} {:<25} {:<30} {:<8} {}\n",
+                item.id, item.name, providers, item.enabled, item.host_count
             ));
         }
         human.push_str(&format!(
@@ -78,14 +83,12 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     let mut human = String::new();
     human.push_str(&format!("ID:              {}\n", resp.id));
     human.push_str(&format!("Name:            {}\n", resp.name));
-    human.push_str(&format!("Provider Type:   {}\n", resp.provider_type));
-    human.push_str(&format!(
-        "Provider Config: {} ({})\n",
-        resp.provider_config_name, resp.provider_config_id
-    ));
-    if !resp.package_identifier.is_empty() {
-        human.push_str(&format!("Package ID:      {}\n", resp.package_identifier));
-    }
+    let providers = if resp.provider_types.is_empty() {
+        "-".to_string()
+    } else {
+        resp.provider_types.join(", ")
+    };
+    human.push_str(&format!("Providers:       {}\n", providers));
     human.push_str(&format!("Enabled:         {}\n", resp.enabled));
     if let Some(checked) = resp.last_checked_at {
         human.push_str(&format!(
@@ -112,8 +115,8 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
     if !resp.hosts.is_empty() {
         human.push_str("\nAssigned Hosts:\n");
         human.push_str(&format!(
-            "  {:<38} {:<20} {:<15} LINKED AT\n",
-            "HOST ID", "HOSTNAME", "INSTALLED"
+            "  {:<38} {:<20} {:<20} {:<30} {:<15} LINKED AT\n",
+            "HOST ID", "HOSTNAME", "PROVIDER", "PACKAGE", "INSTALLED"
         ));
         for h in &resp.hosts {
             let linked = h
@@ -121,9 +124,11 @@ pub async fn show(params: ShowParams<'_>) -> Result<()> {
                 .format(&Rfc3339)
                 .unwrap_or_else(|_| h.linked_at.to_string());
             human.push_str(&format!(
-                "  {:<38} {:<20} {:<15} {}\n",
+                "  {:<38} {:<20} {:<20} {:<30} {:<15} {}\n",
                 h.host_id,
                 h.hostname,
+                h.provider_type,
+                h.package_identifier,
                 h.installed_version.as_deref().unwrap_or("-"),
                 linked
             ));
