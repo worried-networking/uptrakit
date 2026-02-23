@@ -332,6 +332,24 @@ export interface SoftwareItemResponse {
 	updated_at: string;
 }
 
+export interface SoftwareItemHostSummary {
+	host_id: string;
+	hostname: string;
+	friendly_name: string;
+	installed_version: string | null;
+	installed_version_detected_at: string | null;
+	last_updated_at: string | null;
+	linked_at: string;
+}
+
+export interface SoftwareItemDetailResponse extends SoftwareItemResponse {
+	hosts: SoftwareItemHostSummary[];
+}
+
+export interface AssignHostsRequest {
+	host_ids: string[];
+}
+
 export interface UpdateOidcProviderRequest {
 	name?: string;
 	slug?: string;

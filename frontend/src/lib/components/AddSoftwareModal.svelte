@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
-	import { getProviderConfigs, createSoftwareItem } from '$lib/api';
+	import { getProviderConfigs, createSoftwareItem, getHosts, assignHostsToSoftwareItem } from '$lib/api';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
-	import type { ProviderConfigResponse, SoftwareItemResponse } from '$lib/types';
+	import type { HostResponse, ProviderConfigResponse, SoftwareItemResponse } from '$lib/types';
 
-	let { onclose, onsuccess }: {
+	let {
+		onclose,
+		onsuccess
+	}: {
 		onclose: () => void;
 		onsuccess: (created: SoftwareItemResponse) => void;
 	} = $props();
@@ -27,6 +31,13 @@
 	let configsLoading: boolean = $state(false);
 	let providerConfigs: ProviderConfigResponse[] = $state([]);
 	let configsLoadError: string | null = $state(null);
+
+	// Host assignment
+	let showAssignHosts: boolean = $state(false);
+	let allHosts: HostResponse[] = $state([]);
+	let hostsLoading: boolean = $state(false);
+	let hostsLoadFailed: boolean = $state(false);
+	const selectedHostIds = new SvelteSet<string>();
 
 	const providerTypeOptions = [
 		{ value: 'github_releases', label: 'GitHub Releases' },
@@ -50,25 +61,37 @@
 	};
 
 	const activeProviderType = $derived(
-		createNewConfig
-			? providerConfigType
-			: (providerConfigs.find((c) => c.id === providerConfigId)?.provider_type ?? '')
+		createNewConfig ? providerConfigType : (providerConfigs.find((c) => c.id === providerConfigId)?.provider_type ?? '')
 	);
 
 	onMount(async () => {
 		configsLoading = true;
+		hostsLoading = true;
 		try {
-			const result = await getProviderConfigs(1, 500);
-			providerConfigs = result.items;
-			providerConfigId = result.items[0]?.id ?? '';
-			if (result.items.length === 0) {
-				createNewConfig = true;
-				providerConfigText = providerConfigTemplate(providerConfigType);
+			const [configsResult, hostsResult] = await Promise.allSettled([getProviderConfigs(1, 500), getHosts(1, 200)]);
+
+			if (configsResult.status === 'fulfilled') {
+				providerConfigs = configsResult.value.items;
+				providerConfigId = configsResult.value.items[0]?.id ?? '';
+				if (configsResult.value.items.length === 0) {
+					createNewConfig = true;
+					providerConfigText = providerConfigTemplate(providerConfigType);
+				}
+			} else {
+				configsLoadError =
+					configsResult.reason instanceof Error
+						? configsResult.reason.message
+						: 'Failed to load provider configurations.';
 			}
-		} catch (e) {
-			configsLoadError = e instanceof Error ? e.message : 'Failed to load provider configurations.';
+
+			if (hostsResult.status === 'fulfilled') {
+				allHosts = hostsResult.value.items;
+			} else {
+				hostsLoadFailed = true;
+			}
 		} finally {
 			configsLoading = false;
+			hostsLoading = false;
 		}
 	});
 
@@ -112,6 +135,14 @@
 		} catch (e) {
 			newConfigError = e instanceof Error ? e.message : 'Invalid JSON.';
 			return null;
+		}
+	}
+
+	function toggleHost(hostId: string) {
+		if (selectedHostIds.has(hostId)) {
+			selectedHostIds.delete(hostId);
+		} else {
+			selectedHostIds.add(hostId);
 		}
 	}
 
@@ -166,6 +197,20 @@
 				config_override: overrideValue ?? undefined,
 				enabled
 			});
+
+			const hostIds = [...selectedHostIds];
+			if (hostIds.length > 0) {
+				try {
+					await assignHostsToSoftwareItem(created.id, { host_ids: hostIds });
+				} catch {
+					showError(
+						'Software registered, but host assignment failed. You can assign hosts later from the context menu.'
+					);
+					onsuccess(created);
+					return;
+				}
+			}
+
 			showSuccess('Software item registered.');
 			onsuccess(created);
 		} catch (e) {
@@ -318,15 +363,57 @@
 					{/if}
 				{/if}
 			</div>
+
+			<div class="space-y-2">
+				<button
+					type="button"
+					class="text-sm text-surface-500 hover:text-surface-700 dark:hover:text-surface-300"
+					onclick={() => (showAssignHosts = !showAssignHosts)}
+				>
+					{showAssignHosts ? 'Hide host assignment ▲' : 'Assign to hosts (optional) ▼'}
+				</button>
+				{#if showAssignHosts}
+					{#if hostsLoadFailed}
+						<aside class="rounded-lg p-3 preset-tonal-surface">
+							<p class="text-sm text-surface-500">Host list unavailable. You can assign hosts after registration.</p>
+						</aside>
+					{:else if hostsLoading}
+						<p class="text-sm text-surface-500">Loading hosts...</p>
+					{:else if allHosts.length === 0}
+						<aside class="rounded-lg p-3 preset-tonal-surface">
+							<p class="text-sm text-surface-500">No hosts registered yet. You can assign hosts after registration.</p>
+						</aside>
+					{:else}
+						<ul
+							class="max-h-48 overflow-y-auto space-y-0.5 rounded-lg border border-surface-200 dark:border-surface-700 p-2"
+						>
+							{#each allHosts as host (host.id)}
+								<li>
+									<label
+										class="flex items-center gap-3 rounded-md px-2 py-1.5 cursor-pointer hover:bg-surface-100 dark:hover:bg-surface-800"
+									>
+										<input
+											class="checkbox"
+											type="checkbox"
+											checked={selectedHostIds.has(host.id)}
+											onchange={() => toggleHost(host.id)}
+										/>
+										<span class="flex-1 min-w-0">
+											<span class="block text-sm font-medium truncate">{host.friendly_name}</span>
+											<span class="block text-xs text-surface-500 truncate">{host.hostname}</span>
+										</span>
+									</label>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				{/if}
+			</div>
 		{/if}
 
 		<div class="flex justify-end gap-2">
 			<button class="btn preset-tonal-surface" onclick={onclose}>Cancel</button>
-			<button
-				class="btn preset-filled-primary-500"
-				disabled={submitting || configsLoading}
-				onclick={submit}
-			>
+			<button class="btn preset-filled-primary-500" disabled={submitting || configsLoading} onclick={submit}>
 				{submitting ? 'Registering...' : 'Register Software'}
 			</button>
 		</div>

@@ -1,6 +1,7 @@
 import { getAccessToken, setAccessToken, setSessionExpired } from './auth.svelte';
 import type {
 	AgentCertificateSettings,
+	AssignHostsRequest,
 	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
@@ -25,6 +26,7 @@ import type {
 	RegistrationSettings,
 	RenewServerCertResponse,
 	ServiceResponse,
+	SoftwareItemDetailResponse,
 	SoftwareItemResponse,
 	SystemAlertsResponse,
 	UpdateAgentCertificateSettings,
@@ -505,5 +507,26 @@ export function createSoftwareItem(data: CreateSoftwareItemRequest): Promise<Sof
 	return request('/software-items', {
 		method: 'POST',
 		body: JSON.stringify(data)
+	});
+}
+
+export function getSoftwareItem(id: string): Promise<SoftwareItemDetailResponse> {
+	return request(`/software-items/${encodeURIComponent(id)}`);
+}
+
+export function deleteSoftwareItem(id: string): Promise<void> {
+	return requestVoid(`/software-items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function assignHostsToSoftwareItem(id: string, data: AssignHostsRequest): Promise<SoftwareItemDetailResponse> {
+	return request(`/software-items/${encodeURIComponent(id)}/hosts`, {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export function unassignHostFromSoftwareItem(itemId: string, hostId: string): Promise<void> {
+	return requestVoid(`/software-items/${encodeURIComponent(itemId)}/hosts/${encodeURIComponent(hostId)}`, {
+		method: 'DELETE'
 	});
 }
