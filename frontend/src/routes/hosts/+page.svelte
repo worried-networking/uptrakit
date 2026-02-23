@@ -28,7 +28,7 @@
 	onMount(() => {
 		loadHosts(1);
 		refreshInterval = setInterval(() => {
-			if (document.visibilityState === 'visible') loadHosts(currentPage);
+			if (document.visibilityState === 'visible') loadHosts(currentPage, true);
 		}, 60_000);
 	});
 
@@ -36,15 +36,18 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
-	async function loadHosts(page: number) {
+	async function loadHosts(page: number, background = false) {
 		try {
-			error = null;
+			if (!background) error = null;
 			const result = await getHosts(page);
 			hosts = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
+			if (background) error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load hosts';
+			if (!background) {
+				error = e instanceof Error ? e.message : 'Failed to load hosts';
+			}
 		}
 	}
 

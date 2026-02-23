@@ -45,7 +45,7 @@
 		if (canView) {
 			loadAll(1);
 			refreshInterval = setInterval(() => {
-				if (document.visibilityState === 'visible') loadAll(currentPage);
+				if (document.visibilityState === 'visible') loadAll(currentPage, true);
 			}, 60_000);
 		}
 	});
@@ -60,19 +60,24 @@
 		return undefined;
 	}
 
-	async function loadAll(page: number) {
-		loading = true;
-		try {
+	async function loadAll(page: number, background = false) {
+		if (!background) {
+			loading = true;
 			error = null;
+		}
+		try {
 			const result = await getSoftwareItems(page, undefined, discoveryStateFilter());
 			items = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
 			totalItems = result.total;
+			if (background) error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load software items';
+			if (!background) {
+				error = e instanceof Error ? e.message : 'Failed to load software items';
+			}
 		} finally {
-			loading = false;
+			if (!background) loading = false;
 		}
 	}
 

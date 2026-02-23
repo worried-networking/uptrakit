@@ -32,7 +32,7 @@
 		loadServices(1);
 
 		refreshInterval = setInterval(() => {
-			if (document.visibilityState === 'visible') loadServices(currentPage);
+			if (document.visibilityState === 'visible') loadServices(currentPage, true);
 		}, 60_000);
 
 		return () => {
@@ -44,10 +44,9 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
-	async function loadServices(page: number) {
+	async function loadServices(page: number, background = false) {
 		try {
-			error = null;
-			// Pass typeFilter to getServices if it's not 'all'
+			if (!background) error = null;
 			const result = await getServices({
 				type: typeFilter === 'all' ? undefined : typeFilter,
 				page
@@ -55,8 +54,11 @@
 			services = result.items;
 			currentPage = result.page;
 			totalPages = result.total_pages;
+			if (background) error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load services';
+			if (!background) {
+				error = e instanceof Error ? e.message : 'Failed to load services';
+			}
 		}
 	}
 
