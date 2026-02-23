@@ -6,6 +6,14 @@ pub use uptrakit_shared_types::{ProviderType, ReleaseAsset, ReleaseInfo};
 use crate::version::Version;
 
 /// Capabilities that a provider may support.
+///
+/// # Design note
+///
+/// This is a closed, centralized enum rather than a trait-based capability system.
+/// All providers in this project are first-party and registered exclusively through
+/// `uptrakit-provider-registry` (see AGENTS.md: "adding a new provider only through
+/// the registry is an acceptable tradeoff"). `#[non_exhaustive]` allows adding new
+/// variants in future releases without requiring downstream match-arm updates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]

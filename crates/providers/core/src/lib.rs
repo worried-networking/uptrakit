@@ -31,3 +31,14 @@ pub use uptrakit_shared_types::SecretString;
 
 // Re-export tokio::sync::mpsc so provider crates don't need a direct tokio dependency
 pub use tokio::sync::mpsc;
+
+/// Typed sender for streaming update output lines to the executor.
+///
+/// Prefer this alias over `mpsc::Sender<UpdateOutputLine>` directly so that
+/// provider code remains decoupled from the concrete channel implementation.
+pub type UpdateOutputSender = mpsc::Sender<UpdateOutputLine>;
+
+/// Typed receiver for consuming update output lines produced by the executor.
+///
+/// Prefer this alias over `mpsc::Receiver<UpdateOutputLine>` directly.
+pub type UpdateOutputReceiver = mpsc::Receiver<UpdateOutputLine>;

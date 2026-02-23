@@ -174,3 +174,98 @@ A dedicated `reverse-proxy-tests` CI job runs these on `ubuntu-latest` (Docker p
 When validating reverse proxy setups locally, confirm `/api/v1/services` shows expected service IP metadata and
 `last_seen_at` movement for both Agent and MQTT services. Cross-check the security model in
 [docs/security/reverse-proxy-security.md](../security/reverse-proxy-security.md).
+
+## Frontend Testing
+
+The frontend uses [Vitest](https://vitest.dev/) for unit and component tests and
+[Playwright](https://playwright.dev/) for end-to-end tests. All tests live inside the `frontend/`
+directory.
+
+### Unit and component tests (Vitest)
+
+```bash
+# Run all Vitest tests once
+cd frontend && npm run test
+
+# Run with coverage report
+cd frontend && npm run test:coverage
+```
+
+Coverage is collected from `src/lib/**` via the `@vitest/coverage-v8` provider. Minimum thresholds
+are enforced for lines (70%), branches (65%), and functions (70%). These thresholds will increase
+as coverage grows.
+
+**Test locations:**
+
+| Test file | What it covers |
+| --- | --- |
+| `src/lib/api.test.ts` | `authenticatedFetch`, token refresh, error extraction |
+| `src/lib/auth.test.ts` | `initialize`, `handleLogin`, `handleLogout`, `handleOidcCallback` |
+| `src/lib/utils.test.ts` | `isValidLogoUrl`, `formatDate`, `safeRedirect`, `copyToClipboard` |
+| `src/routes/services/services.test.ts` | Services page: load, error, empty state, filter buttons |
+| `src/routes/hosts/hosts.test.ts` | Hosts page: load, error, empty state |
+| `src/lib/components/Pagination.test.ts` | Prev/Next disabled states, click handlers, page display |
+| `src/lib/components/ContextMenu.test.ts` | Keyboard navigation (Arrow/Home/End/Enter/Escape) |
+| `src/lib/components/ModalBackdrop.test.ts` | Focus trapping (Tab/Shift+Tab), Escape, backdrop click |
+| `src/lib/components/ConfirmDialog.test.ts` | Confirm/cancel callbacks, disabled state, labels |
+
+Component tests use [`@testing-library/svelte`](https://testing-library.com/docs/svelte-testing-library/intro/)
+with jsdom. The `src/test-setup.ts` file imports `@testing-library/jest-dom` matchers. The `$lib`
+path alias is configured in `vitest.config.ts` so component tests can import with `$lib/...`
+exactly as production code does.
+
+#### Mocking Svelte 5 rune modules
+
+`$lib/auth.svelte` and `$lib/api` are mocked in route component tests using `vi.mock()`. Because
+vitest hoists `vi.mock()` calls, the mock is applied before the component is imported:
+
+```typescript
+vi.mock('$lib/auth.svelte', () => ({ getUser: vi.fn(() => null) }));
+vi.mock('$lib/api', () => ({ getServices: vi.fn() }));
+
+import ServicesPage from './+page.svelte'; // receives the mocked modules
+```
+
+#### Testing components that accept Svelte 5 snippets
+
+Components that take a `children: Snippet` prop (e.g. `ContextMenu`, `ModalBackdrop`) use Svelte
+5's `createRawSnippet` to pass static HTML content in tests:
+
+```typescript
+import { createRawSnippet } from 'svelte';
+
+const children = createRawSnippet(() => ({
+  render: () => '<button role="menuitem">Action</button>'
+}));
+
+render(ContextMenu, { top: 0, left: 0, onclose: vi.fn(), children });
+```
+
+### End-to-end tests (Playwright)
+
+```bash
+# Install Chromium (one-time setup)
+cd frontend && npx playwright install --with-deps chromium
+
+# Run all E2E tests (starts the dev server automatically)
+cd frontend && npm run test:e2e
+```
+
+E2E tests live in `frontend/tests/e2e/` and run against the SvelteKit dev server (started
+automatically by Playwright's `webServer` configuration). **No Uptrakit backend is required** —
+all API calls are intercepted with `page.route()` inside each test.
+
+**Test files:**
+
+| File | Coverage |
+| --- | --- |
+| `tests/e2e/auth.test.ts` | Unauthenticated redirect, login form, successful login, wrong credentials |
+| `tests/e2e/services.test.ts` | Service list rendering, empty state, type filter |
+| `tests/e2e/hosts.test.ts` | Host list rendering, empty state, context menu, deactivate dialog |
+
+E2E tests are **not** run in CI automatically. To add them to CI, install Chromium in the job
+(`npx playwright install --with-deps chromium`) and run `npm run test:e2e` after `npm run build`.
+See `playwright.config.ts` for the full configuration.
+
+> **Security note:** See [docs/security/auth-and-authorization.md](../security/auth-and-authorization.md)
+> for authentication flow details that E2E tests exercise.

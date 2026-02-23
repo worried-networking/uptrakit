@@ -3,6 +3,15 @@ use rootcause::prelude::*;
 use serde::Serialize;
 
 /// Output format for CLI responses.
+///
+/// # Design note (`#[non_exhaustive]`)
+///
+/// `#[non_exhaustive]` is intentionally absent here. `OutputFormat` implements
+/// `clap::ValueEnum`, which requires exhaustive matching inside this crate when
+/// dispatching output formatting. The only consumers outside the binary are the
+/// intra-workspace integration tests, which also match exhaustively. Adding
+/// `#[non_exhaustive]` would break those test `match` arms without providing
+/// any semver-safety benefit for a crate-internal type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum OutputFormat {
     /// Human-readable output (default)
