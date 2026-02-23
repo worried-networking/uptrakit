@@ -10,7 +10,9 @@ detection timestamp).
   `package_identifier` (default `""`), `config_override?` (JSON), `enabled` (default `true`), `discovery_state?`
   (TEXT — `null` for manual items, `'pending'` for discovered-not-yet-reviewed, `'approved'` for reviewed
   discovered items), `last_checked_at?`, `created_at`, `updated_at`, `deactivated_at?`
-  - Partial unique index: `uq_software_items_active ON (tenant_id, provider_config_id, package_identifier) WHERE deactivated_at IS NULL` — prevents duplicate tracking of the same active package; deleted items can be re-discovered
+  - Partial unique index: `uq_software_items_active ON (tenant_id, provider_config_id, package_identifier)
+    WHERE deactivated_at IS NULL` — prevents duplicate tracking of the same active package; deleted items
+    can be re-discovered
   - Indexes: `idx_software_items_provider_config_id`, `idx_software_items_deactivated_at`
 - **`autodiscovery_ignores`**: `id` (UUID PK), `tenant_id` (FK → `tenants.id`, ON DELETE CASCADE),
   `provider_config_id` (FK → `provider_configs.id`, ON DELETE CASCADE), `package_identifier` (TEXT), `created_at`
@@ -49,7 +51,7 @@ Pending items are created automatically by the autodiscovery subsystem. See
 | Method | Path | Permission | Status | Description |
 | :----- | :---------------------------------------------------- | :------------- | :----- | :------------------------------------------------------------------ |
 | POST | `/api/v1/software-items` | ManageSoftware | 201 | Create a new software item |
-| GET | `/api/v1/software-items` | ViewSoftware | 200 | List all active software items (with host count) |
+| GET | `/api/v1/software-items` | ViewSoftware | 200 | List active software items; supports `?discovery_state=pending\|approved` filter |
 | GET | `/api/v1/software-items/{id}` | ViewSoftware | 200 | Get software item with assigned hosts + installed versions |
 | PUT | `/api/v1/software-items/{id}` | ManageSoftware | 200 | Update name, enabled, package_identifier, config_override |
 | DELETE | `/api/v1/software-items/{id}` | ManageSoftware | 204 | Soft-delete; add `?ignore=true` to also create an ignore rule |

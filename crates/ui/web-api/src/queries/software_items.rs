@@ -5,9 +5,9 @@ use sea_orm::{
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, provider_config, software_item};
-use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
+use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
+    AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams, SoftwareItemDetailResponse,
     SoftwareItemHostSummary, SoftwareItemResponse, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
@@ -342,14 +342,18 @@ pub async fn create_software_item(
 
 pub async fn list_software_items(
     tenant_db: &TenantDb,
-    params: &PaginationParams,
+    params: &ListSoftwareItemsParams,
 ) -> Result<PaginatedResponse<SoftwareItemResponse>, sea_orm::DbErr> {
-    let pagination = params.resolve();
+    let pagination = params.pagination().resolve();
 
-    let base_query = SoftwareItem::find()
+    let mut base_query = SoftwareItem::find()
         .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(software_item::Column::DeactivatedAt.is_null())
         .order_by_asc(software_item::Column::Name);
+
+    if let Some(state) = &params.discovery_state {
+        base_query = base_query.filter(software_item::Column::DiscoveryState.eq(state.clone()));
+    }
 
     let total = base_query.clone().count(tenant_db.db()).await?;
 

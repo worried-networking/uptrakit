@@ -2,17 +2,17 @@ use crate::Result;
 use crate::UptrakitClient;
 use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
-    SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse, TriggerVersionCheckResponse,
-    UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
+    SoftwareItemDetailResponse, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
+    TriggerVersionCheckResponse, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
 impl UptrakitClient {
-    /// List software items with pagination.
+    /// List software items with pagination and optional discovery state filter.
     pub async fn list_software_items(
         &self,
-        params: &PaginationParams,
+        params: &ListSoftwareItemsParams,
     ) -> Result<PaginatedResponse<SoftwareItemResponse>> {
         self.get_with_query(crate::paths::software_items::BASE, params)
             .await

@@ -326,6 +326,7 @@ export interface SoftwareItemResponse {
 	package_identifier: string;
 	config_override: Record<string, unknown> | null;
 	enabled: boolean;
+	discovery_state?: 'pending' | 'approved' | null;
 	last_checked_at: string | null;
 	host_count: number;
 	created_at: string;
@@ -366,4 +367,27 @@ export interface UpdateOidcProviderRequest {
 	auto_create_users?: boolean;
 	role_claim_path?: string;
 	role_mapping?: Record<string, string>;
+}
+
+export interface TriggerDiscoveryResponse {
+	providers_queued: number;
+	message: string;
+}
+
+export interface DiscardDiscoveredResponse {
+	discarded_count: number;
+}
+
+export interface AutodiscoveryIgnoreResponse {
+	id: string;
+	provider_config_id: string;
+	provider_config_name: string;
+	provider_type: string;
+	package_identifier: string;
+	created_at: string;
+}
+
+export interface CreateAutodiscoveryIgnoreRequest {
+	provider_config_id: string;
+	package_identifier: string;
 }

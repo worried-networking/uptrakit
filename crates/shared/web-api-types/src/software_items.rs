@@ -3,6 +3,7 @@ use time::OffsetDateTime;
 use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
 
+use crate::pagination::PaginationParams;
 use crate::provider_configs::CreateProviderConfigRequest;
 use crate::validation::{Validate, ValidationError};
 
@@ -177,6 +178,27 @@ pub struct TriggerVersionCheckResponse {
     pub agents_notified: u32,
     /// Human-readable status message.
     pub message: String,
+}
+
+/// Query parameters for listing software items, extending pagination with an optional
+/// discovery state filter.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+pub struct ListSoftwareItemsParams {
+    /// Page number (1-indexed). Defaults to 1.
+    pub page: Option<u64>,
+    /// Items per page. Defaults to 20, max 1000.
+    pub per_page: Option<u64>,
+    /// Filter by discovery state. Valid values: `"pending"`, `"approved"`.
+    /// Omit to return all items regardless of discovery state.
+    pub discovery_state: Option<SoftwareDiscoveryState>,
+}
+
+impl ListSoftwareItemsParams {
+    /// Convert the pagination fields to a [`PaginationParams`] for resolution.
+    pub fn pagination(&self) -> PaginationParams {
+        PaginationParams { page: self.page, per_page: self.per_page }
+    }
 }
 
 impl Validate for CreateSoftwareItemRequest {

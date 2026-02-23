@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { getUser } from '$lib/auth.svelte';
-	import { getHosts, updateHost, deactivateHost } from '$lib/api';
+	import { getHosts, updateHost, deactivateHost, triggerHostDiscovery } from '$lib/api';
 	import type { HostResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
 	import { formatDate } from '$lib/utils';
+	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
@@ -19,6 +20,8 @@
 	let submitting: boolean = $state(false);
 	let currentPage: number = $state(1);
 	let totalPages: number = $state(1);
+
+	let discoveringHostIds: Set<string> = $state(new Set());
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -115,7 +118,25 @@
 		}
 	}
 
+	async function triggerDiscovery(host: HostResponse) {
+		closeMenu();
+		discoveringHostIds = new Set([...discoveringHostIds, host.id]);
+		try {
+			const result = await triggerHostDiscovery(host.id);
+			if (result.providers_queued > 0) {
+				showSuccess(`Discovery triggered — ${result.providers_queued} provider(s) queued for "${host.friendly_name}"`);
+			} else {
+				showSuccess(`Discovery triggered — no providers queued for "${host.friendly_name}"`);
+			}
+		} catch (e) {
+			showError(e instanceof Error ? e.message : 'Failed to trigger discovery.');
+		} finally {
+			discoveringHostIds = new Set([...discoveringHostIds].filter((id) => id !== host.id));
+		}
+	}
+
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageHosts) ?? false);
+	const canManageSoftware = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 </script>
 
 <svelte:window
@@ -211,6 +232,19 @@
 						Edit Name
 					</button>
 				</li>
+				{#if canManageSoftware}
+					<li>
+						<button
+							class="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-surface-200 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50"
+							role="menuitem"
+							tabindex="-1"
+							disabled={discoveringHostIds.has(host.id)}
+							onclick={() => triggerDiscovery(host)}
+						>
+							{discoveringHostIds.has(host.id) ? 'Triggering…' : 'Trigger Discovery'}
+						</button>
+					</li>
+				{/if}
 				<li>
 					<button
 						class="w-full rounded-md px-3 py-2 text-left text-sm text-error-500 hover:bg-surface-200 dark:hover:bg-surface-800"

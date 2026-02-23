@@ -5,8 +5,11 @@ import type {
 	AuthenticationSettings,
 	AuthMethodsResponse,
 	AuthResponse,
+	AutodiscoveryIgnoreResponse,
 	CombinedSettingsResponse,
+	CreateAutodiscoveryIgnoreRequest,
 	CreateOidcProviderRequest,
+	DiscardDiscoveredResponse,
 	EnrollmentTokenResponse,
 	EnrollmentTokenStatus,
 	HostResponse,
@@ -29,6 +32,7 @@ import type {
 	SoftwareItemDetailResponse,
 	SoftwareItemResponse,
 	SystemAlertsResponse,
+	TriggerDiscoveryResponse,
 	TriggerVersionCheckResponse,
 	UpdateAgentCertificateSettings,
 	UpdateAuthenticationSettings,
@@ -496,10 +500,15 @@ export function getProviderConfigs(
 	return request(`/provider-configs${query ? `?${query}` : ''}`);
 }
 
-export function getSoftwareItems(page?: number, perPage?: number): Promise<PaginatedResponse<SoftwareItemResponse>> {
+export function getSoftwareItems(
+	page?: number,
+	perPage?: number,
+	discoveryState?: 'pending' | 'approved'
+): Promise<PaginatedResponse<SoftwareItemResponse>> {
 	const params = new URLSearchParams();
 	if (page != null) params.set('page', String(page));
 	if (perPage != null) params.set('per_page', String(perPage));
+	if (discoveryState != null) params.set('discovery_state', discoveryState);
 	const query = params.toString();
 	return request(`/software-items${query ? `?${query}` : ''}`);
 }
@@ -534,4 +543,46 @@ export function unassignHostFromSoftwareItem(itemId: string, hostId: string): Pr
 
 export function checkSoftwareItemVersions(itemId: string): Promise<TriggerVersionCheckResponse> {
 	return request(`/software-items/${encodeURIComponent(itemId)}/check-versions`, { method: 'POST' });
+}
+
+export function approveSoftwareItem(id: string): Promise<SoftwareItemResponse> {
+	return request(`/software-items/${encodeURIComponent(id)}/approve`, { method: 'POST' });
+}
+
+export function deleteSoftwareItemWithIgnore(id: string): Promise<void> {
+	return requestVoid(`/software-items/${encodeURIComponent(id)}?ignore=true`, { method: 'DELETE' });
+}
+
+export function triggerHostDiscovery(hostId: string): Promise<TriggerDiscoveryResponse> {
+	return request(`/hosts/${encodeURIComponent(hostId)}/discover`, { method: 'POST' });
+}
+
+export function discardHostDiscovered(hostId: string, providerConfigId?: string): Promise<DiscardDiscoveredResponse> {
+	const params = new URLSearchParams();
+	if (providerConfigId != null) params.set('provider_config_id', providerConfigId);
+	const query = params.toString();
+	return request(`/hosts/${encodeURIComponent(hostId)}/discovered${query ? `?${query}` : ''}`, {
+		method: 'DELETE'
+	});
+}
+
+export function getAutodiscoveryIgnores(
+	page?: number,
+	perPage?: number,
+	providerConfigId?: string
+): Promise<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
+	const params = new URLSearchParams();
+	if (page != null) params.set('page', String(page));
+	if (perPage != null) params.set('per_page', String(perPage));
+	if (providerConfigId != null) params.set('provider_config_id', providerConfigId);
+	const query = params.toString();
+	return request(`/autodiscovery/ignores${query ? `?${query}` : ''}`);
+}
+
+export function createAutodiscoveryIgnore(req: CreateAutodiscoveryIgnoreRequest): Promise<AutodiscoveryIgnoreResponse> {
+	return request('/autodiscovery/ignores', { method: 'POST', body: JSON.stringify(req) });
+}
+
+export function deleteAutodiscoveryIgnore(id: string): Promise<void> {
+	return requestVoid(`/autodiscovery/ignores/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

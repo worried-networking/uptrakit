@@ -23,9 +23,10 @@ use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
 pub use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, SoftwareItemDetailResponse,
-    SoftwareItemHostSummary, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
-    TriggerUpdateStatus, TriggerVersionCheckResponse, UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, ListSoftwareItemsParams,
+    SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
+    TriggerUpdateRequest, TriggerUpdateResponse, TriggerUpdateStatus, TriggerVersionCheckResponse,
+    UpdateSoftwareItemRequest,
 };
 
 // --- Error mapping helper ---
@@ -98,7 +99,8 @@ pub async fn create_software_item(
     path = "/api/v1/software-items",
     params(
         ("page" = Option<u64>, Query, description = "Page number (1-indexed, default 1)"),
-        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)")
+        ("per_page" = Option<u64>, Query, description = "Items per page (default 20, max 1000)"),
+        ("discovery_state" = Option<String>, Query, description = "Filter by discovery state: \"pending\" or \"approved\". Omit to return all items.")
     ),
     extensions(("x-required-permission" = json!("view_software"))),
     responses(
@@ -110,7 +112,7 @@ pub async fn create_software_item(
 pub async fn list_software_items(
     tenant_db: TenantDb,
     CanViewSoftware(_user): CanViewSoftware,
-    Query(params): Query<PaginationParams>,
+    Query(params): Query<ListSoftwareItemsParams>,
 ) -> Response {
     match item_queries::list_software_items(&tenant_db, &params).await {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),

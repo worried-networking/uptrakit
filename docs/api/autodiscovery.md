@@ -1,14 +1,17 @@
 # Autodiscovery API Reference
 
-This document covers all API endpoints related to the autodiscovery feature: approving discovered software items, triggering discovery runs, bulk-discarding pending items, and managing ignore rules.
+This document covers all API endpoints related to the autodiscovery feature: approving discovered
+software items, triggering discovery runs, bulk-discarding pending items, and managing ignore rules.
 
-For a user-facing explanation of how autodiscovery works and the typical review workflow, see [Autodiscovery (End-user Guide)](../end-user/autodiscovery.md).
+For a user-facing explanation of how autodiscovery works and the typical review workflow,
+see [Autodiscovery (End-user Guide)](../end-user/autodiscovery.md).
 
 For the underlying data model, see [Software Item Entity](../architecture/software-item-entity.md).
 
 ## Software Item Discovery State
 
-The `discovery_state` field on `SoftwareItemResponse` describes how the item was created and whether it has been reviewed.
+The `discovery_state` field on `SoftwareItemResponse` describes how the item was created
+and whether it has been reviewed.
 
 | Value | Meaning | `enabled` value |
 | --- | --- | --- |
@@ -16,7 +19,8 @@ The `discovery_state` field on `SoftwareItemResponse` describes how the item was
 | `"pending"` | Discovered by an agent, awaiting review | `false` |
 | `"approved"` | Discovered item approved by a user | `true` |
 
-`enabled` is always `false` while `discovery_state` is `"pending"`. Approving a pending item sets both `discovery_state` to `"approved"` and `enabled` to `true`, activating version tracking.
+`enabled` is always `false` while `discovery_state` is `"pending"`. Approving a pending item sets
+both `discovery_state` to `"approved"` and `enabled` to `true`, activating version tracking.
 
 ---
 
@@ -24,7 +28,8 @@ The `discovery_state` field on `SoftwareItemResponse` describes how the item was
 
 ### `POST /api/v1/software-items/{id}/approve`
 
-Approve a pending discovered software item. Sets `discovery_state` to `"approved"` and `enabled` to `true`, activating version tracking for the item.
+Approve a pending discovered software item. Sets `discovery_state` to `"approved"` and `enabled`
+to `true`, activating version tracking for the item.
 
 **Permission:** `manage_software`
 
@@ -62,7 +67,9 @@ Approve a pending discovered software item. Sets `discovery_state` to `"approved
 
 ### `POST /api/v1/hosts/{id}/discover`
 
-Trigger an autodiscovery run for a specific host. The controller dispatches discovery requests to all connected agents linked to this host. Each agent queries its discovery-capable providers and returns results.
+Trigger an autodiscovery run for a specific host. The controller dispatches discovery requests to
+all connected agents linked to this host. Each agent queries its discovery-capable providers and
+returns results.
 
 **Permission:** `manage_software`
 
@@ -98,7 +105,9 @@ Trigger an autodiscovery run for a specific host. The controller dispatches disc
 
 ### `DELETE /api/v1/hosts/{id}/discovered`
 
-Bulk-discard all pending discovered items for a host. Soft-deletes every software item with `discovery_state = "pending"` that is assigned to this host. No ignore rules are created, so discarded packages can be re-discovered in future runs.
+Bulk-discard all pending discovered items for a host. Soft-deletes every software item with
+`discovery_state = "pending"` that is assigned to this host. No ignore rules are created,
+so discarded packages can be re-discovered in future runs.
 
 **Permission:** `manage_software`
 
@@ -138,7 +147,8 @@ Bulk-discard all pending discovered items for a host. Soft-deletes every softwar
 
 ### `POST /api/v1/provider-configs/{id}/discover`
 
-Trigger an autodiscovery run for a specific provider config across all connected agents. Returns an error if the provider type does not support the `DiscoverLocalSoftware` capability.
+Trigger an autodiscovery run for a specific provider config across all connected agents.
+Returns an error if the provider type does not support the `DiscoverLocalSoftware` capability.
 
 **Permission:** `manage_software`
 
@@ -175,7 +185,9 @@ Trigger an autodiscovery run for a specific provider config across all connected
 
 ### `DELETE /api/v1/provider-configs/{id}/discovered`
 
-Bulk-discard all pending discovered items for a provider config across all hosts. Soft-deletes every software item with `discovery_state = "pending"` linked to this provider config. No ignore rules are created.
+Bulk-discard all pending discovered items for a provider config across all hosts. Soft-deletes
+every software item with `discovery_state = "pending"` linked to this provider config. No ignore
+rules are created.
 
 **Permission:** `manage_software`
 
@@ -209,7 +221,8 @@ Bulk-discard all pending discovered items for a provider config across all hosts
 
 ### `GET /api/v1/autodiscovery/ignores`
 
-List autodiscovery ignore rules for the current tenant. Ignore rules suppress specific packages from being created as pending items in future discovery runs.
+List autodiscovery ignore rules for the current tenant. Ignore rules suppress specific packages
+from being created as pending items in future discovery runs.
 
 **Permission:** `view_software`
 
@@ -257,7 +270,9 @@ List autodiscovery ignore rules for the current tenant. Ignore rules suppress sp
 
 ### `POST /api/v1/autodiscovery/ignores`
 
-Create an ignore rule to permanently suppress a specific package from future discovery runs. This endpoint is idempotent: if a rule already exists for the `(provider_config_id, package_identifier)` pair, the existing rule is returned rather than creating a duplicate.
+Create an ignore rule to permanently suppress a specific package from future discovery runs.
+This endpoint is idempotent: if a rule already exists for the `(provider_config_id,
+package_identifier)` pair, the existing rule is returned rather than creating a duplicate.
 
 **Permission:** `manage_software`
 
@@ -275,7 +290,8 @@ Create an ignore rule to permanently suppress a specific package from future dis
 | `provider_config_id` | UUID | Yes | Provider config to scope the rule to |
 | `package_identifier` | string | Yes | Package identifier to suppress (must not be empty) |
 
-**Response `201`:** Ignore rule response (same shape as items returned by `GET /api/v1/autodiscovery/ignores`)
+**Response `201`:** Ignore rule response (same shape as items returned by
+`GET /api/v1/autodiscovery/ignores`)
 
 ```json
 {
@@ -299,7 +315,8 @@ Create an ignore rule to permanently suppress a specific package from future dis
 
 ### `DELETE /api/v1/autodiscovery/ignores/{id}`
 
-Delete an ignore rule. After deletion, the suppressed package can be re-discovered in future discovery runs.
+Delete an ignore rule. After deletion, the suppressed package can be re-discovered in future
+discovery runs.
 
 **Permission:** `manage_software`
 
@@ -323,25 +340,31 @@ Delete an ignore rule. After deletion, the suppressed package can be re-discover
 
 ## The `?ignore=true` Query Parameter on `DELETE /api/v1/software-items/{id}`
 
-The standard software item delete endpoint (`DELETE /api/v1/software-items/{id}`) accepts an optional `ignore` query parameter. When set to `true`, the operation soft-deletes the item **and** atomically creates an ignore rule for its `(provider_config_id, package_identifier)` pair.
+The standard software item delete endpoint (`DELETE /api/v1/software-items/{id}`) accepts an
+optional `ignore` query parameter. When set to `true`, the operation soft-deletes the item **and**
+atomically creates an ignore rule for its `(provider_config_id, package_identifier)` pair.
 
 **Query parameters:**
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `ignore` | boolean | `false` | When `true`, also create an ignore rule for this item's `(provider_config_id, package_identifier)` |
+| `ignore` | boolean | `false` | When `true`, also create an ignore rule for this item |
 
-This parameter works for any software item regardless of its `discovery_state`. You can use it on pending, approved, or manually created items.
+This parameter works for any software item regardless of its `discovery_state`. You can use it on
+pending, approved, or manually created items.
 
-**Example: discard a pending item and suppress it from future discovery**
+### Example: discard a pending item and suppress it from future discovery
 
-```
+```http
 DELETE /api/v1/software-items/019.../019...?ignore=true
 ```
 
-This is the recommended workflow for items you have decided you will never want to track. The ignore rule is created in the same operation, so you do not need a separate API call.
+This is the recommended workflow for items you have decided you will never want to track. The ignore
+rule is created in the same operation, so you do not need a separate API call.
 
-**Behaviour when no `package_identifier` is set:** If the item's `package_identifier` is empty (possible for manually created items), the ignore rule is not created and the delete proceeds normally.
+**Behaviour when no `package_identifier` is set:** If the item's `package_identifier` is empty
+(possible for manually created items), the ignore rule is not created and the delete proceeds
+normally.
 
 **Response:** `204` No content (same as a standard delete).
 
@@ -355,7 +378,11 @@ This is the recommended workflow for items you have decided you will never want 
 
 ## Related Documentation
 
-- [Autodiscovery (End-user Guide)](../end-user/autodiscovery.md) -- workflow overview and user-facing concepts.
-- [Software Item Entity](../architecture/software-item-entity.md) -- full data model, database schema, and existing software item CRUD endpoints.
-- [HTTP Web API](http-web-api.md) -- common API patterns, pagination, error response format, and authentication.
-- [Provider Guidelines](../development/provider-guidelines.md) -- `DiscoverLocalSoftware` provider capability and `discover_software()` method contract.
+- [Autodiscovery (End-user Guide)](../end-user/autodiscovery.md) — workflow overview and
+  user-facing concepts.
+- [Software Item Entity](../architecture/software-item-entity.md) — full data model, database
+  schema, and existing software item CRUD endpoints.
+- [HTTP Web API](http-web-api.md) — common API patterns, pagination, error response format, and
+  authentication.
+- [Provider Guidelines](../development/provider-guidelines.md) — `DiscoverLocalSoftware` provider
+  capability and `discover_software()` method contract.

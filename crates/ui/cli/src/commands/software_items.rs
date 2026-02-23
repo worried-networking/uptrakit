@@ -4,7 +4,7 @@ use crate::output::{OutputFormat, print_output};
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::pagination::PaginationParams;
+use uptrakit_openapi_client::types::software_items::ListSoftwareItemsParams;
 
 /// Parameters for listing software items.
 pub struct ListParams<'a> {
@@ -35,11 +35,12 @@ pub async fn list(params: ListParams<'_>) -> Result<()> {
         params.insecure,
         params.request_timeout,
     )?;
-    let pagination = PaginationParams {
+    let list_params = ListSoftwareItemsParams {
         page: params.page,
         per_page: params.per_page,
+        discovery_state: None,
     };
-    let resp = client.list_software_items(&pagination).await.context_to()?;
+    let resp = client.list_software_items(&list_params).await.context_to()?;
 
     let mut human = String::new();
     if resp.items.is_empty() {
