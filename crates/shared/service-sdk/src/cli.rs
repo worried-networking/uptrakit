@@ -63,6 +63,10 @@ pub struct CommonServiceArgs {
     /// Preserves the cached CA certificate.
     #[arg(long)]
     pub force_enroll: bool,
+
+    /// Increase log verbosity (-v for debug, -vv for trace).
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    pub verbose: u8,
 }
 
 impl CommonServiceArgs {
@@ -172,6 +176,7 @@ mod tests {
         assert!(!args.common.force_enroll);
         assert!(args.common.pki_addr.is_none());
         assert_eq!(args.common.url.as_deref(), Some("https://controller:8443"));
+        assert_eq!(args.common.verbose, 0);
     }
 
     #[test]
@@ -339,6 +344,19 @@ mod tests {
     fn version_flag_parses_without_url() {
         let args = TestArgs::try_parse_from(["test-service", "--version"]).expect("should parse");
         assert!(args.common.version);
+    }
+
+    #[test]
+    fn verbose_flag_counts_occurrences() {
+        let args = TestArgs::try_parse_from([
+            "test-service",
+            "--url",
+            "https://controller:8443",
+            "-v",
+            "-v",
+        ])
+        .expect("should parse");
+        assert_eq!(args.common.verbose, 2);
     }
 
     #[test]

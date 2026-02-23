@@ -107,11 +107,13 @@ impl GitHubProvider {
     fn convert_release(&self, gh_release: &GitHubRelease) -> Option<UpstreamRelease> {
         // Skip drafts
         if gh_release.draft {
+            tracing::trace!(tag = %gh_release.tag_name, "skipping draft release");
             return None;
         }
 
         // Skip prereleases unless configured to include them
         if gh_release.prerelease && !self.config.include_prereleases {
+            tracing::trace!(tag = %gh_release.tag_name, "skipping prerelease");
             return None;
         }
 
@@ -206,6 +208,7 @@ impl Provider for GitHubProvider {
         self.check_rate_limit(response.headers());
 
         if !status.is_success() {
+            tracing::debug!(status = %status, "GitHub API returned error status");
             // Check for rate limiting
             if status == reqwest::StatusCode::FORBIDDEN
                 || status == reqwest::StatusCode::TOO_MANY_REQUESTS
@@ -305,6 +308,7 @@ impl Provider for GitHubProvider {
             )
             .await;
 
+            tracing::debug!(command = %cmd, "running GitHub update command");
             match self
                 .executor
                 .execute(&CommandSpec::shell(&cmd), output_tx)

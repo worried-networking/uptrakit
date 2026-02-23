@@ -13,7 +13,6 @@ mod ssh_transport;
 
 use clap::Parser;
 use rootcause::prelude::*;
-use tracing_subscriber::EnvFilter;
 use uptrakit_internal_wire::{ControllerMessage, DisconnectReason, ServiceType};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -180,9 +179,8 @@ async fn main() {
 
     // Host subcommands run with minimal tracing and no rustls provider.
     if let Some(Commands::Host { command }) = args.command {
-        // Minimal tracing for CLI subcommands.
-        let filter = EnvFilter::from_default_env();
-        tracing_subscriber::fmt().with_env_filter(filter).init();
+        // Verbosity-aware tracing for CLI subcommands.
+        uptrakit_service_sdk::init_tracing("uptrakit_agent_ssh", args.common.verbose);
 
         if let Err(e) = init_master_key(&args.master_key_file, args.allow_plaintext_secrets) {
             eprintln!("error: {e}");
@@ -211,7 +209,7 @@ async fn main() {
         std::process::exit(1);
     }
 
-    uptrakit_service_sdk::init_tracing("uptrakit_agent_ssh=info");
+    uptrakit_service_sdk::init_tracing("uptrakit_agent_ssh", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     // Initialize master encryption key for local SSH credential storage.

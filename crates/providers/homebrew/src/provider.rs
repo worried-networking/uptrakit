@@ -283,6 +283,7 @@ impl Provider for HomebrewProvider {
 
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         self.require_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "detecting installed Homebrew version");
         let cmd_output = self
             .executor
             .execute_quiet(&CommandSpec::exec(
@@ -310,14 +311,16 @@ impl Provider for HomebrewProvider {
             )))
         })?;
 
-        Ok(
+        let version =
             Self::parse_installed_version(&json, package_identifier, self.is_cask())
-                .map(|v| Version::new(&v)),
-        )
+                .map(|v| Version::new(&v));
+        tracing::debug!(version = ?version, "Homebrew version detection result");
+        Ok(version)
     }
 
     async fn fetch_releases(&self, package_identifier: &str) -> Result<Vec<UpstreamRelease>> {
         self.require_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "fetching Homebrew releases");
         let cmd_output = self
             .executor
             .execute_quiet(&CommandSpec::exec(
@@ -367,7 +370,7 @@ impl Provider for HomebrewProvider {
                 .unwrap_or("")
         };
 
-        Ok(vec![UpstreamRelease {
+        let releases = vec![UpstreamRelease {
             version: Version::new(&version_str),
             tag: version_str,
             is_prerelease: false,
@@ -375,7 +378,9 @@ impl Provider for HomebrewProvider {
             release_notes: None,
             published_at: None,
             assets: vec![],
-        }])
+        }];
+        tracing::debug!(count = releases.len(), "Homebrew releases fetched");
+        Ok(releases)
     }
 
     async fn execute_update(
@@ -395,6 +400,7 @@ impl Provider for HomebrewProvider {
             vec!["upgrade".to_string(), pkg.to_string()]
         };
 
+        tracing::debug!(package = %pkg, "running brew upgrade");
         send_output(
             output_tx,
             &format!("Running: brew {}", args.join(" ")),

@@ -57,6 +57,8 @@ pub(crate) async fn run_command_exec_impl(
     working_dir: Option<&str>,
     output_tx: Option<&mpsc::Sender<UpdateOutputLine>>,
 ) -> crate::Result<(String, i32)> {
+    tracing::debug!(program, args = ?args, working_dir = ?working_dir, "spawning command");
+
     let mut cmd = Command::new(program);
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -88,6 +90,7 @@ pub(crate) async fn run_command_exec_impl(
         let mut output = String::new();
         let mut truncated = false;
         while let Ok(Some(line)) = lines.next_line().await {
+            tracing::trace!(line = %line, stream = "stdout", "command output");
             if let Some(ref tx) = stdout_tx {
                 let _ = tx
                     .send(UpdateOutputLine {
@@ -116,6 +119,7 @@ pub(crate) async fn run_command_exec_impl(
         let mut output = String::new();
         let mut truncated = false;
         while let Ok(Some(line)) = lines.next_line().await {
+            tracing::trace!(line = %line, stream = "stderr", "command output");
             if let Some(ref tx) = stderr_tx {
                 let _ = tx
                     .send(UpdateOutputLine {
@@ -161,6 +165,7 @@ pub(crate) async fn run_command_exec_impl(
         .map_err(|e| report!(CommandError::CommandWait(e)))?;
 
     let exit_code = status.code().unwrap_or(-1);
+    tracing::debug!(exit_code, "command exited");
 
     if !status.success() {
         bail!(CommandError::CommandFailed(exit_code));
@@ -224,6 +229,7 @@ pub async fn run_command_with_shell(
     shell: HookShell,
     output_tx: &mpsc::Sender<UpdateOutputLine>,
 ) -> crate::Result<(String, i32)> {
+    tracing::trace!(cmd = %cmd, "running shell command");
     let wrapped_cmd = wrap_command_for_shell(cmd, shell);
     let (shell_exec, shell_arg) = get_shell_args(shell);
 
@@ -243,6 +249,7 @@ pub async fn run_command_with_shell_quiet(
     cmd: &str,
     shell: HookShell,
 ) -> crate::Result<(String, i32)> {
+    tracing::trace!(cmd = %cmd, "running shell command (quiet)");
     let wrapped_cmd = wrap_command_for_shell(cmd, shell);
     let (shell_exec, shell_arg) = get_shell_args(shell);
 

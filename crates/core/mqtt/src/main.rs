@@ -142,7 +142,7 @@ async fn main() {
         return;
     }
 
-    uptrakit_service_sdk::init_tracing("uptrakit_mqtt=info");
+    uptrakit_service_sdk::init_tracing("uptrakit_mqtt", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     let instance_id = generate_instance_id();

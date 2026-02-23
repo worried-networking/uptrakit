@@ -1,6 +1,7 @@
 use uptrakit_cli::{commands, error, output};
 
 use clap::{CommandFactory, Parser, Subcommand};
+use tracing_subscriber::EnvFilter;
 use uptrakit_build_info::BuildInfo;
 use uptrakit_cli::output::OutputFormat;
 use uptrakit_openapi_client::Uuid;
@@ -32,6 +33,11 @@ struct Cli {
     /// Output format
     #[arg(long, short, global = true, default_value_t, value_enum)]
     output: OutputFormat,
+
+    /// Increase log verbosity (-v for warn, -vv for info, -vvv for debug, -vvvv for trace).
+    /// Log output goes to stderr; command output stays on stdout.
+    #[arg(short = 'v', long = "verbose", global = true, action = clap::ArgAction::Count)]
+    verbose: u8,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -647,6 +653,27 @@ async fn main() {
             std::process::exit(1);
         }
         return;
+    }
+
+    if cli.verbose > 4 {
+        eprintln!(
+            "warning: -vvvvv or more has no additional effect; maximum verbosity is -vvvv (trace)"
+        );
+    }
+    if cli.verbose > 0 {
+        let level = match cli.verbose {
+            1 => "warn",
+            2 => "info",
+            3 => "debug",
+            _ => "trace",
+        };
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_env_filter(
+                EnvFilter::from_default_env()
+                    .add_directive(level.parse().expect("valid level directive")),
+            )
+            .init();
     }
 
     if cli.insecure {
@@ -1421,6 +1448,13 @@ mod tests {
     /// Parse a UUID constant (safe in tests).
     fn uuid(s: &str) -> Uuid {
         s.parse().expect("test UUID constant should be valid")
+    }
+
+    #[test]
+    fn verbose_flag_parses() {
+        let args =
+            Cli::try_parse_from(["uptrakit", "-v", "-v", "-v"]).expect("should parse -v flags");
+        assert_eq!(args.verbose, 3);
     }
 
     #[test]

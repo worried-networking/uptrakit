@@ -46,6 +46,7 @@ pub async fn connect_ws(
 ) -> Result<WsStream> {
     let ws_url = format!("wss://{host}:{port}/api/v1/ws/service");
     tracing::info!(url = %ws_url, "connecting to controller");
+    tracing::debug!(host, port, "opening TCP connection");
 
     let tcp_stream = tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -68,6 +69,7 @@ pub async fn connect_ws(
         .into_client_request()
         .context_to::<EnrollmentError>()?;
 
+    tracing::debug!("upgrading to WebSocket");
     if let Some(header_value) = auth_header {
         request.headers_mut().insert(
             http::header::AUTHORIZATION,
@@ -96,6 +98,7 @@ pub async fn send_enroll(
     in_seq: &mut IncomingSeq,
     payload: EnrollPayload,
 ) -> Result<EnrolledPayload> {
+    tracing::trace!("sending Enroll message");
     let msg = ServiceMessage::Enroll(payload);
     let json = serde_json::to_string(&out_seq.wrap_service(msg)).context_to::<EnrollmentError>()?;
     ws.send(Message::Text(json.into()))
@@ -191,7 +194,10 @@ pub async fn wait_for_approval(ws: &mut WsStream, in_seq: &mut IncomingSeq) -> R
                             tracing::error!(service_id = %payload.service_id, "enrollment rejected");
                             bail!(EnrollmentError::Protocol(ProtocolError::EnrollmentRejected));
                         }
-                        ControllerMessage::Pong(_) => continue,
+                        ControllerMessage::Pong(_) => {
+                            tracing::trace!("received pong during enrollment wait");
+                            continue;
+                        }
                         ControllerMessage::Error(err) => {
                             bail!(EnrollmentError::Protocol(ProtocolError::Enrollment(format!(
                                 "{}: {}",
@@ -226,6 +232,7 @@ pub async fn request_certificate_ws(
     in_seq: &mut IncomingSeq,
     csr_pem: &str,
 ) -> Result<CertificatePayload> {
+    tracing::debug!("sending certificate request");
     let msg = ServiceMessage::RequestCertificate(RequestCertificatePayload {
         csr_pem: csr_pem.to_string(),
     });
@@ -378,6 +385,7 @@ pub async fn run_enrollment(params: EnrollmentParams<'_>) -> Result<()> {
     }
 
     // Generate keypair + CSR, request certificate
+    tracing::debug!("generating CSR for enrollment");
     identity.ensure_keypair().await?;
     let csr_pem = identity.generate_csr_for_self()?;
 
@@ -399,6 +407,7 @@ pub async fn resume_enrollment(
     port: u16,
     tls_connector: &TlsConnector,
 ) -> Result<()> {
+    tracing::debug!("resuming enrollment with stored credentials");
     let enrollment_secret = identity
         .enrollment_secret()
         .ok_or_else(|| report!(EnrollmentError::Identity(IdentityError::NotEnrolled)))?

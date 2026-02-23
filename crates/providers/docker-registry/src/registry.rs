@@ -86,6 +86,7 @@ impl RegistryClient {
     async fn authenticated_get(&self, url: &str) -> Result<String> {
         // Try with cached token first
         if let Some(token) = self.auth.cached_bearer_token() {
+            tracing::trace!("using cached registry auth token");
             let response = self
                 .client
                 .get(url)
@@ -117,8 +118,10 @@ impl RegistryClient {
                 .unwrap_or("")
                 .to_string();
 
+            tracing::debug!("fetching new registry auth token");
             let token = self.auth.fetch_token(&self.client, &www_auth).await?;
 
+            tracing::debug!("retrying registry request after auth refresh");
             let retry_response = self
                 .client
                 .get(url)
@@ -196,6 +199,7 @@ impl RegistryClient {
         let status = response.status();
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            tracing::warn!("Docker registry rate limit encountered");
             bail!(DockerRegistryError::RateLimited);
         }
 

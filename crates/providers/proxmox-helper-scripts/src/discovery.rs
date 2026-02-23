@@ -38,6 +38,7 @@ pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
 
             let slug = &remaining[..dot_sh_pos];
             if !is_valid_slug(slug) {
+                tracing::trace!(slug, "skipping invalid PHS slug");
                 continue;
             }
 
@@ -51,6 +52,7 @@ pub fn parse_phs_scripts(content: &str) -> Vec<PhsScript> {
         }
     }
 
+    tracing::debug!(count = scripts.len(), "parsed PHS scripts from update file");
     scripts
 }
 
@@ -90,6 +92,7 @@ pub fn parse_version_file(content: &str) -> Option<&str> {
 /// traversal and injection when constructing file paths from the identifier.
 pub fn validate_package_identifier(id: &str) -> uptrakit_provider_core::Result<()> {
     if id.is_empty() {
+        tracing::debug!(identifier = %id, "invalid PHS package identifier");
         bail!(ProviderError::Configuration(
             "package identifier must not be empty".to_string()
         ));
@@ -98,12 +101,14 @@ pub fn validate_package_identifier(id: &str) -> uptrakit_provider_core::Result<(
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     {
+        tracing::debug!(identifier = %id, "invalid PHS package identifier");
         bail!(ProviderError::Configuration(format!(
             "invalid package identifier '{id}': must match [a-z0-9-]"
         )));
     }
     let first = id.as_bytes()[0];
     if first == b'-' {
+        tracing::debug!(identifier = %id, "invalid PHS package identifier");
         bail!(ProviderError::Configuration(format!(
             "invalid package identifier '{id}': must not start with '-'"
         )));

@@ -82,6 +82,7 @@ impl ProxmoxHelperScriptsProvider {
 
     /// Read the user's HOME directory via `printenv HOME`.
     async fn resolve_home(&self) -> Result<String> {
+        tracing::trace!("resolving HOME directory via printenv");
         let output = self
             .executor
             .execute_quiet(&CommandSpec::exec("printenv", ["HOME".to_string()]))
@@ -98,6 +99,7 @@ impl ProxmoxHelperScriptsProvider {
                 "HOME environment variable is empty".to_string()
             ));
         }
+        tracing::debug!(home = %home, "HOME directory resolved");
         Ok(home)
     }
 
@@ -204,6 +206,7 @@ impl Provider for ProxmoxHelperScriptsProvider {
 
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
         validate_package_identifier(package_identifier)?;
+        tracing::debug!(package = %package_identifier, "detecting PHS installed version");
 
         let home = self.resolve_home().await?;
         let version_path = format!("{home}/.{package_identifier}");
@@ -213,10 +216,12 @@ impl Provider for ProxmoxHelperScriptsProvider {
             "reading PHS version file"
         );
 
-        Ok(self
+        let version = self
             .try_read_version_file(&version_path)
             .await
-            .map(Version::new))
+            .map(Version::new);
+        tracing::debug!(version = ?version, "PHS version detection result");
+        Ok(version)
     }
 
     async fn execute_update(
@@ -229,6 +234,7 @@ impl Provider for ProxmoxHelperScriptsProvider {
         let mut output = String::new();
         let script_url = &self.config.script_url;
 
+        tracing::debug!(script_url = %script_url, "executing PHS update script");
         send_output(
             output_tx,
             &format!("Running update script from {script_url}"),

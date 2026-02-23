@@ -484,6 +484,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Service Lifecycle](docs/development/service-lifecycle.md)
 - [OpenAPI Client](docs/development/openapi-client.md)
 - [Embedded Frontend](docs/development/embedded-frontend.md)
+- [Logging](docs/development/logging.md)
 
 ### Architecture
 

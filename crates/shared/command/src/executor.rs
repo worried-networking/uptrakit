@@ -165,6 +165,7 @@ impl CommandExecutor for LocalCommandExecutor {
         spec: &CommandSpec,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> crate::Result<CommandOutput> {
+        tracing::debug!(timeout = ?spec.timeout, "executing command");
         let (program, args) = spec.resolve();
         let fut = run_command_exec_impl(
             &program,
@@ -173,25 +174,30 @@ impl CommandExecutor for LocalCommandExecutor {
             Some(output_tx),
         );
         let (output, exit_code) = if let Some(dur) = spec.timeout {
-            tokio::time::timeout(dur, fut)
-                .await
-                .map_err(|_| report!(CommandError::TimedOut))??
+            tokio::time::timeout(dur, fut).await.map_err(|_| {
+                tracing::warn!(timeout = ?dur, "command timed out");
+                report!(CommandError::TimedOut)
+            })??
         } else {
             fut.await?
         };
+        tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
     }
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
+        tracing::debug!("executing command (quiet)");
         let (program, args) = spec.resolve();
         let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), None);
         let (output, exit_code) = if let Some(dur) = spec.timeout {
-            tokio::time::timeout(dur, fut)
-                .await
-                .map_err(|_| report!(CommandError::TimedOut))??
+            tokio::time::timeout(dur, fut).await.map_err(|_| {
+                tracing::warn!(timeout = ?dur, "command timed out");
+                report!(CommandError::TimedOut)
+            })??
         } else {
             fut.await?
         };
+        tracing::debug!(exit_code, "command completed");
         Ok(CommandOutput { output, exit_code })
     }
 }

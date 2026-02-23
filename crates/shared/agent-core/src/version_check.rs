@@ -27,6 +27,8 @@ pub async fn check_version(
     package_identifier: &str,
     executor: Arc<dyn CommandExecutor>,
 ) -> VersionCheckOutcome {
+    tracing::debug!(provider_type = ?provider_type, package_identifier, "checking version");
+
     let provider = match ProviderRegistry::create_provider(provider_type, config, executor) {
         Ok(p) => p,
         Err(e) => {
@@ -38,9 +40,16 @@ pub async fn check_version(
         }
     };
 
+    tracing::debug!("detecting installed version");
     let installed_version = match provider.detect_installed_version(package_identifier).await {
-        Ok(Some(version)) => Some(version.to_string()),
-        Ok(None) => None,
+        Ok(Some(version)) => {
+            tracing::debug!(version = %version, "installed version detected");
+            Some(version.to_string())
+        }
+        Ok(None) => {
+            tracing::debug!("no installed version detected");
+            None
+        }
         Err(e) => {
             return VersionCheckOutcome {
                 installed_version: None,
@@ -53,8 +62,12 @@ pub async fn check_version(
     // For providers that can resolve latest versions locally (e.g., Homebrew),
     // also fetch the latest available version from the package index.
     let latest_version = if provider.has_capability(ProviderCapability::RefreshPackageIndex) {
+        tracing::debug!("fetching releases from provider");
         match provider.fetch_releases(package_identifier).await {
-            Ok(releases) => releases.first().map(|r| r.version.to_string()),
+            Ok(releases) => {
+                tracing::debug!(count = releases.len(), "releases fetched");
+                releases.first().map(|r| r.version.to_string())
+            }
             Err(e) => {
                 tracing::debug!(error = %e, "failed to fetch latest version from provider");
                 None

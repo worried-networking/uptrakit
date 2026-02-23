@@ -47,7 +47,9 @@ impl ControllerConnection {
         tls_connector: &TlsConnector,
         auth_header: Option<&str>,
     ) -> Result<Self> {
+        tracing::debug!(host, port, "connecting to controller");
         let ws = connect_ws(host, port, tls_connector, auth_header).await?;
+        tracing::debug!("WebSocket connection established");
         Ok(Self {
             ws,
             out_seq: OutgoingSeq::new(),
@@ -64,6 +66,7 @@ impl ControllerConnection {
     pub async fn send(&mut self, msg: ServiceMessage) -> Result<()> {
         use tokio_tungstenite::tungstenite::Message;
 
+        tracing::trace!("sending message to controller");
         let envelope = self.out_seq.wrap_service(msg);
         let json = serde_json::to_string(&envelope).context_to::<EnrollmentError>()?;
         self.ws
@@ -106,6 +109,7 @@ impl ControllerConnection {
                             continue;
                         }
                     };
+                    tracing::trace!(msg_type = ?envelope.message, "received message from controller");
                     return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Binary(data))) => {
@@ -123,9 +127,11 @@ impl ControllerConnection {
                             continue;
                         }
                     };
+                    tracing::trace!(msg_type = ?envelope.message, "received message from controller");
                     return Ok(Some(envelope.message));
                 }
                 Some(Ok(Message::Ping(data))) => {
+                    tracing::trace!("received ping from controller");
                     self.ws
                         .send(Message::Pong(data))
                         .await

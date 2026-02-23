@@ -67,6 +67,7 @@ impl DockerPuller for BollardDockerPuller {
         auth: Option<&DockerAuth>,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
+        tracing::debug!(image = %image, "starting Docker image pull");
         let credentials = auth.map(|a| map_auth_to_credentials(image, a));
 
         let mut stream = self.docker.create_image(
@@ -87,6 +88,7 @@ impl DockerPuller for BollardDockerPuller {
             // In bollard 0.20, errors are surfaced via `error_detail`.
             if let Some(ref detail) = info.error_detail {
                 let msg = detail.message.as_deref().unwrap_or("docker pull error");
+                tracing::warn!(error = %msg, "Docker pull stream error");
                 bail!(DockerRegistryError::PullFailed(msg.to_string()));
             }
 
@@ -99,6 +101,7 @@ impl DockerPuller for BollardDockerPuller {
             }
         }
 
+        tracing::debug!("Docker image pull stream completed");
         Ok(output)
     }
 }

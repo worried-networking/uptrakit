@@ -159,6 +159,10 @@ pub struct Args {
     /// The time to wait for existing connections to drain before forcing shutdown.
     #[arg(long, default_value = "30")]
     pub shutdown_timeout_secs: u64,
+
+    /// Increase log verbosity (-v for debug, -vv for trace).
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    pub verbose: u8,
 }
 
 /// OIDC provider bootstrap options.
@@ -310,6 +314,14 @@ mod tests {
         assert!(args.trusted_proxies.is_empty());
         assert!(args.sans.is_empty());
         assert!(!args.force_settings_override);
+        assert_eq!(args.verbose, 0);
+    }
+
+    #[test]
+    fn verbose_flag_parses() {
+        let args = super::Args::try_parse_from(["uptrakit-controller", "-v"])
+            .expect("should parse -v flag");
+        assert_eq!(args.verbose, 1);
     }
 
     #[test]

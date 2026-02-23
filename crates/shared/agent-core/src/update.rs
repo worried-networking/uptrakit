@@ -85,10 +85,12 @@ pub async fn execute_update(
     executor: Arc<dyn CommandExecutor>,
     output_tx: mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateExecutionResult {
+    tracing::info!(software_item = %payload.software_item_name, "starting update");
     let update_history_id = payload.update_history_id;
 
     // Detect current version (from_version)
     let from_version = detect_current_version(&payload, Arc::clone(&executor)).await;
+    tracing::debug!(from_version = ?from_version, "detected current version before update");
 
     let mut accumulated_output = String::new();
     let mut final_error: Option<String> = None;
@@ -144,8 +146,10 @@ pub async fn execute_update(
         )
         .await;
 
+        tracing::debug!("executing provider update");
         match execute_provider_update(&payload, &output_tx, Arc::clone(&executor)).await {
             Ok(output) => {
+                tracing::debug!("provider update returned");
                 append_bounded(&mut accumulated_output, &output, MAX_OUTPUT_BYTES);
             }
             Err(e) => {
@@ -196,6 +200,7 @@ pub async fn execute_update(
     // Handle timeout or execution result
     let to_version = match execution_result {
         Ok(Ok(())) => {
+            tracing::info!(software_item = %payload.software_item_name, "update completed");
             send_output(
                 &output_tx,
                 "[update] Update completed successfully",
@@ -260,6 +265,7 @@ async fn detect_current_version(
             "failed to detect current version"
         );
     }
+    tracing::debug!(version = ?outcome.installed_version, "current version detected");
     outcome.installed_version
 }
 
@@ -313,6 +319,7 @@ async fn run_hook_command(
     stream_type: OutputStreamType,
     output_tx: &mpsc::Sender<UpdateOutputMessage>,
 ) -> UpdateResult<(String, i32)> {
+    tracing::debug!(hook = ?hook_cmd, "running update hook");
     // Bridge provider output -> agent output
     let (provider_tx, mut provider_rx) = mpsc::channel::<UpdateOutputLine>(100);
     let bridge_output_tx = output_tx.clone();
@@ -350,7 +357,11 @@ async fn run_hook_command(
     drop(provider_tx);
     let _ = bridge_handle.await;
 
-    result.map_err(|e| report!(UpdateError::HookFailed(e.to_string())))
+    let result = result.map_err(|e| report!(UpdateError::HookFailed(e.to_string())));
+    if let Ok((_, exit_code)) = &result {
+        tracing::debug!(exit_code, "hook completed");
+    }
+    result
 }
 
 /// Send an output message.

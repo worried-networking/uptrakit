@@ -191,11 +191,13 @@ impl Provider for DockerRegistryProvider {
         output.push_str(&format!("Pulling Docker image {image}:{tag}\n"));
 
         // Pull the image via bollard (direct daemon API — no `docker` CLI required).
+        tracing::debug!(image = %image, "pulling Docker image");
         let pull_output = self
             .docker_puller
             .pull_image(image, tag, self.config.auth.as_ref(), output_tx)
             .await
             .context_transform(|e| ProviderError::InstallFailed(e.to_string()))?;
+        tracing::debug!("Docker image pull completed");
         output.push_str(&pull_output);
 
         if let Some(ref cmd_str) = self.config.restart_command {
@@ -204,6 +206,7 @@ impl Provider for DockerRegistryProvider {
                 .replace("{tag}", &shell_escape(tag))
                 .replace("{version}", &shell_escape(to_version));
 
+            tracing::debug!(command = %cmd, "running container restart command");
             send_output(
                 output_tx,
                 &format!("Running restart command: {cmd}"),

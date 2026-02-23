@@ -170,7 +170,7 @@ async fn main() {
         return;
     }
 
-    uptrakit_service_sdk::init_tracing("uptrakit_agent=info");
+    uptrakit_service_sdk::init_tracing("uptrakit_agent", args.common.verbose);
     uptrakit_service_sdk::init_crypto();
 
     let mut handler = AgentHandler {

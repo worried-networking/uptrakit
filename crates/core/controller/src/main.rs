@@ -64,9 +64,20 @@ async fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
+    if args.verbose > 2 {
+        eprintln!(
+            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
+        );
+    }
+    let default_level = match args.verbose {
+        0 => "info",
+        1 => "debug",
+        _ => "trace",
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(default_level)),
         )
         .init();
 
