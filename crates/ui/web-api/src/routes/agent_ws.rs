@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -40,14 +40,6 @@ enum AgentWsError {
 type AgentWsResult<T> = std::result::Result<T, Report<AgentWsError>>;
 
 impl_report_conversion!(sea_orm::DbErr => AgentWsError::Database);
-
-/// Minimum agent version required for connection.
-const MIN_AGENT_VERSION: &str = "0.0.1";
-
-/// Parsed minimum agent version, validated once at first access.
-static MIN_AGENT_VER: LazyLock<semver::Version> = LazyLock::new(|| {
-    semver::Version::parse(MIN_AGENT_VERSION).expect("MIN_AGENT_VERSION must be valid semver")
-});
 
 /// Maximum size of the `update_history.output` column (1 MB).
 ///
@@ -129,7 +121,8 @@ pub(crate) async fn handle_agent_authenticated(
                 match msg {
                     Message::Text(text) => {
                         let agent_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                            Ok(m) => m,
+                            Ok(Some(m)) => m,
+                            Ok(None) => continue,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
                                 break;
@@ -145,58 +138,11 @@ pub(crate) async fn handle_agent_authenticated(
                                 }
                             }
                             ServiceMessage::ReportHosts(payload) => {
-                                if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
-                                    tracing::warn!(
-                                        %agent_id,
-                                        reported = payload.protocol_version,
-                                        expected = uptrakit_internal_wire::PROTOCOL_VERSION,
-                                        "agent protocol version mismatch"
-                                    );
-                                }
-                                // Check agent version
-                                let agent_ver = match semver::Version::parse(&payload.agent_version) {
-                                    Ok(v) => v,
-                                    Err(_) => {
-                                        tracing::warn!(
-                                            %agent_id,
-                                            version = %payload.agent_version,
-                                            "agent sent invalid version string"
-                                        );
-                                        let err = ControllerMessage::Error(ErrorPayload {
-                                            code: ErrorCode::AgentVersionTooOld,
-                                            message: format!(
-                                                "invalid agent version '{}', minimum required: {MIN_AGENT_VERSION}",
-                                                payload.agent_version
-                                            ),
-                                        });
-                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
-                                            let _ = sink.send(Message::Text(json.into())).await;
-                                        }
-                                        let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
-                                        break;
-                                    }
-                                };
-
-                                if agent_ver < *MIN_AGENT_VER {
-                                    tracing::warn!(
-                                        %agent_id,
-                                        version = %payload.agent_version,
-                                        min_version = MIN_AGENT_VERSION,
-                                        "agent version too old"
-                                    );
-                                    let err = ControllerMessage::Error(ErrorPayload {
-                                        code: ErrorCode::AgentVersionTooOld,
-                                        message: format!(
-                                            "agent version {} is too old, minimum required: {MIN_AGENT_VERSION}",
-                                            payload.agent_version
-                                        ),
-                                    });
-                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
-                                        let _ = sink.send(Message::Text(json.into())).await;
-                                    }
-                                    let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
-                                    break;
-                                }
+                                tracing::debug!(
+                                    %agent_id,
+                                    capabilities = ?payload.capabilities,
+                                    "received ReportHosts"
+                                );
 
                                 // Look up agent hostname from DB for host linking
                                 let agent_model = match uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
@@ -742,7 +688,8 @@ pub(crate) async fn run_agent_enrolled_loop(
                 match msg {
                     Message::Text(text) => {
                         let agent_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                            Ok(m) => m,
+                            Ok(Some(m)) => m,
+                            Ok(None) => continue,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
                                 break;

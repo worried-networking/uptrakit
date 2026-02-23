@@ -13,7 +13,9 @@ mod ssh_transport;
 
 use clap::Parser;
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{ControllerMessage, DisconnectReason, ServiceType};
+use std::collections::BTreeSet;
+
+use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectReason, ServiceType};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
     Signal,
@@ -142,6 +144,10 @@ impl ServiceHandler for SshAgentHandler {
             }
         }
         Ok(None)
+    }
+
+    fn capabilities(&self) -> BTreeSet<Capability> {
+        client::ssh_agent_capabilities()
     }
 
     async fn on_shutdown(

@@ -2,10 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use uptrakit_command::{CommandExecutor, CommandSpec};
+use std::collections::BTreeSet;
+
 use uptrakit_internal_wire::{
-    CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryProviderResult, DiscoveryResultsPayload,
-    ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage, UpdateFinalStatus,
-    UpdateResultPayload, VersionCheckResult, VersionCheckResultsPayload,
+    Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryProviderResult,
+    DiscoveryResultsPayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
+    UpdateFinalStatus, UpdateResultPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
@@ -127,7 +129,7 @@ pub(crate) async fn report_enrolled_hosts(
     let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
         hosts: host_infos,
         agent_version,
-        protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+        capabilities: ssh_agent_capabilities(),
     });
 
     if let Err(e) = conn.send(msg).await {
@@ -138,6 +140,18 @@ pub(crate) async fn report_enrolled_hosts(
             "reported enrolled hosts to controller"
         );
     }
+}
+
+/// Capabilities advertised by the SSH agent service.
+pub(crate) fn ssh_agent_capabilities() -> BTreeSet<Capability> {
+    [
+        Capability::SoftwareDiscovery,
+        Capability::UpdateHooks,
+        Capability::GracefulShutdown,
+        Capability::SshRemote,
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// Establish an SSH session for the given host model.

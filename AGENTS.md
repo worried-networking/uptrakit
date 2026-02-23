@@ -77,7 +77,7 @@ uptrakit/
 │   │   ├── web-api-types/              # uptrakit-web-api-types                 (lib)  — shared HTTP request/response types
 │   │   ├── openapi-client/             # uptrakit-openapi-client                (lib)  — typed HTTP client; full REST API coverage; re-exports web-api-types, reqwest::Error; feature `mock` adds MockApiServer+MockEndpoint for integration testing
 │   │   ├── service-sdk/                # uptrakit-service-sdk                   (lib)  — service lifecycle, SDK-managed event loop, signal handling, enrollment, identity, TLS, CA bootstrap, main helpers
-│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; includes `duration_seconds` serde module for Duration↔u32 fields
+│   │   └── wire/                       # uptrakit-internal-wire                 (lib)  — service↔controller wire protocol; `Capability` enum + capability negotiation; `duration_seconds` serde module for Duration↔u32 fields
 │   └── ui/
 │       ├── cli/                        # uptrakit-cli                           (bin+lib) — CLI interface; uses openapi-client for all API calls (hosts, services, checks, updates, history, scheduler, settings); lib target exposes modules for integration tests
 │       └── web-api/                    # uptrakit-web-api                       (lib)  — HTTP API
@@ -291,6 +291,54 @@ Key integration points:
 - **OpenAPI client**: `update_service(&self, id: &Uuid, req: &UpdateServiceRequest) -> Result<ServiceResponse>`.
 - **Frontend**: Service page context menu includes "Edit Ping Interval" dialog.
 - **`ServiceResponse`**: Includes `ping_interval_seconds: Option<u32>` (`None` means service-type default is used).
+
+### Wire protocol capability negotiation
+
+The agent-controller protocol uses **capability-based negotiation** rather than version numbers. Both sides advertise
+the features they support; each side independently computes the agreed set (intersection of typed variants).
+
+#### How it works
+
+1. Controller sends `service_settings` with `capabilities: [...]` after mTLS authentication.
+2. Service sends `report_hosts` / `register` with its own `capabilities: [...]`.
+3. Each side computes `agreed = intersection(controller_caps, service_caps)` excluding `Other` values.
+4. The agreed set is stored on the connection via `ControllerConnection::set_agreed_capabilities()`.
+
+#### Defined capabilities and service-type fingerprints
+
+| Capability | Wire String | Agent | SSH Agent | MQTT | Controller |
+| --- | --- | :---: | :---: | :---: | :---: |
+| `SoftwareDiscovery` | `software_discovery` | ✓ | ✓ | — | ✓ |
+| `UpdateHooks` | `update_hooks` | ✓ | ✓ | — | ✓ |
+| `GracefulShutdown` | `graceful_shutdown` | ✓ | ✓ | ✓ | ✓ |
+| `MqttBridge` | `mqtt_bridge` | — | — | ✓ | ✓ |
+| `SshRemote` | `ssh_remote` | — | ✓ | — | ✓ |
+| `Other(String)` | *(unknown)* | — | — | — | — |
+
+`Other(String)` is a forward-compat catch-all received from newer peers; it never participates in intersection
+(`Capability::is_known()` returns `false` for it).
+
+Each service type has a unique capability fingerprint (future path to replace `service_type` in enrollment):
+
+| Fingerprint | `ServiceType` |
+| --- | --- |
+| Has `MqttBridge` | `Mqtt` |
+| Has `SshRemote` | `SshAgent` |
+| Has `SoftwareDiscovery`, no `MqttBridge`, no `SshRemote` | `Agent` |
+
+`EnrollPayload.service_type` and `ServiceHandler::SERVICE_TYPE` are **not** removed yet — routing still uses them.
+They will be inferred from capabilities once all peers support capability negotiation.
+
+#### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/wire/src/lib.rs` | `Capability` enum, serde, `is_known()` |
+| `crates/shared/service-sdk/src/connection.rs` | `agreed_capabilities` field + accessors |
+| `crates/shared/service-sdk/src/event_loop.rs` | Capability intersection in `ServiceSettings` handler |
+| `crates/ui/web-api/src/routes/service_ws.rs` | `controller_capabilities()`, `ServiceSettingsPayload` construction |
+| `crates/shared/wire/asyncapi.yaml` | Schema for `capabilities` arrays in messages |
+| `docs/api/wire-protocol.md` | Full capability negotiation documentation |
 
 ### Error handling quick reference
 

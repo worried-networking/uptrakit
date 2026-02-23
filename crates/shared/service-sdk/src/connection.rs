@@ -5,12 +5,15 @@
 //! Both the agent and the MQTT service use this type for their authenticated
 //! event loops.
 
+use std::collections::BTreeSet;
+
 use futures_util::{SinkExt, StreamExt};
 use rootcause::prelude::*;
 use serde::Deserialize;
 use tokio_rustls::TlsConnector;
 use uptrakit_internal_wire::{
-    CloseReason, ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq, ServiceMessage,
+    Capability, CloseReason, ControllerEnvelope, ControllerMessage, IncomingSeq, OutgoingSeq,
+    ServiceMessage,
 };
 
 use crate::error::{EnrollmentError, ProtocolError, Result};
@@ -34,6 +37,7 @@ pub struct ControllerConnection {
     out_seq: OutgoingSeq,
     in_seq: IncomingSeq,
     close_reason: Option<CloseReason>,
+    agreed_capabilities: BTreeSet<Capability>,
 }
 
 impl ControllerConnection {
@@ -55,6 +59,7 @@ impl ControllerConnection {
             out_seq: OutgoingSeq::new(),
             in_seq: IncomingSeq::new(),
             close_reason: None,
+            agreed_capabilities: BTreeSet::new(),
         })
     }
 
@@ -169,6 +174,20 @@ impl ControllerConnection {
     /// from other close reasons.
     pub fn close_reason(&self) -> Option<&CloseReason> {
         self.close_reason.as_ref()
+    }
+
+    /// Returns the agreed capability set computed during `ServiceSettings` processing.
+    ///
+    /// Only populated after the first `ServiceSettings` message is received.
+    /// Contains the intersection of the controller's advertised capabilities and
+    /// this service's own capabilities, filtered to known typed variants only.
+    pub fn agreed_capabilities(&self) -> &BTreeSet<Capability> {
+        &self.agreed_capabilities
+    }
+
+    /// Sets the agreed capability set (called by the event loop after negotiation).
+    pub(crate) fn set_agreed_capabilities(&mut self, caps: BTreeSet<Capability>) {
+        self.agreed_capabilities = caps;
     }
 
     /// Send a [`ServiceMessage`] on a best-effort basis.

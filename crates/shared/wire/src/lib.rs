@@ -1,14 +1,13 @@
 pub mod close_reason;
 pub use close_reason::CloseReason;
 
+use std::collections::BTreeSet;
 use std::fmt;
+use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::UtcDateTime;
 use uuid::Uuid;
-
-/// Current wire protocol version for service-controller communication.
-pub const PROTOCOL_VERSION: u16 = 1;
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
@@ -17,6 +16,132 @@ pub use uptrakit_shared_types::{
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
+
+/// A protocol capability advertised by a service or controller during connection setup.
+///
+/// Both sides announce their capability sets at the start of each authenticated
+/// connection. Each side independently computes the agreed set as the intersection
+/// of typed variants only — [`Other`](Self::Other) is excluded from intersection.
+///
+/// ## Wire format
+///
+/// Capabilities are serialized as plain strings (snake_case). Unknown strings from
+/// a newer peer become `Other(String)` for forward compatibility.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum Capability {
+    /// Service participates in the graceful-shutdown protocol: sends
+    /// `Disconnecting` before clean exit and honours
+    /// `shutdown_timeout_seconds` from `ServiceSettings`.
+    ///
+    /// Wire string: `graceful_shutdown`.
+    GracefulShutdown,
+    /// Service is an MQTT bridge: handles `Register`, `TenantAssignments`,
+    /// `ReleaseTenants`, `MqttClientStatus`, etc.
+    ///
+    /// Used as a future replacement for `ServiceType::Mqtt` — once all peers
+    /// support capability negotiation, `service_type` in enrollment can be
+    /// inferred from this capability.
+    ///
+    /// Wire string: `mqtt_bridge`.
+    MqttBridge,
+    /// Service supports `DiscoverSoftware` → `DiscoveryResults` flow.
+    ///
+    /// The controller gates autodiscovery requests on this capability.
+    ///
+    /// Wire string: `software_discovery`.
+    SoftwareDiscovery,
+    /// Service manages remote hosts over SSH, rather than running locally.
+    ///
+    /// Used as a future replacement for `ServiceType::SshAgent` — combined
+    /// with `SoftwareDiscovery`, uniquely identifies an SSH-backed agent.
+    ///
+    /// Wire string: `ssh_remote`.
+    SshRemote,
+    /// Service supports pre-/post-update hook commands (`HookCommand` in
+    /// `ExecuteUpdatePayload`). The controller omits hooks when absent.
+    ///
+    /// Wire string: `update_hooks`.
+    UpdateHooks,
+    /// Unknown capability from a newer peer; never participates in intersection.
+    ///
+    /// Provides forward compatibility: a newer peer may advertise capabilities
+    /// that an older build does not yet recognise. These are preserved on receipt
+    /// but never emitted by the current codebase.
+    Other(String),
+}
+
+impl Capability {
+    /// Returns the snake_case wire string for this capability.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::SoftwareDiscovery => "software_discovery",
+            Self::UpdateHooks => "update_hooks",
+            Self::GracefulShutdown => "graceful_shutdown",
+            Self::MqttBridge => "mqtt_bridge",
+            Self::SshRemote => "ssh_remote",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+
+    /// Returns `true` for typed variants; `Other` returns `false`.
+    ///
+    /// Only typed variants participate in capability intersection. `Other` values
+    /// are forwarded-compatibility markers and must not gate behaviour.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Other(_))
+    }
+}
+
+impl fmt::Display for Capability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Error returned when parsing a capability string fails.
+///
+/// This error is never actually returned because [`Capability::Other`]
+/// catches all unrecognized strings, but the type satisfies the
+/// [`FromStr`] trait contract.
+#[derive(Debug)]
+pub struct ParseCapabilityError(std::convert::Infallible);
+
+impl fmt::Display for ParseCapabilityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid capability")
+    }
+}
+
+impl std::error::Error for ParseCapabilityError {}
+
+impl FromStr for Capability {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "software_discovery" => Self::SoftwareDiscovery,
+            "update_hooks" => Self::UpdateHooks,
+            "graceful_shutdown" => Self::GracefulShutdown,
+            "mqtt_bridge" => Self::MqttBridge,
+            "ssh_remote" => Self::SshRemote,
+            other => Self::Other(other.to_string()),
+        })
+    }
+}
+
+impl Serialize for Capability {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Capability {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(s.parse().unwrap_or(Capability::Other(s)))
+    }
+}
 
 /// Enrollment status returned in the `Enrolled` message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::Display)]
@@ -185,6 +310,10 @@ pub struct EnrollPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrollment_token: Option<SecretString>,
     /// Identifies the type of service enrolling.
+    ///
+    /// **Deprecation path:** once all peers support capability negotiation,
+    /// the controller will infer service type from the capability set advertised
+    /// in `ReportHosts`/`Register` and this field will no longer be required.
     pub service_type: ServiceType,
 }
 
@@ -212,9 +341,12 @@ pub struct ReportHostsPayload {
     pub hosts: Vec<HostInfo>,
     /// Agent binary version (e.g., "0.0.1").
     pub agent_version: String,
-    /// Wire protocol version reported by the agent.
-    #[serde(default = "protocol_version_default")]
-    pub protocol_version: u16,
+    /// Capabilities advertised by this service.
+    ///
+    /// The controller computes the agreed set as the intersection of this set
+    /// with its own capabilities, considering only typed (known) variants.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<Capability>,
 }
 
 /// Payload for enrollment confirmation.
@@ -284,8 +416,6 @@ pub enum ErrorCode {
     CertificateError,
     /// Unrecoverable server-side error.
     InternalError,
-    /// Agent binary version is below the minimum required.
-    AgentVersionTooOld,
     /// Message sequence number mismatch (replay protection).
     SequenceError,
 }
@@ -325,9 +455,12 @@ pub struct ServiceSettingsPayload {
     pub renewal_window_hours: u16,
     #[serde(default)]
     pub ca_bundle_hash: String,
-    /// Wire protocol version used by the controller.
-    #[serde(default = "protocol_version_default")]
-    pub protocol_version: u16,
+    /// Capabilities advertised by the controller.
+    ///
+    /// The service computes the agreed set as the intersection of this set
+    /// with its own capabilities, considering only typed (known) variants.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<Capability>,
     /// Maximum time in seconds to wait for in-flight operations during shutdown.
     /// Present for agents, absent for MQTT services.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -548,13 +681,12 @@ pub struct MqttRegisterPayload {
     /// Currently active MQTT client IDs (for reconnect reconciliation).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_mqtt_clients: Vec<Uuid>,
-    /// Wire protocol version reported by the MQTT service.
-    #[serde(default = "protocol_version_default")]
-    pub protocol_version: u16,
-}
-
-const fn protocol_version_default() -> u16 {
-    PROTOCOL_VERSION
+    /// Capabilities advertised by this MQTT service.
+    ///
+    /// The controller computes the agreed set as the intersection of this set
+    /// with its own capabilities, considering only typed (known) variants.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub capabilities: BTreeSet<Capability>,
 }
 
 /// Payload for registration acknowledgment.
@@ -942,7 +1074,7 @@ mod tests {
                 ip_address: None,
             }],
             agent_version: "0.0.1".to_string(),
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"report_hosts"#));
@@ -974,7 +1106,7 @@ mod tests {
                 },
             ],
             agent_version: "0.0.1".to_string(),
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""host-a"#));
@@ -1211,7 +1343,7 @@ mod tests {
             instance_id: "mqtt-node1-01936a1e".to_string(),
             max_tenants: 10,
             active_mqtt_clients: vec![TEST_UUID_1, TEST_UUID_2],
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"register"#));
@@ -1227,7 +1359,7 @@ mod tests {
             instance_id: "mqtt-node2-01936a1e".to_string(),
             max_tenants: 0,
             active_mqtt_clients: vec![],
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert!(!json.contains("active_mqtt_clients"));
@@ -1355,14 +1487,14 @@ mod tests {
         let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123".to_string(),
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
             shutdown_timeout_seconds: Some(120),
             ping_interval: std::time::Duration::from_secs(300),
         });
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(
             json,
-            r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","protocol_version":1,"shutdown_timeout_seconds":120,"ping_interval":300}"#
+            r#"{"type":"service_settings","renewal_window_hours":6,"ca_bundle_hash":"abc123","shutdown_timeout_seconds":120,"ping_interval":300}"#
         );
         let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);
@@ -1373,7 +1505,7 @@ mod tests {
         let msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
             renewal_window_hours: 6,
             ca_bundle_hash: "abc123def".to_string(),
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
             shutdown_timeout_seconds: None,
             ping_interval: std::time::Duration::from_secs(15),
         });
@@ -1395,7 +1527,7 @@ mod tests {
             ControllerMessage::ServiceSettings(ServiceSettingsPayload {
                 renewal_window_hours: 12,
                 ca_bundle_hash: "def456".to_string(),
-                protocol_version: PROTOCOL_VERSION,
+                capabilities: BTreeSet::new(),
                 shutdown_timeout_seconds: Some(60),
                 ping_interval: std::time::Duration::from_secs(300),
             })
@@ -1412,7 +1544,7 @@ mod tests {
             ControllerMessage::ServiceSettings(ServiceSettingsPayload {
                 renewal_window_hours: 6,
                 ca_bundle_hash: "abc".to_string(),
-                protocol_version: PROTOCOL_VERSION,
+                capabilities: BTreeSet::new(),
                 shutdown_timeout_seconds: None,
                 ping_interval: std::time::Duration::from_secs(300),
             })
@@ -1424,7 +1556,7 @@ mod tests {
         let payload = ServiceSettingsPayload {
             renewal_window_hours: 6,
             ca_bundle_hash: String::new(),
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: BTreeSet::new(),
             shutdown_timeout_seconds: None,
             ping_interval: std::time::Duration::from_secs(42),
         };
@@ -1844,7 +1976,6 @@ mod tests {
             ErrorCode::Forbidden,
             ErrorCode::CertificateError,
             ErrorCode::InternalError,
-            ErrorCode::AgentVersionTooOld,
             ErrorCode::SequenceError,
         ] {
             let serde_str = serde_json::to_value(code).unwrap();
@@ -1924,7 +2055,6 @@ mod tests {
             (ErrorCode::Forbidden, "forbidden"),
             (ErrorCode::CertificateError, "certificate_error"),
             (ErrorCode::InternalError, "internal_error"),
-            (ErrorCode::AgentVersionTooOld, "agent_version_too_old"),
             (ErrorCode::SequenceError, "sequence_error"),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
@@ -1956,10 +2086,6 @@ mod tests {
         assert_eq!(ErrorCode::Forbidden.to_string(), "forbidden");
         assert_eq!(ErrorCode::CertificateError.to_string(), "certificate_error");
         assert_eq!(ErrorCode::InternalError.to_string(), "internal_error");
-        assert_eq!(
-            ErrorCode::AgentVersionTooOld.to_string(),
-            "agent_version_too_old"
-        );
         assert_eq!(ErrorCode::SequenceError.to_string(), "sequence_error");
     }
 
@@ -2436,7 +2562,9 @@ mod tests {
                 ip_address: Some("10.0.0.5".to_string()),
             }],
             agent_version: "0.0.1".to_string(),
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: [Capability::SoftwareDiscovery, Capability::GracefulShutdown]
+                .into_iter()
+                .collect(),
         }));
         spec.validate("reportHostsPayload", &json);
     }
@@ -2509,7 +2637,9 @@ mod tests {
             instance_id: "mqtt-node1-01936a1e".to_string(),
             max_tenants: 10,
             active_mqtt_clients: vec![TEST_UUID_1],
-            protocol_version: PROTOCOL_VERSION,
+            capabilities: [Capability::MqttBridge, Capability::GracefulShutdown]
+                .into_iter()
+                .collect(),
         }));
         spec.validate("mqttRegisterPayload", &json);
     }
@@ -2604,7 +2734,15 @@ mod tests {
             controller_envelope_json(ControllerMessage::ServiceSettings(ServiceSettingsPayload {
                 renewal_window_hours: 6,
                 ca_bundle_hash: "abc123".to_string(),
-                protocol_version: PROTOCOL_VERSION,
+                capabilities: [
+                    Capability::SoftwareDiscovery,
+                    Capability::UpdateHooks,
+                    Capability::GracefulShutdown,
+                    Capability::MqttBridge,
+                    Capability::SshRemote,
+                ]
+                .into_iter()
+                .collect(),
                 shutdown_timeout_seconds: Some(120),
                 ping_interval: std::time::Duration::from_secs(300),
             }));
@@ -2885,5 +3023,129 @@ mod tests {
             },
         ));
         spec.validate("discoveryResultsPayload", &json);
+    }
+
+    // =========================================================================
+    // Capability enum tests
+    // =========================================================================
+
+    #[test]
+    fn capability_serde_known_variants() {
+        let cases = [
+            (Capability::SoftwareDiscovery, "software_discovery"),
+            (Capability::UpdateHooks, "update_hooks"),
+            (Capability::GracefulShutdown, "graceful_shutdown"),
+            (Capability::MqttBridge, "mqtt_bridge"),
+            (Capability::SshRemote, "ssh_remote"),
+        ];
+        for (variant, wire_str) in &cases {
+            let json = serde_json::to_string(variant).unwrap();
+            assert_eq!(json, format!(r#""{wire_str}""#));
+            let deserialized: Capability = serde_json::from_str(&json).unwrap();
+            assert_eq!(&deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn capability_other_roundtrip() {
+        let cap: Capability = serde_json::from_str(r#""future_capability_xyz""#).unwrap();
+        assert_eq!(cap, Capability::Other("future_capability_xyz".to_string()));
+        let json = serde_json::to_string(&cap).unwrap();
+        assert_eq!(json, r#""future_capability_xyz""#);
+    }
+
+    #[test]
+    fn capability_display_matches_serde() {
+        for cap in [
+            Capability::SoftwareDiscovery,
+            Capability::UpdateHooks,
+            Capability::GracefulShutdown,
+            Capability::MqttBridge,
+            Capability::SshRemote,
+        ] {
+            let serde_str = serde_json::to_value(&cap).unwrap();
+            assert_eq!(
+                cap.to_string(),
+                serde_str.as_str().unwrap(),
+                "Display must match serde for {cap:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn capability_ordering() {
+        // BTreeSet should produce a stable sorted order for capabilities.
+        let set: BTreeSet<Capability> = [
+            Capability::SshRemote,
+            Capability::GracefulShutdown,
+            Capability::SoftwareDiscovery,
+        ]
+        .into_iter()
+        .collect();
+        let mut iter = set.into_iter();
+        // Alphabetical by wire string: graceful_shutdown < software_discovery < ssh_remote
+        assert_eq!(iter.next(), Some(Capability::GracefulShutdown));
+        assert_eq!(iter.next(), Some(Capability::SoftwareDiscovery));
+        assert_eq!(iter.next(), Some(Capability::SshRemote));
+    }
+
+    #[test]
+    fn capability_is_known() {
+        assert!(Capability::SoftwareDiscovery.is_known());
+        assert!(Capability::UpdateHooks.is_known());
+        assert!(Capability::GracefulShutdown.is_known());
+        assert!(Capability::MqttBridge.is_known());
+        assert!(Capability::SshRemote.is_known());
+        assert!(!Capability::Other("future".to_string()).is_known());
+    }
+
+    #[test]
+    fn report_hosts_empty_capabilities_omitted() {
+        let msg = ServiceMessage::ReportHosts(ReportHostsPayload {
+            hosts: vec![HostInfo {
+                machine_id: "m-1".to_string(),
+                os_type: None,
+                os_version: None,
+                architecture: None,
+                hostname: None,
+                ip_address: None,
+            }],
+            agent_version: "0.0.1".to_string(),
+            capabilities: BTreeSet::new(),
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("capabilities"), "empty capabilities should be omitted");
+        // Deserializes back with empty set.
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn capability_intersection_excludes_other() {
+        let controller_caps: BTreeSet<Capability> = [
+            Capability::SoftwareDiscovery,
+            Capability::GracefulShutdown,
+            Capability::MqttBridge,
+        ]
+        .into_iter()
+        .collect();
+        let service_caps: BTreeSet<Capability> = [
+            Capability::SoftwareDiscovery,
+            Capability::GracefulShutdown,
+            Capability::Other("new_cap".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let agreed: BTreeSet<Capability> = controller_caps
+            .intersection(&service_caps)
+            .filter(|c| c.is_known())
+            .cloned()
+            .collect();
+        assert_eq!(
+            agreed,
+            [Capability::SoftwareDiscovery, Capability::GracefulShutdown]
+                .into_iter()
+                .collect()
+        );
     }
 }

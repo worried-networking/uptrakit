@@ -6,12 +6,13 @@
 //! parts (callbacks for connection, messages, shutdown), while the SDK owns
 //! the common plumbing including the unified event loop.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use async_trait::async_trait;
 
 use rootcause::prelude::*;
-use uptrakit_internal_wire::{ControllerMessage, ServiceSettingsPayload, ServiceType};
+use uptrakit_internal_wire::{Capability, ControllerMessage, ServiceSettingsPayload, ServiceType};
 use uptrakit_shared_macros::impl_report_conversion;
 
 use crate::Backoff;
@@ -81,6 +82,10 @@ pub trait ServiceHandler: Send {
     const SERVICE_LABEL: &'static str;
 
     /// Whether this is an Agent, SshAgent, or Mqtt service.
+    ///
+    /// **Deprecation path:** once all peers support capability negotiation,
+    /// the controller will derive service type from the capability set returned
+    /// by [`capabilities()`](Self::capabilities) and this constant will no longer be required.
     const SERVICE_TYPE: ServiceType;
 
     /// Service-specific event type from [`poll_service_event`](Self::poll_service_event).
@@ -112,10 +117,22 @@ pub trait ServiceHandler: Send {
 
     /// Called after the SDK processes shared `ServiceSettings` fields.
     ///
-    /// The SDK already handles protocol version check, renewal schedule,
+    /// The SDK already handles capability negotiation, renewal schedule,
     /// shutdown timeout, and CA staleness. Override this for additional
     /// service-specific settings processing.
     async fn on_settings(&mut self, _settings: &ServiceSettingsPayload) {}
+
+    /// Returns the set of capabilities this service supports.
+    ///
+    /// The SDK intersects this set with the controller's advertised capabilities
+    /// (from `ServiceSettings`) to compute the agreed capability set. Only typed
+    /// (known) variants participate in the intersection.
+    ///
+    /// Services should override this to advertise their actual capabilities.
+    /// The default implementation returns an empty set.
+    fn capabilities(&self) -> BTreeSet<Capability> {
+        BTreeSet::new()
+    }
 
     /// Poll for service-specific events (additional `select!` arm).
     ///

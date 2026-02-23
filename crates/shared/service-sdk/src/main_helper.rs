@@ -44,33 +44,6 @@ pub fn init_tracing(own_module: &str, verbosity: u8) {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn verbosity_level_semantics() {
-        // verbosity=0 should use module=info pattern (not a blanket level)
-        // verbosity=1 maps to "debug"
-        // verbosity>=2 maps to "trace"
-        // We can't easily test the filter output without running init_tracing,
-        // but we can verify the branch logic by checking what level string is produced.
-        let level_for = |v: u8| -> &'static str {
-            if v == 0 {
-                "info" // module-scoped; tested implicitly
-            } else if v == 1 {
-                "debug"
-            } else {
-                "trace"
-            }
-        };
-        assert_eq!(level_for(0), "info");
-        assert_eq!(level_for(1), "debug");
-        assert_eq!(level_for(2), "trace");
-        assert_eq!(level_for(3), "trace");
-    }
-}
-
 /// Install the `aws-lc-rs` default cryptographic provider for `rustls`.
 ///
 /// Safe to call multiple times — the second call is a no-op.
@@ -106,5 +79,30 @@ pub async fn run_lifecycle_and_handle_errors<H: ServiceHandler>(
             tracing::error!(error = %e, "{binary_name} failed");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn verbosity_level_semantics() {
+        // verbosity=0 should use module=info pattern (not a blanket level)
+        // verbosity=1 maps to "debug"
+        // verbosity>=2 maps to "trace"
+        // We can't easily test the filter output without running init_tracing,
+        // but we can verify the branch logic by checking what level string is produced.
+        let level_for = |v: u8| -> &'static str {
+            if v == 0 {
+                "info" // module-scoped; tested implicitly
+            } else if v == 1 {
+                "debug"
+            } else {
+                "trace"
+            }
+        };
+        assert_eq!(level_for(0), "info");
+        assert_eq!(level_for(1), "debug");
+        assert_eq!(level_for(2), "trace");
+        assert_eq!(level_for(3), "trace");
     }
 }

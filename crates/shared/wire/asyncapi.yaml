@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Uptrakit Service-Controller Protocol
-  version: 0.0.10
+  version: 0.1.0
   description: |
     WebSocket protocol for communication between Uptrakit services (agents, MQTT bridges, etc.) and the controller.
 
@@ -1103,7 +1103,6 @@ components:
             - forbidden
             - certificate_error
             - internal_error
-            - agent_version_too_old
             - sequence_error
           description: |
             Machine-readable error code. This enum is non-exhaustive —
@@ -1170,7 +1169,6 @@ components:
         - type
         - hosts
         - agent_version
-        - protocol_version
       properties:
         seq:
           type: integer
@@ -1195,11 +1193,22 @@ components:
           examples:
             - "0.0.1"
             - "1.2.3"
-        protocol_version:
-          type: integer
-          format: int32
-          description: Wire protocol version reported by the agent
-          default: 1
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum:
+              - graceful_shutdown
+              - mqtt_bridge
+              - software_discovery
+              - ssh_remote
+              - update_hooks
+          default: []
+          description: |
+            Capabilities advertised by this service. The controller computes
+            the agreed set as the intersection of this list with its own
+            advertised capabilities. Unknown strings are ignored (forward
+            compatibility). Omitted when empty.
 
     renewCertificatePayload:
       type: object
@@ -1234,7 +1243,6 @@ components:
         - seq
         - type
         - renewal_window_hours
-        - protocol_version
         - ping_interval
       properties:
         seq:
@@ -1263,11 +1271,22 @@ components:
           default: ""
           examples:
             - abc123def456
-        protocol_version:
-          type: integer
-          format: int32
-          description: Wire protocol version used by the controller
-          default: 1
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum:
+              - graceful_shutdown
+              - mqtt_bridge
+              - software_discovery
+              - ssh_remote
+              - update_hooks
+          default: []
+          description: |
+            Capabilities advertised by the controller. The service computes
+            the agreed set as the intersection of this list with its own
+            advertised capabilities. Unknown strings are ignored (forward
+            compatibility). Omitted when empty.
         ping_interval:
           type: integer
           format: int32
@@ -1882,7 +1901,6 @@ components:
         - seq
         - type
         - instance_id
-        - protocol_version
       properties:
         seq:
           type: integer
@@ -1916,11 +1934,20 @@ components:
             Omitted when empty (empty array is the default).
           examples:
             - ["660e8400-e29b-41d4-a716-446655440001"]
-        protocol_version:
-          type: integer
-          format: int32
-          description: Wire protocol version reported by the MQTT service
-          default: 1
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum:
+              - graceful_shutdown
+              - mqtt_bridge
+              - software_discovery
+              - ssh_remote
+              - update_hooks
+          default: []
+          description: |
+            Capabilities advertised by this MQTT service. Unknown strings are
+            ignored (forward compatibility). Omitted when empty.
 
     mqttRegisteredPayload:
       type: object

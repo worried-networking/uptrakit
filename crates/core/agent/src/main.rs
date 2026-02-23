@@ -4,8 +4,10 @@ mod host_info;
 
 use clap::Parser;
 use rootcause::prelude::*;
+use std::collections::BTreeSet;
+
 use uptrakit_internal_wire::{
-    ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
+    Capability, ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
@@ -40,7 +42,7 @@ impl ServiceHandler for AgentHandler {
         conn.send(ServiceMessage::ReportHosts(ReportHostsPayload {
             hosts: vec![host_info],
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
-            protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+            capabilities: agent_capabilities(),
         }))
         .await
         .context_to::<LoopError>()?;
@@ -137,6 +139,10 @@ impl ServiceHandler for AgentHandler {
         Ok(None)
     }
 
+    fn capabilities(&self) -> BTreeSet<Capability> {
+        agent_capabilities()
+    }
+
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
@@ -156,6 +162,17 @@ impl ServiceHandler for AgentHandler {
         )
         .await
     }
+}
+
+/// Capabilities advertised by the agent service.
+fn agent_capabilities() -> BTreeSet<Capability> {
+    [
+        Capability::SoftwareDiscovery,
+        Capability::UpdateHooks,
+        Capability::GracefulShutdown,
+    ]
+    .into_iter()
+    .collect()
 }
 
 #[tokio::main]

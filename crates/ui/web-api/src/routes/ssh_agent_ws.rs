@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
@@ -51,14 +51,6 @@ pub(crate) enum SshAgentWsError {
 type SshAgentWsResult<T> = std::result::Result<T, Report<SshAgentWsError>>;
 
 impl_report_conversion!(sea_orm::DbErr => SshAgentWsError::Database);
-
-/// Minimum SSH agent version required for connection.
-const MIN_AGENT_VERSION: &str = "0.0.1";
-
-/// Parsed minimum SSH agent version, validated once at first access.
-static MIN_AGENT_VER: LazyLock<semver::Version> = LazyLock::new(|| {
-    semver::Version::parse(MIN_AGENT_VERSION).expect("MIN_AGENT_VERSION must be valid semver")
-});
 
 // ---------------------------------------------------------------------------
 // Authenticated SSH agent handler (called from service_ws after shared auth)
@@ -133,7 +125,8 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                 match msg {
                     Message::Text(text) => {
                         let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                            Ok(m) => m,
+                            Ok(Some(m)) => m,
+                            Ok(None) => continue,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
                                 break;
@@ -213,59 +206,11 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                 }
                             }
                             ServiceMessage::ReportHosts(payload) => {
-                                if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
-                                    tracing::warn!(
-                                        %service_id,
-                                        reported = payload.protocol_version,
-                                        expected = uptrakit_internal_wire::PROTOCOL_VERSION,
-                                        "SSH agent protocol version mismatch"
-                                    );
-                                }
-
-                                // Check agent version.
-                                let agent_ver = match semver::Version::parse(&payload.agent_version) {
-                                    Ok(v) => v,
-                                    Err(_) => {
-                                        tracing::warn!(
-                                            %service_id,
-                                            version = %payload.agent_version,
-                                            "SSH agent sent invalid version string"
-                                        );
-                                        let err = ControllerMessage::Error(ErrorPayload {
-                                            code: ErrorCode::AgentVersionTooOld,
-                                            message: format!(
-                                                "invalid agent version '{}', minimum required: {MIN_AGENT_VERSION}",
-                                                payload.agent_version
-                                            ),
-                                        });
-                                        if let Some(json) = serialize_controller_msg(out_seq, err) {
-                                            let _ = sink.send(Message::Text(json.into())).await;
-                                        }
-                                        let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
-                                        break;
-                                    }
-                                };
-
-                                if agent_ver < *MIN_AGENT_VER {
-                                    tracing::warn!(
-                                        %service_id,
-                                        version = %payload.agent_version,
-                                        min_version = MIN_AGENT_VERSION,
-                                        "SSH agent version too old"
-                                    );
-                                    let err = ControllerMessage::Error(ErrorPayload {
-                                        code: ErrorCode::AgentVersionTooOld,
-                                        message: format!(
-                                            "SSH agent version {} is too old, minimum required: {MIN_AGENT_VERSION}",
-                                            payload.agent_version
-                                        ),
-                                    });
-                                    if let Some(json) = serialize_controller_msg(out_seq, err) {
-                                        let _ = sink.send(Message::Text(json.into())).await;
-                                    }
-                                    let _ = close_with_reason(sink, CloseReason::VersionTooOld).await;
-                                    break;
-                                }
+                                tracing::debug!(
+                                    %service_id,
+                                    capabilities = ?payload.capabilities,
+                                    "received ReportHosts"
+                                );
 
                                 // Look up SSH agent service from DB.
                                 let service_model = match ssh_agent_service::Entity::find_by_id(service_id)
@@ -461,7 +406,8 @@ pub(crate) async fn handle_ssh_agent_enrolled(
                 match msg {
                     Message::Text(text) => {
                         let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                            Ok(m) => m,
+                            Ok(Some(m)) => m,
+                            Ok(None) => continue,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
                                 break;

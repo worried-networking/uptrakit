@@ -96,7 +96,8 @@ pub(crate) async fn handle_mqtt_authenticated(
         match msg {
             Message::Text(text) => {
                 let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                    Ok(m) => m,
+                    Ok(Some(m)) => m,
+                    Ok(None) => continue,
                     Err(e) => {
                         tracing::debug!(error = %e, "deserialize error");
                         return;
@@ -105,14 +106,11 @@ pub(crate) async fn handle_mqtt_authenticated(
 
                 match service_msg {
                     ServiceMessage::Register(payload) => {
-                        if payload.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
-                            tracing::warn!(
-                                %service_id,
-                                reported = payload.protocol_version,
-                                expected = uptrakit_internal_wire::PROTOCOL_VERSION,
-                                "MQTT service protocol version mismatch"
-                            );
-                        }
+                        tracing::debug!(
+                            %service_id,
+                            capabilities = ?payload.capabilities,
+                            "received Register"
+                        );
                         break (
                             payload.instance_id,
                             payload.max_tenants,
@@ -246,7 +244,8 @@ pub(crate) async fn handle_mqtt_authenticated(
                 match msg {
                     Message::Text(text) => {
                         let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                            Ok(m) => m,
+                            Ok(Some(m)) => m,
+                            Ok(None) => continue,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
                                 break;
@@ -466,7 +465,8 @@ pub(crate) async fn handle_mqtt_enrolled(
                 match msg {
                     Message::Text(text) => {
                         let service_msg: ServiceMessage = match deserialize_service_msg(in_seq, &text) {
-                            Ok(m) => m,
+                            Ok(Some(m)) => m,
+                            Ok(None) => continue,
                             Err(e) => {
                                 tracing::debug!(error = %e, "deserialize error");
                                 break;

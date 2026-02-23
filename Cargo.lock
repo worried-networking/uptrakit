@@ -6322,7 +6322,6 @@ dependencies = [
  "rootcause",
  "rustls",
  "sea-orm",
- "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",

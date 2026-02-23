@@ -172,7 +172,6 @@ The `ErrorCode` enum is marked `#[non_exhaustive]` — new codes may be added in
 | `forbidden` | Service is not authorized for this action. |
 | `certificate_error` | CSR validation or certificate issuance failed. |
 | `internal_error` | Unexpected server-side error. |
-| `agent_version_too_old` | Agent protocol version is below the minimum supported by the controller. |
 | `sequence_error` | Incoming sequence number does not match the expected value. Connection is closed. |
 
 ## WebSocket Close Reasons
@@ -194,7 +193,6 @@ for strings not yet recognized by the receiver.
 | `CloseReason::ServiceNotApproved` | `"service not approved"` | Service has not been approved for connection. |
 | `CloseReason::ServiceNotFound` | `"service not found"` | Service ID not found in the database. |
 | `CloseReason::EnrollmentTimeout` | `"enrollment timeout"` | Enrollment did not complete within the allowed time. |
-| `CloseReason::VersionTooOld` | `"agent version too old"` | Agent protocol version is below the minimum supported. |
 | `CloseReason::Superseded` | `"superseded by new connection"` | Another instance connected with the same service ID. |
 | `CloseReason::RateLimitExceeded` | `"rate limit exceeded"` | Connection rate limit exceeded. |
 | `CloseReason::Unknown(String)` | *(any other string)* | Forward-compatible catch-all for unrecognized reasons. |
@@ -214,7 +212,7 @@ authenticated connection is established. It carries runtime configuration for th
 | --- | --- | --- | --- |
 | `renewal_window_hours` | `u16` | required | Hours before certificate expiry to initiate renewal |
 | `ca_bundle_hash` | `String` | `#[serde(default)]` | Hash of the current CA bundle for staleness detection |
-| `protocol_version` | `u16` | `#[serde(default = "protocol_version_default")]` | Wire protocol version used by the controller |
+| `capabilities` | `BTreeSet<Capability>` | `#[serde(default, skip_serializing_if = "BTreeSet::is_empty")]` | Set of capabilities advertised by the controller; used for capability negotiation |
 | `shutdown_timeout_seconds` | `Option<u32>` | `#[serde(default, skip_serializing_if)]` | Max seconds to wait during shutdown; present for agents, absent for MQTT |
 | `ping_interval` | `Duration` | `#[serde(with = "duration_seconds")]` | Controller-managed ping interval; derived from per-service DB override or service-type default (300s agent/SSH agent, 15s MQTT) |
 
@@ -242,12 +240,62 @@ The `HostInfo` struct (used inside `ReportHostsPayload.hosts`) contains:
 | `ip_address` | `Option<String>` | IP address or hostname used to reach the host |
 
 The `hostname` and `ip_address` fields were added as part of the SSH agent host reporting feature.
-They use `#[serde(default)]` for backward compatibility -- agents that do not send these fields
-will have them default to `None` on the controller side. No protocol version bump is required.
+They use `#[serde(default)]` for backward compatibility — agents that do not send these fields
+will have them default to `None` on the controller side.
 
 Both the regular agent and the SSH agent send `report_hosts`. The regular agent sets `hostname`
 from local system calls. The SSH agent sets `hostname` from the remote host's `hostname` command
 and `ip_address` from the SSH target address.
+
+## Capability Negotiation
+
+Protocol feature negotiation is capability-based rather than version-based. Both sides advertise the features they
+support at the start of each authenticated connection; neither requires a hard cutover when features are added.
+
+### How It Works
+
+1. After mTLS authentication succeeds, the controller sends `service_settings` containing `capabilities: [...]`.
+2. The service sends `report_hosts` (agent/SSH agent) or `register` (MQTT) containing its own `capabilities: [...]`.
+3. Each side independently computes the **agreed set**: the intersection of the two capability sets, excluding `Other`
+   values (unrecognized capabilities from a newer peer).
+4. The agreed set is stored on the connection and can be used to gate feature-specific flows.
+
+The HTTP path `/api/v1/ws/service` provides the hard-break slot for truly incompatible format changes.
+
+### Defined Capabilities
+
+| Capability | Wire String | Description |
+| --- | --- | --- |
+| `SoftwareDiscovery` | `software_discovery` | Service supports `discover_software` → `discovery_results` flow. Controller gates autodiscovery requests on this capability. |
+| `UpdateHooks` | `update_hooks` | Service supports pre-/post-update hook commands in `execute_update`. Controller omits hooks when absent. |
+| `GracefulShutdown` | `graceful_shutdown` | Service sends `disconnecting` before clean exit and honours `shutdown_timeout_seconds`. |
+| `MqttBridge` | `mqtt_bridge` | Service is an MQTT bridge: handles `register`, `tenant_assignments`, `release_tenants`, `mqtt_client_status`, etc. Future replacement for `ServiceType::Mqtt`. |
+| `SshRemote` | `ssh_remote` | Service manages remote hosts over SSH. Future replacement for `ServiceType::SshAgent`. |
+| `Other(String)` | *(any unknown string)* | Forward-compatible catch-all. Never participates in intersection. |
+
+### Advertised Sets per Component
+
+| Component | `software_discovery` | `update_hooks` | `graceful_shutdown` | `mqtt_bridge` | `ssh_remote` |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| Controller | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Agent | ✓ | ✓ | ✓ | — | — |
+| SSH Agent | ✓ | ✓ | ✓ | — | ✓ |
+| MQTT Service | — | — | ✓ | ✓ | — |
+
+The controller advertises all known capabilities so every service can compute its agreed set regardless of its type.
+
+### Service-Type Identification via Capabilities (future path)
+
+Each service type has a unique capability fingerprint that will eventually replace the `service_type` enrollment field:
+
+| Capability set | Current `ServiceType` |
+| --- | --- |
+| Has `mqtt_bridge` | `Mqtt` |
+| Has `ssh_remote` | `SshAgent` |
+| Has `software_discovery`, no `mqtt_bridge`, no `ssh_remote` | `Agent` |
+
+`EnrollPayload.service_type` and `ServiceHandler::SERVICE_TYPE` are retained for now; once all peers use
+capability negotiation, routing will be derived from the capability fingerprint instead.
 
 ## Forward Compatibility
 

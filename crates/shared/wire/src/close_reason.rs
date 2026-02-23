@@ -42,8 +42,6 @@ pub enum CloseReason {
     RateLimitExceeded,
     /// A newer connection from the same service superseded this one.
     Superseded,
-    /// The agent's protocol version is too old to be supported.
-    VersionTooOld,
     /// A close reason string not recognized by this build.
     ///
     /// Provides forward compatibility: a newer controller may send reasons
@@ -66,7 +64,6 @@ impl CloseReason {
             Self::EnrollmentTimeout => "enrollment timeout",
             Self::RateLimitExceeded => "rate limit exceeded",
             Self::Superseded => "superseded by new connection",
-            Self::VersionTooOld => "agent version too old",
             Self::Unknown(s) => s,
         }
     }
@@ -103,7 +100,6 @@ impl FromStr for CloseReason {
             "enrollment timeout" => Self::EnrollmentTimeout,
             "rate limit exceeded" => Self::RateLimitExceeded,
             "superseded by new connection" => Self::Superseded,
-            "agent version too old" => Self::VersionTooOld,
             other => Self::Unknown(other.to_string()),
         })
     }
@@ -129,7 +125,6 @@ mod tests {
         (CloseReason::EnrollmentTimeout, "enrollment timeout"),
         (CloseReason::RateLimitExceeded, "rate limit exceeded"),
         (CloseReason::Superseded, "superseded by new connection"),
-        (CloseReason::VersionTooOld, "agent version too old"),
     ];
 
     #[test]

@@ -4,8 +4,10 @@ mod tenant_manager;
 
 use clap::Parser;
 use rootcause::prelude::*;
+use std::collections::BTreeSet;
+
 use uptrakit_internal_wire::{
-    ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
+    Capability, ControllerMessage, DisconnectReason, DisconnectingPayload, MqttClientStatusPayload,
     MqttRegisterPayload, ServiceMessage, ServiceType,
 };
 use uptrakit_service_sdk::{
@@ -39,7 +41,7 @@ impl ServiceHandler for MqttHandler {
             instance_id: self.instance_id.clone(),
             max_tenants: self.max_tenants,
             active_mqtt_clients: self.tenant_mgr.active_mqtt_client_ids(),
-            protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+            capabilities: mqtt_capabilities(),
         }))
         .await
         .context_to::<LoopError>()?;
@@ -103,6 +105,10 @@ impl ServiceHandler for MqttHandler {
         }
     }
 
+    fn capabilities(&self) -> BTreeSet<Capability> {
+        mqtt_capabilities()
+    }
+
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
@@ -128,6 +134,13 @@ impl ServiceHandler for MqttHandler {
 
         outcome
     }
+}
+
+/// Capabilities advertised by the MQTT service.
+fn mqtt_capabilities() -> BTreeSet<Capability> {
+    [Capability::MqttBridge, Capability::GracefulShutdown]
+        .into_iter()
+        .collect()
 }
 
 #[tokio::main]

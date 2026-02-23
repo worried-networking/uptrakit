@@ -9,8 +9,11 @@
 use std::path::Path;
 use std::pin::Pin;
 
+use std::collections::BTreeSet;
+
 use uptrakit_internal_wire::{
-    CloseReason, ControllerMessage, PingPayload, ServiceMessage, ServiceSettingsPayload, now_millis,
+    Capability, CloseReason, ControllerMessage, PingPayload, ServiceMessage,
+    ServiceSettingsPayload, now_millis,
 };
 
 use rootcause::prelude::*;
@@ -41,7 +44,7 @@ pub struct EventLoopContext<'a> {
 /// - Ping/pong keepalive
 /// - Certificate renewal (timer-based and controller-requested)
 /// - CA bundle updates
-/// - `ServiceSettings` processing (protocol version, renewal schedule,
+/// - `ServiceSettings` processing (capability negotiation, renewal schedule,
 ///   shutdown timeout, CA staleness)
 /// - Signal handling (`SIGINT`, `SIGTERM`, `SIGHUP`)
 /// - Connection close reason dispatch
@@ -135,6 +138,18 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                             .context_to::<LoopError>()?;
                     }
                     Some(ControllerMessage::ServiceSettings(settings)) => {
+                        // Compute agreed capabilities: intersection of controller's
+                        // advertised set with this service's own capabilities,
+                        // keeping only typed (known) variants.
+                        let agreed: BTreeSet<Capability> = settings
+                            .capabilities
+                            .intersection(&handler.capabilities())
+                            .filter(|c| c.is_known())
+                            .cloned()
+                            .collect();
+                        conn.set_agreed_capabilities(agreed.clone());
+                        tracing::debug!(capabilities = ?agreed, "negotiated protocol capabilities");
+
                         let mut loop_state = LoopState {
                             shutdown_timeout_seconds: &mut shutdown_timeout_seconds,
                             renewal_sleep: &mut renewal_sleep,
@@ -202,8 +217,8 @@ struct LoopState<'a> {
     config_dir: &'a Path,
 }
 
-/// Process shared `ServiceSettings` fields: protocol version check,
-/// shutdown timeout, renewal schedule, ping interval, and CA staleness.
+/// Process shared `ServiceSettings` fields: shutdown timeout, renewal schedule,
+/// ping interval, and CA staleness.
 async fn handle_service_settings(
     settings: &ServiceSettingsPayload,
     state: &mut LoopState<'_>,
@@ -215,14 +230,6 @@ async fn handle_service_settings(
         shutdown_timeout = ?settings.shutdown_timeout_seconds,
         "received service settings"
     );
-
-    if settings.protocol_version != uptrakit_internal_wire::PROTOCOL_VERSION {
-        tracing::warn!(
-            reported = settings.protocol_version,
-            expected = uptrakit_internal_wire::PROTOCOL_VERSION,
-            "controller protocol version mismatch"
-        );
-    }
 
     *state.shutdown_timeout_seconds = settings.shutdown_timeout_seconds.unwrap_or(120);
     update_renewal_schedule(

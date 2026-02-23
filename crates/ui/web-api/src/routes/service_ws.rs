@@ -9,10 +9,12 @@ use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use std::collections::BTreeSet;
+
 use uptrakit_internal_wire::{
-    ApprovedPayload, CloseReason, ControllerMessage, EnrolledPayload, ErrorCode, ErrorPayload,
-    IncomingSeq, OutgoingSeq, PongPayload, RejectedPayload, ServiceEnvelope, ServiceMessage,
-    ServiceSettingsPayload, now_millis,
+    ApprovedPayload, Capability, CloseReason, ControllerMessage, EnrolledPayload, ErrorCode,
+    ErrorPayload, IncomingSeq, OutgoingSeq, PongPayload, RejectedPayload, ServiceEnvelope,
+    ServiceMessage, ServiceSettingsPayload, now_millis,
 };
 use uptrakit_shared_db::entity::service as service_entity;
 
@@ -119,18 +121,60 @@ pub(crate) fn serialize_controller_msg(
     }
 }
 
+/// Minimal envelope used to extract the sequence number before full deserialization.
+///
+/// Advancing the sequence counter even when the full payload cannot be parsed
+/// (e.g. an unknown message type from a future service) is required for replay
+/// protection to remain accurate.
+#[derive(serde::Deserialize)]
+struct SeqOnly {
+    seq: u64,
+}
+
 /// Deserialize a [`ServiceMessage`] from a sequenced [`ServiceEnvelope`]
 /// JSON string, validating the sequence number.
+///
+/// Returns:
+/// - `Err(_)` on malformed JSON or sequence mismatch (hard errors, connection should close).
+/// - `Ok(None)` on an unrecognized message type from a newer service (soft, log and skip).
+/// - `Ok(Some(msg))` on successful parse.
 pub(crate) fn deserialize_service_msg(
     in_seq: &mut IncomingSeq,
     text: &str,
-) -> ServiceWsResult<ServiceMessage> {
-    let envelope: ServiceEnvelope = serde_json::from_str(text)
+) -> ServiceWsResult<Option<ServiceMessage>> {
+    // Step 1: Extract sequence number (hard fail on malformed JSON).
+    let seq_only: SeqOnly = serde_json::from_str(text)
         .context_transform(|e| ServiceWsError::Deserialize(format!("invalid message: {e}")))?;
+
+    // Step 2: Validate sequence (hard fail on mismatch).
     in_seq
-        .validate(envelope.seq)
+        .validate(seq_only.seq)
         .map_err(|e| report!(ServiceWsError::SequenceValidation(e.to_string())))?;
-    Ok(envelope.message)
+
+    // Step 3: Full parse — soft fail for unknown types from future services.
+    match serde_json::from_str::<ServiceEnvelope>(text) {
+        Ok(envelope) => Ok(Some(envelope.message)),
+        Err(e) => {
+            tracing::debug!("ignoring unrecognized service message: {e}");
+            Ok(None)
+        }
+    }
+}
+
+/// Returns the complete set of capabilities advertised by the controller.
+///
+/// The controller advertises all known capabilities so every service type can
+/// compute its agreed set regardless of which service type is connecting.
+pub(crate) fn controller_capabilities() -> BTreeSet<Capability> {
+    [
+        Capability::SoftwareDiscovery,
+        Capability::UpdateHooks,
+        Capability::GracefulShutdown,
+        Capability::MqttBridge,
+        Capability::SshRemote,
+    ]
+    .into_iter()
+    .collect()
 }
 
 pub(crate) async fn close_with_reason(
@@ -581,7 +625,7 @@ async fn handle_authenticated(
     let settings_msg = ControllerMessage::ServiceSettings(ServiceSettingsPayload {
         renewal_window_hours,
         ca_bundle_hash,
-        protocol_version: uptrakit_internal_wire::PROTOCOL_VERSION,
+        capabilities: controller_capabilities(),
         shutdown_timeout_seconds: shutdown_timeout,
         ping_interval,
     });
@@ -789,7 +833,8 @@ async fn handle_anonymous(
         match msg {
             Message::Text(text) => {
                 let service_msg = match deserialize_service_msg(in_seq, &text) {
-                    Ok(m) => m,
+                    Ok(Some(m)) => m,
+                    Ok(None) => continue,
                     Err(e) => {
                         tracing::debug!(error = %e, "invalid message from anonymous client");
                         let code = match e.current_context() {
@@ -1150,6 +1195,34 @@ mod tests {
     use sea_orm::{
         ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
     };
+
+    #[test]
+    fn deserialize_unknown_type_returns_none() {
+        let mut in_seq = IncomingSeq::new();
+        // A JSON with a valid seq and seq-only-parseable structure, but an unknown message type.
+        let json = r#"{"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
+        let result = deserialize_service_msg(&mut in_seq, json);
+        assert!(matches!(result, Ok(None)), "unknown type should return Ok(None)");
+    }
+
+    #[test]
+    fn deserialize_malformed_json_returns_err() {
+        let mut in_seq = IncomingSeq::new();
+        let result = deserialize_service_msg(&mut in_seq, "not valid json at all");
+        assert!(result.is_err(), "malformed JSON should return Err");
+    }
+
+    #[test]
+    fn deserialize_sequence_error_returns_err() {
+        let mut in_seq = IncomingSeq::new();
+        // Send seq=2 when 1 is expected → sequence validation error.
+        let json = r#"{"seq":2,"type":"ping","service_ts":12345}"#;
+        let result = deserialize_service_msg(&mut in_seq, json);
+        assert!(
+            matches!(result, Err(ref e) if matches!(e.current_context(), ServiceWsError::SequenceValidation(_))),
+            "sequence mismatch should return Err(SequenceValidation)"
+        );
+    }
 
     #[test]
     fn message_rate_limiter_enforces_window() {
