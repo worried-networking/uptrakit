@@ -82,12 +82,7 @@ from `crates/ui/web-api/src/auth/permissions.rs`) rather than raw role-name stri
 | --- | --- |
 | `owner` | All nine permissions |
 | `admin` | `view_settings`, `manage_settings`, `view_agents`, `manage_agents`, `view_software`, `manage_software`, `view_hosts`, `manage_hosts` |
-| `user` | `view_agents` only |
-
-The `admin` and `owner` roles automatically receive the 4 new permissions via a backward-compatible
-migration that grants `view_software` to roles with `view_settings`, `manage_software` to roles with
-`manage_settings`, `view_hosts` to roles with `view_agents`, and `manage_hosts` to roles with
-`manage_agents`.
+| `user` | `view_settings`, `view_agents`, `view_software`, `view_hosts` |
 
 The first registered user gets the `owner` role — whether registered via password or OIDC. Subsequent users (password or
 OIDC auto-created) get the `user` role by default. OIDC role mapping can override this.
@@ -133,7 +128,9 @@ See also: [`docs/development/coding-standards.md`](../development/coding-standar
 
 1. Add a variant to the `Permission` enum in `crates/shared/web-api-types/src/permissions.rs` (with `as_str` / `parse`
    arms).
-1. Write a DB migration to insert it into the `permissions` table and assign it to the appropriate roles.
+1. Write a DB migration to insert it into the `permissions` table and assign it explicitly to the appropriate
+   roles by name: `owner` always gets all permissions; `admin` gets all except `manage_global_settings`-level
+   permissions; `user` gets all `view_*` permissions.
 1. Add a `CanXxx => Permission::Xxx` entry to the `permission_extractor!` macro call in
    `crates/ui/web-api/src/middleware/permission.rs`.
 1. Use `CanXxx(_user): CanXxx` (or `CanXxx(user): CanXxx` if you need the user) in the relevant route handler(s),

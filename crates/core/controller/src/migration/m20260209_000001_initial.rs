@@ -1177,6 +1177,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(timestamp(MqttClients::CreatedAt))
                     .col(timestamp(MqttClients::UpdatedAt))
+                    .col(ColumnDef::new(MqttClients::CaCertPem).text())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_mqtt_clients_tenant")
@@ -1788,6 +1789,131 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // ============================================================
+        // 14. Scheduled tasks
+        // ============================================================
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(ScheduledTasks::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(ScheduledTasks::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(ScheduledTasks::TenantId).uuid().not_null())
+                    .col(ColumnDef::new(ScheduledTasks::TaskType).text().not_null())
+                    .col(string(ScheduledTasks::CronExpression))
+                    .col(boolean(ScheduledTasks::Enabled).default(true))
+                    .col(json_null(ScheduledTasks::TaskConfig))
+                    .col(timestamp_null(ScheduledTasks::LastRunAt))
+                    .col(timestamp(ScheduledTasks::NextRunAt))
+                    .col(ColumnDef::new(ScheduledTasks::LockedBy).uuid())
+                    .col(timestamp_null(ScheduledTasks::LockedAt))
+                    .col(ColumnDef::new(ScheduledTasks::LastError).text())
+                    .col(big_integer(ScheduledTasks::RunCount).default(0))
+                    .col(timestamp(ScheduledTasks::CreatedAt))
+                    .col(timestamp(ScheduledTasks::UpdatedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_scheduled_tasks_tenant")
+                            .from(ScheduledTasks::Table, ScheduledTasks::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Restrict),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_scheduled_tasks_next_run")
+                    .table(ScheduledTasks::Table)
+                    .col(ScheduledTasks::NextRunAt)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_scheduled_tasks_tenant_id")
+                    .table(ScheduledTasks::Table)
+                    .col(ScheduledTasks::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_scheduled_tasks_tenant_task_type")
+                    .table(ScheduledTasks::Table)
+                    .col(ScheduledTasks::TenantId)
+                    .col(ScheduledTasks::TaskType)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        // Seed default tasks for all tenants
+        let scheduled_task_types = [
+            ("auth_cleanup", "*/5 * * * *"),
+            ("stale_lease_cleanup", "*/5 * * * *"),
+            ("event_cleanup", "0 * * * *"),
+            ("ca_rotation_check", "0 3 * * *"),
+            ("version_check", "0 */6 * * *"),
+            ("service_cert_check", "0 */12 * * *"),
+        ];
+
+        let tenant_id_select = Query::select()
+            .column(Tenants::Id)
+            .from(Tenants::Table)
+            .to_owned();
+        let tenant_rows = db.query_all(&tenant_id_select).await?;
+
+        for tenant_row in &tenant_rows {
+            use sea_orm::TryGetable;
+            let tenant_id: Uuid = Uuid::try_get_by(tenant_row, "id")
+                .map_err(|e| DbErr::Custom(format!("failed to get tenant ID: {e:?}")))?;
+
+            for (task_type, cron_expr) in &scheduled_task_types {
+                manager
+                    .exec_stmt(
+                        Query::insert()
+                            .into_table(ScheduledTasks::Table)
+                            .columns([
+                                ScheduledTasks::Id,
+                                ScheduledTasks::TenantId,
+                                ScheduledTasks::TaskType,
+                                ScheduledTasks::CronExpression,
+                                ScheduledTasks::Enabled,
+                                ScheduledTasks::NextRunAt,
+                                ScheduledTasks::RunCount,
+                                ScheduledTasks::CreatedAt,
+                                ScheduledTasks::UpdatedAt,
+                            ])
+                            .values_panic([
+                                Uuid::now_v7().into(),
+                                tenant_id.into(),
+                                (*task_type).into(),
+                                (*cron_expr).into(),
+                                true.into(),
+                                now.into(),
+                                0i64.into(),
+                                now.into(),
+                                now.into(),
+                            ])
+                            .to_owned(),
+                    )
+                    .await?;
+            }
+        }
+
         Ok(())
     }
 
@@ -1805,6 +1931,7 @@ impl MigrationTrait for Migration {
 
         drop_tables!(
             manager,
+            ScheduledTasks::Table,
             ControllerEvents::Table,
             ApiRateLimits::Table,
             PendingOidcRegistrations::Table,
@@ -1843,9 +1970,14 @@ impl MigrationTrait for Migration {
     }
 }
 
-/// Seeds the final RBAC state: 3 roles (owner, admin, user) with 5 permissions.
+/// Seeds the final RBAC state: 3 roles (owner, admin, user) with all 9 permissions.
+///
+/// Role assignments:
+/// - `owner`: all 9 permissions
+/// - `admin`: all except `manage_global_settings` (8 permissions)
+/// - `user`: all `view_*` permissions (view_settings, view_agents, view_software, view_hosts)
 async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Result<(), DbErr> {
-    // Insert permissions
+    // Insert all 9 permissions
     let permissions = [
         ("view_settings", "View system settings"),
         ("manage_settings", "Create and modify system settings"),
@@ -1855,6 +1987,16 @@ async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Re
             "manage_global_settings",
             "Manage global settings (network, CA, TLS, system alerts)",
         ),
+        (
+            "view_software",
+            "View software items, provider configs, and update history",
+        ),
+        (
+            "manage_software",
+            "Manage software items, provider configs, version checks, updates, and scheduler",
+        ),
+        ("view_hosts", "View hosts"),
+        ("manage_hosts", "Manage hosts (update, deactivate)"),
     ];
 
     let mut permission_ids = Vec::new();
@@ -1878,7 +2020,7 @@ async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Re
             .await?;
     }
 
-    // owner role: all 5 permissions
+    // owner role: all 9 permissions
     let owner_role_id = Uuid::now_v7();
     manager
         .exec_stmt(
@@ -1907,7 +2049,7 @@ async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Re
             .await?;
     }
 
-    // admin role: all except manage_global_settings
+    // admin role: all except manage_global_settings (8 permissions)
     let admin_role_id = Uuid::now_v7();
     manager
         .exec_stmt(
@@ -1939,7 +2081,7 @@ async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Re
             .await?;
     }
 
-    // user role: view_agents only
+    // user role: all view_* permissions (view_settings, view_agents, view_software, view_hosts)
     let user_role_id = Uuid::now_v7();
     manager
         .exec_stmt(
@@ -1956,23 +2098,25 @@ async fn seed_rbac(manager: &SchemaManager<'_>, now: time::OffsetDateTime) -> Re
         )
         .await?;
 
-    let view_agents_id = permission_ids
-        .iter()
-        .find(|(_, name)| *name == "view_agents")
-        .map(|(id, _)| *id)
-        .ok_or(DbErr::Custom(
-            "view_agents permission not found".to_string(),
-        ))?;
-
-    manager
-        .exec_stmt(
-            Query::insert()
-                .into_table(RolePermissions::Table)
-                .columns([RolePermissions::RoleId, RolePermissions::PermissionId])
-                .values_panic([user_role_id.into(), view_agents_id.into()])
-                .to_owned(),
-        )
-        .await?;
+    let user_permissions = [
+        "view_settings",
+        "view_agents",
+        "view_software",
+        "view_hosts",
+    ];
+    for (perm_id, perm_name) in &permission_ids {
+        if user_permissions.contains(perm_name) {
+            manager
+                .exec_stmt(
+                    Query::insert()
+                        .into_table(RolePermissions::Table)
+                        .columns([RolePermissions::RoleId, RolePermissions::PermissionId])
+                        .values_panic([user_role_id.into(), (*perm_id).into()])
+                        .to_owned(),
+                )
+                .await?;
+        }
+    }
 
     Ok(())
 }
@@ -2262,6 +2406,7 @@ enum MqttClients {
     StatusUpdatedAt,
     CreatedAt,
     UpdatedAt,
+    CaCertPem,
 }
 
 #[derive(DeriveIden)]
@@ -2387,4 +2532,23 @@ enum ControllerEvents {
     TargetServiceType,
     MessageJson,
     CreatedAt,
+}
+
+#[derive(DeriveIden)]
+enum ScheduledTasks {
+    Table,
+    Id,
+    TenantId,
+    TaskType,
+    CronExpression,
+    Enabled,
+    TaskConfig,
+    LastRunAt,
+    NextRunAt,
+    LockedBy,
+    LockedAt,
+    LastError,
+    RunCount,
+    CreatedAt,
+    UpdatedAt,
 }
