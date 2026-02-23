@@ -6,9 +6,9 @@ use futures_util::{SinkExt, StreamExt};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::{
-    ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, ErrorCode, ErrorPayload,
-    ExecuteUpdatePayload, IncomingSeq, OutgoingSeq, PingPayload, ProviderType, RejectedPayload,
-    ServiceMessage, UpdateFinalStatus,
+    ApprovedPayload, CertificatePayload, CloseReason, ControllerMessage, DiscoverSoftwarePayload,
+    DiscoveryProviderAssignment, ErrorCode, ErrorPayload, ExecuteUpdatePayload, IncomingSeq,
+    OutgoingSeq, PingPayload, ProviderType, RejectedPayload, ServiceMessage, UpdateFinalStatus,
 };
 use uptrakit_shared_db::entity::{
     available_version, host, host_software_item, provider_config, service_host, software_item,
@@ -218,7 +218,7 @@ pub(crate) async fn handle_agent_authenticated(
                                 for host_info in &payload.hosts {
                                     let host_hostname = host_info.hostname.as_deref().unwrap_or(&agent_model.hostname);
                                     let host_ip = host_info.ip_address.as_deref().or(agent_model.ip_address.as_deref());
-                                    if let Err(e) = find_or_create_host_and_link(
+                                    match find_or_create_host_and_link(
                                         state.db(),
                                         agent_model.tenant_id,
                                         agent_id,
@@ -226,7 +226,20 @@ pub(crate) async fn handle_agent_authenticated(
                                         host_hostname,
                                         host_ip,
                                     ).await {
-                                        tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host");
+                                        Ok(Some((_host_id, true))) => {
+                                            // New host was registered — trigger autodiscovery.
+                                            trigger_discovery_for_agent_host(
+                                                state,
+                                                agent_id,
+                                                agent_model.tenant_id,
+                                                &host_info.machine_id,
+                                            )
+                                            .await;
+                                        }
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host");
+                                        }
                                     }
                                 }
 
@@ -534,6 +547,64 @@ pub(crate) async fn handle_agent_authenticated(
                                     }
                                 }
                             }
+                            ServiceMessage::DiscoveryResults(payload) => {
+                                tracing::debug!(
+                                    %agent_id,
+                                    host_machine_id = %payload.host_machine_id,
+                                    results = payload.results.len(),
+                                    "received DiscoveryResults"
+                                );
+
+                                // Find the host this discovery result targets.
+                                // Find all service-host links for this agent.
+                                // We resolve machine_id below by joining through the host entity.
+                                let links_opt = uptrakit_shared_db::entity::prelude::ServiceHost::find()
+                                    .filter(service_host::Column::ServiceId.eq(agent_id))
+                                    .all(state.db())
+                                    .await
+                                    .ok();
+
+                                if let Some(links) = links_opt {
+                                    let mut host_id_opt: Option<uuid::Uuid> = None;
+                                    for link in &links {
+                                        if let Ok(Some(h)) = host::Entity::find_by_id(link.host_id)
+                                            .filter(host::Column::MachineId.eq(&payload.host_machine_id))
+                                            .filter(host::Column::DeactivatedAt.is_null())
+                                            .one(state.db())
+                                            .await
+                                        {
+                                            host_id_opt = Some(h.id);
+                                            break;
+                                        }
+                                    }
+
+                                    if let Some(host_id) = host_id_opt {
+                                        if let Ok(Some(agent_svc)) = uptrakit_shared_db::entity::prelude::Service::find_by_id(agent_id)
+                                            .one(state.db())
+                                            .await
+                                            && let Err(e) = crate::queries::autodiscovery::process_discovery_results(
+                                                state.db(),
+                                                agent_id,
+                                                agent_svc.tenant_id,
+                                                host_id,
+                                                payload,
+                                            ).await
+                                        {
+                                            tracing::warn!(
+                                                error = %e,
+                                                %agent_id,
+                                                "failed to process discovery results"
+                                            );
+                                        }
+                                    } else {
+                                        tracing::warn!(
+                                            %agent_id,
+                                            host_machine_id = %payload.host_machine_id,
+                                            "received DiscoveryResults for unknown host machine_id"
+                                        );
+                                    }
+                                }
+                            }
                             ServiceMessage::Disconnecting(payload) => {
                                 tracing::info!(
                                     %agent_id,
@@ -767,8 +838,9 @@ pub(crate) async fn run_agent_enrolled_loop(
                                     let _ = sink.send(Message::Text(json.into())).await;
                                 }
                             }
-                            ServiceMessage::VersionCheckResults(_) => {
-                                // Version checks not supported during enrollment
+                            ServiceMessage::VersionCheckResults(_)
+                            | ServiceMessage::DiscoveryResults(_) => {
+                                // These are not supported during enrollment
                             }
                             ServiceMessage::UpdateStarted(_)
                             | ServiceMessage::UpdateOutput(_)
@@ -1156,4 +1228,86 @@ async fn upsert_available_version(
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Autodiscovery helper
+// ---------------------------------------------------------------------------
+
+/// Send `DiscoverSoftware` to the given agent for the given host.
+///
+/// Queries all active provider configs for discovery-capable provider types.
+/// If no configs exist for a type, sends a single default (empty-config)
+/// assignment so the agent can still discover software.
+pub(crate) async fn trigger_discovery_for_agent_host(
+    state: &Arc<AppState>,
+    agent_id: uuid::Uuid,
+    tenant_id: uuid::Uuid,
+    host_machine_id: &str,
+) {
+    // All discovery-capable provider type variants.
+    let discovery_types: &[ProviderType] = &[
+        ProviderType::Homebrew,
+        ProviderType::ProxmoxHelperScripts,
+    ];
+
+    let mut providers: Vec<DiscoveryProviderAssignment> = Vec::new();
+
+    for provider_type in discovery_types {
+        let provider_type = provider_type.clone();
+        let type_str = provider_type.to_string();
+
+        let configs = match provider_config::Entity::find()
+            .filter(provider_config::Column::TenantId.eq(tenant_id))
+            .filter(provider_config::Column::ProviderType.eq(&type_str))
+            .filter(provider_config::Column::Enabled.eq(true))
+            .filter(provider_config::Column::DeactivatedAt.is_null())
+            .all(state.db())
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    %provider_type,
+                    "failed to query provider configs for discovery trigger"
+                );
+                continue;
+            }
+        };
+
+        if configs.is_empty() {
+            // No configs for this type — send a default assignment.
+            providers.push(DiscoveryProviderAssignment {
+                provider_config_id: None,
+                provider_type: provider_type.clone(),
+                config: serde_json::Value::Object(Default::default()),
+            });
+        } else {
+            for cfg in configs {
+                providers.push(DiscoveryProviderAssignment {
+                    provider_config_id: Some(cfg.id),
+                    provider_type: provider_type.clone(),
+                    config: cfg.config,
+                });
+            }
+        }
+    }
+
+    if providers.is_empty() {
+        tracing::debug!(%agent_id, "no discovery-capable providers configured; skipping discovery trigger");
+        return;
+    }
+
+    let msg = ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
+        host_machine_id: host_machine_id.to_string(),
+        providers,
+    });
+
+    tracing::info!(
+        %agent_id,
+        %host_machine_id,
+        "triggering autodiscovery for newly registered host"
+    );
+    state.notification_service.send(&agent_id, msg).await;
 }

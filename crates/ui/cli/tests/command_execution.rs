@@ -91,6 +91,7 @@ fn sample_software_item() -> SoftwareItemResponse {
         package_identifier: "nodejs/node".to_string(),
         config_override: None,
         enabled: true,
+        discovery_state: None,
         last_checked_at: None,
         host_count: 2,
         created_at: datetime!(2025-01-01 00:00:00 UTC),

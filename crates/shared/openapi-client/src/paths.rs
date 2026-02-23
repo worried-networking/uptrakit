@@ -46,6 +46,16 @@ pub(crate) mod health {
     pub(crate) const HEALTHZ: &str = "/healthz";
 }
 
+pub(crate) mod autodiscovery {
+    use uuid::Uuid;
+    /// `GET /api/v1/autodiscovery/ignores` · `POST …`
+    pub(crate) const IGNORES: &str = "/api/v1/autodiscovery/ignores";
+    /// `DELETE /api/v1/autodiscovery/ignores/{id}`
+    pub(crate) fn ignore_by_id(id: &Uuid) -> String {
+        format!("/api/v1/autodiscovery/ignores/{id}")
+    }
+}
+
 pub(crate) mod hosts {
     use uuid::Uuid;
     /// `GET /api/v1/hosts`
@@ -53,6 +63,14 @@ pub(crate) mod hosts {
     /// `GET /api/v1/hosts/{id}` · `PUT /api/v1/hosts/{id}` · `DELETE /api/v1/hosts/{id}`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/hosts/{id}")
+    }
+    /// `POST /api/v1/hosts/{id}/discover`
+    pub(crate) fn discover(id: &Uuid) -> String {
+        format!("/api/v1/hosts/{id}/discover")
+    }
+    /// `DELETE /api/v1/hosts/{id}/discovered`
+    pub(crate) fn discovered(id: &Uuid) -> String {
+        format!("/api/v1/hosts/{id}/discovered")
     }
 }
 
@@ -102,6 +120,14 @@ pub(crate) mod provider_configs {
     /// `GET /api/v1/provider-configs/{id}` · `PUT …` · `DELETE …`
     pub(crate) fn by_id(id: &Uuid) -> String {
         format!("/api/v1/provider-configs/{id}")
+    }
+    /// `POST /api/v1/provider-configs/{id}/discover`
+    pub(crate) fn discover(id: &Uuid) -> String {
+        format!("/api/v1/provider-configs/{id}/discover")
+    }
+    /// `DELETE /api/v1/provider-configs/{id}/discovered`
+    pub(crate) fn discovered(id: &Uuid) -> String {
+        format!("/api/v1/provider-configs/{id}/discovered")
     }
 }
 
@@ -201,6 +227,10 @@ pub(crate) mod software_items {
     /// `POST /api/v1/software-items/{item_id}/hosts/{host_id}/update`
     pub(crate) fn host_update(item_id: &Uuid, host_id: &Uuid) -> String {
         format!("/api/v1/software-items/{item_id}/hosts/{host_id}/update")
+    }
+    /// `POST /api/v1/software-items/{id}/approve`
+    pub(crate) fn approve(id: &Uuid) -> String {
+        format!("/api/v1/software-items/{id}/approve")
     }
 }
 

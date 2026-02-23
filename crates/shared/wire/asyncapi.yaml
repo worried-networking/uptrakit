@@ -823,6 +823,22 @@ components:
       payload:
         $ref: "#/components/schemas/mqttClientCreatedPayload"
 
+    discoverSoftware:
+      name: discover_software
+      title: Discover Software Message
+      summary: Controller requests software discovery on a host (agent-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/discoverSoftwarePayload"
+
+    discoveryResults:
+      name: discovery_results
+      title: Discovery Results Message
+      summary: Agent reports software discovery results
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/discoveryResultsPayload"
+
   schemas:
     pingPayload:
       type: object
@@ -2153,3 +2169,137 @@ components:
           description: MQTT client UUID to lease
           examples:
             - 660e8400-e29b-41d4-a716-446655440002
+
+    discoveredSoftware:
+      type: object
+      required:
+        - package_identifier
+        - name
+        - installed_version
+      properties:
+        package_identifier:
+          type: string
+          description: Provider-specific package identifier (e.g. Homebrew formula name)
+          examples:
+            - wget
+        name:
+          type: string
+          description: Human-readable display name
+          examples:
+            - Wget
+        installed_version:
+          type: string
+          description: Currently installed version string
+          examples:
+            - "1.21.4"
+        extra:
+          type: object
+          description: Optional provider-specific metadata (e.g. {"package_type":"formula"})
+          nullable: true
+
+    discoveryProviderAssignment:
+      type: object
+      required:
+        - provider_type
+        - config
+      properties:
+        provider_config_id:
+          type: string
+          format: uuid
+          description: Pre-existing provider config ID, absent for default/auto runs
+          nullable: true
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        provider_type:
+          type: string
+          description: Provider type identifier
+          examples:
+            - homebrew
+        config:
+          type: object
+          description: Provider-specific configuration ({} for default assignments)
+
+    discoverSoftwarePayload:
+      type: object
+      required:
+        - seq
+        - type
+        - host_machine_id
+        - providers
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: discover_software
+          description: Message type discriminator
+        host_machine_id:
+          type: string
+          description: Machine ID of the host to run discovery on
+          examples:
+            - machine-abc-123
+        providers:
+          type: array
+          description: Per-provider discovery assignments
+          items:
+            $ref: "#/components/schemas/discoveryProviderAssignment"
+
+    discoveryProviderResult:
+      type: object
+      required:
+        - provider_type
+      properties:
+        provider_config_id:
+          type: string
+          format: uuid
+          description: Echoed provider config ID from the assignment, absent for default runs
+          nullable: true
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        provider_type:
+          type: string
+          description: Provider type that produced these results
+          examples:
+            - homebrew
+        discoveries:
+          type: array
+          description: Discovered software items (absent or empty on error)
+          items:
+            $ref: "#/components/schemas/discoveredSoftware"
+        error:
+          type: string
+          description: Provider-level error message if discovery failed
+          nullable: true
+          examples:
+            - no update script found at /usr/bin/update
+
+    discoveryResultsPayload:
+      type: object
+      required:
+        - seq
+        - type
+        - host_machine_id
+        - results
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: discovery_results
+          description: Message type discriminator
+        host_machine_id:
+          type: string
+          description: Machine ID of the host that was scanned
+          examples:
+            - machine-abc-123
+        results:
+          type: array
+          description: Per-provider discovery results
+          items:
+            $ref: "#/components/schemas/discoveryProviderResult"

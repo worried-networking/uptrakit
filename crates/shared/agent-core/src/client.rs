@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::{
-    DisconnectReason, DisconnectingPayload, ServiceMessage, UpdateOutputPayload,
-    UpdateResultPayload, UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
+    DisconnectReason, DisconnectingPayload, DiscoverSoftwarePayload, DiscoveryProviderResult,
+    DiscoveryResultsPayload, ServiceMessage, UpdateOutputPayload, UpdateResultPayload,
+    UpdateStartedPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
@@ -273,4 +274,112 @@ pub async fn handle_execute_update(
         handle,
         output_rx,
     });
+}
+
+/// Handle a `DiscoverSoftware` message from the controller.
+///
+/// Iterates over each provider assignment, attempts discovery via the provider
+/// registry, and returns all results in a single `DiscoveryResults` message.
+/// Provider-level errors are recorded in the result rather than aborting the
+/// entire discovery run.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` if sending the response fails.
+pub async fn handle_discover_software(
+    payload: DiscoverSoftwarePayload,
+    executor: Arc<dyn CommandExecutor>,
+    conn: &mut ControllerConnection,
+) -> Option<LoopOutcome> {
+    tracing::info!(
+        count = payload.providers.len(),
+        host_machine_id = %payload.host_machine_id,
+        "received DiscoverSoftware request"
+    );
+
+    let mut results = Vec::with_capacity(payload.providers.len());
+
+    for assignment in payload.providers {
+        tracing::debug!(
+            provider_type = %assignment.provider_type,
+            provider_config_id = ?assignment.provider_config_id,
+            "running discovery for provider"
+        );
+
+        let result = match uptrakit_provider_registry::ProviderRegistry::create_provider_for_discovery(
+            assignment.provider_type.clone(),
+            &assignment.config,
+            Arc::clone(&executor),
+        ) {
+            Err(e) => {
+                tracing::warn!(
+                    provider_type = %assignment.provider_type,
+                    error = %e,
+                    "failed to create provider for discovery"
+                );
+                DiscoveryProviderResult {
+                    provider_config_id: assignment.provider_config_id,
+                    provider_type: assignment.provider_type,
+                    discoveries: vec![],
+                    error: Some(e.to_string()),
+                }
+            }
+            Ok(provider) => {
+                use uptrakit_provider_registry::ProviderCapability;
+                if !provider.has_capability(ProviderCapability::DiscoverLocalSoftware) {
+                    tracing::warn!(
+                        provider_type = %assignment.provider_type,
+                        "provider does not support DiscoverLocalSoftware; skipping"
+                    );
+                    DiscoveryProviderResult {
+                        provider_config_id: assignment.provider_config_id,
+                        provider_type: assignment.provider_type,
+                        discoveries: vec![],
+                        error: Some(
+                            "provider does not support software discovery".to_string(),
+                        ),
+                    }
+                } else {
+                    match provider.discover_software().await {
+                        Ok(discoveries) => {
+                            tracing::info!(
+                                provider_type = %assignment.provider_type,
+                                count = discoveries.len(),
+                                "discovery completed"
+                            );
+                            DiscoveryProviderResult {
+                                provider_config_id: assignment.provider_config_id,
+                                provider_type: assignment.provider_type,
+                                discoveries,
+                                error: None,
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                provider_type = %assignment.provider_type,
+                                error = %e,
+                                "discovery failed"
+                            );
+                            DiscoveryProviderResult {
+                                provider_config_id: assignment.provider_config_id,
+                                provider_type: assignment.provider_type,
+                                discoveries: vec![],
+                                error: Some(e.to_string()),
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        results.push(result);
+    }
+
+    let response = ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+        host_machine_id: payload.host_machine_id,
+        results,
+    });
+    if let Err(e) = conn.send(response).await {
+        tracing::error!(error = %e, "failed to send DiscoveryResults");
+        return Some(LoopOutcome::Disconnected);
+    }
+    tracing::debug!("sent DiscoveryResults");
+    None
 }

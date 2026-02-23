@@ -231,6 +231,32 @@ Main functionality that delivers the core value proposition.
 - [x] Add schedule enable/disable functionality
 - [x] Support manual trigger overrides
 
+### Software Autodiscovery
+
+- [x] Design autodiscovery architecture
+  - [x] Event-driven trigger on new host registration
+  - [x] `discovery_state` field on `software_items` (`pending` / `approved` / null)
+  - [x] `autodiscovery_ignores` table for permanent suppression
+  - [x] Partial unique index on `provider_configs(tenant_id, name)` for race-safe auto-creation
+- [x] Implement `DiscoverSoftware` / `DiscoveryResults` wire messages
+- [x] Agent-core `handle_discover_software()` shared implementation
+- [x] Regular agent and SSH agent support for `DiscoverSoftware`
+- [x] Controller `DiscoveryResults` handler with auto-creation of `ProviderConfig` records
+- [x] `ProviderType::supports_discovery()` capability check
+- [x] Homebrew: discover all (formulae + casks) when `package_type = None`; set `extra` metadata
+- [x] Proxmox Helper Scripts: allow discovery with empty `script_url`
+- [x] REST API for autodiscovery
+  - [x] `POST /api/v1/software-items/{id}/approve`
+  - [x] `POST /api/v1/hosts/{id}/discover`
+  - [x] `DELETE /api/v1/hosts/{id}/discovered`
+  - [x] `POST /api/v1/provider-configs/{id}/discover`
+  - [x] `DELETE /api/v1/provider-configs/{id}/discovered`
+  - [x] `GET /api/v1/autodiscovery/ignores`
+  - [x] `POST /api/v1/autodiscovery/ignores`
+  - [x] `DELETE /api/v1/autodiscovery/ignores/{id}`
+  - [x] `DELETE /api/v1/software-items/{id}?ignore=true`
+- [x] Version check scheduler excludes `pending` items
+
 ### Concurrency Control
 
 - [ ] Implement update locking mechanism

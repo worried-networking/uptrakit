@@ -83,39 +83,17 @@ impl HomebrewProvider {
         }
     }
 
-    /// Parse all installed formulae/casks from `brew info --installed --json=v2` output.
-    fn parse_installed_packages(
+    /// Parse installed formulae from `brew info --installed --json=v2` output.
+    ///
+    /// Emits items only for packages with a known installed version.
+    /// When `tag_extra` is true, annotates each item with
+    /// `extra = {"package_type": "formula"}` for auto-discovery grouping.
+    fn parse_installed_formulae(
         json: &serde_json::Value,
-        is_cask: bool,
+        tag_extra: bool,
     ) -> Vec<DiscoveredSoftware> {
         let mut result = Vec::new();
-
-        if is_cask {
-            if let Some(casks) = json.get("casks").and_then(|c| c.as_array()) {
-                for cask in casks {
-                    let Some(token) = cask.get("token").and_then(|t| t.as_str()) else {
-                        continue;
-                    };
-                    let name = cask
-                        .get("name")
-                        .and_then(|n| n.as_array())
-                        .and_then(|arr| arr.first())
-                        .and_then(|n| n.as_str())
-                        .unwrap_or(token);
-                    let installed_version = cask
-                        .get("installed")
-                        .and_then(|v| v.as_str())
-                        .map(Version::new);
-
-                    result.push(DiscoveredSoftware {
-                        package_identifier: token.to_string(),
-                        name: name.to_string(),
-                        installed_version,
-                        extra: None,
-                    });
-                }
-            }
-        } else if let Some(formulae) = json.get("formulae").and_then(|f| f.as_array()) {
+        if let Some(formulae) = json.get("formulae").and_then(|f| f.as_array()) {
             for formula in formulae {
                 let Some(name) = formula.get("name").and_then(|n| n.as_str()) else {
                     continue;
@@ -124,28 +102,89 @@ impl HomebrewProvider {
                     .get("full_name")
                     .and_then(|n| n.as_str())
                     .unwrap_or(name);
-                let installed_version = formula
+                let Some(installed_version) = formula
                     .get("installed")
                     .and_then(|arr| arr.as_array())
                     .and_then(|arr| arr.first())
                     .and_then(|obj| obj.get("version"))
                     .and_then(|v| v.as_str())
-                    .map(Version::new);
+                    .map(|s| s.to_string())
+                else {
+                    // Skip packages without a known installed version.
+                    continue;
+                };
+
+                let extra = if tag_extra {
+                    Some(serde_json::json!({"package_type": "formula"}))
+                } else {
+                    None
+                };
 
                 result.push(DiscoveredSoftware {
                     package_identifier: name.to_string(),
                     name: full_name.to_string(),
                     installed_version,
-                    extra: None,
+                    extra,
                 });
             }
         }
-
         result
     }
 
+    /// Parse installed casks from `brew info --installed --json=v2` output.
+    ///
+    /// Emits items only for packages with a known installed version.
+    /// When `tag_extra` is true, annotates each item with
+    /// `extra = {"package_type": "cask"}` for auto-discovery grouping.
+    fn parse_installed_casks(
+        json: &serde_json::Value,
+        tag_extra: bool,
+    ) -> Vec<DiscoveredSoftware> {
+        let mut result = Vec::new();
+        if let Some(casks) = json.get("casks").and_then(|c| c.as_array()) {
+            for cask in casks {
+                let Some(token) = cask.get("token").and_then(|t| t.as_str()) else {
+                    continue;
+                };
+                let name = cask
+                    .get("name")
+                    .and_then(|n| n.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|n| n.as_str())
+                    .unwrap_or(token);
+                let Some(installed_version) = cask
+                    .get("installed")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                else {
+                    // Skip casks without a known installed version.
+                    continue;
+                };
+
+                let extra = if tag_extra {
+                    Some(serde_json::json!({"package_type": "cask"}))
+                } else {
+                    None
+                };
+
+                result.push(DiscoveredSoftware {
+                    package_identifier: token.to_string(),
+                    name: name.to_string(),
+                    installed_version,
+                    extra,
+                });
+            }
+        }
+        result
+    }
+
+    /// Returns `true` if this instance is configured to track casks.
+    ///
+    /// Returns `false` for `None` (discover-all) and formula configs, so
+    /// version-check operations default to formula behaviour when no explicit
+    /// type is set.
     fn is_cask(&self) -> bool {
-        self.config.package_type == HomebrewPackageType::Cask
+        matches!(self.config.package_type, Some(HomebrewPackageType::Cask))
     }
 
     fn require_package_identifier(&self, package_identifier: &str) -> Result<()> {
@@ -192,10 +231,6 @@ impl Provider for HomebrewProvider {
     }
 
     async fn discover_software(&self) -> Result<Vec<DiscoveredSoftware>> {
-        tracing::debug!(
-            is_cask = self.is_cask(),
-            "discovering installed Homebrew packages"
-        );
         let cmd_output = self
             .executor
             .execute_quiet(&CommandSpec::exec(
@@ -223,7 +258,27 @@ impl Provider for HomebrewProvider {
             )))
         })?;
 
-        Ok(Self::parse_installed_packages(&json, self.is_cask()))
+        let packages = match &self.config.package_type {
+            None => {
+                // Discover-all mode: return both formulae and casks, each tagged
+                // with extra metadata so the controller can route them to the
+                // correct auto-created provider configs.
+                tracing::debug!("discovering all installed Homebrew packages (formulae + casks)");
+                let mut all = Self::parse_installed_formulae(&json, true);
+                all.extend(Self::parse_installed_casks(&json, true));
+                all
+            }
+            Some(HomebrewPackageType::Formula) => {
+                tracing::debug!("discovering installed Homebrew formulae");
+                Self::parse_installed_formulae(&json, false)
+            }
+            Some(HomebrewPackageType::Cask) => {
+                tracing::debug!("discovering installed Homebrew casks");
+                Self::parse_installed_casks(&json, false)
+            }
+        };
+
+        Ok(packages)
     }
 
     async fn detect_installed_version(&self, package_identifier: &str) -> Result<Option<Version>> {
@@ -333,20 +388,6 @@ impl Provider for HomebrewProvider {
         self.require_package_identifier(package_identifier)?;
         let pkg = package_identifier;
         let mut output = String::new();
-
-        let action = if self.is_cask() {
-            format!("brew upgrade --cask {pkg}")
-        } else {
-            format!("brew upgrade {pkg}")
-        };
-
-        send_output(
-            output_tx,
-            &format!("Running: {action}"),
-            OutputStreamType::Stdout,
-        )
-        .await;
-        output.push_str(&format!("Running: {action}\n"));
 
         let args: Vec<String> = if self.is_cask() {
             vec!["upgrade".to_string(), "--cask".to_string(), pkg.to_string()]
@@ -553,34 +594,65 @@ mod tests {
         assert_eq!(version, None);
     }
 
-    // ── parse_installed_packages ────────────────────────────────────────
+    // ── parse_installed_formulae / parse_installed_casks ────────────────
 
     #[test]
-    fn parse_installed_packages_formulae() {
+    fn parse_installed_formulae_without_extra_tag() {
         let json = sample_installed_json();
-        let packages = HomebrewProvider::parse_installed_packages(&json, false);
+        let packages = HomebrewProvider::parse_installed_formulae(&json, false);
         assert_eq!(packages.len(), 2);
         assert_eq!(packages[0].package_identifier, "wget");
         assert_eq!(packages[0].name, "wget");
-        assert_eq!(packages[0].installed_version, Some(Version::new("1.24.4")));
+        assert_eq!(packages[0].installed_version, "1.24.4");
+        assert!(packages[0].extra.is_none());
         assert_eq!(packages[1].package_identifier, "jq");
-        assert_eq!(packages[1].installed_version, Some(Version::new("1.7.1")));
+        assert_eq!(packages[1].installed_version, "1.7.1");
     }
 
     #[test]
-    fn parse_installed_packages_casks() {
+    fn parse_installed_formulae_with_extra_tag() {
         let json = sample_installed_json();
-        let packages = HomebrewProvider::parse_installed_packages(&json, true);
+        let packages = HomebrewProvider::parse_installed_formulae(&json, true);
+        assert_eq!(packages.len(), 2);
+        assert_eq!(
+            packages[0].extra,
+            Some(serde_json::json!({"package_type": "formula"}))
+        );
+    }
+
+    #[test]
+    fn parse_installed_casks_without_extra_tag() {
+        let json = sample_installed_json();
+        let packages = HomebrewProvider::parse_installed_casks(&json, false);
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].package_identifier, "firefox");
         assert_eq!(packages[0].name, "Mozilla Firefox");
-        assert_eq!(packages[0].installed_version, Some(Version::new("132.0")));
+        assert_eq!(packages[0].installed_version, "132.0");
+        assert!(packages[0].extra.is_none());
+    }
+
+    #[test]
+    fn parse_installed_casks_with_extra_tag() {
+        let json = sample_installed_json();
+        let packages = HomebrewProvider::parse_installed_casks(&json, true);
+        assert_eq!(packages.len(), 1);
+        assert_eq!(
+            packages[0].extra,
+            Some(serde_json::json!({"package_type": "cask"}))
+        );
+    }
+
+    #[test]
+    fn parse_installed_casks_skips_not_installed() {
+        let json = sample_cask_json_not_installed();
+        let packages = HomebrewProvider::parse_installed_casks(&json, false);
+        assert!(packages.is_empty());
     }
 
     #[test]
     fn parse_installed_packages_empty() {
         let json = serde_json::json!({"formulae": [], "casks": []});
-        let packages = HomebrewProvider::parse_installed_packages(&json, false);
+        let packages = HomebrewProvider::parse_installed_formulae(&json, false);
         assert!(packages.is_empty());
     }
 
@@ -593,6 +665,38 @@ mod tests {
         assert!(provider.has_capability(ProviderCapability::DiscoverLocalSoftware));
         assert!(provider.has_capability(ProviderCapability::RefreshPackageIndex));
         assert_eq!(provider.capabilities().len(), 2);
+    }
+
+    #[test]
+    fn is_cask_returns_false_for_none() {
+        let provider =
+            HomebrewProvider::new(HomebrewConfig { package_type: None }, test_executor())
+                .expect("create");
+        assert!(!provider.is_cask());
+    }
+
+    #[test]
+    fn is_cask_returns_true_for_cask() {
+        let provider = HomebrewProvider::new(
+            HomebrewConfig {
+                package_type: Some(HomebrewPackageType::Cask),
+            },
+            test_executor(),
+        )
+        .expect("create");
+        assert!(provider.is_cask());
+    }
+
+    #[test]
+    fn is_cask_returns_false_for_formula() {
+        let provider = HomebrewProvider::new(
+            HomebrewConfig {
+                package_type: Some(HomebrewPackageType::Formula),
+            },
+            test_executor(),
+        )
+        .expect("create");
+        assert!(!provider.is_cask());
     }
 
     #[tokio::test]

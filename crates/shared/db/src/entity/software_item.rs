@@ -1,5 +1,6 @@
 use sea_orm::entity::prelude::*;
 use time::OffsetDateTime;
+use uptrakit_shared_types::SoftwareDiscoveryState;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "software_items")]
@@ -13,6 +14,7 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub config_override: Option<serde_json::Value>,
     pub enabled: bool,
+    pub discovery_state: Option<SoftwareDiscoveryState>,
     pub last_checked_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

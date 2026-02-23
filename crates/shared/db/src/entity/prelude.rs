@@ -1,6 +1,9 @@
 pub use super::api_rate_limit::{Entity as ApiRateLimit, Model as ApiRateLimitModel};
 pub use super::api_token::{Entity as ApiToken, Model as ApiTokenModel};
 pub use super::auth_method::AuthMethod;
+pub use super::autodiscovery_ignore::{
+    Entity as AutodiscoveryIgnore, Model as AutodiscoveryIgnoreModel,
+};
 pub use super::available_version::{Entity as AvailableVersion, Model as AvailableVersionModel};
 pub use super::ca_certificate::{Entity as CaCertificate, Model as CaCertificateModel};
 pub use super::controller_event::{Entity as ControllerEvent, Model as ControllerEventModel};

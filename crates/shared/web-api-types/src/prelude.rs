@@ -48,6 +48,12 @@ pub use crate::settings_mqtt::MqttClientConnectionStatus;
 // ── System alerts ────────────────────────────────────────────────────
 pub use crate::system_alerts::AlertSeverity;
 
+// ── Autodiscovery ────────────────────────────────────────────────────
+pub use crate::autodiscovery::{
+    AutodiscoveryIgnoreResponse, CreateAutodiscoveryIgnoreRequest, DiscardDiscoveredResponse,
+    TriggerDiscoveryResponse,
+};
+
 // ── Common ───────────────────────────────────────────────────────────
 pub use crate::error::ErrorResponse;
 pub use crate::pagination::{PaginatedResponse, PaginationParams};

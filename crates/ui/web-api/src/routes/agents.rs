@@ -165,7 +165,9 @@ pub(crate) async fn do_enroll(
 
 /// Find or create a host by machine_id, then link it to the given agent.
 ///
-/// Skips silently when `machine_id == "unknown"`.
+/// Returns `Ok(None)` when `machine_id == "unknown"` (skipped silently).
+/// Returns `Ok(Some((host_id, is_new)))` where `is_new` is `true` when a new
+/// host row was inserted and `false` when an existing host was updated.
 pub(crate) async fn find_or_create_host_and_link(
     db: &sea_orm::DatabaseConnection,
     tenant_id: uuid::Uuid,
@@ -173,9 +175,9 @@ pub(crate) async fn find_or_create_host_and_link(
     host_info: &HostInfo,
     hostname: &str,
     ip_address: Option<&str>,
-) -> Result<(), Report<AgentRouteError>> {
+) -> Result<Option<(uuid::Uuid, bool)>, Report<AgentRouteError>> {
     if host_info.machine_id == "unknown" {
-        return Ok(());
+        return Ok(None);
     }
 
     let now = OffsetDateTime::now_utc();
@@ -187,7 +189,7 @@ pub(crate) async fn find_or_create_host_and_link(
         .await
         .context_to::<AgentRouteError>()?;
 
-    let host_id = if let Some(existing_host) = existing {
+    let (host_id, is_new) = if let Some(existing_host) = existing {
         // Update mutable fields
         let mut active: host::ActiveModel = existing_host.clone().into();
         active.hostname = Set(hostname.to_string());
@@ -206,7 +208,7 @@ pub(crate) async fn find_or_create_host_and_link(
         active.last_seen_at = Set(Some(now));
         active.updated_at = Set(now);
         active.update(db).await.context_to::<AgentRouteError>()?;
-        existing_host.id
+        (existing_host.id, false)
     } else {
         // Create new host
         let host_id = token::generate_uuid();
@@ -226,7 +228,7 @@ pub(crate) async fn find_or_create_host_and_link(
             deactivated_at: Set(None),
         };
         new_host.insert(db).await.context_to::<AgentRouteError>()?;
-        host_id
+        (host_id, true)
     };
 
     // Upsert agent_host link — insert if not exists
@@ -244,7 +246,7 @@ pub(crate) async fn find_or_create_host_and_link(
         link.insert(db).await.context_to::<AgentRouteError>()?;
     }
 
-    Ok(())
+    Ok(Some((host_id, is_new)))
 }
 
 /// Sign a certificate from the agent's CSR, invalidate enrollment secret.

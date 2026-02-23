@@ -519,7 +519,8 @@ impl AppState {
         (name = "Hosts", description = "Host machine management"),
         (name = "Provider Configs", description = "Provider configuration management"),
         (name = "Software Items", description = "Software item tracking and host assignment"),
-        (name = "Update History", description = "Software update history tracking")
+        (name = "Update History", description = "Software update history tracking"),
+        (name = "Autodiscovery", description = "Automatic software discovery management")
     ),
     paths(
         routes::auth::register,
@@ -580,6 +581,14 @@ impl AppState {
         routes::software_items::trigger_update,
         routes::software_items::check_versions,
         routes::software_items::check_versions_host,
+        routes::software_items::approve_software_item,
+        routes::hosts::discover_host,
+        routes::hosts::discard_host_discovered,
+        routes::provider_configs::discover_provider_config,
+        routes::provider_configs::discard_provider_config_discovered,
+        routes::autodiscovery::list_autodiscovery_ignores,
+        routes::autodiscovery::create_autodiscovery_ignore,
+        routes::autodiscovery::delete_autodiscovery_ignore,
         routes::settings_ca::rotate_ca,
         routes::scheduler::list_scheduled_tasks,
         routes::scheduler::get_scheduled_task,
@@ -656,11 +665,16 @@ impl AppState {
             routes::scheduler::TriggerScheduledTaskResponse,
             routes::update_history::UpdateHistoryResponse,
             routes::update_history::UpdateStatus,
+            routes::hosts::TriggerDiscoveryResponse,
+            routes::hosts::DiscardDiscoveredResponse,
+            routes::autodiscovery::AutodiscoveryIgnoreResponse,
+            routes::autodiscovery::CreateAutodiscoveryIgnoreRequest,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::services::ServiceResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::hosts::HostResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::software_items::SoftwareItemResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::update_history::UpdateHistoryResponse>,
             uptrakit_web_api_types::pagination::PaginatedResponse<routes::provider_configs::ProviderConfigResponse>,
+            uptrakit_web_api_types::pagination::PaginatedResponse<routes::autodiscovery::AutodiscoveryIgnoreResponse>,
         )
     ),
     info(
@@ -839,7 +853,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::scheduler::update_scheduled_task))
         .routes(routes!(routes::scheduler::trigger_scheduled_task))
         .routes(routes!(routes::update_history::list_update_history))
-        .routes(routes!(routes::update_history::get_update_history));
+        .routes(routes!(routes::update_history::get_update_history))
+        // Autodiscovery
+        .routes(routes!(routes::software_items::approve_software_item))
+        .routes(routes!(routes::hosts::discover_host))
+        .routes(routes!(routes::hosts::discard_host_discovered))
+        .routes(routes!(routes::provider_configs::discover_provider_config))
+        .routes(routes!(routes::provider_configs::discard_provider_config_discovered))
+        .routes(routes!(
+            routes::autodiscovery::list_autodiscovery_ignores,
+            routes::autodiscovery::create_autodiscovery_ignore
+        ))
+        .routes(routes!(routes::autodiscovery::delete_autodiscovery_ignore));
 
     // OIDC provider management routes require authentication and belong inside auth_routes.
     // The OIDC auth-flow routes (oidc_auth::*) are added to base_router below because

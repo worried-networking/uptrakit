@@ -12,8 +12,8 @@ pub const PROTOCOL_VERSION: u16 = 1;
 
 // Re-export shared types used directly in wire protocol messages.
 pub use uptrakit_shared_types::{
-    HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType, ProviderType,
-    ReleaseAsset, ReleaseInfo, ServiceType,
+    DiscoveredSoftware, HookShell, MqttClientConnectionStatus, MqttTransport, OutputStreamType,
+    ProviderType, ReleaseAsset, ReleaseInfo, ServiceType,
 };
 // Re-export `SecretString` for callers that need it for secret fields.
 pub use uptrakit_shared_types::SecretString;
@@ -101,6 +101,7 @@ pub enum ServiceMessage {
     UpdateStarted(UpdateStartedPayload),
     UpdateOutput(UpdateOutputPayload),
     UpdateResult(UpdateResultPayload),
+    DiscoveryResults(DiscoveryResultsPayload),
     // -- MQTT-specific --
     Register(MqttRegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
@@ -126,6 +127,7 @@ pub enum ControllerMessage {
     // -- Agent-specific --
     CheckVersions(CheckVersionsPayload),
     ExecuteUpdate(Box<ExecuteUpdatePayload>),
+    DiscoverSoftware(DiscoverSoftwarePayload),
     // -- MQTT-specific --
     Registered(MqttRegisteredPayload),
     TenantAssignments(MqttTenantAssignmentsPayload),
@@ -639,6 +641,65 @@ pub struct MqttTenantRevokedPayload {
 pub struct MqttClientCreatedPayload {
     /// MQTT client UUID to lease.
     pub mqtt_client_id: Uuid,
+}
+
+// =============================================================================
+// Software Autodiscovery Payloads
+// =============================================================================
+
+/// Controller -> Agent: Run software discovery on the given host.
+///
+/// The `providers` list contains one entry per provider that should be used.
+/// When `provider_config_id` is `None`, the assignment uses a default (empty)
+/// config — the controller will auto-create a `ProviderConfig` record once
+/// results arrive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoverSoftwarePayload {
+    /// Machine ID of the host to discover software on.
+    ///
+    /// For the regular agent this is validated to match its own machine_id.
+    /// For the SSH agent it identifies which remote host to connect to.
+    pub host_machine_id: String,
+    /// Per-provider discovery assignments.
+    pub providers: Vec<DiscoveryProviderAssignment>,
+}
+
+/// A single provider assignment inside a [`DiscoverSoftwarePayload`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveryProviderAssignment {
+    /// Pre-existing provider config ID, or `None` for a default/auto run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_config_id: Option<Uuid>,
+    /// Provider type to use for discovery.
+    pub provider_type: ProviderType,
+    /// Provider-specific configuration (`{}` for default assignments).
+    pub config: serde_json::Value,
+}
+
+/// Agent -> Controller: Results of a software discovery run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveryResultsPayload {
+    /// Machine ID of the host that was scanned (echoed from the assignment).
+    pub host_machine_id: String,
+    /// Per-provider results.
+    pub results: Vec<DiscoveryProviderResult>,
+}
+
+/// Result for a single provider inside a [`DiscoveryResultsPayload`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveryProviderResult {
+    /// Echoed from [`DiscoveryProviderAssignment`] so the controller can route
+    /// results to the correct `ProviderConfig` row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_config_id: Option<Uuid>,
+    /// Provider type that produced these results.
+    pub provider_type: ProviderType,
+    /// Discovered software items (empty on error).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discoveries: Vec<DiscoveredSoftware>,
+    /// Provider-level error message, if discovery failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // =============================================================================
@@ -2700,5 +2761,129 @@ mod tests {
         });
         let json = serde_json::to_value(&msg).unwrap();
         spec.validate("mqttClientCreatedPayload", &json);
+    }
+
+    // =========================================================================
+    // Autodiscovery wire message tests
+    // =========================================================================
+
+    #[test]
+    fn discover_software_payload_roundtrip() {
+        let msg = ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
+            host_machine_id: "machine-abc".to_string(),
+            providers: vec![
+                DiscoveryProviderAssignment {
+                    provider_config_id: Some(TEST_UUID_1),
+                    provider_type: ProviderType::Homebrew,
+                    config: serde_json::json!({"package_type": "formula"}),
+                },
+                DiscoveryProviderAssignment {
+                    provider_config_id: None,
+                    provider_type: ProviderType::ProxmoxHelperScripts,
+                    config: serde_json::Value::Object(Default::default()),
+                },
+            ],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: ControllerMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn discover_software_payload_type_tag() {
+        let msg = ControllerMessage::DiscoverSoftware(DiscoverSoftwarePayload {
+            host_machine_id: "machine-abc".to_string(),
+            providers: vec![],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"discover_software""#));
+    }
+
+    #[test]
+    fn discovery_results_payload_roundtrip() {
+        let msg = ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+            host_machine_id: "machine-abc".to_string(),
+            results: vec![
+                DiscoveryProviderResult {
+                    provider_config_id: Some(TEST_UUID_1),
+                    provider_type: ProviderType::Homebrew,
+                    discoveries: vec![DiscoveredSoftware {
+                        package_identifier: "wget".to_string(),
+                        name: "Wget".to_string(),
+                        installed_version: "1.21.4".to_string(),
+                        extra: Some(serde_json::json!({"package_type": "formula"})),
+                    }],
+                    error: None,
+                },
+                DiscoveryProviderResult {
+                    provider_config_id: None,
+                    provider_type: ProviderType::ProxmoxHelperScripts,
+                    discoveries: vec![],
+                    error: Some("no update script found".to_string()),
+                },
+            ],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, msg);
+    }
+
+    #[test]
+    fn discovery_results_payload_type_tag() {
+        let msg = ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+            host_machine_id: "machine-abc".to_string(),
+            results: vec![],
+        });
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"discovery_results""#));
+    }
+
+    #[test]
+    fn discovery_provider_assignment_none_config_id_omitted() {
+        let assignment = DiscoveryProviderAssignment {
+            provider_config_id: None,
+            provider_type: ProviderType::Homebrew,
+            config: serde_json::Value::Object(Default::default()),
+        };
+        let json = serde_json::to_value(&assignment).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("provider_config_id"));
+    }
+
+    #[test]
+    fn spec_conformance_discover_software() {
+        let spec = AsyncApiSpec::load();
+        let json = controller_envelope_json(ControllerMessage::DiscoverSoftware(
+            DiscoverSoftwarePayload {
+                host_machine_id: "machine-abc".to_string(),
+                providers: vec![DiscoveryProviderAssignment {
+                    provider_config_id: Some(TEST_UUID_1),
+                    provider_type: ProviderType::Homebrew,
+                    config: serde_json::json!({"package_type": "formula"}),
+                }],
+            },
+        ));
+        spec.validate("discoverSoftwarePayload", &json);
+    }
+
+    #[test]
+    fn spec_conformance_discovery_results() {
+        let spec = AsyncApiSpec::load();
+        let json = service_envelope_json(ServiceMessage::DiscoveryResults(
+            DiscoveryResultsPayload {
+                host_machine_id: "machine-abc".to_string(),
+                results: vec![DiscoveryProviderResult {
+                    provider_config_id: Some(TEST_UUID_1),
+                    provider_type: ProviderType::Homebrew,
+                    discoveries: vec![DiscoveredSoftware {
+                        package_identifier: "wget".to_string(),
+                        name: "Wget".to_string(),
+                        installed_version: "1.21.4".to_string(),
+                        extra: None,
+                    }],
+                    error: None,
+                }],
+            },
+        ));
+        spec.validate("discoveryResultsPayload", &json);
     }
 }

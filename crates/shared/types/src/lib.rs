@@ -1,4 +1,5 @@
 mod device_auth_status;
+mod discovered_software;
 pub mod hex;
 mod hook_shell;
 mod masked_email;
@@ -10,8 +11,10 @@ mod secret_string;
 mod service_status;
 mod service_type;
 mod session_token_type;
+mod software_discovery_state;
 
 pub use device_auth_status::{DeviceAuthStatus, ParseDeviceAuthStatusError};
+pub use discovered_software::DiscoveredSoftware;
 pub use hook_shell::{HookShell, ParseHookShellError};
 pub use masked_email::{MaskedEmail, ParseMaskedEmailError};
 pub use mqtt_connection_status::{
@@ -24,3 +27,6 @@ pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use service_type::{ParseServiceTypeError, ServiceType};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
+pub use software_discovery_state::{
+    ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState,
+};

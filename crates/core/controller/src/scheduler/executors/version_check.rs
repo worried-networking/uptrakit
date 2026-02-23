@@ -168,6 +168,12 @@ impl VersionCheckExecutor {
             .filter(provider_config::Column::Enabled.eq(true))
             .filter(provider_config::Column::DeactivatedAt.is_null())
             .filter(service::Column::DeactivatedAt.is_null())
+            // Exclude pending-discovery items; approved items (enabled=true) are included.
+            .filter(
+                sea_orm::Condition::any()
+                    .add(software_item::Column::DiscoveryState.is_null())
+                    .add(software_item::Column::DiscoveryState.ne("pending")),
+            )
             .into_model::<Row>()
             .all(&self.db)
             .await

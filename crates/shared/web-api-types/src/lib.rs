@@ -4,6 +4,7 @@ pub use uptrakit_shared_types::SecretString;
 
 pub mod agents;
 pub mod api_tokens;
+pub mod autodiscovery;
 pub mod auth;
 pub mod device_auth;
 pub mod error;

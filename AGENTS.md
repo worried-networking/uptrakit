@@ -229,6 +229,49 @@ These are non-negotiable design constraints. Do not violate them.
    auto-advance fires pool-internal timers prematurely, causing spurious `ConnectionAcquire(Timeout)` failures under
    stress (nextest `--stress-count`). See [Testing](docs/development/testing.md).
 
+### Autodiscovery subsystem
+
+Autodiscovery automatically detects software installed on agent hosts and surfaces them as **pending** software items
+for user review. Key invariants:
+
+1. **Discovery is event-driven, not periodic.** It triggers on new host registration and via explicit API calls.
+   There is no periodic discovery scheduler task.
+
+2. **`discovery_state` lifecycle:** `null` (manual, full tracking) → `pending` (discovered, `enabled = false`,
+   excluded from version checks) → `approved` (reviewed, `enabled = true`, included in version checks). Deleting a
+   `pending` item is a plain soft-delete; the item is re-discoverable unless an ignore rule exists.
+
+3. **Ignore list is separate from deletion.** `DELETE /api/v1/software-items/{id}?ignore=true` both soft-deletes
+   the item and creates an `autodiscovery_ignore` row. Without `?ignore=true`, deletion is a plain soft-delete with no
+   ignore rule. Bulk-discard endpoints (`DELETE /api/v1/hosts/{id}/discovered`,
+   `DELETE /api/v1/provider-configs/{id}/discovered`) always perform plain soft-deletes — no ignore rules created.
+
+4. **Auto-created ProviderConfigs.** When no `ProviderConfig` exists for a discovery-capable type at trigger time,
+   the agent receives a default (empty-config) assignment. Results come back with `extra` metadata (e.g.
+   `{"package_type":"formula"}`). The controller auto-creates named configs: `"Homebrew (Formulae)"`,
+   `"Homebrew (Casks)"`, `"Proxmox Helper Scripts"`.
+
+5. **`ProviderType::supports_discovery()`** returns `true` only for `Homebrew` and `ProxmoxHelperScripts`. Used to
+   filter which providers receive discovery assignments.
+
+6. **Partial unique index.** `software_items` uses a partial unique index
+   `(tenant_id, provider_config_id, package_identifier) WHERE deactivated_at IS NULL` instead of a full unique
+   index. This allows the same package to be re-discovered after a soft-delete.
+
+#### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/shared/types/src/software_discovery_state.rs` | `SoftwareDiscoveryState` enum |
+| `crates/shared/types/src/discovered_software.rs` | Unified `DiscoveredSoftware` type |
+| `crates/shared/db/src/entity/autodiscovery_ignore.rs` | SeaORM entity for ignore rules |
+| `crates/shared/agent-core/src/discovery.rs` | `handle_discover_software()` agent-side logic |
+| `crates/ui/web-api/src/queries/autodiscovery.rs` | DB helpers + `process_discovery_results()` |
+| `crates/ui/web-api/src/routes/autodiscovery.rs` | Ignore list CRUD routes |
+| `crates/ui/web-api/src/routes/agent_ws.rs` | `trigger_discovery_for_agent_host()` helper |
+| `docs/api/autodiscovery.md` | Full API reference for autodiscovery endpoints |
+| `docs/end-user/autodiscovery.md` | End-user guide |
+
 ### Service ping interval
 
 The ping interval is controller-managed and per-service configurable. The `services` DB table has a nullable
@@ -458,3 +501,4 @@ For more in-depth information on specific topics, refer to the following documen
 - [Settings Runtime](docs/api/settings-runtime.md)
 - [HTTP Web API](docs/api/http-web-api.md)
 - [Services and Operations](docs/api/services-operations.md)
+- [Autodiscovery](docs/api/autodiscovery.md)

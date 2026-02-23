@@ -59,9 +59,18 @@ impl GitHubReleaseSource {
 }
 
 /// Configuration for the Proxmox Helper Scripts provider.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// `script_url` is optional for deserialization so that an empty `{}` config
+/// can be used for autodiscovery. The field defaults to an empty string when
+/// absent. `validate()` rejects an empty `script_url` only in version-check
+/// context; discovery proceeds with `script_url = ""`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProxmoxHelperScriptsConfig {
     /// URL of the Proxmox helper script to execute for updates.
+    ///
+    /// Optional at deserialization time; required for update execution.
+    /// Defaults to an empty string when the field is absent from JSON.
+    #[serde(default)]
     pub script_url: String,
     /// Optional GitHub release source for upstream version detection.
     ///
@@ -92,7 +101,11 @@ impl SecretMasking for ProxmoxHelperScriptsConfig {
 }
 
 impl ProxmoxHelperScriptsConfig {
-    /// Validate the configuration.
+    /// Validate the configuration for version-check / update-execution context.
+    ///
+    /// Rejects an empty `script_url` because it is required for update execution.
+    /// This validation must NOT be called during discovery, where an empty
+    /// `script_url` is acceptable.
     pub fn validate(&self) -> uptrakit_provider_core::Result<()> {
         if self.script_url.is_empty() {
             bail!(ProviderError::MissingConfig("script_url".to_string()));
@@ -118,12 +131,21 @@ mod tests {
     }
 
     #[test]
-    fn empty_script_url_fails() {
+    fn empty_script_url_fails_validate() {
         let config = ProxmoxHelperScriptsConfig {
             script_url: String::new(),
             github: None,
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn deserialize_empty_object_succeeds() {
+        // Discovery sends {} as the default config — must not fail to deserialize.
+        let config: ProxmoxHelperScriptsConfig =
+            serde_json::from_str("{}").expect("deserialize empty config");
+        assert!(config.script_url.is_empty());
+        assert!(config.github.is_none());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::AppState;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::provider_configs::{self as pc_queries, UpdateProviderConfigError};
 use crate::tenant_db::TenantDb;
 use axum::{
@@ -9,7 +10,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
+use uptrakit_shared_db::entity::{prelude::*, provider_config, service_host};
+use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -25,7 +29,8 @@ pub use uptrakit_web_api_types::provider_configs::{
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 201, description = "Provider config created", body = ProviderConfigResponse),
-        (status = 400, description = "Invalid input")
+        (status = 400, description = "Invalid input"),
+        (status = 409, description = "A provider config with this name already exists")
     ),
     tag = "Provider Configs",
     security(("bearer_token" = []))
@@ -42,7 +47,10 @@ pub async fn create_provider_config(
 
     match pc_queries::create_provider_config(state.provider_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(e) => {
+        Err(pc_queries::CreateProviderConfigError::DuplicateName) => {
+            error_response(StatusCode::CONFLICT, "A provider config with this name already exists")
+        }
+        Err(pc_queries::CreateProviderConfigError::Db(e)) => {
             tracing::error!("Failed to create provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
@@ -188,6 +196,191 @@ pub async fn delete_provider_config(
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
         Err(e) => {
             tracing::error!("Failed to delete provider config: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
+}
+
+// ── Autodiscovery endpoints ───────────────────────────────────────────────────
+
+/// Trigger autodiscovery for a specific provider configuration.
+///
+/// Sends a `DiscoverSoftware` assignment to all connected agents.
+/// Returns an error if the provider type does not support discovery.
+#[utoipa::path(
+    post,
+    path = "/api/v1/provider-configs/{id}/discover",
+    params(("id" = String, Path, description = "Provider config UUID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
+    responses(
+        (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
+        (status = 400, description = "Provider type does not support discovery"),
+        (status = 404, description = "Provider config not found")
+    ),
+    tag = "Provider Configs",
+    security(("bearer_token" = []))
+)]
+pub async fn discover_provider_config(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path(id): Path<String>,
+) -> Response {
+    let config_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
+    };
+
+    // Load the provider config and verify it belongs to the tenant.
+    let cfg = match ProviderConfig::find_by_id(config_id)
+        .filter(provider_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(provider_config::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Provider config not found"),
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Validate provider supports discovery.
+    let provider_type: uptrakit_internal_wire::ProviderType = match cfg.provider_type.parse() {
+        Ok(pt) => pt,
+        Err(_) => {
+            return error_response(StatusCode::BAD_REQUEST, "Unknown provider type");
+        }
+    };
+
+    if !provider_type.supports_discovery() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!("Provider type '{}' does not support autodiscovery", cfg.provider_type),
+        );
+    }
+
+    // Find all agents with linked hosts for this tenant.
+    let all_links = match ServiceHost::find()
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to query service-host links: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Collect unique agent IDs.
+    let agent_ids: std::collections::HashSet<uuid::Uuid> =
+        all_links.into_iter().map(|l| l.service_id).collect();
+
+    let agents_notified = agent_ids.len() as u32;
+
+    // For each agent, send a DiscoverSoftware with just this specific config.
+    for agent_id in &agent_ids {
+        let hosts = match ServiceHost::find()
+            .filter(service_host::Column::ServiceId.eq(*agent_id))
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        for link in &hosts {
+            // Look up the host's machine_id.
+            if let Ok(Some(h)) = uptrakit_shared_db::entity::host::Entity::find_by_id(link.host_id)
+                .filter(uptrakit_shared_db::entity::host::Column::TenantId.eq(tenant_db.tenant_id))
+                .filter(uptrakit_shared_db::entity::host::Column::DeactivatedAt.is_null())
+                .one(tenant_db.db())
+                .await
+            {
+                let msg = uptrakit_internal_wire::ControllerMessage::DiscoverSoftware(
+                    uptrakit_internal_wire::DiscoverSoftwarePayload {
+                        host_machine_id: h.machine_id,
+                        providers: vec![uptrakit_internal_wire::DiscoveryProviderAssignment {
+                            provider_config_id: Some(cfg.id),
+                            provider_type: provider_type.clone(),
+                            config: cfg.config.clone(),
+                        }],
+                    },
+                );
+                state.notification_service.send(agent_id, msg).await;
+            }
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(TriggerDiscoveryResponse {
+            providers_queued: agents_notified,
+            message: format!(
+                "Discovery triggered for provider config '{}' on {} agent(s)",
+                cfg.name, agents_notified
+            ),
+        }),
+    )
+        .into_response()
+}
+
+/// Bulk-discard all pending discovered software items for a provider configuration.
+///
+/// No autodiscovery ignore rules are created.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/provider-configs/{id}/discovered",
+    params(("id" = String, Path, description = "Provider config UUID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
+    responses(
+        (status = 200, description = "Pending items discarded", body = DiscardDiscoveredResponse),
+        (status = 404, description = "Provider config not found")
+    ),
+    tag = "Provider Configs",
+    security(("bearer_token" = []))
+)]
+pub async fn discard_provider_config_discovered(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path(id): Path<String>,
+) -> Response {
+    let config_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
+    };
+
+    // Verify provider config belongs to tenant.
+    let exists = match ProviderConfig::find_by_id(config_id)
+        .filter(provider_config::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(provider_config::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if !exists {
+        return error_response(StatusCode::NOT_FOUND, "Provider config not found");
+    }
+
+    match autodiscovery_queries::discard_pending_items(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        None,
+        Some(config_id),
+    )
+    .await
+    {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to discard pending items: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

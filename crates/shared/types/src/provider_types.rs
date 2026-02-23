@@ -26,6 +26,14 @@ impl ProviderType {
             Self::Homebrew => "homebrew",
         }
     }
+
+    /// Returns `true` if this provider type supports local software discovery.
+    ///
+    /// Used server-side to filter provider configs when building discovery
+    /// assignments, without instantiating the actual provider.
+    pub fn supports_discovery(&self) -> bool {
+        matches!(self, Self::Homebrew | Self::ProxmoxHelperScripts)
+    }
 }
 
 /// Error returned when parsing an invalid [`ProviderType`] string.
@@ -199,6 +207,14 @@ mod tests {
         for pt in &variants {
             assert_eq!(pt.as_str(), pt.to_string());
         }
+    }
+
+    #[test]
+    fn supports_discovery_homebrew_and_phs() {
+        assert!(ProviderType::Homebrew.supports_discovery());
+        assert!(ProviderType::ProxmoxHelperScripts.supports_discovery());
+        assert!(!ProviderType::GithubReleases.supports_discovery());
+        assert!(!ProviderType::DockerRegistry.supports_discovery());
     }
 
     #[test]

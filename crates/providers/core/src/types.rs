@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-pub use uptrakit_shared_types::{ProviderType, ReleaseAsset, ReleaseInfo};
+pub use uptrakit_shared_types::{DiscoveredSoftware, ProviderType, ReleaseAsset, ReleaseInfo};
 
 use crate::version::Version;
 
@@ -22,21 +22,6 @@ pub enum ProviderCapability {
     DiscoverLocalSoftware,
     /// Provider can refresh/sync the local package index from remote sources.
     RefreshPackageIndex,
-}
-
-/// A piece of software discovered on the local system by a provider.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DiscoveredSoftware {
-    /// Provider-specific identifier for this software (e.g., package name, app slug).
-    pub package_identifier: String,
-    /// Human-readable display name.
-    pub name: String,
-    /// Currently installed version, if detected.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub installed_version: Option<Version>,
-    /// Additional provider-specific metadata.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra: Option<serde_json::Value>,
 }
 
 /// Metadata for an upstream software release.
@@ -113,7 +98,7 @@ mod tests {
         let sw = DiscoveredSoftware {
             package_identifier: "prometheus".to_string(),
             name: "Prometheus".to_string(),
-            installed_version: Some(Version::new("2.53.0")),
+            installed_version: "2.53.0".to_string(),
             extra: Some(serde_json::json!({"install_path": "/usr/local/bin/prometheus"})),
         };
         let json = serde_json::to_string(&sw).expect("serialize");
@@ -122,37 +107,16 @@ mod tests {
     }
 
     #[test]
-    fn discovered_software_optional_fields_omitted() {
+    fn discovered_software_optional_extra_omitted() {
         let sw = DiscoveredSoftware {
             package_identifier: "grafana".to_string(),
             name: "Grafana".to_string(),
-            installed_version: None,
+            installed_version: "10.0.0".to_string(),
             extra: None,
         };
         let json = serde_json::to_string(&sw).expect("serialize");
-        assert!(!json.contains("installed_version"));
         assert!(!json.contains("extra"));
         let deserialized: DiscoveredSoftware = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, sw);
-    }
-
-    #[test]
-    fn discovered_software_equality() {
-        let a = DiscoveredSoftware {
-            package_identifier: "node-exporter".to_string(),
-            name: "Node Exporter".to_string(),
-            installed_version: Some(Version::new("1.8.0")),
-            extra: None,
-        };
-        let b = a.clone();
-        assert_eq!(a, b);
-
-        let c = DiscoveredSoftware {
-            package_identifier: "node-exporter".to_string(),
-            name: "Node Exporter".to_string(),
-            installed_version: Some(Version::new("1.9.0")),
-            extra: None,
-        };
-        assert_ne!(a, c);
     }
 }

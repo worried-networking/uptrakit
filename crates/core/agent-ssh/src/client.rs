@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use uptrakit_command::{CommandExecutor, CommandSpec};
 use uptrakit_internal_wire::{
-    CheckVersionsPayload, ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage,
-    UpdateFinalStatus, UpdateResultPayload, VersionCheckResult, VersionCheckResultsPayload,
+    CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryProviderResult, DiscoveryResultsPayload,
+    ExecuteUpdatePayload, HostInfo, ReportHostsPayload, ServiceMessage, UpdateFinalStatus,
+    UpdateResultPayload, VersionCheckResult, VersionCheckResultsPayload,
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
@@ -352,6 +353,111 @@ pub(crate) async fn handle_execute_update_ssh(
     // completes. This is safe because SshCommandExecutor holds an Arc<SshSession>.
     // We intentionally do NOT try_unwrap here since the executor Arc was moved
     // into the spawned task.
+}
+
+/// Handle a `DiscoverSoftware` message for the SSH agent.
+///
+/// Looks up the SSH host by `host_machine_id`, opens a session, and delegates
+/// to the shared `uptrakit_agent_core::handle_discover_software()`. SSH
+/// connection failures are reported as per-provider errors rather than
+/// aborting the entire run.
+///
+/// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
+pub(crate) async fn handle_discover_software_ssh(
+    payload: DiscoverSoftwarePayload,
+    db: &sea_orm::DatabaseConnection,
+    conn: &mut ControllerConnection,
+) -> Option<LoopOutcome> {
+    let host = match find_host_by_machine_id(db, &payload.host_machine_id).await {
+        Ok(Some(h)) => h,
+        Ok(None) => {
+            tracing::warn!(
+                host_machine_id = %payload.host_machine_id,
+                "no SSH host found for DiscoverSoftware host_machine_id; returning errors"
+            );
+            let results = payload
+                .providers
+                .iter()
+                .map(|a| DiscoveryProviderResult {
+                    provider_config_id: a.provider_config_id,
+                    provider_type: a.provider_type.clone(),
+                    discoveries: vec![],
+                    error: Some(format!(
+                        "SSH host with machine_id '{}' not found",
+                        payload.host_machine_id
+                    )),
+                })
+                .collect();
+            conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+                host_machine_id: payload.host_machine_id,
+                results,
+            }))
+            .await;
+            return None;
+        }
+        Err(e) => {
+            tracing::error!(
+                host_machine_id = %payload.host_machine_id,
+                error = %e,
+                "DB error looking up SSH host for DiscoverSoftware"
+            );
+            let results = payload
+                .providers
+                .iter()
+                .map(|a| DiscoveryProviderResult {
+                    provider_config_id: a.provider_config_id,
+                    provider_type: a.provider_type.clone(),
+                    discoveries: vec![],
+                    error: Some(format!("DB error: {e}")),
+                })
+                .collect();
+            conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+                host_machine_id: payload.host_machine_id,
+                results,
+            }))
+            .await;
+            return None;
+        }
+    };
+
+    let session = match establish_ssh_session(&host).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(
+                host_name = %host.name,
+                error = %e,
+                "failed to establish SSH session for DiscoverSoftware"
+            );
+            let results = payload
+                .providers
+                .iter()
+                .map(|a| DiscoveryProviderResult {
+                    provider_config_id: a.provider_config_id,
+                    provider_type: a.provider_type.clone(),
+                    discoveries: vec![],
+                    error: Some(format!("SSH connection failed: {e}")),
+                })
+                .collect();
+            conn.send_best_effort(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
+                host_machine_id: payload.host_machine_id,
+                results,
+            }))
+            .await;
+            return None;
+        }
+    };
+
+    let executor: Arc<dyn CommandExecutor> =
+        Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+
+    let outcome =
+        uptrakit_agent_core::handle_discover_software(payload, executor, conn).await;
+
+    if let Ok(owned) = Arc::try_unwrap(session) {
+        owned.disconnect().await;
+    }
+
+    outcome
 }
 
 pub(crate) use uptrakit_agent_core::{

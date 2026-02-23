@@ -41,11 +41,11 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Agent-specific (service -> controller)
 
-`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`
+`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`
 
 ### SSH agent-specific (service -> controller)
 
-`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`
+`report_hosts`, `version_check_results`, `update_started`, `update_output`, `update_result`, `discovery_results`
 
 ### MQTT-specific (service -> controller)
 
@@ -58,10 +58,59 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### Agent-specific (controller -> service)
 
-`check_versions`, `execute_update`
+`check_versions`, `execute_update`, `discover_software`
 
-Both the regular agent and the SSH agent receive `check_versions` and `execute_update` messages. The `host_machine_id`
-field in each payload determines which host the operation targets (see [`host_machine_id` Field](#host_machine_id-field)).
+Both the regular agent and the SSH agent receive `check_versions`, `execute_update`, and `discover_software` messages.
+The `host_machine_id` field in each payload determines which host the operation targets
+(see [`host_machine_id` Field](#host_machine_id-field)).
+
+#### `discover_software` payload
+
+```json
+{
+  "seq": 1,
+  "type": "discover_software",
+  "host_machine_id": "abc-123",
+  "providers": [
+    {
+      "provider_config_id": "550e8400-...",
+      "provider_type": "homebrew",
+      "config": { "package_type": "formula" }
+    }
+  ]
+}
+```
+
+`provider_config_id` is `null` for auto-discovery runs where no pre-existing `ProviderConfig` exists for the provider
+type. In that case the agent uses the default/empty config and annotates each result with `extra` metadata (e.g.
+`{"package_type":"formula"}`). The controller creates the appropriate `ProviderConfig` records from this metadata.
+
+#### `discovery_results` payload
+
+```json
+{
+  "seq": 1,
+  "type": "discovery_results",
+  "host_machine_id": "abc-123",
+  "results": [
+    {
+      "provider_config_id": "550e8400-...",
+      "provider_type": "homebrew",
+      "discoveries": [
+        {
+          "package_identifier": "wget",
+          "name": "Wget",
+          "installed_version": "1.21.4",
+          "extra": { "package_type": "formula" }
+        }
+      ],
+      "error": null
+    }
+  ]
+}
+```
+
+See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery workflow.
 
 ### MQTT-specific (controller -> service)
 

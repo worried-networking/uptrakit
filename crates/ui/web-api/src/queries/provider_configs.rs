@@ -112,13 +112,22 @@ pub(crate) async fn find_raw_active_config_txn(
 
 // --- Public query functions ---
 
+/// Errors returned by [`create_provider_config`].
+#[derive(Debug)]
+pub enum CreateProviderConfigError {
+    /// An active provider config with the same name already exists for the tenant.
+    DuplicateName,
+    /// A database error occurred.
+    Db(sea_orm::DbErr),
+}
+
 /// Create a new provider configuration and return the masked response.
 /// Validation (name, provider-specific config, hooks) is the caller's responsibility.
 pub async fn create_provider_config(
     ops: &dyn ProviderOps,
     tenant_db: &TenantDb,
     req: CreateProviderConfigRequest,
-) -> Result<ProviderConfigResponse, sea_orm::DbErr> {
+) -> Result<ProviderConfigResponse, CreateProviderConfigError> {
     let now = OffsetDateTime::now_utc();
     let model = provider_config::ActiveModel {
         id: Set(generate_uuid()),
@@ -132,9 +141,21 @@ pub async fn create_provider_config(
         deactivated_at: Set(None),
     };
 
-    let inserted = model.insert(tenant_db.db()).await?;
+    let inserted = model.insert(tenant_db.db()).await.map_err(|e| {
+        if is_unique_name_violation(&e) {
+            CreateProviderConfigError::DuplicateName
+        } else {
+            CreateProviderConfigError::Db(e)
+        }
+    })?;
     Ok(provider_config_to_response(ops, inserted)
         .unwrap_or_else(|| unreachable!("provider_type was just validated by the caller")))
+}
+
+fn is_unique_name_violation(e: &sea_orm::DbErr) -> bool {
+    let msg = e.to_string().to_lowercase();
+    (msg.contains("unique") || msg.contains("duplicate"))
+        && (msg.contains("name") || msg.contains("uq_provider_configs_active_name"))
 }
 
 pub async fn list_provider_configs(

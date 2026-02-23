@@ -156,6 +156,53 @@ register_providers! {
 }
 
 impl ProviderRegistry {
+    /// Create a provider instance for autodiscovery, bypassing `validate()`.
+    ///
+    /// Used by discovery handlers where a default (empty) config is acceptable
+    /// — e.g. a `ProxmoxHelperScriptsConfig` with `script_url = ""` can still
+    /// run `discover_software()` even though `validate()` would reject it for
+    /// version-check / update-execution contexts.
+    pub fn create_provider_for_discovery(
+        provider_type: ProviderType,
+        config: &serde_json::Value,
+        executor: Arc<dyn CommandExecutor>,
+    ) -> Result<Box<dyn Provider>> {
+        match provider_type {
+            ProviderType::GithubReleases => {
+                let typed_config: GitHubConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                let provider = GitHubProvider::new(typed_config, executor)
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
+                Ok(Box::new(provider))
+            }
+            ProviderType::DockerRegistry => {
+                let typed_config: DockerRegistryConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                let provider = DockerRegistryProvider::new(typed_config, executor)
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
+                Ok(Box::new(provider))
+            }
+            ProviderType::ProxmoxHelperScripts => {
+                let typed_config: ProxmoxHelperScriptsConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                // Skip validate() — discovery can proceed with an empty script_url.
+                let provider = ProxmoxHelperScriptsProvider::new(typed_config, executor)
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
+                Ok(Box::new(provider))
+            }
+            ProviderType::Homebrew => {
+                let typed_config: HomebrewConfig =
+                    serde_json::from_value(config.clone()).context_to()?;
+                let provider = HomebrewProvider::new(typed_config, executor)
+                    .map_err(|e| report!(RegistryError::Instantiation(e.to_string())))?;
+                Ok(Box::new(provider))
+            }
+            _ => Err(report!(RegistryError::UnknownProviderType(format!(
+                "{provider_type}"
+            )))),
+        }
+    }
+
     /// Validate provider configuration from string type.
     ///
     /// This is a convenience method that accepts a string provider type.

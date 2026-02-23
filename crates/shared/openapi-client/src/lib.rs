@@ -5,6 +5,7 @@ pub(crate) mod paths;
 
 pub mod api_tokens;
 pub mod auth;
+pub mod autodiscovery;
 pub mod error;
 pub mod health;
 pub mod hosts;
@@ -359,6 +360,21 @@ impl UptrakitClient {
             .query(query);
         let resp = self.send_with_retry(req).await?;
         self.handle_empty_response(resp).await
+    }
+
+    async fn delete_with_query_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &impl Serialize,
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let req = self
+            .http
+            .delete(&url)
+            .bearer_auth(self.token_or_err()?)
+            .query(query);
+        let resp = self.send_with_retry(req).await?;
+        self.handle_response(resp).await
     }
 
     async fn put_json<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {

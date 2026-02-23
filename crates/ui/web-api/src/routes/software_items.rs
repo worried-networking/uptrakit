@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::auth::token::generate_uuid;
 use crate::error_response::error_response;
 use crate::middleware::permission::{CanManageSoftware, CanViewSoftware};
+use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::provider_configs::find_raw_active_config;
 use crate::queries::software_items::{self as item_queries, SoftwareItemQueryError};
 use crate::tenant_db::TenantDb;
@@ -15,8 +16,9 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{
-    host, host_software_item, prelude::*, service, service_host, update_history,
+    host, host_software_item, prelude::*, service, service_host, software_item, update_history,
 };
+use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -183,10 +185,16 @@ pub async fn update_software_item(
 }
 
 /// Soft-delete a software item.
+///
+/// The optional `ignore=true` query parameter also creates an autodiscovery
+/// ignore rule so the item is not re-discovered in future runs.
 #[utoipa::path(
     delete,
     path = "/api/v1/software-items/{id}",
-    params(("id" = String, Path, description = "Software item UUID")),
+    params(
+        ("id" = String, Path, description = "Software item UUID"),
+        ("ignore" = Option<bool>, Query, description = "If true, permanently suppress this package from future autodiscovery runs")
+    ),
     extensions(("x-required-permission" = json!("manage_software"))),
     responses(
         (status = 204, description = "Software item deleted"),
@@ -199,16 +207,124 @@ pub async fn delete_software_item(
     tenant_db: TenantDb,
     CanManageSoftware(_user): CanManageSoftware,
     Path(id): Path<String>,
+    Query(params): Query<DeleteSoftwareItemParams>,
 ) -> Response {
     let item_id = match uuid::Uuid::parse_str(&id) {
         Ok(id) => id,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
+
+    // If ignore=true, look up the item before deleting to capture provider info.
+    let ignore_info: Option<(uuid::Uuid, String)> = if params.ignore.unwrap_or(false) {
+        match software_item::Entity::find_by_id(item_id)
+            .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(tenant_db.db())
+            .await
+        {
+            Ok(Some(item)) => Some((item.provider_config_id, item.package_identifier)),
+            Ok(None) => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+            Err(e) => {
+                tracing::error!("Failed to look up software item for ignore: {e}");
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+            }
+        }
+    } else {
+        None
+    };
+
     match item_queries::delete_software_item(&tenant_db, item_id).await {
-        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => {
+            if let Some((provider_config_id, package_identifier)) = ignore_info
+                && let Err(e) = autodiscovery_queries::create_or_ignore_ignore_rule(
+                    tenant_db.db(),
+                    tenant_db.tenant_id,
+                    provider_config_id,
+                    &package_identifier,
+                )
+                .await
+            {
+                tracing::warn!("Failed to create autodiscovery ignore rule: {e}");
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(false) => error_response(StatusCode::NOT_FOUND, "Software item not found"),
         Err(e) => {
             tracing::error!("Failed to delete software item: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+pub struct DeleteSoftwareItemParams {
+    pub ignore: Option<bool>,
+}
+
+/// Approve a pending discovered software item.
+///
+/// Sets `discovery_state = 'approved'` and enables the item for version
+/// tracking and update management.
+#[utoipa::path(
+    post,
+    path = "/api/v1/software-items/{id}/approve",
+    params(("id" = String, Path, description = "Software item UUID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
+    responses(
+        (status = 200, description = "Software item approved", body = SoftwareItemResponse),
+        (status = 404, description = "Software item not found"),
+        (status = 409, description = "Item is not in pending discovery state")
+    ),
+    tag = "Software Items",
+    security(("bearer_token" = []))
+)]
+pub async fn approve_software_item(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path(id): Path<String>,
+) -> Response {
+    let item_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
+    };
+
+    let item = match software_item::Entity::find_by_id(item_id)
+        .filter(software_item::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(software_item::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(i)) => i,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+        Err(e) => {
+            tracing::error!("Failed to fetch software item: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if item.discovery_state != Some(SoftwareDiscoveryState::Pending) {
+        return error_response(StatusCode::CONFLICT, "Software item is not in pending discovery state");
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let mut active: software_item::ActiveModel = item.into();
+    active.discovery_state = Set(Some(SoftwareDiscoveryState::Approved));
+    active.enabled = Set(true);
+    active.updated_at = Set(now);
+
+    let updated = match active.update(tenant_db.db()).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("Failed to approve software item: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    match item_queries::get_software_item(&tenant_db, updated.id).await {
+        Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
+        Ok(None) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Item not found after update"),
+        Err(e) => {
+            tracing::error!("Failed to fetch approved software item: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }

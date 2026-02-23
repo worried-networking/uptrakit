@@ -957,6 +957,17 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Unique active provider config name per tenant (partial: only non-deactivated rows).
+        // Prevents duplicate names for active configs and makes find-or-create idempotent.
+        manager
+            .get_connection()
+            .execute_unprepared(
+                "CREATE UNIQUE INDEX uq_provider_configs_active_name \
+                 ON provider_configs(tenant_id, name) \
+                 WHERE deactivated_at IS NULL",
+            )
+            .await?;
+
         // --- software_items ---
         manager
             .create_table(
@@ -979,6 +990,7 @@ impl MigrationTrait for Migration {
                     .col(string(SoftwareItems::PackageIdentifier).default(""))
                     .col(json_null(SoftwareItems::ConfigOverride))
                     .col(boolean(SoftwareItems::Enabled).default(true))
+                    .col(string_null(SoftwareItems::DiscoveryState))
                     .col(timestamp_null(SoftwareItems::LastCheckedAt))
                     .col(timestamp(SoftwareItems::CreatedAt))
                     .col(timestamp(SoftwareItems::UpdatedAt))
@@ -1001,16 +1013,14 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Partial unique index: allow the same (tenant, provider_config, package) to exist
+        // again after a soft-delete, enabling re-discovery of previously deleted items.
         manager
-            .create_index(
-                Index::create()
-                    .name("uq_software_items_tenant_provider_config_package")
-                    .table(SoftwareItems::Table)
-                    .col(SoftwareItems::TenantId)
-                    .col(SoftwareItems::ProviderConfigId)
-                    .col(SoftwareItems::PackageIdentifier)
-                    .unique()
-                    .to_owned(),
+            .get_connection()
+            .execute_unprepared(
+                "CREATE UNIQUE INDEX uq_software_items_active \
+                 ON software_items(tenant_id, provider_config_id, package_identifier) \
+                 WHERE deactivated_at IS NULL",
             )
             .await?;
 
@@ -1081,6 +1091,60 @@ impl MigrationTrait for Migration {
                             .to(SoftwareItems::Table, SoftwareItems::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
+                    .to_owned(),
+            )
+            .await?;
+
+        // --- autodiscovery_ignores ---
+        manager
+            .create_table(
+                Table::create()
+                    .table(AutodiscoveryIgnores::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(AutodiscoveryIgnores::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(AutodiscoveryIgnores::TenantId).uuid().not_null())
+                    .col(
+                        ColumnDef::new(AutodiscoveryIgnores::ProviderConfigId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(string(AutodiscoveryIgnores::PackageIdentifier))
+                    .col(timestamp(AutodiscoveryIgnores::CreatedAt))
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_autodiscovery_ignores_tenant")
+                            .from(AutodiscoveryIgnores::Table, AutodiscoveryIgnores::TenantId)
+                            .to(Tenants::Table, Tenants::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_autodiscovery_ignores_provider_config")
+                            .from(
+                                AutodiscoveryIgnores::Table,
+                                AutodiscoveryIgnores::ProviderConfigId,
+                            )
+                            .to(ProviderConfigs::Table, ProviderConfigs::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_autodiscovery_ignores_tenant_config_package")
+                    .table(AutodiscoveryIgnores::Table)
+                    .col(AutodiscoveryIgnores::TenantId)
+                    .col(AutodiscoveryIgnores::ProviderConfigId)
+                    .col(AutodiscoveryIgnores::PackageIdentifier)
+                    .unique()
                     .to_owned(),
             )
             .await?;
@@ -1944,6 +2008,7 @@ impl MigrationTrait for Migration {
             MqttLeases::Table,
             MqttClients::Table,
             AvailableVersions::Table,
+            AutodiscoveryIgnores::Table,
             HostSoftwareItems::Table,
             SoftwareItems::Table,
             ProviderConfigs::Table,
@@ -2359,10 +2424,21 @@ enum SoftwareItems {
     PackageIdentifier,
     ConfigOverride,
     Enabled,
+    DiscoveryState,
     LastCheckedAt,
     CreatedAt,
     UpdatedAt,
     DeactivatedAt,
+}
+
+#[derive(DeriveIden)]
+enum AutodiscoveryIgnores {
+    Table,
+    Id,
+    TenantId,
+    ProviderConfigId,
+    PackageIdentifier,
+    CreatedAt,
 }
 
 #[derive(DeriveIden)]

@@ -13,8 +13,8 @@ pub mod version_check;
 // ── Public re-exports ────────────────────────────────────────────────────────
 
 pub use client::{
-    InFlightUpdate, UpdateEvent, handle_check_versions, handle_execute_update,
-    handle_graceful_shutdown, send_update_output, send_update_result,
+    InFlightUpdate, UpdateEvent, handle_check_versions, handle_discover_software,
+    handle_execute_update, handle_graceful_shutdown, send_update_output, send_update_result,
 };
 pub use update::{UpdateExecutionResult, UpdateOutputMessage};
 pub use version_check::{VersionCheckOutcome, check_version};

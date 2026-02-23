@@ -174,14 +174,18 @@ impl Provider for ProxmoxHelperScriptsProvider {
 
         for script in &scripts {
             let version_path = format!("{home}/.{}", script.slug);
-            let installed_version = self
-                .try_read_version_file(&version_path)
-                .await
-                .map(Version::new);
+            let Some(installed_version) = self.try_read_version_file(&version_path).await else {
+                // Skip items with no known installed version.
+                tracing::debug!(
+                    slug = %script.slug,
+                    "skipping PHS software with unknown version"
+                );
+                continue;
+            };
 
             tracing::debug!(
                 slug = %script.slug,
-                version = ?installed_version,
+                version = %installed_version,
                 "discovered PHS software"
             );
 

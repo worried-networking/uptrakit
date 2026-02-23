@@ -55,7 +55,13 @@ Settings persist in the `settings` table and are reconciled with CLI arguments f
 - `POST /api/v1/services/{target_id}/merge`: merge a source into a target.
 - `/api/v1/services/enrollment-token`: manage enrollment tokens for agents or MQTT services.
 - `/api/v1/software-items`: CRUD endpoints for software items tied to provider configs.
+- `POST /api/v1/software-items/{id}/approve`: approve a discovered (pending) software item. Requires `manage_software`.
 - `/api/v1/update-history`: read-only history with filters by host, software item, or status.
+- `POST /api/v1/hosts/{id}/discover`: trigger software discovery on a specific host. Requires `manage_software`.
+- `DELETE /api/v1/hosts/{id}/discovered[?provider_config_id={uuid}]`: bulk-discard pending discovered items for a host. Requires `manage_software`.
+- `POST /api/v1/provider-configs/{id}/discover`: trigger discovery for a specific provider config. Requires `manage_software`.
+- `DELETE /api/v1/provider-configs/{id}/discovered`: bulk-discard pending discovered items for a provider config. Requires `manage_software`.
+- `/api/v1/autodiscovery/ignores`: CRUD for permanent suppression rules. See [docs/api/autodiscovery.md](autodiscovery.md) for full details.
 
 Software items link to `provider_config`s and host associations via `host_software_item`.
 

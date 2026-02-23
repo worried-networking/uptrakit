@@ -9,11 +9,13 @@ certificate renewal) across controller instances using optimistic locking for HA
 
 ## Key references
 
-- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update history, scheduler)
+- Detailed entity documentation: [docs/architecture/](docs/architecture/) (multi-tenancy, hosts, software items, update history, scheduler, autodiscovery)
 
 - System architecture and operations: [docs/end-user/system-overview.md](docs/end-user/system-overview.md)
 
 - API and wire protocol: [docs/api/wire-protocol.md](docs/api/wire-protocol.md) and [docs/api/http-web-api.md](docs/api/http-web-api.md)
+
+- Autodiscovery: [docs/api/autodiscovery.md](docs/api/autodiscovery.md) and [docs/end-user/autodiscovery.md](docs/end-user/autodiscovery.md)
 
 - Settings, authentication, and service flows: [docs/api/settings-runtime.md](docs/api/settings-runtime.md),
   [docs/api/auth-flows.md](docs/api/auth-flows.md), [docs/api/services-operations.md](docs/api/services-operations.md)

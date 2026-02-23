@@ -80,6 +80,17 @@ impl ServiceHandler for AgentHandler {
                 client::handle_execute_update(*payload, &mut self.in_flight_update, conn).await;
                 Ok(None)
             }
+            ControllerMessage::DiscoverSoftware(payload) => {
+                if payload.host_machine_id != self.machine_id {
+                    tracing::warn!(
+                        expected = %self.machine_id,
+                        received = %payload.host_machine_id,
+                        "host_machine_id mismatch on DiscoverSoftware; ignoring message"
+                    );
+                    return Ok(None);
+                }
+                Ok(client::handle_discover_software(payload, conn).await)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)

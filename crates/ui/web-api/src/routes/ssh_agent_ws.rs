@@ -23,6 +23,7 @@ use super::service_ws::{
     deserialize_service_msg, record_service_activity, send_pong, serialize_controller_msg,
 };
 use crate::AppState;
+use crate::routes::agent_ws::trigger_discovery_for_agent_host;
 use crate::routes::agents::find_or_create_host_and_link;
 
 // ---------------------------------------------------------------------------
@@ -286,7 +287,7 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                 for host_info in &payload.hosts {
                                     let host_hostname = host_info.hostname.as_deref().unwrap_or(&service_model.hostname);
                                     let host_ip = host_info.ip_address.as_deref().or(service_model.ip_address.as_deref());
-                                    if let Err(e) = find_or_create_host_and_link(
+                                    match find_or_create_host_and_link(
                                         state.db(),
                                         service_model.tenant_id,
                                         service_id,
@@ -294,13 +295,80 @@ pub(crate) async fn handle_ssh_agent_authenticated(
                                         host_hostname,
                                         host_ip,
                                     ).await {
-                                        tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host to SSH agent");
+                                        Ok(Some((_host_id, true))) => {
+                                            // New host registered — trigger autodiscovery.
+                                            trigger_discovery_for_agent_host(
+                                                state,
+                                                service_id,
+                                                service_model.tenant_id,
+                                                &host_info.machine_id,
+                                            )
+                                            .await;
+                                        }
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            tracing::warn!(error = %e, machine_id = %host_info.machine_id, "failed to link host to SSH agent");
+                                        }
                                     }
                                 }
 
                                 // Refresh cached host IDs (may have linked new hosts).
                                 if let Ok(ids) = load_ssh_agent_linked_host_ids(state.db(), service_id).await {
                                     linked_host_ids = ids;
+                                }
+                            }
+                            ServiceMessage::DiscoveryResults(payload) => {
+                                tracing::debug!(
+                                    %service_id,
+                                    host_machine_id = %payload.host_machine_id,
+                                    results = payload.results.len(),
+                                    "SSH agent received DiscoveryResults"
+                                );
+
+                                // Find the host this result targets.
+                                let links = uptrakit_shared_db::entity::prelude::ServiceHost::find()
+                                    .filter(ssh_agent_host::Column::ServiceId.eq(service_id))
+                                    .all(state.db())
+                                    .await
+                                    .unwrap_or_default();
+
+                                let mut host_id_opt: Option<uuid::Uuid> = None;
+                                for link in &links {
+                                    if let Ok(Some(h)) = uptrakit_shared_db::entity::host::Entity::find_by_id(link.host_id)
+                                        .filter(uptrakit_shared_db::entity::host::Column::MachineId.eq(&payload.host_machine_id))
+                                        .filter(uptrakit_shared_db::entity::host::Column::DeactivatedAt.is_null())
+                                        .one(state.db())
+                                        .await
+                                    {
+                                        host_id_opt = Some(h.id);
+                                        break;
+                                    }
+                                }
+
+                                if let Some(host_id) = host_id_opt {
+                                    if let Ok(Some(svc)) = ssh_agent_service::Entity::find_by_id(service_id)
+                                        .one(state.db())
+                                        .await
+                                        && let Err(e) = crate::queries::autodiscovery::process_discovery_results(
+                                            state.db(),
+                                            service_id,
+                                            svc.tenant_id,
+                                            host_id,
+                                            payload,
+                                        ).await
+                                    {
+                                        tracing::warn!(
+                                            error = %e,
+                                            %service_id,
+                                            "failed to process SSH agent discovery results"
+                                        );
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        %service_id,
+                                        host_machine_id = %payload.host_machine_id,
+                                        "received DiscoveryResults for unknown host machine_id"
+                                    );
                                 }
                             }
                             ServiceMessage::Disconnecting(payload) => {

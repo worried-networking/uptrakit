@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use uptrakit_shared_types::SoftwareDiscoveryState;
 use uuid::Uuid;
 
 use crate::provider_configs::CreateProviderConfigRequest;
@@ -51,6 +52,9 @@ pub struct SoftwareItemResponse {
     pub package_identifier: String,
     pub config_override: Option<serde_json::Value>,
     pub enabled: bool,
+    /// Discovery state for auto-discovered items. `None` means manually created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_state: Option<SoftwareDiscoveryState>,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
@@ -74,6 +78,9 @@ pub struct SoftwareItemDetailResponse {
     pub package_identifier: String,
     pub config_override: Option<serde_json::Value>,
     pub enabled: bool,
+    /// Discovery state for auto-discovered items. `None` means manually created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_state: Option<SoftwareDiscoveryState>,
     #[serde(with = "time::serde::rfc3339::option")]
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
@@ -367,6 +374,7 @@ mod tests {
             package_identifier: "nodejs/node".to_string(),
             config_override: Some(serde_json::json!({"key": "value"})),
             enabled: true,
+            discovery_state: None,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
             host_count: 5,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
@@ -394,6 +402,7 @@ mod tests {
             package_identifier: "".to_string(),
             config_override: None,
             enabled: false,
+            discovery_state: None,
             last_checked_at: None,
             host_count: 0,
             created_at: datetime!(2025-01-01 00:00:00 UTC),

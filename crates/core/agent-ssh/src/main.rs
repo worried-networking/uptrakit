@@ -96,6 +96,9 @@ impl ServiceHandler for SshAgentHandler {
                 .await;
                 Ok(None)
             }
+            ControllerMessage::DiscoverSoftware(payload) => {
+                Ok(client::handle_discover_software_ssh(payload, db, conn).await)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)

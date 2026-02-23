@@ -1,14 +1,21 @@
+use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{CanManageHosts, CanViewHosts};
+use crate::middleware::permission::{CanManageHosts, CanManageSoftware, CanViewHosts};
+use crate::queries::autodiscovery as autodiscovery_queries;
 use crate::queries::hosts as host_queries;
+use crate::routes::agent_ws::trigger_discovery_for_agent_host;
 use crate::tenant_db::TenantDb;
 use axum::{
     Json,
-    extract::{Path, Query},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::sync::Arc;
+use uptrakit_shared_db::entity::{host, prelude::*, service_host};
 
+pub use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
 pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
 };
@@ -164,4 +171,158 @@ pub async fn deactivate_host(
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
         }
     }
+}
+
+// ── Autodiscovery endpoints ───────────────────────────────────────────────────
+
+/// Trigger autodiscovery on a specific host.
+///
+/// Sends `DiscoverSoftware` to all agents that have this host linked.
+#[utoipa::path(
+    post,
+    path = "/api/v1/hosts/{id}/discover",
+    params(("id" = String, Path, description = "Host UUID")),
+    extensions(("x-required-permission" = json!("manage_software"))),
+    responses(
+        (status = 200, description = "Discovery triggered", body = TriggerDiscoveryResponse),
+        (status = 404, description = "Host not found")
+    ),
+    tag = "Hosts",
+    security(("bearer_token" = []))
+)]
+pub async fn discover_host(
+    State(state): State<Arc<AppState>>,
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path(id): Path<String>,
+) -> Response {
+    let host_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
+    };
+
+    // Verify host belongs to tenant.
+    let host_record = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(h)) => h,
+        Ok(None) => return error_response(StatusCode::NOT_FOUND, "Host not found"),
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    // Find all agents linked to this host.
+    let links = match ServiceHost::find()
+        .filter(service_host::Column::HostId.eq(host_id))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to query service-host links: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    let agents_notified = links.len() as u32;
+    for link in &links {
+        trigger_discovery_for_agent_host(
+            &state,
+            link.service_id,
+            tenant_db.tenant_id,
+            &host_record.machine_id,
+        )
+        .await;
+    }
+
+    (
+        StatusCode::OK,
+        Json(TriggerDiscoveryResponse {
+            providers_queued: agents_notified,
+            message: format!(
+                "Discovery triggered on {} agent(s) for host '{}'",
+                agents_notified, host_record.hostname
+            ),
+        }),
+    )
+        .into_response()
+}
+
+/// Bulk-discard all pending discovered software items for a host.
+///
+/// Optionally filter by provider config. No autodiscovery ignore rules are created.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/hosts/{id}/discovered",
+    params(
+        ("id" = String, Path, description = "Host UUID"),
+        ("provider_config_id" = Option<String>, Query, description = "Filter by provider config UUID")
+    ),
+    extensions(("x-required-permission" = json!("manage_software"))),
+    responses(
+        (status = 200, description = "Pending items discarded", body = DiscardDiscoveredResponse),
+        (status = 404, description = "Host not found")
+    ),
+    tag = "Hosts",
+    security(("bearer_token" = []))
+)]
+pub async fn discard_host_discovered(
+    tenant_db: TenantDb,
+    CanManageSoftware(_user): CanManageSoftware,
+    Path(id): Path<String>,
+    Query(params): Query<DiscardDiscoveredParams>,
+) -> Response {
+    let host_id = match uuid::Uuid::parse_str(&id) {
+        Ok(id) => id,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid host ID"),
+    };
+
+    // Verify host belongs to tenant.
+    let exists = match Host::find_by_id(host_id)
+        .filter(host::Column::TenantId.eq(tenant_db.tenant_id))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(e) => {
+            tracing::error!("DB error: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    if !exists {
+        return error_response(StatusCode::NOT_FOUND, "Host not found");
+    }
+
+    let provider_config_id = params
+        .provider_config_id
+        .as_deref()
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+    match autodiscovery_queries::discard_pending_items(
+        tenant_db.db(),
+        tenant_db.tenant_id,
+        Some(host_id),
+        provider_config_id,
+    )
+    .await
+    {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to discard pending items: {e}");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+pub struct DiscardDiscoveredParams {
+    pub provider_config_id: Option<String>,
 }
