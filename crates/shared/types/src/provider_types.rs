@@ -27,7 +27,7 @@ use thiserror::Error;
 pub enum ProviderType {
     GithubReleases,
     ProxmoxHelperScripts,
-    DockerRegistry,
+    Docker,
     Homebrew,
     Apt,
     /// An unknown provider type received from a newer peer.
@@ -46,7 +46,7 @@ impl ProviderType {
         match self {
             Self::GithubReleases => "github_releases",
             Self::ProxmoxHelperScripts => "proxmox_helper_scripts",
-            Self::DockerRegistry => "docker_registry",
+            Self::Docker => "docker",
             Self::Homebrew => "homebrew",
             Self::Apt => "apt",
             Self::Other(s) => s.as_str(),
@@ -76,7 +76,7 @@ impl FromStr for ProviderType {
         match s {
             "github_releases" => Ok(Self::GithubReleases),
             "proxmox_helper_scripts" => Ok(Self::ProxmoxHelperScripts),
-            "docker_registry" => Ok(Self::DockerRegistry),
+            "docker" => Ok(Self::Docker),
             "homebrew" => Ok(Self::Homebrew),
             "apt" => Ok(Self::Apt),
             _ => Err(ParseProviderTypeError::Invalid),
@@ -106,7 +106,7 @@ impl From<String> for ProviderType {
         match s.as_str() {
             "github_releases" => Self::GithubReleases,
             "proxmox_helper_scripts" => Self::ProxmoxHelperScripts,
-            "docker_registry" => Self::DockerRegistry,
+            "docker" => Self::Docker,
             "homebrew" => Self::Homebrew,
             "apt" => Self::Apt,
             _ => Self::Other(s),
@@ -119,7 +119,7 @@ impl From<ProviderType> for String {
         match pt {
             ProviderType::GithubReleases => "github_releases".to_string(),
             ProviderType::ProxmoxHelperScripts => "proxmox_helper_scripts".to_string(),
-            ProviderType::DockerRegistry => "docker_registry".to_string(),
+            ProviderType::Docker => "docker".to_string(),
             ProviderType::Homebrew => "homebrew".to_string(),
             ProviderType::Apt => "apt".to_string(),
             ProviderType::Other(s) => s,
@@ -192,13 +192,25 @@ mod tests {
     }
 
     #[test]
-    fn provider_type_docker_registry_serialization() {
-        let dr = ProviderType::DockerRegistry;
+    fn provider_type_docker_serialization() {
+        let dr = ProviderType::Docker;
         let json = serde_json::to_string(&dr).expect("serialize");
-        assert_eq!(json, r#""docker_registry""#);
+        assert_eq!(json, r#""docker""#);
 
         let deserialized: ProviderType = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, dr);
+    }
+
+    /// Old `"docker_registry"` wire strings from pre-migration data must
+    /// deserialize to `Other("docker_registry")` rather than failing.
+    #[test]
+    fn provider_type_docker_registry_legacy_deserializes_to_other() {
+        let deserialized: ProviderType =
+            serde_json::from_str(r#""docker_registry""#).expect("deserialize legacy");
+        assert_eq!(
+            deserialized,
+            ProviderType::Other("docker_registry".to_string())
+        );
     }
 
     #[test]
@@ -271,12 +283,21 @@ mod tests {
             ProviderType::GithubReleases
         );
         assert_eq!(
+            ProviderType::from("docker".to_string()),
+            ProviderType::Docker
+        );
+        assert_eq!(
             ProviderType::from("apt".to_string()),
             ProviderType::Apt
         );
         assert_eq!(
             ProviderType::from("winget".to_string()),
             ProviderType::Other("winget".to_string())
+        );
+        // Old wire string maps to Other — not to Docker
+        assert_eq!(
+            ProviderType::from("docker_registry".to_string()),
+            ProviderType::Other("docker_registry".to_string())
         );
     }
 
@@ -287,7 +308,7 @@ mod tests {
             ProviderType::ProxmoxHelperScripts.to_string(),
             "proxmox_helper_scripts"
         );
-        assert_eq!(ProviderType::DockerRegistry.to_string(), "docker_registry");
+        assert_eq!(ProviderType::Docker.to_string(), "docker");
         assert_eq!(ProviderType::Homebrew.to_string(), "homebrew");
         assert_eq!(ProviderType::Apt.to_string(), "apt");
         assert_eq!(
@@ -307,8 +328,8 @@ mod tests {
             Some(ProviderType::ProxmoxHelperScripts)
         );
         assert_eq!(
-            "docker_registry".parse::<ProviderType>().ok(),
-            Some(ProviderType::DockerRegistry)
+            "docker".parse::<ProviderType>().ok(),
+            Some(ProviderType::Docker)
         );
         assert_eq!(
             "homebrew".parse::<ProviderType>().ok(),
@@ -318,6 +339,8 @@ mod tests {
             "apt".parse::<ProviderType>().ok(),
             Some(ProviderType::Apt)
         );
+        // Old wire string must be rejected by FromStr (it becomes Other via serde)
+        assert!("docker_registry".parse::<ProviderType>().is_err());
     }
 
     /// `FromStr` still rejects unknown strings to preserve the registry's
@@ -342,7 +365,7 @@ mod tests {
         let variants = [
             ProviderType::GithubReleases,
             ProviderType::ProxmoxHelperScripts,
-            ProviderType::DockerRegistry,
+            ProviderType::Docker,
             ProviderType::Homebrew,
             ProviderType::Apt,
         ];
@@ -360,7 +383,7 @@ mod tests {
         let variants = [
             ProviderType::GithubReleases,
             ProviderType::ProxmoxHelperScripts,
-            ProviderType::DockerRegistry,
+            ProviderType::Docker,
             ProviderType::Homebrew,
             ProviderType::Apt,
             ProviderType::Other("my_provider".to_string()),
