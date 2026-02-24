@@ -913,6 +913,24 @@ Items to consider for future versions but not currently prioritized:
 
 ______________________________________________________________________
 
+## Deferred Dependency Upgrades
+
+Dependencies that could not be upgraded in the current pass and require upstream changes before they can move forward.
+
+- [ ] **`strum` 0.27 → 0.28** — blocked by `sea-orm rc.x`, which pins `strum = "^0.27"` (excludes 0.28.x). Workspace crates that
+  derive both `strum::EnumIter` and `sea_orm::DeriveActiveEnum` would have two incompatible `Iterable` trait versions. Revisit once
+  sea-orm ships a release that moves its own strum pin to `^0.28`.
+
+- [ ] **`rand` 0.9 → 0.10** — blocked by `russh`, `rsa`, and `crypto-bigint`, which depend on `rand_core = "0.10.0-rc-3"`. Cargo
+  cannot unify this pre-release with the stable `rand_core ^0.10.0` that `rand 0.10.0` requires. Revisit once the russh/RustCrypto
+  stack stabilises on a non-RC release of `rand_core 0.10`.
+
+- [ ] **`der` 0.7 / `const-oid` 0.9 / `spki` 0.7 / `x509-cert` 0.2 / `x509-ocsp` 0.2** — blocked by `rcgen 0.14` and `x509-ocsp 0.2`,
+  which both require `der ^0.7`. Bumping `der` to 0.8 while they remain on 0.7 introduces two incompatible versions and causes type
+  collisions in the PKI/OCSP code. Revisit once `rcgen` and `x509-ocsp` release versions compatible with `der ^0.8`.
+
+______________________________________________________________________
+
 ## Notes
 
 - This roadmap is a living document and should be updated as priorities shift
