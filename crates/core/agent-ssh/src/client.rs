@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use std::collections::BTreeSet;
 use uptrakit_agent_core::ConnectionContext;
-use uptrakit_command::{CommandExecutor, CommandSpec};
+use uptrakit_command::{CommandExecutor, CommandSpec, SudoAwareCommandExecutor};
 
 use uptrakit_internal_wire::{
     Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryProviderResult,
@@ -285,8 +285,9 @@ pub(crate) async fn handle_check_versions_ssh(
     };
 
     let ctx = build_connection_context(&host);
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> =
-        Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+        Arc::new(SudoAwareCommandExecutor::new(raw, host.resolved_sudo_context()));
 
     let outcome = uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ctx).await;
 
@@ -377,8 +378,9 @@ pub(crate) async fn handle_execute_update_ssh(
     // The session is kept alive for the duration of the update via the
     // SshCommandExecutor Arc. The session will be disconnected when the
     // executor is dropped after update completion.
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> =
-        Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+        Arc::new(SudoAwareCommandExecutor::new(raw, host.resolved_sudo_context()));
 
     uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn, &ctx)
         .await;
@@ -483,8 +485,9 @@ pub(crate) async fn handle_discover_software_ssh(
     };
 
     let ctx = build_connection_context(&host);
+    let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
     let executor: Arc<dyn CommandExecutor> =
-        Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+        Arc::new(SudoAwareCommandExecutor::new(raw, host.resolved_sudo_context()));
 
     let outcome =
         uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ctx).await;

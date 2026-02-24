@@ -109,6 +109,16 @@ pub enum HostCommands {
         /// New expected host key fingerprint.
         #[arg(long)]
         host_key_fingerprint: Option<String>,
+
+        /// Sudo execution policy for this host.
+        ///
+        /// Accepted values: `auto` (default), `force-with`, `force-without`.
+        ///
+        /// - `auto`: use sudo when not root and `sudo_available` is true
+        /// - `force-with`: always use sudo (unless agent user is root)
+        /// - `force-without`: never use sudo
+        #[arg(long, value_name = "POLICY")]
+        sudo_policy: Option<String>,
     },
 
     /// Remove an SSH host (by name or UUID).
@@ -168,6 +178,33 @@ pub enum HostCommands {
         /// When set, --host-key-fingerprint is required and TOFU is disabled.
         #[arg(long)]
         strict_host_key_checking: bool,
+
+        /// Write `NOPASSWD: ALL` instead of specific command entries.
+        ///
+        /// Less secure; use only when no provider commands can be resolved on
+        /// the remote host or during development.
+        #[arg(long, default_value_t = false)]
+        allow_all: bool,
+    },
+
+    /// Regenerate the sudoers drop-in file for an enrolled SSH host.
+    ///
+    /// Connects to the host, resolves provider command paths, and writes a
+    /// minimal `/etc/sudoers.d/uptrakit-<username>` file.
+    UpdateSudoers {
+        /// Host name or UUID.
+        name_or_id: String,
+
+        /// Write `NOPASSWD: ALL` instead of specific command entries.
+        ///
+        /// Less secure; use only when no provider commands can be resolved on
+        /// the remote host or during development.
+        #[arg(long)]
+        allow_all: bool,
+
+        /// Preview the sudoers file without writing it to the remote host.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -361,6 +398,7 @@ mod tests {
                         username,
                         private_key_file,
                         host_key_fingerprint,
+                        sudo_policy,
                     },
             }) => {
                 assert_eq!(name_or_id, "my-server");
@@ -370,6 +408,7 @@ mod tests {
                 assert!(username.is_none());
                 assert!(private_key_file.is_none());
                 assert!(host_key_fingerprint.is_none());
+                assert!(sudo_policy.is_none());
             }
             other => panic!("expected Host Update, got: {other:?}"),
         }
@@ -573,6 +612,7 @@ mod tests {
                         target_private_key_file,
                         host_key_fingerprint,
                         strict_host_key_checking,
+                        ..
                     },
             }) => {
                 assert_eq!(target.hostname, "10.0.0.5");
@@ -685,6 +725,7 @@ mod tests {
                         target_private_key_file,
                         host_key_fingerprint,
                         strict_host_key_checking,
+                        ..
                     },
             }) => {
                 assert_eq!(target.hostname, "192.168.1.50");

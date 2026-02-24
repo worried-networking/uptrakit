@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use rootcause::prelude::*;
+use uptrakit_command::SudoPolicy;
 use uptrakit_crypto::EncryptedString;
 
 use crate::cli::HostCommands;
 use crate::commands::bootstrap::{self, BootstrapParams};
+use crate::commands::update_sudoers::{self, UpdateSudoersArgs};
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams, HostUpdates};
 use crate::ssh_config;
@@ -49,7 +51,21 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
             username,
             private_key_file,
             host_key_fingerprint,
+            sudo_policy,
         } => {
+            // Validate sudo_policy string if provided.
+            let validated_policy = match sudo_policy {
+                Some(ref s) => {
+                    let policy = s.parse::<SudoPolicy>().map_err(|e| {
+                        report!(Error::InvalidInput(format!(
+                            "invalid --sudo-policy '{}': {}",
+                            s, e
+                        )))
+                    })?;
+                    Some(policy.to_string())
+                }
+                None => None,
+            };
             let params = UpdateParams {
                 name_or_id: &name_or_id,
                 name,
@@ -58,6 +74,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 username,
                 private_key_file: private_key_file.as_deref(),
                 host_key_fingerprint,
+                sudo_policy: validated_policy,
             };
             run_update(&db, params).await
         }
@@ -71,6 +88,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
             target_private_key_file,
             host_key_fingerprint,
             strict_host_key_checking,
+            allow_all,
         } => {
             // The bootstrap command manages its own DB connection, so we
             // drop the one opened above and delegate entirely.
@@ -85,8 +103,21 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 target_private_key_file: target_private_key_file.as_deref(),
                 host_key_fingerprint,
                 strict_host_key_checking,
+                allow_all,
             };
             run_bootstrap(cli_params).await
+        }
+        HostCommands::UpdateSudoers {
+            name_or_id,
+            allow_all,
+            dry_run,
+        } => {
+            let args = UpdateSudoersArgs {
+                name_or_id,
+                allow_all,
+                dry_run,
+            };
+            update_sudoers::run(&args, &db).await
         }
     }
 }
@@ -148,13 +179,19 @@ async fn run_list(db: &sea_orm::DatabaseConnection) -> Result<()> {
     }
 
     println!(
-        "{:<36}  {:<20}  {:<30}  {:>5}  {:<15}  {:<10}",
-        "ID", "NAME", "HOSTNAME", "PORT", "USERNAME", "KEY TYPE"
+        "{:<36}  {:<20}  {:<30}  {:>5}  {:<15}  {:<10}  {:<12}",
+        "ID", "NAME", "HOSTNAME", "PORT", "USERNAME", "KEY TYPE", "SUDO POLICY"
     );
     for host in &hosts {
         println!(
-            "{:<36}  {:<20}  {:<30}  {:>5}  {:<15}  {:<10}",
-            host.id, host.name, host.hostname, host.port, host.username, host.key_type
+            "{:<36}  {:<20}  {:<30}  {:>5}  {:<15}  {:<10}  {:<12}",
+            host.id,
+            host.name,
+            host.hostname,
+            host.port,
+            host.username,
+            host.key_type,
+            host.sudo_policy
         );
     }
 
@@ -177,6 +214,19 @@ async fn run_show(db: &sea_orm::DatabaseConnection, name_or_id: &str) -> Result<
         "Host key:        {}",
         host.host_key_fingerprint.as_deref().unwrap_or("(not set)")
     );
+    println!("Sudo policy:     {}", host.sudo_policy);
+    println!(
+        "Is root:         {}",
+        host.is_root
+            .map(|v| if v { "yes" } else { "no" })
+            .unwrap_or("unknown")
+    );
+    println!(
+        "Sudo available:  {}",
+        host.sudo_available
+            .map(|v| if v { "yes" } else { "no" })
+            .unwrap_or("unknown")
+    );
     println!("Created at:      {}", format_timestamp(host.created_at));
     println!("Updated at:      {}", format_timestamp(host.updated_at));
 
@@ -192,6 +242,8 @@ struct UpdateParams<'a> {
     username: Option<String>,
     private_key_file: Option<&'a Path>,
     host_key_fingerprint: Option<String>,
+    /// Validated sudo policy string, if provided.
+    sudo_policy: Option<String>,
 }
 
 async fn run_update(db: &sea_orm::DatabaseConnection, params: UpdateParams<'_>) -> Result<()> {
@@ -219,6 +271,7 @@ async fn run_update(db: &sea_orm::DatabaseConnection, params: UpdateParams<'_>) 
         } else {
             None
         },
+        sudo_policy: params.sudo_policy,
     };
 
     let host = host_ops::update_host(db, params.name_or_id, updates).await?;
@@ -259,6 +312,7 @@ struct BootstrapCliParams<'a> {
     target_private_key_file: Option<&'a Path>,
     host_key_fingerprint: Option<String>,
     strict_host_key_checking: bool,
+    allow_all: bool,
 }
 
 async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
@@ -360,6 +414,7 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         target_private_key_pem,
         host_key_fingerprint: p.host_key_fingerprint,
         strict_host_key_checking: p.strict_host_key_checking,
+        allow_all: p.allow_all,
     };
 
     bootstrap::run_bootstrap(p.state_dir, params).await
