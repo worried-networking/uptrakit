@@ -1,4 +1,5 @@
 mod cli;
+mod ha_discovery;
 mod mqtt_client;
 mod tenant_manager;
 
@@ -21,7 +22,7 @@ struct MqttHandler {
     max_tenants: u32,
     instance_id: String,
     tenant_mgr: TenantManager,
-    status_rx: tokio::sync::mpsc::UnboundedReceiver<mqtt_client::MqttClientStatusEvent>,
+    event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::mqtt_client::MqttServiceEvent>,
 }
 
 #[async_trait::async_trait]
@@ -30,7 +31,7 @@ impl ServiceHandler for MqttHandler {
     const SERVICE_LABEL: &'static str = "uptrakit-mqtt service";
     const SERVICE_TYPE: ServiceType = ServiceType::Mqtt;
 
-    type ServiceEvent = Option<mqtt_client::MqttClientStatusEvent>;
+    type ServiceEvent = Option<crate::mqtt_client::MqttServiceEvent>;
 
     async fn on_connected(
         &mut self,
@@ -73,6 +74,15 @@ impl ServiceHandler for MqttHandler {
                 self.tenant_mgr.stop_client(&payload.mqtt_client_id).await;
                 Ok(None)
             }
+            ControllerMessage::SoftwareStates(payload) => {
+                tracing::debug!(
+                    tenant_id = %payload.tenant_id,
+                    items = payload.items.len(),
+                    "received SoftwareStates"
+                );
+                self.tenant_mgr.update_software_states(payload).await;
+                Ok(None)
+            }
             _ => {
                 tracing::debug!("ignoring unrecognized message in authenticated loop");
                 Ok(None)
@@ -81,7 +91,7 @@ impl ServiceHandler for MqttHandler {
     }
 
     async fn poll_service_event(&mut self) -> Self::ServiceEvent {
-        self.status_rx.recv().await
+        self.event_rx.recv().await
     }
 
     async fn on_service_event(
@@ -89,8 +99,9 @@ impl ServiceHandler for MqttHandler {
         event: Self::ServiceEvent,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
+        use crate::mqtt_client::MqttServiceEvent;
         match event {
-            Some(status) => {
+            Some(MqttServiceEvent::Status(status)) => {
                 conn.send_best_effort(ServiceMessage::MqttClientStatus(MqttClientStatusPayload {
                     mqtt_client_id: status.mqtt_client_id,
                     status: status.status,
@@ -98,8 +109,35 @@ impl ServiceHandler for MqttHandler {
                 .await;
                 Ok(None)
             }
+            Some(MqttServiceEvent::Reconnected(id)) => {
+                self.tenant_mgr.handle_reconnected(&id).await;
+                Ok(None)
+            }
+            Some(MqttServiceEvent::HaOnline(id)) => {
+                self.tenant_mgr.handle_ha_online(&id).await;
+                Ok(None)
+            }
+            Some(MqttServiceEvent::Command {
+                mqtt_client_id,
+                topic,
+            }) => {
+                if let Some(payload) = self
+                    .tenant_mgr
+                    .resolve_update_trigger(mqtt_client_id, &topic)
+                {
+                    conn.send_best_effort(ServiceMessage::MqttTriggerUpdate(payload))
+                        .await;
+                } else {
+                    tracing::debug!(
+                        %mqtt_client_id,
+                        %topic,
+                        "received MQTT command on unknown topic, ignoring"
+                    );
+                }
+                Ok(None)
+            }
             None => {
-                tracing::warn!("status channel closed");
+                tracing::warn!("event channel closed");
                 Ok(Some(LoopOutcome::Disconnected))
             }
         }
@@ -161,14 +199,14 @@ async fn main() {
     let instance_id = generate_instance_id();
     tracing::info!(%instance_id, "starting uptrakit-mqtt service");
 
-    let (status_tx, status_rx) = tokio::sync::mpsc::unbounded_channel();
-    let tenant_mgr = TenantManager::new(Some(status_tx));
+    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let tenant_mgr = TenantManager::new(Some(event_tx));
 
     let mut handler = MqttHandler {
         max_tenants: args.max_tenants,
         instance_id,
         tenant_mgr,
-        status_rx,
+        event_rx,
     };
 
     uptrakit_service_sdk::run_lifecycle_and_handle_errors(

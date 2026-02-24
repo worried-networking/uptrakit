@@ -4,7 +4,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use uptrakit_internal_wire::MqttTenantConfig;
 use uuid::Uuid;
 
-use crate::mqtt_client::{MqttClientStatusEvent, MqttConfig, MqttHandle};
+use crate::mqtt_client::{MqttConfig, MqttHandle, MqttServiceEvent};
 use tokio::sync::mpsc;
 use uptrakit_internal_wire::MqttClientConnectionStatus;
 
@@ -12,6 +12,10 @@ use uptrakit_internal_wire::MqttClientConnectionStatus;
 struct ClientState {
     handle: MqttHandle,
     config_hash: u64,
+    tenant_id: uuid::Uuid,
+    topic_prefix: String,
+    ha_discovery: bool,
+    ha_discovery_prefix: String,
 }
 
 /// Manages per-MQTT-client lifecycles with push-based config updates.
@@ -20,14 +24,17 @@ struct ClientState {
 /// updates from the controller via WebSocket messages.
 pub struct TenantManager {
     clients: HashMap<Uuid, ClientState>,
-    status_tx: Option<mpsc::UnboundedSender<MqttClientStatusEvent>>,
+    event_tx: Option<mpsc::UnboundedSender<MqttServiceEvent>>,
+    software_states:
+        HashMap<Uuid, Vec<uptrakit_internal_wire::MqttSoftwareStateItem>>,
 }
 
 impl TenantManager {
-    pub fn new(status_tx: Option<mpsc::UnboundedSender<MqttClientStatusEvent>>) -> Self {
+    pub fn new(event_tx: Option<mpsc::UnboundedSender<MqttServiceEvent>>) -> Self {
         Self {
             clients: HashMap::new(),
-            status_tx,
+            event_tx,
+            software_states: HashMap::new(),
         }
     }
 
@@ -87,6 +94,74 @@ impl TenantManager {
         while tasks.next().await.is_some() {}
     }
 
+    /// Store new software state data for a tenant and push to all HA-enabled
+    /// clients for that tenant.
+    pub async fn update_software_states(
+        &mut self,
+        payload: uptrakit_internal_wire::MqttSoftwareStatesPayload,
+    ) {
+        self.software_states
+            .insert(payload.tenant_id, payload.items.clone());
+
+        // Collect client IDs for this tenant that have HA discovery enabled.
+        let client_ids: Vec<uuid::Uuid> = self
+            .clients
+            .iter()
+            .filter(|(_, s)| s.tenant_id == payload.tenant_id && s.ha_discovery)
+            .map(|(id, _)| *id)
+            .collect();
+
+        for client_id in client_ids {
+            self.publish_ha_state_full(client_id, &payload.items).await;
+        }
+    }
+
+    /// Called on MQTT broker reconnect: republish HA discovery configs and state.
+    pub async fn handle_reconnected(&mut self, mqtt_client_id: &uuid::Uuid) {
+        let Some(state) = self.clients.get(mqtt_client_id) else {
+            return;
+        };
+        if !state.ha_discovery {
+            return;
+        }
+        let tenant_id = state.tenant_id;
+        if let Some(items) = self.software_states.get(&tenant_id).cloned() {
+            self.publish_ha_state_full(*mqtt_client_id, &items).await;
+        }
+    }
+
+    /// Called when HA sends its birth message (restarted): republish discovery configs.
+    pub async fn handle_ha_online(&mut self, mqtt_client_id: &uuid::Uuid) {
+        self.handle_reconnected(mqtt_client_id).await;
+    }
+
+    /// Given an inbound MQTT command topic, resolve it to an
+    /// [`MqttUpdateTriggerPayload`](uptrakit_internal_wire::MqttUpdateTriggerPayload).
+    ///
+    /// Returns `None` if the topic doesn't match any known `(item, host)` in
+    /// the stored states.
+    pub fn resolve_update_trigger(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        topic: &str,
+    ) -> Option<uptrakit_internal_wire::MqttUpdateTriggerPayload> {
+        let state = self.clients.get(&mqtt_client_id)?;
+        let (item_id, host_id) =
+            crate::ha_discovery::parse_command_topic(&state.topic_prefix, topic)?;
+        let tenant_id = state.tenant_id;
+        let items = self.software_states.get(&tenant_id)?;
+        let item = items.iter().find(|i| i.software_item_id == item_id)?;
+        let host = item.hosts.iter().find(|h| h.host_id == host_id)?;
+        let to_version = host.latest_version.clone()?;
+        Some(uptrakit_internal_wire::MqttUpdateTriggerPayload {
+            tenant_id,
+            software_item_id: item_id,
+            host_id,
+            to_version,
+            mqtt_client_id,
+        })
+    }
+
     /// Start or update an MQTT client.
     async fn start_or_update_client(&mut self, config: MqttTenantConfig) {
         let mqtt_client_id = config.mqtt_client_id;
@@ -111,13 +186,30 @@ impl TenantManager {
         let mqtt_config = build_config_from_wire(&config);
         tracing::info!(%mqtt_client_id, config = ?mqtt_config, "starting MQTT client");
 
-        match crate::mqtt_client::start(mqtt_config, self.status_tx.clone(), mqtt_client_id).await {
+        let ha_status_topic = if config.ha_discovery {
+            Some(format!("{}/status", config.ha_discovery_prefix))
+        } else {
+            None
+        };
+
+        match crate::mqtt_client::start(
+            mqtt_config,
+            self.event_tx.clone(),
+            mqtt_client_id,
+            ha_status_topic,
+        )
+        .await
+        {
             Ok(handle) => {
                 self.clients.insert(
                     mqtt_client_id,
                     ClientState {
                         handle,
                         config_hash: new_hash,
+                        tenant_id: config.tenant_id,
+                        topic_prefix: config.topic_prefix.clone(),
+                        ha_discovery: config.ha_discovery,
+                        ha_discovery_prefix: config.ha_discovery_prefix.clone(),
                     },
                 );
             }
@@ -128,15 +220,118 @@ impl TenantManager {
         }
     }
 
-    fn report_status(&self, mqtt_client_id: Uuid, status: MqttClientConnectionStatus) {
-        let Some(sender) = self.status_tx.as_ref() else {
+    async fn publish_ha_state_full(
+        &self,
+        mqtt_client_id: uuid::Uuid,
+        items: &[uptrakit_internal_wire::MqttSoftwareStateItem],
+    ) {
+        let Some(state) = self.clients.get(&mqtt_client_id) else {
             return;
         };
+        if !state.ha_discovery {
+            return;
+        }
 
-        let _ = sender.send(MqttClientStatusEvent {
-            mqtt_client_id,
-            status,
-        });
+        let tenant_id = state.tenant_id;
+        let topic_prefix = &state.topic_prefix;
+        let ha_prefix = &state.ha_discovery_prefix;
+
+        for item in items {
+            for host in &item.hosts {
+                let uid = crate::ha_discovery::unique_id(
+                    tenant_id,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                let config_topic =
+                    crate::ha_discovery::discovery_config_topic(ha_prefix, &uid);
+                let config_json = crate::ha_discovery::build_discovery_config(
+                    ha_prefix,
+                    topic_prefix,
+                    tenant_id,
+                    item.software_item_id,
+                    host.host_id,
+                    &item.name,
+                    &host.hostname,
+                );
+                let config_bytes = config_json.to_string().into_bytes();
+                if let Err(e) = state
+                    .handle
+                    .publish_retained(&config_topic, config_bytes)
+                    .await
+                {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to publish HA discovery config"
+                    );
+                    continue;
+                }
+                // Publish installed version (empty string if unknown).
+                let st = crate::ha_discovery::state_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                let installed = host
+                    .installed_version
+                    .as_deref()
+                    .unwrap_or("")
+                    .as_bytes()
+                    .to_vec();
+                if let Err(e) = state.handle.publish_retained(&st, installed).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to publish HA state topic"
+                    );
+                }
+                // Publish latest version.
+                let lt = crate::ha_discovery::latest_version_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                let latest = host
+                    .latest_version
+                    .as_deref()
+                    .unwrap_or("")
+                    .as_bytes()
+                    .to_vec();
+                if let Err(e) = state.handle.publish_retained(&lt, latest).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to publish HA latest version topic"
+                    );
+                }
+                // Subscribe to command topic.
+                let ct = crate::ha_discovery::command_topic(
+                    topic_prefix,
+                    item.software_item_id,
+                    host.host_id,
+                );
+                if let Err(e) = state.handle.subscribe_topic(&ct).await {
+                    tracing::warn!(
+                        error = ?e,
+                        %mqtt_client_id,
+                        "failed to subscribe to HA command topic"
+                    );
+                }
+            }
+        }
+    }
+
+    fn report_status(&self, mqtt_client_id: Uuid, status: MqttClientConnectionStatus) {
+        let Some(sender) = self.event_tx.as_ref() else {
+            return;
+        };
+        let _ = sender.send(MqttServiceEvent::Status(
+            crate::mqtt_client::MqttClientStatusEvent {
+                mqtt_client_id,
+                status,
+            },
+        ));
     }
 }
 
@@ -440,5 +635,13 @@ mod tests {
         };
 
         assert_eq!(compute_config_hash(&config1), compute_config_hash(&config2));
+    }
+
+    #[test]
+    fn resolve_update_trigger_returns_none_for_unknown_client() {
+        let manager = TenantManager::new(None);
+        let unknown_id = Uuid::parse_str("019471a0-0000-7000-8000-000000000099").unwrap();
+        let result = manager.resolve_update_trigger(unknown_id, "uptrakit/update/anything/set");
+        assert!(result.is_none());
     }
 }

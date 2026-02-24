@@ -2,7 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use rootcause::prelude::*;
-use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, QoS, Transport};
+use rumqttc::{AsyncClient, EventLoop, LastWill, MqttOptions, Packet, QoS, Transport};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -46,6 +46,30 @@ impl fmt::Debug for MqttConfig {
     }
 }
 
+/// Status event emitted by a running MQTT client.
+#[derive(Debug, Clone)]
+pub struct MqttClientStatusEvent {
+    pub mqtt_client_id: uuid::Uuid,
+    pub status: MqttClientConnectionStatus,
+}
+
+/// Events emitted by a running MQTT client connection.
+#[derive(Debug, Clone)]
+pub enum MqttServiceEvent {
+    /// Connection-status change (Online/Offline/Connecting).
+    Status(MqttClientStatusEvent),
+    /// Broker reconnect — discovery configs and state topics must be republished.
+    Reconnected(uuid::Uuid),
+    /// HA published its birth message (`online`) to the HA status topic —
+    /// republish all discovery configs.
+    HaOnline(uuid::Uuid),
+    /// Inbound MQTT publish on a subscribed topic (used for update commands).
+    Command {
+        mqtt_client_id: uuid::Uuid,
+        topic: String,
+    },
+}
+
 /// Handle to a running MQTT connection.
 ///
 /// Dropping without calling [`shutdown`](MqttHandle::shutdown) will abort the
@@ -58,6 +82,22 @@ pub struct MqttHandle {
 }
 
 impl MqttHandle {
+    /// Publish a retained message.
+    pub async fn publish_retained(&self, topic: &str, payload: impl Into<Vec<u8>>) -> Result<()> {
+        self.client
+            .publish(topic, QoS::AtLeastOnce, true, payload.into())
+            .await
+            .context_to::<MqttError>()
+    }
+
+    /// Subscribe to a topic with QoS `AtLeastOnce`.
+    pub async fn subscribe_topic(&self, topic: &str) -> Result<()> {
+        self.client
+            .subscribe(topic, QoS::AtLeastOnce)
+            .await
+            .context_to::<MqttError>()
+    }
+
     /// Publish a retained `offline` message, disconnect, and wait for the
     /// event-loop task to finish.
     pub async fn shutdown(self) {
@@ -98,34 +138,43 @@ pub type Result<T> = std::result::Result<T, Report<MqttError>>;
 
 impl_report_conversion!(rumqttc::ClientError => MqttError::Client);
 
-/// Status event emitted by a running MQTT client.
-#[derive(Debug, Clone)]
-pub struct MqttClientStatusEvent {
-    pub mqtt_client_id: uuid::Uuid,
-    pub status: MqttClientConnectionStatus,
-}
-
 #[derive(Clone)]
-struct MqttClientStatusReporter {
+struct MqttEventReporter {
     mqtt_client_id: uuid::Uuid,
-    sender: mpsc::UnboundedSender<MqttClientStatusEvent>,
+    sender: mpsc::UnboundedSender<MqttServiceEvent>,
 }
 
-impl MqttClientStatusReporter {
-    fn new(
-        mqtt_client_id: uuid::Uuid,
-        sender: mpsc::UnboundedSender<MqttClientStatusEvent>,
-    ) -> Self {
+impl MqttEventReporter {
+    fn new(mqtt_client_id: uuid::Uuid, sender: mpsc::UnboundedSender<MqttServiceEvent>) -> Self {
         Self {
             mqtt_client_id,
             sender,
         }
     }
 
-    fn report(&self, status: MqttClientConnectionStatus) {
-        let _ = self.sender.send(MqttClientStatusEvent {
+    fn report_status(&self, status: MqttClientConnectionStatus) {
+        let _ = self.sender.send(MqttServiceEvent::Status(MqttClientStatusEvent {
             mqtt_client_id: self.mqtt_client_id,
             status,
+        }));
+    }
+
+    fn report_reconnected(&self) {
+        let _ = self
+            .sender
+            .send(MqttServiceEvent::Reconnected(self.mqtt_client_id));
+    }
+
+    fn report_ha_online(&self) {
+        let _ = self
+            .sender
+            .send(MqttServiceEvent::HaOnline(self.mqtt_client_id));
+    }
+
+    fn report_command(&self, topic: String) {
+        let _ = self.sender.send(MqttServiceEvent::Command {
+            mqtt_client_id: self.mqtt_client_id,
+            topic,
         });
     }
 }
@@ -134,16 +183,22 @@ impl MqttClientStatusReporter {
 ///
 /// Publishes a retained `online` message on every successful connection and
 /// registers an LWT so the broker publishes `offline` on unexpected disconnect.
+///
+/// When `ha_status_topic` is `Some`, the event loop subscribes to that topic
+/// after every `ConnAck` and emits [`MqttServiceEvent::HaOnline`] whenever HA
+/// publishes `"online"` to it (HA birth message).
 pub async fn start(
     config: MqttConfig,
-    status_sender: Option<mpsc::UnboundedSender<MqttClientStatusEvent>>,
+    event_sender: Option<mpsc::UnboundedSender<MqttServiceEvent>>,
     mqtt_client_id: uuid::Uuid,
+    ha_status_topic: Option<String>,
 ) -> Result<MqttHandle> {
     let topic = status_topic(&config.topic_prefix);
     let options = build_mqtt_options(&config);
-    let reporter =
-        status_sender.map(|sender| MqttClientStatusReporter::new(mqtt_client_id, sender));
-    report_status(&reporter, MqttClientConnectionStatus::Connecting);
+    let reporter = event_sender.map(|sender| MqttEventReporter::new(mqtt_client_id, sender));
+    if let Some(ref r) = reporter {
+        r.report_status(MqttClientConnectionStatus::Connecting);
+    }
 
     let (client, event_loop) = AsyncClient::new(options, 10);
     let shutdown_token = CancellationToken::new();
@@ -163,6 +218,7 @@ pub async fn start(
         task_topic,
         task_token,
         reporter,
+        ha_status_topic,
     ));
 
     Ok(MqttHandle {
@@ -222,7 +278,8 @@ async fn run_event_loop(
     client: AsyncClient,
     topic: String,
     shutdown_token: CancellationToken,
-    reporter: Option<MqttClientStatusReporter>,
+    reporter: Option<MqttEventReporter>,
+    ha_status_topic: Option<String>,
 ) {
     loop {
         tokio::select! {
@@ -232,27 +289,52 @@ async fn run_event_loop(
             }
             poll = event_loop.poll() => {
                 match poll {
-                    Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
+                    Ok(rumqttc::Event::Incoming(Packet::ConnAck(_))) => {
                         tracing::info!("MQTT connected");
-                        report_status(&reporter, MqttClientConnectionStatus::Online);
+                        if let Some(ref r) = reporter {
+                            r.report_status(MqttClientConnectionStatus::Online);
+                        }
                         if let Err(e) = client
                             .publish(&topic, QoS::AtLeastOnce, true, "online")
                             .await
                         {
                             tracing::warn!("failed to publish online status: {e}");
                         }
+                        if let Some(ref r) = reporter {
+                            r.report_reconnected();
+                        }
+                        if let Some(ref ha_topic) = ha_status_topic
+                            && let Err(e) = client.subscribe(ha_topic, QoS::AtLeastOnce).await
+                        {
+                            tracing::warn!("failed to subscribe to HA status topic: {e}");
+                        }
+                    }
+                    Ok(rumqttc::Event::Incoming(Packet::Publish(publish))) => {
+                        if ha_status_topic.as_deref() == Some(publish.topic.as_str())
+                            && publish.payload.as_ref() == b"online"
+                        {
+                            if let Some(ref r) = reporter {
+                                r.report_ha_online();
+                            }
+                        } else if let Some(ref r) = reporter {
+                            r.report_command(publish.topic.clone());
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => {
                         tracing::warn!("MQTT error: {e}");
-                        report_status(&reporter, MqttClientConnectionStatus::Offline);
+                        if let Some(ref r) = reporter {
+                            r.report_status(MqttClientConnectionStatus::Offline);
+                        }
                         tokio::select! {
                             _ = shutdown_token.cancelled() => {
                                 tracing::debug!("MQTT event loop shutdown requested");
                                 break;
                             }
                             _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                                report_status(&reporter, MqttClientConnectionStatus::Connecting);
+                                if let Some(ref r) = reporter {
+                                    r.report_status(MqttClientConnectionStatus::Connecting);
+                                }
                             }
                         }
                     }
@@ -285,12 +367,6 @@ async fn shutdown_task(
                 }
             }
         }
-    }
-}
-
-fn report_status(reporter: &Option<MqttClientStatusReporter>, status: MqttClientConnectionStatus) {
-    if let Some(reporter) = reporter {
-        reporter.report(status);
     }
 }
 
