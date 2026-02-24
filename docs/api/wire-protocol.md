@@ -49,7 +49,7 @@ Accurate client IP tracking depends on trusted-proxy configuration; see
 
 ### MQTT-specific (service -> controller)
 
-`register`, `release_tenants`, `mqtt_client_status`
+`register`, `release_tenants`, `mqtt_client_status`, `mqtt_trigger_update`
 
 ### Shared (controller -> service)
 
@@ -114,7 +114,7 @@ See [docs/api/autodiscovery.md](autodiscovery.md) for the full autodiscovery wor
 
 ### MQTT-specific (controller -> service)
 
-`registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`
+`registered`, `tenant_assignments`, `tenant_config_updated`, `tenant_revoked`, `software_states`
 
 ## `host_machine_id` Field
 
@@ -326,13 +326,87 @@ The `MqttTenantConfig` struct is used in `tenant_assignments` and `tenant_config
 | `password` | Option&lt;SecretString&gt; | Broker authentication password |
 | `ca_pem` | Option&lt;SecretString&gt; | Custom CA certificate in PEM format for private brokers |
 | `topic_prefix` | String | MQTT topic prefix |
+| `ha_discovery` | bool | Whether to publish Home Assistant MQTT discovery topics (`#[serde(default)]`) |
+| `ha_discovery_prefix` | String | HA MQTT discovery topic prefix (default `"homeassistant"`) |
 | `updated_at` | i64 | Last update timestamp in milliseconds |
 
 The `ca_pem` field is optional and uses `#[serde(default, skip_serializing_if = "Option::is_none")]` for
 backward compatibility. When present, the MQTT service uses the PEM bytes as the trusted CA for TLS
 connections instead of the system trust store. Credentials (`username`, `password`, `ca_pem`) use
-`SecretString` for zeroize-on-drop and redacted debug output. The `ca_pem` field is included in the
-config hash computation for change detection.
+`SecretString` for zeroize-on-drop and redacted debug output. The `ca_pem` field and both `ha_discovery*`
+fields are included in the config hash computation for change detection.
+
+## `software_states` Payload
+
+The controller pushes this message to all locally connected MQTT services for a tenant whenever version
+data changes (e.g. after a version check or an update completes). It is also written to the outbox for
+cross-controller delivery (contains no credentials). MQTT services filter by `tenant_id`.
+
+```json
+{
+  "seq": 1,
+  "type": "software_states",
+  "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
+  "items": [
+    {
+      "software_item_id": "660e8400-e29b-41d4-a716-446655440002",
+      "name": "My App",
+      "hosts": [
+        {
+          "host_id": "770e8400-e29b-41d4-a716-446655440003",
+          "hostname": "my-host",
+          "installed_version": "1.2.3",
+          "latest_version": "1.3.0",
+          "update_available": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each item in `items` corresponds to one enabled, non-deactivated software item whose `discovery_state` is
+`null` or `"approved"`. Each `hosts` entry contains the version data for one host that tracks the software
+item. An empty string in `installed_version` or `latest_version` means the version is not yet known.
+
+When `ha_discovery = true` for an MQTT client, the MQTT service publishes HA discovery configs and retained
+state topics from this payload. See [Home Assistant Integration](../end-user/home-assistant-mqtt.md).
+
+## `mqtt_trigger_update` Payload
+
+Sent by the MQTT service to the controller when a Home Assistant user presses **Install** on a tracked
+software item. The controller validates the request and dispatches `execute_update` to the appropriate
+agent. On validation failure the controller sends `error` back to the MQTT service (soft error — the
+WebSocket connection is not closed).
+
+```json
+{
+  "seq": 2,
+  "type": "mqtt_trigger_update",
+  "tenant_id": "550e8400-e29b-41d4-a716-446655440001",
+  "software_item_id": "660e8400-e29b-41d4-a716-446655440002",
+  "host_id": "770e8400-e29b-41d4-a716-446655440003",
+  "to_version": "1.3.0",
+  "mqtt_client_id": "880e8400-e29b-41d4-a716-446655440004"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tenant_id` | UUID | Tenant the update targets — must match an assigned tenant for this MQTT service |
+| `software_item_id` | UUID | The software item to update |
+| `host_id` | UUID | The host on which to apply the update |
+| `to_version` | String | Target version string resolved from the last `software_states` push |
+| `mqtt_client_id` | UUID | The MQTT client that received the Install command; stored as `actor_id` in `update_history` |
+
+The resulting `update_history` record has `actor_type = "mqtt"` and `actor_id = <mqtt_client_id>`.
+
+The controller rejects the request with an `error` message (no WS close) in the following cases:
+
+- `tenant_id` does not match an assigned tenant for this MQTT service instance.
+- The software item, host, or host assignment does not exist or is deactivated.
+- The host has no approved agent linked.
+- An update with status `pending` or `in_progress` already exists for the same `(host_id, software_item_id)` pair.
 
 ## AsyncAPI Specification
 
