@@ -10,7 +10,10 @@ export default defineConfig({
 		conditions: ['browser'],
 		alias: {
 			// Mirror SvelteKit's $lib alias so component tests can import from $lib/...
-			$lib: fileURLToPath(new URL('./src/lib', import.meta.url))
+			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
+			// Stub SvelteKit virtual modules that don't exist in jsdom
+			'$app/state': fileURLToPath(new URL('./src/lib/test-mocks/app-state.ts', import.meta.url)),
+			'$app/navigation': fileURLToPath(new URL('./src/lib/test-mocks/app-navigation.ts', import.meta.url))
 		}
 	},
 	test: {
