@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getProviderConfigs,
@@ -12,7 +14,7 @@
 		createAutodiscoveryIgnore,
 		deleteAutodiscoveryIgnore
 	} from '$lib/api';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
@@ -21,8 +23,9 @@
 	import type { ProviderConfigResponse, AutodiscoveryIgnoreResponse } from '$lib/types';
 
 	type ActiveTab = 'configs' | 'ignores';
+	const ACTIVE_TAB_VALUES = ['configs', 'ignores'] as const satisfies readonly ActiveTab[];
 
-	let activeTab: ActiveTab = $state('configs');
+	let activeTab: ActiveTab = $state(parseUrlParam(page.url, 'tab', ACTIVE_TAB_VALUES, 'configs'));
 
 	// Provider configs state
 	let configs: ProviderConfigResponse[] = $state([]);
@@ -37,7 +40,7 @@
 	// Ignore rules state
 	let ignores: AutodiscoveryIgnoreResponse[] = $state([]);
 	let ignoresLoading: boolean = $state(true);
-	let ignoresPage: number = $state(1);
+	let ignoresPage: number = $state(page.url.searchParams.get('tab') === 'ignores' ? parseUrlPage(page.url) : 1);
 	let ignoresTotalPages: number = $state(1);
 	let showIgnoreModal: boolean = $state(false);
 	let ignoreForm = $state({ provider_config_id: '', package_identifier: '' });
@@ -46,12 +49,30 @@
 	const canView = $derived(getUser()?.permissions.includes(Permission.ViewSoftware) ?? false);
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageSoftware) ?? false);
 
+	$effect(() => {
+		const parts: string[] = [];
+		if (activeTab !== 'configs') parts.push(`tab=${activeTab}`);
+		if (activeTab === 'ignores' && ignoresPage > 1) parts.push(`page=${ignoresPage}`);
+		const search = parts.join('&');
+		goto(search ? `${location.pathname}?${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	});
+
 	onMount(() => {
 		if (canView) {
 			loadConfigs();
-			loadIgnores(1);
+			loadIgnores(ignoresPage);
 		}
 	});
+
+	function switchTab(tab: ActiveTab) {
+		if (activeTab === tab) return;
+		ignoresPage = 1;
+		activeTab = tab;
+	}
 
 	async function loadConfigs() {
 		configsLoading = true;
@@ -236,13 +257,13 @@
 		<div class="mb-4 flex gap-1">
 			<button
 				class="btn btn-sm {activeTab === 'configs' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'configs')}
+				onclick={() => switchTab('configs')}
 			>
 				Configurations
 			</button>
 			<button
 				class="btn btn-sm {activeTab === 'ignores' ? 'preset-filled-primary-500' : 'preset-tonal'}"
-				onclick={() => (activeTab = 'ignores')}
+				onclick={() => switchTab('ignores')}
 			>
 				Ignore Rules
 			</button>

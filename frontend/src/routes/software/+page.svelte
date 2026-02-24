@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import {
 		getSoftwareItems,
@@ -8,7 +10,7 @@
 		checkSoftwareItemVersions,
 		updateSoftwareItem
 	} from '$lib/api';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import AddSoftwareModal from '$lib/components/AddSoftwareModal.svelte';
@@ -20,10 +22,11 @@
 	import { Permission } from '$lib/types';
 
 	type FilterTab = 'all' | 'pending' | 'active';
+	const FILTER_TAB_VALUES = ['all', 'pending', 'active'] as const satisfies readonly FilterTab[];
 
 	let items: SoftwareItemResponse[] = $state([]);
 	let error: string | null = $state(null);
-	let currentPage: number = $state(1);
+	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 	let totalItems: number = $state(0);
 	let loading: boolean = $state(false);
@@ -35,7 +38,7 @@
 	let submitting: boolean = $state(false);
 	let checkingVersionsId: string | null = $state(null);
 	let approvingId: string | null = $state(null);
-	let activeTab: FilterTab = $state('all');
+	let activeTab: FilterTab = $state(parseUrlParam(page.url, 'tab', FILTER_TAB_VALUES, 'all'));
 	let editItem: { id: string; name: string; enabled: boolean } | null = $state(null);
 	let editForm = $state({ name: '', enabled: true });
 	let editSubmitting: boolean = $state(false);
@@ -45,9 +48,21 @@
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
+	$effect(() => {
+		const parts: string[] = [];
+		if (activeTab !== 'all') parts.push(`tab=${activeTab}`);
+		if (currentPage > 1) parts.push(`page=${currentPage}`);
+		const search = parts.join('&');
+		goto(search ? `${location.pathname}?${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	});
+
 	onMount(() => {
 		if (canView) {
-			loadAll(1);
+			loadAll(currentPage);
 			refreshInterval = setInterval(() => {
 				if (document.visibilityState === 'visible') loadAll(currentPage, true);
 			}, 60_000);
@@ -87,6 +102,7 @@
 
 	function switchTab(tab: FilterTab) {
 		if (activeTab === tab) return;
+		currentPage = 1;
 		activeTab = tab;
 		loadAll(1);
 	}

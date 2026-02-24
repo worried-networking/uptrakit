@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { getHosts, updateHost, deactivateHost, triggerHostDiscovery } from '$lib/api';
 	import type { HostResponse } from '$lib/types';
 	import { Permission } from '$lib/types';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, parseUrlPage } from '$lib/utils';
 	import { showError, showSuccess } from '$lib/notifications.svelte';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -18,15 +20,24 @@
 	let confirmAction: { hostId: string; action: 'deactivate'; name: string } | null = $state(null);
 	let editHost: { id: string; friendlyName: string } | null = $state(null);
 	let submitting: boolean = $state(false);
-	let currentPage: number = $state(1);
+	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
 
 	let discoveringHostIds: Set<string> = $state(new Set());
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
+	$effect(() => {
+		const search = currentPage > 1 ? `page=${currentPage}` : '';
+		goto(search ? `${location.pathname}?${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	});
+
 	onMount(() => {
-		loadHosts(1);
+		loadHosts(currentPage);
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadHosts(currentPage, true);
 		}, 60_000);

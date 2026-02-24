@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { listUpdateHistory, triggerSoftwareUpdate, getSoftwareItems } from '$lib/api';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import { showSuccess, showError } from '$lib/notifications.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
@@ -10,13 +12,20 @@
 	import type { UpdateHistoryResponse, UpdateHistoryStatus, SoftwareItemResponse } from '$lib/types';
 
 	type StatusFilter = 'all' | UpdateHistoryStatus;
+	const STATUS_FILTER_VALUES = [
+		'all',
+		'pending',
+		'in_progress',
+		'completed',
+		'failed'
+	] as const satisfies readonly StatusFilter[];
 
 	let items: UpdateHistoryResponse[] = $state([]);
 	let loading: boolean = $state(false);
 	let error: string | null = $state(null);
-	let currentPage: number = $state(1);
+	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
-	let statusFilter: StatusFilter = $state('all');
+	let statusFilter: StatusFilter = $state(parseUrlParam(page.url, 'status', STATUS_FILTER_VALUES, 'all'));
 	let expandedId: string | null = $state(null);
 
 	// Trigger update modal state
@@ -34,8 +43,20 @@
 
 	const selectedItem = $derived(softwareItems.find((i) => i.id === selectedItemId));
 
+	$effect(() => {
+		const parts: string[] = [];
+		if (statusFilter !== 'all') parts.push(`status=${statusFilter}`);
+		if (currentPage > 1) parts.push(`page=${currentPage}`);
+		const search = parts.join('&');
+		goto(search ? `${location.pathname}?${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	});
+
 	onMount(() => {
-		if (canView) loadHistory(1);
+		if (canView) loadHistory(currentPage);
 	});
 
 	async function loadHistory(page: number) {
@@ -139,6 +160,7 @@
 					<button
 						class="btn btn-sm {statusFilter === s ? 'preset-filled-primary-500' : 'preset-tonal'}"
 						onclick={() => {
+							currentPage = 1;
 							statusFilter = s;
 							loadHistory(1);
 						}}

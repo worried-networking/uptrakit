@@ -1,14 +1,18 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { getUser } from '$lib/auth.svelte';
 	import { getServices, approveService, rejectService, deleteService, mergeService, updateService } from '$lib/api';
 	import type { ServiceResponse, ServiceType } from '$lib/types';
 	import { Permission } from '$lib/types';
-	import { formatDate } from '$lib/utils';
+	import { formatDate, parseUrlParam, parseUrlPage } from '$lib/utils';
 	import ContextMenu from '$lib/components/ContextMenu.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ModalBackdrop from '$lib/components/ModalBackdrop.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+
+	const TYPE_FILTER_VALUES = ['all', 'agent', 'mqtt', 'ssh_agent'] as const satisfies readonly ('all' | ServiceType)[];
 
 	let services: ServiceResponse[] = $state([]);
 	let error: string | null = $state(null);
@@ -19,17 +23,29 @@
 	let mergeTargetId: string | null = $state(null);
 	let editPingService: { id: string; name: string; pingInterval: string } | null = $state(null);
 	let submitting: boolean = $state(false);
-	let currentPage: number = $state(1);
+	let currentPage: number = $state(parseUrlPage(page.url));
 	let totalPages: number = $state(1);
-	let typeFilter: 'all' | ServiceType = $state('all');
+	let typeFilter: 'all' | ServiceType = $state(parseUrlParam(page.url, 'type', TYPE_FILTER_VALUES, 'all'));
 
 	const canManage = $derived(getUser()?.permissions.includes(Permission.ManageAgents) ?? false);
 
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	$effect(() => {
+		const parts: string[] = [];
+		if (typeFilter !== 'all') parts.push(`type=${typeFilter}`);
+		if (currentPage > 1) parts.push(`page=${currentPage}`);
+		const search = parts.join('&');
+		goto(search ? `${location.pathname}?${search}` : location.pathname, {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
+	});
+
+	$effect(() => {
 		const _filter = typeFilter; // explicit dependency tracking
-		loadServices(1);
+		loadServices(untrack(() => currentPage));
 
 		refreshInterval = setInterval(() => {
 			if (document.visibilityState === 'visible') loadServices(currentPage, true);
@@ -77,6 +93,7 @@
 	}
 
 	function setFilter(filter: 'all' | ServiceType) {
+		currentPage = 1;
 		typeFilter = filter;
 		closeMenu();
 	}
