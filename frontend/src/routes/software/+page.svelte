@@ -271,13 +271,18 @@
 					{:else}
 						{#each items as item (item.id)}
 							<tr>
-								<td>{item.name}</td>
+								<td>
+									<a href="/software/{item.id}" class="hover:underline font-medium">{item.name}</a>
+								</td>
 								<td>{item.provider_types.join(', ') || '\u2014'}</td>
 								<td class="flex flex-wrap items-center gap-1">
 									{#if item.enabled}
 										<span class="badge preset-filled-success-500">Enabled</span>
 									{:else}
 										<span class="badge preset-tonal">Disabled</span>
+									{/if}
+									{#if item.update_available}
+										<span class="badge preset-filled-warning-500">Update Available</span>
 									{/if}
 									{#if item.discovery_state === 'pending'}
 										<span class="badge preset-filled-warning-500">Pending</span>
@@ -286,7 +291,12 @@
 									{/if}
 								</td>
 								<td>{item.host_count}</td>
-								<td>{formatDate(item.last_checked_at)}</td>
+								<td>
+									{formatDate(item.last_checked_at)}
+									{#if item.latest_version}
+										<span class="block text-xs text-surface-500">{item.latest_version} available</span>
+									{/if}
+								</td>
 								{#if canManage}
 									<td>
 										<div class="actions-menu">
