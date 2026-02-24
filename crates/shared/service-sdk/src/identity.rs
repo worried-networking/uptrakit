@@ -21,6 +21,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use crate::error::{EnrollmentError, IdentityError, Result};
+use uptrakit_shared_types::SecretString;
 
 /// File names within directories.
 const STATE_FILE: &str = "service.json";
@@ -29,10 +30,13 @@ const SERVICE_CERT_FILE: &str = "service.crt";
 const SERVICE_KEY_FILE: &str = "service.key";
 
 /// Persisted enrollment state.
+///
+/// `enrollment_secret` uses [`SecretString`] so that it is zeroized on drop
+/// and never appears in `Debug` output or tracing spans.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ServiceState {
     service_id: Uuid,
-    enrollment_secret: String,
+    enrollment_secret: SecretString,
 }
 
 /// Unified identity state for any service (agent or MQTT).
@@ -59,7 +63,11 @@ pub struct ServiceIdentityState {
     /// Service UUID assigned by the controller during enrollment.
     service_id: Option<Uuid>,
     /// Enrollment secret for bearer auth before certificate issuance.
-    enrollment_secret: Option<String>,
+    ///
+    /// Stored as [`SecretString`] to prevent accidental exposure in `Debug`
+    /// output or tracing spans. Cleared from memory once the certificate is
+    /// issued and persisted.
+    enrollment_secret: Option<SecretString>,
     /// ECDSA P-256 keypair.
     keypair: Option<rcgen::KeyPair>,
     /// PEM-encoded certificate (after issuance).
@@ -126,7 +134,7 @@ impl ServiceIdentityState {
             match serde_json::from_str::<ServiceState>(&content) {
                 Ok(state) => {
                     self.service_id = Some(state.service_id);
-                    if !state.enrollment_secret.is_empty() {
+                    if !state.enrollment_secret.expose_secret().is_empty() {
                         self.enrollment_secret = Some(state.enrollment_secret);
                     }
                 }
@@ -194,8 +202,14 @@ impl ServiceIdentityState {
     }
 
     /// The enrollment secret (for bearer auth before cert issuance).
+    ///
+    /// Intentionally exposes the raw secret string: this value is used as a
+    /// bearer token in the enrollment HTTP request and must be a plain string
+    /// at that boundary. Do not log or format the returned value.
     pub fn enrollment_secret(&self) -> Option<&str> {
-        self.enrollment_secret.as_deref()
+        self.enrollment_secret
+            .as_ref()
+            .map(|s| s.expose_secret())
     }
 
     /// Certificate expiry read from the PEM-encoded certificate.
@@ -331,7 +345,7 @@ impl ServiceIdentityState {
     ) -> Result<()> {
         let state = ServiceState {
             service_id,
-            enrollment_secret: enrollment_secret.to_string(),
+            enrollment_secret: SecretString::new(enrollment_secret.to_string()),
         };
         let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
         let path = self.state_dir.join(STATE_FILE);
@@ -340,7 +354,7 @@ impl ServiceIdentityState {
             .context_to::<EnrollmentError>()?;
 
         self.service_id = Some(service_id);
-        self.enrollment_secret = Some(enrollment_secret.to_string());
+        self.enrollment_secret = Some(SecretString::new(enrollment_secret.to_string()));
         Ok(())
     }
 
@@ -381,7 +395,7 @@ impl ServiceIdentityState {
         if let Some(sid) = self.service_id {
             let state = ServiceState {
                 service_id: sid,
-                enrollment_secret: String::new(),
+                enrollment_secret: SecretString::new(String::new()),
             };
             let json = serde_json::to_string_pretty(&state).context_to::<EnrollmentError>()?;
             let path = self.state_dir.join(STATE_FILE);
