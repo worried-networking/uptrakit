@@ -16,8 +16,26 @@ use uptrakit_web_api::extract::ServiceIdentity;
 /// Pinned, boxed future returned by the inner TLS acceptor.
 type BoxedAcceptFuture<I, S> = Pin<Box<dyn Future<Output = io::Result<(TlsStream<I>, S)>> + Send>>;
 
-/// Custom acceptor wrapping `RustlsAcceptor`.
-/// After TLS handshake, extracts peer cert CN as `ServiceIdentity`.
+/// Custom TLS acceptor that supports both enrolled and unenrolled agents on a
+/// single listener.
+///
+/// # Dual-authentication model
+///
+/// The underlying rustls config is built with `.allow_unauthenticated()` so
+/// that agents without a client certificate can still complete the TLS
+/// handshake (they have not yet received one during initial enrollment).
+///
+/// After the handshake this acceptor inspects the peer certificates and injects
+/// an `Option<ServiceIdentity>` into every request's extensions:
+///
+/// | Peer cert present? | `ServiceIdentity` in extensions | Authentication path       |
+/// |--------------------|----------------------------------|---------------------------|
+/// | Yes                | `Some(identity)`                 | mTLS — cert-based         |
+/// | No                 | `None`                           | Enrollment secret bearer  |
+///
+/// Route handlers use the presence or absence of `ServiceIdentity` to enforce
+/// their own authentication requirements.  Enrollment-only routes accept
+/// `None`; all post-enrollment agent routes require `Some`.
 #[derive(Clone)]
 pub struct MtlsAcceptor {
     inner: RustlsAcceptor,

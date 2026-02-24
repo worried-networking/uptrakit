@@ -1164,6 +1164,22 @@ pub fn build_rustls_config_with_client_auth_and_crls(
         root_store.add(ca_cert).context_to::<PkiError>()?;
     }
 
+    // allow_unauthenticated() is intentional.
+    //
+    // The controller exposes a single mTLS listener for both enrolled agents
+    // (which present a client certificate) and agents that have not yet
+    // enrolled (which have no certificate).  At the TLS layer the handshake
+    // succeeds for both.  The `MtlsAcceptor` then extracts the peer
+    // certificate CN into an `Option<ServiceIdentity>`:
+    //
+    //   - `Some(ServiceIdentity)` → established agent, authenticated by cert.
+    //   - `None`                  → unenrolled agent, authenticated later via
+    //                              the enrollment secret bearer token.
+    //
+    // Removing allow_unauthenticated() would break the enrollment flow
+    // entirely, because the agent cannot present a certificate it has not yet
+    // received.  Application-level handlers guard their endpoints against
+    // `None` identities as appropriate.
     let verifier = WebPkiClientVerifier::builder(Arc::new(root_store))
         .with_crls(crls)
         .allow_unauthenticated()

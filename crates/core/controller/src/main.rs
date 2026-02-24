@@ -251,9 +251,11 @@ async fn run(args: cli::Args) -> Result<()> {
     // Spawn background tasks
     let mut bg = tasks::BackgroundTasks::new(CancellationToken::new());
 
-    // CRL manager (uses child token for graceful exit, abort as safety net)
+    // CRL manager: uses the child cancellation token for cooperative shutdown.
+    // Must use track() (not track_abort()) so the manager finishes its current
+    // cycle and writes the final TLS config before the process exits.
     let crl_handle = tokio::spawn(Arc::clone(&crl_manager).run(Some(bg.child_token())));
-    bg.track_abort("crl-manager", crl_handle);
+    bg.track("crl-manager", crl_handle);
 
     // Token denylist cleanup (in-memory, per-instance — not in scheduler)
     let h = tasks::spawn_denylist_cleanup(bg.child_token(), Arc::clone(&app_state.token_denylist));
