@@ -15,6 +15,8 @@ This folder contains security architecture, cryptography, PKI, authentication, s
 | [Filesystem and Dependency Security](filesystem-dependency-security.md) | Filesystem permissions, hardening defaults, and dependency safeguards. |
 | [Secure Development](secure-development.md) | Secure coding expectations for contributors. |
 | [Reverse Proxy Security](reverse-proxy-security.md) | Reverse proxy trust model, header validation, revocation strategy, and per-proxy guide links. |
+| [SSH Agent Secrets](ssh-agent-secrets.md) | SSH credential encryption, master key management, bootstrap security, and TOFU vs pinned fingerprints. |
+| [Sudoers Management](sudoers-management.md) | Per-command sudoers generation, sudo policy, detecting/persisting sudo state, and operator guidance. |
 
 ## Related Documentation
 

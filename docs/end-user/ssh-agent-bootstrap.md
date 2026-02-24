@@ -135,6 +135,7 @@ This resolves to `deploy@10.0.0.5:2222` with host name `myserver`.
 | `--target-username` | No | `uptrakit` (when auth is `root`), else auth username | Username for the managed account |
 | `--target-private-key-file` | No | (generated) | Path to PEM private key for the target user |
 | `--host-key-fingerprint` | No | (TOFU) | Expected host key fingerprint (SHA-256) |
+| `--allow-all` | No | `false` | Write `NOPASSWD: ALL` instead of specific command entries (less secure) |
 
 ## SSH config resolution
 
@@ -193,9 +194,13 @@ The bootstrap command performs these steps in order:
    through the managed account while allowing the non-interactive command
    execution that the agent requires.
 
-5. **Configure sudoers** — Writes
-   `/etc/sudoers.d/uptrakit-<target_username>` with `ALL=(ALL) NOPASSWD: ALL`
-   and validates it with `visudo -cf`.
+5. **Configure sudoers** — Queries all registered providers for their required
+   sudo commands, resolves each to its absolute path on the remote host via
+   `command -v`, and writes a minimal
+   `/etc/sudoers.d/uptrakit-<target_username>` with one entry per resolved
+   command. Validates with `visudo -cf`. Commands not found on the remote host
+   are skipped with a warning. Pass `--allow-all` to fall back to
+   `NOPASSWD: ALL` when no commands resolve.
 
 6. **Disconnect** the auth session.
 
@@ -221,19 +226,31 @@ via `--target-private-key-file`.
 
 ## Sudoers configuration
 
-The bootstrap command grants **full NOPASSWD access** to the target user:
+The bootstrap command generates a minimal sudoers file with one entry per
+registered provider command. For example, if only the APT provider is active:
 
 ```text
-<target_username> ALL=(ALL) NOPASSWD: ALL
+# Managed by Uptrakit - DO NOT EDIT MANUALLY
+# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# /usr/bin/apt-get: Package installation and index refresh require root privileges
+uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
 
 This is written to `/etc/sudoers.d/uptrakit-<target_username>` with `440`
 permissions and validated with `visudo -cf`.
 
-**Security warning**: `NOPASSWD: ALL` grants unrestricted root access to the
-target user. After bootstrapping, review and restrict the sudoers file to only
-the commands needed for your update workflow. See
-[SSH Agent Secrets](../security/ssh-agent-secrets.md) for more details.
+The `--allow-all` flag writes `NOPASSWD: ALL` instead (less secure; matches the
+pre-1.x behavior). Use it only when the required tools are not yet installed or
+during development.
+
+To refresh the sudoers file after adding new providers, run:
+
+```bash
+uptrakit-agent-ssh host update-sudoers <host-name> \
+  --master-key-file /etc/uptrakit/master.key
+```
+
+For the full security rationale, see [Sudoers Management](../security/sudoers-management.md).
 
 ## POSIX username requirements
 
@@ -293,6 +310,12 @@ The target user's home directory could not be resolved via `getent passwd`. This
 can happen if the user's account is misconfigured. Verify that `getent passwd
 <username>` returns a valid entry on the remote host.
 
+### "No provider commands could be resolved on the remote host"
+
+The required provider tools (e.g. `apt-get`) are not installed on the remote
+host, so no sudoers entries could be generated. Either install the required tools
+first, or re-run bootstrap with `--allow-all` to fall back to `NOPASSWD: ALL`.
+
 ### "sudoers validation failed"
 
 The generated sudoers file did not pass `visudo -cf` validation. This is
@@ -314,8 +337,10 @@ The host entry is **not** saved to the database unless all steps succeed.
 ## Related documentation
 
 - [SSH Agent Host Management](ssh-agent-host-management.md) — managing existing
-  host entries
+  host entries, including `update-sudoers`
 - [SSH Agent Architecture](../architecture/ssh-agent.md) — architecture and
   database schema
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — encryption model and
   threat model
+- [Sudoers Management](../security/sudoers-management.md) — sudoers generation,
+  security model, and operator guidance

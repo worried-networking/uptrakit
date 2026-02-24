@@ -35,11 +35,57 @@ See [Dependency Policy](dependency-policy.md) for the full re-export strategy.
 
 Providers do not spawn processes directly. Instead, each provider receives an `Arc<dyn CommandExecutor>` at construction
 time and delegates all command execution through that trait. This decouples provider logic from the execution transport,
-enabling the same provider code to run commands locally (via `LocalCommandExecutor`) or remotely (e.g., over SSH in the
-future).
+enabling the same provider code to run commands locally (via `LocalCommandExecutor`) or remotely (via `SshCommandExecutor`).
 
 See [Command Executor](command-executor.md) for the full trait reference, `CommandSpec` constructors, and guidance on
 implementing custom executors.
+
+### Declaring privileged commands with `required_sudo_commands()`
+
+If your provider needs passwordless `sudo` to run certain commands, implement `required_sudo_commands()` on the `Provider` trait:
+
+```rust
+use uptrakit_provider_core::SudoCommandEntry;
+
+fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
+    vec![SudoCommandEntry {
+        command: "apt-get".into(),
+        explanation: "Package installation and index refresh require root privileges".into(),
+    }]
+}
+```
+
+**Contract:**
+
+- `command` is the **bare command name** (e.g. `"apt-get"`, `"systemctl"`), not an absolute path.
+  The bootstrap and `update-sudoers` commands resolve the absolute path on the target host via
+  `command -v <name>`.
+- `explanation` is shown as a comment in the generated sudoers file and in CLI output. Keep it concise and factual.
+- Return an empty `vec![]` (the default) when your provider never needs elevated privileges.
+- Do **not** hardcode `sudo` in your `CommandSpec` programs or arguments. Instead, call
+  `.privileged()` on the spec and declare the corresponding command here so the sudoers file
+  can be kept minimal.
+
+The `ProviderRegistry::all_required_sudo_commands()` static method aggregates declarations from all
+registered providers (using the same minimal-config instantiation as `create_provider_for_discovery()`).
+The bootstrap and `update-sudoers` SSH agent commands call this to build a per-command sudoers entry.
+
+**Testing:**
+
+Add a unit test verifying that your provider returns the expected entries:
+
+```rust
+#[test]
+fn required_sudo_commands_returns_expected_entries() {
+    let provider = MyProvider::new(MyConfig::default(), Arc::new(LocalCommandExecutor)).unwrap();
+    let cmds = provider.required_sudo_commands();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].command, "my-tool");
+    assert!(!cmds[0].explanation.is_empty());
+}
+```
+
+See [Sudoers Management](../security/sudoers-management.md) for the full security rationale and operator guidance.
 
 ## Provider Trait: Required Methods
 

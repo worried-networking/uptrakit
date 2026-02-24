@@ -192,15 +192,31 @@ non-interactive command execution.
 
 ### Sudoers configuration
 
-The bootstrap command writes `/etc/sudoers.d/uptrakit-<target_username>` with:
+The bootstrap command writes `/etc/sudoers.d/uptrakit-<target_username>` with
+minimal per-command entries derived from registered providers. For example:
 
 ```text
-<target_username> ALL=(ALL) NOPASSWD: ALL
+# Managed by Uptrakit - DO NOT EDIT MANUALLY
+# Regenerate: uptrakit-agent-ssh host update-sudoers <host>
+# /usr/bin/apt-get: Package installation and index refresh require root privileges
+uptrakit ALL=(root) NOPASSWD: /usr/bin/apt-get
 ```
 
-This grants unrestricted root access to the target user. Operators should review
-and restrict this file after bootstrapping to limit access to only the commands
-required by the update workflow.
+This grants the target user passwordless sudo access only for the specific
+absolute paths required by the registered providers — not unrestricted root
+access.
+
+The `--allow-all` flag writes `NOPASSWD: ALL` instead (legacy behavior; less
+secure). Avoid using `--allow-all` in production.
+
+Refresh the sudoers file after adding new providers with:
+
+```bash
+uptrakit-agent-ssh host update-sudoers <host>
+```
+
+See [Sudoers Management](sudoers-management.md) for the full security model,
+sudo policy configuration, and operator guidance.
 
 ## SSH Key Type Auto-Detection
 

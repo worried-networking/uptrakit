@@ -11,10 +11,13 @@ The SSH agent is feature-complete for version checks and updates. The implementa
 - Controller-side enrollment and WebSocket dispatch for SSH agents
 - A standalone binary (`uptrakit-agent-ssh`) with the `ServiceHandler` trait
 - A local SQLite database for storing SSH host credentials (encrypted at rest)
-- CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove/bootstrap`)
+- CLI subcommands for managing SSH host entries locally (`host add/list/show/update/remove/bootstrap/update-sudoers`)
 - SSH transport layer (`russh`) for the bootstrap workflow (connect, authenticate, execute remote commands)
 - Ed25519 keypair generation for automated key deployment
 - A `host bootstrap` command that automates remote host setup (user creation, key deployment, sudoers configuration)
+- A `host update-sudoers` command to regenerate minimal per-command sudoers entries as providers change
+- Per-host sudo state tracking (`is_root`, `sudo_available`, `sudo_policy`) in the local database
+- Runtime `SudoAwareCommandExecutor` wrapping that applies `sudo` based on stored host context — no hard-coded `sudo` in provider commands
 - Host reporting via `ReportHosts` — on authenticated connect, the SSH agent collects system info
   from each enrolled host over SSH and reports it to the controller
 - Full version check and update execution over SSH, with in-flight update tracking and graceful shutdown (see [Version Check and Update Execution](#version-check-and-update-execution))
@@ -75,10 +78,17 @@ The SSH agent uses a local SQLite database (`agent-ssh.db` in the state director
 | `key_type` | TEXT | Key algorithm: `ed25519`, `rsa`, or `ecdsa` |
 | `host_key_fingerprint` | TEXT | Known host key (SHA-256), nullable |
 | `machine_id` | TEXT | Remote host machine ID (populated by `ReportHosts`; used for routing `CheckVersions` and `ExecuteUpdate`) |
+| `sudo_available` | BOOLEAN | NULL = unknown; TRUE = passwordless sudo works for this host |
+| `is_root` | BOOLEAN | NULL = unknown; TRUE = agent user is UID 0 |
+| `sudo_policy` | TEXT | `"auto"` / `"force_with"` / `"force_without"` — runtime sudo execution policy |
 | `created_at` | INTEGER | Unix timestamp |
 | `updated_at` | INTEGER | Unix timestamp |
 
 The `name` column has a UNIQUE index to prevent duplicate host names.
+
+The three sudo columns are populated by `host bootstrap` and `host update-sudoers`. When `NULL`,
+`Model::resolved_sudo_context()` applies backward-compatible defaults (`sudo_available = true`,
+`is_root = false`, `policy = auto`) so hosts enrolled before the sudo tracking migration continue to work.
 
 ## Service Type Registration
 
@@ -102,11 +112,12 @@ directly on the local SQLite database.
 | Command | Description |
 | --- | --- |
 | `host add` | Register a new SSH host with connection details and private key |
-| `host list` | List all registered SSH hosts in tabular format |
-| `host show <name_or_id>` | Display detailed information for a specific host |
-| `host update <name_or_id>` | Update one or more fields of an existing host |
+| `host list` | List all registered SSH hosts in tabular format (includes sudo policy) |
+| `host show <name_or_id>` | Display detailed information for a specific host (includes sudo state) |
+| `host update <name_or_id>` | Update one or more fields of an existing host (includes `--sudo-policy`) |
 | `host remove <name_or_id>` | Remove an SSH host from the local database |
 | `host bootstrap` | Automate remote host setup and save the host entry (see [Bootstrap](#bootstrap-workflow)) |
+| `host update-sudoers <name_or_id>` | Regenerate the sudoers drop-in file on an enrolled host (see [Sudo Context](#sudo-context-and-dynamic-execution)) |
 
 Host identification accepts either the host's friendly name or UUID. The code tries UUID parse first, then falls back to a name lookup.
 
@@ -146,9 +157,13 @@ command. It accepts a positional target in standard SSH format
 2. VALIDATE INPUTS (username format, no DB name conflict)
 3. PREPARE KEY MATERIAL (read provided key or generate Ed25519)
 4. CONNECT & AUTHENTICATE (password, key file, or SSH agent; TOFU or pinned host key)
-5. DETECT PRIVILEGES (root check, sudo -n true)
-6. REMOTE SETUP (create user with /bin/sh shell, deploy authorized_keys with
-   no-pty/no-agent-forwarding/no-X11-forwarding restrictions, write sudoers)
+5. DETECT PRIVILEGES (root check via id -u; sudo -n true)
+6. REMOTE SETUP
+   - Create user with /bin/sh shell (if different from auth user)
+   - Deploy authorized_keys with no-pty/no-agent-forwarding/no-X11-forwarding
+   - Resolve provider commands (command -v per SudoCommandEntry)
+   - Write minimal /etc/sudoers.d/uptrakit-<username> (or NOPASSWD: ALL with --allow-all)
+   - Validate with visudo -cf
 7. DISCONNECT auth session
 8. VERIFY (reconnect as target user, whoami + sudo -n true)
 9. SAVE TO DATABASE (encrypt key, store host entry)
@@ -194,6 +209,62 @@ prevent shell injection. SSH config parsing uses the `ssh2-config` crate with
 
 For detailed usage and troubleshooting, see
 [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md).
+
+## Sudo Context and Dynamic Execution
+
+The SSH agent tracks per-host sudo state in the local database and uses it to
+dynamically prepend `sudo` to privileged commands at runtime — without
+hard-coding `sudo` in provider command specs.
+
+### How it works
+
+Providers declare which commands they need `sudo` for via `required_sudo_commands()` (see
+[Provider Guidelines](../development/provider-guidelines.md#declaring-privileged-commands-with-required_sudo_commands)).
+Each command has a `privileged: bool` flag on its `CommandSpec`.
+
+At runtime, the SSH agent wraps `SshCommandExecutor` with `SudoAwareCommandExecutor`:
+
+```text
+SudoAwareCommandExecutor { inner: SshCommandExecutor, context: SudoContext }
+     │
+     │  spec.privileged && context.should_use_sudo()
+     ▼
+CommandSpec { Exec { program: "sudo", args: ["apt-get", "install", ...] } }
+```
+
+`SudoContext` is built from the database columns:
+
+| DB column | `SudoContext` field | Unknown default |
+| --- | --- | --- |
+| `is_root` | `is_root: bool` | `false` (conservative) |
+| `sudo_available` | `sudo_available: bool` | `true` (backward compat) |
+| `sudo_policy` | `policy: SudoPolicy` | `Auto` |
+
+### Updating sudo state
+
+- **`host bootstrap`** — detects and stores `is_root` and `sudo_available` during the bootstrap workflow.
+- **`host update-sudoers`** — re-detects `is_root` and `sudo_available` on every run (always
+  refreshes), then writes or refreshes the sudoers drop-in file.
+- **Regular operations** (`CheckVersions`, `ExecuteUpdate`) — read from the database without any SSH detection round-trip.
+
+### `host update-sudoers` workflow
+
+```text
+1. Load SSH host from DB by name or UUID
+2. Connect & authenticate (using stored credentials)
+3. Detect is_root (id -u) and sudo_available (sudo -n true)
+4. Persist detected values to DB
+5. Collect provider commands (ProviderRegistry::all_required_sudo_commands())
+6. Resolve absolute paths on remote host (command -v per entry)
+7. Build SudoersContent::SpecificCommands or AllCommands (with --allow-all)
+8. Write /etc/sudoers.d/uptrakit-<username>, chmod 440, validate with visudo -cf
+9. Update DB: sudo_available = true
+10. Print summary
+```
+
+Supports `--dry-run` to preview the sudoers file without writing it.
+
+See [Sudoers Management](../security/sudoers-management.md) for the security model and operator guidance.
 
 ## Command Execution over SSH
 
@@ -332,7 +403,8 @@ crates/core/agent-ssh/
 └── src/
     ├── main.rs          # SshAgentHandler (ServiceHandler impl, in_flight_update field), entry point, master key init
     ├── cli.rs           # CLI args (Commands, HostCommands, CommonServiceArgs integration)
-    ├── client.rs        # Authenticated loop (ping/pong, cert renewal, local DB init); handle_check_versions_ssh(), handle_execute_update_ssh()
+    ├── client.rs        # Authenticated loop; handle_check_versions_ssh(), handle_execute_update_ssh(),
+    │                    # handle_discover_software_ssh() — all wrap SshCommandExecutor with SudoAwareCommandExecutor
     ├── error.rs         # Error types (rootcause + thiserror)
     ├── ssh_config.rs    # SSH config resolution (~/.ssh/config defaults for User, Port, HostName)
     ├── ssh_executor.rs  # SshCommandExecutor (CommandExecutor impl over SSH)
@@ -340,20 +412,24 @@ crates/core/agent-ssh/
     ├── ssh_target.rs    # SshTarget type with FromStr (parses [user@]host[:port] and ssh:// URLs, validates hostname syntax)
     ├── ssh_transport.rs # SSH client wrapper (russh): connect, authenticate, exec_command, LineBuffer
     ├── host_info.rs     # Remote host info collection over SSH (machine_id, os_type, os_version, architecture, hostname)
-    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove, find_host_by_machine_id, update_host_machine_id)
+    ├── host_ops.rs      # CRUD operations for SSH hosts (add, find, list, update, remove, update_host_sudo_state, ...)
     ├── commands/
-    │   ├── mod.rs       # Command module declarations
-    │   ├── host.rs      # Host subcommand handlers (dispatch, SSH config resolution, formatting)
-    │   └── bootstrap.rs # Bootstrap workflow (remote setup, verification, DB save)
+    │   ├── mod.rs         # Command module declarations
+    │   ├── host.rs        # Host subcommand handlers (dispatch, SSH config resolution, formatting)
+    │   ├── bootstrap.rs   # Bootstrap workflow (remote setup, verification, DB save; uses sudoers.rs)
+    │   ├── sudoers.rs     # Shared sudoers helpers: detect_is_root, detect_sudo_available,
+    │   │                  # resolve_command_path, generate_sudoers_content, write_sudoers_file
+    │   └── update_sudoers.rs  # update-sudoers command (re-detect, resolve, write, persist)
     └── db/
         ├── mod.rs       # SQLite init (init_db) + tests
         ├── entity/
         │   ├── mod.rs   # Entity module declarations
-        │   └── ssh_host.rs  # SeaORM entity (Model, SshKeyType enum with FromStr/Display)
+        │   └── ssh_host.rs  # SeaORM entity (Model + resolved_sudo_context(), SshKeyType enum)
         └── migration/
             ├── mod.rs   # Migration runner
-            ├── m20260215_000001_initial.rs  # ssh_hosts table (with UNIQUE index on name)
-            └── m20260222_000002_add_machine_id.rs  # Adds machine_id TEXT NOT NULL DEFAULT '' column to ssh_hosts
+            ├── m20260215_000001_initial.rs         # ssh_hosts table (with UNIQUE index on name)
+            ├── m20260222_000002_add_machine_id.rs  # Adds machine_id TEXT NOT NULL DEFAULT ''
+            └── m20260224_000003_add_sudo_columns.rs  # Adds sudo_available, is_root, sudo_policy
 ```
 
 ## Shared `uptrakit-agent-core` Crate
@@ -379,6 +455,8 @@ Version check and update execution logic shared between `uptrakit-agent` and `up
 - [SSH Agent Bootstrap](../end-user/ssh-agent-bootstrap.md) — detailed bootstrap workflow and troubleshooting
 - [Service Lifecycle](../development/service-lifecycle.md) — `ServiceHandler` trait
 - [SSH Agent Secrets](../security/ssh-agent-secrets.md) — secret storage, SSH session lifecycle, and threat model
+- [Sudoers Management](../security/sudoers-management.md) — sudoers generation, sudo policy, and operator guidance
 - [Wire Protocol](../api/wire-protocol.md) — `SshAgent` service type in enrollment; `host_machine_id` routing field
 - [Services and Operations](../api/services-operations.md) — shared service management API
-- [Command Executor](../development/command-executor.md) — `CommandExecutor` trait implemented by `SshCommandExecutor`
+- [Command Executor](../development/command-executor.md) — `CommandExecutor` trait, `privileged` flag, and `SudoAwareCommandExecutor`
+- [Provider Guidelines](../development/provider-guidelines.md) — `required_sudo_commands()` contract

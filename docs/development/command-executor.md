@@ -23,6 +23,8 @@ Describes a command to execute without specifying the transport.
 pub struct CommandSpec {
     pub mode: CommandMode,
     pub working_dir: Option<String>,
+    pub timeout: Option<std::time::Duration>,
+    pub privileged: bool,
 }
 ```
 
@@ -34,6 +36,25 @@ Convenience constructors:
 | `CommandSpec::shell(command)` | Shell command via Bash with fail-early settings (`set -euo pipefail`). |
 | `CommandSpec::shell_with(command, shell)` | Shell command with a specific shell (`Bash`, `Sh`). |
 | `.with_working_dir(dir)` | Builder method to set the working directory. |
+| `.privileged()` | Mark the command as requiring elevated privileges (used with `SudoAwareCommandExecutor`). |
+
+#### The `privileged` flag
+
+Set `privileged: true` on a `CommandSpec` when the command requires root or elevated privileges to
+execute (for example, running `apt-get install`). Do **not** hardcode `sudo` in the command program
+or arguments — use `.privileged()` instead:
+
+```rust
+// ✓ Correct: declare privilege intent, let the executor handle sudo
+CommandSpec::exec("apt-get", ["install", "-y", "package"]).privileged()
+
+// ✗ Wrong: hardcoding sudo prevents executor-level control
+CommandSpec::exec("sudo", ["apt-get", "install", "-y", "package"])
+```
+
+The `.privileged()` flag has no effect on `Shell` mode specs — shell commands control their own
+privilege escalation. If `.privileged()` is set on a `Shell` spec, a warning is logged and the spec
+is passed through unchanged.
 
 ### `CommandMode`
 
@@ -84,11 +105,81 @@ The default implementation. Delegates to `tokio::process::Command` on the local 
 pub struct LocalCommandExecutor;
 ```
 
-No configuration needed -- instantiate with `LocalCommandExecutor` and wrap in `Arc`:
+No configuration needed — instantiate with `LocalCommandExecutor` and wrap in `Arc`:
 
 ```rust
 let executor: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
 ```
+
+### `SudoAwareCommandExecutor`
+
+A decorator executor that conditionally prepends `sudo` for `privileged` specs based on the runtime host context.
+
+```rust
+pub struct SudoAwareCommandExecutor {
+    inner: Arc<dyn CommandExecutor>,
+    context: SudoContext,
+}
+```
+
+#### `SudoContext`
+
+Controls whether and how `sudo` is prepended:
+
+```rust
+pub struct SudoContext {
+    pub is_root: bool,          // agent user is UID 0
+    pub sudo_available: bool,   // passwordless sudo is available
+    pub policy: SudoPolicy,
+}
+```
+
+`SudoPolicy` (default: `Auto`) determines the behavior:
+
+| Variant | String | Behavior |
+| --- | --- | --- |
+| `Auto` | `"auto"` | Prepend `sudo` when not root AND `sudo_available` is `true` |
+| `ForceWith` | `"force_with"` | Always prepend `sudo` (unless root) |
+| `ForceWithout` | `"force_without"` | Never prepend `sudo` |
+
+`SudoContext::default()` encodes the backward-compatible assumption used by the local agent:
+non-root user, sudo available, auto policy. This matches the old hardcoded-sudo behavior.
+
+#### How it works
+
+`SudoAwareCommandExecutor::apply_sudo()` inspects each spec before delegating to the inner executor:
+
+1. If `!spec.privileged` or `!context.should_use_sudo()` — passes the spec through unchanged.
+2. If `spec.privileged && context.should_use_sudo()` and mode is `Exec { program, args }` — rewrites
+   to `Exec { program: "sudo", args: [old_program] + old_args }`.
+3. If mode is `Shell { .. }` — emits `tracing::warn!` and passes through unchanged (shell commands handle their own privilege).
+
+#### Usage
+
+```rust
+use std::sync::Arc;
+use uptrakit_command::{
+    CommandExecutor, LocalCommandExecutor,
+    SudoAwareCommandExecutor, SudoContext,
+};
+
+// Local agent: use default context (backward-compatible sudo behavior)
+let raw: Arc<dyn CommandExecutor> = Arc::new(LocalCommandExecutor);
+let executor: Arc<dyn CommandExecutor> =
+    Arc::new(SudoAwareCommandExecutor::new(raw, SudoContext::default()));
+
+// SSH agent: load context from database
+let executor: Arc<dyn CommandExecutor> =
+    Arc::new(SudoAwareCommandExecutor::new(raw, host.resolved_sudo_context()));
+```
+
+The SSH agent stores `is_root`, `sudo_available`, and `sudo_policy` in the `ssh_hosts` table and
+reads them back via `Model::resolved_sudo_context()`. When the values are unknown (`NULL`) in the
+database, `resolved_sudo_context()` defaults to `sudo_available = true` for backward compatibility
+with hosts bootstrapped before the sudo tracking migration.
+
+See [SSH Agent Architecture — Sudo Context](../architecture/ssh-agent.md#sudo-context-and-dynamic-execution) for the full SSH agent integration.
+See [Sudoers Management](../security/sudoers-management.md) for the security model and operator guidance.
 
 ## Provider construction
 
@@ -149,13 +240,18 @@ expansion, compound statements).
 The SSH-backed implementation lives in `crates/core/agent-ssh/src/ssh_executor.rs`. It runs commands
 on remote hosts via an `SshSession` from the SSH transport layer.
 
+In practice, `SshCommandExecutor` is always wrapped with `SudoAwareCommandExecutor` in the SSH agent's handler functions — never used bare:
+
 ```rust
 use std::sync::Arc;
-use uptrakit_command::{CommandExecutor, CommandSpec};
+use uptrakit_command::{CommandExecutor, SudoAwareCommandExecutor};
 
 // Wrap an authenticated SSH session in Arc and pass it to the executor.
 let session = Arc::new(session);
-let executor: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+let raw: Arc<dyn CommandExecutor> = Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
+// Wrap with sudo-aware behavior from the database-backed context.
+let executor: Arc<dyn CommandExecutor> =
+    Arc::new(SudoAwareCommandExecutor::new(raw, host.resolved_sudo_context()));
 
 // Use exactly like LocalCommandExecutor — providers are transport-agnostic.
 let output = executor
