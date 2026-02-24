@@ -6235,6 +6235,7 @@ dependencies = [
  "uptrakit-crypto",
  "uptrakit-directories",
  "uptrakit-internal-wire",
+ "uptrakit-provider-registry",
  "uptrakit-service-sdk",
  "uptrakit-shared-macros",
  "uptrakit-shared-types",

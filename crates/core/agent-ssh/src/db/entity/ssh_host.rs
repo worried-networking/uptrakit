@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use sea_orm::entity::prelude::*;
 use thiserror::Error;
+use uptrakit_command::SudoContext;
 use uptrakit_crypto::EncryptedString;
 
 // ── SshKeyType ──────────────────────────────────────────────────────
@@ -70,6 +71,41 @@ pub struct Model {
     pub machine_id: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Whether passwordless sudo (`sudo -n true`) is available for this host's agent user.
+    ///
+    /// `None` means the value has not yet been detected (host was bootstrapped
+    /// before this column existed). `resolved_sudo_context()` defaults `None`
+    /// to `true` for backward compatibility.
+    pub sudo_available: Option<bool>,
+    /// Whether the agent user is UID 0 (root) on the remote host.
+    ///
+    /// `None` means the value has not yet been detected.
+    /// `resolved_sudo_context()` defaults `None` to `false`.
+    pub is_root: Option<bool>,
+    /// Sudo policy string: `"auto"` | `"force_with"` | `"force_without"`.
+    ///
+    /// Stored as TEXT with `DEFAULT 'auto'` so existing rows are valid without
+    /// a data migration.
+    pub sudo_policy: String,
+}
+
+impl Model {
+    /// Build a [`SudoContext`] from the host's persisted sudo fields.
+    ///
+    /// Defaults for unknown (`None`) values:
+    /// - `sudo_available`: `true` — backward compatibility for hosts bootstrapped
+    ///   before this field was added (they had `NOPASSWD: ALL` written).
+    /// - `is_root`: `false` — conservative default; the agent user is assumed
+    ///   to be non-root until confirmed otherwise.
+    /// - `sudo_policy`: `SudoPolicy::Auto` when the stored string cannot be
+    ///   parsed.
+    pub fn resolved_sudo_context(&self) -> SudoContext {
+        SudoContext {
+            is_root: self.is_root.unwrap_or(false),
+            sudo_available: self.sudo_available.unwrap_or(true),
+            policy: self.sudo_policy.parse().unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -81,6 +117,8 @@ impl ActiveModelBehavior for ActiveModel {}
 
 #[cfg(test)]
 mod tests {
+    use uptrakit_command::SudoPolicy;
+
     use super::*;
 
     #[test]
@@ -108,5 +146,61 @@ mod tests {
         assert!("dsa".parse::<SshKeyType>().is_err());
         assert!("Ed25519".parse::<SshKeyType>().is_err());
         assert!("".parse::<SshKeyType>().is_err());
+    }
+
+    // ── resolved_sudo_context ────────────────────────────────────────────
+
+    fn stub_model(sudo_available: Option<bool>, is_root: Option<bool>, sudo_policy: &str) -> Model {
+        use uptrakit_crypto::EncryptedString;
+        Model {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            hostname: "127.0.0.1".to_string(),
+            port: 22,
+            username: "uptrakit".to_string(),
+            private_key: EncryptedString::new("key".to_string()).expect("encrypt"),
+            key_type: SshKeyType::Ed25519,
+            host_key_fingerprint: None,
+            machine_id: String::new(),
+            created_at: 0,
+            updated_at: 0,
+            sudo_available,
+            is_root,
+            sudo_policy: sudo_policy.to_string(),
+        }
+    }
+
+    #[test]
+    fn resolved_sudo_context_defaults_for_unknown_values() {
+        let model = stub_model(None, None, "auto");
+        let ctx = model.resolved_sudo_context();
+        // Defaults: is_root=false, sudo_available=true, policy=Auto
+        assert!(!ctx.is_root);
+        assert!(ctx.sudo_available);
+        assert_eq!(ctx.policy, SudoPolicy::Auto);
+        // Should behave like old hardcoded sudo
+        assert!(ctx.should_use_sudo());
+    }
+
+    #[test]
+    fn resolved_sudo_context_root_user() {
+        let model = stub_model(None, Some(true), "auto");
+        let ctx = model.resolved_sudo_context();
+        assert!(ctx.is_root);
+        assert!(!ctx.should_use_sudo());
+    }
+
+    #[test]
+    fn resolved_sudo_context_force_without_policy() {
+        let model = stub_model(Some(true), Some(false), "force_without");
+        let ctx = model.resolved_sudo_context();
+        assert!(!ctx.should_use_sudo());
+    }
+
+    #[test]
+    fn resolved_sudo_context_invalid_policy_defaults_to_auto() {
+        let model = stub_model(Some(true), Some(false), "garbage_value");
+        let ctx = model.resolved_sudo_context();
+        assert_eq!(ctx.policy, SudoPolicy::Auto);
     }
 }

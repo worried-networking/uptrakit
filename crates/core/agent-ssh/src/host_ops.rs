@@ -24,6 +24,9 @@ pub struct HostUpdates {
     pub private_key: Option<uptrakit_crypto::EncryptedString>,
     pub key_type: Option<SshKeyType>,
     pub host_key_fingerprint: Option<Option<String>>,
+    /// Sudo policy string: `"auto"`, `"force_with"`, or `"force_without"`.
+    /// When `Some`, replaces the stored sudo policy.
+    pub sudo_policy: Option<String>,
 }
 
 /// Add a new SSH host to the database.
@@ -53,6 +56,9 @@ pub async fn add_host(db: &DatabaseConnection, params: AddHostParams) -> Result<
         machine_id: Set(String::new()),
         created_at: Set(now),
         updated_at: Set(now),
+        sudo_available: sea_orm::ActiveValue::NotSet,
+        is_root: sea_orm::ActiveValue::NotSet,
+        sudo_policy: Set("auto".to_string()),
     };
 
     let inserted = model.insert(db).await.context_to::<Error>()?;
@@ -145,6 +151,9 @@ pub async fn update_host(
     if let Some(fp) = updates.host_key_fingerprint {
         model.host_key_fingerprint = Set(fp);
     }
+    if let Some(policy) = updates.sudo_policy {
+        model.sudo_policy = Set(policy);
+    }
 
     model.updated_at = Set(now_unix_timestamp());
 
@@ -169,6 +178,40 @@ pub async fn update_host_machine_id(
 
     let mut model: ActiveModel = host.into();
     model.machine_id = Set(machine_id.to_string());
+    model.updated_at = Set(now_unix_timestamp());
+    model.update(db).await.context_to::<Error>()?;
+    Ok(())
+}
+
+/// Update the sudo state fields for an SSH host.
+///
+/// Called after sudo detection during bootstrap or `update-sudoers`.
+/// Only fields with `Some` values are updated; `None` leaves the existing
+/// value unchanged.
+pub async fn update_host_sudo_state(
+    db: &DatabaseConnection,
+    host_id: &str,
+    sudo_available: Option<bool>,
+    is_root: Option<bool>,
+    sudo_policy: Option<String>,
+) -> Result<()> {
+    let host = Entity::find_by_id(host_id)
+        .one(db)
+        .await
+        .context_to::<Error>()?
+        .ok_or_else(|| report!(Error::HostNotFound(host_id.to_string())))?;
+
+    let mut model: ActiveModel = host.into();
+
+    if let Some(v) = sudo_available {
+        model.sudo_available = Set(Some(v));
+    }
+    if let Some(v) = is_root {
+        model.is_root = Set(Some(v));
+    }
+    if let Some(policy) = sudo_policy {
+        model.sudo_policy = Set(policy);
+    }
     model.updated_at = Set(now_unix_timestamp());
     model.update(db).await.context_to::<Error>()?;
     Ok(())
@@ -359,6 +402,7 @@ mod tests {
                 private_key: None,
                 key_type: None,
                 host_key_fingerprint: Some(Some("SHA256:abc123".to_string())),
+                sudo_policy: None,
             },
         )
         .await
@@ -395,6 +439,7 @@ mod tests {
                 private_key: None,
                 key_type: None,
                 host_key_fingerprint: None,
+                sudo_policy: None,
             },
         )
         .await;
@@ -422,6 +467,7 @@ mod tests {
                 private_key: None,
                 key_type: None,
                 host_key_fingerprint: None,
+                sudo_policy: None,
             },
         )
         .await;
@@ -453,6 +499,7 @@ mod tests {
                 private_key: None,
                 key_type: None,
                 host_key_fingerprint: None,
+                sudo_policy: None,
             },
         )
         .await

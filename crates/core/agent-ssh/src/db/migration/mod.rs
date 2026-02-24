@@ -3,6 +3,7 @@ use sea_orm_migration::prelude::*;
 
 mod m20260215_000001_initial;
 mod m20260222_000002_add_machine_id;
+mod m20260224_000003_add_sudo_columns;
 
 pub struct Migrator;
 
@@ -12,6 +13,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260215_000001_initial::Migration),
             Box::new(m20260222_000002_add_machine_id::Migration),
+            Box::new(m20260224_000003_add_sudo_columns::Migration),
         ]
     }
 }
