@@ -239,10 +239,13 @@ async fn handle_service_settings(
     );
 
     // Create or update the ping timer with the controller-provided interval.
+    // Use interval_at so the first tick fires after one full period, not immediately.
     let interval_duration = settings.ping_interval;
     tracing::debug!(ping_interval_secs = ?interval_duration.as_secs(), "setting ping interval from controller");
-    let mut new_timer = tokio::time::interval(interval_duration);
-    new_timer.tick().await; // Skip the first immediate tick
+    let new_timer = tokio::time::interval_at(
+        tokio::time::Instant::now() + interval_duration,
+        interval_duration,
+    );
     *state.ping_timer = Some(new_timer);
 
     crate::ca::check_ca_staleness(
