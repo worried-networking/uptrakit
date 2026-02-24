@@ -12,7 +12,7 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    Signal,
+    ShutdownCause, Signal,
 };
 
 use cli::Args;
@@ -178,13 +178,10 @@ impl ServiceHandler for AgentHandler {
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
-        signal: Signal,
+        cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
-        let (disconnect_reason, outcome) = match signal {
-            Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
-            _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
-        };
+        let (disconnect_reason, outcome) = resolve_shutdown(cause);
         client::handle_graceful_shutdown(
             conn,
             self.in_flight_update.take(),
@@ -193,6 +190,22 @@ impl ServiceHandler for AgentHandler {
             outcome,
         )
         .await
+    }
+}
+
+/// Map a [`ShutdownCause`] to the appropriate [`DisconnectReason`] and
+/// [`LoopOutcome`] for this service.
+///
+/// | Cause | `DisconnectReason` | `LoopOutcome` |
+/// | --- | --- | --- |
+/// | `Signal(Hangup)` | `Restart` | `Restart` |
+/// | `Signal(_)` | `Shutdown` | `Shutdown` |
+/// | `ServerRestarting` | `Restart` | `Disconnected` |
+fn resolve_shutdown(cause: ShutdownCause) -> (DisconnectReason, LoopOutcome) {
+    match cause {
+        ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
+        ShutdownCause::Signal(_) => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+        ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
     }
 }
 
@@ -232,4 +245,30 @@ async fn main() {
         &mut handler,
     )
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_shutdown_hangup() {
+        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Hangup));
+        assert_eq!(reason, DisconnectReason::Restart);
+        assert_eq!(outcome, LoopOutcome::Restart);
+    }
+
+    #[test]
+    fn resolve_shutdown_terminate() {
+        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
+        assert_eq!(reason, DisconnectReason::Shutdown);
+        assert_eq!(outcome, LoopOutcome::Shutdown);
+    }
+
+    #[test]
+    fn resolve_shutdown_server_restarting() {
+        let (reason, outcome) = resolve_shutdown(ShutdownCause::ServerRestarting);
+        assert_eq!(reason, DisconnectReason::Restart);
+        assert_eq!(outcome, LoopOutcome::Disconnected);
+    }
 }

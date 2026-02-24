@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use uptrakit_internal_wire::{Capability, ControllerMessage, DisconnectReason, ServiceType};
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,
-    Signal,
+    ShutdownCause, Signal,
 };
 
 use cli::{Args, Commands};
@@ -182,13 +182,10 @@ impl ServiceHandler for SshAgentHandler {
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
-        signal: Signal,
+        cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome {
-        let (disconnect_reason, outcome) = match signal {
-            Signal::Hangup => (DisconnectReason::Restart, LoopOutcome::Restart),
-            _ => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
-        };
+        let (disconnect_reason, outcome) = resolve_shutdown(cause);
         client::handle_graceful_shutdown(
             conn,
             self.in_flight_update.take(),
@@ -197,6 +194,22 @@ impl ServiceHandler for SshAgentHandler {
             outcome,
         )
         .await
+    }
+}
+
+/// Map a [`ShutdownCause`] to the appropriate [`DisconnectReason`] and
+/// [`LoopOutcome`] for this service.
+///
+/// | Cause | `DisconnectReason` | `LoopOutcome` |
+/// | --- | --- | --- |
+/// | `Signal(Hangup)` | `Restart` | `Restart` |
+/// | `Signal(_)` | `Shutdown` | `Shutdown` |
+/// | `ServerRestarting` | `Restart` | `Disconnected` |
+fn resolve_shutdown(cause: ShutdownCause) -> (DisconnectReason, LoopOutcome) {
+    match cause {
+        ShutdownCause::Signal(Signal::Hangup) => (DisconnectReason::Restart, LoopOutcome::Restart),
+        ShutdownCause::Signal(_) => (DisconnectReason::Shutdown, LoopOutcome::Shutdown),
+        ShutdownCause::ServerRestarting => (DisconnectReason::Restart, LoopOutcome::Disconnected),
     }
 }
 
@@ -412,5 +425,32 @@ mod tests {
         let key_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let result = parse_master_key_hex(key_hex);
         assert!(matches!(result, Ok(bytes) if bytes.len() == 32));
+    }
+
+    #[test]
+    fn resolve_shutdown_hangup() {
+        use super::{resolve_shutdown, LoopOutcome, ShutdownCause, Signal};
+        use uptrakit_internal_wire::DisconnectReason;
+        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Hangup));
+        assert_eq!(reason, DisconnectReason::Restart);
+        assert_eq!(outcome, LoopOutcome::Restart);
+    }
+
+    #[test]
+    fn resolve_shutdown_terminate() {
+        use super::{resolve_shutdown, LoopOutcome, ShutdownCause, Signal};
+        use uptrakit_internal_wire::DisconnectReason;
+        let (reason, outcome) = resolve_shutdown(ShutdownCause::Signal(Signal::Terminate));
+        assert_eq!(reason, DisconnectReason::Shutdown);
+        assert_eq!(outcome, LoopOutcome::Shutdown);
+    }
+
+    #[test]
+    fn resolve_shutdown_server_restarting() {
+        use super::{resolve_shutdown, LoopOutcome, ShutdownCause};
+        use uptrakit_internal_wire::DisconnectReason;
+        let (reason, outcome) = resolve_shutdown(ShutdownCause::ServerRestarting);
+        assert_eq!(reason, DisconnectReason::Restart);
+        assert_eq!(outcome, LoopOutcome::Disconnected);
     }
 }
