@@ -342,6 +342,35 @@ pub(crate) async fn handle_agent_authenticated(
                                         .await;
                                     }
                                 }
+
+                                // Batch-update last_checked_at for all software items that
+                                // had at least one successful result (no error). This is a
+                                // single UPDATE rather than per-item to avoid N DB round-trips.
+                                let checked_ids: Vec<uuid::Uuid> = payload
+                                    .results
+                                    .iter()
+                                    .filter(|r| r.error.is_none())
+                                    .map(|r| r.software_item_id)
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .into_iter()
+                                    .collect();
+
+                                if !checked_ids.is_empty() {
+                                    if let Err(e) = software_item::Entity::update_many()
+                                        .filter(software_item::Column::Id.is_in(checked_ids))
+                                        .col_expr(
+                                            software_item::Column::LastCheckedAt,
+                                            Expr::value(now),
+                                        )
+                                        .exec(state.db())
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "failed to batch-update software_item last_checked_at"
+                                        );
+                                    }
+                                }
                             }
                             ServiceMessage::UpdateStarted(payload) => {
                                 tracing::info!(
