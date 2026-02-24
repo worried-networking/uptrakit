@@ -43,6 +43,8 @@ fn model_to_response(
         has_password: model.password.is_some(),
         has_ca_cert: model.ca_cert_pem.is_some(),
         topic_prefix: model.topic_prefix.clone(),
+        ha_discovery: model.ha_discovery,
+        ha_discovery_prefix: model.ha_discovery_prefix.clone(),
         connection_status,
     }
 }
@@ -208,6 +210,11 @@ pub async fn create_mqtt_settings(
         password: req.password.as_ref().map(|p| p.expose_secret()),
         ca_cert_pem: req.ca_pem.as_ref().map(|c| c.expose_secret()),
         topic_prefix,
+        ha_discovery: req.ha_discovery.unwrap_or(false),
+        ha_discovery_prefix: req
+            .ha_discovery_prefix
+            .as_deref()
+            .unwrap_or("homeassistant"),
     })
     .await
     {
@@ -542,6 +549,8 @@ pub async fn update_mqtt_settings(
         password,
         ca_cert_pem,
         topic_prefix: req.topic_prefix.as_deref(),
+        ha_discovery: req.ha_discovery,
+        ha_discovery_prefix: req.ha_discovery_prefix.as_deref(),
     })
     .await
     {

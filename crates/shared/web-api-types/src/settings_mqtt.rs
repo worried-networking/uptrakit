@@ -33,6 +33,8 @@ pub struct MqttClientResponse {
     pub has_password: bool,
     pub has_ca_cert: bool,
     pub topic_prefix: String,
+    pub ha_discovery: bool,
+    pub ha_discovery_prefix: String,
     pub connection_status: MqttClientConnectionStatus,
 }
 
@@ -62,6 +64,10 @@ pub struct CreateMqttClientRequest {
     pub ca_pem: Option<SecretString>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ha_discovery: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ha_discovery_prefix: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -91,6 +97,10 @@ pub struct UpdateMqttClientRequest {
     pub ca_pem: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic_prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ha_discovery: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ha_discovery_prefix: Option<String>,
 }
 
 #[cfg(test)]

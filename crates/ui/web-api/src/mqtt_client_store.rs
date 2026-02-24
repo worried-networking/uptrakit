@@ -79,6 +79,8 @@ pub struct CreateMqttClientParams<'a> {
     pub password: Option<&'a str>,
     pub ca_cert_pem: Option<&'a str>,
     pub topic_prefix: &'a str,
+    pub ha_discovery: bool,
+    pub ha_discovery_prefix: &'a str,
 }
 
 /// Create a new MQTT client for a tenant.
@@ -96,6 +98,8 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         password,
         ca_cert_pem,
         topic_prefix,
+        ha_discovery,
+        ha_discovery_prefix,
     } = params;
 
     // Check limit
@@ -125,8 +129,8 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         topic_prefix: Set(topic_prefix.to_string()),
         connection_status: Set(MqttClientConnectionStatus::Offline),
         status_updated_at: Set(now),
-        ha_discovery: Set(false),
-        ha_discovery_prefix: Set("homeassistant".to_string()),
+        ha_discovery: Set(ha_discovery),
+        ha_discovery_prefix: Set(ha_discovery_prefix.to_string()),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -147,6 +151,8 @@ pub struct UpdateMqttClientParams<'a> {
     pub password: Option<Option<&'a str>>,
     pub ca_cert_pem: Option<Option<&'a str>>,
     pub topic_prefix: Option<&'a str>,
+    pub ha_discovery: Option<bool>,
+    pub ha_discovery_prefix: Option<&'a str>,
 }
 
 /// Update an existing MQTT client model. Pass the loaded model; only non-None
@@ -164,6 +170,8 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
         password,
         ca_cert_pem,
         topic_prefix,
+        ha_discovery,
+        ha_discovery_prefix,
     } = params;
     let mut model: mqtt_client::ActiveModel = existing.into();
 
@@ -199,6 +207,12 @@ pub async fn update_mqtt_client(params: UpdateMqttClientParams<'_>) -> Result<mq
     }
     if let Some(v) = topic_prefix {
         model.topic_prefix = Set(v.to_string());
+    }
+    if let Some(v) = ha_discovery {
+        model.ha_discovery = Set(v);
+    }
+    if let Some(v) = ha_discovery_prefix {
+        model.ha_discovery_prefix = Set(v.to_string());
     }
     model.updated_at = Set(OffsetDateTime::now_utc());
 

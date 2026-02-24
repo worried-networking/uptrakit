@@ -561,9 +561,18 @@ enum MqttCommands {
         /// Path to a PEM file containing a custom CA certificate (for private brokers)
         #[arg(long, conflicts_with = "ca_pem")]
         ca_pem_file: Option<std::path::PathBuf>,
-        /// Topic prefix (e.g. homeassistant)
+        /// Topic prefix (e.g. uptrakit)
         #[arg(long)]
         topic_prefix: Option<String>,
+        /// Enable Home Assistant MQTT discovery
+        #[arg(long = "ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false)]
+        ha_discovery: bool,
+        /// Disable Home Assistant MQTT discovery
+        #[arg(long = "no-ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false, conflicts_with = "ha_discovery")]
+        no_ha_discovery: bool,
+        /// Home Assistant discovery topic prefix (default: homeassistant)
+        #[arg(long)]
+        ha_discovery_prefix: Option<String>,
     },
     /// Update an MQTT client configuration
     Update {
@@ -602,6 +611,15 @@ enum MqttCommands {
         /// Topic prefix
         #[arg(long)]
         topic_prefix: Option<String>,
+        /// Enable Home Assistant MQTT discovery
+        #[arg(long = "ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false)]
+        ha_discovery: bool,
+        /// Disable Home Assistant MQTT discovery
+        #[arg(long = "no-ha-discovery", action = clap::ArgAction::SetTrue, default_value_t = false, conflicts_with = "ha_discovery")]
+        no_ha_discovery: bool,
+        /// Home Assistant discovery topic prefix (default: homeassistant)
+        #[arg(long)]
+        ha_discovery_prefix: Option<String>,
     },
     /// Delete an MQTT client configuration
     Delete {
@@ -1550,8 +1568,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                     ca_pem,
                     ca_pem_file,
                     topic_prefix,
+                    ha_discovery,
+                    no_ha_discovery,
+                    ha_discovery_prefix,
                 } => {
                     let ca_pem = resolve_ca_pem(ca_pem, ca_pem_file)?;
+                    let ha_discovery_flag = if ha_discovery {
+                        Some(true)
+                    } else if no_ha_discovery {
+                        Some(false)
+                    } else {
+                        None
+                    };
                     let resp =
                         commands::settings::mqtt_create(commands::settings::MqttCreateParams {
                             server: cli.server.as_deref(),
@@ -1567,6 +1595,8 @@ async fn run(cli: Cli) -> error::Result<()> {
                             password,
                             ca_pem,
                             topic_prefix,
+                            ha_discovery: ha_discovery_flag,
+                            ha_discovery_prefix,
                             request_timeout,
                         })
                         .await?;
@@ -1585,8 +1615,18 @@ async fn run(cli: Cli) -> error::Result<()> {
                     ca_pem,
                     ca_pem_file,
                     topic_prefix,
+                    ha_discovery,
+                    no_ha_discovery,
+                    ha_discovery_prefix,
                 } => {
                     let ca_pem = resolve_ca_pem(ca_pem, ca_pem_file)?;
+                    let ha_discovery_flag = if ha_discovery {
+                        Some(true)
+                    } else if no_ha_discovery {
+                        Some(false)
+                    } else {
+                        None
+                    };
                     let resp =
                         commands::settings::mqtt_update(commands::settings::MqttUpdateParams {
                             server: cli.server.as_deref(),
@@ -1603,6 +1643,8 @@ async fn run(cli: Cli) -> error::Result<()> {
                             password,
                             ca_pem,
                             topic_prefix,
+                            ha_discovery: ha_discovery_flag,
+                            ha_discovery_prefix,
                             request_timeout,
                         })
                         .await?;

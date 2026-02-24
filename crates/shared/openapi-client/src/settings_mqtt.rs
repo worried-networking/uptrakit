@@ -72,13 +72,17 @@ mod tests {
             username: None,
             password: None,
             ca_pem: None,
-            topic_prefix: Some("homeassistant".to_string()),
+            topic_prefix: Some("uptrakit".to_string()),
+            ha_discovery: Some(true),
+            ha_discovery_prefix: Some("homeassistant".to_string()),
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["url"], "mqtt://broker:1883");
         assert_eq!(json["enabled"], true);
         assert_eq!(json["client_id"], "uptrakit-1");
-        assert_eq!(json["topic_prefix"], "homeassistant");
+        assert_eq!(json["topic_prefix"], "uptrakit");
+        assert_eq!(json["ha_discovery"], true);
+        assert_eq!(json["ha_discovery_prefix"], "homeassistant");
     }
 
     #[test]
@@ -94,6 +98,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: None,
+            ha_discovery: None,
+            ha_discovery_prefix: None,
         };
         let json = serde_json::to_value(&req).expect("serialize");
         assert_eq!(json["host"], "new-broker");

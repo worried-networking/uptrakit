@@ -193,6 +193,13 @@ impl HumanOutput for MqttClientResponse {
         ));
         out.push_str(&format!("Has Password:  {}\n", self.has_password));
         out.push_str(&format!("Topic Prefix:  {}\n", self.topic_prefix));
+        out.push_str(&format!("HA Discovery:  {}\n", self.ha_discovery));
+        if self.ha_discovery {
+            out.push_str(&format!(
+                "HA Prefix:     {}\n",
+                self.ha_discovery_prefix
+            ));
+        }
         out.push_str(&format!("Status:        {}\n", self.connection_status));
         out
     }
@@ -312,6 +319,8 @@ pub struct MqttCreateParams<'a> {
     pub password: Option<String>,
     pub ca_pem: Option<String>,
     pub topic_prefix: Option<String>,
+    pub ha_discovery: Option<bool>,
+    pub ha_discovery_prefix: Option<String>,
 }
 
 /// Parameters for updating an MQTT client configuration.
@@ -331,6 +340,8 @@ pub struct MqttUpdateParams<'a> {
     pub password: Option<String>,
     pub ca_pem: Option<String>,
     pub topic_prefix: Option<String>,
+    pub ha_discovery: Option<bool>,
+    pub ha_discovery_prefix: Option<String>,
 }
 
 /// Parameters for creating an OIDC provider.
@@ -570,6 +581,8 @@ pub async fn mqtt_create(params: MqttCreateParams<'_>) -> Result<MqttClientRespo
         password: params.password.map(SecretString::new),
         ca_pem: params.ca_pem.map(SecretString::new),
         topic_prefix: params.topic_prefix,
+        ha_discovery: params.ha_discovery,
+        ha_discovery_prefix: params.ha_discovery_prefix,
     };
     client.create_mqtt_settings(&req).await.context_to()
 }
@@ -601,6 +614,8 @@ pub async fn mqtt_update(params: MqttUpdateParams<'_>) -> Result<MqttClientRespo
         password,
         ca_pem,
         topic_prefix: params.topic_prefix,
+        ha_discovery: params.ha_discovery,
+        ha_discovery_prefix: params.ha_discovery_prefix,
     };
     client
         .update_mqtt_settings(&params.id, &req)
