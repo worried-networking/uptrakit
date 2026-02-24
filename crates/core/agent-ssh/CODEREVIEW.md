@@ -257,10 +257,6 @@ structured error codes) apply once.
 
 ##### Issues
 
-**[SEVERITY: Medium]** `src/main.rs:83-84` — `expect()` in `on_message` handler for `local_db` access is not an approved exception
-
-Will panic if `on_message` is ever called before `on_connected`. Should return `Err(LoopError::Other("local_db not initialized".into()))`.
-
 ---
 
 ## Tests
