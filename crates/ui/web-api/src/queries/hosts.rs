@@ -238,7 +238,7 @@ pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea
     Ok(true)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "db-sqlite"))]
 mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};

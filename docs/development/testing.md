@@ -96,6 +96,26 @@ If you prefer `nextest`:
 cargo nextest run --all-features
 ```
 
+### Running `uptrakit-web-api` tests
+
+Some query tests in `uptrakit-web-api` (specifically in
+`crates/ui/web-api/src/queries/hosts.rs` and `crates/ui/web-api/src/queries/autodiscovery.rs`)
+use an in-memory SQLite database and are gated behind `#[cfg(all(test, feature = "db-sqlite"))]`.
+They are excluded from compilation entirely without the feature, so running
+`cargo test -p uptrakit-web-api` alone will not execute them.
+
+Run the full `uptrakit-web-api` test suite — including DB-backed tests — with:
+
+```bash
+cargo test -p uptrakit-web-api --features db-sqlite
+```
+
+Or run the entire workspace (preferred, mirrors CI):
+
+```bash
+cargo test --workspace --all-features
+```
+
 ### What We Test
 
 - Pure logic (unit tests)
