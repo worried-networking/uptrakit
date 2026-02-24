@@ -1495,7 +1495,7 @@ components:
           description: Provider type identifier
           examples:
             - github_releases
-            - docker_registry
+            - docker
             - proxmox_helper_scripts
             - homebrew
             - apt
@@ -1566,7 +1566,7 @@ components:
       enum:
         - github_releases
         - proxmox_helper_scripts
-        - docker_registry
+        - docker
         - homebrew
         - apt
       description: Provider type for update execution

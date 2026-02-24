@@ -754,7 +754,7 @@ enum ProviderConfigsCommands {
         /// Config name
         #[arg(long)]
         name: String,
-        /// Provider type (github_releases, docker_registry, homebrew, proxmox_helper_scripts)
+        /// Provider type (github_releases, docker, homebrew, proxmox_helper_scripts)
         #[arg(long)]
         provider_type: String,
         /// Provider-specific config as JSON string

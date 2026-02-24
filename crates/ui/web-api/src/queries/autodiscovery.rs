@@ -434,6 +434,28 @@ async fn process_provider_result(
         ProviderType::Homebrew => {
             process_homebrew_default(db, tenant_id, host_id, now, result).await?;
         }
+        ProviderType::Docker => {
+            let config_json = serde_json::json!({});
+            let pc_id = find_or_create_default_provider_config(
+                db,
+                tenant_id,
+                &provider_type_str,
+                &config_json,
+                "Docker",
+            )
+            .await?;
+            let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
+            for item in &result.discoveries {
+                let args = ProcessDiscoveryArgs {
+                    package_identifier: &item.package_identifier,
+                    name: &item.name,
+                    installed_version: &item.installed_version,
+                    provider_type_str: &provider_type_str,
+                };
+                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+                    .await?;
+            }
+        }
         ProviderType::ProxmoxHelperScripts => {
             let config_json = serde_json::json!({});
             let pc_id = find_or_create_default_provider_config(
