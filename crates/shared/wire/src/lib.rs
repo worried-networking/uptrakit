@@ -2213,7 +2213,7 @@ mod tests {
         let json = serde_json::json!({
             "software_item_id": "00000000-0000-0000-0000-000000000001",
             "name": "My App",
-            "provider_type": "apt",
+            "provider_type": "winget",
             "package_identifier": "my-app",
             "config": {}
         });
@@ -2221,8 +2221,23 @@ mod tests {
             serde_json::from_value(json).expect("should deserialize");
         assert_eq!(
             assignment.provider_type,
-            ProviderType::Other("apt".to_string())
+            ProviderType::Other("winget".to_string())
         );
+    }
+
+    /// `"apt"` deserializes to the known `Apt` variant in `VersionCheckAssignment`.
+    #[test]
+    fn version_check_assignment_apt_provider_type_deserializes() {
+        let json = serde_json::json!({
+            "software_item_id": "00000000-0000-0000-0000-000000000001",
+            "name": "nginx",
+            "provider_type": "apt",
+            "package_identifier": "nginx",
+            "config": {}
+        });
+        let assignment: VersionCheckAssignment =
+            serde_json::from_value(json).expect("should deserialize");
+        assert_eq!(assignment.provider_type, ProviderType::Apt);
     }
 
     #[test]

@@ -1498,6 +1498,7 @@ components:
             - docker_registry
             - proxmox_helper_scripts
             - homebrew
+            - apt
         package_identifier:
           type: string
           description: Package identifier for the provider
@@ -1567,6 +1568,7 @@ components:
         - proxmox_helper_scripts
         - docker_registry
         - homebrew
+        - apt
       description: Provider type for update execution
 
     outputStreamType:
@@ -2437,6 +2439,7 @@ components:
           description: Provider type identifier
           examples:
             - homebrew
+            - apt
         config:
           type: object
           description: Provider-specific configuration ({} for default assignments)
@@ -2486,6 +2489,7 @@ components:
           description: Provider type that produced these results
           examples:
             - homebrew
+            - apt
         discoveries:
           type: array
           description: Discovered software items (absent or empty on error)
