@@ -17,6 +17,12 @@ use crate::types::UpdateOutputLine;
 ///
 /// Providers build a `CommandSpec` describing *what* to run, and the injected
 /// [`CommandExecutor`] decides *how* to run it (locally, over SSH, etc.).
+///
+/// The `privileged` flag marks commands that require root privileges. When
+/// `true`, a [`crate::sudo::SudoAwareCommandExecutor`] will prepend `sudo`
+/// to the command if the active [`crate::sudo::SudoContext`] indicates that
+/// sudo is available and the current user is not already root. Shell-mode
+/// commands are always passed through unchanged regardless of this flag.
 #[derive(Clone, Debug)]
 pub struct CommandSpec {
     /// How the command should be invoked.
@@ -25,6 +31,13 @@ pub struct CommandSpec {
     pub working_dir: Option<String>,
     /// Maximum time to wait for the command. `None` means no timeout is applied.
     pub timeout: Option<std::time::Duration>,
+    /// Whether this command requires root privileges.
+    ///
+    /// When `true` and the active executor is a [`crate::sudo::SudoAwareCommandExecutor`],
+    /// `sudo` is prepended to `Exec`-mode commands if the current user is
+    /// non-root and passwordless sudo is available. Has no effect on `Shell`
+    /// mode — shell commands must handle privilege escalation themselves.
+    pub privileged: bool,
 }
 
 /// How a command is invoked.
@@ -69,6 +82,7 @@ impl CommandSpec {
             },
             working_dir: None,
             timeout: None,
+            privileged: false,
         }
     }
 
@@ -81,6 +95,7 @@ impl CommandSpec {
             },
             working_dir: None,
             timeout: None,
+            privileged: false,
         }
     }
 
@@ -93,7 +108,19 @@ impl CommandSpec {
             },
             working_dir: None,
             timeout: None,
+            privileged: false,
         }
+    }
+
+    /// Mark this command as requiring root privileges (builder pattern).
+    ///
+    /// A [`crate::sudo::SudoAwareCommandExecutor`] will prepend `sudo` when
+    /// the host context indicates that sudo is available and the current user
+    /// is non-root. This flag has **no effect** on Shell-mode commands.
+    #[must_use]
+    pub fn privileged(mut self) -> Self {
+        self.privileged = true;
+        self
     }
 
     /// Set the working directory (builder pattern).
@@ -219,6 +246,19 @@ mod tests {
             if program == "echo" && args == &["hello".to_string()]));
         assert!(spec.working_dir.is_none());
         assert!(spec.timeout.is_none());
+        assert!(!spec.privileged);
+    }
+
+    #[test]
+    fn privileged_builder() {
+        let spec = CommandSpec::exec("apt-get", Vec::<String>::new()).privileged();
+        assert!(spec.privileged);
+    }
+
+    #[test]
+    fn shell_constructor_not_privileged_by_default() {
+        let spec = CommandSpec::shell("echo hello");
+        assert!(!spec.privileged);
     }
 
     #[test]

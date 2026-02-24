@@ -1,6 +1,7 @@
 pub mod command;
 pub mod error;
 pub mod executor;
+pub mod sudo;
 pub mod types;
 
 pub use command::{
@@ -11,4 +12,5 @@ pub use error::{CommandError, Result};
 pub use executor::{
     CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
 };
+pub use sudo::{ParseSudoPolicyError, SudoAwareCommandExecutor, SudoContext, SudoPolicy};
 pub use types::UpdateOutputLine;
