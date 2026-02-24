@@ -15,6 +15,7 @@ uptrakit-provider-github = { path = "../github" }
 uptrakit-provider-docker-registry = { path = "../docker-registry" }
 uptrakit-provider-proxmox-helper-scripts = { path = "../proxmox-helper-scripts" }
 uptrakit-provider-homebrew = { path = "../homebrew" }
+uptrakit-provider-apt = { path = "../apt" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 rootcause = { workspace = true }

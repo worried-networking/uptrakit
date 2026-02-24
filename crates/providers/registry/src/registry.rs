@@ -4,6 +4,7 @@ use rootcause::prelude::*;
 
 use uptrakit_command::CommandExecutor;
 use uptrakit_provider_core::{Provider, ProviderType, SecretMasking};
+use uptrakit_provider_apt::{AptConfig, AptProvider};
 use uptrakit_provider_docker_registry::{DockerRegistryConfig, DockerRegistryProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
 use uptrakit_provider_homebrew::{HomebrewConfig, HomebrewProvider};
@@ -215,6 +216,7 @@ register_providers! {
     DockerRegistry   => { config: DockerRegistryConfig,        provider: DockerRegistryProvider },
     ProxmoxHelperScripts => { config: ProxmoxHelperScriptsConfig, provider: ProxmoxHelperScriptsProvider },
     Homebrew         => { config: HomebrewConfig,              provider: HomebrewProvider },
+    Apt              => { config: AptConfig,                   provider: AptProvider },
 }
 
 impl ProviderRegistry {
@@ -228,6 +230,7 @@ impl ProviderRegistry {
     ) -> std::result::Result<(), String> {
         match provider_type {
             ProviderType::Homebrew => uptrakit_provider_homebrew::validate_identifier(value),
+            ProviderType::Apt => uptrakit_provider_apt::validate_identifier(value),
             _ => Ok(()),
         }
     }
@@ -295,6 +298,10 @@ mod tests {
         assert_eq!(
             "homebrew".parse::<ProviderType>().ok(),
             Some(ProviderType::Homebrew)
+        );
+        assert_eq!(
+            "apt".parse::<ProviderType>().ok(),
+            Some(ProviderType::Apt)
         );
         assert!("unknown".parse::<ProviderType>().is_err());
     }
@@ -573,6 +580,12 @@ mod tests {
         )
         .expect("create homebrew");
         assert_eq!(homebrew.provider_type(), ProviderType::Homebrew);
+
+        let apt_config = serde_json::json!({});
+        let apt =
+            ProviderRegistry::create_provider(ProviderType::Apt, &apt_config, test_executor())
+                .expect("create apt");
+        assert_eq!(apt.provider_type(), ProviderType::Apt);
     }
 
     #[test]
@@ -624,6 +637,71 @@ mod tests {
         assert_eq!(incoming["auth_token"], "ghp_real_token");
     }
 
+    #[test]
+    fn create_provider_apt() {
+        let config = serde_json::json!({});
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Apt, &config, test_executor());
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn create_provider_apt_all_filter() {
+        let config = serde_json::json!({"discovery_filter": "all"});
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Apt, &config, test_executor());
+        assert!(provider.is_ok());
+    }
+
+    #[test]
+    fn validate_apt_config() {
+        let config = serde_json::json!({});
+        assert!(ProviderRegistry::validate_config(ProviderType::Apt, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_apt_config_invalid_filter_fails() {
+        let config = serde_json::json!({"discovery_filter": "unknown"});
+        assert!(ProviderRegistry::validate_config(ProviderType::Apt, &config).is_err());
+    }
+
+    #[test]
+    fn apt_provider_capabilities() {
+        let config = serde_json::json!({});
+        let provider =
+            ProviderRegistry::create_provider(ProviderType::Apt, &config, test_executor())
+                .unwrap();
+        assert!(
+            provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::DiscoverLocalSoftware)
+        );
+        assert!(
+            provider
+                .has_capability(uptrakit_provider_core::ProviderCapability::RefreshPackageIndex)
+        );
+    }
+
+    #[test]
+    fn mask_config_secrets_apt() {
+        let config = serde_json::json!({"discovery_filter": "manual"});
+        let masked = ProviderRegistry::mask_config_secrets(ProviderType::Apt, &config);
+        assert_eq!(masked, config);
+    }
+
+    #[test]
+    fn validate_package_identifier_apt_valid() {
+        assert!(
+            ProviderRegistry::validate_package_identifier(ProviderType::Apt, "nginx").is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_package_identifier_apt_uppercase_fails() {
+        assert!(
+            ProviderRegistry::validate_package_identifier(ProviderType::Apt, "Nginx").is_err()
+        );
+    }
+
     // ── ProviderType::Other(String) behaviour ──────────────────────────────
 
     /// `Other(String)` received from a newer server must fail gracefully at
@@ -633,7 +711,7 @@ mod tests {
     fn create_provider_other_returns_unknown_type_error() {
         let config = serde_json::json!({});
         let Err(err) = ProviderRegistry::create_provider(
-            ProviderType::Other("apt".to_string()),
+            ProviderType::Other("winget".to_string()),
             &config,
             test_executor(),
         ) else {
@@ -655,8 +733,10 @@ mod tests {
     #[test]
     fn mask_config_secrets_other_returns_config_unchanged() {
         let config = serde_json::json!({"token": "secret", "repo": "something"});
-        let result =
-            ProviderRegistry::mask_config_secrets(ProviderType::Other("apt".to_string()), &config);
+        let result = ProviderRegistry::mask_config_secrets(
+            ProviderType::Other("winget".to_string()),
+            &config,
+        );
         assert_eq!(result, config);
     }
 

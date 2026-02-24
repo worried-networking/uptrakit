@@ -6407,6 +6407,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "uptrakit-provider-apt"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "rootcause",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uptrakit-provider-core",
+ "uptrakit-shared-macros",
+]
+
+[[package]]
 name = "uptrakit-provider-core"
 version = "0.0.1"
 dependencies = [
@@ -6502,6 +6517,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uptrakit-command",
+ "uptrakit-provider-apt",
  "uptrakit-provider-core",
  "uptrakit-provider-docker-registry",
  "uptrakit-provider-github",
