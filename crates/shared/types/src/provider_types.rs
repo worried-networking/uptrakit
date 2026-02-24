@@ -29,6 +29,7 @@ pub enum ProviderType {
     ProxmoxHelperScripts,
     DockerRegistry,
     Homebrew,
+    Apt,
     /// An unknown provider type received from a newer peer.
     ///
     /// The inner string is the raw snake_case value as it appeared on the wire.
@@ -47,6 +48,7 @@ impl ProviderType {
             Self::ProxmoxHelperScripts => "proxmox_helper_scripts",
             Self::DockerRegistry => "docker_registry",
             Self::Homebrew => "homebrew",
+            Self::Apt => "apt",
             Self::Other(s) => s.as_str(),
         }
     }
@@ -76,6 +78,7 @@ impl FromStr for ProviderType {
             "proxmox_helper_scripts" => Ok(Self::ProxmoxHelperScripts),
             "docker_registry" => Ok(Self::DockerRegistry),
             "homebrew" => Ok(Self::Homebrew),
+            "apt" => Ok(Self::Apt),
             _ => Err(ParseProviderTypeError::Invalid),
         }
     }
@@ -105,6 +108,7 @@ impl From<String> for ProviderType {
             "proxmox_helper_scripts" => Self::ProxmoxHelperScripts,
             "docker_registry" => Self::DockerRegistry,
             "homebrew" => Self::Homebrew,
+            "apt" => Self::Apt,
             _ => Self::Other(s),
         }
     }
@@ -117,6 +121,7 @@ impl From<ProviderType> for String {
             ProviderType::ProxmoxHelperScripts => "proxmox_helper_scripts".to_string(),
             ProviderType::DockerRegistry => "docker_registry".to_string(),
             ProviderType::Homebrew => "homebrew".to_string(),
+            ProviderType::Apt => "apt".to_string(),
             ProviderType::Other(s) => s,
         }
     }
@@ -211,12 +216,31 @@ mod tests {
     #[test]
     fn provider_type_unknown_deserializes_to_other() {
         let deserialized: ProviderType =
-            serde_json::from_str(r#""apt""#).expect("deserialize unknown");
-        assert_eq!(deserialized, ProviderType::Other("apt".to_string()));
-
-        let deserialized: ProviderType =
             serde_json::from_str(r#""winget""#).expect("deserialize unknown");
         assert_eq!(deserialized, ProviderType::Other("winget".to_string()));
+
+        let deserialized: ProviderType =
+            serde_json::from_str(r#""flatpak""#).expect("deserialize unknown");
+        assert_eq!(deserialized, ProviderType::Other("flatpak".to_string()));
+    }
+
+    /// `"apt"` deserializes to the known `Apt` variant, not `Other`.
+    #[test]
+    fn provider_type_apt_deserializes_to_apt_variant() {
+        let deserialized: ProviderType =
+            serde_json::from_str(r#""apt""#).expect("deserialize apt");
+        assert_eq!(deserialized, ProviderType::Apt);
+    }
+
+    /// `ProviderType::Apt` serializes to `"apt"`.
+    #[test]
+    fn provider_type_apt_serialization() {
+        let apt = ProviderType::Apt;
+        let json = serde_json::to_string(&apt).expect("serialize");
+        assert_eq!(json, r#""apt""#);
+
+        let deserialized: ProviderType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, apt);
     }
 
     /// `Other(String)` must serialize back to its inner string.
@@ -248,7 +272,11 @@ mod tests {
         );
         assert_eq!(
             ProviderType::from("apt".to_string()),
-            ProviderType::Other("apt".to_string())
+            ProviderType::Apt
+        );
+        assert_eq!(
+            ProviderType::from("winget".to_string()),
+            ProviderType::Other("winget".to_string())
         );
     }
 
@@ -261,6 +289,7 @@ mod tests {
         );
         assert_eq!(ProviderType::DockerRegistry.to_string(), "docker_registry");
         assert_eq!(ProviderType::Homebrew.to_string(), "homebrew");
+        assert_eq!(ProviderType::Apt.to_string(), "apt");
         assert_eq!(
             ProviderType::Other("custom_type".to_string()).to_string(),
             "custom_type"
@@ -284,6 +313,10 @@ mod tests {
         assert_eq!(
             "homebrew".parse::<ProviderType>().ok(),
             Some(ProviderType::Homebrew)
+        );
+        assert_eq!(
+            "apt".parse::<ProviderType>().ok(),
+            Some(ProviderType::Apt)
         );
     }
 
@@ -311,6 +344,7 @@ mod tests {
             ProviderType::ProxmoxHelperScripts,
             ProviderType::DockerRegistry,
             ProviderType::Homebrew,
+            ProviderType::Apt,
         ];
         for pt in &variants {
             let s = pt.to_string();
@@ -328,6 +362,7 @@ mod tests {
             ProviderType::ProxmoxHelperScripts,
             ProviderType::DockerRegistry,
             ProviderType::Homebrew,
+            ProviderType::Apt,
             ProviderType::Other("my_provider".to_string()),
         ];
         for pt in &variants {
