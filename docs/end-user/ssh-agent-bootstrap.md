@@ -136,6 +136,7 @@ This resolves to `deploy@10.0.0.5:2222` with host name `myserver`.
 | `--target-private-key-file` | No | (generated) | Path to PEM private key for the target user |
 | `--host-key-fingerprint` | No | (TOFU) | Expected host key fingerprint (SHA-256) |
 | `--allow-all` | No | `false` | Write `NOPASSWD: ALL` instead of specific command entries (less secure) |
+| `--remove-stale-keys` | No | `false` | Remove existing Uptrakit-managed keys before writing the new key (see [Stale key detection](#stale-key-detection)) |
 
 ## SSH config resolution
 
@@ -186,13 +187,25 @@ The bootstrap command performs these steps in order:
    only needs non-interactive command execution.
 
 4. **Deploy SSH key** — If `--target-private-key-file` is omitted, generates a
-   new Ed25519 keypair in memory. Appends the public key to
+   new Ed25519 keypair in memory. Reads the existing `authorized_keys` (if any),
+   classifies Uptrakit-managed entries (see [Stale key detection](#stale-key-detection)
+   below), and prints a notice when any are found. Then appends the public key to
    `~target/.ssh/authorized_keys` with SSH restrictions
    (`no-pty,no-agent-forwarding,no-X11-forwarding`) and proper permissions
    (`700` for `.ssh`, `600` for `authorized_keys`). The restrictions prevent
    interactive terminal allocation, SSH agent forwarding, and X11 forwarding
    through the managed account while allowing the non-interactive command
    execution that the agent requires.
+
+   The key entry is written with a comment that identifies its origin:
+
+   - `uptrakit-<service-uuid>` — when the service has already been enrolled with
+     the controller (the UUID is the service identifier assigned at enrollment).
+   - `uptrakit` — when bootstrap runs before first enrollment (fallback; still
+     marks the key as Uptrakit-managed).
+
+   If `--remove-stale-keys` is passed, existing stale keys are removed before
+   the new key is appended (see [Stale key detection](#stale-key-detection)).
 
 5. **Configure sudoers** — Queries all registered providers for their required
    sudo commands, resolves each to its absolute path on the remote host via
@@ -223,6 +236,42 @@ Ed25519 keypair in memory. The private key is:
 This means the private key exists only in the encrypted database. If the
 database is lost, the key is lost. Back up the database or provide your own key
 via `--target-private-key-file`.
+
+## Stale key detection
+
+Each key entry written to `authorized_keys` by bootstrap includes a comment
+that identifies it as Uptrakit-managed:
+
+- `uptrakit-<service-uuid>` when the service has been enrolled.
+- `uptrakit` as a fallback before first enrollment.
+
+Before writing the new key, bootstrap reads `authorized_keys` and classifies
+existing entries:
+
+- **For the `uptrakit` target user**: all existing entries are considered
+  Uptrakit-managed, because the `uptrakit` account is exclusively managed by
+  the agent and no external keys should be present.
+- **For all other target users**: only entries whose last whitespace-separated
+  token starts with `uptrakit` are considered Uptrakit-managed.
+
+If any managed entries are found, bootstrap prints a notice:
+
+```text
+NOTE: Found 1 existing key(s) in authorized_keys:
+  no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... uptrakit-550e8400-e29b-41d4-a716-446655440000
+      Pass --remove-stale-keys to remove them before writing the new key.
+```
+
+By default the new key is **appended** (non-destructive). Pass
+`--remove-stale-keys` to remove the stale entries atomically before the new key
+is written. This is the safe way to re-bootstrap a host after key rotation.
+
+```bash
+uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
+  --auth-password \
+  --master-key-file /etc/uptrakit/master.key \
+  --remove-stale-keys
+```
 
 ## Sudoers configuration
 
@@ -321,6 +370,23 @@ first, or re-run bootstrap with `--allow-all` to fall back to `NOPASSWD: ALL`.
 The generated sudoers file did not pass `visudo -cf` validation. This is
 unexpected and may indicate a non-standard sudoers configuration on the remote
 host. Check `/etc/sudoers` and `/etc/sudoers.d/` for syntax errors.
+
+### Accumulating keys after repeated bootstraps
+
+If bootstrap is run multiple times against the same host without
+`--remove-stale-keys`, each run appends a new key entry. The old entries
+remain valid but are unused. Re-run with `--remove-stale-keys` to clean up:
+
+```bash
+uptrakit-agent-ssh host bootstrap root@192.168.1.100 \
+  --auth-password \
+  --master-key-file /etc/uptrakit/master.key \
+  --remove-stale-keys
+```
+
+The flag removes only the entries identified as Uptrakit-managed (comment
+starts with `uptrakit`), leaving any manually added keys untouched — except
+for the `uptrakit` user account, where **all** existing entries are removed.
 
 ### Partial failure
 
