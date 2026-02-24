@@ -76,6 +76,16 @@ pub struct SoftwareItemResponse {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
+    /// Latest known version from the `available_versions` table.
+    /// Populated for agent-side providers (Homebrew, PHS) that report upstream versions.
+    /// `None` for controller-side providers (GitHub Releases, Docker) until upstream
+    /// resolution is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// `true` when at least one assigned host has an `installed_version` that differs
+    /// from `latest_version` (and both values are known). Uses string equality — no
+    /// semver parsing — because version formats are provider-specific.
+    pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
@@ -99,6 +109,13 @@ pub struct SoftwareItemDetailResponse {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>, format = DateTime))]
     pub last_checked_at: Option<OffsetDateTime>,
     pub host_count: u64,
+    /// Latest known version from the `available_versions` table. See `SoftwareItemResponse`
+    /// for full semantics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// `true` when any assigned host has a known `installed_version` that differs from
+    /// `latest_version`.
+    pub update_available: bool,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub created_at: OffsetDateTime,
@@ -129,6 +146,12 @@ pub struct SoftwareItemHostSummary {
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = DateTime))]
     pub linked_at: OffsetDateTime,
+    /// Latest known version for this software item (denormalized from the item level).
+    /// `None` when no upstream version has been resolved yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// `true` when `installed_version` and `latest_version` are both `Some` and differ.
+    pub update_available: bool,
 }
 
 /// Status returned when triggering an update.
@@ -344,6 +367,8 @@ mod tests {
             discovery_state: None,
             last_checked_at: Some(datetime!(2025-06-01 12:00:00 UTC)),
             host_count: 5,
+            latest_version: Some("8.10.0".to_string()),
+            update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-06-01 12:00:00 UTC),
         };
@@ -355,6 +380,35 @@ mod tests {
         assert_eq!(deserialized.host_count, 5);
         assert_eq!(deserialized.provider_types.len(), 2);
         assert!(deserialized.enabled);
+        assert_eq!(deserialized.latest_version.as_deref(), Some("8.10.0"));
+        assert!(deserialized.update_available);
+    }
+
+    #[test]
+    fn software_item_response_update_available_false_when_no_latest() {
+        use time::macros::datetime;
+        let resp = SoftwareItemResponse {
+            id: sample_uuid(),
+            name: "MyApp".to_string(),
+            provider_types: vec!["github_releases".to_string()],
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            host_count: 1,
+            latest_version: None,
+            update_available: false,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+        };
+        let json = serde_json::to_string(&resp).expect("serialization should succeed");
+        let deserialized: SoftwareItemResponse =
+            serde_json::from_str(&json).expect("deserialization should succeed");
+        assert!(deserialized.latest_version.is_none());
+        assert!(!deserialized.update_available);
+        // latest_version is skipped when None
+        let json_value =
+            serde_json::to_value(&resp).expect("serialization to Value should succeed");
+        assert!(json_value.get("latest_version").is_none());
     }
 
     #[test]
@@ -368,6 +422,8 @@ mod tests {
             discovery_state: None,
             last_checked_at: None,
             host_count: 0,
+            latest_version: None,
+            update_available: false,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
         };
@@ -377,6 +433,7 @@ mod tests {
         assert!(deserialized.provider_types.is_empty());
         assert!(deserialized.last_checked_at.is_none());
         assert!(!deserialized.enabled);
+        assert!(!deserialized.update_available);
     }
 
     // ── TriggerUpdateRequest / TriggerUpdateResponse ─────────────────

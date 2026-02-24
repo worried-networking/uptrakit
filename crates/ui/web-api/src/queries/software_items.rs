@@ -5,7 +5,9 @@ use sea_orm::{
 use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
-use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, provider_config, software_item};
+use uptrakit_shared_db::entity::{
+    available_version, host, host_software_item, prelude::*, provider_config, software_item,
+};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
@@ -61,6 +63,8 @@ fn build_list_response(
     item: &software_item::Model,
     provider_types: Vec<String>,
     host_count: u64,
+    latest_version: Option<String>,
+    update_available: bool,
 ) -> SoftwareItemResponse {
     SoftwareItemResponse {
         id: item.id,
@@ -70,6 +74,8 @@ fn build_list_response(
         discovery_state: item.discovery_state.clone(),
         last_checked_at: item.last_checked_at,
         host_count,
+        latest_version,
+        update_available,
         created_at: item.created_at,
         updated_at: item.updated_at,
     }
@@ -79,6 +85,8 @@ fn build_detail_response(
     item: software_item::Model,
     provider_types: Vec<String>,
     host_count: u64,
+    latest_version: Option<String>,
+    update_available: bool,
     hosts: Vec<SoftwareItemHostSummary>,
 ) -> SoftwareItemDetailResponse {
     SoftwareItemDetailResponse {
@@ -89,9 +97,22 @@ fn build_detail_response(
         discovery_state: item.discovery_state,
         last_checked_at: item.last_checked_at,
         host_count,
+        latest_version,
+        update_available,
         created_at: item.created_at,
         updated_at: item.updated_at,
         hosts,
+    }
+}
+
+/// Compute `update_available` for a single host: both values must be `Some` and differ.
+fn host_update_available(
+    installed_version: Option<&str>,
+    latest_version: Option<&str>,
+) -> bool {
+    match (installed_version, latest_version) {
+        (Some(installed), Some(latest)) => installed != latest,
+        _ => false,
     }
 }
 
@@ -137,6 +158,7 @@ async fn load_provider_types(
 async fn load_item_hosts(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
+    latest_version: Option<&str>,
 ) -> Vec<SoftwareItemHostSummary> {
     let links = match HostSoftwareItem::find()
         .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
@@ -187,6 +209,10 @@ async fn load_item_hosts(
         .filter_map(|link| {
             let host = hosts.get(&link.host_id)?;
             let pc = provider_configs.get(&link.provider_config_id)?;
+            let update_avail = host_update_available(
+                link.installed_version.as_deref(),
+                latest_version,
+            );
             Some(SoftwareItemHostSummary {
                 host_id: host.id,
                 hostname: host.hostname.clone(),
@@ -200,6 +226,8 @@ async fn load_item_hosts(
                 installed_version_detected_at: link.installed_version_detected_at,
                 last_updated_at: link.last_updated_at,
                 linked_at: link.linked_at,
+                latest_version: latest_version.map(str::to_owned),
+                update_available: update_avail,
             })
         })
         .collect()
@@ -371,7 +399,7 @@ pub async fn create_software_item(
 
     txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
 
-    Ok(build_list_response(&inserted, vec![], 0))
+    Ok(build_list_response(&inserted, vec![], 0, None, false))
 }
 
 pub async fn list_software_items(
@@ -434,7 +462,7 @@ pub async fn list_software_items(
             sea_orm::JoinType::InnerJoin,
             host_software_item::Relation::ProviderConfig.def(),
         )
-        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids))
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
         .into_model::<ItemProviderType>()
         .all(tenant_db.db())
         .await?;
@@ -448,6 +476,41 @@ pub async fn list_software_items(
         }
     }
 
+    // Bulk-load latest known versions from available_versions for all items.
+    let latest_versions: HashMap<Uuid, String> =
+        AvailableVersion::find()
+            .filter(available_version::Column::SoftwareItemId.is_in(item_ids.clone()))
+            .all(tenant_db.db())
+            .await?
+            .into_iter()
+            .filter_map(|av| av.version.map(|v| (av.software_item_id, v)))
+            .collect();
+
+    // Bulk-load all host installed_versions for update_available computation.
+    // Map: software_item_id → list of installed_version values (may include None).
+    #[derive(Debug, FromQueryResult)]
+    struct InstalledVersionRow {
+        software_item_id: Uuid,
+        installed_version: Option<String>,
+    }
+
+    let installed_rows: Vec<InstalledVersionRow> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::SoftwareItemId)
+        .column(host_software_item::Column::InstalledVersion)
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .into_model::<InstalledVersionRow>()
+        .all(tenant_db.db())
+        .await?;
+
+    let mut installed_map: HashMap<Uuid, Vec<Option<String>>> = HashMap::new();
+    for row in installed_rows {
+        installed_map
+            .entry(row.software_item_id)
+            .or_default()
+            .push(row.installed_version);
+    }
+
     let response: Vec<SoftwareItemResponse> = items
         .iter()
         .map(|item| {
@@ -455,7 +518,18 @@ pub async fn list_software_items(
                 .remove(&item.id)
                 .unwrap_or_default();
             let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
-            build_list_response(item, provider_types, host_count)
+            let latest_version = latest_versions.get(&item.id).cloned();
+            let update_available = latest_version.as_deref().is_some_and(|lv| {
+                installed_map
+                    .get(&item.id)
+                    .map(|versions| {
+                        versions
+                            .iter()
+                            .any(|iv| iv.as_deref().is_some_and(|iv| iv != lv))
+                    })
+                    .unwrap_or(false)
+            });
+            build_list_response(item, provider_types, host_count, latest_version, update_available)
         })
         .collect();
 
@@ -471,10 +545,20 @@ pub async fn get_software_item(
         return Ok(None);
     };
 
-    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    // Load latest known version for this item.
+    let latest_version: Option<String> = AvailableVersion::find()
+        .filter(available_version::Column::SoftwareItemId.eq(id))
+        .one(tenant_db.db())
+        .await?
+        .and_then(|av| av.version);
+
+    let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
     let host_count = hosts.len() as u64;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
-    Ok(Some(build_detail_response(item, provider_types, host_count, hosts)))
+
+    let update_available = hosts.iter().any(|h| h.update_available);
+
+    Ok(Some(build_detail_response(item, provider_types, host_count, latest_version, update_available, hosts)))
 }
 
 /// Partial update — only `name` and `enabled` are updatable.
@@ -526,7 +610,27 @@ pub async fn update_software_item(
     let updated = model.update(tenant_db.db()).await.map_err(SoftwareItemQueryError::Db)?;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
     let host_count = count_linked_hosts(tenant_db.db(), id).await;
-    Ok(build_list_response(&updated, provider_types, host_count))
+    let latest_version: Option<String> = AvailableVersion::find()
+        .filter(available_version::Column::SoftwareItemId.eq(id))
+        .one(tenant_db.db())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|av| av.version);
+    // For update_available we do a quick per-host check.
+    let update_available = if latest_version.is_some() {
+        HostSoftwareItem::find()
+            .filter(host_software_item::Column::SoftwareItemId.eq(id))
+            .filter(host_software_item::Column::InstalledVersion.is_not_null())
+            .all(tenant_db.db())
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|h| host_update_available(h.installed_version.as_deref(), latest_version.as_deref()))
+    } else {
+        false
+    };
+    Ok(build_list_response(&updated, provider_types, host_count, latest_version, update_available))
 }
 
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
@@ -642,10 +746,19 @@ pub async fn assign_hosts(
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    let latest_version: Option<String> = AvailableVersion::find()
+        .filter(available_version::Column::SoftwareItemId.eq(id))
+        .one(tenant_db.db())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|av| av.version);
+
+    let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
     let host_count = hosts.len() as u64;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
-    Ok(build_detail_response(item, provider_types, host_count, hosts))
+    let update_available = hosts.iter().any(|h| h.update_available);
+    Ok(build_detail_response(item, provider_types, host_count, latest_version, update_available, hosts))
 }
 
 /// Update the provider info for an existing host–software-item assignment.
@@ -722,10 +835,19 @@ pub async fn update_host_assignment(
         .await
         .ok_or(SoftwareItemQueryError::NotFound)?;
 
-    let hosts = load_item_hosts(tenant_db.db(), id).await;
+    let latest_version: Option<String> = AvailableVersion::find()
+        .filter(available_version::Column::SoftwareItemId.eq(id))
+        .one(tenant_db.db())
+        .await
+        .ok()
+        .flatten()
+        .and_then(|av| av.version);
+
+    let hosts = load_item_hosts(tenant_db.db(), id, latest_version.as_deref()).await;
     let host_count = hosts.len() as u64;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
-    Ok(build_detail_response(item, provider_types, host_count, hosts))
+    let update_available = hosts.iter().any(|h| h.update_available);
+    Ok(build_detail_response(item, provider_types, host_count, latest_version, update_available, hosts))
 }
 
 /// Unassign a host from a software item.
@@ -789,12 +911,55 @@ mod tests {
             deactivated_at: None,
         };
 
-        let resp = build_list_response(&item, vec!["github_releases".to_string()], 3);
+        let resp = build_list_response(
+            &item,
+            vec!["github_releases".to_string()],
+            3,
+            Some("22.0.0".to_string()),
+            true,
+        );
 
         assert_eq!(resp.name, "Node.js");
         assert_eq!(resp.provider_types, vec!["github_releases"]);
         assert_eq!(resp.host_count, 3);
         assert!(resp.last_checked_at.is_some());
+        assert_eq!(resp.latest_version.as_deref(), Some("22.0.0"));
+        assert!(resp.update_available);
+    }
+
+    #[test]
+    fn build_list_response_update_available_false_no_latest() {
+        let now = OffsetDateTime::now_utc();
+        let item = software_item::Model {
+            id: uuid::Uuid::now_v7(),
+            tenant_id: uuid::Uuid::nil(),
+            name: "Nginx".to_string(),
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            created_at: now,
+            updated_at: now,
+            deactivated_at: None,
+        };
+
+        let resp = build_list_response(&item, vec![], 0, None, false);
+
+        assert!(!resp.update_available);
+        assert!(resp.latest_version.is_none());
+    }
+
+    #[test]
+    fn host_update_available_semantics() {
+        // Both known and differ → true
+        assert!(host_update_available(Some("1.0.0"), Some("2.0.0")));
+        // Same version → false
+        assert!(!host_update_available(Some("2.0.0"), Some("2.0.0")));
+        // Missing installed → false
+        assert!(!host_update_available(None, Some("2.0.0")));
+        // Missing latest → false
+        assert!(!host_update_available(Some("1.0.0"), None));
+        // Both missing → false
+        assert!(!host_update_available(None, None));
     }
 
     #[test]
@@ -824,9 +989,12 @@ mod tests {
             installed_version_detected_at: Some(now),
             last_updated_at: None,
             linked_at: now,
+            latest_version: Some("7.4.0".to_string()),
+            update_available: true,
         }];
 
-        let resp = build_detail_response(item, vec!["github_releases".to_string()], 1, hosts);
+        let resp =
+            build_detail_response(item, vec!["github_releases".to_string()], 1, Some("7.4.0".to_string()), true, hosts);
 
         assert_eq!(resp.name, "Redis");
         assert_eq!(resp.provider_types, vec!["github_releases"]);
@@ -834,6 +1002,9 @@ mod tests {
         assert_eq!(resp.hosts[0].hostname, "web-01");
         assert_eq!(resp.hosts[0].package_identifier, "redis/redis");
         assert_eq!(resp.hosts[0].installed_version, Some("7.2.4".to_string()));
+        assert_eq!(resp.hosts[0].latest_version.as_deref(), Some("7.4.0"));
+        assert!(resp.hosts[0].update_available);
+        assert!(resp.update_available);
     }
 
     #[test]
@@ -851,12 +1022,13 @@ mod tests {
             deactivated_at: None,
         };
 
-        let resp = build_list_response(&item, vec![], 0);
+        let resp = build_list_response(&item, vec![], 0, None, false);
 
         assert!(!resp.enabled);
         assert!(resp.last_checked_at.is_none());
         assert_eq!(resp.host_count, 0);
         assert!(resp.provider_types.is_empty());
+        assert!(!resp.update_available);
     }
 
     #[test]
