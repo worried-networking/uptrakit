@@ -304,6 +304,65 @@ for user review. Key invariants:
 | `docs/end-user/provider-configs.md` | End-user guide for provider config CRUD and discovery |
 | `docs/end-user/cli-usage.md` | CLI command reference including `provider-configs` and `autodiscovery` groups |
 
+### Home Assistant MQTT discovery
+
+The MQTT service can publish [Home Assistant MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
+topics for each tracked software item, creating `update` entities in HA — one per `(software_item, host)` pair.
+
+Key invariants:
+
+1. **Discovery is opt-in per MQTT client.** Two columns on `mqtt_clients` control it:
+   `ha_discovery BOOL` and `ha_discovery_prefix TEXT DEFAULT 'homeassistant'`.
+2. **State push is controller-initiated.** The controller sends `SoftwareStates` (wire type
+   `software_states`) to MQTT services whenever version data changes (version check completed, update
+   result received). The MQTT service stores the states in memory and publishes to the broker.
+3. **`SoftwareStates` is safe for the outbox.** It contains no credentials and is written to the
+   cross-controller outbox with `target_service_type = "mqtt"` so only MQTT services receive it.
+4. **Reconnect resilience.** On every `ConnAck` the MQTT service emits a `Reconnected` event, causing
+   `TenantManager` to republish all discovery configs and state topics from the in-memory cache.
+5. **HA restart resilience.** HA publishes `"online"` to `{ha_discovery_prefix}/status` on startup
+   (birth message). The MQTT service subscribes to this topic and republishes discovery configs when
+   `"online"` is received (`HaOnline` event).
+6. **Updates triggered via MQTT.** When a user presses Install in HA, HA publishes `"install"` to the
+   entity's command topic. The MQTT service resolves `to_version` from the in-memory state cache and
+   sends `ServiceMessage::MqttTriggerUpdate` to the controller. The controller validates the request
+   and dispatches `execute_update` to the agent. On failure the controller sends `error` back (soft
+   error — WebSocket is not closed).
+7. **Actor attribution.** Updates triggered via MQTT have `actor_type = "mqtt"` and
+   `actor_id = <mqtt_client_id>` in the `update_history` record.
+
+#### MQTT topic scheme
+
+All topics use the MQTT client's `topic_prefix` field.
+
+| Topic | Retained | Direction | Purpose |
+| --- | :---: | --- | --- |
+| `{prefix}/update/{item_id}/{host_id}/state` | ✓ | publish | Installed version string |
+| `{prefix}/update/{item_id}/{host_id}/latest_version` | ✓ | publish | Latest available version string |
+| `{prefix}/update/{item_id}/{host_id}/set` | — | subscribe | Receives `"install"` from HA |
+| `{ha_prefix}/update/uptrakit_{t}_{i}_{h}/config` | ✓ | publish | HA discovery config (JSON) |
+| `{ha_prefix}/status` | — | subscribe | HA birth/will (`"online"` / `"offline"`) |
+
+`{t}`, `{i}`, `{h}` are UUID hex strings with dashes removed. The `unique_id` format is
+`uptrakit_{t}_{i}_{h}`.
+
+#### Key files
+
+| File | Purpose |
+| --- | --- |
+| `crates/core/mqtt/src/ha_discovery.rs` | Pure HA topic/config helpers + `parse_command_topic` |
+| `crates/core/mqtt/src/tenant_manager.rs` | `TenantManager`: software state cache, `publish_ha_state_full`, `resolve_update_trigger` |
+| `crates/core/mqtt/src/mqtt_client.rs` | `MqttServiceEvent` enum, `publish_retained`, `subscribe_topic`, HA status topic handling |
+| `crates/core/mqtt/src/main.rs` | `on_service_event` dispatch; `ControllerMessage::SoftwareStates` handler |
+| `crates/ui/web-api/src/queries/mqtt_software_states.rs` | Bulk query loading enabled software items with per-host version data |
+| `crates/ui/web-api/src/notification_service.rs` | `push_software_states_for_tenant` (local broadcast + outbox write) |
+| `crates/ui/web-api/src/routes/mqtt_ws.rs` | `MqttTriggerUpdate` handler; states push after `TenantAssignments` |
+| `crates/ui/web-api/src/routes/agent_ws.rs` | States push after `VersionCheckResults` and `UpdateResult` |
+| `crates/ui/web-api/src/queries/update_triggers.rs` | `trigger_update_for_host` shared by REST and MQTT WS handlers |
+| `docs/end-user/home-assistant-mqtt.md` | Full end-user setup guide |
+| `docs/api/wire-protocol.md` | `software_states` and `mqtt_trigger_update` payload docs |
+| `crates/shared/wire/asyncapi.yaml` | AsyncAPI schemas for both new messages |
+
 ### Service ping interval
 
 The ping interval is controller-managed and per-service configurable. The `services` DB table has a nullable
@@ -555,6 +614,7 @@ For more in-depth information on specific topics, refer to the following documen
 - [Profile and API Tokens](docs/end-user/profile-tokens.md)
 - [Autodiscovery](docs/end-user/autodiscovery.md)
 - [Update Workflow](docs/end-user/update-workflow.md)
+- [Home Assistant and MQTT Integration](docs/end-user/home-assistant-mqtt.md)
 
 ### Development Guidelines
 

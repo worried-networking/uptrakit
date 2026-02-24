@@ -35,7 +35,7 @@ Essential infrastructure needed before feature development.
   - [x] Hosts table (machine_id, hostname, OS info, architecture, last seen, linked agents)
   - [x] Software items table (provider config, package identifier, config override, host assignments)
   - [x] Available versions table (software item ID, version, release date, extra metadata)
-  - [x] Update history table (host ID, software item ID, from/to version, status, output, initiated_by)
+  - [x] Update history table (host ID, software item ID, from/to version, status, output, actor_type, actor_id)
   - [x] Scheduled checks table (software item ID, schedule, last run, next run)
 - [x] Implement database migrations system
 - [x] Create database access layer with connection pooling
@@ -383,18 +383,18 @@ Ways users interact with the system.
   - [x] Unified REST API for service management (`/api/v1/services` — list, approve, reject, deactivate)
   - [x] Unified REST API for service enrollment tokens (`/api/v1/services/enrollment-tokens` — create, list, delete)
   - [x] Unified database entity (`services` table with `service_type` column, `service_certificates`)
-- [ ] Implement MQTT auto-discovery for Home Assistant
-  - [ ] Device discovery messages
-  - [ ] Entity discovery (sensors, binary sensors, buttons)
-- [ ] Publish software version sensors
-  - [ ] Current version attribute
-  - [ ] Available version attribute
-  - [ ] Update available binary sensor
-- [ ] Implement update command handling via MQTT
-  - [ ] Listen to Home Assistant update commands
-  - [ ] Publish update status
-  - [ ] Publish update progress
-- [ ] Add configurable MQTT topics
+- [x] Implement MQTT auto-discovery for Home Assistant
+  - [x] HA `update` entity discovery per `(software item, host)` pair
+  - [x] Discovery republished on reconnect and HA restart (birth message)
+- [x] Publish software version sensors
+  - [x] Installed version (state topic, retained)
+  - [x] Latest version (latest_version topic, retained)
+  - [x] Update available (derived by HA from installed vs latest)
+- [x] Implement update command handling via MQTT
+  - [x] Listen to Home Assistant Install commands (command topic per entity)
+  - [x] Trigger update via controller (`MqttTriggerUpdate` wire message)
+  - [x] Update status pushed after completion (via `SoftwareStates` push)
+- [x] Add configurable MQTT topics (topic_prefix per MQTT client)
 - [x] Implement MQTT connection resilience
 - [ ] Add MQTT authentication support
 
