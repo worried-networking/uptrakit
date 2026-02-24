@@ -12,34 +12,36 @@ use crate::lifecycle::ServiceHandler;
 
 /// Initialize `tracing_subscriber` with a verbosity-aware [`EnvFilter`].
 ///
-/// - `verbosity == 0`: service's own module at `info`; all others silent unless
-///   `RUST_LOG` specifies them (e.g. `"uptrakit_agent=info"`).
-/// - `verbosity == 1`: global `debug` level added on top of `RUST_LOG`.
-/// - `verbosity >= 2`: global `trace` level added on top of `RUST_LOG`.
-/// - `verbosity > 2`: emits a warning — `-vvv` and above have no extra effect.
+/// Verbosity levels expand scope progressively, keeping third-party crates
+/// silent unless `RUST_LOG` explicitly enables them:
 ///
-/// `RUST_LOG` is always respected and can override or suppress specific modules.
+/// - `verbosity == 0`: `{own_module}=info` — only the service's own crate at info.
+/// - `verbosity == 1`: `{own_module}=debug` — own crate at debug, everything else quiet.
+/// - `verbosity == 2`: `uptrakit=debug` — all uptrakit crates at debug.
+/// - `verbosity >= 3`: `uptrakit=trace` — all uptrakit crates at trace.
+/// - `verbosity > 3`: emits a warning — `-vvvv` and above have no extra effect.
+///
+/// `RUST_LOG` is always respected and can enable third-party crates independently
+/// (e.g. `RUST_LOG=tokio=info uptrakit-agent -vv`).
 ///
 /// [`EnvFilter`]: tracing_subscriber::EnvFilter
 pub fn init_tracing(own_module: &str, verbosity: u8) {
     use tracing_subscriber::EnvFilter;
 
-    if verbosity > 2 {
+    if verbosity > 3 {
         eprintln!(
-            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
+            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
         );
     }
 
-    let filter = if verbosity == 0 {
-        EnvFilter::from_default_env().add_directive(
-            format!("{own_module}=info")
-                .parse()
-                .expect("valid module=level directive"),
-        )
-    } else {
-        let level = if verbosity == 1 { "debug" } else { "trace" };
-        EnvFilter::from_default_env().add_directive(level.parse().expect("valid level directive"))
+    let directive = match verbosity {
+        0 => format!("{own_module}=info"),
+        1 => format!("{own_module}=debug"),
+        2 => "uptrakit=debug".to_string(),
+        _ => "uptrakit=trace".to_string(),
     };
+    let filter = EnvFilter::from_default_env()
+        .add_directive(directive.parse().expect("valid directive"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
@@ -85,23 +87,24 @@ pub async fn run_lifecycle_and_handle_errors<H: ServiceHandler>(
 mod tests {
     #[test]
     fn verbosity_level_semantics() {
-        // verbosity=0 should use module=info pattern (not a blanket level)
-        // verbosity=1 maps to "debug"
-        // verbosity>=2 maps to "trace"
-        // We can't easily test the filter output without running init_tracing,
-        // but we can verify the branch logic by checking what level string is produced.
-        let level_for = |v: u8| -> &'static str {
-            if v == 0 {
-                "info" // module-scoped; tested implicitly
-            } else if v == 1 {
-                "debug"
-            } else {
-                "trace"
+        // Verify the directive string produced for each verbosity level.
+        // verbosity=0 → own-module scoped at info
+        // verbosity=1 → own-module scoped at debug
+        // verbosity=2 → all uptrakit crates at debug
+        // verbosity>=3 → all uptrakit crates at trace
+        let own_module = "uptrakit_agent";
+        let directive_for = |v: u8| -> String {
+            match v {
+                0 => format!("{own_module}=info"),
+                1 => format!("{own_module}=debug"),
+                2 => "uptrakit=debug".to_string(),
+                _ => "uptrakit=trace".to_string(),
             }
         };
-        assert_eq!(level_for(0), "info");
-        assert_eq!(level_for(1), "debug");
-        assert_eq!(level_for(2), "trace");
-        assert_eq!(level_for(3), "trace");
+        assert_eq!(directive_for(0), "uptrakit_agent=info");
+        assert_eq!(directive_for(1), "uptrakit_agent=debug");
+        assert_eq!(directive_for(2), "uptrakit=debug");
+        assert_eq!(directive_for(3), "uptrakit=trace");
+        assert_eq!(directive_for(4), "uptrakit=trace");
     }
 }
