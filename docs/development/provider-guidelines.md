@@ -92,15 +92,25 @@ register_providers! {
 }
 ```
 
-The macro generates four methods:
+The macro generates six methods:
 
 - `ProviderRegistry::create_provider()` — deserializes config, validates it, and instantiates the provider.
 - `ProviderRegistry::validate_config()` — deserializes and validates provider configuration JSON.
 - `ProviderRegistry::mask_config_secrets()` / `restore_config_secrets()` — handles secret masking for API responses
   (delegates to the `SecretMasking` trait implemented on each config struct).
+- `ProviderRegistry::create_provider_for_discovery()` — same as `create_provider` but without calling `validate()`,
+  so discovery works with empty or minimal configs (e.g., `ProxmoxHelperScriptsConfig` with no `script_url`).
+- `ProviderRegistry::discovery_provider_types()` — returns the list of `ProviderType` variants whose provider
+  reports `ProviderCapability::DiscoverLocalSoftware` in `capabilities()`. Fully auto-derived from the macro —
+  no manual list needed.
 
 To add a new provider, add a single entry to the `register_providers!` invocation. The macro generates all match arms
-for all four methods automatically, eliminating the need to update multiple match blocks manually.
+for all six methods automatically. If the provider supports discovery, implement `capabilities()` to include
+`ProviderCapability::DiscoverLocalSoftware` — `discovery_provider_types()` will automatically include it.
+
+**Discovery capability is registry-derived.** Use `state.provider_ops.discovery_provider_types()` in route handlers
+(or `ProviderRegistry::discovery_provider_types()` statically) to get the current list of discovery-capable provider
+types. Do not maintain a separate static list or override method.
 
 ### Secret masking with the `SecretMasking` trait
 

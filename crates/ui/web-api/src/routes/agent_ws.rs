@@ -450,7 +450,8 @@ pub(crate) async fn handle_agent_authenticated(
                                 let mut active: update_history::ActiveModel = record.clone().into();
                                 active.status = Set(match payload.status {
                                     UpdateFinalStatus::Completed => update_history::UpdateStatus::Completed,
-                                    UpdateFinalStatus::Failed | _ => update_history::UpdateStatus::Failed,
+                                    UpdateFinalStatus::Failed => update_history::UpdateStatus::Failed,
+                                    _ => update_history::UpdateStatus::Failed,
                                 });
                                 active.completed_at = Set(Some(time::OffsetDateTime::now_utc()));
                                 let capped_output = if payload.output.len() > MAX_UPDATE_OUTPUT_BYTES {
@@ -1213,16 +1214,11 @@ pub(crate) async fn trigger_discovery_for_agent_host(
     tenant_id: uuid::Uuid,
     host_machine_id: &str,
 ) {
-    // All discovery-capable provider type variants.
-    let discovery_types: &[ProviderType] = &[
-        ProviderType::Homebrew,
-        ProviderType::ProxmoxHelperScripts,
-    ];
+    let discovery_types = state.provider_ops.discovery_provider_types();
 
     let mut providers: Vec<DiscoveryProviderAssignment> = Vec::new();
 
     for provider_type in discovery_types {
-        let provider_type = provider_type.clone();
         let type_str = provider_type.to_string();
 
         let configs = match provider_config::Entity::find()

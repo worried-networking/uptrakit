@@ -2,6 +2,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
+use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{host, prelude::ServiceHost, service, service_host};
 use uptrakit_web_api_types::hosts::{HostAgentSummary, HostResponse, UpdateHostRequest};
@@ -101,11 +102,79 @@ pub async fn list_hosts(
         .all(tenant_db.db())
         .await?;
 
-    let mut items = Vec::with_capacity(hosts.len());
-    for h in hosts {
-        let agents = load_host_agents(tenant_db, h.id).await;
-        items.push(host_to_response(h, agents));
+    // Batch-load agents for all hosts in one pass (2 queries total, not 2N).
+    let host_ids: Vec<Uuid> = hosts.iter().map(|h| h.id).collect();
+
+    let all_links = if host_ids.is_empty() {
+        vec![]
+    } else {
+        match ServiceHost::find()
+            .filter(service_host::Column::HostId.is_in(host_ids.clone()))
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(links) => links,
+            Err(e) => {
+                tracing::warn!("Failed to load service-host links for page: {}", e);
+                vec![]
+            }
+        }
+    };
+
+    // Build a map: host_id → list of service_ids
+    let mut host_service_ids: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for link in &all_links {
+        host_service_ids
+            .entry(link.host_id)
+            .or_default()
+            .push(link.service_id);
     }
+
+    let all_service_ids: Vec<Uuid> = all_links.iter().map(|l| l.service_id).collect();
+
+    let services_by_id: HashMap<Uuid, service::Model> = if all_service_ids.is_empty() {
+        HashMap::new()
+    } else {
+        match tenant_db
+            .find::<service::Entity>()
+            .filter(service::Column::Id.is_in(all_service_ids))
+            .filter(service::Column::DeactivatedAt.is_null())
+            .all(tenant_db.db())
+            .await
+        {
+            Ok(svcs) => svcs.into_iter().map(|s| (s.id, s)).collect(),
+            Err(e) => {
+                tracing::warn!("Failed to load services for page: {}", e);
+                HashMap::new()
+            }
+        }
+    };
+
+    let items: Vec<HostResponse> = hosts
+        .into_iter()
+        .map(|h| {
+            let agents: Vec<HostAgentSummary> = host_service_ids
+                .get(&h.id)
+                .map(|svc_ids| {
+                    svc_ids
+                        .iter()
+                        .filter_map(|sid| services_by_id.get(sid))
+                        .map(|svc| HostAgentSummary {
+                            id: svc.id,
+                            friendly_name: svc.friendly_name.clone(),
+                            status: match svc.status {
+                                service::ServiceStatus::Pending => ServiceStatus::Pending,
+                                service::ServiceStatus::Approved => ServiceStatus::Approved,
+                                service::ServiceStatus::Rejected => ServiceStatus::Rejected,
+                                service::ServiceStatus::Deactivated => ServiceStatus::Deactivated,
+                            },
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            host_to_response(h, agents)
+        })
+        .collect();
 
     Ok(PaginatedResponse::new(items, total, pagination))
 }

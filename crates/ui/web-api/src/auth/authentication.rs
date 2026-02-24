@@ -65,7 +65,12 @@ pub enum OidcUserResolution {
     },
     /// Email match, user has password, no active OIDC links -> require password.
     LinkViaPasswordRequired { user_id: uuid::Uuid },
-    /// Email matched but no existing link — manual linking required.
+    /// The OIDC provider explicitly reported that the email address is not
+    /// verified (`email_verified: false`). Authentication is rejected to
+    /// prevent account takeover via an attacker-controlled IdP.
+    ///
+    /// Also returned when an email address is found but no OIDC link exists
+    /// and linking is not permitted in the current flow.
     EmailNotVerified,
     /// New user created with link.
     NewUser(uuid::Uuid),
@@ -112,8 +117,14 @@ pub async fn resolve_oidc_user<C: ConnectionTrait>(
         first_name,
         last_name,
         auto_create,
-        email_verified: _,
+        email_verified,
     } = params;
+
+    // Reject explicitly-unverified email addresses before any DB lookup.
+    if email_verified == Some(false) {
+        return Ok(OidcUserResolution::EmailNotVerified);
+    }
+
     // 1. Check for existing link
     let existing_link = UserOidcLink::find()
         .filter(user_oidc_link::Column::ProviderId.eq(provider_id))

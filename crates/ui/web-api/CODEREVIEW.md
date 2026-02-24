@@ -71,14 +71,6 @@ The plain JSON route should be registered unconditionally; Swagger UI should be 
 
 ### Issues
 
-**[SEVERITY: High]** `src/auth/authentication.rs:115` — OIDC `email_verified` claim silently discarded
-
-```rust
-email_verified: _,
-```
-
-The field is destructured and immediately ignored. The caller (`src/routes/oidc_auth.rs:435`) passes `email_verified` from the ID token claims, but `resolve_oidc_user` never consults it. A misconfigured or malicious OIDC provider asserting an unverified email address (e.g., an attacker-controlled IdP with a lookalike email) will proceed to account creation or matching. The fix is to check `if email_verified == Some(false) { return Ok(OidcUserResolution::EmailNotVerified); }` as the first guard inside `resolve_oidc_user`.
-
 **[SEVERITY: High]** `src/routes/server_cert.rs:199` — mTLS uses `.allow_unauthenticated()`
 
 `WebPkiClientVerifier::builder(...).allow_unauthenticated()` permits TLS connections from clients that present no certificate at all. The agent WebSocket trust boundary then relies entirely on application-layer bearer-secret or service-ID checks rather than transport-layer PKI enforcement. A network-adjacent attacker can establish a TLS session and probe the anonymous enrollment path without any certificate. Correct production posture is `.build()` (unauthenticated clients rejected at TLS handshake).
@@ -154,25 +146,6 @@ The `==` operator short-circuits, but the compared values (CA CNs) are not confi
 
 ### Issues
 
-**[SEVERITY: High]** `src/routes/service_ws.rs:610-614` — Magic value `120` repeated three times with a wildcard arm that silently accepts future service types
-
-```rust
-service_entity::ServiceType::Agent => Some(120),
-service_entity::ServiceType::Mqtt => None,
-service_entity::ServiceType::SshAgent => Some(120),
-_ => Some(120),
-```
-
-`120` should be extracted to `AGENT_SHUTDOWN_TIMEOUT_SECS` in `durations.rs`. More critically, the `_ => Some(120)` wildcard silently assigns a shutdown timeout to any future `ServiceType` variant added to the enum, rather than forcing the developer to make an explicit decision. Remove the wildcard; the compiler will flag new variants exhaustively.
-
-**[SEVERITY: High]** `src/routes/agent_ws.rs:453` — Non-exhaustive wildcard on `UpdateFinalStatus` match
-
-```rust
-UpdateFinalStatus::Failed | _ => update_history::UpdateStatus::Failed,
-```
-
-Any new `UpdateFinalStatus` variant (e.g., `Cancelled`, `TimedOut`) silently maps to `Failed`. This produces incorrect update history records without any compile-time warning. Make the match exhaustive.
-
 **[SEVERITY: High]** `src/routes/oidc_auth.rs:224-637` — `oidc_callback` is 413 lines with 7+ nesting levels
 
 The function simultaneously handles: parameter validation, state store lookup, provider loading, OIDC discovery (again — see duplication below), PKCE token exchange, ID token validation, claims extraction, registration-mode pre-check, transaction management, user resolution (5 `OidcUserResolution` branches), role sync, session creation, and redirect construction. This is the second-largest function in the entire codebase. Maximum nesting depth exceeds 7 `match`/`if let` levels, making control flow difficult to audit. Decompose into: `exchange_code_for_token`, `validate_id_token`, `resolve_or_create_user`, and `create_session_and_redirect`.
@@ -189,15 +162,6 @@ Both `oidc_complete_registration` and `oidc_link` contain the same ~30-line bloc
 
 All three functions execute the same sequence: map status to wire enum, build `EnrolledPayload`, serialize and send, log, check `approved`, conditionally send `ApprovedPayload`. Differences are only in the result type and log message. The three functions are 67, 62, and 62 lines respectively, of which ~47 lines are identical. Extract `fn send_enrollment_result(service_id, enrollment_secret, status, sink, out_seq) -> Option<(Uuid, bool)>`.
 
-**[SEVERITY: Medium]** `src/routes/service_ws.rs:616-623` — Magic values `300` and `15` for ping interval defaults
-
-```rust
-service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => 300u32,
-service_entity::ServiceType::Mqtt => 15u32,
-```
-
-These are domain-significant heartbeat intervals (agent: 5 minutes, MQTT: 15 seconds). Name them `AGENT_DEFAULT_PING_INTERVAL_SECS` and `MQTT_DEFAULT_PING_INTERVAL_SECS` in `durations.rs`.
-
 **[SEVERITY: Medium]** `src/routes/oidc_auth.rs:66` and `src/routes/oidc_auth.rs:352` — `unwrap_or_default()` on DB queries silently returns empty results
 
 `OidcProvider::find().all(...).await.unwrap_or_default()` at line 66 returns an empty provider list on DB error, causing `auth_methods` to report "no OIDC providers configured" rather than a server error. At line 352, `count(...).unwrap_or(1)` treats a DB error as "link exists", gating the user out of the OIDC flow. Both should log with `tracing::warn!` or propagate as errors.
@@ -206,22 +170,7 @@ These are domain-significant heartbeat intervals (agent: 5 minutes, MQTT: 15 sec
 
 The pattern of `SessionService::new(...)`, `create_refresh_token(...)`, `get_user_permissions(...)`, `create_access_token(...)`, and building `AuthResponse` is repeated identically in `oidc_exchange` (lines 668-733), `oidc_complete_registration` (lines 913-980), and `oidc_link` (lines 1128-1193). Extract `async fn create_oidc_session(state, user_id, provider_id) -> Response`.
 
-**[SEVERITY: Low]** `src/routes/agent_ws.rs:1217-1220` — Discovery-capable provider types hardcoded as a slice literal
-
-```rust
-let discovery_types: &[ProviderType] = &[
-    ProviderType::Homebrew,
-    ProviderType::ProxmoxHelperScripts,
-];
-```
-
-This is a second source of truth that diverges from `ProviderType::supports_discovery()` in `shared/types`. When a new discovery-capable provider is added, this slice must also be updated manually. A missed update silently prevents discovery for the new provider type.
-
 #### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/notification_service.rs:121` — `unreachable!()` macro on `ServiceType` wildcard arm will panic on new variants
-
-`ServiceType` is `#[non_exhaustive]`. New variants will cause runtime panic. Should log a warning and skip delivery instead.
 
 **[SEVERITY: Medium]** `src/queries/provider_configs.rs:155-158` — Duplicated `is_unique_name_violation` uses brittle string matching
 
@@ -397,22 +346,6 @@ Should have a per-event timeout or overall backlog delivery budget.
 
 ### Issues
 
-**[SEVERITY: High]** `src/queries/update_history.rs:78-83` — Full host table scan for tenant scoping
-
-`tenant_host_ids()` loads ALL host rows for the tenant into application memory as a `Vec<Uuid>`, then passes them as an `IN (...)` clause. With thousands of hosts, this performs a full table scan on every call, transfers unbounded data across the DB connection, and risks exceeding driver-level parameter limits (SQLite: 32,766 per query; PostgreSQL: 65,535 per prepared statement). Replace with a JOIN or correlated subquery: `WHERE host_id IN (SELECT id FROM hosts WHERE tenant_id = ?)`.
-
-**[SEVERITY: High]** `src/queries/software_items.rs:126-178` — N+1 in `load_item_hosts`
-
-For N hosts linked to a software item: 1 query for all `host_software_item` links + N individual `find_by_id(host_id)` + N individual `find_by_id(provider_config_id)` = 1+2N queries. This function is called from `get_software_item`, `assign_hosts`, and `update_host_assignment`. A software item assigned to 50 hosts produces 101 queries. Replace with a single JOIN across `host_software_items`, `hosts`, and `provider_configs`.
-
-**[SEVERITY: High]** `src/queries/update_history.rs:146-151` — N+1 in `list_update_history`
-
-For each record in a page of 20, `resolve_host_name` and `resolve_software_item_name` each issue individual DB queries: 40 extra round-trips per page. Collect all `host_id` and `software_item_id` values from the page, batch-load with `is_in(ids)`, then join in memory before constructing the response.
-
-**[SEVERITY: High]** `src/queries/autodiscovery.rs:567-580` — Ignore-list `COUNT(*)` inside per-item loop
-
-`process_one_discovery` issues a `COUNT(*)` query against `autodiscovery_ignores` per discovered item. For 200 discovered packages, this is 200 DB round-trips. Load the entire ignore list for the tenant into a `HashSet<String>` before entering the loop, then check membership in O(1).
-
 **[SEVERITY: Medium]** Missing index: `update_history` has no index on `created_at`
 
 `list_update_history` orders by `created_at DESC` with pagination, but there is no index on this column. The query degrades to a full table scan as update history grows. Add `CREATE INDEX idx_update_history_created_at ON update_history (created_at DESC)`.
@@ -438,14 +371,6 @@ API tokens are valid indefinitely once issued. A compromised token that was neve
 "Find active sessions for user" is a common query path (user detail view, session revocation). A composite index on `(user_id, expires_at)` would serve this filter efficiently.
 
 #### 2026-02-24 Review
-
-**[SEVERITY: High]** `src/queries/software_items.rs:417-421` — N+1 in `list_software_items`: per-item `load_provider_types` and `count_linked_hosts`
-
-For N items, issues 2N extra queries. Should batch-load with GROUP BY.
-
-**[SEVERITY: High]** `src/queries/hosts.rs:104-108` — N+1 in `list_hosts`: per-host `load_host_agents` issues 2 queries per host
-
-For 20 hosts, 40 extra round-trips. Should batch-load with a single JOIN.
 
 **[SEVERITY: High]** `src/routes/provider_configs.rs:264-274` — Full cross-tenant `service_hosts` table scan in `discover_provider_config`
 
@@ -491,17 +416,13 @@ DB outage causes items to report zero linked hosts silently.
 - **No `Result<T, String>` anti-pattern** — All error types are `thiserror`-derived with typed variants.
 - **No `StatusCode` numeric literals** — All comparisons use `StatusCode::*` variants or `.is_*()` helpers.
 - **`FromStr` with typed errors** — Used correctly for `AlertSeverity`, `Permission`, etc.
-- **Only one `#[allow(clippy::...)]` in the entire codebase** — `src/queries/autodiscovery.rs:554` (addressed below).
+- **Zero `#[allow(clippy::...)]` in the entire codebase** — All previously allowed lints have been resolved.
 
 ### Issues
 
 **[SEVERITY: High]** `src/routes/api_tokens.rs:19-31` and `src/routes/auth.rs:339,666` — `x-required-permission` annotation missing on user-identity endpoints
 
 `create_api_token`, `list_api_tokens`, `revoke_api_token`, `logout`, and `me` use raw `Extension<AuthenticatedUser>` directly (appropriate for user-scoped resources) but lack the `x-required-permission` OpenAPI extension. The OpenAPI spec consequently omits the permission requirement from generated clients, and the automated permission-coverage check cannot verify these endpoints. Add `x-required-permission: "self"` or an equivalent sentinel value to document that these endpoints require only authentication, not a specific resource permission.
-
-**[SEVERITY: High]** `src/queries/autodiscovery.rs:554` — `#[allow(clippy::too_many_arguments)]` violates AGENTS.md
-
-AGENTS.md states: "There are currently no approved exceptions." `process_one_discovery` takes 8 arguments. Fix: introduce a `ProcessDiscoveryArgs<'a>` struct grouping `package_identifier`, `name`, `installed_version`, `provider_type_str`, and other related parameters. After restructuring, the argument count will drop below Clippy's default threshold of 7 and the suppression can be removed.
 
 **[SEVERITY: Medium]** Pervasive `Path<String>` + manual `uuid::Uuid::parse_str` pattern — 43 occurrences across 10 route files
 
@@ -548,17 +469,6 @@ These are pragmatic uses but each should carry an inline comment explaining why 
 
 ### Issues
 
-**[SEVERITY: High]** `src/routes/agent_ws.rs:1217-1220` — Discovery-capable provider types hardcoded as a slice literal
-
-```rust
-let discovery_types: &[ProviderType] = &[
-    ProviderType::Homebrew,
-    ProviderType::ProxmoxHelperScripts,
-];
-```
-
-This is a third source of truth for discovery capability, duplicating `ProviderType::supports_discovery()` in `shared/types` and `create_provider_for_discovery` in `providers/registry`. A new provider with discovery capability requires updates in all three locations. A missed update silently prevents autodiscovery without any compile-time feedback. The canonical source should be `Provider::capabilities()` on each provider implementation; `agent_ws.rs` should query the registry for providers that return `ProviderCapability::SoftwareDiscovery` rather than maintaining its own list.
-
 **[SEVERITY: High]** `src/queries/software_items.rs:329-332` — Package identifier validation uses raw string comparison
 
 ```rust
@@ -576,10 +486,6 @@ The role sync reconstruction only places values at the first dot-separated segme
 Additional claim retrieval (groups, department, cost center) requires custom scopes. The current implementation splits `provider.scopes` on whitespace and adds each as a separate `Scope`. This works but is the only extensibility point for claims enrichment. There is no documented path for operators to add custom claims processors without code changes.
 
 #### 2026-02-24 Review
-
-**[SEVERITY: Medium]** `src/routes/service_ws.rs:610-614,617-621` — Shutdown timeout and ping interval use hardcoded per-ServiceType match with wildcard fallback
-
-Adding a new `ServiceType` silently inherits defaults with no compile-time signal. Values should be in `durations.rs` and wildcards should log warnings.
 
 **[SEVERITY: Medium]** `src/routes/service_ws.rs:640-681,744-783,916-962` — Three `match service_type` dispatch blocks require manual extension for every new service type
 

@@ -29,6 +29,23 @@ Refresh token verification and rotation validate session data integrity before p
 
 See also: [Secrets Handling and Encryption](secrets-and-encryption.md) for encryption-at-rest details.
 
+## OIDC Email Verification Enforcement
+
+`resolve_oidc_user` checks the `email_verified` claim from the OIDC ID token before performing any database
+lookup. This prevents account creation or matching for addresses that the identity provider has not confirmed.
+
+| `email_verified` claim | Behavior |
+| --- | --- |
+| `true` | Accepted — proceeds to user resolution |
+| `false` | **Rejected** — returns `OidcUserResolution::EmailNotVerified`; user is redirected to the login page with `error=email_not_verified` |
+| absent / `null` | Accepted conservatively — many legitimate providers (GitHub, Google) omit the claim for confirmed accounts |
+
+The check occurs at the entry point of `resolve_oidc_user` before any DB query, ensuring no account is created
+or linked for an unverified email regardless of `auto_create` or role-mapping configuration.
+
+See also: [`docs/development/coding-standards.md`](../development/coding-standards.md) for the security guard
+placement convention.
+
 ## OIDC Link Token URL Exposure
 
 **Risk level:** Low (accepted)

@@ -254,7 +254,7 @@ pub async fn discover_provider_config(
         }
     };
 
-    if !provider_type.supports_discovery() {
+    if !state.provider_ops.discovery_provider_types().contains(&provider_type) {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!("Provider type '{}' does not support autodiscovery", cfg.provider_type),

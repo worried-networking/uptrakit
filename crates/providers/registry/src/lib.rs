@@ -83,6 +83,9 @@ pub trait ProviderOps: Send + Sync + 'static {
         incoming: &mut serde_json::Value,
         existing: &serde_json::Value,
     );
+
+    /// Returns all provider types that have the `DiscoverLocalSoftware` capability.
+    fn discovery_provider_types(&self) -> Vec<ProviderType>;
 }
 
 impl ProviderOps for ProviderRegistry {
@@ -109,5 +112,9 @@ impl ProviderOps for ProviderRegistry {
         existing: &serde_json::Value,
     ) {
         ProviderRegistry::restore_config_secrets_str(provider_type, incoming, existing);
+    }
+
+    fn discovery_provider_types(&self) -> Vec<ProviderType> {
+        ProviderRegistry::discovery_provider_types()
     }
 }

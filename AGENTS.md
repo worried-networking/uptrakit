@@ -259,8 +259,10 @@ for user review. Key invariants:
    `{"package_type":"formula"}`). The controller auto-creates named configs: `"Homebrew (Formulae)"`,
    `"Homebrew (Casks)"`, `"Proxmox Helper Scripts"`.
 
-5. **`ProviderType::supports_discovery()`** returns `true` only for `Homebrew` and `ProxmoxHelperScripts`. Used to
-   filter which providers receive discovery assignments.
+5. **Discovery capability is derived from the registry.** Call `state.provider_ops.discovery_provider_types()`
+   (or `ProviderRegistry::discovery_provider_types()` statically) to get the current list of discovery-capable
+   provider types. This is derived automatically from each provider's `capabilities()` method via the registry —
+   no static list is maintained separately. `ProviderType::supports_discovery()` has been removed.
 
 6. **Partial unique indexes.** `software_items` uses a partial unique index
    `(tenant_id, name) WHERE deactivated_at IS NULL` — prevents duplicate item names within a tenant while

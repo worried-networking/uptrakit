@@ -1,7 +1,9 @@
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
 };
-use uptrakit_shared_db::entity::{host, prelude::*, update_history, update_output_line};
+use sea_orm::sea_query::{Expr, ExprTrait, Query};
+use std::collections::HashMap;
+use uptrakit_shared_db::entity::{host, prelude::*, software_item, update_history, update_output_line};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::update_history::{
     UpdateHistoryQuery, UpdateHistoryResponse, UpdateStatus,
@@ -74,34 +76,6 @@ async fn load_output_lines(
     Ok(output)
 }
 
-/// Collect all host IDs belonging to a tenant (for tenant scoping of update_history).
-async fn tenant_host_ids(
-    tenant_db: &TenantDb,
-) -> Result<Vec<Uuid>, sea_orm::DbErr> {
-    let hosts = tenant_db.find::<host::Entity>().all(tenant_db.db()).await?;
-    Ok(hosts.into_iter().map(|h| h.id).collect())
-}
-
-async fn resolve_host_name(
-    db: &sea_orm::DatabaseConnection,
-    host_id: Uuid,
-) -> String {
-    match Host::find_by_id(host_id).one(db).await {
-        Ok(Some(h)) => h.friendly_name,
-        _ => "Unknown Host".to_string(),
-    }
-}
-
-async fn resolve_software_item_name(
-    db: &sea_orm::DatabaseConnection,
-    software_item_id: Uuid,
-) -> String {
-    match SoftwareItem::find_by_id(software_item_id).one(db).await {
-        Ok(Some(si)) => si.name,
-        _ => "Unknown Software Item".to_string(),
-    }
-}
-
 // --- Public query functions ---
 
 pub async fn list_update_history(
@@ -110,18 +84,16 @@ pub async fn list_update_history(
 ) -> Result<PaginatedResponse<UpdateHistoryResponse>, sea_orm::DbErr> {
     let pagination = query.pagination().resolve();
 
-    let host_ids = tenant_host_ids(tenant_db).await?;
-
-    if host_ids.is_empty() {
-        return Ok(PaginatedResponse::<UpdateHistoryResponse>::new(
-            vec![],
-            0,
-            pagination,
-        ));
-    }
+    // Tenant-scoped subquery: filter update_history by host IDs belonging to this tenant.
+    // This avoids loading all host IDs into application memory.
+    let host_subquery = Query::select()
+        .column(host::Column::Id)
+        .from(host::Entity)
+        .and_where(Expr::col(host::Column::TenantId).eq(tenant_db.tenant_id))
+        .to_owned();
 
     let mut q = UpdateHistory::find()
-        .filter(update_history::Column::HostId.is_in(host_ids));
+        .filter(update_history::Column::HostId.in_subquery(host_subquery));
 
     if let Some(host_id) = query.host_id {
         q = q.filter(update_history::Column::HostId.eq(host_id));
@@ -143,12 +115,54 @@ pub async fn list_update_history(
         .all(tenant_db.db())
         .await?;
 
-    let mut items = Vec::with_capacity(records.len());
-    for record in records {
-        let host_name = resolve_host_name(tenant_db.db(), record.host_id).await;
-        let si_name = resolve_software_item_name(tenant_db.db(), record.software_item_id).await;
-        items.push(build_response(&record, host_name, si_name, record.output.clone()));
+    if records.is_empty() {
+        return Ok(PaginatedResponse::new(vec![], total, pagination));
     }
+
+    // Batch-load host names and software item names in two queries (no per-record lookups).
+    let host_ids: Vec<uuid::Uuid> = records
+        .iter()
+        .map(|r| r.host_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let si_ids: Vec<uuid::Uuid> = records
+        .iter()
+        .map(|r| r.software_item_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let host_names: HashMap<uuid::Uuid, String> = Host::find()
+        .filter(host::Column::Id.is_in(host_ids))
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .map(|h| (h.id, h.friendly_name))
+        .collect();
+
+    let si_names: HashMap<uuid::Uuid, String> = SoftwareItem::find()
+        .filter(software_item::Column::Id.is_in(si_ids))
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .map(|si| (si.id, si.name))
+        .collect();
+
+    let items: Vec<UpdateHistoryResponse> = records
+        .iter()
+        .map(|record| {
+            let host_name = host_names
+                .get(&record.host_id)
+                .cloned()
+                .unwrap_or_else(|| "Unknown Host".to_string());
+            let si_name = si_names
+                .get(&record.software_item_id)
+                .cloned()
+                .unwrap_or_else(|| "Unknown Software Item".to_string());
+            build_response(record, host_name, si_name, record.output.clone())
+        })
+        .collect();
 
     Ok(PaginatedResponse::new(items, total, pagination))
 }
@@ -171,7 +185,13 @@ pub async fn get_update_history(
         return Ok(None);
     };
 
-    let si_name = resolve_software_item_name(tenant_db.db(), record.software_item_id).await;
+    let si_name = match SoftwareItem::find_by_id(record.software_item_id)
+        .one(tenant_db.db())
+        .await
+    {
+        Ok(Some(si)) => si.name,
+        _ => "Unknown Software Item".to_string(),
+    };
     let output = if record.output.is_empty() {
         match load_output_lines(tenant_db.db(), record.id).await {
             Ok(out) => out,

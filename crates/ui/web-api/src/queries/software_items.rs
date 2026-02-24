@@ -1,7 +1,8 @@
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, ModelTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, FromQueryResult, ModelTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, RelationTrait, Set, TransactionTrait,
 };
+use std::collections::HashMap;
 use time::OffsetDateTime;
 use uptrakit_provider_registry::ProviderRegistry;
 use uptrakit_shared_db::entity::{host, host_software_item, prelude::*, provider_config, software_item};
@@ -40,6 +41,18 @@ pub enum SoftwareItemQueryError {
     InvalidInlineProviderConfig(String),
     /// A database error occurred.
     Db(sea_orm::DbErr),
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ItemHostCount {
+    software_item_id: Uuid,
+    count: i64,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct ItemProviderType {
+    software_item_id: Uuid,
+    provider_type: String,
 }
 
 // --- Private helpers ---
@@ -95,8 +108,6 @@ async fn load_provider_types(
     db: &sea_orm::DatabaseConnection,
     item_id: Uuid,
 ) -> Vec<String> {
-    use sea_orm::{FromQueryResult, QuerySelect};
-
     #[derive(Debug, FromQueryResult)]
     struct PcRow {
         provider_type: String,
@@ -139,42 +150,59 @@ async fn load_item_hosts(
         }
     };
 
-    let mut summaries = Vec::with_capacity(links.len());
-    for link in links {
-        let host = match Host::find_by_id(link.host_id)
-            .filter(host::Column::DeactivatedAt.is_null())
-            .one(db)
-            .await
-        {
-            Ok(Some(h)) => h,
-            _ => continue,
-        };
-
-        let pc = match ProviderConfig::find_by_id(link.provider_config_id)
-            .one(db)
-            .await
-        {
-            Ok(Some(c)) => c,
-            _ => continue,
-        };
-
-        summaries.push(SoftwareItemHostSummary {
-            host_id: host.id,
-            hostname: host.hostname,
-            friendly_name: host.friendly_name,
-            provider_config_id: pc.id,
-            provider_config_name: pc.name,
-            provider_type: pc.provider_type,
-            package_identifier: link.package_identifier,
-            config_override: link.config_override,
-            installed_version: link.installed_version,
-            installed_version_detected_at: link.installed_version_detected_at,
-            last_updated_at: link.last_updated_at,
-            linked_at: link.linked_at,
-        });
+    if links.is_empty() {
+        return Vec::new();
     }
 
-    summaries
+    let host_ids: Vec<Uuid> = links.iter().map(|l| l.host_id).collect();
+    let pc_ids: Vec<Uuid> = links.iter().map(|l| l.provider_config_id).collect();
+
+    let hosts: HashMap<Uuid, host::Model> = match Host::find()
+        .filter(host::Column::Id.is_in(host_ids))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .all(db)
+        .await
+    {
+        Ok(h) => h.into_iter().map(|h| (h.id, h)).collect(),
+        Err(e) => {
+            tracing::warn!("Failed to load hosts for software item: {e}");
+            return Vec::new();
+        }
+    };
+
+    let provider_configs: HashMap<Uuid, provider_config::Model> = match ProviderConfig::find()
+        .filter(provider_config::Column::Id.is_in(pc_ids))
+        .all(db)
+        .await
+    {
+        Ok(pcs) => pcs.into_iter().map(|pc| (pc.id, pc)).collect(),
+        Err(e) => {
+            tracing::warn!("Failed to load provider configs for software item: {e}");
+            return Vec::new();
+        }
+    };
+
+    links
+        .into_iter()
+        .filter_map(|link| {
+            let host = hosts.get(&link.host_id)?;
+            let pc = provider_configs.get(&link.provider_config_id)?;
+            Some(SoftwareItemHostSummary {
+                host_id: host.id,
+                hostname: host.hostname.clone(),
+                friendly_name: host.friendly_name.clone(),
+                provider_config_id: pc.id,
+                provider_config_name: pc.name.clone(),
+                provider_type: pc.provider_type.clone(),
+                package_identifier: link.package_identifier,
+                config_override: link.config_override,
+                installed_version: link.installed_version,
+                installed_version_detected_at: link.installed_version_detected_at,
+                last_updated_at: link.last_updated_at,
+                linked_at: link.linked_at,
+            })
+        })
+        .collect()
 }
 
 /// Find a non-deactivated software item by ID, scoped to a tenant.
@@ -395,6 +423,8 @@ pub async fn list_software_items(
     tenant_db: &TenantDb,
     params: &ListSoftwareItemsParams,
 ) -> Result<PaginatedResponse<SoftwareItemResponse>, sea_orm::DbErr> {
+    use sea_orm::sea_query::Expr;
+
     let pagination = params.pagination().resolve();
 
     let mut base_query = SoftwareItem::find()
@@ -414,12 +444,65 @@ pub async fn list_software_items(
         .all(tenant_db.db())
         .await?;
 
-    let mut response = Vec::with_capacity(items.len());
-    for item in items {
-        let provider_types = load_provider_types(tenant_db.db(), item.id).await;
-        let host_count = count_linked_hosts(tenant_db.db(), item.id).await;
-        response.push(build_list_response(&item, provider_types, host_count));
+    if items.is_empty() {
+        return Ok(PaginatedResponse::new(vec![], total, pagination));
     }
+
+    let item_ids: Vec<Uuid> = items.iter().map(|i| i.id).collect();
+
+    // Bulk-load host counts for all items in one GROUP BY query.
+    let host_counts: HashMap<Uuid, u64> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::SoftwareItemId)
+        .column_as(
+            {
+                use sea_orm::sea_query::ExprTrait;
+                Expr::col(host_software_item::Column::HostId).count()
+            },
+            "count",
+        )
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .group_by(host_software_item::Column::SoftwareItemId)
+        .into_model::<ItemHostCount>()
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .map(|row| (row.software_item_id, row.count as u64))
+        .collect();
+
+    // Bulk-load provider types for all items via JOIN (one query).
+    let provider_type_rows: Vec<ItemProviderType> = HostSoftwareItem::find()
+        .select_only()
+        .column(host_software_item::Column::SoftwareItemId)
+        .column(provider_config::Column::ProviderType)
+        .join(
+            sea_orm::JoinType::InnerJoin,
+            host_software_item::Relation::ProviderConfig.def(),
+        )
+        .filter(host_software_item::Column::SoftwareItemId.is_in(item_ids))
+        .into_model::<ItemProviderType>()
+        .all(tenant_db.db())
+        .await?;
+
+    // Group provider types by software item id, deduplicated.
+    let mut provider_types_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for row in provider_type_rows {
+        let entry = provider_types_map.entry(row.software_item_id).or_default();
+        if !entry.contains(&row.provider_type) {
+            entry.push(row.provider_type);
+        }
+    }
+
+    let response: Vec<SoftwareItemResponse> = items
+        .iter()
+        .map(|item| {
+            let provider_types = provider_types_map
+                .remove(&item.id)
+                .unwrap_or_default();
+            let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
+            build_list_response(item, provider_types, host_count)
+        })
+        .collect();
 
     Ok(PaginatedResponse::new(response, total, pagination))
 }

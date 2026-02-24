@@ -17,7 +17,7 @@ Related shared crate reviewed for cross-cutting issues:
 
 The provider subsystem is the strongest-structured domain in the codebase. The `Provider` trait is clean and object-safe, the `register_providers!` macro eliminates dispatch duplication for the normal code path, secret masking is correctly designed, and dependency injection via `CommandExecutor` makes all providers unit-testable without spawning real processes. Individual provider crates are focused, well-tested, and follow consistent patterns.
 
-The primary structural weakness is a discovery-codepath split: capability knowledge that belongs exclusively in each provider's `capabilities()` method is mirrored in at least three separate locations (`ProviderType::supports_discovery()`, a hardcoded slice in `agent_ws.rs`, and a 40-line hand-maintained match block `create_provider_for_discovery`). This split means adding a new discovery-capable provider requires coordinated changes in at least three crates, and a miss in any one results in a runtime failure with no compile-time signal.
+The discovery-codepath split has been resolved: `ProviderType::supports_discovery()` has been removed, the hardcoded slice in `agent_ws.rs` is gone, and `create_provider_for_discovery` is now macro-generated alongside the other five dispatch methods. Adding a new discovery-capable provider requires only implementing `capabilities()` to include `ProviderCapability::DiscoverLocalSoftware` — the registry derives everything else automatically.
 
 A secondary concern is that platform-specific providers (Homebrew for macOS, ProxmoxHelperScripts for Proxmox VE) are compiled unconditionally into all agent binaries, causing Linux agents to accept configuration for `HomebrewProvider` and fail only at runtime when the `brew` binary is absent.
 
@@ -33,7 +33,7 @@ The remaining issues — a hardcoded `per_page=100` in GitHub pagination, a wron
 `crates/providers/core/src/traits.rs:22-98`. The trait has exactly one required method (`provider_type`). Every other method has a default implementation that returns a typed error. New providers only override what they support. `capabilities()` returns `&'static [ProviderCapability]` — no heap allocation on the hot version-check path. `has_capability` is a trivial slice contains check.
 
 **`register_providers!` macro eliminates all dispatch duplication.**
-`crates/providers/registry/src/registry.rs:43-156`. A single declaration block generates all four dispatch methods (`create_provider`, `validate_config`, `mask_config_secrets`, `restore_config_secrets`) with consistent error handling (`context_to`, `RegistryError`). Adding a new provider requires exactly one line in this macro invocation plus a `Cargo.toml` dependency. The doc-comment on `ProviderRegistry` explicitly states this invariant.
+`crates/providers/registry/src/registry.rs:43-156`. A single declaration block generates all six dispatch methods (`create_provider`, `validate_config`, `mask_config_secrets`, `restore_config_secrets`, `create_provider_for_discovery`, `discovery_provider_types`) with consistent error handling (`context_to`, `RegistryError`). Adding a new provider requires exactly one line in this macro invocation plus a `Cargo.toml` dependency. Discovery capability is automatically derived from each provider's `capabilities()` method — no manual list needed. The doc-comment on `ProviderRegistry` explicitly states this invariant.
 
 **`ProviderOps` trait decouples the web API from the concrete registry.**
 `crates/providers/registry/src/lib.rs:57-86`. `AppState` holds `Arc<dyn ProviderOps>` rather than a direct reference to `ProviderRegistry`. Route handlers and query helpers are testable in isolation by substituting a mock implementation. `ProviderRegistry` implements `ProviderOps` through delegation, keeping the blanket impl trivial.
@@ -51,18 +51,6 @@ Unknown capabilities from a newer peer are preserved and excluded from capabilit
 `crates/providers/proxmox-helper-scripts/src/config.rs:61-118`. The `script_url` field defaults to an empty string at deserialization time (`#[serde(default)]`). `validate()` rejects an empty URL for version-check or update contexts. The comment at lines 63-66 clearly documents that `validate()` must not be called during discovery. This is an explicit and documented design choice, not a hidden special case.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/shared/types/src/provider_types.rs:34-36` — `supports_discovery()` duplicates capability knowledge in a second crate
-
-`ProviderType::supports_discovery()` is a method in the shared-types crate that manually mirrors what `Provider::capabilities()` already expresses on the agent side. The two definitions are in different crates, maintained independently, and can diverge without any compile-time warning. A new discovery-capable provider must be registered in three places: (1) `ProviderType` enum and `supports_discovery()`, (2) `register_providers!` macro, and (3) a hardcoded capability slice in `agent_ws.rs`. Missing any one of these three produces a runtime failure, not a compile error.
-
-The correct fix is to derive `supports_discovery()` from capability data exchanged over the wire protocol rather than re-encoding it as a static `matches!` pattern.
-
-**[SEVERITY: High]** `crates/providers/registry/src/registry.rs:165-204` — `create_provider_for_discovery` bypasses the macro and requires manual synchronization
-
-`create_provider_for_discovery` is a 40-line hand-maintained match block that exists because `create_provider` calls `validate()` on every config, and discovery requires constructing a provider with an intentionally invalid config (empty `script_url`). The `_` catch-all arm at line 200 means that adding a new provider to `register_providers!` without also updating this method produces a silent runtime error, not a compile error.
-
-The root cause is that `validate: bool` or a `ConstructionMode` parameter was not added to the macro-generated method. A `validate: bool` parameter in the macro would allow the discovery caller to pass `false` and remove this entire manual method.
 
 **[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Package identifier validation uses a raw string literal, not the `ProviderType` enum
 
@@ -304,8 +292,8 @@ The `#[serde(default)]` on `script_url` exists to allow `{}` to deserialize succ
 
 ### Strengths
 
-**Adding a non-discovery provider requires exactly one line in the macro.**
-The `register_providers!` invocation at `registry.rs:151-156` is the single authoritative source for the four dispatch methods. For a provider without discovery, the full extension path is: new crate, new `ProviderType` variant, one macro line, one `Cargo.toml` dependency. No other files require changes.
+**Adding any provider requires exactly one line in the macro.**
+The `register_providers!` invocation at `registry.rs` is the single authoritative source for all six dispatch methods. For a provider without discovery, the full extension path is: new crate, new `ProviderType` variant, one macro line, one `Cargo.toml` dependency. For a discovery-capable provider, additionally include `ProviderCapability::DiscoverLocalSoftware` in the provider's `capabilities()` method — `discovery_provider_types()` is fully auto-derived. No other files require changes.
 
 **`ProviderCapability` is `#[non_exhaustive]`.**
 `crates/shared/types/src/provider_types.rs:10`. Unknown capability variants from a newer binary are preserved through the `Other(String)` case in the wire protocol and excluded from capability intersection, rather than causing deserialization errors. New capabilities can be added in a future release without breaking older agents.
@@ -317,22 +305,6 @@ The `ServiceHandler` trait in `service-sdk` means adding a new service type (age
 Both wire enums use the same `Unknown`/`Other` string-preserving variant. New provider capability or close reason additions are forward-compatible across versions.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/shared/types/src/provider_types.rs:34-36` — `supports_discovery()` is a hardcoded capability mirror across three locations
-
-The `matches!(self, Self::Homebrew | Self::ProxmoxHelperScripts)` expression at line 34 duplicates knowledge that the `Provider` trait already expresses through `capabilities()`. The full list of discovery-capable providers is now maintained in:
-
-1. `provider_types.rs:34` — `supports_discovery()` method
-2. `crates/ui/web-api/src/routes/agent_ws.rs:1217-1220` — hardcoded `&[ProviderType::Homebrew, ProviderType::ProxmoxHelperScripts]` slice
-3. `registry.rs:165-204` — `create_provider_for_discovery` match block
-
-None of these three locations will produce a compile error when a new discovery-capable provider is added to the macro but omitted from any of the three mirrors. The miss will produce either a runtime "discovery silently disabled" (location 1), a runtime "provider not offered for discovery assignments" (location 2), or a runtime `RegistryError::UnknownProviderType` (location 3).
-
-**[SEVERITY: High]** `crates/providers/registry/src/registry.rs:165-204` — `create_provider_for_discovery` is a manually-maintained 40-line match block that duplicates the macro
-
-This method exists solely because `create_provider` calls `validate()` unconditionally. The fix is to add a `validate: bool` parameter to the macro-generated `create_provider` method, or to introduce a `ConstructionMode` enum (`Normal | Discovery`). Either approach would allow `create_provider_for_discovery` to be eliminated, and the `_` catch-all error at line 200 — which currently hides missed providers — would be removed.
-
-Until fixed, every new provider added to `register_providers!` must also be manually added to this match block, and a missed addition is caught only at runtime.
 
 **[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Provider-specific validation rule encoded as raw string in query layer
 
@@ -388,13 +360,14 @@ When adding a new provider, the following steps are required. Steps marked (clea
 |------|----------|--------|
 | New crate with `Provider` + config struct | `crates/providers/<name>/` | Clean |
 | Implement `SecretMasking` | provider config struct | Clean |
-| One line in `register_providers!` | `registry.rs:151-156` | Clean |
+| One line in `register_providers!` | `registry.rs` | Clean |
 | Dependency in registry `Cargo.toml` | `registry/Cargo.toml` | Clean |
 | New variant in `ProviderType` | `shared/types/src/provider_types.rs` | Clean |
 | `as_str()`, `FromStr`, `Display` for new variant | `shared/types/src/provider_types.rs` | Clean |
-| **If discovery-capable:** update `supports_discovery()` | `provider_types.rs:34` | Manual |
-| **If discovery-capable:** update hardcoded slice | `agent_ws.rs:1217-1220` | Manual |
-| **If discovery-capable:** update `create_provider_for_discovery` | `registry.rs:165-204` | Manual |
-| **If special identifier rules:** add branch in `validate_assignment` | `software_items.rs:329-332` | Manual |
+| **If discovery-capable:** include `ProviderCapability::DiscoverLocalSoftware` in `capabilities()` | provider crate | Clean |
+| **If special identifier rules:** add branch in `validate_assignment` | `software_items.rs` | Manual |
 
-The four "Manual" steps are the primary extensibility debt in this subsystem.
+The single remaining "Manual" step is package-identifier validation in the query layer. The three previously "Manual"
+discovery steps (`supports_discovery()`, hardcoded slice, `create_provider_for_discovery`) have all been eliminated —
+discovery support is now fully auto-derived from the `register_providers!` macro and the provider's `capabilities()`
+method.

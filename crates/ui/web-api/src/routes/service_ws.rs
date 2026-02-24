@@ -30,6 +30,13 @@ pub(crate) const WS_MESSAGE_RATE_LIMIT: u32 = 50;
 /// Window for WebSocket message rate limiting.
 pub(crate) const WS_MESSAGE_RATE_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// Shutdown timeout for Agent and SshAgent service types (seconds).
+const AGENT_SHUTDOWN_TIMEOUT_SECS: u64 = 120;
+/// Default ping interval for Agent and SshAgent service types (seconds).
+const AGENT_DEFAULT_PING_INTERVAL_SECS: u32 = 300;
+/// Default ping interval for Mqtt service type (seconds).
+const MQTT_DEFAULT_PING_INTERVAL_SECS: u32 = 15;
+
 /// Fixed-window rate limiter for WebSocket message processing.
 pub(crate) struct MessageRateLimiter {
     window_start: std::time::Instant,
@@ -607,17 +614,20 @@ async fn handle_authenticated(
     // Send ServiceSettings on connect.
     let renewal_window_hours = state.settings.renewal_window_hours();
     let ca_bundle_hash = state.ca_snapshot.borrow().bundle_hash.clone();
-    let shutdown_timeout = match service.service_type {
-        service_entity::ServiceType::Agent => Some(120),
+    let shutdown_timeout: Option<u32> = match service.service_type {
+        service_entity::ServiceType::Agent => Some(AGENT_SHUTDOWN_TIMEOUT_SECS as u32),
         service_entity::ServiceType::Mqtt => None,
-        service_entity::ServiceType::SshAgent => Some(120),
-        _ => Some(120),
+        service_entity::ServiceType::SshAgent => Some(AGENT_SHUTDOWN_TIMEOUT_SECS as u32),
+        _ => {
+            tracing::warn!(service_type = ?service.service_type, "unknown ServiceType for shutdown timeout; defaulting to agent timeout");
+            Some(AGENT_SHUTDOWN_TIMEOUT_SECS as u32)
+        }
     };
     let ping_secs = service.ping_interval_seconds.map_or_else(
         || match service.service_type {
-            service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => 300u32,
-            service_entity::ServiceType::Mqtt => 15u32,
-            _ => 300u32,
+            service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => AGENT_DEFAULT_PING_INTERVAL_SECS,
+            service_entity::ServiceType::Mqtt => MQTT_DEFAULT_PING_INTERVAL_SECS,
+            _ => AGENT_DEFAULT_PING_INTERVAL_SECS,
         },
         |v| v as u32,
     );

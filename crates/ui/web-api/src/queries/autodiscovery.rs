@@ -11,6 +11,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
 };
+use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{DiscoveryProviderResult, DiscoveryResultsPayload, ProviderType};
 use uptrakit_shared_db::entity::{
@@ -392,19 +393,15 @@ async fn process_provider_result(
     // If the assignment already had a provider_config_id, use it directly for
     // all discoveries in this result. Otherwise, group by config key.
     if let Some(existing_pc_id) = result.provider_config_id {
+        let ignore_set = load_ignore_set(db, tenant_id, existing_pc_id).await?;
         for item in &result.discoveries {
-            process_one_discovery(
-                db,
-                tenant_id,
-                host_id,
-                existing_pc_id,
-                &provider_type_str,
-                &item.package_identifier,
-                &item.name,
-                &item.installed_version,
-                now,
-            )
-            .await?;
+            let args = ProcessDiscoveryArgs {
+                package_identifier: &item.package_identifier,
+                name: &item.name,
+                installed_version: &item.installed_version,
+                provider_type_str: &provider_type_str,
+            };
+            process_one_discovery(db, tenant_id, host_id, existing_pc_id, args, &ignore_set, now).await?;
         }
         return Ok(());
     }
@@ -425,19 +422,15 @@ async fn process_provider_result(
                 "Proxmox Helper Scripts",
             )
             .await?;
+            let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
             for item in &result.discoveries {
-                process_one_discovery(
-                    db,
-                    tenant_id,
-                    host_id,
-                    pc_id,
-                    &provider_type_str,
-                    &item.package_identifier,
-                    &item.name,
-                    &item.installed_version,
-                    now,
-                )
-                .await?;
+                let args = ProcessDiscoveryArgs {
+                    package_identifier: &item.package_identifier,
+                    name: &item.name,
+                    installed_version: &item.installed_version,
+                    provider_type_str: &provider_type_str,
+                };
+                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now).await?;
             }
         }
         _ => {
@@ -496,19 +489,15 @@ async fn process_homebrew_default(
             "Homebrew (Formulae)",
         )
         .await?;
+        let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
         for item in formulae {
-            process_one_discovery(
-                db,
-                tenant_id,
-                host_id,
-                pc_id,
-                &provider_type_str,
-                &item.package_identifier,
-                &item.name,
-                &item.installed_version,
-                now,
-            )
-            .await?;
+            let args = ProcessDiscoveryArgs {
+                package_identifier: &item.package_identifier,
+                name: &item.name,
+                installed_version: &item.installed_version,
+                provider_type_str: &provider_type_str,
+            };
+            process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now).await?;
         }
     }
 
@@ -522,24 +511,45 @@ async fn process_homebrew_default(
             "Homebrew (Casks)",
         )
         .await?;
+        let ignore_set = load_ignore_set(db, tenant_id, pc_id).await?;
         for item in casks {
-            process_one_discovery(
-                db,
-                tenant_id,
-                host_id,
-                pc_id,
-                &provider_type_str,
-                &item.package_identifier,
-                &item.name,
-                &item.installed_version,
-                now,
-            )
-            .await?;
+            let args = ProcessDiscoveryArgs {
+                package_identifier: &item.package_identifier,
+                name: &item.name,
+                installed_version: &item.installed_version,
+                provider_type_str: &provider_type_str,
+            };
+            process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now).await?;
         }
     }
 
     let _ = unknown; // already warned above
     Ok(())
+}
+
+/// Grouped arguments for a single discovered software item.
+struct ProcessDiscoveryArgs<'a> {
+    package_identifier: &'a str,
+    name: &'a str,
+    installed_version: &'a str,
+    provider_type_str: &'a str,
+}
+
+/// Pre-load the ignore set for a specific `(tenant_id, provider_config_id)` pair.
+///
+/// Returns a `HashSet` of `package_identifier` strings that should be skipped.
+/// Scoped per config to keep the set bounded.
+async fn load_ignore_set(
+    db: &sea_orm::DatabaseConnection,
+    tenant_id: Uuid,
+    provider_config_id: Uuid,
+) -> Result<HashSet<String>, AutodiscoveryError> {
+    let rules = AutodiscoveryIgnore::find()
+        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
+        .filter(autodiscovery_ignore::Column::ProviderConfigId.eq(provider_config_id))
+        .all(db)
+        .await?;
+    Ok(rules.into_iter().map(|r| r.package_identifier).collect())
 }
 
 /// Process a single discovered software item: check ignore list, upsert or create.
@@ -551,30 +561,20 @@ async fn process_homebrew_default(
 ///    and insert a new `host_software_item` link for this host.
 /// 3. Otherwise create a new pending `software_item` (name only) and a new
 ///    `host_software_item` with the provider info.
-#[allow(clippy::too_many_arguments)]
 async fn process_one_discovery(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
     host_id: Uuid,
     provider_config_id: Uuid,
-    provider_type_str: &str,
-    package_identifier: &str,
-    name: &str,
-    installed_version: &str,
+    args: ProcessDiscoveryArgs<'_>,
+    ignore_set: &HashSet<String>,
     now: OffsetDateTime,
 ) -> Result<(), AutodiscoveryError> {
-    // 1. Check ignore list.
-    let ignored = AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id))
-        .filter(autodiscovery_ignore::Column::ProviderConfigId.eq(provider_config_id))
-        .filter(autodiscovery_ignore::Column::PackageIdentifier.eq(package_identifier))
-        .count(db)
-        .await?;
-
-    if ignored > 0 {
+    // 1. Check ignore list (O(1) lookup into pre-loaded set).
+    if ignore_set.contains(args.package_identifier) {
         tracing::debug!(
             %provider_config_id,
-            %package_identifier,
+            package_identifier = %args.package_identifier,
             "skipping ignored autodiscovery item"
         );
         return Ok(());
@@ -584,14 +584,14 @@ async fn process_one_discovery(
     let existing_host_link = HostSoftwareItem::find()
         .filter(host_software_item::Column::HostId.eq(host_id))
         .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
-        .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
+        .filter(host_software_item::Column::PackageIdentifier.eq(args.package_identifier))
         .one(db)
         .await?;
 
     if let Some(link) = existing_host_link {
         // Just refresh the installed version — no schema changes needed.
         let mut active: host_software_item::ActiveModel = link.into();
-        active.installed_version = Set(Some(installed_version.to_string()));
+        active.installed_version = Set(Some(args.installed_version.to_string()));
         active.installed_version_detected_at = Set(Some(now));
         active.update(db).await?;
         return Ok(());
@@ -602,7 +602,7 @@ async fn process_one_discovery(
     // so the global catalog stays unified.
     let candidate_links: Vec<Uuid> = HostSoftwareItem::find()
         .filter(host_software_item::Column::ProviderConfigId.eq(provider_config_id))
-        .filter(host_software_item::Column::PackageIdentifier.eq(package_identifier))
+        .filter(host_software_item::Column::PackageIdentifier.eq(args.package_identifier))
         .all(db)
         .await?
         .into_iter()
@@ -628,7 +628,7 @@ async fn process_one_discovery(
         let new_item = software_item::ActiveModel {
             id: Set(new_id),
             tenant_id: Set(tenant_id),
-            name: Set(name.to_string()),
+            name: Set(args.name.to_string()),
             enabled: Set(false),
             discovery_state: Set(Some(SoftwareDiscoveryState::Pending)),
             last_checked_at: Set(None),
@@ -638,8 +638,8 @@ async fn process_one_discovery(
         };
         SoftwareItem::insert(new_item).exec(db).await?;
         tracing::debug!(
-            %package_identifier,
-            %provider_type_str,
+            package_identifier = %args.package_identifier,
+            provider_type_str = %args.provider_type_str,
             "created pending software item from discovery"
         );
         new_id
@@ -651,9 +651,9 @@ async fn process_one_discovery(
         host_id: Set(host_id),
         software_item_id: Set(software_item_id),
         provider_config_id: Set(provider_config_id),
-        package_identifier: Set(package_identifier.to_string()),
+        package_identifier: Set(args.package_identifier.to_string()),
         config_override: Set(None),
-        installed_version: Set(Some(installed_version.to_string())),
+        installed_version: Set(Some(args.installed_version.to_string())),
         installed_version_detected_at: Set(Some(now)),
         last_updated_at: Set(None),
         linked_at: Set(now),

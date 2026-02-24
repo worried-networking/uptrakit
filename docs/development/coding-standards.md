@@ -349,3 +349,115 @@ mod sea_orm_impl {
 | `EncryptedString` | `uptrakit-shared-db` | `mqtt_client.password`, `oidc_provider.client_secret`, `ca_certificate.key_pem`, `ssh_host.private_key` |
 
 See also: [Secrets Handling and Encryption](../security/secrets-and-encryption.md) for security properties of `SecretString` and `MaskedEmail`.
+
+## Database Query Patterns
+
+Paginated list endpoints must never issue per-record queries. Violating this rule produces O(N) database round-trips
+that make the API unusable at scale.
+
+### Batch loading rule
+
+After fetching a page of N records, collect all unique foreign-key IDs from the page and load related entities in a
+single `is_in(ids)` query. Build a `HashMap<Uuid, …>` for O(1) lookup during response construction. Never call
+`find_by_id` inside a loop.
+
+```rust
+// ✓ Correct — two queries regardless of page size
+let host_ids: Vec<Uuid> = records.iter().map(|r| r.host_id).collect();
+let hosts: HashMap<Uuid, String> = Host::find()
+    .filter(host::Column::Id.is_in(host_ids))
+    .all(db).await?
+    .into_iter().map(|h| (h.id, h.friendly_name)).collect();
+
+// ✗ Wrong — N+1 queries
+for record in &records {
+    let name = resolve_host_name(db, record.host_id).await?;
+}
+```
+
+### Tenant-scoped subquery
+
+Use `Expr::in_subquery(…)` or a JOIN for tenant-scoping tables that reference `host_id` (e.g. `update_history`).
+Loading all host IDs into application memory and passing them to `is_in(Vec<Uuid>)` is only acceptable when the
+tenant is guaranteed to have fewer than ~100 rows; for unbounded collections use a subquery:
+
+```rust
+let host_subquery = Query::select()
+    .column(host::Column::Id)
+    .from(host::Entity)
+    .and_where(Expr::col(host::Column::TenantId).eq(tenant_id))
+    .to_owned();
+Entity::find().filter(Column::HostId.in_subquery(host_subquery))
+```
+
+### Scope pre-loaded sets tightly
+
+When pre-loading a lookup set to avoid per-item queries, scope it to the narrowest key available. For example,
+pre-load autodiscovery ignore rules per `(tenant_id, provider_config_id)`, not per `tenant_id` alone — the
+per-config set is bounded to what a user has explicitly configured for that one provider, while the per-tenant set
+can be unbounded.
+
+### Avoid `unwrap_or(0)` on count queries
+
+A silently-zero count on DB failure hides errors. Propagate DB errors with `?` or log and return an explicit error
+response. Do not use `count.unwrap_or(0)` as a silent default.
+
+## Exhaustive Enum Dispatch
+
+Wildcard arms in dispatch functions are forbidden. A function that maps enum variants to domain values (timeout,
+routing key, HTTP status code) must enumerate every known variant explicitly — a new variant must not silently
+inherit an arbitrary default.
+
+Extend the `#[non_exhaustive]` rule from the "Public Enum Extensibility" section:
+
+- **Closed enum**: remove the wildcard entirely. The compiler enforces exhaustiveness at compile time.
+- **`#[non_exhaustive]` enum** (e.g., `ServiceType`, `UpdateFinalStatus`): a wildcard is required in external
+  crates, but it must never be silent. Replace `_ => some_default` with a `tracing::warn!` + a documented safe
+  fallback, and replace `_ => unreachable!()` with `tracing::warn!` + early return. Never use `unreachable!()` on
+  values that come from wire or database state.
+
+```rust
+// ✓ Correct — unknown variant logged; safe fallback chosen explicitly
+match service_type {
+    ServiceType::Agent | ServiceType::SshAgent => Some(AGENT_SHUTDOWN_TIMEOUT_SECS),
+    ServiceType::Mqtt => None,
+    _ => {
+        tracing::warn!(?service_type, "unknown ServiceType for shutdown timeout; using agent default");
+        Some(AGENT_SHUTDOWN_TIMEOUT_SECS)
+    }
+}
+
+// ✗ Wrong — silent incorrect behaviour for future variants
+_ => Some(120),
+
+// ✗ Wrong — panics when a new wire variant arrives
+_ => unreachable!("unknown ServiceType variant"),
+```
+
+## Parameter Struct Pattern
+
+Functions must not require `#[allow(clippy::too_many_arguments)]`. No Clippy suppression is approved in this
+codebase (AGENTS.md invariant 13). When a function's non-`self` parameter count exceeds Clippy's threshold (7),
+introduce a named grouped struct to batch related scalar or reference parameters:
+
+```rust
+struct ProcessDiscoveryArgs<'a> {
+    package_identifier: &'a str,
+    name: &'a str,
+    installed_version: &'a str,
+    provider_type_str: &'a str,
+}
+
+async fn process_one_discovery(
+    db: &DatabaseConnection,
+    tenant_id: Uuid,
+    host_id: Uuid,
+    provider_config_id: Uuid,
+    args: ProcessDiscoveryArgs<'_>,   // replaces 4 separate parameters
+    ignore_set: &HashSet<String>,
+    now: OffsetDateTime,
+) -> Result<()> { ... }
+```
+
+Name the struct after its semantic role (`ProcessDiscoveryArgs`, `CreateServiceArgs`), not a generic label like
+`Params`. The struct should be private to the module unless it is part of a public API.

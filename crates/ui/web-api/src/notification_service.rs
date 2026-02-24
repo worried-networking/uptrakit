@@ -118,7 +118,10 @@ impl NotificationService {
             ServiceType::Agent => "agent",
             ServiceType::Mqtt => "mqtt",
             ServiceType::SshAgent => "ssh_agent",
-            _ => unreachable!("unknown ServiceType variant"),
+            _ => {
+                tracing::warn!(?service_type, "unknown ServiceType in backlog delivery — skipping");
+                return 0;
+            }
         };
 
         let broadcast_condition = Condition::all()

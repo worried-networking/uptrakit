@@ -8,7 +8,7 @@ The primary architectural concern at workspace level is that `uptrakit-crypto`, 
 
 Several high-severity operational issues span the workspace. The `AGENTS.md` invariant document references a `crates/shared/core/` (`uptrakit-core`) crate that does not exist, which misleads any agent or developer reading the canonical layout map. The child-process orphan problem in `uptrakit-command` is a documented gap that affects every binary that runs updates — orphaned `apt`, `brew`, or custom script processes hold system locks until manually killed. And the mTLS configuration in `uptrakit-controller` uses `.allow_unauthenticated()`, so the transport-layer PKI boundary that mTLS is meant to provide is not actually enforced; agent trust rests entirely on application-layer checks.
 
-The extensibility seam for providers is well-designed at the `Provider` trait and `register_providers!` macro level but fractures in three places outside that seam: `ProviderType::supports_discovery()` in `uptrakit-shared-types` duplicates capability knowledge that `Provider::capabilities()` already owns; `create_provider_for_discovery` in the registry bypasses the macro entirely; and package-identifier validation is split between the provider `validate()` method and raw string comparisons in a query helper. Any new discovery-capable provider must touch all three locations and will get a runtime error, not a compile error, if any is missed. Addressing these cross-cutting concerns would raise the baseline from a solid prototype-quality codebase to one ready for production multi-tenant operation.
+The extensibility seam for providers is well-designed at the `Provider` trait and `register_providers!` macro level. Discovery-capable provider support is now fully registry-driven — `discovery_provider_types()` is auto-generated from the macro, and `create_provider_for_discovery` is macro-generated too; no manual sync is needed. The remaining extensibility concern is that package-identifier validation is split between the provider `validate()` method and raw string comparisons in a query helper (`software_items.rs`). Addressing this remaining cross-cutting concern would complete the provider extensibility story.
 
 ---
 
@@ -97,10 +97,6 @@ The AGENTS.md should include explicit dependency direction statements to elimina
 
 ### Issues
 
-**[SEVERITY: High]** `crates/ui/web-api/src/auth/authentication.rs:115` — OIDC `email_verified` claim silently discarded
-
-The `resolve_oidc_user` function pattern-matches `email_verified: _`, ignoring the field entirely. A misconfigured or malicious OIDC provider can assert an unverified email address, which the controller will accept for account creation or login matching. This is a cross-cutting invariant failure: the OIDC authentication path in `crates/ui/web-api/src/routes/oidc_auth.rs` retrieves the claim value but `resolve_oidc_user` never consults it. The fix must be applied at the workspace-visible boundary: reject the authentication if `email_verified` is `Some(false)` and document the `None` treatment (either accept or reject, but do so explicitly) in `docs/security/auth-and-authorization.md`.
-
 **[SEVERITY: High]** `crates/core/controller/src/pki.rs:1169` and `crates/ui/web-api/src/routes/server_cert.rs:199` — mTLS configured with `.allow_unauthenticated()`
 
 `WebPkiClientVerifier::builder(...).allow_unauthenticated()` permits TLS sessions from clients that present no certificate. The agent-controller security model documented in AGENTS.md depends on mTLS as the transport-layer trust anchor; the architecture invariant "agents authenticate via client certificates issued by the controller CA" is not enforced at the TLS layer. Application-layer checks (machine-ID validation, enrollment state) remain intact, but transport-layer PKI enforcement is absent. The correct builder terminal for requiring client certificates is `.build()` without `.allow_unauthenticated()`. This is a cross-workspace concern because it affects the security guarantee described in `docs/security/pki-certificates.md` and `docs/security/tofu-tls.md`.
@@ -138,21 +134,13 @@ Although the controller has migrated to DB-based JWT key storage, the file-based
 ### Strengths
 
 - Zero `#[allow(dead_code)]` annotations across all 24 crates — dead code is removed, not suppressed.
-- Only one `#[allow(clippy::...)]` in the entire workspace (`crates/ui/web-api/src/queries/autodiscovery.rs:554`), consistent with the AGENTS.md invariant that no approved exceptions exist.
+- Zero `#[allow(clippy::...)]` suppressions in the entire workspace, consistent with the AGENTS.md invariant that no approved exceptions exist.
 - `crates/core/controller/src/durations.rs`: All domain-significant durations (shutdown timeout, stale claim window, cert renewal threshold) are named constants with doc-comments. No magic numeric literals for time values in the controller.
 - Uniform error propagation via `rootcause` (`bail!`, `report!`, `context_to`, `impl_report_conversion!`) with no `Report::new()` anti-pattern and no `Result<T, String>` in library boundaries.
 - `crates/ui/web-api/src/lib.rs:98`: `CaKeyStore` `Debug` implementation manually redacts all key fields to `[REDACTED]` — secrets cannot leak via `{:?}` formatting, log macros, or `dbg!()`.
 - `crates/ui/web-api/src/startup.rs`: Discrete startup phases use distinct typed structs (`ReconciledSettings`, `ValidatedConfig`, `PkiRuntime`) — partially initialized state cannot be passed to functions expecting fully initialized state.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/routes/agent_ws.rs:453` — Wildcard arm on `UpdateFinalStatus` match silently maps all future variants to `Failed`
-
-`UpdateFinalStatus::Failed | _ => UpdateStatus::Failed` — any new variant added to `UpdateFinalStatus` will silently map to `Failed` with no compile-time warning. This is a workspace-level concern because `UpdateFinalStatus` is defined in `uptrakit-internal-wire`, and the wire crate is the intended extension point for new status codes. Adding a new status variant passes compilation without triggering any exhaustiveness error in the consumer. The wildcard should be removed; the match should be exhaustive.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/routes/service_ws.rs:610-614` — Magic constant `120` repeated inline for shutdown timeout; wildcard arm masks future service types
-
-The value `120` (seconds) appears three times inline in proximity to a `_ => Some(120)` wildcard arm. Domain-significant timeout constants should be in `crates/core/controller/src/durations.rs`, and the wildcard should be replaced with exhaustive matching so that a new `ServiceType` variant does not silently inherit an arbitrary timeout. This violates the same principle as the `agent_ws.rs` finding above: `ServiceType` is a wire-protocol extension point in `uptrakit-internal-wire`.
 
 **[SEVERITY: High]** `crates/ui/web-api/src/routes/oidc_auth.rs:224-637` — `oidc_callback` is 413 lines with at least 7 levels of nesting
 
@@ -175,13 +163,9 @@ Axum's extractor system supports `Path(id): Path<Uuid>` directly, returning a ty
 ##### Strengths
 
 - **Zero `#[allow(dead_code)]` annotations across all 24 crates.** No crate uses `#[allow(dead_code)]` to suppress warnings. All unused code has been removed.
-- **Only one `#[allow(clippy::...)]` suppression in the entire workspace.** `#[allow(clippy::too_many_arguments)]` at `crates/ui/web-api/src/queries/autodiscovery.rs:554`. Already documented with a prescribed fix.
+- **Zero `#[allow(clippy::...)]` suppressions in the entire workspace.** All previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead code removal.
 
 ##### Issues
-
-**[SEVERITY: Medium]** `crates/ui/web-api/src/routes/service_ws.rs:616-621`, `crates/ui/web-api/src/notification_service.rs:117-121` — Wildcard arms on `ServiceType` enum matches across multiple non-exhaustive enum consumers
-
-Beyond the already-documented wildcard issues, ping interval defaults and backlog delivery also use wildcards on `ServiceType`. The ping interval wildcard `_ => 300u32` silently assigns a 5-minute heartbeat to any future service type, and the notification service wildcard `_ => unreachable!()` will panic. Each new `ServiceType` variant requires manual updates in at least four files in `web-api`.
 
 ---
 
@@ -303,22 +287,6 @@ A new `Interval` is created and its first tick immediately consumed with `.await
 
 ### Issues
 
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/update_history.rs:78-83` — Full host table scan for tenant scoping in `tenant_host_ids()`
-
-The helper loads all host rows for the tenant into application memory and passes them as an `IN (...)` clause. For tenants with many hosts, this degrades non-linearly, risks hitting driver-level parameter count limits, and forces the DB to build a large ephemeral set for each query that calls `tenant_host_ids()`. The fix is to replace the in-memory ID collection with a JOIN or a correlated subquery that keeps filtering inside the DB.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:126-178` — N+1 query pattern in `load_item_hosts`
-
-For N host assignments: 1 query to load links, then N individual `find_by_id(host_id)` calls plus N individual `find_by_id(provider_config_id)` calls = 1 + 2N round trips. `load_item_hosts` is called from `get_software_item`, `assign_hosts`, and `update_host_assignment`. A single JOIN across `host_software_items`, `hosts`, and `provider_configs` would reduce this to one query regardless of N.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/update_history.rs:146-151` — N+1 in `list_update_history` for a paginated list
-
-For a page of 20 records: `resolve_host_name` and `resolve_software_item_name` each issue an individual lookup per record, producing up to 40 extra round trips per page. Both should be batched using `Column::Id.is_in(ids)` before the main loop.
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/autodiscovery.rs:567-580` — Ignore-list check issued inside a per-item loop
-
-`process_one_discovery` issues a `COUNT(*)` query for every discovered software item. For a host with 200 installed packages, this is 200 sequential DB queries. The ignore list should be bulk-loaded once before the discovery loop and checked in memory.
-
 **[SEVERITY: Medium]** `crates/shared/db/src/entity/oidc_provider.rs:89` — Soft-delete column named `deleted_at` instead of `deactivated_at`
 
 All other 7 soft-deletable entities (`tenants`, `users`, `hosts`, `services`, `software_items`, `provider_configs`, `ca_certificates`) use `deactivated_at`. The `oidc_providers` entity uses `deleted_at`. This inconsistency prevents a generic soft-delete utility from working across all entities and confuses developers who expect a uniform column name. A migration renaming the column is the correct fix.
@@ -368,10 +336,6 @@ Issues N_tenants x 6 individual INSERT statements. Should use a single multi-row
 - 70+ endpoints carry `x-required-permission` OpenAPI extension annotations with values that match `Permission::as_str()` serialization — auditable authorization coverage by static inspection.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/ui/web-api/src/queries/autodiscovery.rs:554` — `#[allow(clippy::too_many_arguments)]` violates AGENTS.md invariant 13
-
-AGENTS.md states: "There are currently no approved exceptions in the codebase; all previously allowed lints have been resolved via parameter structs, `FromStr` implementations, or dead code removal." This single remaining suppression must be resolved. The prescribed fix is to introduce a `DiscoveryEntry<'a>` struct grouping the `package_identifier`, `name`, `installed_version`, and `provider_type_str` arguments, reducing the parameter count below Clippy's threshold without changing behaviour.
 
 **[SEVERITY: High]** `crates/ui/web-api/src/routes/api_tokens.rs:19-31` and `crates/ui/web-api/src/routes/auth.rs:339,666` — User-identity endpoints missing `x-required-permission` OpenAPI extension
 
@@ -425,14 +389,6 @@ The enum has 9 variants and will grow with new features. Adding `#[non_exhaustiv
 - `crates/providers/core/src/secrets.rs:9-17`: `SecretMasking` trait with no-op defaults — providers that have no secrets do not need to implement masking.
 
 ### Issues
-
-**[SEVERITY: High]** `crates/shared/types/src/provider_types.rs:34-36` — `supports_discovery()` hardcodes discovery capability; duplicates `Provider::capabilities()` in a different crate
-
-`ProviderType::supports_discovery()` uses a `matches!(self, Self::Homebrew | Self::ProxmoxHelperScripts)` literal. The authoritative source of capability knowledge is `Provider::capabilities()` in each provider crate. Adding a new discovery-capable provider requires changes in three places: the provider crate (add `ProviderCapability::SoftwareDiscovery` to `capabilities()`), the `ProviderType` enum in `uptrakit-shared-types` (update `supports_discovery()`), and a hardcoded slice in `crates/ui/web-api/src/routes/agent_ws.rs:1217-1220`. Missing any one of these produces a silent runtime failure — discovery assignments are not sent to the new provider. The fix is to drive the discovery filter from a capability flag queried via the registry, eliminating `supports_discovery()` as a separate concern.
-
-**[SEVERITY: High]** `crates/providers/registry/src/registry.rs:165-204` — `create_provider_for_discovery` is a 40-line manual dispatch block that bypasses the `register_providers!` macro
-
-This method exists because `create_provider` calls `validate()`, which requires a populated config, while discovery uses empty configs. The `_ =>` catch-all produces a runtime error for any provider not explicitly handled — a new provider added to the macro but not to this method will only fail at runtime when a discovery assignment is received. The gap should be closed either by adding a `validate: bool` parameter to the macro-generated creation path or by introducing a `Provider::create_for_discovery()` trait method with a default that delegates to `create_provider` with an empty config.
 
 **[SEVERITY: High]** `crates/ui/web-api/src/queries/software_items.rs:329-332` — Package identifier validation uses raw string comparison against `"homebrew"`
 
