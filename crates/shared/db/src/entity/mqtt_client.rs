@@ -19,6 +19,8 @@ pub struct Model {
     pub topic_prefix: String,
     pub connection_status: MqttClientConnectionStatus,
     pub status_updated_at: OffsetDateTime,
+    pub ha_discovery: bool,
+    pub ha_discovery_prefix: String,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
 }

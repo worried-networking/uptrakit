@@ -209,8 +209,8 @@
 										{:else}
 											<p class="text-sm text-surface-500">No output recorded.</p>
 										{/if}
-										{#if item.initiated_by}
-											<p class="mt-2 text-xs text-surface-500">Initiated by: {item.initiated_by}</p>
+										{#if item.actor_type}
+											<p class="mt-2 text-xs text-surface-500">Actor: {item.actor_type} ({item.actor_id})</p>
 										{/if}
 									</td>
 								</tr>

@@ -55,7 +55,10 @@ impl HumanOutput for UpdateHistoryResponse {
         }
         out.push_str(&format!("To Version:    {}\n", self.to_version));
         out.push_str(&format!("Status:        {}\n", self.status.as_str()));
-        out.push_str(&format!("Initiated By:  {}\n", self.initiated_by));
+        out.push_str(&format!(
+            "Actor:         {} ({})\n",
+            self.actor_type, self.actor_id
+        ));
         out.push_str(&format!(
             "Started At:    {}\n",
             self.started_at
@@ -154,7 +157,8 @@ mod tests {
             from_version: Some("18.0.0".to_string()),
             to_version: "20.0.0".to_string(),
             status: UpdateStatus::Completed,
-            initiated_by: "admin".to_string(),
+            actor_type: "user".to_string(),
+            actor_id: "admin".to_string(),
             started_at: datetime!(2025-01-01 00:00:00 UTC),
             completed_at: Some(datetime!(2025-01-01 00:01:00 UTC)),
             output: "Success".to_string(),

@@ -41,7 +41,8 @@ fn build_response(
         to_version: record.to_version.clone(),
         status: db_status_to_api(&record.status),
         output,
-        initiated_by: record.initiated_by.clone(),
+        actor_type: record.actor_type.clone(),
+        actor_id: record.actor_id.clone(),
         started_at: record.started_at,
         completed_at: record.completed_at,
         created_at: record.created_at,
@@ -229,7 +230,8 @@ mod tests {
             status: update_history::UpdateStatus::Completed,
             output: "Update completed successfully".to_string(),
             output_bytes: 28,
-            initiated_by: "user-123".to_string(),
+            actor_type: "user".to_string(),
+            actor_id: "user-123".to_string(),
             started_at: now,
             completed_at: Some(now),
             created_at: now,
@@ -248,7 +250,8 @@ mod tests {
         assert_eq!(resp.to_version, "2.0.0");
         assert_eq!(resp.status, UpdateStatus::Completed);
         assert_eq!(resp.output, "Update completed successfully");
-        assert_eq!(resp.initiated_by, "user-123");
+        assert_eq!(resp.actor_type, "user");
+        assert_eq!(resp.actor_id, "user-123");
         assert!(resp.completed_at.is_some());
     }
 
@@ -264,7 +267,8 @@ mod tests {
             status: update_history::UpdateStatus::Failed,
             output: "Error: package not found".to_string(),
             output_bytes: 25,
-            initiated_by: "scheduler".to_string(),
+            actor_type: "scheduler".to_string(),
+            actor_id: "".to_string(),
             started_at: now,
             completed_at: Some(now),
             created_at: now,
@@ -283,7 +287,7 @@ mod tests {
         assert_eq!(resp.to_version, "3.0.0");
         assert_eq!(resp.status, UpdateStatus::Failed);
         assert_eq!(resp.output, "Error: package not found");
-        assert_eq!(resp.initiated_by, "scheduler");
+        assert_eq!(resp.actor_type, "scheduler");
     }
 
     #[test]
@@ -298,7 +302,8 @@ mod tests {
             status: update_history::UpdateStatus::Pending,
             output: String::new(),
             output_bytes: 0,
-            initiated_by: "mqtt".to_string(),
+            actor_type: "mqtt".to_string(),
+            actor_id: "".to_string(),
             started_at: now,
             completed_at: None,
             created_at: now,
@@ -313,7 +318,7 @@ mod tests {
 
         assert_eq!(resp.status, UpdateStatus::Pending);
         assert!(resp.completed_at.is_none());
-        assert_eq!(resp.initiated_by, "mqtt");
+        assert_eq!(resp.actor_type, "mqtt");
     }
 
     #[test]

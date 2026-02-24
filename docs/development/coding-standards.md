@@ -159,7 +159,7 @@ pub async fn list_hosts(
 ```
 
 Use the bound variable name `_user` when the `AuthenticatedUser` value is not used in the body, and `user`
-when it is (e.g. `user.user_id` for an `initiated_by` field).
+when it is (e.g. `user.user_id` for an `actor_id` field).
 
 ### Required utoipa extension
 

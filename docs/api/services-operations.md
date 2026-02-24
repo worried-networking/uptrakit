@@ -9,7 +9,7 @@
   manage the service lifecycle (approve, reject, deactivate, merge).
 - `/api/v1/agents/{agent_id}/version-check` instructs the controller to send `check_versions` over WebSocket.
 - `/api/v1/agents/{agent_id}/execute-update` triggers `execute_update` with the software item ID(s).
-- `/api/v1/update-history` provides audit logs for updates; each row tracks `status`, `output`, `initiated_by`, and `tenant_id`.
+- `/api/v1/update-history` provides audit logs for updates; each row tracks `status`, `output`, `actor_type`, `actor_id`, and `tenant_id`.
 
 ## MQTT Service
 

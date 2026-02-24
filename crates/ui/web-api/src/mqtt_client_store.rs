@@ -125,6 +125,8 @@ pub async fn create_mqtt_client(params: CreateMqttClientParams<'_>) -> Result<mq
         topic_prefix: Set(topic_prefix.to_string()),
         connection_status: Set(MqttClientConnectionStatus::Offline),
         status_updated_at: Set(now),
+        ha_discovery: Set(false),
+        ha_discovery_prefix: Set("homeassistant".to_string()),
         created_at: Set(now),
         updated_at: Set(now),
     };

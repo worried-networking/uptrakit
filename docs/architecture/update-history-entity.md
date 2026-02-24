@@ -13,7 +13,8 @@ Records are immutable — once created they are not modified or soft-deleted.
   - `to_version` (target version)
   - `status` (string-backed enum: pending, in_progress, completed, failed)
   - `output` (text, NOT NULL — full command output for success or failure)
-  - `initiated_by` (string, NOT NULL — user UUID, "scheduler", or "mqtt")
+  - `actor_type` (string, NOT NULL — e.g. `"user"`, `"mqtt"`, `"scheduler"`, or `"legacy"` for pre-migration rows)
+  - `actor_id` (string, NOT NULL — e.g. user UUID or MQTT client UUID; empty string for non-user actors)
   - `started_at`
   - `completed_at?`
   - `created_at`

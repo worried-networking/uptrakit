@@ -773,6 +773,8 @@ mod tests {
             topic_prefix: ActiveValue::Set("uptrakit".to_string()),
             connection_status: ActiveValue::Set(MqttClientConnectionStatus::Offline),
             status_updated_at: ActiveValue::Set(now),
+            ha_discovery: ActiveValue::Set(false),
+            ha_discovery_prefix: ActiveValue::Set("homeassistant".to_string()),
             created_at: ActiveValue::Set(now),
             updated_at: ActiveValue::Set(now),
         };

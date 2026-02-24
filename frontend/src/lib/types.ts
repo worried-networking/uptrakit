@@ -424,7 +424,8 @@ export interface UpdateHistoryResponse {
 	from_version: string | null;
 	to_version: string;
 	status: UpdateHistoryStatus;
-	initiated_by: string | null;
+	actor_type: string;
+	actor_id: string;
 	started_at: string | null;
 	completed_at: string | null;
 	output: string | null;

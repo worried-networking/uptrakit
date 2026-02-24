@@ -27,7 +27,8 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub output: String,
     pub output_bytes: i64,
-    pub initiated_by: String,
+    pub actor_type: String,
+    pub actor_id: String,
     pub started_at: OffsetDateTime,
     pub completed_at: Option<OffsetDateTime>,
     pub created_at: OffsetDateTime,

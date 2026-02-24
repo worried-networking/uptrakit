@@ -81,7 +81,8 @@ pub struct UpdateHistoryResponse {
     pub to_version: String,
     pub status: UpdateStatus,
     pub output: String,
-    pub initiated_by: String,
+    pub actor_type: String,
+    pub actor_id: String,
     #[serde(with = "time::serde::rfc3339")]
     #[cfg_attr(
         feature = "openapi",
