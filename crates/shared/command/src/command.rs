@@ -60,7 +60,13 @@ pub(crate) async fn run_command_exec_impl(
     tracing::debug!(program, args = ?args, working_dir = ?working_dir, "spawning command");
 
     let mut cmd = Command::new(program);
-    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // kill_on_drop(true) ensures the child is sent SIGKILL when the Child handle is
+    // dropped (e.g. on timeout), preventing orphaned processes from holding package
+    // manager locks or consuming resources after the executor returns.
+    cmd.args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
 
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);

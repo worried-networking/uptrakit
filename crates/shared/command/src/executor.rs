@@ -105,11 +105,11 @@ impl CommandSpec {
 
     /// Set a maximum execution time for the command (builder pattern).
     ///
-    /// When the deadline is reached, the executor returns
-    /// [`CommandError::TimedOut`]. The child process's stdio pipes are closed,
-    /// but the orphaned process is not killed; a follow-up task can add
-    /// `child.start_kill()` once the executor is restructured to retain the
-    /// child handle outside the completion future.
+    /// When the deadline is reached the executor returns
+    /// [`CommandError::TimedOut`]. The child process is sent `SIGKILL` via
+    /// `kill_on_drop(true)`, which fires automatically when the
+    /// `tokio::process::Child` handle is dropped as the timed-out future is
+    /// cancelled.
     #[must_use]
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = Some(timeout);
