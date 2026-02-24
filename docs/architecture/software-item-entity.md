@@ -56,6 +56,58 @@ creating multiple fragmented software item entries.
 Pending items are created automatically by the autodiscovery subsystem. See
 [docs/api/autodiscovery.md](../api/autodiscovery.md) for the discovery workflow and API endpoints.
 
+## Response type fields
+
+### `SoftwareItemResponse` (list and mutation responses)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | `Uuid` | Item UUID |
+| `name` | `String` | Display name |
+| `provider_types` | `Vec<String>` | Distinct provider types across all host assignments |
+| `enabled` | `bool` | Whether version checks are active |
+| `discovery_state` | `Option<String>` | `null`, `"pending"`, or `"approved"` |
+| `last_checked_at` | `Option<OffsetDateTime>` | When the last successful version check completed; updated in batch after `VersionCheckResults` is received |
+| `host_count` | `u64` | Number of hosts currently assigned |
+| `latest_version` | `Option<String>` | Latest upstream version from `available_versions`, if known. Populated for agent-side providers (Homebrew, PHS). `null` when not yet resolved. |
+| `update_available` | `bool` | `true` if at least one assigned host has a different `installed_version` than `latest_version` (string equality; no semver parsing) |
+| `created_at` | `OffsetDateTime` | |
+| `updated_at` | `OffsetDateTime` | |
+
+### `SoftwareItemDetailResponse` (detail and assignment responses)
+
+Extends `SoftwareItemResponse` with:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `hosts` | `Vec<SoftwareItemHostSummary>` | Per-host assignment records |
+
+### `SoftwareItemHostSummary`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `host_id` | `Uuid` | |
+| `hostname` | `String` | |
+| `friendly_name` | `String` | |
+| `provider_config_id` | `Uuid` | |
+| `provider_config_name` | `String` | |
+| `provider_type` | `String` | |
+| `package_identifier` | `String` | |
+| `config_override` | `Option<Value>` | |
+| `installed_version` | `Option<String>` | Version detected on this host |
+| `installed_version_detected_at` | `Option<OffsetDateTime>` | |
+| `last_updated_at` | `Option<OffsetDateTime>` | |
+| `linked_at` | `OffsetDateTime` | |
+| `latest_version` | `Option<String>` | Same as the item-level `latest_version` (denormalized for convenience) |
+| `update_available` | `bool` | `true` when `installed_version` and `latest_version` are both `Some` and differ |
+
+> **Note:** `update_available` uses string equality only. Because version format is
+> provider-specific (e.g. Homebrew may return `"1.2.3"`, PHS may return `"v1.2.3"`), no
+> semver normalization is applied. For agent-side providers (Homebrew, PHS), `latest_version`
+> is populated by the agent during the `VersionCheckResults` handler. For controller-side
+> providers (GitHub Releases, Docker Registry), the value comes from the scheduled upstream
+> resolver and may be `null` until that task has run.
+
 ## REST API
 
 | Method | Path | Permission | Status | Description |
@@ -69,6 +121,7 @@ Pending items are created automatically by the autodiscovery subsystem. See
 | POST | `/api/v1/software-items/{id}/hosts` | ManageSoftware | 200 | Assign to additional host(s); each assignment carries its own provider config and package identifier |
 | PUT | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 200 | Update the provider config, package identifier, or config override for a specific host assignment |
 | DELETE | `/api/v1/software-items/{id}/hosts/{host_id}` | ManageSoftware | 204 | Unassign from a host; add `?ignore=true` to also create an ignore rule |
+| POST | `/api/v1/software-items/{id}/hosts/{host_id}/update` | ManageSoftware | 200 | Trigger a software update on a specific host; returns `TriggerUpdateResponse` |
 
 ## Validation rules
 

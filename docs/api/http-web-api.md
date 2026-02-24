@@ -202,13 +202,34 @@ Types are defined in `crates/shared/web-api-types/src/software_items.rs`:
 | Type | Fields |
 | --- | --- |
 | `TriggerVersionCheckResponse` | `agents_notified` (u32), `message` (String) |
+| `SoftwareItemResponse` | `id`, `name`, `provider_types`, `enabled`, `discovery_state`, `last_checked_at`, `host_count`, `latest_version` (Option), `update_available`, `created_at`, `updated_at` |
+| `SoftwareItemDetailResponse` | Extends `SoftwareItemResponse` with `hosts: Vec<SoftwareItemHostSummary>` |
+| `SoftwareItemHostSummary` | `host_id`, `hostname`, `friendly_name`, `provider_config_id`, `provider_config_name`, `provider_type`, `package_identifier`, `config_override`, `installed_version`, `installed_version_detected_at`, `last_updated_at`, `linked_at`, `latest_version` (Option), `update_available` |
+| `TriggerUpdateRequest` | `to_version` (String), `release_info` (Option — `{ tag: String, release_url: String }`) |
+| `TriggerUpdateResponse` | `update_history_id` (Uuid), `status` (TriggerUpdateStatus — `pending`, `queued`) |
+
+**`latest_version` and `update_available`** are populated by the controller at read time:
+
+- `latest_version` is sourced from the `available_versions` table for the software item. It is
+  populated by agent-side providers (Homebrew, PHS) during the `VersionCheckResults` WebSocket
+  handler, and by the scheduled upstream resolver for controller-side providers (GitHub Releases,
+  Docker Registry). `null` when neither has run yet.
+- `update_available` at the item level is `true` if any assigned host's `installed_version`
+  differs from `latest_version` (string equality). At the host level (`SoftwareItemHostSummary`),
+  it is `true` when both `installed_version` and `latest_version` are non-null and differ.
+- `last_checked_at` on `SoftwareItemResponse` is updated in a single batch `UPDATE` after the
+  `VersionCheckResults` WebSocket message is processed, covering all items that had at least one
+  successful result.
+
+See [Software Item Entity](../architecture/software-item-entity.md) for the full field reference.
 
 ### Key files
 
 | File | Purpose |
 | --- | --- |
-| `crates/ui/web-api/src/routes/software_items.rs` | Route handlers (`check_versions`, `check_versions_host`) |
-| `crates/shared/web-api-types/src/software_items.rs` | Response type |
+| `crates/ui/web-api/src/routes/software_items.rs` | Route handlers (`check_versions`, `check_versions_host`, `trigger_update`) |
+| `crates/ui/web-api/src/routes/agent_ws.rs` | `VersionCheckResults` handler (updates `last_checked_at`) |
+| `crates/shared/web-api-types/src/software_items.rs` | Response and request types |
 
 ## Scheduler Endpoints
 

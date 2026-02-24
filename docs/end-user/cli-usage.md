@@ -162,7 +162,24 @@ uptrakit software-items unassign <ITEM_ID> --host <HOST_ID>
 
 # Unassign a host and create an autodiscovery ignore rule for this package
 uptrakit software-items unassign <ITEM_ID> --host <HOST_ID> --ignore
+
+# Trigger an update to the latest known version on a specific host
+# (resolves the current latest_version automatically; errors if not yet known)
+uptrakit software-items update-latest <ITEM_ID> --host <HOST_ID>
 ```
+
+`software-items list` output includes an `UPDATE` column showing `yes` when any assigned host has
+an available update.
+
+`software-items show` output includes `Latest Version` and `Update Available` fields at the item
+level, and `LATEST` / `STATUS` columns in the host table showing `up-to-date` or
+`update-available` per host. The `STATUS` column only has a value when both `installed_version`
+and `latest_version` are known.
+
+`latest_version` is populated for agent-side providers (Homebrew, PHS) immediately after a version
+check. For controller-side providers (GitHub Releases, Docker Registry), it is populated by the
+scheduled upstream resolver. Run `uptrakit check item <ITEM_ID>` to trigger a fresh check before
+using `update-latest`.
 
 See also: [Software Item Entity](../architecture/software-item-entity.md),
 [Autodiscovery](autodiscovery.md), [Provider Configurations](provider-configs.md).
@@ -257,7 +274,7 @@ See also: [Wire Protocol](../api/wire-protocol.md), [HTTP Web API](../api/http-w
 Trigger a software update on a specific host. Updates are always manual and user-initiated.
 
 ```sh
-# Trigger an update
+# Trigger an update to a specific version
 uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0"
 
 # With optional release metadata
@@ -265,6 +282,11 @@ uptrakit update trigger <ITEM_ID> <HOST_ID> --to-version "2.0.0" \
   --release-tag "v2.0.0" \
   --release-url "https://github.com/example/repo/releases/tag/v2.0.0"
 ```
+
+For a convenience shortcut that resolves the current `latest_version` automatically, use the
+`software-items update-latest` subcommand (see the [Software Items](#software-items) section above).
+That command errors with a clear message if no latest version is known yet, prompting you to run
+`uptrakit check item <ITEM_ID>` first.
 
 See also: [Update Workflow](update-workflow.md), [Update History Entity](../architecture/update-history-entity.md).
 
