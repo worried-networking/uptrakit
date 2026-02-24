@@ -355,8 +355,8 @@ pub(crate) async fn handle_agent_authenticated(
                                     .into_iter()
                                     .collect();
 
-                                if !checked_ids.is_empty() {
-                                    if let Err(e) = software_item::Entity::update_many()
+                                if !checked_ids.is_empty()
+                                    && let Err(e) = software_item::Entity::update_many()
                                         .filter(software_item::Column::Id.is_in(checked_ids))
                                         .col_expr(
                                             software_item::Column::LastCheckedAt,
@@ -364,12 +364,11 @@ pub(crate) async fn handle_agent_authenticated(
                                         )
                                         .exec(state.db())
                                         .await
-                                    {
-                                        tracing::warn!(
-                                            error = %e,
-                                            "failed to batch-update software_item last_checked_at"
-                                        );
-                                    }
+                                {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "failed to batch-update software_item last_checked_at"
+                                    );
                                 }
                             }
                             ServiceMessage::UpdateStarted(payload) => {
