@@ -160,7 +160,8 @@ pub struct Args {
     #[arg(long, default_value = "30")]
     pub shutdown_timeout_secs: u64,
 
-    /// Increase log verbosity (-v for debug, -vv for trace).
+    /// Increase log verbosity (-v for own-crate debug, -vv for uptrakit=debug, -vvv for uptrakit=trace).
+    /// Use RUST_LOG to enable logging for other crates (e.g. `RUST_LOG=tokio=info`).
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbose: u8,
 }

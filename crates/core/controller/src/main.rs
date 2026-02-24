@@ -64,19 +64,21 @@ async fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    if args.verbose > 2 {
+    if args.verbose > 3 {
         eprintln!(
-            "warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)"
+            "warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)"
         );
     }
-    let default_level = match args.verbose {
-        0 => "info",
-        1 => "debug",
-        _ => "trace",
+    let directive = match args.verbose {
+        0 => "uptrakit_controller=info",
+        1 => "uptrakit_controller=debug",
+        2 => "uptrakit=debug",
+        _ => "uptrakit=trace",
     };
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level)),
+            EnvFilter::from_default_env()
+                .add_directive(directive.parse().expect("valid directive")),
         )
         .init();
 
