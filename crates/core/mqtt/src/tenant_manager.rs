@@ -186,6 +186,8 @@ fn compute_config_hash(config: &MqttTenantConfig) -> u64 {
     config.password.hash(&mut hasher);
     config.ca_pem.hash(&mut hasher);
     config.topic_prefix.hash(&mut hasher);
+    config.ha_discovery.hash(&mut hasher);
+    config.ha_discovery_prefix.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -210,6 +212,8 @@ mod tests {
             password: Some(SecretString::new("pass".into())),
             ca_pem: None,
             topic_prefix: "home/uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -244,6 +248,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -265,6 +271,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -280,6 +288,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -300,6 +310,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -321,6 +333,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "prefix".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -373,6 +387,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         }];
         // Disabled configs should be a no-op (stop_client on non-existent is noop).
@@ -401,6 +417,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::UNIX_EPOCH,
         };
 
@@ -416,6 +434,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::from_unix_timestamp(12345).unwrap(), // Different updated_at doesn't matter
         };
 

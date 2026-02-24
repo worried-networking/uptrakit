@@ -231,6 +231,7 @@ pub enum ServiceMessage {
     Register(MqttRegisterPayload),
     ReleaseTenants(MqttReleaseTenantsPayload),
     MqttClientStatus(MqttClientStatusPayload),
+    MqttTriggerUpdate(MqttUpdateTriggerPayload),
 }
 
 /// Messages sent from the controller to a service (agent or MQTT).
@@ -259,6 +260,7 @@ pub enum ControllerMessage {
     TenantConfigUpdated(MqttTenantConfigUpdatedPayload),
     TenantRevoked(MqttTenantRevokedPayload),
     MqttClientCreated(MqttClientCreatedPayload),
+    SoftwareStates(MqttSoftwareStatesPayload),
 }
 
 /// Payload for ping messages.
@@ -747,6 +749,12 @@ pub struct MqttTenantConfig {
     pub ca_pem: Option<SecretString>,
     /// Topic prefix.
     pub topic_prefix: String,
+    /// Whether to publish Home Assistant MQTT discovery topics.
+    #[serde(default)]
+    pub ha_discovery: bool,
+    /// Prefix for Home Assistant MQTT discovery topics.
+    #[serde(default = "default_ha_discovery_prefix")]
+    pub ha_discovery_prefix: String,
     /// Last update timestamp (for change detection).
     #[serde(with = "utc_datetime_millis")]
     pub updated_at: UtcDateTime,
@@ -772,6 +780,68 @@ pub struct MqttTenantRevokedPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MqttClientCreatedPayload {
     /// MQTT client UUID to lease.
+    pub mqtt_client_id: Uuid,
+}
+
+fn default_ha_discovery_prefix() -> String {
+    "homeassistant".to_string()
+}
+
+/// Controller -> MQTT service: current software version state for a tenant.
+///
+/// Sent after tenant assignment and after any version check or update result.
+/// Safe to write to the outbox (contains no credentials).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttSoftwareStatesPayload {
+    /// Tenant this state belongs to.
+    pub tenant_id: Uuid,
+    /// All active software items for the tenant with per-host version data.
+    pub items: Vec<MqttSoftwareStateItem>,
+}
+
+/// A single software item entry in [`MqttSoftwareStatesPayload`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttSoftwareStateItem {
+    /// Software item UUID.
+    pub software_item_id: Uuid,
+    /// Human-readable software item name.
+    pub name: String,
+    /// Per-host version data for this software item.
+    pub hosts: Vec<MqttSoftwareStateHostEntry>,
+}
+
+/// Per-host version data for a software item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttSoftwareStateHostEntry {
+    /// Host UUID.
+    pub host_id: Uuid,
+    /// Human-readable hostname.
+    pub hostname: String,
+    /// Currently installed version, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// Latest available version, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// Whether an update is available (`latest_version > installed_version`).
+    pub update_available: bool,
+}
+
+/// MQTT service -> Controller: request to trigger a software update.
+///
+/// Sent when a Home Assistant user presses "Install" on an update entity.
+/// The controller validates and dispatches the update to the appropriate agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MqttUpdateTriggerPayload {
+    /// Tenant UUID (for validation).
+    pub tenant_id: Uuid,
+    /// Software item to update.
+    pub software_item_id: Uuid,
+    /// Host to update on.
+    pub host_id: Uuid,
+    /// Target version to install.
+    pub to_version: String,
+    /// MQTT client UUID that initiated the trigger (used as actor_id).
     pub mqtt_client_id: Uuid,
 }
 
@@ -1796,6 +1866,8 @@ mod tests {
                 password: Some(SecretString::new("pass".into())),
                 ca_pem: None,
                 topic_prefix: "home/uptrakit".to_string(),
+                ha_discovery: false,
+                ha_discovery_prefix: "homeassistant".to_string(),
                 updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
             }],
         });
@@ -1821,6 +1893,8 @@ mod tests {
                 password: None,
                 ca_pem: None,
                 topic_prefix: "uptrakit".to_string(),
+                ha_discovery: false,
+                ha_discovery_prefix: "homeassistant".to_string(),
                 updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
             },
         });
@@ -2178,6 +2252,8 @@ mod tests {
             password: None,
             ca_pem: None,
             topic_prefix: "uptrakit".to_string(),
+            ha_discovery: false,
+            ha_discovery_prefix: "homeassistant".to_string(),
             updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
         };
         let json = serde_json::to_string(&config).unwrap();
@@ -2867,6 +2943,8 @@ mod tests {
                     password: Some(SecretString::new("pass".into())),
                     ca_pem: None,
                     topic_prefix: "home/uptrakit".to_string(),
+                    ha_discovery: false,
+                    ha_discovery_prefix: "homeassistant".to_string(),
                     updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
                 }],
             },
@@ -2891,6 +2969,8 @@ mod tests {
                     password: None,
                     ca_pem: None,
                     topic_prefix: "uptrakit".to_string(),
+                    ha_discovery: false,
+                    ha_discovery_prefix: "homeassistant".to_string(),
                     updated_at: UtcDateTime::from_unix_timestamp(1706400000).unwrap(),
                 },
             },

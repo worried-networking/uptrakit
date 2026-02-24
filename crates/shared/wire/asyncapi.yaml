@@ -162,6 +162,10 @@ channels:
         $ref: "#/components/messages/mqttTenantConfigUpdated"
       mqttTenantRevoked:
         $ref: "#/components/messages/mqttTenantRevoked"
+      softwareStates:
+        $ref: "#/components/messages/softwareStates"
+      mqttTriggerUpdate:
+        $ref: "#/components/messages/mqttTriggerUpdate"
 
   controllerOutbox:
     address: controller_events
@@ -563,6 +567,36 @@ operations:
       A controller polls the outbox table and consumes this event to attempt
       leasing the newly created MQTT client to its least busy local instance.
 
+  receiveSoftwareStates:
+    action: receive
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/softwareStates"
+    summary: MQTT service receives current software version state from controller
+    description: |
+      Sent after tenant assignment and after any version check or update result.
+      Contains per-host installed/latest version data for all active software
+      items of the tenant. The MQTT service uses this to publish Home Assistant
+      discovery topics and state topics for the broker.
+
+      Safe to write to the outbox (contains no credentials).
+
+  sendMqttTriggerUpdate:
+    action: send
+    channel:
+      $ref: "#/channels/serviceConnection"
+    messages:
+      - $ref: "#/channels/serviceConnection/messages/mqttTriggerUpdate"
+    summary: MQTT service requests software update via Home Assistant (MQTT-only)
+    description: |
+      Sent when a Home Assistant user presses "Install" on an update entity.
+      The controller validates the request, checks for in-progress updates,
+      and dispatches `ExecuteUpdate` to the appropriate agent. On error, the
+      controller responds with an `Error` message (soft error — WS not closed).
+
+      Attribution: `actor_type = "mqtt"`, `actor_id = mqtt_client_id`.
+
 components:
   securitySchemes:
     mtls:
@@ -822,6 +856,22 @@ components:
       contentType: application/json
       payload:
         $ref: "#/components/schemas/mqttClientCreatedPayload"
+
+    softwareStates:
+      name: software_states
+      title: Software States Message
+      summary: Controller pushes software version state for a tenant to MQTT services (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/softwareStatesPayload"
+
+    mqttTriggerUpdate:
+      name: mqtt_trigger_update
+      title: MQTT Trigger Update Message
+      summary: MQTT service requests an update be triggered for a software item on a host (MQTT-only)
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/mqttTriggerUpdatePayload"
 
     discoverSoftware:
       name: discover_software
@@ -2124,6 +2174,16 @@ components:
           description: MQTT topic prefix
           examples:
             - uptrakit
+        ha_discovery:
+          type: boolean
+          default: false
+          description: Whether to publish Home Assistant MQTT discovery topics
+        ha_discovery_prefix:
+          type: string
+          default: homeassistant
+          description: Prefix for Home Assistant MQTT discovery topics
+          examples:
+            - homeassistant
         updated_at:
           type: integer
           format: int64
@@ -2196,6 +2256,141 @@ components:
           description: MQTT client UUID to lease
           examples:
             - 660e8400-e29b-41d4-a716-446655440002
+
+    mqttSoftwareStateHostEntry:
+      type: object
+      required:
+        - host_id
+        - hostname
+        - update_available
+      properties:
+        host_id:
+          type: string
+          format: uuid
+          description: Host UUID
+          examples:
+            - 770e8400-e29b-41d4-a716-446655440001
+        hostname:
+          type: string
+          description: Human-readable hostname
+          examples:
+            - web-server-01
+        installed_version:
+          type: string
+          description: Currently installed version (absent if unknown)
+          examples:
+            - "1.2.3"
+        latest_version:
+          type: string
+          description: Latest available version (absent if unknown)
+          examples:
+            - "1.3.0"
+        update_available:
+          type: boolean
+          description: Whether an update is available
+
+    mqttSoftwareStateItem:
+      type: object
+      required:
+        - software_item_id
+        - name
+        - hosts
+      properties:
+        software_item_id:
+          type: string
+          format: uuid
+          description: Software item UUID
+          examples:
+            - 880e8400-e29b-41d4-a716-446655440001
+        name:
+          type: string
+          description: Human-readable software item name
+          examples:
+            - Node.js
+        hosts:
+          type: array
+          description: Per-host version data for this software item
+          items:
+            $ref: "#/components/schemas/mqttSoftwareStateHostEntry"
+
+    softwareStatesPayload:
+      type: object
+      required:
+        - seq
+        - type
+        - tenant_id
+        - items
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: software_states
+          description: Message type discriminator
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant UUID this state belongs to
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        items:
+          type: array
+          description: All active software items for the tenant with per-host version data
+          items:
+            $ref: "#/components/schemas/mqttSoftwareStateItem"
+
+    mqttTriggerUpdatePayload:
+      type: object
+      required:
+        - seq
+        - type
+        - tenant_id
+        - software_item_id
+        - host_id
+        - to_version
+        - mqtt_client_id
+      properties:
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing sequence number for replay protection
+        type:
+          type: string
+          const: mqtt_trigger_update
+          description: Message type discriminator
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant UUID (for validation)
+          examples:
+            - 550e8400-e29b-41d4-a716-446655440000
+        software_item_id:
+          type: string
+          format: uuid
+          description: Software item UUID to update
+          examples:
+            - 880e8400-e29b-41d4-a716-446655440001
+        host_id:
+          type: string
+          format: uuid
+          description: Host UUID to update on
+          examples:
+            - 770e8400-e29b-41d4-a716-446655440001
+        to_version:
+          type: string
+          description: Target version to install
+          examples:
+            - "1.3.0"
+        mqtt_client_id:
+          type: string
+          format: uuid
+          description: MQTT client UUID that initiated the trigger (used as actor_id)
+          examples:
+            - 660e8400-e29b-41d4-a716-446655440001
 
     discoveredSoftware:
       type: object

@@ -706,6 +706,8 @@ fn model_to_config(client: &mqtt_client::Model) -> MqttTenantConfig {
             .as_ref()
             .map(|c| SecretString::new(c.expose_secret().to_string())),
         topic_prefix: client.topic_prefix.clone(),
+        ha_discovery: client.ha_discovery,
+        ha_discovery_prefix: client.ha_discovery_prefix.clone(),
         updated_at: UtcDateTime::from_unix_timestamp(client.updated_at.unix_timestamp())
             .unwrap_or(UtcDateTime::UNIX_EPOCH),
     }

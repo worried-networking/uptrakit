@@ -214,7 +214,9 @@ fn should_deliver_backlog_message(service_type: ServiceType, msg: &ControllerMes
         ),
         ServiceType::Mqtt => matches!(
             msg,
-            ControllerMessage::CaBundleUpdated(_) | ControllerMessage::RequestCertRenewal(_)
+            ControllerMessage::CaBundleUpdated(_)
+                | ControllerMessage::RequestCertRenewal(_)
+                | ControllerMessage::SoftwareStates(_)
         ),
         ServiceType::SshAgent => matches!(
             msg,
@@ -300,6 +302,8 @@ mod tests {
                     password: Some(uptrakit_internal_wire::SecretString::new("secret".into())),
                     ca_pem: None,
                     topic_prefix: "test/".into(),
+                    ha_discovery: false,
+                    ha_discovery_prefix: "homeassistant".to_string(),
                     updated_at: time::UtcDateTime::UNIX_EPOCH,
                 },
             })
