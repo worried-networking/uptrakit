@@ -247,16 +247,6 @@ the controller-side query layer.
 
 ### Issues
 
-**[SEVERITY: Medium]** Inherited — `crates/shared/service-sdk` — `init_tracing`
-called from a library
-
-`uptrakit_service_sdk::init_tracing(...)` is called in `main()` at line 190.  The
-function configures the global `tracing_subscriber` from inside the SDK library, so
-two calls (e.g., in an integration test harness that invokes `main` twice) will
-panic.  Subscriber initialization should be the binary's direct responsibility;
-the SDK should expose a builder or let the binary call
-`tracing_subscriber::fmt().init()` itself.
-
 **[SEVERITY: Low]** No `rust-version` in `Cargo.toml` or `[workspace.package]`
 
 Consistent with the rest of the workspace (none of the 24 crates set MSRV), but

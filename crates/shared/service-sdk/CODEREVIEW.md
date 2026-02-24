@@ -66,26 +66,6 @@ download."
 
 ### Issues
 
-**[SEVERITY: Medium]** `Cargo.toml:34` — `tracing-subscriber` is a production
-dependency of a shared library.
-
-`init_tracing()` in `main_helper.rs:44` calls
-`tracing_subscriber::fmt().with_env_filter(filter).init()`. The `init()` call
-registers a global subscriber. Libraries must not own the global subscriber
-— that is the binary's responsibility. Two paths trigger the double-init
-panic today:
-
-1. An integration test that calls `init_tracing()` in a `#[tokio::test]`
-   harness that already set a subscriber will panic with
-   `"attempted to set a subscriber after the global default was already set"`.
-2. Any future consumer that calls `init_tracing()` on two code paths (e.g.
-   conditional binary entry points) will panic for the same reason.
-
-The correct fix is to remove `init_tracing()` from the library and let each
-binary's `main()` own the subscriber setup. `tracing-subscriber` should then
-be removed from `[dependencies]` in `Cargo.toml` and added to the
-`[dev-dependencies]` or moved to each binary crate entirely.
-
 ---
 
 ## Security & Safety
@@ -186,48 +166,6 @@ Guarded by `is_some()` check, so will never fire. Refactor to pattern match to e
 
 ### Issues
 
-**[SEVERITY: Medium]** `event_loop.rs:244-246` — `tick().await` inside
-`handle_service_settings` suspends the event loop.
-
-```rust
-let mut new_timer = tokio::time::interval(interval_duration);
-new_timer.tick().await; // Skip the first immediate tick
-*state.ping_timer = Some(new_timer);
-```
-
-`handle_service_settings` is called from within the `tokio::select!` arm for
-`ControllerMessage::ServiceSettings`. Because `handle_service_settings` is
-declared `async` and awaited inside the select arm, the event loop cannot
-progress while `tick().await` is pending. In practice this resolves on the
-next Tokio tick and adds negligible latency, but correctness depends on
-`Interval::tick()` being immediately ready for a freshly created `Interval`.
-The Tokio documentation does not guarantee this as a stable behaviour.
-
-The correct approach is to create the interval with
-`tokio::time::interval_at(Instant::now() + interval_duration, interval_duration)`
-so the first tick fires after one period rather than immediately, eliminating
-the need to consume the first tick at all. This removes the `.await` from the
-settings handler and makes `handle_service_settings` a synchronous function.
-
-**[SEVERITY: Medium]** `main_helper.rs:37-38, 42-43` — `expect()` in
-`init_tracing` is not an approved unwrap exception.
-
-```rust
-format!("{own_module}=info")
-    .parse()
-    .expect("valid module=level directive"),
-// ...
-level.parse().expect("valid level directive")
-```
-
-AGENTS.md approves `expect()` only for `Mutex`/`RwLock` lock acquisition.
-These two `expect()` calls parse string literals that are statically valid, so
-they will never panic in practice. The correct idiomatic form is to use
-`unwrap()` with a comment, or to prove infallibility at compile time via
-`const` evaluation if the parser supports it. As a library function called from
-binary `main()`, a panic here would produce an unformatted process abort with
-no user-visible error message, which is poor UX for a tracing initialiser.
-
 ---
 
 ## Tests
@@ -278,19 +216,6 @@ Same file has correctly-annotated tests at lines 385, 397, 411 — inconsistency
 
 Does not test signal dispatch path.
 
-### Issues
-
-**[SEVERITY: Low]** `main_helper.rs` — `verbosity_level_semantics` test does
-not exercise `init_tracing` at all.
-
-The test at `main_helper.rs:87-108` defines a local closure that mirrors the
-branching logic of `init_tracing` but never calls `init_tracing`. Changes to
-the real function would not be caught by this test. The test effectively
-documents intent rather than verifying implementation. Because `init_tracing`
-calls `tracing_subscriber::fmt().init()` (a global side effect), it is
-difficult to test in isolation — but this is precisely why the function belongs
-in each binary's `main.rs` rather than a shared library.
-
 ---
 
 ## High Availability
@@ -323,16 +248,6 @@ ensures a certificate written during a previous rotation cycle is always loaded
 without requiring any cache invalidation mechanism.
 
 ### Issues
-
-**[SEVERITY: Medium]** `event_loop.rs:244-246` — `tick().await` inside
-`handle_service_settings` blocks event loop.
-
-Covered above under Code Quality. The event loop cannot read incoming frames,
-respond to pings, or process other controller messages while `tick().await` is
-pending. This is functionally benign in the current Tokio implementation but
-represents a latent correctness hazard: if a `Ping` arrives from the
-controller during the brief suspension, the pong response is delayed until the
-next select iteration.
 
 **[SEVERITY: Low]** `lifecycle.rs:263-275` — Enrollment retry only catches
 `ReceiveClosed`, not transient network errors.
@@ -398,15 +313,6 @@ meaningful variants that carry exactly the information needed by the lifecycle
 to decide what to do next.
 
 ### Issues
-
-**[SEVERITY: Medium]** `Cargo.toml:34` — `tracing-subscriber` in
-`[dependencies]`, not `[dev-dependencies]`.
-
-Covered above under Architecture. This violates the library/binary
-responsibility separation defined in AGENTS.md and standard Rust library
-convention. Moving subscriber initialisation to each binary removes the
-dependency from the library's public footprint and eliminates the double-init
-panic risk.
 
 ---
 

@@ -193,10 +193,11 @@ The SDK provides shared initialization and error-handling functions to reduce bo
 
 | Function | Purpose |
 | --- | --- |
-| `init_tracing(directive)` | Initialize `tracing_subscriber` with the given filter directive. |
 | `init_crypto()` | Install the `aws-lc-rs` rustls crypto provider. |
 | `print_build_info(name, version, features)` | Print build metadata for `--version`. |
 | `run_lifecycle_and_handle_errors(name, args, handler)` | Run the lifecycle and handle errors (log + exit code). |
+
+> **Note:** Tracing subscriber initialization (`tracing_subscriber::fmt().init()`) is intentionally **not** provided by the SDK. Libraries must never configure the global tracing dispatcher. Each binary is responsible for initializing tracing in its own `main()` before calling SDK functions.
 
 ## Example: minimal service
 
@@ -259,7 +260,16 @@ impl ServiceHandler for MyHandler {
 #[tokio::main]
 async fn main() {
     let args = clap::Parser::parse();
-    uptrakit_service_sdk::init_tracing("uptrakit_my_service=info");
+
+    // Each binary initializes its own tracing subscriber.
+    // The SDK does not provide init_tracing() — libraries must not configure
+    // the global dispatcher.
+    let mut filter = tracing_subscriber::EnvFilter::from_default_env();
+    if let Ok(directive) = "uptrakit_my_service=info".parse() {
+        filter = filter.add_directive(directive);
+    }
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
     uptrakit_service_sdk::init_crypto();
 
     let mut handler = MyHandler;
