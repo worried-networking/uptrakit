@@ -46,6 +46,12 @@ pub struct BootstrapParams {
     /// Less secure; use only when no provider commands can be resolved on the
     /// remote host or during development.
     pub allow_all: bool,
+    /// Service UUID for the `authorized_keys` comment.  `None` when the
+    /// service has not yet been enrolled.
+    pub service_id: Option<uuid::Uuid>,
+    /// Remove existing Uptrakit-managed keys from `authorized_keys` before
+    /// writing the new entry.
+    pub remove_stale_keys: bool,
 }
 
 // ── Main orchestrator ────────────────────────────────────────────────
@@ -199,20 +205,105 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         )));
     }
 
-    // Deploy authorized_keys.
+    // 5. DEPLOY authorized_keys.
     println!("Deploying SSH public key...");
-    let ak_cmd = cmd_setup_authorized_keys(
-        &home_dir,
-        &target_public_openssh,
-        &params.target_username,
-        use_sudo,
-    );
-    let ak_result = session.exec_command(&ak_cmd).await?;
-    if ak_result.exit_code != 0 {
-        bail!(Error::SshCommand(format!(
-            "failed to deploy authorized_keys: {}",
-            ak_result.stderr.trim()
-        )));
+
+    // 5a. Build the service comment.
+    let service_comment = match &params.service_id {
+        Some(id) => format!("uptrakit-{id}"),
+        None => "uptrakit".to_string(),
+    };
+
+    // Strip any trailing comment from the raw public key so we control the
+    // comment field ourselves (first two whitespace-separated tokens only).
+    let stripped_pubkey = target_public_openssh
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // 5b. Read existing authorized_keys from remote.
+    let read_cmd = cmd_read_authorized_keys(&home_dir, use_sudo);
+    let read_result = session.exec_command(&read_cmd).await?;
+    let existing = parse_existing_authorized_keys(&read_result.stdout);
+
+    // 5d. Decide which lines are stale for this run.
+    let stale_lines: Vec<String> = if params.target_username == "uptrakit" {
+        existing.all_key_lines.clone()
+    } else {
+        existing.uptrakit_key_lines.clone()
+    };
+
+    // 5e. Print notice if any stale keys found.
+    if !stale_lines.is_empty() {
+        let uptrakit_user_note = if params.target_username == "uptrakit" {
+            " — all are considered Uptrakit-managed"
+        } else {
+            ""
+        };
+        println!(
+            "NOTE: Found {} existing key(s) in authorized_keys{uptrakit_user_note}:",
+            stale_lines.len()
+        );
+        for line in &stale_lines {
+            println!("  {line}");
+        }
+        if !params.remove_stale_keys {
+            println!("      Pass --remove-stale-keys to remove them before writing the new key.");
+        }
+    }
+
+    if params.remove_stale_keys && !stale_lines.is_empty() {
+        // 5f. Remove stale keys and write the new entry atomically.
+        println!("Removing {} stale key(s) from authorized_keys...", stale_lines.len());
+
+        let stale_set: std::collections::HashSet<&str> =
+            stale_lines.iter().map(String::as_str).collect();
+        let keep_lines: Vec<&str> = existing
+            .all_key_lines
+            .iter()
+            .map(String::as_str)
+            .filter(|l| !stale_set.contains(l))
+            .collect();
+
+        let new_entry = format!(
+            "{AUTHORIZED_KEYS_RESTRICTIONS} {stripped_pubkey} {service_comment}"
+        );
+        let new_content = if keep_lines.is_empty() {
+            format!("{new_entry}\n")
+        } else {
+            format!("{}\n{new_entry}\n", keep_lines.join("\n"))
+        };
+
+        let write_cmd = cmd_write_authorized_keys(
+            &home_dir,
+            &new_content,
+            &params.target_username,
+            use_sudo,
+        );
+        let write_result = session.exec_command(&write_cmd).await?;
+        if write_result.exit_code != 0 {
+            bail!(Error::SshCommand(format!(
+                "failed to write authorized_keys: {}",
+                write_result.stderr.trim()
+            )));
+        }
+    } else {
+        // Normal path: append new key entry (may include mkdir / chmod setup).
+        let ak_cmd = cmd_setup_authorized_keys(
+            &home_dir,
+            &stripped_pubkey,
+            &params.target_username,
+            use_sudo,
+            &service_comment,
+        );
+        let ak_result = session.exec_command(&ak_cmd).await?;
+        if ak_result.exit_code != 0 {
+            bail!(Error::SshCommand(format!(
+                "failed to deploy authorized_keys: {}",
+                ak_result.stderr.trim()
+            )));
+        }
     }
 
     // Set up sudoers (specific commands per registered providers).
@@ -456,9 +547,39 @@ fn cmd_detect_home(username: &str, use_sudo: bool) -> String {
 /// command execution that the agent requires.
 const AUTHORIZED_KEYS_RESTRICTIONS: &str = "no-pty,no-agent-forwarding,no-X11-forwarding";
 
-fn cmd_setup_authorized_keys(home: &str, pubkey: &str, owner: &str, use_sudo: bool) -> String {
+/// Build a remote command that reads `authorized_keys`, tolerating a missing
+/// file (returns empty output).
+fn cmd_read_authorized_keys(home: &str, use_sudo: bool) -> String {
+    let ak_path = format!("{home}/.ssh/authorized_keys");
+    let escaped_ak_path = uptrakit_command::shell_escape(&ak_path);
+    let sudo_prefix = if use_sudo { "sudo " } else { "" };
+    format!("{sudo_prefix}cat {escaped_ak_path} 2>/dev/null || true")
+}
+
+/// Build a remote command that atomically overwrites `authorized_keys` with
+/// `content` (already-formatted key lines + new entry) and fixes permissions.
+fn cmd_write_authorized_keys(home: &str, content: &str, owner: &str, use_sudo: bool) -> String {
+    let ak_path = format!("{home}/.ssh/authorized_keys");
+    let escaped_ak_path = uptrakit_command::shell_escape(&ak_path);
+    let escaped_content = uptrakit_command::shell_escape(content);
+    let escaped_owner = uptrakit_command::shell_escape(owner);
+    let sudo_prefix = if use_sudo { "sudo " } else { "" };
+    format!(
+        "printf '%s' {escaped_content} | {sudo_prefix}tee {escaped_ak_path} > /dev/null && \
+         {sudo_prefix}chmod 600 {escaped_ak_path} && \
+         {sudo_prefix}chown -R {escaped_owner}:{escaped_owner} {home}/.ssh"
+    )
+}
+
+fn cmd_setup_authorized_keys(
+    home: &str,
+    pubkey: &str,
+    owner: &str,
+    use_sudo: bool,
+    service_comment: &str,
+) -> String {
     let escaped_home = uptrakit_command::shell_escape(home);
-    let restricted_key = format!("{AUTHORIZED_KEYS_RESTRICTIONS} {pubkey}");
+    let restricted_key = format!("{AUTHORIZED_KEYS_RESTRICTIONS} {pubkey} {service_comment}");
     let escaped_pubkey = uptrakit_command::shell_escape(&restricted_key);
     let escaped_owner = uptrakit_command::shell_escape(owner);
     let ssh_dir = format!("{home}/.ssh");
@@ -475,6 +596,54 @@ fn cmd_setup_authorized_keys(home: &str, pubkey: &str, owner: &str, use_sudo: bo
          {sudo_prefix}chmod 600 {escaped_ak_path} && \
          {sudo_prefix}chown -R {escaped_owner}:{escaped_owner} {escaped_home}/.ssh"
     )
+}
+
+/// Returns `true` if the `authorized_keys` line looks like a key that was
+/// written by Uptrakit.
+///
+/// Detection: the line is non-empty, does not start with `#`, and its last
+/// whitespace-separated token starts with `uptrakit`.
+fn is_uptrakit_key_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return false;
+    }
+    trimmed
+        .split_whitespace()
+        .next_back()
+        .map(|tok| tok.starts_with("uptrakit"))
+        .unwrap_or(false)
+}
+
+/// Classification of the current `authorized_keys` file content.
+struct ExistingAuthorizedKeys {
+    /// Non-blank, non-comment lines (actual key entries).
+    all_key_lines: Vec<String>,
+    /// Subset of `all_key_lines` that pass `is_uptrakit_key_line`.
+    uptrakit_key_lines: Vec<String>,
+}
+
+/// Parse `authorized_keys` content into classified buckets.
+fn parse_existing_authorized_keys(content: &str) -> ExistingAuthorizedKeys {
+    let mut all_key_lines = Vec::new();
+    let mut uptrakit_key_lines = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let owned = trimmed.to_string();
+        if is_uptrakit_key_line(trimmed) {
+            uptrakit_key_lines.push(owned.clone());
+        }
+        all_key_lines.push(owned);
+    }
+
+    ExistingAuthorizedKeys {
+        all_key_lines,
+        uptrakit_key_lines,
+    }
 }
 
 
@@ -564,9 +733,10 @@ mod tests {
     fn cmd_authorized_keys_structure() {
         let cmd = cmd_setup_authorized_keys(
             "/home/deploy",
-            "ssh-ed25519 AAAA... comment",
+            "ssh-ed25519 AAAA...",
             "deploy",
             true,
+            "uptrakit",
         );
         assert!(cmd.contains("mkdir -p"));
         assert!(cmd.contains("chmod 700"));
@@ -578,11 +748,166 @@ mod tests {
 
     #[test]
     fn cmd_authorized_keys_includes_restrictions() {
-        let cmd =
-            cmd_setup_authorized_keys("/home/svc", "ssh-ed25519 AAAA... svc@host", "svc", false);
+        let cmd = cmd_setup_authorized_keys(
+            "/home/svc",
+            "ssh-ed25519 AAAA...",
+            "svc",
+            false,
+            "uptrakit",
+        );
         assert!(
             cmd.contains("no-pty,no-agent-forwarding,no-X11-forwarding ssh-ed25519"),
             "authorized_keys entry must include restriction prefix: {cmd}"
+        );
+    }
+
+    #[test]
+    fn cmd_authorized_keys_includes_service_comment() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let comment = format!("uptrakit-{uuid}");
+        let cmd = cmd_setup_authorized_keys(
+            "/home/svc",
+            "ssh-ed25519 AAAA...",
+            "svc",
+            false,
+            &comment,
+        );
+        assert!(
+            cmd.contains(&comment),
+            "authorized_keys entry must contain service comment: {cmd}"
+        );
+    }
+
+    // ── is_uptrakit_key_line tests ───────────────────────────────────
+
+    #[test]
+    fn is_uptrakit_key_line_detects_plain_uptrakit() {
+        assert!(is_uptrakit_key_line(
+            "no-pty ssh-ed25519 AAAA... uptrakit"
+        ));
+    }
+
+    #[test]
+    fn is_uptrakit_key_line_detects_uptrakit_uuid() {
+        assert!(is_uptrakit_key_line(
+            "no-pty ssh-ed25519 AAAA... uptrakit-550e8400-e29b-41d4-a716-446655440000"
+        ));
+    }
+
+    #[test]
+    fn is_uptrakit_key_line_rejects_user_at_host() {
+        assert!(!is_uptrakit_key_line("ssh-ed25519 AAAA... user@host"));
+    }
+
+    #[test]
+    fn is_uptrakit_key_line_rejects_blank() {
+        assert!(!is_uptrakit_key_line(""));
+        assert!(!is_uptrakit_key_line("   "));
+    }
+
+    #[test]
+    fn is_uptrakit_key_line_rejects_comment_line() {
+        assert!(!is_uptrakit_key_line("# uptrakit"));
+        assert!(!is_uptrakit_key_line("# ssh-ed25519 AAAA... uptrakit"));
+    }
+
+    // ── parse_existing_authorized_keys tests ────────────────────────
+
+    #[test]
+    fn parse_empty_file() {
+        let result = parse_existing_authorized_keys("");
+        assert!(result.all_key_lines.is_empty());
+        assert!(result.uptrakit_key_lines.is_empty());
+    }
+
+    #[test]
+    fn parse_no_uptrakit_keys() {
+        let content = "ssh-ed25519 AAAA... user@host\nssh-rsa BBBB... admin@server\n";
+        let result = parse_existing_authorized_keys(content);
+        assert_eq!(result.all_key_lines.len(), 2);
+        assert!(result.uptrakit_key_lines.is_empty());
+    }
+
+    #[test]
+    fn parse_mixed_keys() {
+        let content = "ssh-ed25519 AAAA... user@host\n\
+                       no-pty ssh-ed25519 BBBB... uptrakit\n\
+                       ssh-rsa CCCC... admin@server\n\
+                       no-pty ssh-ed25519 DDDD... uptrakit-550e8400-e29b-41d4-a716-446655440000\n";
+        let result = parse_existing_authorized_keys(content);
+        assert_eq!(result.all_key_lines.len(), 4);
+        assert_eq!(result.uptrakit_key_lines.len(), 2);
+        assert!(result
+            .uptrakit_key_lines
+            .iter()
+            .all(|l| l.ends_with("uptrakit") || l.contains("uptrakit-")));
+    }
+
+    #[test]
+    fn parse_comment_only_lines_ignored() {
+        let content = "# This is a comment\n\
+                       # uptrakit key\n\
+                       ssh-ed25519 AAAA... uptrakit\n";
+        let result = parse_existing_authorized_keys(content);
+        assert_eq!(result.all_key_lines.len(), 1);
+        assert_eq!(result.uptrakit_key_lines.len(), 1);
+    }
+
+    #[test]
+    fn parse_blank_lines_ignored() {
+        let content = "\n\n  \nssh-ed25519 AAAA... uptrakit\n\n";
+        let result = parse_existing_authorized_keys(content);
+        assert_eq!(result.all_key_lines.len(), 1);
+        assert_eq!(result.uptrakit_key_lines.len(), 1);
+    }
+
+    // ── cmd_read_authorized_keys tests ──────────────────────────────
+
+    #[test]
+    fn cmd_read_authorized_keys_without_sudo() {
+        let cmd = cmd_read_authorized_keys("/home/uptrakit", false);
+        assert!(!cmd.contains("sudo"));
+        assert!(cmd.contains("/home/uptrakit/.ssh/authorized_keys"));
+        assert!(cmd.contains("2>/dev/null || true"));
+    }
+
+    #[test]
+    fn cmd_read_authorized_keys_with_sudo() {
+        let cmd = cmd_read_authorized_keys("/home/uptrakit", true);
+        assert!(cmd.starts_with("sudo "));
+        assert!(cmd.contains("/home/uptrakit/.ssh/authorized_keys"));
+    }
+
+    // ── cmd_write_authorized_keys tests ─────────────────────────────
+
+    #[test]
+    fn cmd_write_authorized_keys_structure() {
+        let content = "no-pty ssh-ed25519 AAAA... uptrakit\n";
+        let cmd = cmd_write_authorized_keys("/home/uptrakit", content, "uptrakit", true);
+        assert!(cmd.contains("printf '%s'"));
+        assert!(cmd.contains("sudo tee"));
+        assert!(cmd.contains("/home/uptrakit/.ssh/authorized_keys"));
+        assert!(cmd.contains("chmod 600"));
+        assert!(cmd.contains("chown -R"));
+    }
+
+    #[test]
+    fn cmd_write_authorized_keys_without_sudo() {
+        let content = "no-pty ssh-ed25519 AAAA... uptrakit\n";
+        let cmd = cmd_write_authorized_keys("/home/deploy", content, "deploy", false);
+        assert!(!cmd.contains("sudo"));
+        assert!(cmd.contains("tee"));
+    }
+
+    #[test]
+    fn cmd_write_authorized_keys_escapes_content() {
+        // Content with single-quotes should be safely escaped.
+        let content = "no-pty ssh-ed25519 AAAA it's uptrakit\n";
+        let cmd = cmd_write_authorized_keys("/home/deploy", content, "deploy", false);
+        // shell_escape wraps in single quotes and escapes embedded single-quotes.
+        assert!(
+            !cmd.contains("it's"),
+            "raw single quote must not appear unescaped: {cmd}"
         );
     }
 }
