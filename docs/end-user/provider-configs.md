@@ -10,7 +10,7 @@ same provider config.
 
 ## Provider Types
 
-Uptrakit ships with four built-in provider types:
+Uptrakit ships with five built-in provider types:
 
 | Provider type | Description | Autodiscovery |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ Uptrakit ships with four built-in provider types:
 | `docker_registry` | Tracks image tags in a Docker/OCI registry. Resolves the latest tag according to a configurable tag pattern. | No |
 | `homebrew` | Tracks Homebrew formulae and casks. Installed version is read from the local Homebrew installation on the agent host. | Yes |
 | `proxmox_helper_scripts` | Tracks applications managed by Proxmox VE community helper scripts. Installed and latest versions are resolved locally by the agent. | Yes |
+| `apt` | Tracks Debian/Ubuntu packages managed by APT. Installed and latest versions are resolved locally by the agent using `dpkg` and `apt-cache`. Requires `sudo` access for updates and index refresh. | Yes |
 
 ### `github_releases` configuration fields
 
@@ -49,6 +50,18 @@ Uptrakit ships with four built-in provider types:
 The `proxmox_helper_scripts` provider requires no explicit configuration fields. Uptrakit
 auto-creates a config named `"Proxmox Helper Scripts"` when the first supporting agent
 connects.
+
+### `apt` configuration fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `discovery_filter` | No | `manual` (default) or `all`. Controls which packages are surfaced during autodiscovery. `manual` surfaces only packages explicitly installed by the user (`apt-mark showmanual`); `all` surfaces every installed package. |
+
+Uptrakit auto-creates a config named `"APT"` when the first agent with APT support
+connects and no matching provider config exists.
+
+For full details and `sudoers` configuration requirements, see
+[APT Provider](providers/apt.md).
 
 ## Managing Provider Configs
 
@@ -114,9 +127,9 @@ uptrakit provider-configs delete <PROVIDER_CONFIG_ID>
 
 ## Autodiscovery
 
-The `homebrew` and `proxmox_helper_scripts` provider types support **autodiscovery**: the agent
-queries the local package manager and reports installed packages back to the controller, which
-creates pending software items for your review.
+The `homebrew`, `proxmox_helper_scripts`, and `apt` provider types support
+**autodiscovery**: the agent queries the local package manager and reports installed
+packages back to the controller, which creates pending software items for your review.
 
 If no provider config exists for a discovery-capable type when a host registers, Uptrakit
 automatically creates one. Auto-created configs are named:
@@ -124,6 +137,7 @@ automatically creates one. Auto-created configs are named:
 - `Homebrew (Formulae)`
 - `Homebrew (Casks)`
 - `Proxmox Helper Scripts`
+- `APT`
 
 ### Triggering discovery
 

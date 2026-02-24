@@ -36,6 +36,23 @@ certificate renewal) across controller instances using optimistic locking for HA
   the controller binary at compile time via the `embed-frontend` Cargo feature for
   single-binary deployment.
 
+## Providers
+
+Providers are pluggable modules that define how to detect installed versions, resolve latest upstream versions, and execute updates. Each provider
+crate implements the `Provider` trait and is registered in `uptrakit-provider-registry`. See
+[Provider Development Guidelines](docs/development/provider-guidelines.md) for the extension pattern.
+
+| Provider type | Crate | Version resolution | Autodiscovery | Notes |
+| --- | --- | --- | --- | --- |
+| `github_releases` | `uptrakit-provider-github` | Controller (GitHub API) | No | Tracks GitHub release tags |
+| `docker_registry` | `uptrakit-provider-docker-registry` | Controller (Registry API) | No | Tracks OCI image tags |
+| `homebrew` | `uptrakit-provider-homebrew` | Agent (`brew info`) | Yes | macOS/Linux formulae and casks |
+| `proxmox_helper_scripts` | `uptrakit-provider-proxmox-helper-scripts` | Agent (local scripts) | Yes | PVE helper-script containers |
+| `apt` | `uptrakit-provider-apt` | Agent (`apt-cache madison`) | Yes | Debian/Ubuntu packages via APT |
+
+Providers with a local package index (`homebrew`, `proxmox_helper_scripts`, `apt`) resolve both installed and latest versions on the agent.
+All other providers resolve upstream versions on the controller.
+
 ## Wire protocol
 
 Agents, SSH agents, and MQTT services connect to `/api/v1/ws/service` over mTLS and exchange shared `ServiceMessage`/`ControllerMessage` enums. The

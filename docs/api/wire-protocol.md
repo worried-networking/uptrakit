@@ -85,6 +85,8 @@ The `host_machine_id` field in each payload determines which host the operation 
 type. In that case the agent uses the default/empty config and annotates each result with `extra` metadata (e.g.
 `{"package_type":"formula"}`). The controller creates the appropriate `ProviderConfig` records from this metadata.
 
+Known `provider_type` values for discovery: `homebrew`, `proxmox_helper_scripts`, `apt`.
+
 #### `discovery_results` payload
 
 ```json

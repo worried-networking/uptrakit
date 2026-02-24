@@ -65,6 +65,7 @@ uptrakit/
 │   │   ├── github/                     # uptrakit-provider-github               (lib)  — GitHub Releases provider
 │   │   ├── homebrew/                   # uptrakit-provider-homebrew             (lib)  — Homebrew formulae/cask provider
 │   │   ├── proxmox-helper-scripts/     # uptrakit-provider-proxmox-helper-scripts (lib) — PVE helper-scripts provider (discovery, version detection, updates, optional GitHub-based upstream version detection)
+│   │   ├── apt/                        # uptrakit-provider-apt                  (lib)  — APT (Debian/Ubuntu) provider (discovery via dpkg/apt-mark, version detection via dpkg-query, latest via apt-cache madison, updates via sudo apt-get install)
 │   │   └── registry/                   # uptrakit-provider-registry             (lib)  — provider dispatch & validation
 │   ├── shared/
 │   │   ├── agent-core/                 # uptrakit-agent-core                    (lib)  — shared agent logic: version check, update execution, handle_check_versions/execute_update/graceful_shutdown
@@ -268,7 +269,7 @@ for user review. Key invariants:
 4. **Auto-created ProviderConfigs.** When no `ProviderConfig` exists for a discovery-capable type at trigger time,
    the agent receives a default (empty-config) assignment. Results come back with `extra` metadata (e.g.
    `{"package_type":"formula"}`). The controller auto-creates named configs: `"Homebrew (Formulae)"`,
-   `"Homebrew (Casks)"`, `"Proxmox Helper Scripts"`.
+   `"Homebrew (Casks)"`, `"Proxmox Helper Scripts"`, `"APT"`.
 
 5. **Discovery capability is derived from the registry.** Call `state.provider_ops.discovery_provider_types()`
    (or `ProviderRegistry::discovery_provider_types()` statically) to get the current list of discovery-capable
