@@ -261,6 +261,14 @@ enum SoftwareItemsCommands {
         #[arg(long, default_value_t = false)]
         ignore: bool,
     },
+    /// Trigger update to the latest known version for a software item on a host
+    UpdateLatest {
+        /// Software item UUID
+        id: Uuid,
+        /// Host UUID
+        #[arg(long)]
+        host: Uuid,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1206,6 +1214,20 @@ async fn run(cli: Cli) -> error::Result<()> {
                     insecure,
                     request_timeout,
                 })
+                .await?;
+                output::print_output(format, &resp)?;
+            }
+            SoftwareItemsCommands::UpdateLatest { id, host } => {
+                let resp = commands::software_items::update_latest(
+                    commands::software_items::UpdateLatestParams {
+                        id: &id,
+                        host_id: &host,
+                        server: cli.server.as_deref(),
+                        token: cli.token.as_deref(),
+                        insecure,
+                        request_timeout,
+                    },
+                )
                 .await?;
                 output::print_output(format, &resp)?;
             }

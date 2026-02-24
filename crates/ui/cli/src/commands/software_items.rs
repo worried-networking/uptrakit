@@ -9,7 +9,7 @@ use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::software_items::{
     AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
     ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemResponse,
-    UpdateSoftwareItemRequest,
+    TriggerUpdateRequest, TriggerUpdateResponse, UpdateSoftwareItemRequest,
 };
 
 // ── Human output ────────────────────────────────────────────────────────────
@@ -20,8 +20,8 @@ impl HumanOutput for PaginatedResponse<SoftwareItemResponse> {
             return "No software items found.\n".to_string();
         }
         let mut out = format!(
-            "{:<38} {:<25} {:<30} {:<8} HOSTS\n",
-            "ID", "NAME", "PROVIDERS", "ENABLED"
+            "{:<38} {:<25} {:<30} {:<8} {:<7} UPDATE\n",
+            "ID", "NAME", "PROVIDERS", "ENABLED", "HOSTS"
         );
         for item in &self.items {
             let providers = if item.provider_types.is_empty() {
@@ -29,9 +29,10 @@ impl HumanOutput for PaginatedResponse<SoftwareItemResponse> {
             } else {
                 item.provider_types.join(", ")
             };
+            let update = if item.update_available { "yes" } else { "-" };
             out.push_str(&format!(
-                "{:<38} {:<25} {:<30} {:<8} {}\n",
-                item.id, item.name, providers, item.enabled, item.host_count
+                "{:<38} {:<25} {:<30} {:<8} {:<7} {}\n",
+                item.id, item.name, providers, item.enabled, item.host_count, update
             ));
         }
         out.push_str(&format!(
@@ -54,6 +55,10 @@ impl HumanOutput for SoftwareItemDetailResponse {
         };
         out.push_str(&format!("Providers:       {}\n", providers));
         out.push_str(&format!("Enabled:         {}\n", self.enabled));
+        if let Some(ref lv) = self.latest_version {
+            out.push_str(&format!("Latest Version:  {}\n", lv));
+        }
+        out.push_str(&format!("Update Available:{}\n", if self.update_available { " yes" } else { " no" }));
         if let Some(checked) = self.last_checked_at {
             out.push_str(&format!(
                 "Last Checked:    {}\n",
@@ -78,21 +83,30 @@ impl HumanOutput for SoftwareItemDetailResponse {
         if !self.hosts.is_empty() {
             out.push_str("\nAssigned Hosts:\n");
             out.push_str(&format!(
-                "  {:<38} {:<20} {:<20} {:<30} {:<15} LINKED AT\n",
-                "HOST ID", "HOSTNAME", "PROVIDER", "PACKAGE", "INSTALLED"
+                "  {:<38} {:<20} {:<20} {:<30} {:<15} {:<15} {:<16} LINKED AT\n",
+                "HOST ID", "HOSTNAME", "PROVIDER", "PACKAGE", "INSTALLED", "LATEST", "STATUS"
             ));
             for h in &self.hosts {
                 let linked = h
                     .linked_at
                     .format(&Rfc3339)
                     .unwrap_or_else(|_| h.linked_at.to_string());
+                let status = if h.update_available {
+                    "update-available"
+                } else if h.installed_version.is_some() && h.latest_version.is_some() {
+                    "up-to-date"
+                } else {
+                    "—"
+                };
                 out.push_str(&format!(
-                    "  {:<38} {:<20} {:<20} {:<30} {:<15} {}\n",
+                    "  {:<38} {:<20} {:<20} {:<30} {:<15} {:<15} {:<16} {}\n",
                     h.host_id,
                     h.hostname,
                     h.provider_type,
                     h.package_identifier,
                     h.installed_version.as_deref().unwrap_or("-"),
+                    h.latest_version.as_deref().unwrap_or("-"),
+                    status,
                     linked
                 ));
             }
@@ -116,6 +130,10 @@ impl HumanOutput for SoftwareItemResponse {
         if let Some(ds) = &self.discovery_state {
             out.push_str(&format!("Discovery State: {}\n", ds));
         }
+        if let Some(ref lv) = self.latest_version {
+            out.push_str(&format!("Latest Version:  {}\n", lv));
+        }
+        out.push_str(&format!("Update Available:{}\n", if self.update_available { " yes" } else { " no" }));
         if let Some(checked) = self.last_checked_at {
             out.push_str(&format!(
                 "Last Checked:    {}\n",
@@ -198,6 +216,16 @@ pub struct UnassignParams<'a> {
     pub id: &'a Uuid,
     pub host_id: &'a Uuid,
     pub ignore: bool,
+    pub server: Option<&'a str>,
+    pub token: Option<&'a str>,
+    pub insecure: bool,
+    pub request_timeout: Option<std::time::Duration>,
+}
+
+/// Parameters for `update-latest`: trigger update to the current `latest_version`.
+pub struct UpdateLatestParams<'a> {
+    pub id: &'a Uuid,
+    pub host_id: &'a Uuid,
     pub server: Option<&'a str>,
     pub token: Option<&'a str>,
     pub insecure: bool,
@@ -288,6 +316,49 @@ pub async fn unassign(params: UnassignParams<'_>) -> Result<DeletedOutput> {
     })
 }
 
+/// Trigger an update to the latest known version for a software item on a specific host.
+///
+/// Loads the software item detail to obtain `latest_version`, then calls the update
+/// trigger API. Errors if no latest version is known yet (run `check item <id>` first).
+pub async fn update_latest(params: UpdateLatestParams<'_>) -> Result<TriggerUpdateResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+
+    let detail = client.get_software_item(params.id).await.context_to()?;
+
+    // Check per-host latest_version first, then fall back to item-level.
+    let latest_version = detail
+        .hosts
+        .iter()
+        .find(|h| h.host_id == *params.host_id)
+        .and_then(|h| h.latest_version.clone())
+        .or(detail.latest_version.clone());
+
+    let Some(version) = latest_version else {
+        use crate::error::CliError;
+        use rootcause::report;
+        return Err(report!(CliError::Other(format!(
+            "No latest version known for software item {}.\n\
+             Run `uptrakit check item {}` first, or use `uptrakit update trigger` to specify a version explicitly.",
+            params.id, params.id
+        ))));
+    };
+
+    let req = TriggerUpdateRequest {
+        to_version: version,
+        release_info: None,
+    };
+
+    client
+        .trigger_update(params.id, params.host_id, &req)
+        .await
+        .context_to()
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -305,6 +376,24 @@ mod tests {
             discovery_state: None,
             last_checked_at: None,
             host_count: 2,
+            latest_version: None,
+            update_available: false,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+        }
+    }
+
+    fn sample_item_with_update() -> SoftwareItemResponse {
+        SoftwareItemResponse {
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            name: "Homebrew App".to_string(),
+            provider_types: vec!["homebrew".to_string()],
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            host_count: 1,
+            latest_version: Some("3.0.0".to_string()),
+            update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
         }
@@ -334,6 +423,20 @@ mod tests {
         let s = resp.to_human_string();
         assert!(s.contains("Node.js"), "name missing");
         assert!(s.contains("github_releases"), "provider missing");
+        assert!(s.contains("UPDATE"), "UPDATE column header missing");
+    }
+
+    #[test]
+    fn paginated_software_items_update_column() {
+        let resp = PaginatedResponse {
+            items: vec![sample_item_with_update()],
+            total: 1,
+            page: 1,
+            per_page: 20,
+            total_pages: 1,
+        };
+        let s = resp.to_human_string();
+        assert!(s.contains("yes"), "update-available row should show 'yes'");
     }
 
     #[test]
@@ -346,6 +449,8 @@ mod tests {
             discovery_state: None,
             last_checked_at: None,
             host_count: 1,
+            latest_version: Some("22.0.0".to_string()),
+            update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
             hosts: vec![SoftwareItemHostSummary {
@@ -365,12 +470,56 @@ mod tests {
                 installed_version_detected_at: None,
                 last_updated_at: None,
                 linked_at: datetime!(2025-01-01 00:00:00 UTC),
+                latest_version: Some("22.0.0".to_string()),
+                update_available: true,
             }],
         };
         let s = detail.to_human_string();
         assert!(s.contains("Node.js"), "name missing");
         assert!(s.contains("server-1.local"), "hostname missing");
         assert!(s.contains("20.0.0"), "installed version missing");
+        assert!(s.contains("22.0.0"), "latest version missing");
+        assert!(s.contains("update-available"), "host status missing");
+        assert!(s.contains("Latest Version:"), "item latest version header missing");
+    }
+
+    #[test]
+    fn software_item_detail_up_to_date_status() {
+        let detail = SoftwareItemDetailResponse {
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            name: "Curl".to_string(),
+            provider_types: vec!["homebrew".to_string()],
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            host_count: 1,
+            latest_version: Some("8.7.0".to_string()),
+            update_available: false,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+            hosts: vec![SoftwareItemHostSummary {
+                host_id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                    .parse::<Uuid>()
+                    .unwrap(),
+                hostname: "mac-1".to_string(),
+                friendly_name: "mac-1".to_string(),
+                provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                    .parse::<Uuid>()
+                    .unwrap(),
+                provider_config_name: "Homebrew".to_string(),
+                provider_type: "homebrew".to_string(),
+                package_identifier: "curl".to_string(),
+                config_override: None,
+                installed_version: Some("8.7.0".to_string()),
+                installed_version_detected_at: None,
+                last_updated_at: None,
+                linked_at: datetime!(2025-01-01 00:00:00 UTC),
+                latest_version: Some("8.7.0".to_string()),
+                update_available: false,
+            }],
+        };
+        let s = detail.to_human_string();
+        assert!(s.contains("up-to-date"), "host status should show up-to-date");
     }
 
     #[test]
@@ -384,6 +533,8 @@ mod tests {
             discovery_state: Some(SoftwareDiscoveryState::Approved),
             last_checked_at: None,
             host_count: 0,
+            latest_version: Some("1.5.0".to_string()),
+            update_available: true,
             created_at: datetime!(2025-01-01 00:00:00 UTC),
             updated_at: datetime!(2025-01-01 00:00:00 UTC),
         };
@@ -391,5 +542,27 @@ mod tests {
         assert!(s.contains("My App"));
         assert!(s.contains("homebrew"));
         assert!(s.contains("approved"));
+        assert!(s.contains("1.5.0"), "latest version should appear");
+        assert!(s.contains("yes"), "update_available should show 'yes'");
+    }
+
+    #[test]
+    fn software_item_response_no_update_available() {
+        let item = SoftwareItemResponse {
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            name: "Up-to-date App".to_string(),
+            provider_types: vec![],
+            enabled: true,
+            discovery_state: None,
+            last_checked_at: None,
+            host_count: 1,
+            latest_version: None,
+            update_available: false,
+            created_at: datetime!(2025-01-01 00:00:00 UTC),
+            updated_at: datetime!(2025-01-01 00:00:00 UTC),
+        };
+        let s = item.to_human_string();
+        assert!(s.contains(" no"), "update_available should show 'no'");
+        assert!(!s.contains("Latest Version:"), "latest version should not appear when None");
     }
 }
