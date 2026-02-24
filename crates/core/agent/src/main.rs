@@ -7,7 +7,8 @@ use rootcause::prelude::*;
 use std::collections::BTreeSet;
 
 use uptrakit_internal_wire::{
-    Capability, ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage, ServiceType,
+    Capability, ControllerMessage, DisconnectReason, ReportHostsPayload, ServiceMessage,
+    ServiceType,
 };
 use uptrakit_service_sdk::{
     ControllerConnection, LoopError, LoopOutcome, LoopResult, ServiceHandler, ServiceIdentityState,

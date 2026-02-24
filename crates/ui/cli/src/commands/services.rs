@@ -139,20 +139,19 @@ pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<ServiceRes
         params.insecure,
         params.request_timeout,
     )?;
-    let query = ListServicesQuery {
-        r#type: params
-            .service_type
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
-        status: params
-            .status
-            .map(|s| s.parse())
-            .transpose()
-            .map_err(|e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())))?,
-        page: params.page,
-        per_page: params.per_page,
-    };
+    let query =
+        ListServicesQuery {
+            r#type: params
+                .service_type
+                .map(|s| s.parse())
+                .transpose()
+                .map_err(|e: ParseServiceTypeError| Report::new(CliError::Other(e.to_string())))?,
+            status: params.status.map(|s| s.parse()).transpose().map_err(
+                |e: ParseServiceStatusError| Report::new(CliError::Other(e.to_string())),
+            )?,
+            page: params.page,
+            per_page: params.per_page,
+        };
     client.list_services(&query).await.context_to()
 }
 
@@ -249,7 +248,9 @@ mod tests {
 
     fn sample_service() -> ServiceResponse {
         ServiceResponse {
-            id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6".parse::<Uuid>().unwrap(),
+            id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                .parse::<Uuid>()
+                .unwrap(),
             service_type: "agent".parse().unwrap(),
             hostname: "agent-host.local".to_string(),
             friendly_name: "Test Agent".to_string(),

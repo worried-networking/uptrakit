@@ -150,7 +150,10 @@ impl VersionCheckExecutor {
                 "package_identifier",
             )
             .column_as(provider_config::Column::Config, "config")
-            .column_as(host_software_item::Column::ConfigOverride, "config_override")
+            .column_as(
+                host_software_item::Column::ConfigOverride,
+                "config_override",
+            )
             .join(
                 JoinType::InnerJoin,
                 host_software_item::Relation::SoftwareItem.def().rev(),

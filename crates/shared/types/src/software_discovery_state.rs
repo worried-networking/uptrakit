@@ -14,10 +14,7 @@ use thiserror::Error;
     feature = "sea-orm",
     derive(strum::EnumIter, sea_orm::DeriveActiveEnum)
 )]
-#[cfg_attr(
-    feature = "sea-orm",
-    sea_orm(rs_type = "String", db_type = "Text")
-)]
+#[cfg_attr(feature = "sea-orm", sea_orm(rs_type = "String", db_type = "Text"))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum SoftwareDiscoveryState {
@@ -65,7 +62,10 @@ mod tests {
 
     #[test]
     fn serde_round_trip() {
-        for variant in [SoftwareDiscoveryState::Pending, SoftwareDiscoveryState::Approved] {
+        for variant in [
+            SoftwareDiscoveryState::Pending,
+            SoftwareDiscoveryState::Approved,
+        ] {
             let json = serde_json::to_string(&variant).unwrap();
             let deserialized: SoftwareDiscoveryState = serde_json::from_str(&json).unwrap();
             assert_eq!(deserialized, variant);

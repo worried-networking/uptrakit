@@ -49,9 +49,10 @@ pub async fn create_provider_config(
 
     match pc_queries::create_provider_config(state.provider_ops.as_ref(), &tenant_db, req).await {
         Ok(resp) => (StatusCode::CREATED, Json(resp)).into_response(),
-        Err(pc_queries::CreateProviderConfigError::DuplicateName) => {
-            error_response(StatusCode::CONFLICT, "A provider config with this name already exists")
-        }
+        Err(pc_queries::CreateProviderConfigError::DuplicateName) => error_response(
+            StatusCode::CONFLICT,
+            "A provider config with this name already exists",
+        ),
         Err(pc_queries::CreateProviderConfigError::Db(e)) => {
             tracing::error!("Failed to create provider config: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -80,7 +81,8 @@ pub async fn list_provider_configs(
     CanViewSoftware(_user): CanViewSoftware,
     Query(params): Query<PaginationParams>,
 ) -> Response {
-    match pc_queries::list_provider_configs(state.provider_ops.as_ref(), &tenant_db, &params).await {
+    match pc_queries::list_provider_configs(state.provider_ops.as_ref(), &tenant_db, &params).await
+    {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(e) => {
             tracing::error!("Failed to list provider configs: {e}");
@@ -113,7 +115,8 @@ pub async fn get_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::get_provider_config(state.provider_ops.as_ref(), &tenant_db, config_id).await {
+    match pc_queries::get_provider_config(state.provider_ops.as_ref(), &tenant_db, config_id).await
+    {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Provider config not found"),
         Err(e) => {
@@ -149,7 +152,14 @@ pub async fn update_provider_config(
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "Invalid UUID"),
     };
 
-    match pc_queries::update_provider_config(state.provider_ops.as_ref(), &tenant_db, config_id, req).await {
+    match pc_queries::update_provider_config(
+        state.provider_ops.as_ref(),
+        &tenant_db,
+        config_id,
+        req,
+    )
+    .await
+    {
         Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
         Err(UpdateProviderConfigError::NotFound) => {
             error_response(StatusCode::NOT_FOUND, "Provider config not found")
@@ -256,10 +266,17 @@ pub async fn discover_provider_config(
         }
     };
 
-    if !state.provider_ops.discovery_provider_types().contains(&provider_type) {
+    if !state
+        .provider_ops
+        .discovery_provider_types()
+        .contains(&provider_type)
+    {
         return error_response(
             StatusCode::BAD_REQUEST,
-            format!("Provider type '{}' does not support autodiscovery", cfg.provider_type),
+            format!(
+                "Provider type '{}' does not support autodiscovery",
+                cfg.provider_type
+            ),
         );
     }
 
@@ -297,7 +314,10 @@ pub async fn discover_provider_config(
     let mut by_service: std::collections::HashMap<uuid::Uuid, Vec<String>> =
         std::collections::HashMap::new();
     for row in rows {
-        by_service.entry(row.service_id).or_default().push(row.machine_id);
+        by_service
+            .entry(row.service_id)
+            .or_default()
+            .push(row.machine_id);
     }
 
     let agents_notified = by_service.len() as u32;

@@ -253,9 +253,10 @@ pub async fn handle_execute_update(
     let update_history_id = payload.update_history_id;
 
     // Spawn update execution task
-    let handle = tokio::spawn(async move {
-        crate::update::execute_update(payload, executor, output_tx).await
-    });
+    let handle =
+        tokio::spawn(
+            async move { crate::update::execute_update(payload, executor, output_tx).await },
+        );
 
     // Send UpdateStarted
     if let Err(e) = conn
@@ -304,71 +305,70 @@ pub async fn handle_discover_software(
             "running discovery for provider"
         );
 
-        let result = match uptrakit_provider_registry::ProviderRegistry::create_provider_for_discovery(
-            assignment.provider_type.clone(),
-            &assignment.config,
-            Arc::clone(&executor),
-        ) {
-            Err(e) => {
-                tracing::warn!(
-                    provider_type = %assignment.provider_type,
-                    error = %e,
-                    "failed to create provider for discovery"
-                );
-                DiscoveryProviderResult {
-                    provider_config_id: assignment.provider_config_id,
-                    provider_type: assignment.provider_type,
-                    discoveries: vec![],
-                    error: Some(e.to_string()),
-                }
-            }
-            Ok(provider) => {
-                use uptrakit_provider_registry::ProviderCapability;
-                if !provider.has_capability(ProviderCapability::DiscoverLocalSoftware) {
+        let result =
+            match uptrakit_provider_registry::ProviderRegistry::create_provider_for_discovery(
+                assignment.provider_type.clone(),
+                &assignment.config,
+                Arc::clone(&executor),
+            ) {
+                Err(e) => {
                     tracing::warn!(
                         provider_type = %assignment.provider_type,
-                        "provider does not support DiscoverLocalSoftware; skipping"
+                        error = %e,
+                        "failed to create provider for discovery"
                     );
                     DiscoveryProviderResult {
                         provider_config_id: assignment.provider_config_id,
                         provider_type: assignment.provider_type,
                         discoveries: vec![],
-                        error: Some(
-                            "provider does not support software discovery".to_string(),
-                        ),
+                        error: Some(e.to_string()),
                     }
-                } else {
-                    match provider.discover_software().await {
-                        Ok(discoveries) => {
-                            tracing::info!(
-                                provider_type = %assignment.provider_type,
-                                count = discoveries.len(),
-                                "discovery completed"
-                            );
-                            DiscoveryProviderResult {
-                                provider_config_id: assignment.provider_config_id,
-                                provider_type: assignment.provider_type,
-                                discoveries,
-                                error: None,
-                            }
+                }
+                Ok(provider) => {
+                    use uptrakit_provider_registry::ProviderCapability;
+                    if !provider.has_capability(ProviderCapability::DiscoverLocalSoftware) {
+                        tracing::warn!(
+                            provider_type = %assignment.provider_type,
+                            "provider does not support DiscoverLocalSoftware; skipping"
+                        );
+                        DiscoveryProviderResult {
+                            provider_config_id: assignment.provider_config_id,
+                            provider_type: assignment.provider_type,
+                            discoveries: vec![],
+                            error: Some("provider does not support software discovery".to_string()),
                         }
-                        Err(e) => {
-                            tracing::warn!(
-                                provider_type = %assignment.provider_type,
-                                error = %e,
-                                "discovery failed"
-                            );
-                            DiscoveryProviderResult {
-                                provider_config_id: assignment.provider_config_id,
-                                provider_type: assignment.provider_type,
-                                discoveries: vec![],
-                                error: Some(e.to_string()),
+                    } else {
+                        match provider.discover_software().await {
+                            Ok(discoveries) => {
+                                tracing::info!(
+                                    provider_type = %assignment.provider_type,
+                                    count = discoveries.len(),
+                                    "discovery completed"
+                                );
+                                DiscoveryProviderResult {
+                                    provider_config_id: assignment.provider_config_id,
+                                    provider_type: assignment.provider_type,
+                                    discoveries,
+                                    error: None,
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    provider_type = %assignment.provider_type,
+                                    error = %e,
+                                    "discovery failed"
+                                );
+                                DiscoveryProviderResult {
+                                    provider_config_id: assignment.provider_config_id,
+                                    provider_type: assignment.provider_type,
+                                    discoveries: vec![],
+                                    error: Some(e.to_string()),
+                                }
                             }
                         }
                     }
                 }
-            }
-        };
+            };
         results.push(result);
     }
 

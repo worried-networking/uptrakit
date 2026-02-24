@@ -40,7 +40,10 @@ impl HumanOutput for AutodiscoveryIgnoreResponse {
     fn to_human_string(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("ID:               {}\n", self.id));
-        out.push_str(&format!("Provider Config:  {} ({})\n", self.provider_config_name, self.provider_config_id));
+        out.push_str(&format!(
+            "Provider Config:  {} ({})\n",
+            self.provider_config_name, self.provider_config_id
+        ));
         out.push_str(&format!("Provider Type:    {}\n", self.provider_type));
         out.push_str(&format!("Package:          {}\n", self.package_identifier));
         out.push_str(&format!(
@@ -84,18 +87,35 @@ pub struct IgnoresDeleteParams<'a> {
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
-pub async fn ignores_list(params: IgnoresListParams<'_>) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+pub async fn ignores_list(
+    params: IgnoresListParams<'_>,
+) -> Result<PaginatedResponse<AutodiscoveryIgnoreResponse>> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let list_params = ListIgnoresParams {
         page: params.page,
         per_page: params.per_page,
         provider_config_id: params.provider_config_id,
     };
-    client.list_autodiscovery_ignores(&list_params).await.context_to()
+    client
+        .list_autodiscovery_ignores(&list_params)
+        .await
+        .context_to()
 }
 
-pub async fn ignores_create(params: IgnoresCreateParams<'_>) -> Result<AutodiscoveryIgnoreResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+pub async fn ignores_create(
+    params: IgnoresCreateParams<'_>,
+) -> Result<AutodiscoveryIgnoreResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = CreateAutodiscoveryIgnoreRequest {
         provider_config_id: *params.provider_config_id,
         package_identifier: params.package_identifier,
@@ -104,9 +124,19 @@ pub async fn ignores_create(params: IgnoresCreateParams<'_>) -> Result<Autodisco
 }
 
 pub async fn ignores_delete(params: IgnoresDeleteParams<'_>) -> Result<DeletedOutput> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    client.delete_autodiscovery_ignore(params.id).await.context_to()?;
-    Ok(DeletedOutput { message: format!("Autodiscovery ignore rule {} deleted.", params.id) })
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    client
+        .delete_autodiscovery_ignore(params.id)
+        .await
+        .context_to()?;
+    Ok(DeletedOutput {
+        message: format!("Autodiscovery ignore rule {} deleted.", params.id),
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -118,8 +148,12 @@ mod tests {
 
     fn sample_ignore() -> AutodiscoveryIgnoreResponse {
         AutodiscoveryIgnoreResponse {
-            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse::<Uuid>().unwrap(),
-            provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6".parse::<Uuid>().unwrap(),
+            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                .parse::<Uuid>()
+                .unwrap(),
+            provider_config_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
+                .parse::<Uuid>()
+                .unwrap(),
             provider_config_name: "My GitHub".to_string(),
             provider_type: "github_releases".to_string(),
             package_identifier: "org/my-app".to_string(),

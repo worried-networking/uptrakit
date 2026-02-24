@@ -625,7 +625,9 @@ async fn handle_authenticated(
     };
     let ping_secs = service.ping_interval_seconds.map_or_else(
         || match service.service_type {
-            service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => AGENT_DEFAULT_PING_INTERVAL_SECS,
+            service_entity::ServiceType::Agent | service_entity::ServiceType::SshAgent => {
+                AGENT_DEFAULT_PING_INTERVAL_SECS
+            }
             service_entity::ServiceType::Mqtt => MQTT_DEFAULT_PING_INTERVAL_SECS,
             _ => AGENT_DEFAULT_PING_INTERVAL_SECS,
         },
@@ -1212,7 +1214,10 @@ mod tests {
         // A JSON with a valid seq and seq-only-parseable structure, but an unknown message type.
         let json = r#"{"seq":1,"type":"future_message","data":{"foo":"bar"}}"#;
         let result = deserialize_service_msg(&mut in_seq, json);
-        assert!(matches!(result, Ok(None)), "unknown type should return Ok(None)");
+        assert!(
+            matches!(result, Ok(None)),
+            "unknown type should return Ok(None)"
+        );
     }
 
     #[test]

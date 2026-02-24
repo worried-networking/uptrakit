@@ -1,7 +1,5 @@
 use rootcause::prelude::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
 use crate::db::entity::ssh_host::{ActiveModel, Column, Entity, Model, SshKeyType};
 use crate::error::{Error, Result};
@@ -509,8 +507,12 @@ mod tests {
     #[tokio::test]
     async fn update_host_machine_id_nonexistent_id_fails() {
         let (_dir, db) = setup_db().await;
-        let result = update_host_machine_id(&db, "00000000-0000-0000-0000-000000000000", "mid").await;
+        let result =
+            update_host_machine_id(&db, "00000000-0000-0000-0000-000000000000", "mid").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err().current_context(), Error::HostNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err().current_context(),
+            Error::HostNotFound(_)
+        ));
     }
 }

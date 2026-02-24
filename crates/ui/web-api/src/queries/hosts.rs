@@ -31,10 +31,7 @@ fn host_to_response(h: host::Model, agents: Vec<HostAgentSummary>) -> HostRespon
     }
 }
 
-pub(crate) async fn load_host_agents(
-    tenant_db: &TenantDb,
-    host_id: Uuid,
-) -> Vec<HostAgentSummary> {
+pub(crate) async fn load_host_agents(tenant_db: &TenantDb, host_id: Uuid) -> Vec<HostAgentSummary> {
     let links = match ServiceHost::find()
         .filter(service_host::Column::HostId.eq(host_id))
         .all(tenant_db.db())
@@ -223,10 +220,7 @@ pub async fn update_host(
 }
 
 /// Soft-delete a host. Returns `true` if deactivated, `false` if not found.
-pub async fn deactivate_host(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+pub async fn deactivate_host(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
     let Some(h) = tenant_db
         .find_by_id::<host::Entity, _>(id)
         .filter(host::Column::DeactivatedAt.is_null())

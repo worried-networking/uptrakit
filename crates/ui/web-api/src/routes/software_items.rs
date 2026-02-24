@@ -15,11 +15,11 @@ use axum::{
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, RelationTrait, Set};
 use std::sync::Arc;
 use time::OffsetDateTime;
+use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     host, host_software_item, prelude::*, provider_config, service, service_host, software_item,
     update_history,
 };
-use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_web_api_types::validation::Validate;
 
 pub use uptrakit_web_api_types::pagination::{PaginatedResponse, PaginationParams};
@@ -268,7 +268,10 @@ pub async fn approve_software_item(
     };
 
     if item.discovery_state != Some(SoftwareDiscoveryState::Pending) {
-        return error_response(StatusCode::CONFLICT, "Software item is not in pending discovery state");
+        return error_response(
+            StatusCode::CONFLICT,
+            "Software item is not in pending discovery state",
+        );
     }
 
     let now = OffsetDateTime::now_utc();
@@ -287,7 +290,10 @@ pub async fn approve_software_item(
 
     match item_queries::get_software_item(&tenant_db, updated.id).await {
         Ok(Some(resp)) => (StatusCode::OK, Json(resp)).into_response(),
-        Ok(None) => error_response(StatusCode::INTERNAL_SERVER_ERROR, "Item not found after update"),
+        Ok(None) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Item not found after update",
+        ),
         Err(e) => {
             tracing::error!("Failed to fetch approved software item: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -325,7 +331,10 @@ pub async fn assign_hosts(
     };
 
     if req.host_assignments.is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "host_assignments must not be empty");
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "host_assignments must not be empty",
+        );
     }
 
     match item_queries::assign_hosts(&tenant_db, item_id, req).await {
@@ -408,7 +417,10 @@ pub async fn unassign_host(
             }
             StatusCode::NO_CONTENT.into_response()
         }
-        Ok(false) => error_response(StatusCode::NOT_FOUND, "Software item or host assignment not found"),
+        Ok(false) => error_response(
+            StatusCode::NOT_FOUND,
+            "Software item or host assignment not found",
+        ),
         Err(e) => {
             tracing::error!("Failed to unassign host from software item: {e}");
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
@@ -494,12 +506,11 @@ pub async fn trigger_update(
     };
 
     // 1. Verify software item exists and is active
-    let item = match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
-        .await
-    {
-        Some(i) => i,
-        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
-    };
+    let item =
+        match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
+            Some(i) => i,
+            None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+        };
 
     // 2. Verify host exists, is active, and belongs to tenant
     let host_record = match Host::find_by_id(host_id)
@@ -744,12 +755,11 @@ pub async fn check_versions(
     };
 
     // Verify software item exists and is active
-    let item = match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
-        .await
-    {
-        Some(i) => i,
-        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
-    };
+    let item =
+        match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
+            Some(i) => i,
+            None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+        };
 
     // Find all hosts assigned to this software item
     let links = match HostSoftwareItem::find()
@@ -776,65 +786,56 @@ pub async fn check_versions(
     let config_ids: Vec<uuid::Uuid> = links.iter().map(|l| l.provider_config_id).collect();
 
     // Batch query 1: Hosts (tenant-scoped).
-    let hosts: std::collections::HashMap<uuid::Uuid, host::Model> =
-        match tenant_db
-            .find::<host::Entity>()
-            .filter(host::Column::Id.is_in(host_ids.clone()))
-            .filter(host::Column::DeactivatedAt.is_null())
-            .all(tenant_db.db())
-            .await
-        {
-            Ok(hs) => hs.into_iter().map(|h| (h.id, h)).collect(),
-            Err(e) => {
-                tracing::error!("Failed to load hosts: {e}");
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
-            }
-        };
+    let hosts: std::collections::HashMap<uuid::Uuid, host::Model> = match tenant_db
+        .find::<host::Entity>()
+        .filter(host::Column::Id.is_in(host_ids.clone()))
+        .filter(host::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(hs) => hs.into_iter().map(|h| (h.id, h)).collect(),
+        Err(e) => {
+            tracing::error!("Failed to load hosts: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     // Batch query 2: service_host → service JOIN (tenant-scoped, approved services only).
     // Uses find_via_tenant_join to enforce tenant isolation without a separate service query.
-    let service_hosts: std::collections::HashMap<uuid::Uuid, uuid::Uuid> =
-        match tenant_db
-            .find_via_tenant_join::<service_host::Entity, service::Entity>(
-                service_host::Relation::Service.def(),
-            )
-            .filter(service_host::Column::HostId.is_in(host_ids))
-            .filter(service::Column::DeactivatedAt.is_null())
-            .filter(service::Column::Status.eq(service::ServiceStatus::Approved))
-            .all(tenant_db.db())
-            .await
-        {
-            Ok(shs) => shs.into_iter().map(|sh| (sh.host_id, sh.service_id)).collect(),
-            Err(e) => {
-                tracing::error!("Failed to load service-host links: {e}");
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
-            }
-        };
+    let service_hosts: std::collections::HashMap<uuid::Uuid, uuid::Uuid> = match tenant_db
+        .find_via_tenant_join::<service_host::Entity, service::Entity>(
+            service_host::Relation::Service.def(),
+        )
+        .filter(service_host::Column::HostId.is_in(host_ids))
+        .filter(service::Column::DeactivatedAt.is_null())
+        .filter(service::Column::Status.eq(service::ServiceStatus::Approved))
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(shs) => shs
+            .into_iter()
+            .map(|sh| (sh.host_id, sh.service_id))
+            .collect(),
+        Err(e) => {
+            tracing::error!("Failed to load service-host links: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     // Batch query 3: Provider configs (tenant-scoped).
-    let configs: std::collections::HashMap<uuid::Uuid, provider_config::Model> =
-        match tenant_db
-            .find::<provider_config::Entity>()
-            .filter(provider_config::Column::Id.is_in(config_ids))
-            .filter(provider_config::Column::DeactivatedAt.is_null())
-            .all(tenant_db.db())
-            .await
-        {
-            Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
-            Err(e) => {
-                tracing::error!("Failed to load provider configs: {e}");
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error",
-                );
-            }
-        };
+    let configs: std::collections::HashMap<uuid::Uuid, provider_config::Model> = match tenant_db
+        .find::<provider_config::Entity>()
+        .filter(provider_config::Column::Id.is_in(config_ids))
+        .filter(provider_config::Column::DeactivatedAt.is_null())
+        .all(tenant_db.db())
+        .await
+    {
+        Ok(cs) => cs.into_iter().map(|c| (c.id, c)).collect(),
+        Err(e) => {
+            tracing::error!("Failed to load provider configs: {e}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
 
     let mut agents_notified: u32 = 0;
     // Deduplicate by (service_id, host_id) — each pair gets exactly one CheckVersions message.
@@ -861,10 +862,8 @@ pub async fn check_versions(
             Err(_) => continue,
         };
 
-        let config = crate::update_hooks::merge_config(
-            &prov_config.config,
-            link.config_override.as_ref(),
-        );
+        let config =
+            crate::update_hooks::merge_config(&prov_config.config, link.config_override.as_ref());
 
         let assignment = uptrakit_internal_wire::VersionCheckAssignment {
             software_item_id: item_id,
@@ -935,12 +934,11 @@ pub async fn check_versions_host(
     };
 
     // Verify software item exists and is active
-    let item = match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id)
-        .await
-    {
-        Some(i) => i,
-        None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
-    };
+    let item =
+        match item_queries::find_active_item(tenant_db.db(), tenant_db.tenant_id, item_id).await {
+            Some(i) => i,
+            None => return error_response(StatusCode::NOT_FOUND, "Software item not found"),
+        };
 
     // Verify host exists and belongs to tenant; keep the record for machine_id.
     let host_record = match Host::find_by_id(host_id)
@@ -1026,10 +1024,8 @@ pub async fn check_versions_host(
         }
     };
 
-    let config = crate::update_hooks::merge_config(
-        &provider_config.config,
-        link.config_override.as_ref(),
-    );
+    let config =
+        crate::update_hooks::merge_config(&provider_config.config, link.config_override.as_ref());
 
     let assignment = uptrakit_internal_wire::VersionCheckAssignment {
         software_item_id: item_id,

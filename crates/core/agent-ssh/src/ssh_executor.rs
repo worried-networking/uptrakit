@@ -122,7 +122,10 @@ mod tests {
 
     #[test]
     fn exec_with_spaces_in_args() {
-        let spec = CommandSpec::exec("docker", ["pull".to_string(), "my image:latest".to_string()]);
+        let spec = CommandSpec::exec(
+            "docker",
+            ["pull".to_string(), "my image:latest".to_string()],
+        );
         let result = build_remote_command_string(&spec);
         assert_eq!(result, "'docker' 'pull' 'my image:latest'");
     }

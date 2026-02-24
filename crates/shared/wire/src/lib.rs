@@ -3006,8 +3006,8 @@ mod tests {
     #[test]
     fn spec_conformance_discovery_results() {
         let spec = AsyncApiSpec::load();
-        let json = service_envelope_json(ServiceMessage::DiscoveryResults(
-            DiscoveryResultsPayload {
+        let json =
+            service_envelope_json(ServiceMessage::DiscoveryResults(DiscoveryResultsPayload {
                 host_machine_id: "machine-abc".to_string(),
                 results: vec![DiscoveryProviderResult {
                     provider_config_id: Some(TEST_UUID_1),
@@ -3020,8 +3020,7 @@ mod tests {
                     }],
                     error: None,
                 }],
-            },
-        ));
+            }));
         spec.validate("discoveryResultsPayload", &json);
     }
 
@@ -3114,7 +3113,10 @@ mod tests {
             capabilities: BTreeSet::new(),
         });
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(!json.contains("capabilities"), "empty capabilities should be omitted");
+        assert!(
+            !json.contains("capabilities"),
+            "empty capabilities should be omitted"
+        );
         // Deserializes back with empty set.
         let deserialized: ServiceMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, msg);

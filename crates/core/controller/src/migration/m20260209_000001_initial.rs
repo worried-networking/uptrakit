@@ -1082,7 +1082,10 @@ impl MigrationTrait for Migration {
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_host_software_items_provider_config")
-                            .from(HostSoftwareItems::Table, HostSoftwareItems::ProviderConfigId)
+                            .from(
+                                HostSoftwareItems::Table,
+                                HostSoftwareItems::ProviderConfigId,
+                            )
                             .to(ProviderConfigs::Table, ProviderConfigs::Id)
                             .on_delete(ForeignKeyAction::Restrict),
                     )
@@ -1122,7 +1125,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(AutodiscoveryIgnores::TenantId).uuid().not_null())
+                    .col(
+                        ColumnDef::new(AutodiscoveryIgnores::TenantId)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(AutodiscoveryIgnores::ProviderConfigId)
                             .uuid()

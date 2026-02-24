@@ -140,7 +140,9 @@ mod tests {
 
     fn sample_entry() -> UpdateHistoryResponse {
         UpdateHistoryResponse {
-            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse::<Uuid>().unwrap(),
+            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                .parse::<Uuid>()
+                .unwrap(),
             host_id: "b1b2b3b4-c1c2-d1d2-e1e2-f1f2f3f4f5f6"
                 .parse::<Uuid>()
                 .unwrap(),

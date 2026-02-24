@@ -1,9 +1,9 @@
 use rootcause::prelude::*;
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
     Set,
 };
-use sea_orm::sea_query::Expr;
 use thiserror::Error;
 use time::OffsetDateTime;
 use uptrakit_shared_db::entity::{mqtt_client, prelude::MqttClient};
@@ -243,10 +243,7 @@ pub async fn update_mqtt_clients_status(
     }
     let now = OffsetDateTime::now_utc();
     let result = MqttClient::update_many()
-        .col_expr(
-            mqtt_client::Column::ConnectionStatus,
-            Expr::value(status),
-        )
+        .col_expr(mqtt_client::Column::ConnectionStatus, Expr::value(status))
         .col_expr(mqtt_client::Column::StatusUpdatedAt, Expr::value(now))
         .filter(mqtt_client::Column::Id.is_in(ids.to_vec()))
         .exec(db)

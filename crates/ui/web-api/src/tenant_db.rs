@@ -4,8 +4,8 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::response::IntoResponse;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, DeleteMany, JoinType, PrimaryKeyTrait, QueryFilter, QuerySelect,
-    RelationDef, Select, UpdateMany,
+    ColumnTrait, DatabaseConnection, DeleteMany, JoinType, PrimaryKeyTrait, QueryFilter,
+    QuerySelect, RelationDef, Select, UpdateMany,
 };
 use std::sync::Arc;
 use uptrakit_shared_db::entity::TenantScoped;
@@ -67,10 +67,7 @@ impl TenantDb {
     ///     .all(tenant_db.db())
     ///     .await?
     /// ```
-    pub fn find_via_tenant_join<Target, Scoped>(
-        &self,
-        relation: RelationDef,
-    ) -> Select<Target>
+    pub fn find_via_tenant_join<Target, Scoped>(&self, relation: RelationDef) -> Select<Target>
     where
         Target: sea_orm::EntityTrait,
         Scoped: TenantScoped,

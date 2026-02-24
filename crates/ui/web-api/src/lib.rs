@@ -485,9 +485,9 @@ impl AppStateBuilder {
             token_denylist: self
                 .token_denylist
                 .ok_or(AppStateBuildError("token_denylist"))?,
-            provider_ops: self.provider_ops.unwrap_or_else(|| {
-                Arc::new(uptrakit_provider_registry::ProviderRegistry)
-            }),
+            provider_ops: self
+                .provider_ops
+                .unwrap_or_else(|| Arc::new(uptrakit_provider_registry::ProviderRegistry)),
         })
     }
 }
@@ -772,7 +772,7 @@ pub async fn api_not_found(headers: HeaderMap) -> Response {
 /// Build the application router.
 pub fn build_router(state: Arc<AppState>) -> Router {
     // Authenticated OpenAPI routes (require_auth middleware applied before merge)
-    let mut auth_routes = OpenApiRouter::new()
+    let auth_routes = OpenApiRouter::new()
         .routes(routes!(routes::auth::logout))
         .routes(routes!(routes::auth::me))
         .routes(routes!(
@@ -865,7 +865,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .routes(routes!(routes::hosts::discover_host))
         .routes(routes!(routes::hosts::discard_host_discovered))
         .routes(routes!(routes::provider_configs::discover_provider_config))
-        .routes(routes!(routes::provider_configs::discard_provider_config_discovered))
+        .routes(routes!(
+            routes::provider_configs::discard_provider_config_discovered
+        ))
         .routes(routes!(
             routes::autodiscovery::list_autodiscovery_ignores,
             routes::autodiscovery::create_autodiscovery_ignore
@@ -876,16 +878,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     // The OIDC auth-flow routes (oidc_auth::*) are added to base_router below because
     // they must remain publicly reachable (browser redirects, token exchange, etc.).
     #[cfg(feature = "oidc")]
-    {
-        auth_routes = auth_routes
-            .routes(routes!(routes::oidc_providers::create_provider))
-            .routes(routes!(routes::oidc_providers::list_providers))
-            .routes(routes!(routes::oidc_providers::get_provider))
-            .routes(routes!(routes::oidc_providers::update_provider))
-            .routes(routes!(routes::oidc_providers::delete_provider))
-            .routes(routes!(routes::oidc_providers::activate_provider))
-            .routes(routes!(routes::oidc_providers::deactivate_provider));
-    }
+    let auth_routes = auth_routes
+        .routes(routes!(routes::oidc_providers::create_provider))
+        .routes(routes!(routes::oidc_providers::list_providers))
+        .routes(routes!(routes::oidc_providers::get_provider))
+        .routes(routes!(routes::oidc_providers::update_provider))
+        .routes(routes!(routes::oidc_providers::delete_provider))
+        .routes(routes!(routes::oidc_providers::activate_provider))
+        .routes(routes!(routes::oidc_providers::deactivate_provider));
 
     let auth_routes = auth_routes.route_layer(axum_mw::from_fn_with_state(
         Arc::clone(&state),

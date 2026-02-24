@@ -177,10 +177,7 @@ impl HomebrewProvider {
     /// Emits items only for packages with a known installed version.
     /// When `tag_extra` is true, annotates each item with
     /// `extra = {"package_type": "cask"}` for auto-discovery grouping.
-    fn parse_installed_casks(
-        json: &serde_json::Value,
-        tag_extra: bool,
-    ) -> Vec<DiscoveredSoftware> {
+    fn parse_installed_casks(json: &serde_json::Value, tag_extra: bool) -> Vec<DiscoveredSoftware> {
         let mut result = Vec::new();
         if let Some(casks) = json.get("casks").and_then(|c| c.as_array()) {
             for cask in casks {
@@ -352,9 +349,8 @@ impl Provider for HomebrewProvider {
             )))
         })?;
 
-        let version =
-            Self::parse_installed_version(&json, package_identifier, self.is_cask())
-                .map(|v| Version::new(&v));
+        let version = Self::parse_installed_version(&json, package_identifier, self.is_cask())
+            .map(|v| Version::new(&v));
         tracing::debug!(version = ?version, "Homebrew version detection result");
         Ok(version)
     }

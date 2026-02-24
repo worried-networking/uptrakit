@@ -38,8 +38,7 @@ pub fn init_tracing(own_module: &str, verbosity: u8) {
         )
     } else {
         let level = if verbosity == 1 { "debug" } else { "trace" };
-        EnvFilter::from_default_env()
-            .add_directive(level.parse().expect("valid level directive"))
+        EnvFilter::from_default_env().add_directive(level.parse().expect("valid level directive"))
     };
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }

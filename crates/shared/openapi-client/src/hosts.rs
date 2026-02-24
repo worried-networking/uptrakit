@@ -22,7 +22,10 @@ impl UptrakitClient {
     /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
     /// [`list_hosts`]: Self::list_hosts
     pub async fn list_all_hosts(&self) -> Result<Vec<HostResponse>> {
-        let base = PaginationParams { page: None, per_page: None };
+        let base = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         self.fetch_all_pages(crate::paths::hosts::BASE, &base).await
     }
 

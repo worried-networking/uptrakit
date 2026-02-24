@@ -33,7 +33,10 @@ impl UptrakitClient {
     /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
     /// [`list_provider_configs`]: Self::list_provider_configs
     pub async fn list_all_provider_configs(&self) -> Result<Vec<ProviderConfigResponse>> {
-        let base = PaginationParams { page: None, per_page: None };
+        let base = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         self.fetch_all_pages(crate::paths::provider_configs::BASE, &base)
             .await
     }

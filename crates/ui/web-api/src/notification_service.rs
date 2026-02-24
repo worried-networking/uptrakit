@@ -119,7 +119,10 @@ impl NotificationService {
             ServiceType::Mqtt => "mqtt",
             ServiceType::SshAgent => "ssh_agent",
             _ => {
-                tracing::warn!(?service_type, "unknown ServiceType in backlog delivery — skipping");
+                tracing::warn!(
+                    ?service_type,
+                    "unknown ServiceType in backlog delivery — skipping"
+                );
                 return 0;
             }
         };

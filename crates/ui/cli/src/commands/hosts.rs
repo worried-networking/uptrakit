@@ -4,7 +4,9 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
+use uptrakit_openapi_client::types::autodiscovery::{
+    DiscardDiscoveredResponse, TriggerDiscoveryResponse,
+};
 use uptrakit_openapi_client::types::hosts::{HostMessageResponse, HostResponse, UpdateHostRequest};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 
@@ -82,7 +84,10 @@ impl HumanOutput for HostResponse {
 
 impl HumanOutput for TriggerDiscoveryResponse {
     fn to_human_string(&self) -> String {
-        format!("{} (providers queued: {})\n", self.message, self.providers_queued)
+        format!(
+            "{} (providers queued: {})\n",
+            self.message, self.providers_queued
+        )
     }
 }
 
@@ -176,24 +181,51 @@ pub async fn show(params: ShowParams<'_>) -> Result<HostResponse> {
 }
 
 pub async fn update(params: UpdateParams<'_>) -> Result<HostResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    let req = UpdateHostRequest { friendly_name: params.friendly_name };
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    let req = UpdateHostRequest {
+        friendly_name: params.friendly_name,
+    };
     client.update_host(params.id, &req).await.context_to()
 }
 
 pub async fn deactivate(params: DeactivateParams<'_>) -> Result<HostMessageResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     client.deactivate_host(params.id).await.context_to()
 }
 
 pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     client.discover_host(params.id).await.context_to()
 }
 
-pub async fn discard_discovered(params: DiscardDiscoveredParams<'_>) -> Result<DiscardDiscoveredResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    client.discard_host_discovered(params.id, params.provider_config_id).await.context_to()
+pub async fn discard_discovered(
+    params: DiscardDiscoveredParams<'_>,
+) -> Result<DiscardDiscoveredResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    client
+        .discard_host_discovered(params.id, params.provider_config_id)
+        .await
+        .context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -202,12 +234,16 @@ pub async fn discard_discovered(params: DiscardDiscoveredParams<'_>) -> Result<D
 mod tests {
     use super::*;
     use time::macros::datetime;
-    use uptrakit_openapi_client::types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
+    use uptrakit_openapi_client::types::autodiscovery::{
+        DiscardDiscoveredResponse, TriggerDiscoveryResponse,
+    };
     use uptrakit_openapi_client::types::hosts::HostAgentSummary;
 
     fn sample_host() -> HostResponse {
         HostResponse {
-            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse::<Uuid>().unwrap(),
+            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                .parse::<Uuid>()
+                .unwrap(),
             machine_id: "machine-001".to_string(),
             hostname: "server-1.local".to_string(),
             friendly_name: "Production Server".to_string(),
@@ -237,7 +273,9 @@ mod tests {
     fn host_detail_with_agents() {
         let mut host = sample_host();
         host.agents = vec![HostAgentSummary {
-            id: "d1d2d3d4-e1e2-f1f2-a1a2-b1b2b3b4b5b6".parse::<Uuid>().unwrap(),
+            id: "d1d2d3d4-e1e2-f1f2-a1a2-b1b2b3b4b5b6"
+                .parse::<Uuid>()
+                .unwrap(),
             friendly_name: "agent-1".to_string(),
             status: "approved".parse().unwrap(),
         }];
@@ -273,7 +311,9 @@ mod tests {
 
     #[test]
     fn host_message_response_human_output() {
-        let resp = HostMessageResponse { message: "Host deactivated.".to_string() };
+        let resp = HostMessageResponse {
+            message: "Host deactivated.".to_string(),
+        };
         let s = resp.to_human_string();
         assert!(s.contains("Host deactivated"));
     }

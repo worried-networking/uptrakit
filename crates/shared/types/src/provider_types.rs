@@ -26,7 +26,6 @@ impl ProviderType {
             Self::Homebrew => "homebrew",
         }
     }
-
 }
 
 /// Error returned when parsing an invalid [`ProviderType`] string.

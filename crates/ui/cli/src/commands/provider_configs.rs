@@ -6,7 +6,9 @@ use rootcause::prelude::*;
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
+use uptrakit_openapi_client::types::autodiscovery::{
+    DiscardDiscoveredResponse, TriggerDiscoveryResponse,
+};
 use uptrakit_openapi_client::types::pagination::{PaginatedResponse, PaginationParams};
 use uptrakit_openapi_client::types::provider_configs::{
     CreateProviderConfigRequest, ProviderConfigResponse, UpdateProviderConfigRequest,
@@ -20,10 +22,7 @@ impl HumanOutput for PaginatedResponse<ProviderConfigResponse> {
         if self.items.is_empty() {
             return "No provider configs found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<25} {:<20} ENABLED\n",
-            "ID", "NAME", "TYPE"
-        );
+        let mut out = format!("{:<38} {:<25} {:<20} ENABLED\n", "ID", "NAME", "TYPE");
         for c in &self.items {
             out.push_str(&format!(
                 "{:<38} {:<25} {:<20} {}\n",
@@ -124,18 +123,36 @@ pub struct DiscardDiscoveredParams<'a> {
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 pub async fn list(params: ListParams<'_>) -> Result<PaginatedResponse<ProviderConfigResponse>> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    let pagination = PaginationParams { page: params.page, per_page: params.per_page };
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    let pagination = PaginationParams {
+        page: params.page,
+        per_page: params.per_page,
+    };
     client.list_provider_configs(&pagination).await.context_to()
 }
 
 pub async fn show(params: ShowParams<'_>) -> Result<ProviderConfigResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     client.get_provider_config(params.id).await.context_to()
 }
 
 pub async fn create(params: CreateParams<'_>) -> Result<ProviderConfigResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = CreateProviderConfigRequest {
         name: params.name,
         provider_type: params.provider_type,
@@ -146,29 +163,65 @@ pub async fn create(params: CreateParams<'_>) -> Result<ProviderConfigResponse> 
 }
 
 pub async fn update(params: UpdateParams<'_>) -> Result<ProviderConfigResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = UpdateProviderConfigRequest {
         name: params.name,
         config: params.config,
         enabled: params.enabled,
     };
-    client.update_provider_config(params.id, &req).await.context_to()
+    client
+        .update_provider_config(params.id, &req)
+        .await
+        .context_to()
 }
 
 pub async fn delete(params: DeleteParams<'_>) -> Result<DeletedOutput> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    client.delete_provider_config(params.id).await.context_to()?;
-    Ok(DeletedOutput { message: format!("Provider config {} deleted.", params.id) })
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    client
+        .delete_provider_config(params.id)
+        .await
+        .context_to()?;
+    Ok(DeletedOutput {
+        message: format!("Provider config {} deleted.", params.id),
+    })
 }
 
 pub async fn discover(params: DiscoverParams<'_>) -> Result<TriggerDiscoveryResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    client.discover_provider_config(params.id).await.context_to()
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    client
+        .discover_provider_config(params.id)
+        .await
+        .context_to()
 }
 
-pub async fn discard_discovered(params: DiscardDiscoveredParams<'_>) -> Result<DiscardDiscoveredResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
-    client.discard_provider_config_discovered(params.id).await.context_to()
+pub async fn discard_discovered(
+    params: DiscardDiscoveredParams<'_>,
+) -> Result<DiscardDiscoveredResponse> {
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
+    client
+        .discard_provider_config_discovered(params.id)
+        .await
+        .context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -180,7 +233,9 @@ mod tests {
 
     fn sample_config() -> ProviderConfigResponse {
         ProviderConfigResponse {
-            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse::<Uuid>().unwrap(),
+            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "GitHub Releases".to_string(),
             provider_type: ProviderType::GithubReleases,
             config: serde_json::json!({"owner": "org", "repo": "app"}),

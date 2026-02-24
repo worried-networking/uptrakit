@@ -44,10 +44,7 @@ impl UptrakitClient {
     }
 
     /// Trigger autodiscovery for a specific provider config across all agents.
-    pub async fn discover_provider_config(
-        &self,
-        id: &Uuid,
-    ) -> Result<TriggerDiscoveryResponse> {
+    pub async fn discover_provider_config(&self, id: &Uuid) -> Result<TriggerDiscoveryResponse> {
         self.post_empty(&crate::paths::provider_configs::discover(id))
             .await
     }

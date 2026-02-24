@@ -50,10 +50,7 @@ fn normalize_cron(expr: &str) -> String {
     }
 }
 
-fn compute_next_run(
-    cron_expr: &str,
-    after: OffsetDateTime,
-) -> Option<OffsetDateTime> {
+fn compute_next_run(cron_expr: &str, after: OffsetDateTime) -> Option<OffsetDateTime> {
     let normalized = normalize_cron(cron_expr);
     let schedule = cron::Schedule::from_str(&normalized).ok()?;
     let after_chrono = chrono::DateTime::from_timestamp(after.unix_timestamp(), 0)?;
@@ -156,14 +153,8 @@ pub async fn trigger_scheduled_task(
 
     let now = OffsetDateTime::now_utc();
     let result = scheduled_task::Entity::update_many()
-        .col_expr(
-            scheduled_task::Column::NextRunAt,
-            Expr::value(now),
-        )
-        .col_expr(
-            scheduled_task::Column::UpdatedAt,
-            Expr::value(now),
-        )
+        .col_expr(scheduled_task::Column::NextRunAt, Expr::value(now))
+        .col_expr(scheduled_task::Column::UpdatedAt, Expr::value(now))
         .filter(scheduled_task::Column::Id.eq(id))
         .exec(tenant_db.db())
         .await?;

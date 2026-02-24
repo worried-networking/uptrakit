@@ -26,7 +26,10 @@ impl UptrakitClient {
     /// [`MAX_PER_PAGE`]: uptrakit_web_api_types::pagination::MAX_PER_PAGE
     /// [`list_software_items`]: Self::list_software_items
     pub async fn list_all_software_items(&self) -> Result<Vec<SoftwareItemResponse>> {
-        let base = PaginationParams { page: None, per_page: None };
+        let base = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         self.fetch_all_pages(crate::paths::software_items::BASE, &base)
             .await
     }
@@ -103,11 +106,8 @@ impl UptrakitClient {
         host_id: &Uuid,
         req: &UpdateHostAssignmentRequest,
     ) -> Result<SoftwareItemDetailResponse> {
-        self.put_json(
-            &crate::paths::software_items::host(item_id, host_id),
-            req,
-        )
-        .await
+        self.put_json(&crate::paths::software_items::host(item_id, host_id), req)
+            .await
     }
 
     /// Trigger a version check for a software item across all assigned hosts.
@@ -146,9 +146,8 @@ impl UptrakitClient {
 #[cfg(test)]
 mod tests {
     use uptrakit_web_api_types::software_items::{
-        AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
-        ReleaseInfoRequest, TriggerUpdateRequest, UpdateHostAssignmentRequest,
-        UpdateSoftwareItemRequest,
+        AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment, ReleaseInfoRequest,
+        TriggerUpdateRequest, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
     };
     use uuid::Uuid;
 

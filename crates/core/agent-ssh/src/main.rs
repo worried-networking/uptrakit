@@ -80,21 +80,17 @@ impl ServiceHandler for SshAgentHandler {
         msg: ControllerMessage,
         conn: &mut ControllerConnection,
     ) -> LoopResult<Option<LoopOutcome>> {
-        let db = self.local_db.as_ref().expect(
-            "local_db must be initialized in on_connected before on_message is called",
-        );
+        let db = self
+            .local_db
+            .as_ref()
+            .expect("local_db must be initialized in on_connected before on_message is called");
         match msg {
             ControllerMessage::CheckVersions(payload) => {
                 Ok(client::handle_check_versions_ssh(payload, db, conn).await)
             }
             ControllerMessage::ExecuteUpdate(payload) => {
-                client::handle_execute_update_ssh(
-                    *payload,
-                    db,
-                    &mut self.in_flight_update,
-                    conn,
-                )
-                .await;
+                client::handle_execute_update_ssh(*payload, db, &mut self.in_flight_update, conn)
+                    .await;
                 Ok(None)
             }
             ControllerMessage::DiscoverSoftware(payload) => {

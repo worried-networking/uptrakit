@@ -183,10 +183,10 @@ pub async fn approve_service(
     let resp = match svc_queries::approve_service(&tenant_db, service_id).await {
         Ok(r) => r,
         Err(ServiceQueryError::NotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Service not found")
+            return error_response(StatusCode::NOT_FOUND, "Service not found");
         }
         Err(ServiceQueryError::NotPending) => {
-            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
+            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
         }
         Err(ServiceQueryError::Db(e)) => {
             tracing::error!("Failed to approve service: {}", e);
@@ -241,10 +241,10 @@ pub async fn reject_service(
     let resp = match svc_queries::reject_service(&tenant_db, service_id).await {
         Ok(r) => r,
         Err(ServiceQueryError::NotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Service not found")
+            return error_response(StatusCode::NOT_FOUND, "Service not found");
         }
         Err(ServiceQueryError::NotPending) => {
-            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status")
+            return error_response(StatusCode::BAD_REQUEST, "Service is not in pending status");
         }
         Err(ServiceQueryError::Db(e)) => {
             tracing::error!("Failed to reject service: {}", e);
@@ -371,28 +371,28 @@ pub async fn merge_service(
     {
         Ok(r) => r,
         Err(ServiceQueryError::NotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Target service not found")
+            return error_response(StatusCode::NOT_FOUND, "Target service not found");
         }
         Err(ServiceQueryError::SourceNotFound) => {
-            return error_response(StatusCode::NOT_FOUND, "Source service not found")
+            return error_response(StatusCode::NOT_FOUND, "Source service not found");
         }
         Err(ServiceQueryError::TargetConnected) => {
             return error_response(
                 StatusCode::CONFLICT,
                 "Target service is currently connected",
-            )
+            );
         }
         Err(ServiceQueryError::NotAgentType) => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 "Merge is only supported for agent services",
-            )
+            );
         }
         Err(ServiceQueryError::NotApproved) => {
-            return error_response(StatusCode::BAD_REQUEST, "Target service must be approved")
+            return error_response(StatusCode::BAD_REQUEST, "Target service must be approved");
         }
         Err(ServiceQueryError::NotPending) => {
-            return error_response(StatusCode::BAD_REQUEST, "Source service must be pending")
+            return error_response(StatusCode::BAD_REQUEST, "Source service must be pending");
         }
         Err(ServiceQueryError::Db(e)) => {
             tracing::error!("Failed to merge services: {}", e);
@@ -558,11 +558,14 @@ mod tests {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use sea_orm::{
-        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection, EntityTrait,
-        Set,
+        ActiveModelTrait, ConnectOptions, ConnectionTrait, Database, DatabaseConnection,
+        EntityTrait, Set,
     };
     use time::OffsetDateTime;
-    use uptrakit_shared_db::entity::{service, prelude::{AuthMethod, Service}};
+    use uptrakit_shared_db::entity::{
+        prelude::{AuthMethod, Service},
+        service,
+    };
 
     async fn test_db() -> DatabaseConnection {
         let opt = ConnectOptions::new("sqlite::memory:".to_owned());

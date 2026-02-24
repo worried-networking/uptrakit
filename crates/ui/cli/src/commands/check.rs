@@ -62,10 +62,7 @@ pub async fn all(params: AllParams<'_>) -> Result<TriggerScheduledTaskResponse> 
         }
     };
 
-    client
-        .trigger_scheduled_task(&task.id)
-        .await
-        .context_to()
+    client.trigger_scheduled_task(&task.id).await.context_to()
 }
 
 /// Trigger a version check for a specific software item.

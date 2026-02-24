@@ -242,11 +242,7 @@ pub async fn update_provider_config(
     }
     if let Some(mut config) = req.config {
         // Re-apply secret restoration on the actual value being persisted.
-        ops.restore_config_secrets_str(
-            &provider_type,
-            &mut config,
-            model.config.as_ref(),
-        );
+        ops.restore_config_secrets_str(&provider_type, &mut config, model.config.as_ref());
         model.config = Set(config);
     }
     if let Some(enabled) = req.enabled {
@@ -259,10 +255,11 @@ pub async fn update_provider_config(
         .await
         .map_err(UpdateProviderConfigError::Db)?;
 
-    provider_config_to_response(ops, updated)
-        .ok_or_else(|| UpdateProviderConfigError::ConfigValidation(
+    provider_config_to_response(ops, updated).ok_or_else(|| {
+        UpdateProviderConfigError::ConfigValidation(
             "updated record has unrecognised provider_type".to_string(),
-        ))
+        )
+    })
 }
 
 /// Soft-delete a provider configuration.

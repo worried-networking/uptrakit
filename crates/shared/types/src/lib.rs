@@ -27,6 +27,4 @@ pub use secret_string::SecretString;
 pub use service_status::{ParseServiceStatusError, ServiceStatus};
 pub use service_type::{ParseServiceTypeError, ServiceType};
 pub use session_token_type::{ParseSessionTokenTypeError, SessionTokenType};
-pub use software_discovery_state::{
-    ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState,
-};
+pub use software_discovery_state::{ParseSoftwareDiscoveryStateError, SoftwareDiscoveryState};

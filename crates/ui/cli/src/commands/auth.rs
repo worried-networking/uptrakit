@@ -67,10 +67,7 @@ impl HumanOutput for TokenListOutput {
         if self.tokens.is_empty() {
             return "No API tokens found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<30} {:<25} STATUS\n",
-            "ID", "NAME", "CREATED"
-        );
+        let mut out = format!("{:<38} {:<30} {:<25} STATUS\n", "ID", "NAME", "CREATED");
         for t in &self.tokens {
             let created = t
                 .created_at

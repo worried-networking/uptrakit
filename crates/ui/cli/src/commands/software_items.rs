@@ -7,9 +7,9 @@ use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
 use uptrakit_openapi_client::types::pagination::PaginatedResponse;
 use uptrakit_openapi_client::types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
-    ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemResponse,
-    TriggerUpdateRequest, TriggerUpdateResponse, UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment, ListSoftwareItemsParams,
+    SoftwareItemDetailResponse, SoftwareItemResponse, TriggerUpdateRequest, TriggerUpdateResponse,
+    UpdateSoftwareItemRequest,
 };
 
 // ── Human output ────────────────────────────────────────────────────────────
@@ -58,7 +58,10 @@ impl HumanOutput for SoftwareItemDetailResponse {
         if let Some(ref lv) = self.latest_version {
             out.push_str(&format!("Latest Version:  {}\n", lv));
         }
-        out.push_str(&format!("Update Available:{}\n", if self.update_available { " yes" } else { " no" }));
+        out.push_str(&format!(
+            "Update Available:{}\n",
+            if self.update_available { " yes" } else { " no" }
+        ));
         if let Some(checked) = self.last_checked_at {
             out.push_str(&format!(
                 "Last Checked:    {}\n",
@@ -133,11 +136,16 @@ impl HumanOutput for SoftwareItemResponse {
         if let Some(ref lv) = self.latest_version {
             out.push_str(&format!("Latest Version:  {}\n", lv));
         }
-        out.push_str(&format!("Update Available:{}\n", if self.update_available { " yes" } else { " no" }));
+        out.push_str(&format!(
+            "Update Available:{}\n",
+            if self.update_available { " yes" } else { " no" }
+        ));
         if let Some(checked) = self.last_checked_at {
             out.push_str(&format!(
                 "Last Checked:    {}\n",
-                checked.format(&Rfc3339).unwrap_or_else(|_| checked.to_string())
+                checked
+                    .format(&Rfc3339)
+                    .unwrap_or_else(|_| checked.to_string())
             ));
         }
         out.push_str(&format!("Host Count:      {}\n", self.host_count));
@@ -262,7 +270,12 @@ pub async fn show(params: ShowParams<'_>) -> Result<SoftwareItemDetailResponse> 
 }
 
 pub async fn create(params: CreateParams<'_>) -> Result<SoftwareItemResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = CreateSoftwareItemRequest {
         name: params.name,
         enabled: params.enabled.unwrap_or(true),
@@ -271,27 +284,52 @@ pub async fn create(params: CreateParams<'_>) -> Result<SoftwareItemResponse> {
 }
 
 pub async fn update(params: UpdateParams<'_>) -> Result<SoftwareItemResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = UpdateSoftwareItemRequest {
         name: params.name,
         enabled: params.enabled,
     };
-    client.update_software_item(params.id, &req).await.context_to()
+    client
+        .update_software_item(params.id, &req)
+        .await
+        .context_to()
 }
 
 pub async fn delete(params: DeleteParams<'_>) -> Result<DeletedOutput> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     client.delete_software_item(params.id).await.context_to()?;
-    Ok(DeletedOutput { message: format!("Software item {} deleted.", params.id) })
+    Ok(DeletedOutput {
+        message: format!("Software item {} deleted.", params.id),
+    })
 }
 
 pub async fn approve(params: ApproveParams<'_>) -> Result<SoftwareItemResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     client.approve_software_item(params.id).await.context_to()
 }
 
 pub async fn assign(params: AssignParams<'_>) -> Result<SoftwareItemDetailResponse> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     let req = AssignHostsRequest {
         host_assignments: vec![HostSoftwareAssignment {
             host_id: *params.host_id,
@@ -305,14 +343,28 @@ pub async fn assign(params: AssignParams<'_>) -> Result<SoftwareItemDetailRespon
 }
 
 pub async fn unassign(params: UnassignParams<'_>) -> Result<DeletedOutput> {
-    let client = authenticated_client(params.server, params.token, params.insecure, params.request_timeout)?;
+    let client = authenticated_client(
+        params.server,
+        params.token,
+        params.insecure,
+        params.request_timeout,
+    )?;
     if params.ignore {
-        client.unassign_host_with_ignore(params.id, params.host_id).await.context_to()?;
+        client
+            .unassign_host_with_ignore(params.id, params.host_id)
+            .await
+            .context_to()?;
     } else {
-        client.unassign_host(params.id, params.host_id).await.context_to()?;
+        client
+            .unassign_host(params.id, params.host_id)
+            .await
+            .context_to()?;
     }
     Ok(DeletedOutput {
-        message: format!("Host {} unassigned from software item {}.", params.host_id, params.id),
+        message: format!(
+            "Host {} unassigned from software item {}.",
+            params.host_id, params.id
+        ),
     })
 }
 
@@ -365,11 +417,15 @@ pub async fn update_latest(params: UpdateLatestParams<'_>) -> Result<TriggerUpda
 mod tests {
     use super::*;
     use time::macros::datetime;
-    use uptrakit_openapi_client::types::software_items::{SoftwareItemHostSummary, SoftwareItemResponse};
+    use uptrakit_openapi_client::types::software_items::{
+        SoftwareItemHostSummary, SoftwareItemResponse,
+    };
 
     fn sample_item() -> SoftwareItemResponse {
         SoftwareItemResponse {
-            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "Node.js".to_string(),
             provider_types: vec!["github_releases".to_string()],
             enabled: true,
@@ -385,7 +441,9 @@ mod tests {
 
     fn sample_item_with_update() -> SoftwareItemResponse {
         SoftwareItemResponse {
-            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "Homebrew App".to_string(),
             provider_types: vec!["homebrew".to_string()],
             enabled: true,
@@ -442,7 +500,9 @@ mod tests {
     #[test]
     fn software_item_detail_human_output() {
         let detail = SoftwareItemDetailResponse {
-            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "Node.js".to_string(),
             provider_types: vec!["github_releases".to_string()],
             enabled: true,
@@ -480,13 +540,18 @@ mod tests {
         assert!(s.contains("20.0.0"), "installed version missing");
         assert!(s.contains("22.0.0"), "latest version missing");
         assert!(s.contains("update-available"), "host status missing");
-        assert!(s.contains("Latest Version:"), "item latest version header missing");
+        assert!(
+            s.contains("Latest Version:"),
+            "item latest version header missing"
+        );
     }
 
     #[test]
     fn software_item_detail_up_to_date_status() {
         let detail = SoftwareItemDetailResponse {
-            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "Curl".to_string(),
             provider_types: vec!["homebrew".to_string()],
             enabled: true,
@@ -519,14 +584,19 @@ mod tests {
             }],
         };
         let s = detail.to_human_string();
-        assert!(s.contains("up-to-date"), "host status should show up-to-date");
+        assert!(
+            s.contains("up-to-date"),
+            "host status should show up-to-date"
+        );
     }
 
     #[test]
     fn software_item_response_human_output() {
         use uptrakit_shared_types::SoftwareDiscoveryState;
         let item = SoftwareItemResponse {
-            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "My App".to_string(),
             provider_types: vec!["homebrew".to_string()],
             enabled: true,
@@ -549,7 +619,9 @@ mod tests {
     #[test]
     fn software_item_response_no_update_available() {
         let item = SoftwareItemResponse {
-            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6".parse::<Uuid>().unwrap(),
+            id: "c1c2c3c4-d1d2-e1e2-f1f2-a1a2a3a4a5a6"
+                .parse::<Uuid>()
+                .unwrap(),
             name: "Up-to-date App".to_string(),
             provider_types: vec![],
             enabled: true,
@@ -563,6 +635,9 @@ mod tests {
         };
         let s = item.to_human_string();
         assert!(s.contains(" no"), "update_available should show 'no'");
-        assert!(!s.contains("Latest Version:"), "latest version should not appear when None");
+        assert!(
+            !s.contains("Latest Version:"),
+            "latest version should not appear when None"
+        );
     }
 }

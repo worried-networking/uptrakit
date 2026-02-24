@@ -52,8 +52,8 @@ impl BollardDockerPuller {
     /// `DOCKER_HOST` and falls back to the platform default socket path.
     /// No actual network connection is opened at construction time.
     pub(crate) fn new() -> Result<Self> {
-        let docker = bollard::Docker::connect_with_defaults()
-            .context_to::<DockerRegistryError>()?;
+        let docker =
+            bollard::Docker::connect_with_defaults().context_to::<DockerRegistryError>()?;
         Ok(Self { docker })
     }
 }
@@ -144,11 +144,7 @@ fn infer_serveraddress(image: &str) -> String {
 
 /// Format a single pull-progress event as `"{id}: {status} {progress}"`,
 /// omitting any empty components.
-fn format_progress_line(
-    id: Option<&str>,
-    status: Option<&str>,
-    progress: Option<&str>,
-) -> String {
+fn format_progress_line(id: Option<&str>, status: Option<&str>, progress: Option<&str>) -> String {
     let status = status.unwrap_or("").trim();
     let progress = progress.unwrap_or("").trim();
 
@@ -192,7 +188,9 @@ impl DockerPuller for MockDockerPuller {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> Result<String> {
         if self.should_fail {
-            bail!(DockerRegistryError::PullFailed("mock pull failure".to_string()));
+            bail!(DockerRegistryError::PullFailed(
+                "mock pull failure".to_string()
+            ));
         }
         send_output(output_tx, &self.output, OutputStreamType::Stdout).await;
         Ok(self.output.clone())
@@ -243,10 +241,7 @@ mod tests {
 
     #[test]
     fn infer_serveraddress_docker_hub_official() {
-        assert_eq!(
-            infer_serveraddress("nginx"),
-            "https://index.docker.io/v1/"
-        );
+        assert_eq!(infer_serveraddress("nginx"), "https://index.docker.io/v1/");
     }
 
     #[test]
@@ -275,9 +270,6 @@ mod tests {
 
     #[test]
     fn infer_serveraddress_localhost() {
-        assert_eq!(
-            infer_serveraddress("localhost/app"),
-            "https://localhost/"
-        );
+        assert_eq!(infer_serveraddress("localhost/app"), "https://localhost/");
     }
 }

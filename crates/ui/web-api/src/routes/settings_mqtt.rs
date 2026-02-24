@@ -1,8 +1,6 @@
 use crate::AppState;
 use crate::error_response::error_response;
-use crate::middleware::permission::{
-    CanManageGlobalSettings, CanManageSettings, CanViewSettings,
-};
+use crate::middleware::permission::{CanManageGlobalSettings, CanManageSettings, CanViewSettings};
 use crate::mqtt_client_store;
 use crate::mqtt_lease_coordinator::{LeaseOutcome, MQTT_LEASE_STALE_AFTER, MqttLeaseCoordinator};
 use crate::tenant_db::TenantDb;

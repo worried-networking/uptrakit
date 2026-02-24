@@ -1,9 +1,9 @@
-use sea_orm::{
-    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-};
 use sea_orm::sea_query::{Expr, ExprTrait, Query};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::collections::HashMap;
-use uptrakit_shared_db::entity::{host, prelude::*, software_item, update_history, update_output_line};
+use uptrakit_shared_db::entity::{
+    host, prelude::*, software_item, update_history, update_output_line,
+};
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::update_history::{
     UpdateHistoryQuery, UpdateHistoryResponse, UpdateStatus,
@@ -92,8 +92,8 @@ pub async fn list_update_history(
         .and_where(Expr::col(host::Column::TenantId).eq(tenant_db.tenant_id))
         .to_owned();
 
-    let mut q = UpdateHistory::find()
-        .filter(update_history::Column::HostId.in_subquery(host_subquery));
+    let mut q =
+        UpdateHistory::find().filter(update_history::Column::HostId.in_subquery(host_subquery));
 
     if let Some(host_id) = query.host_id {
         q = q.filter(update_history::Column::HostId.eq(host_id));
@@ -204,7 +204,12 @@ pub async fn get_update_history(
         record.output.clone()
     };
 
-    Ok(Some(build_response(&record, host.friendly_name, si_name, output)))
+    Ok(Some(build_response(
+        &record,
+        host.friendly_name,
+        si_name,
+        output,
+    )))
 }
 
 #[cfg(test)]

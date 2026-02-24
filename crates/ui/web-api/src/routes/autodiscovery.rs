@@ -95,7 +95,10 @@ pub async fn create_autodiscovery_ignore(
     use uptrakit_shared_db::entity::{prelude::*, provider_config};
 
     if req.package_identifier.trim().is_empty() {
-        return error_response(StatusCode::BAD_REQUEST, "package_identifier must not be empty");
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "package_identifier must not be empty",
+        );
     }
 
     // Verify provider config belongs to this tenant.
@@ -143,9 +146,7 @@ pub async fn create_autodiscovery_ignore(
     let rule = match AutodiscoveryIgnore::find()
         .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_db.tenant_id))
         .filter(autodiscovery_ignore::Column::ProviderConfigId.eq(req.provider_config_id))
-        .filter(
-            autodiscovery_ignore::Column::PackageIdentifier.eq(req.package_identifier.clone()),
-        )
+        .filter(autodiscovery_ignore::Column::PackageIdentifier.eq(req.package_identifier.clone()))
         .one(tenant_db.db())
         .await
     {

@@ -407,9 +407,8 @@ mod tests {
             output: pull_output.clone(),
             should_fail: false,
         });
-        let provider =
-            DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
-                .expect("valid config");
+        let provider = DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
+            .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let result = provider
             .execute_update("nginx", "1.25.0", None, &tx)
@@ -430,13 +429,10 @@ mod tests {
             output: String::new(),
             should_fail: true,
         });
-        let provider =
-            DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
-                .expect("valid config");
+        let provider = DockerRegistryProvider::new_for_test(test_config(), test_executor(), puller)
+            .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
-        let result = provider
-            .execute_update("nginx", "1.25.0", None, &tx)
-            .await;
+        let result = provider.execute_update("nginx", "1.25.0", None, &tx).await;
 
         assert!(result.is_err(), "pull failure should be propagated");
 
@@ -452,9 +448,8 @@ mod tests {
         });
         let mut config = test_config();
         config.restart_command = Some("echo restarting {image}:{tag}".to_string());
-        let provider =
-            DockerRegistryProvider::new_for_test(config, test_executor(), puller)
-                .expect("valid config");
+        let provider = DockerRegistryProvider::new_for_test(config, test_executor(), puller)
+            .expect("valid config");
         let (tx, mut rx) = mpsc::channel(100);
         let result = provider
             .execute_update("nginx", "1.25.0", None, &tx)

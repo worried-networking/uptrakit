@@ -238,7 +238,10 @@ pub struct ListSoftwareItemsParams {
 impl ListSoftwareItemsParams {
     /// Convert the pagination fields to a [`PaginationParams`] for resolution.
     pub fn pagination(&self) -> PaginationParams {
-        PaginationParams { page: self.page, per_page: self.per_page }
+        PaginationParams {
+            page: self.page,
+            per_page: self.per_page,
+        }
     }
 }
 
@@ -300,14 +303,22 @@ mod tests {
 
     #[test]
     fn validate_empty_name_fails() {
-        let req = CreateSoftwareItemRequest { name: "".to_string(), enabled: true };
-        let err = req.validate().expect_err("empty name should fail validation");
+        let req = CreateSoftwareItemRequest {
+            name: "".to_string(),
+            enabled: true,
+        };
+        let err = req
+            .validate()
+            .expect_err("empty name should fail validation");
         assert_eq!(err.field, "name");
     }
 
     #[test]
     fn validate_whitespace_only_name_fails() {
-        let req = CreateSoftwareItemRequest { name: "   ".to_string(), enabled: true };
+        let req = CreateSoftwareItemRequest {
+            name: "   ".to_string(),
+            enabled: true,
+        };
         let err = req
             .validate()
             .expect_err("whitespace-only name should fail validation");
@@ -348,7 +359,9 @@ mod tests {
         assert_eq!(deserialized.host_assignments.len(), 2);
         assert_eq!(deserialized.host_assignments[0].host_id, sample_uuid());
         assert_eq!(
-            deserialized.host_assignments[0].package_identifier.as_deref(),
+            deserialized.host_assignments[0]
+                .package_identifier
+                .as_deref(),
             Some("1password")
         );
         assert!(deserialized.host_assignments[1].provider_config.is_some());

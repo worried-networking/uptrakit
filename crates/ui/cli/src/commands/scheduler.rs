@@ -4,7 +4,9 @@ use crate::output::HumanOutput;
 use rootcause::prelude::*;
 use time::format_description::well_known::Rfc3339;
 use uptrakit_openapi_client::Uuid;
-use uptrakit_openapi_client::types::scheduler::{ScheduledTaskResponse, TriggerScheduledTaskResponse};
+use uptrakit_openapi_client::types::scheduler::{
+    ScheduledTaskResponse, TriggerScheduledTaskResponse,
+};
 
 // ── Human output ────────────────────────────────────────────────────────────
 
@@ -142,10 +144,7 @@ pub async fn trigger(params: TriggerParams<'_>) -> Result<TriggerScheduledTaskRe
         params.insecure,
         params.request_timeout,
     )?;
-    client
-        .trigger_scheduled_task(params.id)
-        .await
-        .context_to()
+    client.trigger_scheduled_task(params.id).await.context_to()
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -158,7 +157,9 @@ mod tests {
 
     fn sample_task() -> ScheduledTaskResponse {
         ScheduledTaskResponse {
-            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6".parse::<Uuid>().unwrap(),
+            id: "a1a2a3a4-b1b2-c1c2-d1d2-e1e2e3e4e5e6"
+                .parse::<Uuid>()
+                .unwrap(),
             task_type: "version_check".to_string(),
             label: "Version Check".to_string(),
             cron_expression: "0 * * * *".to_string(),

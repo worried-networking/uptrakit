@@ -56,11 +56,7 @@ pub use uptrakit_command::{CommandExecutor, LocalCommandExecutor};
 /// helpers from the concrete registry, making them testable in isolation.
 pub trait ProviderOps: Send + Sync + 'static {
     /// Validate provider configuration JSON for the given string provider type.
-    fn validate_config_str(
-        &self,
-        provider_type: &str,
-        config: &serde_json::Value,
-    ) -> Result<()>;
+    fn validate_config_str(&self, provider_type: &str, config: &serde_json::Value) -> Result<()>;
 
     /// Mask secrets in provider configuration JSON for an API response.
     ///
@@ -100,11 +96,7 @@ pub trait ProviderOps: Send + Sync + 'static {
 }
 
 impl ProviderOps for ProviderRegistry {
-    fn validate_config_str(
-        &self,
-        provider_type: &str,
-        config: &serde_json::Value,
-    ) -> Result<()> {
+    fn validate_config_str(&self, provider_type: &str, config: &serde_json::Value) -> Result<()> {
         ProviderRegistry::validate_config_str(provider_type, config)
     }
 

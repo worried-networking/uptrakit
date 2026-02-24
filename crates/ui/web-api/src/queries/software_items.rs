@@ -10,9 +10,9 @@ use uptrakit_shared_db::entity::{
 };
 use uptrakit_web_api_types::pagination::PaginatedResponse;
 use uptrakit_web_api_types::software_items::{
-    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment,
-    ListSoftwareItemsParams, SoftwareItemDetailResponse, SoftwareItemHostSummary,
-    SoftwareItemResponse, UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
+    AssignHostsRequest, CreateSoftwareItemRequest, HostSoftwareAssignment, ListSoftwareItemsParams,
+    SoftwareItemDetailResponse, SoftwareItemHostSummary, SoftwareItemResponse,
+    UpdateHostAssignmentRequest, UpdateSoftwareItemRequest,
 };
 use uuid::Uuid;
 
@@ -106,10 +106,7 @@ fn build_detail_response(
 }
 
 /// Compute `update_available` for a single host: both values must be `Some` and differ.
-fn host_update_available(
-    installed_version: Option<&str>,
-    latest_version: Option<&str>,
-) -> bool {
+fn host_update_available(installed_version: Option<&str>, latest_version: Option<&str>) -> bool {
     match (installed_version, latest_version) {
         (Some(installed), Some(latest)) => installed != latest,
         _ => false,
@@ -125,10 +122,7 @@ async fn count_linked_hosts(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> 
 }
 
 /// Load the distinct provider types for a software item from its host assignments.
-async fn load_provider_types(
-    db: &sea_orm::DatabaseConnection,
-    item_id: Uuid,
-) -> Vec<String> {
+async fn load_provider_types(db: &sea_orm::DatabaseConnection, item_id: Uuid) -> Vec<String> {
     #[derive(Debug, FromQueryResult)]
     struct PcRow {
         provider_type: String,
@@ -209,10 +203,8 @@ async fn load_item_hosts(
         .filter_map(|link| {
             let host = hosts.get(&link.host_id)?;
             let pc = provider_configs.get(&link.provider_config_id)?;
-            let update_avail = host_update_available(
-                link.installed_version.as_deref(),
-                latest_version,
-            );
+            let update_avail =
+                host_update_available(link.installed_version.as_deref(), latest_version);
             Some(SoftwareItemHostSummary {
                 host_id: host.id,
                 hostname: host.hostname.clone(),
@@ -324,7 +316,10 @@ async fn resolve_provider_config_txn(
                 updated_at: Set(now),
                 deactivated_at: Set(None),
             };
-            let inserted = model.insert(txn).await.map_err(SoftwareItemQueryError::Db)?;
+            let inserted = model
+                .insert(txn)
+                .await
+                .map_err(SoftwareItemQueryError::Db)?;
             Ok((pcid, inserted))
         }
         _ => Err(SoftwareItemQueryError::ProviderConfigNotFound),
@@ -337,14 +332,17 @@ fn validate_assignment(
     package_identifier: &str,
     config_override: Option<&serde_json::Value>,
 ) -> Result<(), SoftwareItemQueryError> {
-    if let Ok(pt) = config.provider_type.parse::<uptrakit_provider_registry::ProviderType>()
+    if let Ok(pt) = config
+        .provider_type
+        .parse::<uptrakit_provider_registry::ProviderType>()
         && let Err(e) = ProviderRegistry::validate_package_identifier(pt, package_identifier)
     {
         return Err(SoftwareItemQueryError::InvalidPackageIdentifier(e));
     }
 
     if let Some(override_val) = config_override {
-        if let Err(e) = validate_config_override(&config.provider_type, &config.config, override_val)
+        if let Err(e) =
+            validate_config_override(&config.provider_type, &config.config, override_val)
         {
             return Err(SoftwareItemQueryError::InvalidConfigOverride(e.to_string()));
         }
@@ -395,7 +393,10 @@ pub async fn create_software_item(
         deactivated_at: Set(None),
     };
 
-    let inserted = model.insert(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+    let inserted = model
+        .insert(&txn)
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
 
     txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
 
@@ -477,14 +478,13 @@ pub async fn list_software_items(
     }
 
     // Bulk-load latest known versions from available_versions for all items.
-    let latest_versions: HashMap<Uuid, String> =
-        AvailableVersion::find()
-            .filter(available_version::Column::SoftwareItemId.is_in(item_ids.clone()))
-            .all(tenant_db.db())
-            .await?
-            .into_iter()
-            .filter_map(|av| av.version.map(|v| (av.software_item_id, v)))
-            .collect();
+    let latest_versions: HashMap<Uuid, String> = AvailableVersion::find()
+        .filter(available_version::Column::SoftwareItemId.is_in(item_ids.clone()))
+        .all(tenant_db.db())
+        .await?
+        .into_iter()
+        .filter_map(|av| av.version.map(|v| (av.software_item_id, v)))
+        .collect();
 
     // Bulk-load all host installed_versions for update_available computation.
     // Map: software_item_id → list of installed_version values (may include None).
@@ -514,9 +514,7 @@ pub async fn list_software_items(
     let response: Vec<SoftwareItemResponse> = items
         .iter()
         .map(|item| {
-            let provider_types = provider_types_map
-                .remove(&item.id)
-                .unwrap_or_default();
+            let provider_types = provider_types_map.remove(&item.id).unwrap_or_default();
             let host_count = host_counts.get(&item.id).copied().unwrap_or(0);
             let latest_version = latest_versions.get(&item.id).cloned();
             let update_available = latest_version.as_deref().is_some_and(|lv| {
@@ -529,7 +527,13 @@ pub async fn list_software_items(
                     })
                     .unwrap_or(false)
             });
-            build_list_response(item, provider_types, host_count, latest_version, update_available)
+            build_list_response(
+                item,
+                provider_types,
+                host_count,
+                latest_version,
+                update_available,
+            )
         })
         .collect();
 
@@ -558,7 +562,14 @@ pub async fn get_software_item(
 
     let update_available = hosts.iter().any(|h| h.update_available);
 
-    Ok(Some(build_detail_response(item, provider_types, host_count, latest_version, update_available, hosts)))
+    Ok(Some(build_detail_response(
+        item,
+        provider_types,
+        host_count,
+        latest_version,
+        update_available,
+        hosts,
+    )))
 }
 
 /// Partial update — only `name` and `enabled` are updatable.
@@ -607,7 +618,10 @@ pub async fn update_software_item(
     }
     model.updated_at = Set(now);
 
-    let updated = model.update(tenant_db.db()).await.map_err(SoftwareItemQueryError::Db)?;
+    let updated = model
+        .update(tenant_db.db())
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
     let host_count = count_linked_hosts(tenant_db.db(), id).await;
     let latest_version: Option<String> = AvailableVersion::find()
@@ -626,18 +640,23 @@ pub async fn update_software_item(
             .await
             .unwrap_or_default()
             .iter()
-            .any(|h| host_update_available(h.installed_version.as_deref(), latest_version.as_deref()))
+            .any(|h| {
+                host_update_available(h.installed_version.as_deref(), latest_version.as_deref())
+            })
     } else {
         false
     };
-    Ok(build_list_response(&updated, provider_types, host_count, latest_version, update_available))
+    Ok(build_list_response(
+        &updated,
+        provider_types,
+        host_count,
+        latest_version,
+        update_available,
+    ))
 }
 
 /// Soft-delete a software item. Returns `true` if deleted, `false` if not found.
-pub async fn delete_software_item(
-    tenant_db: &TenantDb,
-    id: Uuid,
-) -> Result<bool, sea_orm::DbErr> {
+pub async fn delete_software_item(tenant_db: &TenantDb, id: Uuid) -> Result<bool, sea_orm::DbErr> {
     let Some(item) = find_active_item(tenant_db.db(), tenant_db.tenant_id, id).await else {
         return Ok(false);
     };
@@ -721,7 +740,10 @@ pub async fn assign_hosts(
                 active.provider_config_id = Set(provider_config_id);
                 active.package_identifier = Set(package_identifier.to_string());
                 active.config_override = Set(assignment.config_override.clone());
-                active.update(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+                active
+                    .update(&txn)
+                    .await
+                    .map_err(SoftwareItemQueryError::Db)?;
             }
             None => {
                 let link = host_software_item::ActiveModel {
@@ -735,7 +757,9 @@ pub async fn assign_hosts(
                     last_updated_at: Set(None),
                     linked_at: Set(now),
                 };
-                link.insert(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+                link.insert(&txn)
+                    .await
+                    .map_err(SoftwareItemQueryError::Db)?;
             }
         }
     }
@@ -758,7 +782,14 @@ pub async fn assign_hosts(
     let host_count = hosts.len() as u64;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
-    Ok(build_detail_response(item, provider_types, host_count, latest_version, update_available, hosts))
+    Ok(build_detail_response(
+        item,
+        provider_types,
+        host_count,
+        latest_version,
+        update_available,
+        hosts,
+    ))
 }
 
 /// Update the provider info for an existing host–software-item assignment.
@@ -783,7 +814,10 @@ pub async fn update_host_assignment(
         host_id,
         provider_config_id: req.provider_config_id.or(Some(link.provider_config_id)),
         provider_config: req.provider_config,
-        package_identifier: req.package_identifier.clone().or(Some(link.package_identifier.clone())),
+        package_identifier: req
+            .package_identifier
+            .clone()
+            .or(Some(link.package_identifier.clone())),
         config_override: req.config_override.clone().or(link.config_override.clone()),
     };
 
@@ -798,7 +832,11 @@ pub async fn update_host_assignment(
 
     let package_identifier = synthetic.package_identifier.as_deref().unwrap_or("");
 
-    validate_assignment(&config, package_identifier, synthetic.config_override.as_ref())?;
+    validate_assignment(
+        &config,
+        package_identifier,
+        synthetic.config_override.as_ref(),
+    )?;
 
     // Check for conflicts in other software items.
     let global_conflict = HostSoftwareItem::find()
@@ -827,7 +865,10 @@ pub async fn update_host_assignment(
         }
     }
 
-    active.update(&txn).await.map_err(SoftwareItemQueryError::Db)?;
+    active
+        .update(&txn)
+        .await
+        .map_err(SoftwareItemQueryError::Db)?;
 
     txn.commit().await.map_err(SoftwareItemQueryError::Db)?;
 
@@ -847,7 +888,14 @@ pub async fn update_host_assignment(
     let host_count = hosts.len() as u64;
     let provider_types = load_provider_types(tenant_db.db(), id).await;
     let update_available = hosts.iter().any(|h| h.update_available);
-    Ok(build_detail_response(item, provider_types, host_count, latest_version, update_available, hosts))
+    Ok(build_detail_response(
+        item,
+        provider_types,
+        host_count,
+        latest_version,
+        update_available,
+        hosts,
+    ))
 }
 
 /// Unassign a host from a software item.
@@ -993,8 +1041,14 @@ mod tests {
             update_available: true,
         }];
 
-        let resp =
-            build_detail_response(item, vec!["github_releases".to_string()], 1, Some("7.4.0".to_string()), true, hosts);
+        let resp = build_detail_response(
+            item,
+            vec!["github_releases".to_string()],
+            1,
+            Some("7.4.0".to_string()),
+            true,
+            hosts,
+        );
 
         assert_eq!(resp.name, "Redis");
         assert_eq!(resp.provider_types, vec!["github_releases"]);
@@ -1114,7 +1168,8 @@ mod tests {
 
         for case in cases {
             assert!(
-                ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, case).is_err(),
+                ProviderRegistry::validate_package_identifier(ProviderType::Homebrew, case)
+                    .is_err(),
                 "expected invalid: {case}"
             );
         }

@@ -14,10 +14,10 @@ use sea_orm::{
 use std::collections::HashSet;
 use time::OffsetDateTime;
 use uptrakit_internal_wire::{DiscoveryProviderResult, DiscoveryResultsPayload, ProviderType};
+use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_shared_db::entity::{
     autodiscovery_ignore, host_software_item, prelude::*, provider_config, software_item,
 };
-use uptrakit_shared_db::SoftwareDiscoveryState;
 use uptrakit_web_api_types::autodiscovery::{
     AutodiscoveryIgnoreResponse, DiscardDiscoveredResponse,
 };
@@ -87,8 +87,8 @@ pub async fn list_ignore_rules(
     let page = params.page.unwrap_or(1).max(1);
     let per_page = params.per_page.unwrap_or(20).clamp(1, 1000);
 
-    let mut query = AutodiscoveryIgnore::find()
-        .filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id));
+    let mut query =
+        AutodiscoveryIgnore::find().filter(autodiscovery_ignore::Column::TenantId.eq(tenant_id));
 
     if let Some(pc_id) = provider_config_id_filter {
         query = query.filter(autodiscovery_ignore::Column::ProviderConfigId.eq(pc_id));
@@ -184,22 +184,23 @@ pub async fn discard_pending_items(
 
     // If a provider config filter is requested, restrict to items that have at
     // least one host_software_items row with that provider config ID.
-    let provider_filtered_item_ids: Option<Vec<Uuid>> = if let Some(pc_id) = provider_config_id_filter {
-        let linked: Vec<Uuid> = HostSoftwareItem::find()
-            .filter(host_software_item::Column::ProviderConfigId.eq(pc_id))
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|l| l.software_item_id)
-            .collect();
+    let provider_filtered_item_ids: Option<Vec<Uuid>> =
+        if let Some(pc_id) = provider_config_id_filter {
+            let linked: Vec<Uuid> = HostSoftwareItem::find()
+                .filter(host_software_item::Column::ProviderConfigId.eq(pc_id))
+                .all(db)
+                .await?
+                .into_iter()
+                .map(|l| l.software_item_id)
+                .collect();
 
-        if linked.is_empty() {
-            return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
-        }
-        Some(linked)
-    } else {
-        None
-    };
+            if linked.is_empty() {
+                return Ok(DiscardDiscoveredResponse { discarded_count: 0 });
+            }
+            Some(linked)
+        } else {
+            None
+        };
 
     if let Some(ref pfids) = provider_filtered_item_ids {
         id_query = id_query.filter(software_item::Column::Id.is_in(pfids.clone()));
@@ -401,7 +402,16 @@ async fn process_provider_result(
                 installed_version: &item.installed_version,
                 provider_type_str: &provider_type_str,
             };
-            process_one_discovery(db, tenant_id, host_id, existing_pc_id, args, &ignore_set, now).await?;
+            process_one_discovery(
+                db,
+                tenant_id,
+                host_id,
+                existing_pc_id,
+                args,
+                &ignore_set,
+                now,
+            )
+            .await?;
         }
         return Ok(());
     }
@@ -430,7 +440,8 @@ async fn process_provider_result(
                     installed_version: &item.installed_version,
                     provider_type_str: &provider_type_str,
                 };
-                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now).await?;
+                process_one_discovery(db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+                    .await?;
             }
         }
         _ => {

@@ -15,7 +15,9 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uptrakit_shared_db::entity::{host, prelude::*, service_host};
 
-pub use uptrakit_web_api_types::autodiscovery::{DiscardDiscoveredResponse, TriggerDiscoveryResponse};
+pub use uptrakit_web_api_types::autodiscovery::{
+    DiscardDiscoveredResponse, TriggerDiscoveryResponse,
+};
 pub use uptrakit_web_api_types::hosts::{
     HostAgentSummary, HostMessageResponse, HostResponse, UpdateHostRequest,
 };

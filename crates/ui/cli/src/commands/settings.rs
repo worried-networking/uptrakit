@@ -209,10 +209,7 @@ impl HumanOutput for Vec<OidcProviderResponse> {
         if self.is_empty() {
             return "No OIDC providers found.\n".to_string();
         }
-        let mut out = format!(
-            "{:<38} {:<20} {:<15} ACTIVE\n",
-            "ID", "NAME", "SLUG"
-        );
+        let mut out = format!("{:<38} {:<20} {:<15} ACTIVE\n", "ID", "NAME", "SLUG");
         for p in self {
             out.push_str(&format!(
                 "{:<38} {:<20} {:<15} {}\n",
@@ -410,10 +407,7 @@ pub async fn registration_update(
         token: params.reg_token.map(SecretString::new),
         require_token_for_oidc: params.require_token_for_oidc,
     };
-    client
-        .update_registration_settings(&req)
-        .await
-        .context_to()
+    client.update_registration_settings(&req).await.context_to()
 }
 
 /// Show authentication settings.
@@ -784,9 +778,9 @@ pub async fn alerts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uptrakit_openapi_client::types::agents::EnrollmentTokenStatusResponse;
     use uptrakit_openapi_client::types::registration::RegistrationMode;
     use uptrakit_openapi_client::types::settings_combined::EnrollmentTokenStatusesResponse;
-    use uptrakit_openapi_client::types::agents::EnrollmentTokenStatusResponse;
     use uptrakit_openapi_client::types::system_alerts::{AlertSeverity, SystemAlert};
 
     #[test]
@@ -850,7 +844,10 @@ mod tests {
         };
         let s = resp.to_human_string();
         assert!(s.contains("Registration"), "registration section missing");
-        assert!(s.contains("Authentication"), "authentication section missing");
+        assert!(
+            s.contains("Authentication"),
+            "authentication section missing"
+        );
         assert!(s.contains("365"), "lifetime_days missing");
     }
 

@@ -238,7 +238,10 @@ impl UptrakitClient {
             } else if status.is_server_error() {
                 // Exponential backoff: initial, 2×initial, 4×initial, …, capped.
                 let factor = 1u32.checked_shl(attempt as u32).unwrap_or(u32::MAX);
-                retry.initial_delay.saturating_mul(factor).min(retry.max_delay)
+                retry
+                    .initial_delay
+                    .saturating_mul(factor)
+                    .min(retry.max_delay)
             } else {
                 // Not retriable — return as-is.
                 return Ok(resp);
@@ -649,8 +652,7 @@ mod tests {
 
     #[test]
     fn default_client_has_no_retry() {
-        let client =
-            UptrakitClient::new("https://example.com", None, false, None).expect("client");
+        let client = UptrakitClient::new("https://example.com", None, false, None).expect("client");
         assert!(client.retry.is_none());
     }
 
@@ -695,7 +697,10 @@ mod tests {
             then.status(503).body(r#"{"error":"down"}"#);
         });
 
-        let params = PaginationParams { page: None, per_page: None };
+        let params = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         let client = retrying_client(&server.base_url());
         let result = client.list_hosts(&params).await;
 
@@ -715,7 +720,10 @@ mod tests {
             then.status(400).body(r#"{"error":"bad request"}"#);
         });
 
-        let params = PaginationParams { page: None, per_page: None };
+        let params = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         let client = retrying_client(&server.base_url());
         let result = client.list_hosts(&params).await;
 
@@ -734,7 +742,10 @@ mod tests {
             then.status(401).body(r#"{"error":"unauthorized"}"#);
         });
 
-        let params = PaginationParams { page: None, per_page: None };
+        let params = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         let client = retrying_client(&server.base_url());
         let result = client.list_hosts(&params).await;
 
@@ -755,7 +766,10 @@ mod tests {
                 .body(r#"{"error":"rate limited"}"#);
         });
 
-        let params = PaginationParams { page: None, per_page: None };
+        let params = PaginationParams {
+            page: None,
+            per_page: None,
+        };
         let client = retrying_client(&server.base_url());
         let result = client.list_hosts(&params).await;
 
@@ -840,8 +854,14 @@ mod tests {
         let client = UptrakitClient::with_token(&server.base_url(), "tok", false).expect("client");
         let all = client.list_all_hosts().await.expect("list_all_hosts");
         assert_eq!(all.len(), 3);
-        assert_eq!(all[0].machine_id, "machine-550e8400-e29b-41d4-a716-446655440001");
-        assert_eq!(all[2].machine_id, "machine-550e8400-e29b-41d4-a716-446655440003");
+        assert_eq!(
+            all[0].machine_id,
+            "machine-550e8400-e29b-41d4-a716-446655440001"
+        );
+        assert_eq!(
+            all[2].machine_id,
+            "machine-550e8400-e29b-41d4-a716-446655440003"
+        );
     }
 
     #[tokio::test]

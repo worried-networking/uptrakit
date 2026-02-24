@@ -191,8 +191,9 @@ mod tests {
             auth_method: AuthMethod::Password,
             permissions: vec![Permission::ViewHosts],
         });
-        let CanViewHosts(extracted_user) =
-            CanViewHosts::from_request_parts(&mut parts, &()).await.unwrap();
+        let CanViewHosts(extracted_user) = CanViewHosts::from_request_parts(&mut parts, &())
+            .await
+            .unwrap();
         assert_eq!(extracted_user.user_id, user_id);
     }
 
@@ -201,7 +202,7 @@ mod tests {
         let user = AuthenticatedUser {
             user_id: uuid::Uuid::nil(),
             auth_method: AuthMethod::Password,
-            permissions: vec![],  // no permissions
+            permissions: vec![], // no permissions
         };
         // new() skips the permission check — intended for direct handler tests
         let extractor = CanManageAgents::new(user.clone());

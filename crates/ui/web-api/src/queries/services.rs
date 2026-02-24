@@ -147,7 +147,10 @@ pub async fn approve_service(
     active.status = Set(service::ServiceStatus::Approved);
     active.updated_at = Set(now);
 
-    let updated = active.update(tenant_db.db()).await.map_err(ServiceQueryError::Db)?;
+    let updated = active
+        .update(tenant_db.db())
+        .await
+        .map_err(ServiceQueryError::Db)?;
     Ok(model_to_response(updated))
 }
 
@@ -175,7 +178,10 @@ pub async fn reject_service(
     active.deactivated_at = Set(Some(now));
     active.updated_at = Set(now);
 
-    let updated = active.update(tenant_db.db()).await.map_err(ServiceQueryError::Db)?;
+    let updated = active
+        .update(tenant_db.db())
+        .await
+        .map_err(ServiceQueryError::Db)?;
     Ok(model_to_response(updated))
 }
 
@@ -295,7 +301,10 @@ pub async fn merge_service(
     source_active.enrollment_secret_hash = Set(invalidated_hash);
     source_active.deactivated_at = Set(Some(now));
     source_active.updated_at = Set(now);
-    source_active.update(&txn).await.map_err(ServiceQueryError::Db)?;
+    source_active
+        .update(&txn)
+        .await
+        .map_err(ServiceQueryError::Db)?;
 
     // Revoke all non-revoked certificates for both services.
     for (svc_uuid, label) in [(source_uuid, "source"), (target_uuid, "target")] {
@@ -318,9 +327,7 @@ pub async fn merge_service(
         }
     }
 
-    if let Err(e) =
-        crate::settings_store::bump_revocation_version(&txn, default_tenant_id).await
-    {
+    if let Err(e) = crate::settings_store::bump_revocation_version(&txn, default_tenant_id).await {
         tracing::warn!(error = ?e, "failed to bump revocation version counter during merge");
     }
 
@@ -332,7 +339,10 @@ pub async fn merge_service(
     target_active.ip_address = Set(source_ip_address);
     target_active.updated_at = Set(now);
 
-    let updated_target = target_active.update(&txn).await.map_err(ServiceQueryError::Db)?;
+    let updated_target = target_active
+        .update(&txn)
+        .await
+        .map_err(ServiceQueryError::Db)?;
 
     // Copy source service's host links to target (INSERT ON CONFLICT DO NOTHING).
     let source_links = ServiceHost::find()

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use uptrakit_command::{CommandExecutor, CommandSpec};
 use std::collections::BTreeSet;
+use uptrakit_command::{CommandExecutor, CommandSpec};
 
 use uptrakit_internal_wire::{
     Capability, CheckVersionsPayload, DiscoverSoftwarePayload, DiscoveryProviderResult,
@@ -98,9 +98,7 @@ pub(crate) async fn report_enrolled_hosts(
 
         // Persist the machine_id so incoming CheckVersions / ExecuteUpdate
         // messages can be routed to this host via find_host_by_machine_id().
-        if let Err(e) =
-            update_host_machine_id(local_db, &host.id, &info.machine_id).await
-        {
+        if let Err(e) = update_host_machine_id(local_db, &host.id, &info.machine_id).await {
             tracing::warn!(
                 host_name = %host.name,
                 machine_id = %info.machine_id,
@@ -269,8 +267,7 @@ pub(crate) async fn handle_check_versions_ssh(
     let executor: Arc<dyn CommandExecutor> =
         Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
 
-    let outcome =
-        uptrakit_agent_core::handle_check_versions(payload, executor, conn).await;
+    let outcome = uptrakit_agent_core::handle_check_versions(payload, executor, conn).await;
 
     // Disconnect session after version check completes.
     if let Ok(owned) = Arc::try_unwrap(session) {
@@ -464,8 +461,7 @@ pub(crate) async fn handle_discover_software_ssh(
     let executor: Arc<dyn CommandExecutor> =
         Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
 
-    let outcome =
-        uptrakit_agent_core::handle_discover_software(payload, executor, conn).await;
+    let outcome = uptrakit_agent_core::handle_discover_software(payload, executor, conn).await;
 
     if let Ok(owned) = Arc::try_unwrap(session) {
         owned.disconnect().await;
