@@ -35,6 +35,29 @@ export function safeRedirect(redirect: string | null): string {
 }
 
 /**
+ * Parse and validate an enum-typed URL search param.
+ * Returns the fallback for missing or invalid values.
+ */
+export function parseUrlParam<T extends string>(url: URL, key: string, allowed: readonly T[], fallback: T): T {
+	const val = url.searchParams.get(key);
+	if (val !== null && (allowed as readonly string[]).includes(val)) {
+		return val as T;
+	}
+	return fallback;
+}
+
+/**
+ * Parse a page number from a URL search param.
+ * Returns 1 for missing or invalid values (non-integer, zero, or negative).
+ */
+export function parseUrlPage(url: URL): number {
+	const val = url.searchParams.get('page');
+	if (val === null || !/^\d+$/.test(val)) return 1;
+	const num = parseInt(val, 10);
+	return num >= 1 ? num : 1;
+}
+
+/**
  * Copies text to the clipboard. Returns true on success, false on failure.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {

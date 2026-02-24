@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { copyToClipboard, formatDate, isValidLogoUrl, safeRedirect } from './utils';
+import { copyToClipboard, formatDate, isValidLogoUrl, parseUrlPage, parseUrlParam, safeRedirect } from './utils';
 
 // ── isValidLogoUrl ────────────────────────────────────────────────────────────
 
@@ -90,6 +90,71 @@ describe('safeRedirect', () => {
 
 	it('returns / for empty string', () => {
 		expect(safeRedirect('')).toBe('/');
+	});
+});
+
+// ── parseUrlParam ─────────────────────────────────────────────────────────────
+
+const TAB_VALUES = ['all', 'pending', 'active'] as const;
+
+describe('parseUrlParam', () => {
+	it('returns the value when it matches an allowed value', () => {
+		const url = new URL('http://localhost/?tab=pending');
+		expect(parseUrlParam(url, 'tab', TAB_VALUES, 'all')).toBe('pending');
+	});
+
+	it('returns the fallback when the param is absent', () => {
+		const url = new URL('http://localhost/');
+		expect(parseUrlParam(url, 'tab', TAB_VALUES, 'all')).toBe('all');
+	});
+
+	it('returns the fallback when the value is not in the allowed list', () => {
+		const url = new URL('http://localhost/?tab=unknown');
+		expect(parseUrlParam(url, 'tab', TAB_VALUES, 'all')).toBe('all');
+	});
+
+	it('returns the fallback for an empty string value', () => {
+		const url = new URL('http://localhost/?tab=');
+		expect(parseUrlParam(url, 'tab', TAB_VALUES, 'all')).toBe('all');
+	});
+
+	it('is case-sensitive and rejects values with wrong casing', () => {
+		const url = new URL('http://localhost/?tab=Pending');
+		expect(parseUrlParam(url, 'tab', TAB_VALUES, 'all')).toBe('all');
+	});
+});
+
+// ── parseUrlPage ──────────────────────────────────────────────────────────────
+
+describe('parseUrlPage', () => {
+	it('returns the page number from the URL', () => {
+		const url = new URL('http://localhost/?page=3');
+		expect(parseUrlPage(url)).toBe(3);
+	});
+
+	it('returns 1 when the page param is absent', () => {
+		const url = new URL('http://localhost/');
+		expect(parseUrlPage(url)).toBe(1);
+	});
+
+	it('returns 1 for a non-integer string', () => {
+		const url = new URL('http://localhost/?page=abc');
+		expect(parseUrlPage(url)).toBe(1);
+	});
+
+	it('returns 1 for zero', () => {
+		const url = new URL('http://localhost/?page=0');
+		expect(parseUrlPage(url)).toBe(1);
+	});
+
+	it('returns 1 for a negative number', () => {
+		const url = new URL('http://localhost/?page=-2');
+		expect(parseUrlPage(url)).toBe(1);
+	});
+
+	it('returns 1 for a float string', () => {
+		const url = new URL('http://localhost/?page=2.5');
+		expect(parseUrlPage(url)).toBe(1);
 	});
 });
 
