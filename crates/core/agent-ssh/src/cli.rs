@@ -185,6 +185,15 @@ pub enum HostCommands {
         /// the remote host or during development.
         #[arg(long, default_value_t = false)]
         allow_all: bool,
+
+        /// Remove existing Uptrakit-managed keys from `authorized_keys` before
+        /// writing the new key.
+        ///
+        /// For the `uptrakit` target user all existing keys are removed.
+        /// For other target users only keys whose comment starts with `uptrakit`
+        /// are removed.
+        #[arg(long, default_value_t = false)]
+        remove_stale_keys: bool,
     },
 
     /// Regenerate the sudoers drop-in file for an enrolled SSH host.
@@ -854,6 +863,51 @@ mod tests {
             result.is_err(),
             "--auth-password and --auth-private-key-file should conflict"
         );
+    }
+
+    #[test]
+    fn host_bootstrap_remove_stale_keys_flag() {
+        let args = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "root@10.0.0.1",
+            "--auth-password",
+            "pass",
+            "--remove-stale-keys",
+        ])
+        .expect("should parse --remove-stale-keys");
+
+        match &args.command {
+            Some(Commands::Host {
+                command: HostCommands::Bootstrap { remove_stale_keys, .. },
+            }) => {
+                assert!(*remove_stale_keys, "--remove-stale-keys should be true");
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
+
+        // Default is false.
+        let args_no_flag = Args::try_parse_from([
+            "uptrakit-agent-ssh",
+            "--allow-plaintext-secrets",
+            "host",
+            "bootstrap",
+            "root@10.0.0.1",
+            "--auth-password",
+            "pass",
+        ])
+        .expect("should parse without --remove-stale-keys");
+
+        match &args_no_flag.command {
+            Some(Commands::Host {
+                command: HostCommands::Bootstrap { remove_stale_keys, .. },
+            }) => {
+                assert!(!*remove_stale_keys, "default should be false");
+            }
+            other => panic!("expected Host Bootstrap, got: {other:?}"),
+        }
     }
 
     #[test]

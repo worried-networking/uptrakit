@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use rootcause::prelude::*;
 use uptrakit_command::SudoPolicy;
 use uptrakit_crypto::EncryptedString;
+use uptrakit_service_sdk::ServiceIdentityState;
 
 use crate::cli::HostCommands;
 use crate::commands::bootstrap::{self, BootstrapParams};
@@ -89,6 +90,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
             host_key_fingerprint,
             strict_host_key_checking,
             allow_all,
+            remove_stale_keys,
         } => {
             // The bootstrap command manages its own DB connection, so we
             // drop the one opened above and delegate entirely.
@@ -104,6 +106,7 @@ pub async fn run(state_dir: &Path, command: HostCommands) -> Result<()> {
                 host_key_fingerprint,
                 strict_host_key_checking,
                 allow_all,
+                remove_stale_keys,
             };
             run_bootstrap(cli_params).await
         }
@@ -313,6 +316,7 @@ struct BootstrapCliParams<'a> {
     host_key_fingerprint: Option<String>,
     strict_host_key_checking: bool,
     allow_all: bool,
+    remove_stale_keys: bool,
 }
 
 async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
@@ -402,6 +406,13 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         None => None,
     };
 
+    // Load service ID best-effort from the local identity state.  Bootstrap
+    // may run before the first enrollment, so errors are silently ignored.
+    let service_id = {
+        let mut identity = ServiceIdentityState::new_single_dir(p.state_dir);
+        identity.load().await.ok().and_then(|()| identity.service_id())
+    };
+
     let params = BootstrapParams {
         name,
         hostname,
@@ -415,6 +426,8 @@ async fn run_bootstrap(p: BootstrapCliParams<'_>) -> Result<()> {
         host_key_fingerprint: p.host_key_fingerprint,
         strict_host_key_checking: p.strict_host_key_checking,
         allow_all: p.allow_all,
+        service_id,
+        remove_stale_keys: p.remove_stale_keys,
     };
 
     bootstrap::run_bootstrap(p.state_dir, params).await
