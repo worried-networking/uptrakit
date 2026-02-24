@@ -209,12 +209,15 @@ pub async fn run_command_exec_quiet(
 /// - **Bash**: `set -euo pipefail` (exit on error, undefined vars, pipe failures)
 /// - **Sh**: `set -eu` (exit on error, undefined vars)
 /// - **PowerShell**: `$ErrorActionPreference = 'Stop'`
-pub(crate) fn wrap_command_for_shell(cmd: &str, shell: HookShell) -> String {
+///
+/// Returns [`CommandError::UnsupportedShell`] if the shell variant is not
+/// recognized by this version of the agent.
+pub(crate) fn wrap_command_for_shell(cmd: &str, shell: HookShell) -> crate::Result<String> {
     match shell {
-        HookShell::Bash => format!("set -euo pipefail\n{cmd}"),
-        HookShell::Sh => format!("set -eu\n{cmd}"),
-        HookShell::PowerShell => format!("$ErrorActionPreference = 'Stop'\n{cmd}"),
-        _ => unimplemented!("wrap_command_for_shell: unsupported HookShell variant"),
+        HookShell::Bash => Ok(format!("set -euo pipefail\n{cmd}")),
+        HookShell::Sh => Ok(format!("set -eu\n{cmd}")),
+        HookShell::PowerShell => Ok(format!("$ErrorActionPreference = 'Stop'\n{cmd}")),
+        _ => bail!(crate::error::CommandError::UnsupportedShell(format!("{shell:?}"))),
     }
 }
 
@@ -236,7 +239,7 @@ pub async fn run_command_with_shell(
     output_tx: &mpsc::Sender<UpdateOutputLine>,
 ) -> crate::Result<(String, i32)> {
     tracing::trace!(cmd = %cmd, "running shell command");
-    let wrapped_cmd = wrap_command_for_shell(cmd, shell);
+    let wrapped_cmd = wrap_command_for_shell(cmd, shell)?;
     let (shell_exec, shell_arg) = get_shell_args(shell);
 
     run_command_exec(
@@ -256,7 +259,7 @@ pub async fn run_command_with_shell_quiet(
     shell: HookShell,
 ) -> crate::Result<(String, i32)> {
     tracing::trace!(cmd = %cmd, "running shell command (quiet)");
-    let wrapped_cmd = wrap_command_for_shell(cmd, shell);
+    let wrapped_cmd = wrap_command_for_shell(cmd, shell)?;
     let (shell_exec, shell_arg) = get_shell_args(shell);
 
     run_command_exec_quiet(shell_exec, &[shell_arg.to_string(), wrapped_cmd], None).await
@@ -336,21 +339,24 @@ mod tests {
 
     #[test]
     fn wrap_command_for_bash() {
-        let wrapped = wrap_command_for_shell("echo hello", HookShell::Bash);
+        let wrapped = wrap_command_for_shell("echo hello", HookShell::Bash)
+            .expect("Bash is a supported shell");
         assert!(wrapped.starts_with("set -euo pipefail\n"));
         assert!(wrapped.ends_with("echo hello"));
     }
 
     #[test]
     fn wrap_command_for_sh() {
-        let wrapped = wrap_command_for_shell("echo hello", HookShell::Sh);
+        let wrapped = wrap_command_for_shell("echo hello", HookShell::Sh)
+            .expect("Sh is a supported shell");
         assert!(wrapped.starts_with("set -eu\n"));
         assert!(wrapped.ends_with("echo hello"));
     }
 
     #[test]
     fn wrap_command_for_powershell() {
-        let wrapped = wrap_command_for_shell("echo hello", HookShell::PowerShell);
+        let wrapped = wrap_command_for_shell("echo hello", HookShell::PowerShell)
+            .expect("PowerShell is a supported shell");
         assert!(wrapped.starts_with("$ErrorActionPreference = 'Stop'\n"));
         assert!(wrapped.ends_with("echo hello"));
     }

@@ -18,6 +18,9 @@ pub enum CommandError {
 
     #[error("command timed out")]
     TimedOut,
+
+    #[error("unsupported shell variant: {0}")]
+    UnsupportedShell(String),
 }
 
 /// Result type alias for command operations.

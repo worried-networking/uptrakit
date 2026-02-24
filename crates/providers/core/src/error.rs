@@ -34,6 +34,9 @@ pub enum ProviderError {
     #[error("command timed out")]
     TimedOut,
 
+    #[error("unsupported shell variant: {0}")]
+    UnsupportedShell(String),
+
     #[error("install command failed: {0}")]
     InstallFailed(String),
 

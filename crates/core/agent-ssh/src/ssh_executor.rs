@@ -34,7 +34,7 @@ impl CommandExecutor for SshCommandExecutor {
         spec: &CommandSpec,
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> uptrakit_command::Result<CommandOutput> {
-        let remote_cmd = build_remote_command_string(spec);
+        let remote_cmd = build_remote_command_string(spec)?;
 
         let result = self
             .session
@@ -59,7 +59,7 @@ impl CommandExecutor for SshCommandExecutor {
     }
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> uptrakit_command::Result<CommandOutput> {
-        let remote_cmd = build_remote_command_string(spec);
+        let remote_cmd = build_remote_command_string(spec)?;
 
         let result = self
             .session
@@ -90,8 +90,11 @@ impl CommandExecutor for SshCommandExecutor {
 /// Uses `spec.resolve()` to obtain `(program, args)` for both Exec and
 /// Shell modes, then shell-escapes each component. When `working_dir`
 /// is set, prepends `cd '<dir>' &&`.
-fn build_remote_command_string(spec: &CommandSpec) -> String {
-    let (program, args) = spec.resolve();
+///
+/// Returns [`CommandError::UnsupportedShell`] if the shell variant is
+/// not recognized by this version of the agent.
+fn build_remote_command_string(spec: &CommandSpec) -> uptrakit_command::Result<String> {
+    let (program, args) = spec.resolve()?;
 
     let mut parts = Vec::with_capacity(1 + args.len());
     parts.push(shell_escape(&program));
@@ -101,10 +104,10 @@ fn build_remote_command_string(spec: &CommandSpec) -> String {
 
     let command_str = parts.join(" ");
 
-    match &spec.working_dir {
+    Ok(match &spec.working_dir {
         Some(dir) => format!("cd {} && {}", shell_escape(dir), command_str),
         None => command_str,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -116,7 +119,7 @@ mod tests {
     #[test]
     fn exec_simple_command() {
         let spec = CommandSpec::exec("echo", ["hello".to_string()]);
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert_eq!(result, "'echo' 'hello'");
     }
 
@@ -126,28 +129,29 @@ mod tests {
             "docker",
             ["pull".to_string(), "my image:latest".to_string()],
         );
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert_eq!(result, "'docker' 'pull' 'my image:latest'");
     }
 
     #[test]
     fn exec_with_quotes_in_args() {
         let spec = CommandSpec::exec("echo", ["it's a test".to_string()]);
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert_eq!(result, "'echo' 'it'\\''s a test'");
     }
 
     #[test]
     fn exec_no_args() {
         let spec = CommandSpec::exec("whoami", Vec::<String>::new());
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert_eq!(result, "'whoami'");
     }
 
     #[test]
     fn shell_mode_wraps_with_fail_early() {
         let spec = CommandSpec::shell("echo hello && echo world");
-        let result = build_remote_command_string(&spec);
+        let result =
+            build_remote_command_string(&spec).expect("bash is a supported shell");
         // Shell mode resolves to: ("bash", ["-c", "set -euo pipefail\n..."])
         assert!(result.starts_with("'bash' '-c'"));
         assert!(result.contains("set -euo pipefail"));
@@ -157,7 +161,7 @@ mod tests {
     #[test]
     fn with_working_dir() {
         let spec = CommandSpec::exec("ls", ["-la".to_string()]).with_working_dir("/opt/my app");
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert_eq!(result, "cd '/opt/my app' && 'ls' '-la'");
     }
 
@@ -171,7 +175,7 @@ mod tests {
                 "`id`".to_string(),
             ],
         );
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         // All special characters are safely wrapped in single quotes.
         assert_eq!(result, "'echo' '$(whoami)' '; rm -rf /' '`id`'");
     }
@@ -180,7 +184,7 @@ mod tests {
     fn working_dir_with_special_chars() {
         let spec = CommandSpec::exec("ls", Vec::<String>::new())
             .with_working_dir("/opt/dir with spaces; rm -rf /");
-        let result = build_remote_command_string(&spec);
+        let result = build_remote_command_string(&spec).expect("exec mode always succeeds");
         assert!(result.starts_with("cd '/opt/dir with spaces; rm -rf /'"));
     }
 }

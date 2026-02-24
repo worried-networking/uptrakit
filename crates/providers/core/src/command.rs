@@ -22,6 +22,7 @@ uptrakit_shared_macros::impl_report_conversion!(
             uptrakit_command::CommandError::CommandFailed(code) => ProviderError::CommandFailed(code),
             uptrakit_command::CommandError::CommandWait(io) => ProviderError::CommandWait(io),
             uptrakit_command::CommandError::TimedOut => ProviderError::TimedOut,
+            uptrakit_command::CommandError::UnsupportedShell(s) => ProviderError::UnsupportedShell(s),
         }
     }
 );

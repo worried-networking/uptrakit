@@ -121,13 +121,16 @@ impl CommandSpec {
     /// - **Exec** mode: returns `(program, args)` unchanged.
     /// - **Shell** mode: wraps the command with fail-early settings and returns
     ///   `(shell_executable, [flag, wrapped_command])`.
-    pub fn resolve(&self) -> (String, Vec<String>) {
+    ///
+    /// Returns [`crate::error::CommandError::UnsupportedShell`] if the shell
+    /// variant is not recognized by this version of the agent.
+    pub fn resolve(&self) -> crate::Result<(String, Vec<String>)> {
         match &self.mode {
-            CommandMode::Exec { program, args } => (program.clone(), args.clone()),
+            CommandMode::Exec { program, args } => Ok((program.clone(), args.clone())),
             CommandMode::Shell { command, shell } => {
-                let wrapped = wrap_command_for_shell(command, *shell);
+                let wrapped = wrap_command_for_shell(command, *shell)?;
                 let (shell_exec, shell_arg) = get_shell_args(*shell);
-                (shell_exec.to_string(), vec![shell_arg.to_string(), wrapped])
+                Ok((shell_exec.to_string(), vec![shell_arg.to_string(), wrapped]))
             }
         }
     }
@@ -166,7 +169,7 @@ impl CommandExecutor for LocalCommandExecutor {
         output_tx: &mpsc::Sender<UpdateOutputLine>,
     ) -> crate::Result<CommandOutput> {
         tracing::debug!(timeout = ?spec.timeout, "executing command");
-        let (program, args) = spec.resolve();
+        let (program, args) = spec.resolve()?;
         let fut = run_command_exec_impl(
             &program,
             &args,
@@ -187,7 +190,7 @@ impl CommandExecutor for LocalCommandExecutor {
 
     async fn execute_quiet(&self, spec: &CommandSpec) -> crate::Result<CommandOutput> {
         tracing::debug!("executing command (quiet)");
-        let (program, args) = spec.resolve();
+        let (program, args) = spec.resolve()?;
         let fut = run_command_exec_impl(&program, &args, spec.working_dir.as_deref(), None);
         let (output, exit_code) = if let Some(dur) = spec.timeout {
             tokio::time::timeout(dur, fut).await.map_err(|_| {
@@ -244,7 +247,7 @@ mod tests {
     #[test]
     fn resolve_exec_passthrough() {
         let spec = CommandSpec::exec("docker", ["pull".to_string(), "nginx".to_string()]);
-        let (program, args) = spec.resolve();
+        let (program, args) = spec.resolve().expect("exec mode always succeeds");
         assert_eq!(program, "docker");
         assert_eq!(args, vec!["pull", "nginx"]);
     }
@@ -252,7 +255,7 @@ mod tests {
     #[test]
     fn resolve_shell_wraps_with_fail_early() {
         let spec = CommandSpec::shell("echo hello");
-        let (program, args) = spec.resolve();
+        let (program, args) = spec.resolve().expect("bash is a supported shell");
         assert_eq!(program, "bash");
         assert_eq!(args.len(), 2);
         assert_eq!(args[0], "-c");
@@ -263,7 +266,7 @@ mod tests {
     #[test]
     fn resolve_shell_sh() {
         let spec = CommandSpec::shell_with("echo hello", HookShell::Sh);
-        let (program, args) = spec.resolve();
+        let (program, args) = spec.resolve().expect("sh is a supported shell");
         assert_eq!(program, "sh");
         assert_eq!(args[0], "-c");
         assert!(args[1].starts_with("set -eu\n"));
