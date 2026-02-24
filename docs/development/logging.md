@@ -44,35 +44,37 @@ All binaries accept a `-v` / `--verbose` flag that can be repeated. Each additio
 
 ### Service daemons (`uptrakit-controller`, `uptrakit-agent`, `uptrakit-agent-ssh`, `uptrakit-mqtt`)
 
-The baseline level is `info` for the service's own crate; all other crates are silent unless `RUST_LOG` enables them.
+The baseline level is `info` for the service's own crate; all other crates — including third-party dependencies like
+`tokio`, `h2`, `rustls`, and `reqwest` — are silent unless `RUST_LOG` enables them explicitly.
 
-| Flags | Effective level |
-| --- | --- |
-| (none) | `info` for own crate; silence elsewhere |
-| `-v` | `debug`, all crates |
-| `-vv` | `trace`, all crates |
-| `-vvv`+ | Same as `-vv`; a warning is printed |
+| Flags | Directive | Effect |
+| --- | --- | --- |
+| (none) | `{own_module}=info` | Only the binary's own crate at info |
+| `-v` | `{own_module}=debug` | Own crate at debug; everything else quiet |
+| `-vv` | `uptrakit=debug` | All uptrakit crates at debug |
+| `-vvv` | `uptrakit=trace` | All uptrakit crates at trace |
+| `-vvvv`+ | Same as `-vvv`; a warning is printed | |
 
 ### CLI (`uptrakit`)
 
 The CLI produces no log output by default (tracing is not initialised at all). When `-v` is given, output goes to
 **stderr** so that command output on stdout is not contaminated.
 
-| Flags | Effective level |
-| --- | --- |
-| (none) | No log output |
-| `-v` | `warn` |
-| `-vv` | `info` |
-| `-vvv` | `debug` |
-| `-vvvv` | `trace` |
-| `-vvvvv`+ | Same as `-vvvv`; a warning is printed |
+| Flags | Directive | Effect |
+| --- | --- | --- |
+| (none) | *(no subscriber)* | No log output |
+| `-v` | `uptrakit_cli=warn` | CLI crate warnings only |
+| `-vv` | `uptrakit_cli=debug` | CLI crate at debug |
+| `-vvv` | `uptrakit=debug` | All uptrakit crates at debug |
+| `-vvvv` | `uptrakit=trace` | All uptrakit crates at trace |
+| `-vvvvv`+ | Same as `-vvvv`; a warning is printed | |
 
 ### Excessive-verbosity warning
 
 When more `-v` flags are passed than necessary to reach `trace`, a message is printed to stderr **before** the
 subscriber is initialised (so it always reaches the user regardless of log level):
 
-- Services: `warning: -vvv or more has no additional effect; maximum verbosity is -vv (trace)`
+- Services: `warning: -vvvv or more has no additional effect; maximum verbosity is -vvv (trace)`
 - CLI: `warning: -vvvvv or more has no additional effect; maximum verbosity is -vvvv (trace)`
 
 ## `RUST_LOG` Reference
@@ -92,31 +94,43 @@ RUST_LOG=crate1=level1,crate2=level2,global_level
 
 ### How `-v` and `RUST_LOG` interact
 
-The verbosity flag adds a global fallback directive (e.g. `debug`). `RUST_LOG` entries, being more specific, always
-override it. This means:
+`-v` adds a scoped directive (`{module}=debug` or `uptrakit=debug/trace`) to the filter. Third-party crates remain
+silent unless `RUST_LOG` enables them explicitly. `RUST_LOG` entries are always additive and work alongside the
+verbosity directive, because `EnvFilter` resolves by specificity: a more-specific directive always beats a
+less-specific one.
 
-- Use `-v` to get debug output everywhere.
-- Use `RUST_LOG=tokio=warn,h2=warn` to silence noisy crates while keeping the rest at debug.
-- Use `RUST_LOG=uptrakit_agent=trace` to get trace output from one crate without enabling it elsewhere, without any `-v`
-  flag.
+This means:
+
+- Use `-vv` to get debug output across all uptrakit crates without touching third-party noise.
+- Use `RUST_LOG=tokio=info` to enable tokio logging independently of any `-v` flag.
+- Use `RUST_LOG=uptrakit_agent=trace` to get trace output from one crate without enabling it elsewhere.
 
 ### Common examples
 
 ```bash
-# Debug everywhere except tokio and h2
-RUST_LOG=tokio=warn,h2=warn uptrakit-agent -v
+# Own crate at debug only
+uptrakit-agent -v
+
+# All uptrakit crates at debug
+uptrakit-agent -vv
+
+# All uptrakit crates at debug, plus tokio at info
+RUST_LOG=tokio=info uptrakit-agent -vv
 
 # Trace only the agent crate (no flag needed)
 RUST_LOG=uptrakit_agent=trace uptrakit-agent
 
-# Trace command crate, debug everywhere else
-RUST_LOG=uptrakit_command=trace uptrakit-agent -v
-
-# Info for the full CLI run (warn + info visible)
-uptrakit -vv hosts list
+# All uptrakit crates at trace
+uptrakit-agent -vvv
 
 # Debug the controller without touching RUST_LOG
-uptrakit-controller -v
+uptrakit-controller -vv
+
+# CLI warnings only
+uptrakit -v hosts list
+
+# All uptrakit crates at debug via CLI
+uptrakit -vvv hosts list
 ```
 
 ## Security Rule
