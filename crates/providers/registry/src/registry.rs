@@ -14,11 +14,26 @@ use uptrakit_provider_proxmox_helper_scripts::{
 use crate::error::{RegistryError, Result};
 
 /// Deserialize, mask secrets via [`SecretMasking`], and re-serialize.
+///
+/// If re-serialization of the masked config fails (which should never happen
+/// in practice), an error is logged and the **original unmasked config** is
+/// returned. Callers must never silently discard such an outcome: the log
+/// entry is the production signal that masking is broken.
 fn mask_secrets_for<T: SecretMasking>(config: &serde_json::Value) -> serde_json::Value {
     let Ok(cfg) = serde_json::from_value::<T>(config.clone()) else {
         return config.clone();
     };
-    serde_json::to_value(cfg.with_secrets_masked()).unwrap_or_else(|_| config.clone())
+    match serde_json::to_value(cfg.with_secrets_masked()) {
+        Ok(masked) => masked,
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "failed to serialize masked provider config; \
+                 falling back to original — provider secrets may be exposed in API responses"
+            );
+            config.clone()
+        }
+    }
 }
 
 /// Deserialize both values, restore secrets via [`SecretMasking`], and write back.
@@ -607,5 +622,51 @@ mod tests {
             &existing,
         );
         assert_eq!(incoming["auth_token"], "ghp_real_token");
+    }
+
+    // ── ProviderType::Other(String) behaviour ──────────────────────────────
+
+    /// `Other(String)` received from a newer server must fail gracefully at
+    /// the registry level (unknown type) rather than causing a deserialization
+    /// panic or silent data loss.
+    #[test]
+    fn create_provider_other_returns_unknown_type_error() {
+        let config = serde_json::json!({});
+        let Err(err) = ProviderRegistry::create_provider(
+            ProviderType::Other("apt".to_string()),
+            &config,
+            test_executor(),
+        ) else {
+            panic!("expected Err for Other provider type");
+        };
+        assert!(err.to_string().contains("unknown provider type"));
+    }
+
+    #[test]
+    fn validate_config_other_returns_unknown_type_error() {
+        let config = serde_json::json!({});
+        let result =
+            ProviderRegistry::validate_config(ProviderType::Other("winget".to_string()), &config);
+        assert!(result.is_err());
+    }
+
+    /// `mask_config_secrets` for an `Other` provider type returns the config
+    /// unchanged (no masking possible for an unknown provider).
+    #[test]
+    fn mask_config_secrets_other_returns_config_unchanged() {
+        let config = serde_json::json!({"token": "secret", "repo": "something"});
+        let result =
+            ProviderRegistry::mask_config_secrets(ProviderType::Other("apt".to_string()), &config);
+        assert_eq!(result, config);
+    }
+
+    /// `validate_package_identifier` for `Other` always returns `Ok(())`.
+    #[test]
+    fn validate_package_identifier_other_is_permissive() {
+        assert!(ProviderRegistry::validate_package_identifier(
+            ProviderType::Other("flatpak".to_string()),
+            "org.example.App"
+        )
+        .is_ok());
     }
 }
