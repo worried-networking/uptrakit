@@ -166,6 +166,9 @@ pub async fn delete_ignore_rule(
 /// host or provider config.
 ///
 /// No ignore rules are created — deleted items can be re-discovered later.
+/// All `host_software_items` links for the discarded items are hard-deleted so that
+/// subsequent discovery runs treat those packages as new discoveries rather than
+/// silently refreshing the version on an orphaned link.
 pub async fn discard_pending_items(
     db: &sea_orm::DatabaseConnection,
     tenant_id: Uuid,
@@ -244,6 +247,15 @@ pub async fn discard_pending_items(
     }
 
     let count = ids.len() as u32;
+
+    // Remove host-software-item links for all discarded items.  Without this,
+    // the orphaned rows would cause subsequent discovery runs to find the link
+    // in Phase 1 and return early — silently refreshing the version on a
+    // deactivated item instead of surfacing a new pending entry.
+    HostSoftwareItem::delete_many()
+        .filter(host_software_item::Column::SoftwareItemId.is_in(ids.clone()))
+        .exec(db)
+        .await?;
 
     // Soft-delete in bulk.
     SoftwareItem::update_many()
@@ -565,11 +577,14 @@ async fn load_ignore_set(
 
 /// Process a single discovered software item: check ignore list, upsert or create.
 ///
-/// Two-phase lookup:
+/// Three-phase lookup:
 /// 1. If this host already has a `host_software_item` row for
-///    `(provider_config_id, package_identifier)`, update `installed_version` in place.
-/// 2. If *any other* host in the tenant has the same assignment, reuse that software item
-///    and insert a new `host_software_item` link for this host.
+///    `(provider_config_id, package_identifier)`, update `installed_version` in place
+///    **if** the linked `software_item` is still active.  If the item has been
+///    discarded (soft-deleted), the orphaned link is removed and the function falls
+///    through to phases 2/3 so a fresh pending item is created.
+/// 2. If *any other* host in the tenant has the same assignment backed by an active
+///    software item, reuse it and insert a new `host_software_item` link for this host.
 /// 3. Otherwise create a new pending `software_item` (name only) and a new
 ///    `host_software_item` with the provider info.
 async fn process_one_discovery(
@@ -600,12 +615,36 @@ async fn process_one_discovery(
         .await?;
 
     if let Some(link) = existing_host_link {
-        // Just refresh the installed version — no schema changes needed.
-        let mut active: host_software_item::ActiveModel = link.into();
-        active.installed_version = Set(Some(args.installed_version.to_string()));
-        active.installed_version_detected_at = Set(Some(now));
-        active.update(db).await?;
-        return Ok(());
+        // Verify the linked software item is still active.  `discard_pending_items`
+        // removes host links together with the soft-delete, but this check guards
+        // against any pre-existing orphaned rows so re-discovery always surfaces a
+        // fresh pending item for previously discarded packages.
+        let linked_item_active = SoftwareItem::find()
+            .filter(software_item::Column::Id.eq(link.software_item_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .one(db)
+            .await?
+            .is_some();
+
+        if linked_item_active {
+            // Just refresh the installed version — no schema changes needed.
+            let mut active: host_software_item::ActiveModel = link.into();
+            active.installed_version = Set(Some(args.installed_version.to_string()));
+            active.installed_version_detected_at = Set(Some(now));
+            active.update(db).await?;
+            return Ok(());
+        }
+
+        // The linked software item was discarded; remove the orphaned host link so
+        // this package is treated as new and phases 2/3 create a fresh pending item.
+        tracing::debug!(
+            %provider_config_id,
+            package_identifier = %args.package_identifier,
+            "removing orphaned host link for discarded software item; will re-discover"
+        );
+        let link_model: host_software_item::ActiveModel = link.into();
+        link_model.delete(db).await?;
+        // Fall through to phases 2/3.
     }
 
     // Phase 2: Check if any other host in this tenant already has
@@ -684,4 +723,264 @@ struct IdRow {
 fn is_unique_violation(e: &sea_orm::DbErr) -> bool {
     let msg = e.to_string().to_lowercase();
     msg.contains("unique") || msg.contains("duplicate")
+}
+
+#[cfg(all(test, feature = "db-sqlite"))]
+mod tests {
+    use super::*;
+    use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection};
+    use uptrakit_shared_db::SoftwareDiscoveryState;
+
+    /// Create a minimal in-memory SQLite database with the tables used by the
+    /// autodiscovery query helpers.
+    async fn setup_db() -> DatabaseConnection {
+        let opt = ConnectOptions::new("sqlite::memory:".to_owned());
+        let db = Database::connect(opt).await.expect("test db");
+
+        db.execute_unprepared(
+            "CREATE TABLE software_items (
+                id              TEXT    PRIMARY KEY,
+                tenant_id       TEXT    NOT NULL,
+                name            TEXT    NOT NULL,
+                enabled         INTEGER NOT NULL DEFAULT 1,
+                discovery_state TEXT,
+                last_checked_at INTEGER,
+                created_at      INTEGER NOT NULL,
+                updated_at      INTEGER NOT NULL,
+                deactivated_at  INTEGER
+            )",
+        )
+        .await
+        .expect("create software_items");
+
+        // Composite PK (host_id, software_item_id) + unique constraint that
+        // mirrors the real schema.
+        db.execute_unprepared(
+            "CREATE TABLE host_software_items (
+                host_id                      TEXT    NOT NULL,
+                software_item_id             TEXT    NOT NULL,
+                provider_config_id           TEXT    NOT NULL,
+                package_identifier           TEXT    NOT NULL DEFAULT '',
+                config_override              TEXT,
+                installed_version            TEXT,
+                installed_version_detected_at INTEGER,
+                last_updated_at              INTEGER,
+                linked_at                    INTEGER NOT NULL,
+                PRIMARY KEY (host_id, software_item_id),
+                UNIQUE (host_id, provider_config_id, package_identifier)
+            )",
+        )
+        .await
+        .expect("create host_software_items");
+
+        db.execute_unprepared(
+            "CREATE TABLE autodiscovery_ignores (
+                id                  TEXT    PRIMARY KEY,
+                tenant_id           TEXT    NOT NULL,
+                provider_config_id  TEXT    NOT NULL,
+                package_identifier  TEXT    NOT NULL,
+                created_at          INTEGER NOT NULL,
+                UNIQUE (tenant_id, provider_config_id, package_identifier)
+            )",
+        )
+        .await
+        .expect("create autodiscovery_ignores");
+
+        db
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    async fn insert_software_item(
+        db: &DatabaseConnection,
+        id: Uuid,
+        tenant_id: Uuid,
+        name: &str,
+        deactivated_at: Option<time::OffsetDateTime>,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        let model = software_item::ActiveModel {
+            id: Set(id),
+            tenant_id: Set(tenant_id),
+            name: Set(name.to_string()),
+            enabled: Set(false),
+            discovery_state: Set(Some(SoftwareDiscoveryState::Pending)),
+            last_checked_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+            deactivated_at: Set(deactivated_at),
+        };
+        SoftwareItem::insert(model).exec(db).await.expect("insert software_item");
+    }
+
+    async fn insert_host_link(
+        db: &DatabaseConnection,
+        host_id: Uuid,
+        software_item_id: Uuid,
+        provider_config_id: Uuid,
+        package_identifier: &str,
+    ) {
+        let now = time::OffsetDateTime::now_utc();
+        let link = host_software_item::ActiveModel {
+            host_id: Set(host_id),
+            software_item_id: Set(software_item_id),
+            provider_config_id: Set(provider_config_id),
+            package_identifier: Set(package_identifier.to_string()),
+            config_override: Set(None),
+            installed_version: Set(Some("1.0.0".to_string())),
+            installed_version_detected_at: Set(Some(now)),
+            last_updated_at: Set(None),
+            linked_at: Set(now),
+        };
+        HostSoftwareItem::insert(link).exec(db).await.expect("insert host_software_item");
+    }
+
+    // ── tests ─────────────────────────────────────────────────────────────────
+
+    /// `discard_pending_items` must remove the `host_software_items` rows for
+    /// every discarded software item so that future discovery runs do not find
+    /// an orphaned link and return early without creating a new pending item.
+    #[tokio::test]
+    async fn discard_pending_items_removes_host_links() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+
+        insert_software_item(&db, item_id, tenant_id, "git", None).await;
+        insert_host_link(&db, host_id, item_id, pc_id, "git").await;
+
+        // Sanity: one host link exists before discard.
+        let links_before = HostSoftwareItem::find()
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .count(&db)
+            .await
+            .expect("count before");
+        assert_eq!(links_before, 1, "expected one host link before discard");
+
+        let result =
+            discard_pending_items(&db, tenant_id, None, None).await.expect("discard");
+        assert_eq!(result.discarded_count, 1);
+
+        // The host link must be gone after discard.
+        let links_after = HostSoftwareItem::find()
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .count(&db)
+            .await
+            .expect("count after");
+        assert_eq!(links_after, 0, "host link must be deleted when software item is discarded");
+    }
+
+    /// When `process_one_discovery` encounters a `host_software_item` row that
+    /// points to a deactivated (discarded) software item, it must delete the
+    /// orphaned link and create a fresh pending item instead of returning early.
+    #[tokio::test]
+    async fn process_one_discovery_orphaned_link_creates_new_pending() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let old_item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        // Insert a discarded (deactivated) software item and its orphaned link —
+        // the state that existed before this fix.
+        insert_software_item(&db, old_item_id, tenant_id, "curl", Some(now)).await;
+        insert_host_link(&db, host_id, old_item_id, pc_id, "curl").await;
+
+        let args = ProcessDiscoveryArgs {
+            package_identifier: "curl",
+            name: "curl",
+            installed_version: "8.0.0",
+            provider_type_str: "homebrew",
+        };
+        let ignore_set = HashSet::new();
+
+        process_one_discovery(&db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+            .await
+            .expect("process_one_discovery");
+
+        // The orphaned link must be gone.
+        let orphan_count = HostSoftwareItem::find()
+            .filter(host_software_item::Column::SoftwareItemId.eq(old_item_id))
+            .count(&db)
+            .await
+            .expect("orphan count");
+        assert_eq!(orphan_count, 0, "orphaned host link must be deleted");
+
+        // A new active pending software item must have been created.
+        let active_items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .all(&db)
+            .await
+            .expect("active items");
+        assert_eq!(active_items.len(), 1, "expected exactly one new pending item");
+        assert_eq!(
+            active_items[0].discovery_state,
+            Some(SoftwareDiscoveryState::Pending)
+        );
+
+        // A new host link pointing to the new pending item must exist.
+        let new_link_count = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::ProviderConfigId.eq(pc_id))
+            .filter(host_software_item::Column::PackageIdentifier.eq("curl"))
+            .count(&db)
+            .await
+            .expect("new link count");
+        assert_eq!(new_link_count, 1, "expected a new host link for the re-discovered item");
+    }
+
+    /// `process_one_discovery` must update `installed_version` in place when the
+    /// existing host link points to an active (non-discarded) software item.
+    #[tokio::test]
+    async fn process_one_discovery_active_link_updates_version() {
+        let db = setup_db().await;
+        let tenant_id = Uuid::now_v7();
+        let host_id = Uuid::now_v7();
+        let pc_id = Uuid::now_v7();
+        let item_id = Uuid::now_v7();
+        let now = time::OffsetDateTime::now_utc();
+
+        // Active software item with an existing host link at version 1.0.0.
+        insert_software_item(&db, item_id, tenant_id, "wget", None).await;
+        insert_host_link(&db, host_id, item_id, pc_id, "wget").await;
+
+        let args = ProcessDiscoveryArgs {
+            package_identifier: "wget",
+            name: "wget",
+            installed_version: "2.0.0",
+            provider_type_str: "homebrew",
+        };
+        let ignore_set = HashSet::new();
+
+        process_one_discovery(&db, tenant_id, host_id, pc_id, args, &ignore_set, now)
+            .await
+            .expect("process_one_discovery");
+
+        // The original item must still be active and the link updated.
+        let items = SoftwareItem::find()
+            .filter(software_item::Column::TenantId.eq(tenant_id))
+            .filter(software_item::Column::DeactivatedAt.is_null())
+            .all(&db)
+            .await
+            .expect("items");
+        assert_eq!(items.len(), 1, "no new item should be created");
+        assert_eq!(items[0].id, item_id, "the original item must be retained");
+
+        let link = HostSoftwareItem::find()
+            .filter(host_software_item::Column::HostId.eq(host_id))
+            .filter(host_software_item::Column::SoftwareItemId.eq(item_id))
+            .one(&db)
+            .await
+            .expect("link query")
+            .expect("link must exist");
+        assert_eq!(
+            link.installed_version.as_deref(),
+            Some("2.0.0"),
+            "installed_version must be updated to the new value"
+        );
+    }
 }
