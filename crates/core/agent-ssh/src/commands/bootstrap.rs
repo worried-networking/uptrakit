@@ -8,7 +8,11 @@ use std::time::Duration;
 use rootcause::prelude::*;
 use sea_orm::DatabaseConnection;
 use uptrakit_crypto::EncryptedString;
+use uptrakit_provider_registry::ProviderRegistry;
 
+use crate::commands::sudoers::{
+    ResolvedSudoCommand, SudoersContent, detect_is_root, resolve_command_path, write_sudoers_file,
+};
 use crate::error::{Error, Result};
 use crate::host_ops::{self, AddHostParams};
 use crate::ssh_key;
@@ -37,6 +41,11 @@ pub struct BootstrapParams {
     pub host_key_fingerprint: Option<String>,
     /// When `true`, `host_key_fingerprint` must be `Some` and TOFU is disabled.
     pub strict_host_key_checking: bool,
+    /// Write `NOPASSWD: ALL` instead of specific command entries.
+    ///
+    /// Less secure; use only when no provider commands can be resolved on the
+    /// remote host or during development.
+    pub allow_all: bool,
 }
 
 // ── Main orchestrator ────────────────────────────────────────────────
@@ -137,8 +146,7 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
     }
 
     // 4. Detect if auth user is root
-    let result = session.exec_command("id -u").await?;
-    let is_root = result.stdout.trim() == "0";
+    let is_root = detect_is_root(&session).await?;
     let use_sudo = !is_root;
 
     if use_sudo {
@@ -207,26 +215,49 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
         )));
     }
 
-    // Set up sudoers.
+    // Set up sudoers (specific commands per registered providers).
     println!("Configuring sudoers...");
-    let sudoers_cmd = cmd_setup_sudoers(&params.target_username, use_sudo);
-    let sudoers_result = session.exec_command(&sudoers_cmd).await?;
-    if sudoers_result.exit_code != 0 {
-        bail!(Error::SshCommand(format!(
-            "failed to configure sudoers: {}",
-            sudoers_result.stderr.trim()
-        )));
+    let provider_sudo_cmds = ProviderRegistry::all_required_sudo_commands();
+    let mut resolved: Vec<ResolvedSudoCommand> = Vec::new();
+
+    for (_provider_type, entries) in &provider_sudo_cmds {
+        for entry in entries {
+            match resolve_command_path(&session, &entry.command).await? {
+                Some(path) => {
+                    tracing::debug!(command = %entry.command, path = %path, "resolved command path");
+                    resolved.push(ResolvedSudoCommand {
+                        command_path: path,
+                        explanation: entry.explanation.clone(),
+                    });
+                }
+                None => {
+                    tracing::warn!(
+                        command = %entry.command,
+                        "command not found on remote host, skipping"
+                    );
+                    println!(
+                        "  WARNING: command '{}' not found on remote host, skipping.",
+                        entry.command
+                    );
+                }
+            }
+        }
     }
 
-    // Validate sudoers.
-    let validate_cmd = cmd_validate_sudoers(&params.target_username, use_sudo);
-    let validate_result = session.exec_command(&validate_cmd).await?;
-    if validate_result.exit_code != 0 {
-        bail!(Error::SshCommand(format!(
-            "sudoers validation failed (visudo -cf): {}",
-            validate_result.stderr.trim()
-        )));
-    }
+    let sudoers_content = if !resolved.is_empty() {
+        SudoersContent::SpecificCommands(resolved)
+    } else if params.allow_all {
+        println!("  No provider commands resolved; using NOPASSWD: ALL (--allow-all).");
+        SudoersContent::AllCommands
+    } else {
+        bail!(Error::InvalidInput(
+            "No provider commands could be resolved on the remote host. \
+             Ensure the required tools are installed or re-run with --allow-all."
+                .to_string()
+        ));
+    };
+
+    write_sudoers_file(&session, &params.target_username, &sudoers_content, use_sudo).await?;
 
     // 6. DISCONNECT auth session.
     session.disconnect().await;
@@ -281,10 +312,13 @@ pub async fn run_bootstrap(state_dir: &Path, params: BootstrapParams) -> Result<
 
     println!();
     println!(
-        "WARNING: Sudoers grants NOPASSWD: ALL to user '{}'. \
-         Review /etc/sudoers.d/uptrakit-{} on the remote host and \
-         restrict commands as needed.",
-        params.target_username, params.target_username
+        "NOTE: Sudoers file written to /etc/sudoers.d/uptrakit-{}.",
+        params.target_username
+    );
+    println!(
+        "      Run 'uptrakit-agent-ssh host update-sudoers {}' to refresh \
+         entries when providers change.",
+        params.name
     );
 
     Ok(())
@@ -443,30 +477,6 @@ fn cmd_setup_authorized_keys(home: &str, pubkey: &str, owner: &str, use_sudo: bo
     )
 }
 
-fn cmd_setup_sudoers(target: &str, use_sudo: bool) -> String {
-    let sudoers_file = format!("/etc/sudoers.d/uptrakit-{target}");
-    let escaped_sudoers = uptrakit_command::shell_escape(&sudoers_file);
-    let content = format!("{target} ALL=(ALL) NOPASSWD: ALL");
-    let escaped_content = uptrakit_command::shell_escape(&content);
-
-    let sudo_prefix = if use_sudo { "sudo " } else { "" };
-
-    format!(
-        "echo {escaped_content} | {sudo_prefix}tee {escaped_sudoers} > /dev/null && \
-         {sudo_prefix}chmod 440 {escaped_sudoers}"
-    )
-}
-
-fn cmd_validate_sudoers(target: &str, use_sudo: bool) -> String {
-    let sudoers_file = format!("/etc/sudoers.d/uptrakit-{target}");
-    let escaped_sudoers = uptrakit_command::shell_escape(&sudoers_file);
-
-    if use_sudo {
-        format!("sudo visudo -cf {escaped_sudoers}")
-    } else {
-        format!("visudo -cf {escaped_sudoers}")
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -541,26 +551,6 @@ mod tests {
     fn cmd_detect_home_with_sudo() {
         let cmd = cmd_detect_home("deploy", true);
         assert_eq!(cmd, "sudo getent passwd 'deploy' | cut -d: -f6");
-    }
-
-    #[test]
-    fn cmd_setup_sudoers_content() {
-        let cmd = cmd_setup_sudoers("uptrakit", true);
-        assert!(cmd.contains("uptrakit ALL=(ALL) NOPASSWD: ALL"));
-        assert!(cmd.contains("/etc/sudoers.d/uptrakit-uptrakit"));
-        assert!(cmd.contains("chmod 440"));
-    }
-
-    #[test]
-    fn cmd_validate_sudoers_with_sudo() {
-        let cmd = cmd_validate_sudoers("deploy", true);
-        assert_eq!(cmd, "sudo visudo -cf '/etc/sudoers.d/uptrakit-deploy'");
-    }
-
-    #[test]
-    fn cmd_validate_sudoers_without_sudo() {
-        let cmd = cmd_validate_sudoers("deploy", false);
-        assert_eq!(cmd, "visudo -cf '/etc/sudoers.d/uptrakit-deploy'");
     }
 
     #[test]
