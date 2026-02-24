@@ -38,7 +38,7 @@ pub use error::{RegistryError, Result};
 pub use registry::ProviderRegistry;
 
 // Re-export commonly used types for provider crate convenience
-pub use uptrakit_provider_core::{Provider, ProviderCapability};
+pub use uptrakit_provider_core::{Provider, ProviderCapability, SudoCommandEntry};
 pub use uptrakit_shared_types::ProviderType;
 
 // Re-export executor types for downstream convenience

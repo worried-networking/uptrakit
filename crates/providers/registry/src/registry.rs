@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rootcause::prelude::*;
 
 use uptrakit_command::CommandExecutor;
-use uptrakit_provider_core::{Provider, ProviderType, SecretMasking};
+use uptrakit_provider_core::{Provider, ProviderType, SecretMasking, SudoCommandEntry};
 use uptrakit_provider_apt::{AptConfig, AptProvider};
 use uptrakit_provider_docker::{DockerConfig, DockerProvider};
 use uptrakit_provider_github::{GitHubConfig, GitHubProvider};
@@ -188,6 +188,32 @@ macro_rules! register_providers {
                     {
                         if p.has_capability(uptrakit_provider_core::ProviderCapability::DiscoverLocalSoftware) {
                             result.push(ProviderType::$variant);
+                        }
+                    }
+                )+
+                result
+            }
+
+            /// Returns required sudo command entries for every registered provider.
+            ///
+            /// Iterates all known provider types, instantiates each with an empty
+            /// config (using `create_provider_for_discovery` which bypasses validation),
+            /// calls `required_sudo_commands()`, and collects non-empty results.
+            ///
+            /// Used by the bootstrap process and `update-sudoers` command to generate
+            /// minimal, per-command sudoers entries rather than a blanket
+            /// `NOPASSWD: ALL` rule.
+            pub fn all_required_sudo_commands() -> Vec<(ProviderType, Vec<SudoCommandEntry>)> {
+                let executor = Arc::new(uptrakit_command::LocalCommandExecutor) as Arc<dyn CommandExecutor>;
+                let empty = serde_json::Value::Object(serde_json::Map::new());
+                let mut result = Vec::new();
+                $(
+                    if let Ok(p) = Self::create_provider_for_discovery(
+                        ProviderType::$variant, &empty, executor.clone())
+                    {
+                        let entries = p.required_sudo_commands();
+                        if !entries.is_empty() {
+                            result.push((ProviderType::$variant, entries));
                         }
                     }
                 )+
@@ -576,6 +602,29 @@ mod tests {
             types.contains(&ProviderType::Docker),
             "Docker should be in discovery_provider_types()"
         );
+    }
+
+    #[test]
+    fn all_required_sudo_commands_includes_apt() {
+        let entries = ProviderRegistry::all_required_sudo_commands();
+        let apt_entry = entries
+            .iter()
+            .find(|(pt, _)| *pt == ProviderType::Apt)
+            .expect("Apt should have sudo command entries");
+        assert!(!apt_entry.1.is_empty());
+        assert_eq!(apt_entry.1[0].command, "apt-get");
+    }
+
+    #[test]
+    fn all_required_sudo_commands_no_duplicates_per_provider() {
+        let entries = ProviderRegistry::all_required_sudo_commands();
+        // All entries in results should have non-empty command lists
+        for (pt, cmds) in &entries {
+            assert!(
+                !cmds.is_empty(),
+                "provider {pt} has empty sudo command list but was included"
+            );
+        }
     }
 
     #[test]

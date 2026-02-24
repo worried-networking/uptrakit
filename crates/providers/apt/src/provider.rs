@@ -7,7 +7,8 @@ use uptrakit_provider_core::command::{CommandExecutor, CommandSpec, send_output}
 use uptrakit_provider_core::mpsc;
 use uptrakit_provider_core::{
     DiscoveredSoftware, OutputStreamType, Provider, ProviderCapability, ProviderError,
-    ProviderType, ReleaseInfo, Result, UpdateOutputLine, UpstreamRelease, Version,
+    ProviderType, ReleaseInfo, Result, SudoCommandEntry, UpdateOutputLine, UpstreamRelease,
+    Version,
 };
 
 use crate::config::{AptConfig, AptDiscoveryFilter};
@@ -141,14 +142,21 @@ impl Provider for AptProvider {
         ]
     }
 
+    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
+        vec![SudoCommandEntry {
+            command: "apt-get".into(),
+            explanation: "Package installation and index refresh require root privileges".into(),
+        }]
+    }
+
     async fn refresh_package_index(&self) -> Result<()> {
         tracing::info!("refreshing APT package index");
         let cmd_output = self
             .executor
             .execute_quiet(&CommandSpec::exec(
-                "sudo",
-                ["apt-get".to_string(), "update".to_string(), "-q".to_string()],
-            ))
+                "apt-get",
+                ["update".to_string(), "-q".to_string()],
+            ).privileged())
             .await
             .map_err(|e| {
                 report!(ProviderError::ProviderInternal(format!(
@@ -332,7 +340,6 @@ impl Provider for AptProvider {
 
         let pkg_version = format!("{package_identifier}={to_version}");
         let args = vec![
-            "apt-get".to_string(),
             "install".to_string(),
             "--yes".to_string(),
             "--no-install-recommends".to_string(),
@@ -342,20 +349,27 @@ impl Provider for AptProvider {
         tracing::debug!(
             package = %package_identifier,
             version = %to_version,
-            "running sudo apt-get install"
+            "running apt-get install"
         );
 
+        let display_args = std::iter::once("apt-get")
+            .chain(args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
         send_output(
             output_tx,
-            &format!("Running: sudo {}", args.join(" ")),
+            &format!("Running: {display_args}"),
             OutputStreamType::Stdout,
         )
         .await;
-        let mut output = format!("Running: sudo {}\n", args.join(" "));
+        let mut output = format!("Running: {display_args}\n");
 
         let cmd_output = self
             .executor
-            .execute(&CommandSpec::exec("sudo", args), output_tx)
+            .execute(
+                &CommandSpec::exec("apt-get", args).privileged(),
+                output_tx,
+            )
             .await
             .map_err(|e| report!(ProviderError::InstallFailed(e.to_string())))?;
 
@@ -537,6 +551,18 @@ mod tests {
     fn parse_dpkg_output_empty_input() {
         let result = AptProvider::parse_dpkg_output("");
         assert!(result.is_empty());
+    }
+
+    // ── required_sudo_commands ───────────────────────────────────────────
+
+    #[test]
+    fn apt_provider_required_sudo_commands() {
+        let provider =
+            AptProvider::new(AptConfig::default(), test_executor()).expect("create provider");
+        let entries = provider.required_sudo_commands();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "apt-get");
+        assert!(!entries[0].explanation.is_empty());
     }
 
     // ── capabilities ────────────────────────────────────────────────────

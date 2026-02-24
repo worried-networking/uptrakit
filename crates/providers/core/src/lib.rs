@@ -8,7 +8,7 @@ pub mod version;
 
 pub use error::{ProviderError, Result};
 pub use secrets::SecretMasking;
-pub use traits::Provider;
+pub use traits::{Provider, SudoCommandEntry};
 pub use types::{
     DiscoveredSoftware, ProviderCapability, ProviderType, ReleaseAsset, ReleaseInfo,
     UpstreamRelease,
@@ -24,6 +24,7 @@ pub use uptrakit_shared_types::{HookShell, OutputStreamType};
 // Re-export executor types for provider crate convenience
 pub use uptrakit_command::{
     CommandExecutor, CommandMode, CommandOutput, CommandSpec, LocalCommandExecutor,
+    SudoAwareCommandExecutor, SudoContext, SudoPolicy,
 };
 
 // Re-export SecretString so provider crates use it via provider-core

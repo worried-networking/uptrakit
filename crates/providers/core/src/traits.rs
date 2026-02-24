@@ -12,6 +12,30 @@ use uptrakit_command::UpdateOutputLine;
 /// Empty capabilities slice for providers that have no special capabilities.
 const NO_CAPABILITIES: &[ProviderCapability] = &[];
 
+/// Describes a single command that a provider needs to run with passwordless sudo.
+///
+/// Providers return a [`Vec<SudoCommandEntry>`] from
+/// [`Provider::required_sudo_commands`] to declare which commands they need
+/// elevated privileges for. The bootstrap process and `update-sudoers` command
+/// use these declarations to generate minimal, specific sudoers entries instead
+/// of a blanket `NOPASSWD: ALL` rule.
+///
+/// # Contract
+///
+/// - `command` must be a **bare command name** (e.g. `"apt-get"`), never an
+///   absolute path. The agent resolves it to an absolute path on the target
+///   host at sudoers-generation time using `command -v`.
+/// - `explanation` is shown as a comment in the generated sudoers file and in
+///   CLI output for human reviewers.
+pub struct SudoCommandEntry {
+    /// Bare command name (e.g. `"apt-get"`).
+    ///
+    /// Must not contain path separators or shell metacharacters.
+    pub command: String,
+    /// Human-readable explanation shown in sudoers comments and CLI output.
+    pub explanation: String,
+}
+
 /// A unified provider trait for both remote and local operations.
 ///
 /// This trait abstracts over both controller-side (remote) and agent-side (local)
@@ -94,6 +118,24 @@ pub trait Provider: Send + Sync {
         Err(report!(ProviderError::Configuration(
             "refresh_package_index not supported by this provider".to_string()
         )))
+    }
+
+    /// Returns the list of commands this provider needs to run with passwordless sudo.
+    ///
+    /// The bootstrap process and the `update-sudoers` CLI command use these
+    /// declarations to generate minimal, per-command sudoers entries. Providers
+    /// that never execute privileged commands should return an empty `Vec` (the
+    /// default).
+    ///
+    /// # Provider contract
+    ///
+    /// - Each [`SudoCommandEntry::command`] must be a **bare command name**,
+    ///   not an absolute path. The agent resolves absolute paths at sudoers-
+    ///   generation time via `command -v` on the target host.
+    /// - Entries are deduplicated by the caller — listing the same command
+    ///   twice is harmless.
+    fn required_sudo_commands(&self) -> Vec<SudoCommandEntry> {
+        vec![]
     }
 }
 
