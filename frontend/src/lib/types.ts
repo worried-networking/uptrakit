@@ -321,6 +321,8 @@ export interface SoftwareItemResponse {
 	discovery_state?: 'pending' | 'approved' | null;
 	last_checked_at: string | null;
 	host_count: number;
+	latest_version?: string | null;
+	update_available: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -338,6 +340,8 @@ export interface SoftwareItemHostSummary {
 	installed_version_detected_at: string | null;
 	last_updated_at: string | null;
 	linked_at: string;
+	latest_version?: string | null;
+	update_available: boolean;
 }
 
 export interface SoftwareItemDetailResponse extends SoftwareItemResponse {
@@ -427,10 +431,14 @@ export interface UpdateHistoryResponse {
 	created_at: string;
 }
 
+export interface ReleaseInfoRequest {
+	tag: string;
+	release_url: string;
+}
+
 export interface TriggerUpdateRequest {
 	to_version: string;
-	release_tag?: string;
-	release_url?: string;
+	release_info?: ReleaseInfoRequest;
 }
 
 export interface TriggerUpdateResponse {

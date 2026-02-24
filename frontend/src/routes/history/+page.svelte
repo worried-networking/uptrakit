@@ -97,10 +97,16 @@
 		if (!selectedItemId || !selectedHostId || !targetVersion.trim() || triggering) return;
 		triggering = true;
 		try {
+			const release_info =
+				releaseTag.trim() || releaseUrl.trim()
+					? {
+							tag: releaseTag.trim() || targetVersion.trim(),
+							release_url: releaseUrl.trim()
+						}
+					: undefined;
 			const res = await triggerSoftwareUpdate(selectedItemId, selectedHostId, {
 				to_version: targetVersion.trim(),
-				release_tag: releaseTag.trim() || undefined,
-				release_url: releaseUrl.trim() || undefined
+				release_info
 			});
 			showSuccess(`Update triggered — history ID: ${res.update_history_id}`);
 			closeTriggerModal();
