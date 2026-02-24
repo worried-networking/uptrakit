@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use std::collections::BTreeSet;
+use uptrakit_agent_core::ConnectionContext;
 use uptrakit_command::{CommandExecutor, CommandSpec};
 
 use uptrakit_internal_wire::{
@@ -176,6 +177,25 @@ async fn establish_ssh_session(
     Ok(Arc::new(session))
 }
 
+/// Build a `ConnectionContext` for a remote SSH host.
+///
+/// Injects the SSH host's connection details so that the Docker provider
+/// (when enabled) can point bollard at the remote Docker daemon via SSH.
+fn build_connection_context(host: &crate::db::entity::ssh_host::Model) -> ConnectionContext {
+    ConnectionContext {
+        docker_host_override: Some(format!(
+            "ssh://{}@{}:{}",
+            host.username, host.hostname, host.port
+        )),
+        // The SSH key is stored as PEM in the database; bollard's SSH connector
+        // needs a file path. When ssh_key_path is None, bollard falls back to
+        // the default SSH key locations (SSH_AUTH_SOCK, ~/.ssh/id_ed25519, etc.).
+        // For full support a key file would need to be written to a temp path,
+        // which is left as a future enhancement.
+        ssh_key_path: None,
+    }
+}
+
 /// Handle a `CheckVersions` message for the SSH agent.
 ///
 /// Looks up the SSH host by `host_machine_id`, opens a session, and delegates
@@ -264,10 +284,11 @@ pub(crate) async fn handle_check_versions_ssh(
         }
     };
 
+    let ctx = build_connection_context(&host);
     let executor: Arc<dyn CommandExecutor> =
         Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
 
-    let outcome = uptrakit_agent_core::handle_check_versions(payload, executor, conn).await;
+    let outcome = uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ctx).await;
 
     // Disconnect session after version check completes.
     if let Ok(owned) = Arc::try_unwrap(session) {
@@ -351,13 +372,16 @@ pub(crate) async fn handle_execute_update_ssh(
         }
     };
 
+    let ctx = build_connection_context(&host);
+
     // The session is kept alive for the duration of the update via the
     // SshCommandExecutor Arc. The session will be disconnected when the
     // executor is dropped after update completion.
     let executor: Arc<dyn CommandExecutor> =
         Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
 
-    uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn).await;
+    uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn, &ctx)
+        .await;
 
     // Note: the SSH session remains open while the update is in-flight.
     // It is disconnected when the executor is dropped after the spawned task
@@ -458,10 +482,12 @@ pub(crate) async fn handle_discover_software_ssh(
         }
     };
 
+    let ctx = build_connection_context(&host);
     let executor: Arc<dyn CommandExecutor> =
         Arc::new(SshCommandExecutor::new(Arc::clone(&session)));
 
-    let outcome = uptrakit_agent_core::handle_discover_software(payload, executor, conn).await;
+    let outcome =
+        uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ctx).await;
 
     if let Ok(owned) = Arc::try_unwrap(session) {
         owned.disconnect().await;

@@ -7,6 +7,10 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+default = []
+ssh = ["uptrakit-provider-registry/ssh"]
+
 [dependencies]
 async-trait = { workspace = true }
 futures-util = { workspace = true }

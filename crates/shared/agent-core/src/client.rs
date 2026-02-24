@@ -8,6 +8,8 @@ use uptrakit_internal_wire::{
 };
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
+use crate::connection_context::ConnectionContext;
+
 /// State for an in-flight update execution.
 pub struct InFlightUpdate {
     pub update_history_id: uuid::Uuid,
@@ -135,11 +137,15 @@ pub async fn handle_graceful_shutdown(
 /// The `executor` is provided by the caller — `LocalCommandExecutor` for the
 /// regular agent, `SshCommandExecutor` for the SSH agent.
 ///
+/// The `ctx` is used to inject connection-specific overrides (e.g. a remote
+/// Docker host for the SSH agent) into each provider config before creation.
+///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
 pub async fn handle_check_versions(
     payload: uptrakit_internal_wire::CheckVersionsPayload,
     executor: Arc<dyn CommandExecutor>,
     conn: &mut ControllerConnection,
+    ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
     tracing::info!(
         count = payload.assignments.len(),
@@ -155,9 +161,12 @@ pub async fn handle_check_versions(
             if refreshed_types.contains(&assignment.provider_type) {
                 continue;
             }
+            let mut effective_config = assignment.config.clone();
+            ctx.apply_to_config(&assignment.provider_type, &mut effective_config);
+
             if let Ok(provider) = uptrakit_provider_registry::ProviderRegistry::create_provider(
                 assignment.provider_type.clone(),
-                &assignment.config,
+                &effective_config,
                 Arc::clone(&executor),
             ) && provider
                 .has_capability(uptrakit_provider_registry::ProviderCapability::RefreshPackageIndex)
@@ -175,6 +184,7 @@ pub async fn handle_check_versions(
     let results: Vec<VersionCheckResult> = stream::iter(payload.assignments)
         .map(|assignment| {
             let executor = Arc::clone(&executor);
+            let ctx = ctx.clone();
             async move {
                 tracing::debug!(
                     software_item_id = %assignment.software_item_id,
@@ -187,6 +197,7 @@ pub async fn handle_check_versions(
                     &assignment.config,
                     &assignment.package_identifier,
                     executor,
+                    &ctx,
                 )
                 .await;
                 VersionCheckResult {
@@ -214,11 +225,15 @@ pub async fn handle_check_versions(
 ///
 /// The `executor` is provided by the caller — `LocalCommandExecutor` for the
 /// regular agent, `SshCommandExecutor` for the SSH agent.
+///
+/// The `ctx` is used to inject connection-specific overrides into the provider
+/// config before instantiation.
 pub async fn handle_execute_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
     in_flight_update: &mut Option<InFlightUpdate>,
     conn: &mut ControllerConnection,
+    ctx: &ConnectionContext,
 ) {
     tracing::info!(
         update_id = %payload.update_history_id,
@@ -246,17 +261,23 @@ pub async fn handle_execute_update(
         return;
     }
 
+    // Apply connection context to the provider config
+    let mut effective_payload = payload.clone();
+    ctx.apply_to_config(
+        &effective_payload.provider_type,
+        &mut effective_payload.provider_config,
+    );
+
     // Create a channel for output streaming
     let (output_tx, output_rx) =
         tokio::sync::mpsc::channel::<crate::update::UpdateOutputMessage>(100);
 
-    let update_history_id = payload.update_history_id;
+    let update_history_id = effective_payload.update_history_id;
 
     // Spawn update execution task
-    let handle =
-        tokio::spawn(
-            async move { crate::update::execute_update(payload, executor, output_tx).await },
-        );
+    let handle = tokio::spawn(async move {
+        crate::update::execute_update(effective_payload, executor, output_tx).await
+    });
 
     // Send UpdateStarted
     if let Err(e) = conn
@@ -284,11 +305,15 @@ pub async fn handle_execute_update(
 /// Provider-level errors are recorded in the result rather than aborting the
 /// entire discovery run.
 ///
+/// The `ctx` is used to inject connection-specific overrides (e.g. a remote
+/// Docker host for the SSH agent) into each provider config before creation.
+///
 /// Returns `Some(LoopOutcome::Disconnected)` if sending the response fails.
 pub async fn handle_discover_software(
     payload: DiscoverSoftwarePayload,
     executor: Arc<dyn CommandExecutor>,
     conn: &mut ControllerConnection,
+    ctx: &ConnectionContext,
 ) -> Option<LoopOutcome> {
     tracing::info!(
         count = payload.providers.len(),
@@ -305,10 +330,13 @@ pub async fn handle_discover_software(
             "running discovery for provider"
         );
 
+        let mut effective_config = assignment.config.clone();
+        ctx.apply_to_config(&assignment.provider_type, &mut effective_config);
+
         let result =
             match uptrakit_provider_registry::ProviderRegistry::create_provider_for_discovery(
                 assignment.provider_type.clone(),
-                &assignment.config,
+                &effective_config,
                 Arc::clone(&executor),
             ) {
                 Err(e) => {

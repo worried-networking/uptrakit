@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use uptrakit_agent_core::ConnectionContext;
 use uptrakit_command::LocalCommandExecutor;
 use uptrakit_service_sdk::{ControllerConnection, LoopOutcome};
 
@@ -9,7 +10,8 @@ pub(crate) use uptrakit_agent_core::{InFlightUpdate, UpdateEvent};
 /// Handle a `CheckVersions` message from the controller.
 ///
 /// Creates a `LocalCommandExecutor` and delegates to the shared agent-core
-/// implementation.
+/// implementation. Passes a default `ConnectionContext` (no overrides needed
+/// for the local agent).
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
 pub(crate) async fn handle_check_versions(
@@ -17,26 +19,35 @@ pub(crate) async fn handle_check_versions(
     conn: &mut ControllerConnection,
 ) -> Option<LoopOutcome> {
     let executor = Arc::new(LocalCommandExecutor);
-    uptrakit_agent_core::handle_check_versions(payload, executor, conn).await
+    uptrakit_agent_core::handle_check_versions(payload, executor, conn, &ConnectionContext::default()).await
 }
 
 /// Handle an `ExecuteUpdate` message from the controller.
 ///
 /// Creates a `LocalCommandExecutor` and delegates to the shared agent-core
-/// implementation.
+/// implementation. Passes a default `ConnectionContext` (no overrides needed
+/// for the local agent).
 pub(crate) async fn handle_execute_update(
     payload: uptrakit_internal_wire::ExecuteUpdatePayload,
     in_flight_update: &mut Option<InFlightUpdate>,
     conn: &mut ControllerConnection,
 ) {
     let executor = Arc::new(LocalCommandExecutor);
-    uptrakit_agent_core::handle_execute_update(payload, executor, in_flight_update, conn).await;
+    uptrakit_agent_core::handle_execute_update(
+        payload,
+        executor,
+        in_flight_update,
+        conn,
+        &ConnectionContext::default(),
+    )
+    .await;
 }
 
 /// Handle a `DiscoverSoftware` message from the controller.
 ///
 /// Creates a `LocalCommandExecutor` and delegates to the shared agent-core
-/// implementation.
+/// implementation. Passes a default `ConnectionContext` (no overrides needed
+/// for the local agent).
 ///
 /// Returns `Some(LoopOutcome::Disconnected)` if the response send fails.
 pub(crate) async fn handle_discover_software(
@@ -44,7 +55,7 @@ pub(crate) async fn handle_discover_software(
     conn: &mut ControllerConnection,
 ) -> Option<LoopOutcome> {
     let executor = Arc::new(LocalCommandExecutor);
-    uptrakit_agent_core::handle_discover_software(payload, executor, conn).await
+    uptrakit_agent_core::handle_discover_software(payload, executor, conn, &ConnectionContext::default()).await
 }
 
 pub(crate) use uptrakit_agent_core::{

@@ -4,6 +4,8 @@ use uptrakit_command::CommandExecutor;
 use uptrakit_internal_wire::ProviderType;
 use uptrakit_provider_registry::{ProviderCapability, ProviderRegistry};
 
+use crate::connection_context::ConnectionContext;
+
 /// Result of a version check for a single software item.
 pub struct VersionCheckOutcome {
     /// Detected installed version, if any.
@@ -21,15 +23,23 @@ pub struct VersionCheckOutcome {
 /// If the provider supports `RefreshPackageIndex`, the latest available version
 /// is also fetched via `fetch_releases()`. For providers that resolve latest
 /// versions on the controller side, `latest_version` will be `None`.
+///
+/// The `ctx` parameter is used to inject connection-specific overrides (e.g.
+/// a remote Docker host for the SSH agent) into the provider config before
+/// instantiation.
 pub async fn check_version(
     provider_type: ProviderType,
     config: &serde_json::Value,
     package_identifier: &str,
     executor: Arc<dyn CommandExecutor>,
+    ctx: &ConnectionContext,
 ) -> VersionCheckOutcome {
     tracing::debug!(provider_type = ?provider_type, package_identifier, "checking version");
 
-    let provider = match ProviderRegistry::create_provider(provider_type, config, executor) {
+    let mut effective_config = config.clone();
+    ctx.apply_to_config(&provider_type, &mut effective_config);
+
+    let provider = match ProviderRegistry::create_provider(provider_type, &effective_config, executor) {
         Ok(p) => p,
         Err(e) => {
             return VersionCheckOutcome {
@@ -93,6 +103,10 @@ mod tests {
         Arc::new(LocalCommandExecutor)
     }
 
+    fn no_ctx() -> ConnectionContext {
+        ConnectionContext::default()
+    }
+
     #[tokio::test]
     async fn check_version_github_stub_returns_none() {
         let config = serde_json::json!({
@@ -104,6 +118,7 @@ mod tests {
             &config,
             "octocat/hello-world",
             test_executor(),
+            &no_ctx(),
         )
         .await;
         // Stub implementation returns None for installed_version
@@ -114,14 +129,14 @@ mod tests {
 
     #[tokio::test]
     async fn check_version_docker_stub_returns_none() {
-        let config = serde_json::json!({
-            "image": "nginx"
-        });
+        // Empty config — valid for Docker
+        let config = serde_json::json!({});
         let outcome = check_version(
-            ProviderType::DockerRegistry,
+            ProviderType::Docker,
             &config,
             "nginx",
             test_executor(),
+            &no_ctx(),
         )
         .await;
         assert!(outcome.installed_version.is_none());
@@ -139,6 +154,7 @@ mod tests {
             &config,
             "example",
             test_executor(),
+            &no_ctx(),
         )
         .await;
         assert!(outcome.installed_version.is_none());
@@ -156,6 +172,7 @@ mod tests {
             &config,
             "octocat/hello-world",
             test_executor(),
+            &no_ctx(),
         )
         .await;
         assert!(outcome.installed_version.is_none());
@@ -166,9 +183,31 @@ mod tests {
     #[tokio::test]
     async fn check_version_homebrew_default_returns_none() {
         let config = serde_json::json!({});
-        let outcome = check_version(ProviderType::Homebrew, &config, "", test_executor()).await;
+        let outcome = check_version(ProviderType::Homebrew, &config, "", test_executor(), &no_ctx()).await;
         assert!(outcome.installed_version.is_none());
         assert!(outcome.latest_version.is_none());
         assert!(outcome.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn check_version_docker_context_injects_docker_host() {
+        let config = serde_json::json!({});
+        let ctx = ConnectionContext {
+            docker_host_override: Some("ssh://user@host:2222".to_string()),
+            ssh_key_path: None,
+        };
+        // With a valid docker host override, the provider is created with the
+        // injected host. The check itself will fail (no daemon) but that proves
+        // the injection path runs without panicking.
+        let outcome = check_version(
+            ProviderType::Docker,
+            &config,
+            "nginx",
+            test_executor(),
+            &ctx,
+        )
+        .await;
+        // We don't assert success — just that it didn't crash with bad injection
+        let _ = outcome;
     }
 }

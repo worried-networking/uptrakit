@@ -251,11 +251,14 @@ async fn detect_current_version(
     payload: &ExecuteUpdatePayload,
     executor: Arc<dyn CommandExecutor>,
 ) -> Option<String> {
+    // The connection context has already been merged into payload.provider_config
+    // by the caller before the update task was spawned.
     let outcome = crate::version_check::check_version(
         payload.provider_type.clone(),
         &payload.provider_config,
         &payload.package_identifier,
         executor,
+        &crate::connection_context::ConnectionContext::default(),
     )
     .await;
     if let Some(e) = outcome.error {
