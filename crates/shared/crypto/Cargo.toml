@@ -7,11 +7,14 @@ repository.workspace = true
 version.workspace = true
 publish = false
 
+[features]
+sea-orm = ["dep:sea-orm"]
+
 [dependencies]
 aws-lc-rs = { workspace = true }
 rand = { workspace = true }
 rootcause = { workspace = true }
-sea-orm = { workspace = true }
+sea-orm = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uptrakit-shared-macros = { workspace = true }

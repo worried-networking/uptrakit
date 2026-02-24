@@ -259,6 +259,7 @@ impl EncryptedString {
     ///
     /// Used by `ValueType` / `TryGetable` impls to construct from a decrypted
     /// value while preserving the original DB representation.
+    #[cfg(feature = "sea-orm")]
     fn from_db(plaintext: String, db_repr: String) -> Self {
         Self {
             plaintext: SecretString::new(plaintext),
@@ -294,6 +295,7 @@ impl fmt::Display for EncryptedString {
 
 // ── SeaORM integration ──────────────────────────────────────────────
 
+#[cfg(feature = "sea-orm")]
 impl sea_orm::sea_query::ValueType for EncryptedString {
     fn try_from(v: sea_orm::Value) -> std::result::Result<Self, sea_orm::sea_query::ValueTypeErr> {
         match v {
@@ -324,18 +326,21 @@ impl sea_orm::sea_query::ValueType for EncryptedString {
     }
 }
 
+#[cfg(feature = "sea-orm")]
 impl sea_orm::sea_query::Nullable for EncryptedString {
     fn null() -> sea_orm::Value {
         sea_orm::Value::String(None)
     }
 }
 
+#[cfg(feature = "sea-orm")]
 impl From<EncryptedString> for sea_orm::Value {
     fn from(val: EncryptedString) -> Self {
         sea_orm::Value::String(Some(val.db_value))
     }
 }
 
+#[cfg(feature = "sea-orm")]
 impl sea_orm::TryGetable for EncryptedString {
     fn try_get_by<I: sea_orm::ColIdx>(
         res: &sea_orm::QueryResult,
@@ -472,6 +477,7 @@ mod tests {
         assert!(decrypt_value(&tampered).is_err());
     }
 
+    #[cfg(feature = "sea-orm")]
     #[test]
     fn test_seaorm_value_roundtrip() {
         let _lock = TEST_LOCK.lock().unwrap();
@@ -506,6 +512,7 @@ mod tests {
         assert_eq!(es.expose_secret(), "secret");
     }
 
+    #[cfg(feature = "sea-orm")]
     #[test]
     fn test_from_impl_uses_precomputed_value() {
         let _lock = TEST_LOCK.lock().unwrap();
@@ -523,6 +530,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sea-orm")]
     #[test]
     fn test_legacy_plaintext_accepted() {
         let _lock = TEST_LOCK.lock().unwrap();
@@ -631,6 +639,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "sea-orm")]
     #[test]
     fn test_seaorm_value_type_non_string_fails() {
         // Passing a non-String Value should return ValueTypeErr.
@@ -639,6 +648,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg(feature = "sea-orm")]
     #[test]
     fn test_seaorm_nullable_returns_none() {
         let null = <EncryptedString as sea_orm::sea_query::Nullable>::null();

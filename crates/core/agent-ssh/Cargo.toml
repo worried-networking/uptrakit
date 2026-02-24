@@ -31,7 +31,7 @@ uptrakit-command = { path = "../../shared/command" }
 uptrakit-directories = { path = "../../shared/directories" }
 uptrakit-service-sdk = { path = "../../shared/service-sdk" }
 uptrakit-shared-types = { workspace = true }
-uptrakit-crypto = { path = "../../shared/crypto" }
+uptrakit-crypto = { path = "../../shared/crypto", features = ["sea-orm"] }
 uptrakit-internal-wire = { path = "../../shared/wire" }
 sea-orm = { workspace = true, features = ["sqlx-sqlite"] }
 sea-orm-migration = { version = "2.0.0-rc.34", default-features = false, features = ["runtime-tokio-rustls", "sqlx-sqlite"] }

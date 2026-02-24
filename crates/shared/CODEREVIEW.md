@@ -24,12 +24,6 @@ These nine crates form the foundational layer that every other crate in the work
 
 - **`uptrakit-directories` async-first design.** All public I/O functions are `async` (backed by `tokio::fs`), which the module documentation correctly identifies as eliminating TOCTOU risks. Platform permission hardening (0700 dirs, 0600 files) is appropriately conditioned on `#[cfg(unix)]` with documentation calling out that non-Unix paths are not security-hardened.
 
-### Issues
-
-**[SEVERITY: High]** `crates/shared/crypto/Cargo.toml:14` — `uptrakit-crypto` unconditionally depends on `sea-orm`
-
-`sea-orm` appears in `[dependencies]` without `optional = true`. The sole purpose of this dependency is to implement `ValueType`, `TryGetable`, and `Nullable` for `EncryptedString` (lines 297-368 of `src/lib.rs`). As a result, every consumer of `uptrakit-crypto` — including any future agent-side tooling, test utilities, or command-line tools that only need to encrypt or decrypt a string — drags in the full ORM stack. This is the only architectural layering violation in the shared crates layer and contradicts the pattern already established by `uptrakit-shared-types`. Fix: add `sea-orm = ["dep:sea-orm"]` to `[features]` and mark `sea-orm` as `optional = true`. The SeaORM `impl` blocks in `src/lib.rs` should be wrapped in `#[cfg(feature = "sea-orm")]`. Consumers that need DB integration (`uptrakit-shared-db`) activate the feature; consumers that only need encryption primitives do not.
-
 ---
 
 ## Security & Safety
@@ -89,10 +83,6 @@ These two calls appear in a `#[test]` function (`expand_tilde_works_without_home
 - **Typed `FromStr` error types for all domain enums.** Every `FromStr` implementation pairs with a dedicated error type. No `FromStr` returns `String` as error.
 
 #### Issues
-
-**[SEVERITY: Medium]** `crates/shared/command/src/command.rs:211` — `unimplemented!()` in production code path for unsupported HookShell variants
-
-Will panic at runtime if a new `HookShell` variant is added. Should use `bail!` with an error return.
 
 **[SEVERITY: Low]** `crates/shared/command/src/executor.rs:126` — Unnecessary `clone()` in `CommandSpec::resolve()` for Exec mode
 
