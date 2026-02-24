@@ -23,7 +23,7 @@ use crate::cert_handler::{
 };
 use crate::connection::ControllerConnection;
 use crate::identity::ServiceIdentityState;
-use crate::lifecycle::{LoopError, LoopOutcome, LoopResult, ServiceHandler};
+use crate::lifecycle::{LoopError, LoopOutcome, LoopResult, ServiceHandler, ShutdownCause};
 use crate::signal::SignalWatcher;
 
 /// Context for the event loop, providing connection metadata that callbacks
@@ -177,7 +177,17 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
                         }
                     }
                     Some(ControllerMessage::ServerRestarting(payload)) => {
-                        tracing::info!(reason = %payload.reason, "controller is restarting");
+                        tracing::info!(
+                            reason = %payload.reason,
+                            "controller is restarting, initiating graceful shutdown"
+                        );
+                        break handler
+                            .on_shutdown(
+                                &mut conn,
+                                ShutdownCause::ServerRestarting,
+                                shutdown_timeout_seconds,
+                            )
+                            .await;
                     }
                     Some(msg) => {
                         match handler.on_message(msg, &mut conn).await? {
@@ -194,9 +204,13 @@ pub(crate) async fn run_event_loop<H: ServiceHandler>(
             // 5. OS signals.
             signal = signals.recv() => {
                 tracing::info!(%signal, "received signal, initiating graceful shutdown");
-                break handler.on_shutdown(
-                    &mut conn, signal, shutdown_timeout_seconds,
-                ).await;
+                break handler
+                    .on_shutdown(
+                        &mut conn,
+                        ShutdownCause::Signal(signal),
+                        shutdown_timeout_seconds,
+                    )
+                    .await;
             }
         }
     };

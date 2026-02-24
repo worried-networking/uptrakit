@@ -53,6 +53,25 @@ impl_report_conversion!(EnrollmentError => LoopError, |e| {
     }
 });
 
+/// Cause of a service shutdown, passed to [`ServiceHandler::on_shutdown`].
+///
+/// Services use this to choose the appropriate [`DisconnectReason`] and
+/// [`LoopOutcome`]:
+///
+/// | Cause | `DisconnectReason` | `LoopOutcome` |
+/// | --- | --- | --- |
+/// | `Signal(Hangup)` | `Restart` | `Restart` |
+/// | `Signal(_)` | `Shutdown` | `Shutdown` |
+/// | `ServerRestarting` | `Restart` | `Disconnected` |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownCause {
+    /// An OS signal was received (`SIGINT`, `SIGTERM`, `SIGHUP`).
+    Signal(Signal),
+    /// The controller sent `ServerRestarting`; the service should disconnect
+    /// and reconnect once the controller is available again.
+    ServerRestarting,
+}
+
 /// Outcome of the authenticated event loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoopOutcome {
@@ -151,10 +170,15 @@ pub trait ServiceHandler: Send {
     ) -> LoopResult<Option<LoopOutcome>>;
 
     /// Graceful shutdown: send `Disconnecting` and drain in-flight work.
+    ///
+    /// `cause` indicates whether shutdown was triggered by an OS signal or
+    /// by the controller sending `ServerRestarting`. Services should map the
+    /// cause to a [`DisconnectReason`] and a [`LoopOutcome`] following the
+    /// table in [`ShutdownCause`].
     async fn on_shutdown(
         &mut self,
         conn: &mut ControllerConnection,
-        signal: Signal,
+        cause: ShutdownCause,
         shutdown_timeout_seconds: u32,
     ) -> LoopOutcome;
 }
